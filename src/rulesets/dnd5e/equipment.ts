@@ -167,7 +167,13 @@ function weapon(
   sides: number,
   type: 'slashing' | 'piercing' | 'bludgeoning',
   attackAbility: 'str' | 'dex' | 'finesse',
-  extra: { reachFeet?: number; rangeFeet?: { normal: number; long: number }; properties?: readonly string[] },
+  extra: {
+    magical?: boolean
+    specialMaterial?: 'silvered' | 'adamantine'
+    reachFeet?: number
+    rangeFeet?: { normal: number; long: number }
+    properties?: readonly string[]
+  },
 ): EquipmentItem {
   return { id, name, slot: 'mainWeapon', dnd5e: { kind: 'weapon', category, mode, damage: { count, sides, type }, attackAbility, ...extra } }
 }
@@ -201,6 +207,41 @@ export interface Dnd5eWeaponAttackProfile {
   damage: { count: number; sides: number; bonus: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
   reachFeet?: number
   rangeFeet?: { normal: number; long: number }
+}
+
+export interface Dnd5eWeaponDamageSource {
+  /** 装备定义的稳定 ID，而不是 UI 临时生成的攻击请求 ID。 */
+  weaponId: string
+  magical: boolean
+  specialMaterial?: 'silvered' | 'adamantine'
+}
+
+function dnd5eLegacyWeaponIsMagical(weapon: EquipmentItem): boolean {
+  if (weapon.id.startsWith('srd-5.1:magic-item:weapon-')) return true
+  if (!weapon.baseEquipmentId) return false
+  return (weapon.effects?.weaponAttackBonus ?? 0) !== 0 ||
+    (weapon.effects?.weaponDamageBonus ?? 0) !== 0
+}
+
+/**
+ * Derives weapon provenance from the authoritative equipped item.
+ * The legacy inference keeps existing +N magic-weapon saves working; new content
+ * should persist `dnd5e.magical` explicitly.
+ */
+export function dnd5eWeaponDamageSource(
+  weapon: EquipmentItem | undefined,
+): Dnd5eWeaponDamageSource | undefined {
+  const data = weapon?.dnd5e
+  if (!weapon || !weapon.id.trim() || !data || data.kind !== 'weapon') return undefined
+  const explicitMagical = typeof data.magical === 'boolean' ? data.magical : undefined
+  const specialMaterial = data.specialMaterial === 'silvered' || data.specialMaterial === 'adamantine'
+    ? data.specialMaterial
+    : undefined
+  return {
+    weaponId: weapon.id,
+    magical: explicitMagical ?? dnd5eLegacyWeaponIsMagical(weapon),
+    ...(specialMaterial ? { specialMaterial } : {}),
+  }
 }
 
 export interface Dnd5eUnarmedStrikeProfile {
@@ -257,6 +298,17 @@ export function normalizeDnd5eCharacterEquipment(
     const item = character.equipment?.[slot]
     const selected = item?.dnd5e || item?.effects ? item : useLegacyDefaults ? defaults?.[slot] : undefined
     if (!selected) continue
+    const dnd5e = structuredClone(selected.dnd5e)
+    if (dnd5e?.kind === 'weapon') {
+      const source = dnd5eWeaponDamageSource(selected)
+      if (typeof dnd5e.magical !== 'boolean') {
+        if (source?.magical) dnd5e.magical = true
+        else delete dnd5e.magical
+      }
+      if (dnd5e.specialMaterial !== 'silvered' && dnd5e.specialMaterial !== 'adamantine') {
+        delete dnd5e.specialMaterial
+      }
+    }
     result[slot] = {
       id: selected.id,
       baseEquipmentId: selected.baseEquipmentId,
@@ -264,7 +316,7 @@ export function normalizeDnd5eCharacterEquipment(
       slot: selected.slot,
       ac: selected.ac,
       effects: selected.effects ? { ...selected.effects } : undefined,
-      dnd5e: structuredClone(selected.dnd5e),
+      dnd5e,
     }
   }
   return Object.keys(result).length > 0 ? result : undefined

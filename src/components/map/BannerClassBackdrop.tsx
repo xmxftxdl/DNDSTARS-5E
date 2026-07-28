@@ -18,7 +18,7 @@ export default function BannerClassBackdrop({
       aria-hidden="true"
     >
       <svg
-        className="combat-banner-class-backdrop__main"
+        className={`combat-banner-class-backdrop__main${classId === 'bard' ? ' combat-banner-class-backdrop__main--bard' : ''}`}
         viewBox="0 0 80 80"
         role="presentation"
       >

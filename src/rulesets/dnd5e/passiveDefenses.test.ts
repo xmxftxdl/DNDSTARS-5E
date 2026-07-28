@@ -8,6 +8,7 @@ import {
   dnd5ePreventsAttackAdvantage,
   dnd5eReactionsPrevented,
   dnd5eSavingThrowMode,
+  dnd5eSavingThrowModeExplanation,
   dnd5eTargetGrantsAttackAdvantage,
   dnd5eUnseenTargetImposesDisadvantage,
   type Dnd5eDefensiveCreature,
@@ -28,6 +29,21 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode(resistant, 'str')).toBe('normal')
     expect(dnd5eSavingThrowMode({ ...resistant, exhaustionLevel: 3 }, 'wis', { sourceIsSpell: true }))
       .toBe('normal')
+  })
+
+  it('exposes the rule sources behind a saving throw roll mode', () => {
+    const explanation = dnd5eSavingThrowModeExplanation(
+      creature({ magicResistance: true, exhaustionLevel: 3 }),
+      'con',
+      { sourceIsSpell: true },
+    )
+    expect(explanation.mode).toBe('normal')
+    expect(explanation.advantage).toContainEqual(expect.objectContaining({
+      id: 'magic-resistance', label: '魔法抗性',
+    }))
+    expect(explanation.disadvantage).toContainEqual(expect.objectContaining({
+      id: 'exhaustion-level-3', label: '力竭（3级或更高）',
+    }))
   })
 
   it('applies Danger Sense and cancels it against level-three exhaustion', () => {

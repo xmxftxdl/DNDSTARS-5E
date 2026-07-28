@@ -30,7 +30,6 @@ interface Props {
 }
 
 export default function CombatSettlementPanel({
-  mode,
   isDM,
   canRoll = true,
   rollerName,
@@ -64,7 +63,7 @@ export default function CombatSettlementPanel({
     if (!target || !onSettle) return
     onSettle(target.id, operation, amount)
   }
-  const panelTitle = mode === 'manual' ? '手动结算台' : 'DM 战场修正台'
+  const panelTitle = '手动结算台'
 
   return (
     <div data-testid="combat-settlement-panel" className="absolute right-3 top-16 z-40 w-[min(25rem,calc(100vw-1.5rem))] rounded-2xl border border-violet-400/20 bg-void-950/92 shadow-2xl backdrop-blur-md">

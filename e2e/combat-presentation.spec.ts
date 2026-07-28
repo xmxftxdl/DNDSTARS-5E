@@ -118,3 +118,117 @@ test('DM publishes Fireball flight and area explosion through SSE', async ({ bro
   ).toBe(0)
   await context.close()
 })
+
+test('four class-colored cantrip animations render before settlement', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const now = Date.now()
+  const mapId = `cantrip-presentations-${now}`
+  const sourceToken = {
+    id: 'cantrip-bard',
+    label: '诗人',
+    x: 105,
+    y: 280,
+    color: '#d946ef',
+    emoji: '🎭',
+    size: 1,
+    type: 'player',
+  }
+  const targets = [
+    { id: 'dying-target', label: '濒死目标', x: 315, y: 105, color: '#64748b', emoji: '🛡️', size: 1, type: 'player' },
+    { id: 'acid-target', label: '酸液目标', x: 490, y: 210, color: '#ef4444', emoji: '👹', size: 1, type: 'enemy' },
+    { id: 'poison-target', label: '毒雾目标', x: 490, y: 350, color: '#ef4444', emoji: '👹', size: 1, type: 'enemy' },
+    { id: 'mockery-target', label: '恶言目标', x: 315, y: 455, color: '#ef4444', emoji: '👹', size: 1, type: 'enemy' },
+  ]
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: '四戏法动画 E2E',
+      width: 700,
+      height: 560,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [sourceToken, ...targets],
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1100, height: 820 } })
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  const canvas = player.getByTestId('map-canvas')
+  await Promise.all([
+    expect(dm.getByTestId('map-canvas')).toBeVisible(),
+    expect(canvas).toBeVisible(),
+  ])
+  // Let both SSE subscriptions settle before broadcasting short-lived animations.
+  await player.waitForTimeout(600)
+
+  await player.evaluate(async ({ activeMapId, sourceTokenId, targetIds }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    const common = {
+      mapId: activeMapId,
+      sourceTokenId,
+      accentColor: '#d946ef',
+      glowColor: '#e879f9',
+    }
+    const stamp = Date.now()
+    void Promise.all([
+      presentation.publishSpareTheDyingPresentation({
+        ...common,
+        id: `e2e-spare-${stamp}`,
+        transactionId: `e2e-spare-tx-${stamp}`,
+        targetTokenId: targetIds[0],
+      }),
+      presentation.publishAcidSplashPresentation({
+        ...common,
+        id: `e2e-acid-${stamp}`,
+        transactionId: `e2e-acid-tx-${stamp}`,
+        targetTokenId: targetIds[1],
+      }),
+      presentation.publishPoisonSprayPresentation({
+        ...common,
+        id: `e2e-poison-${stamp}`,
+        transactionId: `e2e-poison-tx-${stamp}`,
+        targetTokenId: targetIds[2],
+      }),
+      presentation.publishViciousMockeryPresentation({
+        ...common,
+        id: `e2e-mockery-${stamp}`,
+        transactionId: `e2e-mockery-tx-${stamp}`,
+        targetTokenId: targetIds[3],
+      }),
+    ])
+  }, {
+    activeMapId: mapId,
+    sourceTokenId: sourceToken.id,
+    targetIds: targets.map((target) => target.id),
+  })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+      .sort()
+    return kinds
+  }).toEqual(['acid-splash', 'poison-spray', 'spare-the-dying', 'vicious-mockery'])
+  await player.waitForTimeout(120)
+  await canvas.screenshot({
+    path: process.env.CANTRIP_ANIMATIONS_SCREENSHOT_PATH ??
+      testInfo.outputPath('four-cantrip-animations.png'),
+  })
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})

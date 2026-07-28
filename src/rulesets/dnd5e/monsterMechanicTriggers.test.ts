@@ -146,6 +146,81 @@ describe('custom monster authoritative trigger snapshots', () => {
     })).toMatchObject({ ok: false })
   })
 
+  it('inherits the authoritative damage type after any dealt damage', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '背水斗士'
+    draft.actions[0].damageType = 'slashing'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'desperate-damage',
+      name: '不退斗志',
+      trigger: 'after-dealt-damage',
+      triggerSubject: 'self',
+      hpPercentageAtOrBelow: undefined,
+      hpBelow: 10,
+      effectKind: 'damage',
+      effectTarget: 'trigger-target',
+      healingDice: '1d6',
+      damageType: 'inherit-trigger',
+      limit: 'once-per-turn',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const attacker = combatant('attacker', 'dm', 20, {
+      statBlockId: monster.id,
+      currentHp: 9,
+      maxHp: 20,
+    })
+    const hero = combatant('hero', 'player', 10)
+    const state = startDnd5eHeadlessCombat('combat', [attacker, hero])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(attacker.id, hero.id)]: 5,
+    }
+
+    const attacked = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: attacker.id,
+      actionId: monster.actions[0].id,
+      rolls: [{ targetId: hero.id, d20: 18, damageRolls: [[3]] }],
+    })
+    expect(attacked.ok).toBe(true)
+    if (!attacked.ok) return
+    const pending = attacked.events.find((event) =>
+      event.type === 'monster-mechanic-trigger-pending' &&
+      event.snapshot.mechanicId === 'desperate-damage',
+    )
+    expect(pending).toMatchObject({
+      snapshot: {
+        subjectId: attacker.id,
+        triggerTargetId: hero.id,
+        triggerDamageType: 'slashing',
+      },
+    })
+    if (!pending || pending.type !== 'monster-mechanic-trigger-pending') return
+    const resolved = resolveDnd5eHeadlessAction(attacked.state, {
+      type: 'resolve-monster-mechanic-trigger',
+      actorId: attacker.id,
+      snapshotId: pending.snapshot.id,
+      roll: {
+        actorId: attacker.id,
+        mechanicId: 'desperate-damage',
+        effectRolls: [{ effectId: 'effect-0', rolls: [4] }],
+      },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[hero.id].currentHp).toBe(22)
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied',
+      sourceId: attacker.id,
+      targetId: hero.id,
+      amount: 4,
+      damageTypes: ['slashing'],
+      suppressAfterDealtDamageTrigger: true,
+    }))
+    expect(dnd5ePendingMonsterMechanicResolutions(resolved.state)).toEqual([])
+  })
+
   it('stores a nearby ally attack bonus and consumes it on only the next monster attack', () => {
     const draft = createDnd5eCustomMonsterDraft()
     draft.name = '战团祭司'

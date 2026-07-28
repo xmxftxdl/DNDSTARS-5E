@@ -89,6 +89,10 @@ describe('D&D 5e equipment attack authority', () => {
       attackModifier: 7,
       damage: { sides: 8, bonus: 4 },
     })
+    expect(prepared.prepared.damageSource).toEqual({
+      weaponId: DND5E_CLUB.id,
+      magical: true,
+    })
 
     input.actor.equipment = DND5E_FIGHTER_STARTING_EQUIPMENT
     expect(prepareDnd5eEquipmentAttack({
@@ -96,6 +100,65 @@ describe('D&D 5e equipment attack authority', () => {
       characters: [input.actor],
       attacksUsed: 0,
     })).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
+  it('derives damage provenance from equipped weapon data and ignores a forged request payload', () => {
+    const input = fixture()
+    const weapon = structuredClone(DND5E_SHORTSWORD)
+    weapon.id = 'plugin:silvered-magic-shortsword'
+    weapon.baseEquipmentId = DND5E_SHORTSWORD.id
+    if (weapon.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    weapon.dnd5e.magical = true
+    weapon.dnd5e.specialMaterial = 'silvered'
+    input.actor.equipment = { mainWeapon: weapon }
+    const forgedAction = {
+      ...input.action,
+      damageSource: {
+        weaponId: 'forged-ui-id',
+        magical: false,
+        specialMaterial: 'adamantine',
+      },
+    } as SharedPlayerActionState
+
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      action: forgedAction,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.damageSource).toEqual({
+      weaponId: weapon.id,
+      magical: true,
+      specialMaterial: 'silvered',
+    })
+  })
+
+  it('marks a mundane equipped weapon magical while an authoritative Magic Weapon effect is active', () => {
+    const input = fixture()
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activeEffects: [createDnd5eMechanicalEffect({
+        definitionId: 'srd-5.1:spell:magic-weapon',
+        label: '魔化武器',
+        targetId: input.actor.id,
+        source: { kind: 'spell', actorId: input.actor.id, rulesId: 'magic-weapon', spellLevel: 2 },
+        duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+        modifiers: { magicWeapon: { weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id, bonus: 1 } },
+      })],
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.damageSource).toEqual({
+      weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id,
+      magical: true,
+    })
   })
 
   it('separates weapon proficiency from armor proficiency for a wizard attack', () => {
@@ -348,6 +411,7 @@ describe('D&D 5e equipment attack authority', () => {
     expect(offHand.prepared).toMatchObject({
       offHandAttack: true, spendsAction: false, spendsBonusAction: true, countsTowardAttackAction: false,
       profile: { weaponName: '短剑', damage: { bonus: 3 } },
+      damageSource: { weaponId: DND5E_OFFHAND_SHORTSWORD.id, magical: false },
     })
     const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: offHand.prepared, d20: 15, damageRolls: [2] })
     expect(resolved.result.ok).toBe(true)

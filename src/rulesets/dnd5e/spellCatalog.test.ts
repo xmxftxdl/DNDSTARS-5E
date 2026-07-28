@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { DND5E_SRD_COMBAT_SPELLS, dnd5eSpellDiceCount, getDnd5eSrdCombatSpell } from './spells'
 import { DND5E_SRD_SPELL_CATALOG, dnd5eBardMagicalSecretsOptions, dnd5eSrdSpellCatalogForClass, dnd5eWarlockMysticArcanumOptions, getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
+import {
+  DND5E_CONDITIONAL_SIGHT_SPELL_IDS,
+  DND5E_REQUIRED_SIGHT_SPELL_IDS,
+} from './spellVisibility'
 
 describe('official SRD 5.1 spell-list catalog', () => {
   it('contains all 319 unique spells and 778 class-list memberships', () => {
@@ -19,6 +23,32 @@ describe('official SRD 5.1 spell-list catalog', () => {
     expect(getDnd5eSrdSpellCatalogEntry('vicious-mockery')?.name).toBe('恶言相加')
     expect(getDnd5eSrdSpellCatalogEntry('shield-of-faith')?.name).toBe('虔诚护盾')
     expect(getDnd5eSrdSpellCatalogEntry('arcane-hand')?.name).toBe('奥术之手')
+  })
+
+  it('gives all 319 spells an audited visibility requirement', () => {
+    expect(DND5E_REQUIRED_SIGHT_SPELL_IDS.size).toBe(83)
+    expect(DND5E_CONDITIONAL_SIGHT_SPELL_IDS.size).toBe(8)
+    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'required')).toHaveLength(83)
+    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'conditional')).toHaveLength(8)
+    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'not-required')).toHaveLength(228)
+    expect(getDnd5eSrdSpellCatalogEntry('magic-missile')?.visibilityRequirement).toBe('required')
+    expect(getDnd5eSrdSpellCatalogEntry('call-lightning')?.visibilityRequirement).toBe('required')
+    expect(getDnd5eSrdSpellCatalogEntry('detect-thoughts')?.visibilityRequirement).toBe('conditional')
+    expect(getDnd5eSrdSpellCatalogEntry('fireball')?.visibilityRequirement).toBe('not-required')
+    expect(getDnd5eSrdSpellCatalogEntry('dispel-magic')?.visibilityRequirement).toBe('not-required')
+    for (const spellId of [
+      'dominate-monster',
+      'earthquake',
+      'feeblemind',
+      'flesh-to-stone',
+      'harm',
+      'imprisonment',
+      'maze',
+      'seeming',
+      'telekinesis',
+    ]) {
+      expect(getDnd5eSrdSpellCatalogEntry(spellId)?.visibilityRequirement, spellId).toBe('required')
+    }
   })
 
   it('matches the official per-class spell counts', () => {
@@ -43,12 +73,18 @@ describe('official SRD 5.1 spell-list catalog', () => {
   })
 
   it('requires every mechanically implemented combat spell to agree with the official catalog', () => {
-    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(92)
+    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(93)
     for (const spell of DND5E_SRD_COMBAT_SPELLS) {
       const catalog = getDnd5eSrdSpellCatalogEntry(spell.id)
       expect(catalog, spell.id).toBeDefined()
       expect(spell.level, spell.id).toBe(catalog?.level)
       expect([...spell.classes].sort(), spell.id).toEqual([...(catalog?.classes ?? [])].sort())
+      if (spell.requiresVisibleTarget != null) {
+        expect(catalog?.visibilityRequirement, spell.id).toBe('required')
+      }
+      if (spell.allowsGuessedTargetCell) {
+        expect(catalog?.visibilityRequirement, spell.id).toBe('not-required')
+      }
     }
   })
 

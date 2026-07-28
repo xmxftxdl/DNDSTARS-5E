@@ -276,6 +276,86 @@ describe('D&D 5e monster resource actions', () => {
     }))
   })
 
+  it('lets an Acolyte apply Sanctuary with its stat-block save DC', () => {
+    const acolyte = combatant('acolyte', 20, {
+      statBlockId: 'srd-5.1:acolyte',
+      classState: { monsterSpellSlots: { 1: { current: 3, max: 3 } } },
+    })
+    const ally = combatant('ally', 15, { position: { x: 20, y: 0 } })
+    const enemy = combatant('enemy', 10, {
+      controller: 'player',
+      position: { x: 30, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('monster-sanctuary', [acolyte, ally, enemy])
+    state.distanceFeetByCombatantPair = { ['acolyte\u0000ally']: 20 }
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'acolyte',
+      spellId: 'sanctuary',
+      slotLevel: 1,
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['ally'],
+        effectRolls: [],
+      },
+    })
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.acolyte.turn.actionAvailable).toBe(true)
+    expect(result.state.combatants.acolyte.turn.bonusActionAvailable).toBe(false)
+    expect(result.state.combatants.acolyte.classState.monsterSpellSlots?.['1'].current).toBe(2)
+    expect(result.state.combatants.ally.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:sanctuary',
+      potency: 12,
+      source: expect.objectContaining({
+        actorId: 'acolyte',
+        rulesId: 'sanctuary',
+      }),
+      duration: expect.objectContaining({
+        type: 'rounds',
+        remainingRounds: 10,
+        tickOn: 'target-turn-end',
+      }),
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-core-spell-resolved',
+      actorId: 'acolyte',
+      spellId: 'sanctuary',
+      targetIds: ['ally'],
+    }))
+  })
+
+  it('rejects an Acolyte casting Sanctuary on a hostile without spending resources', () => {
+    const acolyte = combatant('acolyte', 20, {
+      statBlockId: 'srd-5.1:acolyte',
+      classState: { monsterSpellSlots: { 1: { current: 3, max: 3 } } },
+    })
+    const enemy = combatant('enemy', 10, {
+      controller: 'player',
+      position: { x: 20, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('monster-sanctuary-hostile', [acolyte, enemy])
+    state.distanceFeetByCombatantPair = { ['acolyte\u0000enemy']: 20 }
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'acolyte',
+      spellId: 'sanctuary',
+      slotLevel: 1,
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['enemy'],
+        effectRolls: [],
+      },
+    })
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(result.state.combatants.acolyte.turn.bonusActionAvailable).toBe(true)
+    expect(result.state.combatants.acolyte.classState.monsterSpellSlots?.['1'].current).toBe(3)
+    expect(result.state.combatants.enemy.classState.activeEffects).toBeUndefined()
+  })
+
   it('resolves monster Magic Missile projectiles and lets Shield negate every projectile on its target', () => {
     const shielded = combatant('shielded', 15, {
       controller: 'player',
@@ -507,11 +587,9 @@ describe('D&D 5e monster resource actions', () => {
       position: { x: 0, y: 0 },
     })
     const detect = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('legendary-detect', [hero, dragon]), {
-      type: 'monster-adjudicated-action',
+      type: 'monster-legendary-special-action',
       actorId: 'dragon',
       actionId: 'detect',
-      legendary: true,
-      effects: [],
       d20: 12,
     })
     expect(detect.ok).toBe(true)
@@ -535,6 +613,359 @@ describe('D&D 5e monster resource actions', () => {
     expect(wing.state.combatants.hero.currentHp).toBe(87)
     expect(wing.state.combatants.hero.conditions).toContain('prone')
     expect(wing.state.combatants.dragon.turn.movementRemaining).toBe(70)
+  })
+
+  it('resolves the adult black dragon acid breath as a physical area action', () => {
+    const dragon = combatant('dragon', 20, {
+      statBlockId: 'srd-5.1:adult-black-dragon',
+      classState: { monsterRechargeReadyByActionId: { 'acid-breath': true } },
+    })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      currentHp: 120,
+      maxHp: 120,
+      magicResistance: true,
+      savingThrowBonuses: { dex: 0 },
+    })
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('acid-breath', [dragon, hero]), {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'acid-breath',
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 1, d20Second: 20 }],
+        damageRolls: Array.from({ length: 12 }, () => 8),
+      },
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    // A breath weapon is not a spell: Magic Resistance must not turn the
+    // supplied second die into advantage.
+    expect(result.state.combatants.hero.currentHp).toBe(24)
+    expect(result.state.combatants.dragon.classState.monsterRechargeReadyByActionId)
+      .toEqual({ 'acid-breath': false })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved', targetId: 'hero', ability: 'dex', d20: 1, dc: 18, success: false,
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-area-action-resolved', actionId: 'acid-breath', damage: 96,
+    }))
+  })
+
+  it('spends and enforces the Winter Wolf Cold Breath recharge resource', () => {
+    const wolf = combatant('winter-wolf', 20, {
+      statBlockId: 'srd-5.1:winter-wolf',
+      classState: { monsterRechargeReadyByActionId: { 'cold-breath': true } },
+    })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      savingThrowBonuses: { dex: 0 },
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('winter-wolf-cold-breath', [wolf, hero]),
+      {
+        type: 'monster-area-action',
+        actorId: 'winter-wolf',
+        actionId: 'cold-breath',
+        resolution: {
+          schemaVersion: 1,
+          targetIds: ['hero'],
+          targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+          damageRolls: [8, 8, 8, 8],
+        },
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.hero.currentHp).toBe(68)
+    expect(result.state.combatants['winter-wolf'].classState.monsterRechargeReadyByActionId)
+      .toEqual({ 'cold-breath': false })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: 'hero',
+      ability: 'dex',
+      dc: 12,
+      success: false,
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-area-action-resolved',
+      actionId: 'cold-breath',
+      damage: 32,
+    }))
+
+    result.state.combatants['winter-wolf'].turn.actionAvailable = true
+    expect(resolveDnd5eHeadlessAction(result.state, {
+      type: 'monster-area-action',
+      actorId: 'winter-wolf',
+      actionId: 'cold-breath',
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 20 }],
+        damageRolls: [1, 1, 1, 1],
+      },
+    })).toMatchObject({ ok: false, reason: 'class-resource-unavailable' })
+  })
+
+  it('resolves Dragon Turtle Steam Breath through the authoritative recharge resource', () => {
+    const dragonTurtle = combatant('dragon-turtle', 20, {
+      statBlockId: 'srd-5.1:dragon-turtle',
+      currentHp: 341,
+      maxHp: 341,
+      classState: { monsterRechargeReadyByActionId: { 'steam-breath': true } },
+    })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      savingThrowBonuses: { con: 0 },
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('dragon-turtle-steam-breath', [dragonTurtle, hero]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon-turtle',
+        actionId: 'steam-breath',
+        resolution: {
+          schemaVersion: 1,
+          targetIds: ['hero'],
+          targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+          damageRolls: Array.from({ length: 15 }, () => 6),
+        },
+      },
+    )
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.hero.currentHp).toBe(10)
+    expect(result.state.combatants['dragon-turtle'].classState.monsterRechargeReadyByActionId)
+      .toEqual({ 'steam-breath': false })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: 'hero',
+      ability: 'con',
+      dc: 18,
+      success: false,
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-area-action-resolved',
+      actionId: 'steam-breath',
+      damage: 90,
+    }))
+
+    result.state.combatants['dragon-turtle'].turn.actionAvailable = true
+    const spent = resolveDnd5eHeadlessAction(result.state, {
+      type: 'monster-area-action',
+      actorId: 'dragon-turtle',
+      actionId: 'steam-breath',
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 20 }],
+        damageRolls: Array.from({ length: 15 }, () => 1),
+      },
+    })
+    expect(spent).toMatchObject({ ok: false, reason: 'class-resource-unavailable' })
+  })
+
+  it('selects a stable breath variant while both variants share the parent recharge pool', () => {
+    const dragon = combatant('dragon', 20, {
+      statBlockId: 'srd-5.1:adult-brass-dragon',
+      classState: { monsterRechargeReadyByActionId: { 'breath-weapons': true } },
+    })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      currentHp: 100,
+      maxHp: 100,
+      savingThrowBonuses: { dex: 0, con: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('shared-breath-recharge', [dragon, hero])
+    const fire = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'breath-weapons',
+      resolution: {
+        schemaVersion: 1,
+        variantId: 'fire-breath',
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+        damageRolls: Array.from({ length: 13 }, () => 1),
+      },
+    })
+    expect(fire.ok, fire.ok ? undefined : fire.reason).toBe(true)
+    if (!fire.ok) return
+    expect(fire.state.combatants.hero.currentHp).toBe(87)
+    expect(fire.state.combatants.dragon.classState.monsterRechargeReadyByActionId)
+      .toEqual({ 'breath-weapons': false })
+    expect(fire.events).toContainEqual(expect.objectContaining({
+      type: 'monster-area-action-resolved',
+      actionId: 'breath-weapons',
+      variantId: 'fire-breath',
+    }))
+    expect(fire.transaction?.rollLedger.entries).toContainEqual(expect.objectContaining({
+      id: expect.stringContaining(':area:fire-breath:damage'),
+      label: '火焰吐息 damage',
+      dice: { sides: 6, values: Array.from({ length: 13 }, () => 1) },
+    }))
+
+    // Restore only the turn action. The shared parent recharge remains spent,
+    // so selecting the other variant must still fail.
+    fire.state.combatants.dragon.turn.actionAvailable = true
+    const sleep = resolveDnd5eHeadlessAction(fire.state, {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'breath-weapons',
+      resolution: {
+        schemaVersion: 1,
+        variantId: 'sleep-breath',
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+        damageRolls: [],
+      },
+    })
+    expect(sleep).toMatchObject({ ok: false, reason: 'class-resource-unavailable' })
+
+    const invalidVariant = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('invalid-breath-variant', [dragon, hero]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          schemaVersion: 1,
+          variantId: 'unknown-breath',
+          targetIds: ['hero'],
+          targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+          damageRolls: [],
+        },
+      },
+    )
+    expect(invalidVariant).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+  })
+
+  it('resolves the control variant from the same breath action with damage wake-up semantics', () => {
+    const dragon = combatant('dragon', 20, {
+      statBlockId: 'srd-5.1:adult-brass-dragon',
+      classState: { monsterRechargeReadyByActionId: { 'breath-weapons': true } },
+    })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      savingThrowBonuses: { con: 0 },
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('sleep-breath-variant', [dragon, hero]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          schemaVersion: 1,
+          variantId: 'sleep-breath',
+          targetIds: ['hero'],
+          targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+          damageRolls: [],
+        },
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.hero.conditions).toContain('unconscious')
+    expect(result.state.combatants.hero.classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'unconscious',
+      duration: { type: 'rounds', remainingRounds: 100, tickOn: 'target-turn-end' },
+      breakOn: ['takes-damage'],
+    }))
+    expect(result.state.combatants.dragon.classState.monsterRechargeReadyByActionId)
+      .toEqual({ 'breath-weapons': false })
+  })
+
+  it('uses the Brass Dragon Wyrmling breath variants through one recharge pool', () => {
+    const dragon = combatant('dragon', 20, {
+      statBlockId: 'srd-5.1:brass-dragon-wyrmling',
+      classState: { monsterRechargeReadyByActionId: { 'breath-weapons': true } },
+    })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      savingThrowBonuses: { con: 0, dex: 0 },
+    })
+    const sleep = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('wyrmling-shared-breath', [dragon, hero]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          schemaVersion: 1,
+          variantId: 'sleep-breath',
+          targetIds: ['hero'],
+          targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+          damageRolls: [],
+        },
+      },
+    )
+    expect(sleep.ok, sleep.ok ? undefined : sleep.reason).toBe(true)
+    if (!sleep.ok) return
+    expect(sleep.state.combatants.hero.classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'unconscious',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      breakOn: ['takes-damage'],
+    }))
+    expect(sleep.state.combatants.dragon.classState.monsterRechargeReadyByActionId)
+      .toEqual({ 'breath-weapons': false })
+
+    sleep.state.combatants.dragon.turn.actionAvailable = true
+    const fire = resolveDnd5eHeadlessAction(sleep.state, {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'breath-weapons',
+      resolution: {
+        schemaVersion: 1,
+        variantId: 'fire-breath',
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+        damageRolls: [1, 1, 1, 1],
+      },
+    })
+    expect(fire).toMatchObject({ ok: false, reason: 'class-resource-unavailable' })
+  })
+
+  it('resolves adult black dragon Frightful Presence with an end-turn repeat save and source immunity', () => {
+    const dragon = combatant('dragon', 20, { statBlockId: 'srd-5.1:adult-black-dragon' })
+    const hero = combatant('hero', 10, {
+      controller: 'player',
+      savingThrowBonuses: { wis: 0 },
+    })
+    const frightened = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('frightful-presence', [dragon, hero]), {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'frightful-presence',
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['hero'],
+        targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+        damageRolls: [],
+      },
+    })
+    expect(frightened.ok, frightened.ok ? undefined : frightened.reason).toBe(true)
+    if (!frightened.ok) return
+    expect(frightened.state.combatants.hero.conditions).toContain('frightened')
+    expect(frightened.state.combatants.hero.classState.monsterFrightfulPresenceImmunityRoundsBySource)
+      .toEqual({ dragon: 14_400 })
+
+    const dragonEnd = resolveDnd5eHeadlessAction(frightened.state, { type: 'end-turn', actorId: 'dragon' })
+    expect(dragonEnd.ok, dragonEnd.ok ? undefined : dragonEnd.reason).toBe(true)
+    if (!dragonEnd.ok) return
+    const effectId = dragonEnd.state.combatants.hero.classState.activeEffects?.[0]?.id
+    expect(effectId).toBeTruthy()
+    const heroEnd = resolveDnd5eHeadlessAction(dragonEnd.state, {
+      type: 'end-turn',
+      actorId: 'hero',
+      activeEffectSavingThrows: [{ effectId: effectId!, d20: 20 }],
+    })
+    expect(heroEnd.ok, heroEnd.ok ? undefined : heroEnd.reason).toBe(true)
+    if (!heroEnd.ok) return
+    expect(heroEnd.state.combatants.hero.conditions).not.toContain('frightened')
+    expect(heroEnd.state.combatants.hero.classState.monsterFrightfulPresenceImmunityRoundsBySource)
+      .toEqual({ dragon: 14_399 })
   })
 
   it('supports authoritative vampire alternate forms and forced return to true form', () => {

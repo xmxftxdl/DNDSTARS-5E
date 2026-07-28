@@ -288,6 +288,7 @@ export default function EnemyDetailPanel({
               <div className="flex items-center gap-1">
                 <input
                   type="number"
+                  aria-label="怪物当前生命值"
                   min={0}
                   value={linked?.currentHp ?? curHp}
                   onChange={(e) => {
@@ -304,6 +305,7 @@ export default function EnemyDetailPanel({
                 <span className="text-xs text-slate-500">/</span>
                 <input
                   type="number"
+                  aria-label="怪物最大生命值"
                   min={1}
                   value={linked?.maxHp ?? maxHp}
                   onChange={(e) => {

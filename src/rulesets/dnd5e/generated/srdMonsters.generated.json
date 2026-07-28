@@ -2845,6 +2845,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Grappled",
@@ -5472,6 +5484,18 @@
       "damageImmunities": [
         "psychic"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Frightened"
@@ -6090,6 +6114,23 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "delivery": "spell",
+          "magical": true
+        },
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 12,
@@ -7046,6 +7087,18 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -7480,6 +7533,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -7814,6 +7880,19 @@
       "damageImmunities": [
         "fire",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
       ],
       "conditionImmunities": [
         "Poisoned"
@@ -8995,6 +9074,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -10054,6 +10146,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -10449,6 +10554,19 @@
         "acid",
         "poison",
         "psychic"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "adamantine"
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -11359,6 +11477,18 @@
       ],
       "damageImmunities": [
         "psychic"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [],
       "senses": [
@@ -12557,6 +12687,18 @@
         "radiant"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Exhaustion",
@@ -14669,6 +14811,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Paralyzed",
@@ -15234,6 +15388,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -15678,6 +15845,18 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Grappled",
@@ -15929,6 +16108,19 @@
       "damageImmunities": [
         "lightning",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "adamantine"
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -16466,6 +16658,19 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "adamantine"
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Petrified",
@@ -16825,6 +17030,18 @@
         "cold",
         "necrotic",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -20124,6 +20341,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -21454,6 +21683,18 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -22129,6 +22370,18 @@
       "damageResistances": [],
       "damageImmunities": [
         "psychic"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -22853,6 +23106,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -23417,6 +23682,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -23879,6 +24157,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -24251,6 +24542,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -24373,6 +24677,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Grappled",
@@ -24489,6 +24805,19 @@
         "fire",
         "poison",
         "psychic"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "adamantine"
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -25111,6 +25440,18 @@
       "damageImmunities": [
         "lightning"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Frightened",
         "Paralyzed"
@@ -25634,6 +25975,18 @@
       ],
       "damageImmunities": [
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -26674,6 +27027,18 @@
       "damageImmunities": [
         "fire"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -27022,6 +27387,18 @@
       ],
       "damageImmunities": [
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Poisoned"
@@ -28142,6 +28519,18 @@
         "necrotic",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Exhaustion",
@@ -28276,6 +28665,18 @@
       "damageImmunities": [
         "necrotic",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -28562,6 +28963,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -28731,6 +29144,19 @@
         "fire"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Charmed"
       ],
@@ -30579,6 +31005,19 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -30824,6 +31263,18 @@
         "radiant"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Exhaustion",
@@ -31858,6 +32309,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -32055,6 +32518,27 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "vulnerable",
+          "damageTypes": [
+            "piercing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": true,
+          "sourceMoralAlignment": "good"
+        },
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -33632,6 +34116,18 @@
       "damageImmunities": [
         "fire"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -34305,6 +34801,18 @@
       "damageImmunities": [
         "necrotic",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Exhaustion",
@@ -34991,6 +35499,18 @@
         "necrotic",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Exhaustion",
@@ -35271,6 +35791,18 @@
       "damageImmunities": [
         "necrotic",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Charmed",
@@ -36279,6 +36811,19 @@
         "poison",
         "psychic"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "adamantine"
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Exhaustion",
@@ -36675,6 +37220,18 @@
         "poison"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -37996,6 +38553,18 @@
         "fire",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Frightened",
@@ -39314,6 +39883,18 @@
         "necrotic"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -39477,6 +40058,18 @@
         "necrotic"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -39667,6 +40260,18 @@
         "necrotic"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -39812,6 +40417,18 @@
         "necrotic"
       ],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -40257,6 +40874,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Poisoned"
       ],
@@ -40663,6 +41292,18 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Grappled",
@@ -40875,6 +41516,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 17,
@@ -41003,6 +41657,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 17,
@@ -41112,6 +41779,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 17,
@@ -41260,6 +41940,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 12,
@@ -41360,6 +42053,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 12,
@@ -41468,6 +42174,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 12,
@@ -41604,6 +42323,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 12,
@@ -41738,6 +42470,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 12,
@@ -41894,6 +42639,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -41999,6 +42757,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -42138,6 +42909,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -42326,6 +43110,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {
@@ -42453,6 +43250,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 14,
@@ -42546,6 +43356,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 14,
@@ -42676,6 +43499,19 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "immune",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [],
       "passivePerception": 14,
@@ -42905,6 +43741,19 @@
       "damageImmunities": [
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Exhaustion",
         "Poisoned"
@@ -43043,6 +43892,18 @@
       "damageImmunities": [
         "lightning",
         "poison"
+      ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false
+        }
       ],
       "conditionImmunities": [
         "Exhaustion",
@@ -43483,6 +44344,19 @@
         "necrotic",
         "poison"
       ],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "bludgeoning",
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "silvered"
+        }
+      ],
       "conditionImmunities": [
         "Charmed",
         "Exhaustion",
@@ -43742,6 +44616,18 @@
       "damageVulnerabilities": [],
       "damageResistances": [],
       "damageImmunities": [],
+      "damageDefenseRules": [
+        {
+          "outcome": "resistant",
+          "damageTypes": [
+            "piercing",
+            "slashing"
+          ],
+          "delivery": "weapon-attack",
+          "magical": false,
+          "weaponMaterialNot": "adamantine"
+        }
+      ],
       "conditionImmunities": [],
       "senses": [
         {

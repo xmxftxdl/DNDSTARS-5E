@@ -127,7 +127,10 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
   await expect(dm.getByTestId('combat-settlement-mode')).toHaveValue('manual', { timeout: 20_000 })
   await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('手动结算', { timeout: 20_000 })
   await expect(dm.getByTestId('combat-settlement-panel')).toBeVisible()
-  await expect(player.getByTestId('combat-settlement-panel')).toBeVisible()
+  await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
+  await player.getByTestId('map-dice-roller-toggle').click()
+  const playerDice = player.getByRole('dialog', { name: '自由掷骰' })
+  await expect(playerDice).toBeVisible()
 
   // 怪物先攻时，全手动模式不会启动 Headless 怪物 AI。
   await expect.poll(async () => (await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(0)
@@ -145,6 +148,7 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
     return state.characters.find((character) => character.id === 'manual-hero')?.currentHp
   }).toBe((beforeDamageHp ?? 7) - 7)
   await dm.getByRole('button', { name: /^Log/ }).click()
+  await dm.getByText(/查看 Headless 结算依据/).click()
   await expect(dm.getByText(new RegExp(`HP ${beforeDamageHp} → ${(beforeDamageHp ?? 7) - 7}（上限 \\d+）`))).toBeVisible()
   await expect(dm.getByText('结算来源：DM 手动调整')).toBeVisible()
   await expect.poll(async () => {
@@ -152,10 +156,9 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
     return state.entries.some((entry) => entry.details?.includes('结算来源：DM 手动调整'))
   }).toBe(true)
 
-  await player.getByLabel('骰子类型').selectOption('6')
-  await player.getByLabel('投骰名称').fill('玩家公开检定')
-  await player.getByTestId('manual-roll-submit').click()
-  await expect(player.getByTestId('manual-roll-submit')).toBeEnabled({ timeout: 15_000 })
+  await playerDice.getByRole('button', { name: 'd6', exact: true }).click()
+  await playerDice.getByLabel('掷骰名称').fill('玩家公开检定')
+  await playerDice.getByRole('button', { name: /^投掷 1d6/ }).click()
   await expect.poll(async () => {
     const state = await getState<{ events: Array<{ sourceMode: string; visibility?: string; roll?: { label: string } }> }>(request, 'dice-events')
     return state.events.some((event) => event.sourceMode === 'player' && event.visibility === 'public' && event.roll?.label.includes('玩家公开检定'))
@@ -172,14 +175,15 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
   await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 15_000 })
 
   const publicDiceCount = (await getState<{ events: unknown[] }>(request, 'dice-events')).events.length
-  await dm.getByTestId('manual-roll-visibility').click()
-  await expect(dm.getByTestId('manual-roll-visibility')).toHaveText('暗骰')
-  await dm.getByLabel('投骰名称').fill('DM 秘密检定')
-  await dm.getByTestId('manual-roll-submit').click()
+  await dm.getByTestId('map-dice-roller-toggle').click()
+  const dmDice = dm.getByRole('dialog', { name: '自由掷骰' })
+  await dmDice.getByLabel('自由掷骰可见性').selectOption('dm')
+  await dmDice.getByLabel('掷骰名称').fill('DM 秘密检定')
+  await dmDice.getByRole('button', { name: /^投掷 1d20/ }).click()
   await expect(dm.getByRole('dialog', { name: 'DM 暗骰确认' })).toBeVisible({ timeout: 15_000 })
   await dm.getByTestId('d20-dm-override').fill('17')
   await dm.getByTestId('d20-roll-continue').click()
-  await expect(dm.getByTestId('manual-roll-submit')).toBeEnabled({ timeout: 15_000 })
+  await expect(dmDice.getByRole('button', { name: /^投掷 1d20/ })).toBeEnabled({ timeout: 15_000 })
   await dm.waitForTimeout(500)
   expect((await getState<{ events: unknown[] }>(request, 'dice-events')).events).toHaveLength(publicDiceCount)
   expect((await getState<{ entries: Array<{ text?: string }> }>(request, 'combat-log')).entries)
@@ -190,8 +194,8 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
 
   await dm.getByTestId('combat-settlement-mode').selectOption('automatic')
   await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('自动结算')
-  await expect(dm.getByTestId('combat-settlement-panel')).toContainText('DM 战场修正台')
-  await expect(dm.getByTestId('manual-roll-submit')).toBeEnabled()
+  await expect(dm.getByTestId('combat-settlement-panel')).toHaveCount(0)
+  await expect(dm.getByTestId('map-dice-roller-toggle')).toBeEnabled()
   await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
 
   // 结算模式与回合推进会在共享 combat 资源中排队写入。一次结束点击必须

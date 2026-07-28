@@ -56,6 +56,7 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'interaction-reward-unavailable': { title: '奖励规则未就绪', message: '互动点引用的物品模板当前不可用，为避免错误发放，本次交互已拒绝。' },
   'room-rules-unavailable': { title: '房间规则未就绪', message: '尚未获得可验证的房规快照，为避免错误结算，已拒绝本次行动。' },
   'plugin-not-allowed': { title: '插件未授权', message: '当前房间规则未授权该插件能力，本次行动未结算。' },
+  'authority-commit-failed': { title: '结算同步失败', message: '权威战斗结果未能安全保存，本次行动已结束且不会重复扣除资源。请稍后重试。' },
 }
 
 export function playerActionRejectionNotice(reason?: string): PlayerActionRejectionNotice {

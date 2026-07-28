@@ -35,6 +35,12 @@ export interface MonsterDecisionMetrics {
   controlValue?: number
   /** 治疗、保护或恢复资源的收益；仅允许 Host 对已实现能力填入。 */
   supportValue?: number
+  /** Number of enemies affected by this already-validated candidate. */
+  affectedEnemyCount?: number
+  /** Number of allies negatively affected by this already-validated candidate. */
+  affectedAllyCount?: number
+  /** Urgency of the ally receiving healing or protection, normalized to 0..1. */
+  allyEmergency?: number
   /** 稀缺能力的资源成本，越高越不应浪费。 */
   resourceCost?: number
   hitProbability: number
@@ -63,10 +69,14 @@ export interface MonsterDecisionCandidate<TPayload> {
     | 'spell'
     | 'move-spell'
     | 'retreat-spell'
+    | 'area-action'
+    | 'move-area-action'
+    | 'retreat-area-action'
     | 'control'
     | 'move-control'
     | 'retreat-control'
     | 'heal'
+    | 'support'
     | 'dash'
     | 'move-dodge'
     | 'dodge'
@@ -303,6 +313,18 @@ export const DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3: MonsterDecisio
     if ((metrics.supportValue ?? 0) > 0) {
       score += (metrics.supportValue ?? 0) * weights.support
       reasons.push('能力具有治疗或保护收益')
+    }
+    if ((metrics.affectedEnemyCount ?? 0) > 1) {
+      score += Math.min(18, ((metrics.affectedEnemyCount ?? 1) - 1) * 5) * weights.control
+      reasons.push(`范围协同覆盖 ${metrics.affectedEnemyCount} 名敌人`)
+    }
+    if ((metrics.affectedAllyCount ?? 0) > 0) {
+      score -= (metrics.affectedAllyCount ?? 0) * 18
+      reasons.push(`范围会影响 ${metrics.affectedAllyCount} 名友方`)
+    }
+    if ((metrics.allyEmergency ?? 0) > 0) {
+      score += Math.min(1, metrics.allyEmergency ?? 0) * 16 * weights.support
+      reasons.push('优先支援濒危队友')
     }
     if ((metrics.expectedIncomingDamage ?? 0) > 0) {
       const hpRatio = Math.max(0, Math.min(1, context.currentHp / Math.max(1, context.maxHp)))

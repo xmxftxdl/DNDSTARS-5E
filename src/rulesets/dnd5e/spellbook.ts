@@ -3,6 +3,7 @@ import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.
 import type { Dnd5eSrdSpellDescriptionZh } from './spellDescriptionTypes'
 import { DND5E_SRD_COMBAT_SPELLS, type Dnd5eSrdSpellDefinition } from './spells'
 import { DND5E_SRD_SPELL_CATALOG } from './spellCatalog'
+import type { Dnd5eSpellVisibilityRequirement } from './spellVisibility'
 import { parseDnd5eSpellMechanics, type Dnd5eSpellMechanicsDefinition } from './spellMechanics'
 
 export const DND5E_SPELL_IMPORT_FORMAT = 'dndstars5e-spells'
@@ -98,6 +99,7 @@ export interface Dnd5eSpellbookEntry {
   sourceKind: 'srd-core' | 'room-import'
   headless: boolean
   catalogOnly: boolean
+  visibilityRequirement?: Dnd5eSpellVisibilityRequirement
   translationStatus?: 'context-reviewed' | 'pending-srd-translation'
   reference?: Dnd5eSrdSpellDescriptionZh
   imported?: Dnd5eImportedSpell
@@ -368,6 +370,7 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
       sourceKind: 'srd-core',
       headless: !!combat,
       catalogOnly: !combat,
+      visibilityRequirement: catalog.visibilityRequirement,
       translationStatus: reviewedReference ? 'context-reviewed' : 'pending-srd-translation',
       ...(reference ? { reference } : {}),
       ...(combat ? { combat } : {}),

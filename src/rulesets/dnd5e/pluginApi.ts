@@ -32,6 +32,9 @@ import {
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
 import type { Dnd5eClassId } from './classes'
+import type { Dnd5eMonsterStatBlock } from './monsters'
+import { parseDnd5eMonsterStatBlock } from './monsterSchema'
+import { registerDnd5ePluginMonsterCatalogEntry } from './roomMonsterCatalog'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
@@ -495,6 +498,8 @@ export interface Dnd5eRulesPluginApi {
   registerSpell(definition: Dnd5ePluginSpellDefinition): string
   /** 注册可由 DM 分发的声明式物品；装备效果由 Host 白名单结算。 */
   registerItem(definition: Dnd5ePluginItemDefinition): string
+  /** 注册由怪物工坊生成的纯数据 stat block；Host 会执行 monsterSchema fail-closed 校验。 */
+  registerMonster(definition: Dnd5eMonsterStatBlock): string
 }
 
 export interface Dnd5eRulesPlugin {
@@ -525,6 +530,12 @@ const pluginBackgrounds = new Map<string, RegisteredDnd5ePluginBackground>()
 const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()
 const pluginSpells = new Map<string, RegisteredDnd5ePluginSpell>()
 const pluginItems = new Map<string, RegisteredDnd5ePluginItem>()
+export type RegisteredDnd5ePluginMonster = Dnd5eMonsterStatBlock & {
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+}
+const pluginMonsters = new Map<string, RegisteredDnd5ePluginMonster>()
 const pluginListeners = new Set<() => void>()
 let pluginRevision = 0
 
@@ -1927,6 +1938,30 @@ export function registerDnd5eRulesPlugin(
       })
       return itemId
     },
+    registerMonster(definition) {
+      assertAcceptingContributions()
+      const parsed = parseDnd5eMonsterStatBlock(structuredClone(definition))
+      if (!parsed.ok) {
+        throw new Error(`Invalid plugin monster ${definition?.id ?? 'unknown'}: ${parsed.issues[0]?.message ?? 'invalid stat block'}`)
+      }
+      if (parsed.value.source !== 'DM 自定义') {
+        throw new Error(`Plugin monster must be marked as DM custom: ${parsed.value.id}`)
+      }
+      if (pluginMonsters.has(parsed.value.id)) throw new Error(`Plugin monster already registered: ${parsed.value.id}`)
+      const registered: RegisteredDnd5ePluginMonster = {
+        ...parsed.value,
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      }
+      pluginMonsters.set(registered.id, registered)
+      const unregisterCatalog = registerDnd5ePluginMonsterCatalogEntry(registered)
+      disposers.push(() => {
+        if (pluginMonsters.get(registered.id) === registered) pluginMonsters.delete(registered.id)
+        unregisterCatalog()
+      })
+      return registered.id
+    },
   }
 
   try {
@@ -2186,6 +2221,12 @@ export function registeredDnd5ePluginItems(): readonly RegisteredDnd5ePluginItem
 export function dnd5ePluginItemDefinition(id: string): RegisteredDnd5ePluginItem | undefined {
   const item = pluginItems.get(id)
   return item ? cloneRegisteredPluginItem(item) : undefined
+}
+
+export function registeredDnd5ePluginMonsters(): readonly RegisteredDnd5ePluginMonster[] {
+  return [...pluginMonsters.values()]
+    .map((monster) => structuredClone(monster))
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
 
 export function dnd5ePluginAbilityGenerationMethod(id: string): RegisteredDnd5ePluginAbilityGeneration | undefined {

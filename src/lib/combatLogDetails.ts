@@ -51,6 +51,17 @@ const CLASS_DAMAGE_LABELS: Record<string, string> = {
   'foe-slayer': '屠灭众敌',
 }
 
+const CLASS_STATE_LABELS: Record<string, string> = {
+  'shield-spell': '护盾术',
+  dodging: '闪避',
+  raging: '狂暴',
+  hidden: '隐藏',
+  'wild-shape': '荒野变形',
+  'hurl-through-hell-ready': '坠入地狱预备',
+  'vicious-mockery': '恶言相加',
+  'reckless-attack': '鲁莽攻击',
+}
+
 const REMOVAL_REASON_LABELS: Record<string, string> = {
   expired: '持续时间结束',
   'save-succeeded': '豁免成功',
@@ -87,7 +98,15 @@ function effectDefinitionLabel(definitionId: string): string {
     : definitionId
 }
 
-function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => string): string[] {
+function classStateLabel(stateKey: string): string {
+  return CLASS_STATE_LABELS[stateKey] ?? stateKey
+}
+
+function eventDetails(
+  event: Dnd5eCombatEvent,
+  resolveName: (id: string) => string,
+  formatPosition: (position: { x: number; y: number }) => string,
+): string[] {
   switch (event.type) {
     case 'attack-resolved':
       return [
@@ -101,6 +120,10 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
     }
     case 'class-damage-applied':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${CLASS_DAMAGE_LABELS[event.source] ?? event.source}造成 ${event.amount} 点额外伤害`]
+    case 'movement-granted':
+      return [`${resolveName(event.actorId)}｜获得 ${event.amount} 尺额外移动力`]
+    case 'disengage-granted':
+      return [`${resolveName(event.actorId)}｜获得撤离状态`]
     case 'damage-reduced':
       return [`${resolveName(event.targetId)}｜伤害减免 ${event.amount}（${event.damageBefore} → ${event.damageAfter}）${event.caught ? '｜接住投射物' : ''}`]
     case 'healing-applied':
@@ -121,6 +144,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.actorId)}｜消耗${resourceLabel(event.resourceKey)}｜剩余 ${event.current}/${event.max}`]
     case 'class-resource-restored':
       return [`${resolveName(event.actorId)}｜恢复${resourceLabel(event.resourceKey)}｜当前 ${event.current}/${event.max}`]
+    case 'class-state-changed':
+      return [`${resolveName(event.actorId)}｜${classStateLabel(event.stateKey)}${event.active ? '生效' : '结束'}${event.value == null ? '' : `｜数值 ${event.value}`}${event.targetId ? `｜目标 ${resolveName(event.targetId)}` : ''}`]
     case 'spell-cast':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜使用 ${event.slotLevel} 环法术位`]
     case 'sleep-resolved':
@@ -135,6 +160,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.targetId)}｜获得状态：${dnd5eConditionLabel(event.condition)}｜来源：${resolveName(event.actorId)}`]
     case 'condition-ended':
       return [`${resolveName(event.targetId)}｜状态结束：${dnd5eConditionLabel(event.condition)}`]
+    case 'contest-resolved':
+      return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${event.contest === 'grapple' ? '擒抱' : event.contest === 'shove' ? '推撞' : '挣脱擒抱'} ${event.actorTotal} vs ${event.targetTotal}｜${event.success ? '成功' : '失败'}${event.outcome ? `｜${event.outcome === 'prone' ? '击倒' : '推开'}` : ''}`]
     case 'active-effect-applied':
       return [`${resolveName(event.targetId)}｜效果生效：${effectDefinitionLabel(event.definitionId)}`]
     case 'active-effect-refreshed':
@@ -159,10 +186,16 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.targetId)}｜受到大规模伤害并立即死亡（受伤前 ${event.hpBefore} HP）`]
     case 'death-ward-triggered':
       return [`${resolveName(event.targetId)}｜死亡防护触发（${event.trigger === 'damage' ? '伤害' : '即死效果'}）`]
+    case 'hostile-targeting-prevented':
+      return [`${resolveName(event.actorId)}无法指定 ${resolveName(event.targetId)}｜${event.source === 'sanctuary' ? '庇护术' : event.source === 'nature-sanctuary' ? '自然庇护' : '宁静心境'}阻止敌对目标选择`]
     case 'moved':
-      return [`${resolveName(event.actorId)}｜移动 ${event.distance} 尺｜(${event.from.x}, ${event.from.y}) → (${event.to.x}, ${event.to.y})`]
+      return [`${resolveName(event.actorId)}｜移动 ${event.distance} 尺｜${formatPosition(event.from)} → ${formatPosition(event.to)}`]
     case 'teleported':
-      return [`${resolveName(event.actorId)}｜${event.spellId}传送 ${event.distanceFeet} 尺｜(${event.from.x}, ${event.from.y}) → (${event.to.x}, ${event.to.y})`]
+      return [`${resolveName(event.actorId)}｜${event.spellId}传送 ${event.distanceFeet} 尺｜${formatPosition(event.from)} → ${formatPosition(event.to)}`]
+    case 'elevation-changed':
+      return [`${resolveName(event.actorId)}｜${event.mode === 'fly' ? '飞行' : event.mode === 'climb' ? '攀爬' : '移动'}高度变化 ${event.fromElevationFeet} 尺 → ${event.toElevationFeet} 尺`]
+    case 'falling-damage-resolved':
+      return [`${resolveName(event.actorId)}｜坠落 ${event.distanceFeet} 尺｜${event.dice}d6 = ${event.damage} 点伤害${event.landedProne ? '｜落地倒地' : ''}`]
     case 'legendary-resistance-used':
       return [`${resolveName(event.targetId)}｜使用传奇抗性｜剩余 ${event.remainingUses} 次`]
     case 'counterspell-resolved':
@@ -180,6 +213,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
 
 export interface CombatLogDetailOptions {
   resolveName?: (id: string) => string
+  /** Projects engine-space coordinates into player-facing coordinates such as map cells. */
+  formatPosition?: (position: { x: number; y: number }) => string
   extra?: readonly string[]
   limit?: number
 }
@@ -190,9 +225,10 @@ export function formatDnd5eCombatLogDetails(
   options: CombatLogDetailOptions = {},
 ): string[] {
   const resolveName = options.resolveName ?? ((id: string) => id)
+  const formatPosition = options.formatPosition ?? ((position) => `(${position.x}, ${position.y})`)
   const all = [
     ...(options.extra ?? []).filter((line) => line.trim().length > 0),
-    ...events.flatMap((event) => eventDetails(event, resolveName)),
+    ...events.flatMap((event) => eventDetails(event, resolveName, formatPosition)),
   ]
   const unique = all.filter((line, index) => all.indexOf(line) === index)
   const limit = Math.max(1, options.limit ?? 14)

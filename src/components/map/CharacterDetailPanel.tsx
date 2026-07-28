@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -5,6 +6,7 @@ import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import { getAc } from '../../lib/combatStats'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
+import { parseLiveHitPointDraft } from './characterHitPoints'
 
 interface CharacterDetailPanelProps {
   token: Token
@@ -31,9 +33,14 @@ export default function CharacterDetailPanel({
   conditionSourceOptions,
   onClose,
 }: CharacterDetailPanelProps) {
+  const portrait = character.tokenPortrait || token.tokenPortrait || character.portrait
   const hpPct =
     character.maxHp > 0 ? Math.max(0, Math.min(100, (character.currentHp / character.maxHp) * 100)) : 0
   const tempHp = character.tempHp ?? 0
+  const [currentHpDraft, setCurrentHpDraft] = useState(String(character.currentHp))
+  const [maxHpDraft, setMaxHpDraft] = useState(String(character.maxHp))
+  const [editingCurrentHp, setEditingCurrentHp] = useState(false)
+  const [editingMaxHp, setEditingMaxHp] = useState(false)
 
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
@@ -48,14 +55,52 @@ export default function CharacterDetailPanel({
     updateToken(mapId, token.id, { hp: nextHp, maxHp })
   }
 
+  const commitCurrentHp = () => {
+    const nextHp = parseLiveHitPointDraft(currentHpDraft, character.maxHp) ?? character.currentHp
+    setEditingCurrentHp(false)
+    setCurrentHpDraft(String(nextHp))
+    if (
+      nextHp !== character.currentHp ||
+      token.hp !== nextHp ||
+      token.maxHp !== character.maxHp
+    ) setHp(nextHp)
+  }
+
+  const updateCurrentHpDraft = (draft: string) => {
+    setCurrentHpDraft(draft)
+    const nextHp = parseLiveHitPointDraft(draft, character.maxHp)
+    if (nextHp == null) return
+    if (
+      nextHp !== character.currentHp ||
+      token.hp !== nextHp ||
+      token.maxHp !== character.maxHp
+    ) setHp(nextHp)
+  }
+
+  const commitMaxHp = () => {
+    const parsed = Number(maxHpDraft)
+    const nextMaxHp = Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : character.maxHp
+    const nextCurrentHp = Math.min(character.currentHp, nextMaxHp)
+    setEditingMaxHp(false)
+    setMaxHpDraft(String(nextMaxHp))
+    setCurrentHpDraft(String(nextCurrentHp))
+    if (nextMaxHp !== character.maxHp || nextCurrentHp !== character.currentHp) {
+      setHp(nextCurrentHp, nextMaxHp, true)
+    }
+  }
+
   return (
     <div data-testid="character-detail-panel" className="glass absolute bottom-3 left-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 bg-void-900 text-2xl"
+          className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-2xl"
           style={{ borderColor: token.color || '#34d399' }}
         >
-          {character.avatar || token.emoji}
+          {portrait ? (
+            <img src={portrait} alt={`${character.name}的地图 Token`} className="h-full w-full object-cover" />
+          ) : (
+            character.avatar || token.emoji
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -94,17 +139,38 @@ export default function CharacterDetailPanel({
               <>
                 <input
                   type="number"
+                  aria-label="当前生命值"
                   min={0}
-                  value={character.currentHp}
-                  onChange={(e) => setHp(Number(e.target.value) || 0)}
+                  max={character.maxHp}
+                  value={editingCurrentHp ? currentHpDraft : String(character.currentHp)}
+                  onFocus={(event) => {
+                    setCurrentHpDraft(String(character.currentHp))
+                    setEditingCurrentHp(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => updateCurrentHpDraft(event.target.value)}
+                  onBlur={commitCurrentHp}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
                   className="w-20 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
                 <span className="text-xs text-slate-500">/</span>
                 <input
                   type="number"
+                  aria-label="最大生命值"
                   min={1}
-                  value={character.maxHp}
-                  onChange={(e) => setHp(character.currentHp, Math.max(1, Number(e.target.value) || 1), true)}
+                  value={editingMaxHp ? maxHpDraft : String(character.maxHp)}
+                  onFocus={(event) => {
+                    setMaxHpDraft(String(character.maxHp))
+                    setEditingMaxHp(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => setMaxHpDraft(event.target.value)}
+                  onBlur={commitMaxHp}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
                   className="w-20 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
               </>

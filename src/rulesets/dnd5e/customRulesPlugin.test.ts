@@ -7,7 +7,12 @@ import {
 } from './customRulesPlugin'
 import { parseDnd5eDeclarativeRulesPackageV1 } from './declarativeSubclassAbility'
 import { dnd5eRulesPluginFromDeclarativePackageV1 } from './declarativePluginPackage'
-import { dnd5ePluginSubclassDefinition, registerDnd5eRulesPlugin } from './pluginApi'
+import {
+  dnd5ePluginSubclassDefinition,
+  registerDnd5eRulesPlugin,
+  registeredDnd5ePluginMonsters,
+} from './pluginApi'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
 
 function draft(): Dnd5eCustomRulesPluginDraft {
   return {
@@ -64,6 +69,10 @@ describe('DM custom rules plugin builder', () => {
         automation: 'full',
       }],
     }]
+    const monsterDraft = createDnd5eCustomMonsterDraft()
+    monsterDraft.name = '星痕守卫'
+    monsterDraft.slug = 'astral-guard'
+    value.monsters = [buildDnd5eCustomMonster(monsterDraft)]
     const source = buildDnd5eCustomRulesPluginPackageV1(value)
     expect(source).not.toMatch(/\b(?:eval|Function)\s*\(/)
     const parsed = parseDnd5eDeclarativeRulesPackageV1(new TextEncoder().encode(source).buffer as ArrayBuffer)
@@ -74,7 +83,17 @@ describe('DM custom rules plugin builder', () => {
       expect(dnd5ePluginSubclassDefinition('local.dm.character-rules:arc-guard')?.features[0]).toMatchObject({
         name: '奥能打击', automation: 'full',
       })
-    } finally { dispose() }
+      expect(registeredDnd5ePluginMonsters()).toEqual([
+        expect.objectContaining({
+          id: 'room-monster:astral-guard',
+          name: '星痕守卫',
+          ownerPluginId: 'local.dm.character-rules',
+        }),
+      ])
+    } finally {
+      dispose()
+      expect(registeredDnd5ePluginMonsters()).toEqual([])
+    }
   })
 
   it('emits a self-contained sandbox-compatible module', () => {
@@ -86,6 +105,7 @@ describe('DM custom rules plugin builder', () => {
     expect(source).toContain('api.registerHeadlessAction(compileHeadlessAction(action))')
     expect(source).toContain('api.registerSpell(spell)')
     expect(source).toContain('api.registerItem(item)')
+    expect(source).toContain('api.registerMonster(monster)')
     expect(source.trimEnd()).toMatch(/export default plugin;$/)
   })
 

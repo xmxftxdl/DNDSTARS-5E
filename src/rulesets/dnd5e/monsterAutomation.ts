@@ -175,8 +175,12 @@ export function dnd5eMonsterMechanicCompatibility(
     if (
       (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition' || effect.kind === 'roll-modifier' || effect.kind === 'attack') &&
       effect.target === 'trigger-target' &&
-      !['after-hit', 'after-miss', 'when-hit'].includes(event)
+      !['after-hit', 'after-miss', 'when-hit', 'after-dealt-damage'].includes(event)
     ) reasons.push('该触发时机没有可绑定的攻击目标。')
+    if (
+      effect.kind === 'damage' && effect.damageType === 'inherit-trigger' &&
+      event !== 'after-dealt-damage' && event !== 'after-damaged'
+    ) reasons.push('继承伤害类型只能用于“造成伤害后”或“受到伤害后”。')
   }
   const requested = mechanic.automation
   const effective = requested === 'partial' || reasons.length > 0 ? 'partial' : 'full'
@@ -219,6 +223,13 @@ export function dnd5eEligibleMonsterMechanics(
       mechanic.schemaVersion === 2 && mechanic.predicates.hpPercentageAtOrAbove != null &&
       hpPercentage < mechanic.predicates.hpPercentageAtOrAbove
     ) return false
+    if (mechanic.schemaVersion === 2) {
+      const v2Predicates = mechanic.predicates
+      if (v2Predicates.hpBelow != null && context.currentHp >= v2Predicates.hpBelow) return false
+      if (v2Predicates.hpAtOrBelow != null && context.currentHp > v2Predicates.hpAtOrBelow) return false
+      if (v2Predicates.hpAbove != null && context.currentHp <= v2Predicates.hpAbove) return false
+      if (v2Predicates.hpAtOrAbove != null && context.currentHp < v2Predicates.hpAtOrAbove) return false
+    }
     const previous = context.usedKeys?.[dnd5eMonsterMechanicLedgerKey(mechanic.id)]
     if (mechanic.limit === 'once-per-combat') return previous !== context.combatId
     if (mechanic.limit === 'once-per-turn') return previous !== dnd5eMonsterMechanicUsageValue(mechanic, context)

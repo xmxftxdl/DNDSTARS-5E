@@ -1,6 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
-import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -37,7 +37,8 @@ import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eEligibleMonsterMechanics, dnd5eMonsterMechanicDiceRequirements } from './monsterAutomation'
 import {
   dnd5eMonsterEffectiveWeaponAttack,
-  dnd5eMonsterHasGenericAbility,
+  dnd5eMonsterPackTacticsApplies,
+  dnd5eMonsterWeaponAttackAtDistance,
   dnd5eMonsterWeaponAttackAgainstConditions,
 } from './monsterGenericAbilities'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
@@ -79,6 +80,20 @@ export interface PreparedDnd5eMonsterAttack {
   sizeDamageD4Mode?: 'add' | 'subtract'
 }
 
+function monsterAttackAllowsDistance(
+  attack: Dnd5eMonsterWeaponAttack,
+  distanceFeet: number,
+): boolean {
+  if (attack.mode === 'melee') return distanceFeet <= (attack.reachFeet ?? 5)
+  if (attack.mode === 'ranged') {
+    return distanceFeet <= (attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0)
+  }
+  return distanceFeet <= Math.max(
+    attack.reachFeet ?? 5,
+    attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0,
+  )
+}
+
 export function prepareDnd5eMonsterAttack(input: {
   combatId: string
   round?: number
@@ -108,8 +123,25 @@ export function prepareDnd5eMonsterAttack(input: {
   const indexedAction = monster.actions[input.actionIndex ?? 0]
     ?? monster.actions.find((action) => action.kind === 'weapon-attack')
   if (!indexedAction) return { ok: false, reason: 'invalid-action' }
+  const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map)
+    * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   const multiattack = indexedAction.kind === 'weapon-attack'
-    ? monster.actions.find((action) => action.kind === 'multiattack' && action.sequence?.includes(indexedAction.id) && dnd5eMonsterActionAutomation(action) === 'headless')
+    ? monster.actions.find((action) => {
+        if (
+          action.kind !== 'multiattack' ||
+          !action.sequence?.includes(indexedAction.id) ||
+          dnd5eMonsterActionAutomation(action) !== 'headless'
+        ) return false
+        if (!action.sequenceAttackMode || !indexedAction.attack) return true
+        return monsterAttackAllowsDistance(
+          dnd5eMonsterWeaponAttackAtDistance(
+            indexedAction.attack,
+            distanceFeet,
+            action.sequenceAttackMode,
+          ),
+          distanceFeet,
+        )
+      })
     : undefined
   const action = multiattack ?? indexedAction
   if (dnd5eMonsterActionAutomation(action) !== 'headless') return { ok: false, reason: 'invalid-action' }
@@ -129,20 +161,20 @@ export function prepareDnd5eMonsterAttack(input: {
       : []
   })
   if (attacks.length !== attackIds.length || attacks.length === 0) return { ok: false, reason: 'invalid-action' }
-  const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map)
-    * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-  const allAttacksInRange = attacks.every(({ attack }) => distanceFeet <= (
-    attack.mode === 'melee'
-      ? attack.reachFeet ?? 5
-      : attack.mode === 'ranged'
-        ? attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0
-        : Math.max(attack.reachFeet ?? 5, attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0)
-  ))
+  attacks = attacks.map((entry) => ({
+    ...entry,
+    attack: dnd5eMonsterWeaponAttackAtDistance(
+      entry.attack,
+      distanceFeet,
+      action.kind === 'multiattack' ? action.sequenceAttackMode : undefined,
+    ),
+  }))
+  const allAttacksInRange = attacks.every(({ attack }) =>
+    monsterAttackAllowsDistance(attack, distanceFeet))
   if (!allAttacksInRange) return { ok: false, reason: 'target-out-of-range' }
   const environment = mapGeometryRuntimeForMap(input.map.id)?.environment
   const underwaterAttacks = attacks.map(({ id, name, attack }) => {
-    const usesRangedAttack = attack.mode === 'ranged' ||
-      (attack.mode === 'melee-or-ranged' && distanceFeet > (attack.reachFeet ?? 5))
+    const usesRangedAttack = attack.mode === 'ranged'
     return dnd5eUnderwaterWeaponAttack({
       environment,
       weaponId: dnd5eMonsterWeaponIdForUnderwater(id, name),
@@ -169,6 +201,11 @@ export function prepareDnd5eMonsterAttack(input: {
   if (actorIndex < 0 || !actorCombatant || !target) {
     return { ok: false, reason: 'combatant-missing' }
   }
+  // 每次地图动作都会重建独立 Headless 快照。战斗可能已经推进到先攻
+  // 列表中的任意怪物，因此不能沿用 startDnd5eHeadlessCombat 的第 0 位。
+  // 移动适配器也执行同样的对齐；攻击若遗漏，会在怪物移动成功后被
+  // Headless 以“不是当前行动者”拒绝。
+  snapshot.state.initiativeIndex = actorIndex
   attacks = attacks.map((entry) => ({
     ...entry,
     attack: dnd5eMonsterWeaponAttackAgainstConditions(monster, entry.attack, target.conditions),
@@ -204,12 +241,24 @@ export function prepareDnd5eMonsterAttack(input: {
   }
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const packTactics = dnd5eMonsterHasGenericAbility(monster, 'pack-tactics') && input.map.tokens.some((candidate) => {
-    if (candidate.id === actorToken.id || candidate.id === targetToken.id || candidate.type === 'obstacle' || (candidate.hp ?? 1) <= 0) return false
-    if (areOpposedCombatTokens(actorToken, candidate)) return false
-    const ally = snapshot.state.combatants[candidate.id]
-    return !!ally && !dnd5eIsIncapacitated(ally) &&
-      tokenFootprintDistanceCells(candidate, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+  const actorSide = dnd5eCombatTokenSide(actorToken)
+  const packTactics = dnd5eMonsterPackTacticsApplies({
+    monster,
+    actorId: actorToken.id,
+    targetId: targetToken.id,
+    candidates: input.map.tokens.flatMap((candidate) => {
+      const ally = snapshot.state.combatants[candidate.id]
+      if (candidate.type === 'obstacle' || !ally) return []
+      return [{
+        id: candidate.id,
+        alliedWithActor: actorSide != null && dnd5eCombatTokenSide(candidate) === actorSide,
+        currentHp: ally.currentHp,
+        incapacitated: dnd5eIsIncapacitated(ally),
+        distanceFeetToTarget:
+          tokenFootprintDistanceCells(candidate, targetToken, input.map) *
+          Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL),
+      }]
+    }),
   })
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
@@ -230,7 +279,7 @@ export function prepareDnd5eMonsterAttack(input: {
       tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
   })
   const attackModes = attacks.map(({ attack }, attackIndex) => {
-    const usesRangedAttack = attack.mode === 'ranged' || (attack.mode === 'melee-or-ranged' && distanceFeet > (attack.reachFeet ?? 5))
+    const usesRangedAttack = attack.mode === 'ranged'
     const rangeDisadvantage = usesRangedAttack && (
       rangedThreatened || distanceFeet > (attack.rangeFeet?.normal ?? 0)
     )

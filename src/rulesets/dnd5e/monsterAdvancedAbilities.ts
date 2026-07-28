@@ -85,6 +85,8 @@ export function dnd5eMonsterCoreSpellCompatibility(
     (spell.appliedEffect &&
       spell.appliedEffect !== 'darkvision' &&
       spell.appliedEffect !== 'see-invisibility' &&
+      spell.appliedEffect !== 'warding-bond' &&
+      (spell.appliedEffect !== 'sanctuary' || spell.id !== 'sanctuary') &&
       spell.appliedEffect !== 'magic-weapon') ||
     spell.onHitEffect ||
     (spell.onFailedSaveEffect && spell.onFailedSaveEffect !== 'charm-person') ||

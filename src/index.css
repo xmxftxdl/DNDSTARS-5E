@@ -691,6 +691,11 @@ body > .dice-box-canvas {
   animation: combat-banner-class-sigil 18s linear infinite;
 }
 
+.combat-banner-class-backdrop__main--bard {
+  transform-origin: center;
+  animation: combat-banner-bard-sigil-bounce 1.35s cubic-bezier(.3, .05, .25, 1) infinite;
+}
+
 .combat-banner-class-backdrop__mini {
   position: absolute;
   top: 50%;
@@ -757,6 +762,18 @@ body > .dice-box-canvas {
   from { transform: translateY(-50%) rotate(0deg) scale(.96); }
   50% { transform: translateY(-50%) rotate(180deg) scale(1.08); }
   to { transform: translateY(-50%) rotate(360deg) scale(.96); }
+}
+
+@keyframes combat-banner-bard-sigil-bounce {
+  0%, 100% {
+    transform: translateY(3px) scale(.97);
+  }
+  42% {
+    transform: translateY(-9px) scale(1.075);
+  }
+  64% {
+    transform: translateY(-2px) scale(1.015);
+  }
 }
 
 @keyframes combat-banner-bard-note-pulse {
@@ -836,6 +853,7 @@ body > .dice-box-canvas {
   }
   .combat-action-banner__aether,
   .combat-action-banner__runes,
+  .combat-banner-class-backdrop__main--bard,
   .combat-banner-class-backdrop__bard-note {
     animation: none;
   }

@@ -9,6 +9,7 @@ import {
 } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import {
+  dnd5eEffectiveSpeed,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatEvent,
@@ -83,7 +84,6 @@ export function resolveDnd5eMonsterMapMove(input: {
   const finalElevationFeet = path.elevationsFeet.at(-1) ?? actorElevationFeet
   const verticalDistanceFeet = Math.abs(finalElevationFeet - actorElevationFeet)
   const distanceFeet = path.distanceFeet + verticalDistanceFeet
-  const movementCostFeet = path.movementCostFeet + verticalDistanceFeet
   let actionState = { ...snapshot.state, initiativeIndex: actorIndex }
   const priorEvents: Dnd5eCombatEvent[] = []
   if (path.doorsToOpen.length === 1) {
@@ -123,13 +123,24 @@ export function resolveDnd5eMonsterMapMove(input: {
     actionState = dashed.state
     priorEvents.push(...dashed.events)
   }
+  const isProne = actorCombatant.conditions.some((condition) =>
+    ['prone', '倒地'].includes(condition.toLowerCase()))
+  const standingPrevented = actorCombatant.classState.activeEffects?.some((effect) =>
+    effect.source.kind === 'spell' && effect.source.rulesId === 'hideous-laughter',
+  ) === true
+  // The core refuses an illegal "stand" command.  A disabled monster must
+  // instead crawl (or choose another action), never lose its whole move to an
+  // opaque invalid-class-feature rejection.
+  const standFromProne = isProne && !standingPrevented && dnd5eEffectiveSpeed(actorCombatant) > 0
+  const movementCostFeet = path.movementCostFeet + verticalDistanceFeet +
+    (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0)
   const result = resolveDnd5eHeadlessAction(
     actionState,
     {
       type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet, movementCost: movementCostFeet,
       traversalMode: usesFlight ? 'fly' : 'walk',
       toElevationFeet: finalElevationFeet,
-      standFromProne: actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())),
+      standFromProne,
     },
   )
   if (!result.ok) return { ok: true, result, distanceFeet, path: path.points, doorsToOpen: path.doorsToOpen }

@@ -80,6 +80,10 @@ export interface Dnd5eSrdSpellDefinition {
   rangeFeet: number
   target: 'hostile' | 'ally' | 'creature' | 'area'
   effect: Dnd5eSpellEffectKind
+  /** This spell attack may target a guessed cell; the Host resolves occupancy. */
+  allowsGuessedTargetCell?: boolean
+  /** The SRD text explicitly requires the caster to see each selected target. */
+  requiresVisibleTarget?: boolean | 'primary' | 'placement'
   saveAbility?: AbilityKey
   /** 仅敌对（即不自愿）目标进行该豁免；友方目标视为自愿。 */
   unwillingSaveAbility?: AbilityKey
@@ -142,6 +146,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'jump'
     | 'darkvision'
     | 'see-invisibility'
+    | 'warding-bond'
     | 'fly'
     | 'heroism'
     | 'enlarge-reduce'
@@ -183,7 +188,8 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'sanctuary', name: '庇护术', englishName: 'Sanctuary', level: 1, school: '防护',
     classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 30,
-    target: 'creature', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    target: 'creature', effect: 'active-effect', allowsGuessedTargetCell: true,
+    dice: { count: 0, sides: 4, bonus: 0 },
     appliedEffect: 'sanctuary', effectDurationRounds: 10,
     description: '保护一个生物1分钟。任何以目标为攻击或有害法术目标的生物必须先通过感知豁免，否则必须改选目标或令攻击／法术落空。区域效果不受影响；受保护生物发动攻击或施展影响敌人的法术时，效果结束。',
   },
@@ -231,9 +237,17 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '持续1小时，你能如同看见普通生物和物件般看见隐形生物和物件，并能看入以太位面。以太位面中的生物和物件呈半透明的幽灵状。',
   },
   {
+    id: 'warding-bond', name: '守护之链', englishName: 'Warding Bond', level: 2, school: '防护',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'warding-bond', effectDurationRounds: 600,
+    description: '触碰另一个自愿生物并与其建立持续1小时的神秘联结。目标在你60尺内时获得+1 AC、+1豁免，并对所有伤害具有抗性；目标每次受到伤害时，你承受等量伤害。你降至0生命、距离超过60尺，或联结任一方再次成为本法术目标时，联结结束。',
+  },
+  {
     id: 'misty-step', name: '迷踪步', englishName: 'Misty Step', level: 2, school: '咒法',
     classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'bonus-action', rangeFeet: 0,
-    target: 'area', effect: 'teleport', dice: { count: 0, sides: 4, bonus: 0 },
+    target: 'area', effect: 'teleport', requiresVisibleTarget: 'placement',
+    dice: { count: 0, sides: 4, bonus: 0 },
     area: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 30 },
     description: '你被银色薄雾短暂包围，传送至多30尺，到达一处你能看见的未占据空间。',
   },
@@ -256,7 +270,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'enlarge-reduce', name: '变巨/缩小术', englishName: 'Enlarge/Reduce', level: 2, school: '变化',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 30,
-    target: 'creature', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    target: 'creature', effect: 'active-effect', requiresVisibleTarget: true, dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
     unwillingSaveAbility: 'con', appliedEffect: 'enlarge-reduce',
     enlargeReduceOptions: ['enlarge', 'reduce'],
@@ -295,6 +309,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     id: 'spiritual-weapon', name: '灵体武器', englishName: 'Spiritual Weapon', level: 2, school: '塑能',
     classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60,
     target: 'hostile', effect: 'spell-attack',
+    allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'force',
     addSpellcastingModifier: true, maximumTargets: 1,
     area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
@@ -326,6 +341,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     id: 'dispel-magic', name: '解除魔法', englishName: 'Dispel Magic', level: 3, school: '防护',
     classes: ['bard', 'cleric', 'druid', 'paladin', 'sorcerer', 'warlock', 'wizard'],
     castingTime: 'action', rangeFeet: 120, target: 'creature', effect: 'dispel-magic',
+    allowsGuessedTargetCell: true,
     dice: { count: 0, sides: 20, bonus: 0 },
     description: '选择射程内一个生物。目标身上不高于本次施法环级的法术自动结束；每个更高环级法术分别进行一次施法属性检定，DC为10＋该法术环级，成功则结束该法术。',
   },
@@ -365,6 +381,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     id: 'call-lightning', name: '召雷术', englishName: 'Call Lightning', level: 3, school: '咒法',
     classes: ['druid'], castingTime: 'action', rangeFeet: 120, target: 'area',
     effect: 'saving-throw', saveAbility: 'dex', damageOnSuccessfulSave: 'half',
+    requiresVisibleTarget: 'placement',
     dice: { count: 3, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'lightning',
     concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
     area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
@@ -388,7 +405,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'phantasmal-killer', name: '魅影杀手', englishName: 'Phantasmal Killer', level: 4, school: '幻术',
     classes: ['wizard'], castingTime: 'action', rangeFeet: 120,
-    target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    target: 'hostile', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
     dice: { count: 0, sides: 10, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
     onFailedSaveEffect: 'phantasmal-killer',
@@ -397,7 +414,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'black-tentacles', name: '黑触手', englishName: 'Black Tentacles', level: 4, school: '咒法',
     classes: ['wizard'], castingTime: 'action', rangeFeet: 90,
-    target: 'area', effect: 'persistent-area',
+    target: 'area', effect: 'persistent-area', requiresVisibleTarget: 'placement',
     dice: { count: 0, sides: 6, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 100, areaIncludesSelf: true,
@@ -421,7 +438,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'charm-person', name: '魅惑人类', englishName: 'Charm Person', level: 1, school: '附魔',
     classes: ['bard', 'druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action',
-    rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 },
     maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
     onFailedSaveEffect: 'charm-person', effectDurationRounds: 600,
@@ -429,7 +446,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'hideous-laughter', name: '狂笑术', englishName: 'Hideous Laughter', level: 1, school: '附魔',
-    classes: ['bard', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    classes: ['bard', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 1, onFailedSaveEffect: 'hideous-laughter',
     description: '一名智力高于4的可见生物进行感知豁免；失败则倒地、陷入失能且无法站起。目标在每个回合结束时，以及每次受到伤害后重复豁免；受伤触发的豁免具有优势。豁免成功时法术结束。需要专注，至多1分钟。',
@@ -522,13 +539,13 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'guiding-bolt', name: '曳光弹', englishName: 'Guiding Bolt', level: 1, school: '塑能',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 4, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'radiant', onHitEffect: 'guiding-bolt',
     description: '进行一次远程法术攻击。命中造成4d6光耀伤害；在你的下一回合结束前，下一次对该目标的攻击检定具有优势。每升一环增加1d6伤害。',
   },
   {
     id: 'acid-arrow', name: '强酸箭', englishName: 'Acid Arrow', level: 2, school: '塑能',
-    classes: ['wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'spell-attack',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 4, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', spellAttackMissDamage: 'half',
     delayedDamage: {
       dice: { count: 2, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', timing: 'target-next-turn-end',
@@ -537,20 +554,20 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'hellish-rebuke', name: '炼狱叱喝', englishName: 'Hellish Rebuke', level: 1, school: '塑能',
-    classes: ['warlock'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
+    classes: ['warlock'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex', requiresVisibleTarget: true,
     dice: { count: 2, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'fire', damageOnSuccessfulSave: 'half',
     description: '当60尺内你能看见的生物伤害你时，以反应迫使其进行敏捷豁免；失败受到2d10火焰伤害，成功减半。每升一环增加1d10。系统在符合触发条件时询问。',
   },
   {
     id: 'blindness-deafness', name: '目盲/耳聋术', englishName: 'Blindness/Deafness', level: 2, school: '死灵',
-    classes: ['bard', 'cleric', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'con',
+    classes: ['bard', 'cleric', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'con', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, maximumTargets: 1, additionalTargetsPerHigherSlot: 1,
     onFailedSaveEffect: 'blindness-deafness', conditionOptions: ['blinded', 'deafened'],
     description: '选择使目标目盲或耳聋。目标进行体质豁免；失败承受所选状态1分钟，并在其每个回合结束时重复豁免，成功则结束。每升一环可多选择一个目标。',
   },
   {
     id: 'hold-person', name: '人类定身术', englishName: 'Hold Person', level: 2, school: '附魔',
-    classes: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    classes: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
     onFailedSaveEffect: 'hold-person',
@@ -564,7 +581,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'mass-healing-word', name: '群体治愈真言', englishName: 'Mass Healing Word', level: 3, school: '塑能',
-    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing',
+    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing', requiresVisibleTarget: true,
     dice: { count: 1, sides: 4, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
     description: '以附赠动作使射程内至多六名生物各恢复1d4＋施法属性调整值的生命。每升一环增加1d4治疗。对构装生物和亡灵无效。',
   },
@@ -588,20 +605,20 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'counterspell', name: '法术反制', englishName: 'Counterspell', level: 3, school: '防护',
-    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'counterspell',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'counterspell', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 },
     description: '当60尺内你能看见的生物施法时，以反应尝试中断该法术。3环及以下法术自动失败；更高环法术需要进行DC 10＋法术环级的施法属性检定。升环可自动反制不高于所用法术位环级的法术。',
   },
   {
     id: 'banishment', name: '放逐术', englishName: 'Banishment', level: 4, school: '防护',
-    classes: ['cleric', 'paladin', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'cha',
+    classes: ['cleric', 'paladin', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'cha', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 1, additionalTargetsPerHigherSlot: 1, onFailedSaveEffect: 'banishment',
     description: '目标进行魅力豁免；失败则被放逐并在持续期间陷入失能。需要专注，至多1分钟；每升一环可多选择一个目标。异界生物维持满时长后的位面归返由DM裁定。',
   },
   {
     id: 'hold-monster', name: '怪物定身术', englishName: 'Hold Monster', level: 5, school: '附魔',
-    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
     onFailedSaveEffect: 'hold-monster',
@@ -609,25 +626,26 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'heal', name: '医疗术', englishName: 'Heal', level: 6, school: '塑能',
-    classes: ['cleric', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'fixed-healing',
+    classes: ['cleric', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'fixed-healing', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, fixedHealing: 70, fixedHealingPerHigherSlot: 10,
     description: '目标恢复70点生命，并结束影响它的目盲、耳聋和疾病。每升一环额外恢复10点生命。对构装生物和亡灵无效。',
   },
   {
     id: 'power-word-stun', name: '律令震慑', englishName: 'Power Word Stun', level: 8, school: '附魔',
-    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'power-word-stun',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'power-word-stun', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, hitPointThreshold: 150,
     description: '若目标当前生命值不高于150，则陷入震慑；否则法术无效。目标在每个回合结束时进行体质豁免，成功则结束震慑。',
   },
   {
     id: 'mass-heal', name: '群体医疗术', englishName: 'Mass Heal', level: 9, school: '塑能',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'healing-pool',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'healing-pool', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, healingPool: 700, maximumTargets: 100,
     description: '将700点治疗分配给射程内可见的生物；每个目标恢复分配到的数值，并结束影响它的所有疾病、目盲与耳聋。对构装生物和亡灵无效。',
   },
   {
     id: 'acid-splash', name: '酸液飞溅', englishName: 'Acid Splash', level: 0, school: '咒法',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
+    allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 6, bonus: 0 }, damageType: 'acid', cantripScaling: true,
     maximumTargets: 2, maximumTargetSeparationFeet: 5,
     description: '选择射程内一个生物，或选择射程内彼此相距不超过5尺的两个生物。目标分别进行敏捷豁免；失败受到酸蚀伤害，成功不受伤害。伤害骰在5、11、17级增加。',
@@ -635,32 +653,33 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'hunters-mark', name: '猎人印记', englishName: "Hunter's Mark", level: 1, school: '预言',
     classes: ['ranger'], castingTime: 'bonus-action', rangeFeet: 90, target: 'hostile', effect: 'mark',
+    requiresVisibleTarget: true,
     dice: { count: 0, sides: 6, bonus: 0 }, concentration: true, concentrationDurationRounds: 600,
     description: '以附赠动作标记射程内一个生物并保持专注，基础持续至多1小时（3至4环为8小时，5环及以上为24小时）。每当你以武器攻击命中该目标时，额外造成1d6同类伤害；目标降至0生命后可在后续回合转移印记。',
   },
   {
     id: 'fire-bolt', name: '火焰箭', englishName: 'Fire Bolt', level: 0, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 10, bonus: 0 }, damageType: 'fire', cantripScaling: true,
     description: '进行一次远程法术攻击；命中造成火焰伤害。伤害骰在5、11、17级增加。',
   },
   {
     id: 'ray-of-frost', name: '冷冻射线', englishName: 'Ray of Frost', level: 0, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'spell-attack',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'cold', cantripScaling: true,
     onHitEffect: 'ray-of-frost',
     description: '进行一次远程法术攻击。命中时目标受到冷冻伤害，且速度降低10尺，直到你的下一回合开始。伤害骰在5、11、17级增加。',
   },
   {
     id: 'shocking-grasp', name: '电爪', englishName: 'Shocking Grasp', level: 0, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'lightning', cantripScaling: true,
     onHitEffect: 'shocking-grasp',
     description: '进行一次近战法术攻击；若目标穿戴金属护甲，该攻击具有优势。命中时造成闪电伤害，且目标直到其下一回合开始前不能进行反应。伤害骰在5、11、17级增加。',
   },
   {
     id: 'chill-touch', name: '冻寒之触', englishName: 'Chill Touch', level: 0, school: '死灵',
-    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'necrotic', cantripScaling: true,
     onHitEffect: 'chill-touch',
     description: '进行一次远程法术攻击；命中造成黯蚀伤害，且目标在你的下一回合开始前无法恢复生命值。若目标为亡灵，其在此期间对你进行的攻击检定具有劣势。伤害骰在5、11、17级增加。',
@@ -668,30 +687,34 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'eldritch-blast', name: '魔能爆', englishName: 'Eldritch Blast', level: 0, school: '塑能',
     classes: ['warlock'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 10, bonus: 0 }, damageType: 'force', cantripScaling: true,
     description: '向射程内生物发射一道爆裂能量并进行远程法术攻击；命中造成1d10力场伤害。5、11、17级时分别增加至2、3、4道射线；每道射线分别进行攻击检定，并可指定同一或不同目标。',
   },
   {
     id: 'produce-flame', name: '燃火术', englishName: 'Produce Flame', level: 0, school: '咒法',
-    classes: ['druid'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'spell-attack',
+    classes: ['druid'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'fire', cantripScaling: true,
     description: '将火焰投向生物并进行一次远程法术攻击；命中造成火焰伤害。伤害骰在5、11、17级增加。',
   },
   {
     id: 'poison-spray', name: '毒气喷溅', englishName: 'Poison Spray', level: 0, school: '咒法',
     classes: ['druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 10, target: 'hostile', effect: 'saving-throw', saveAbility: 'con',
+    requiresVisibleTarget: true,
     dice: { count: 1, sides: 12, bonus: 0 }, damageType: 'poison', cantripScaling: true,
     description: '目标进行体质豁免；失败受到毒素伤害，成功不受伤害。伤害骰在5、11、17级增加。',
   },
   {
     id: 'sacred-flame', name: '圣火术', englishName: 'Sacred Flame', level: 0, school: '塑能',
     classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
+    requiresVisibleTarget: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'radiant', cantripScaling: true,
     description: '目标进行敏捷豁免；失败受到光耀伤害，成功不受伤害。伤害骰在5、11、17级增加。',
   },
   {
     id: 'vicious-mockery', name: '恶言相加', englishName: 'Vicious Mockery', level: 0, school: '附魔',
     classes: ['bard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    requiresVisibleTarget: true,
     dice: { count: 1, sides: 4, bonus: 0 }, damageType: 'psychic', cantripScaling: true,
     onFailedSaveEffect: 'vicious-mockery',
     description: '目标进行感知豁免；失败受到心灵伤害，并在其下回合结束前进行的下一次攻击检定中具有劣势。成功则不受影响。伤害骰在5、11、17级增加。',
@@ -705,12 +728,14 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'healing-word', name: '治愈真言', englishName: 'Healing Word', level: 1, school: '塑能',
     classes: ['bard', 'cleric', 'druid'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing',
+    requiresVisibleTarget: true,
     dice: { count: 1, sides: 4, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true,
     description: '以附赠动作令射程内一名生物恢复1d4＋施法属性调整值的生命；升环时每高一环增加1d4。对构装体与亡灵无效。',
   },
   {
     id: 'bane', name: '灾祸术', englishName: 'Bane', level: 1, school: '附魔',
     classes: ['bard', 'cleric'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'attack-save-debuff',
+    requiresVisibleTarget: true,
     saveAbility: 'cha', dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 3, additionalTargetsPerHigherSlot: 1,
     description: '选择射程内至多三个生物。每个目标进行魅力豁免；失败者在法术持续期间每次进行攻击检定或豁免时掷 1d4，并从检定结果中减去该数值。每使用高一环法术位可多选择一个目标；需要专注，持续至多 1 分钟。',
@@ -737,13 +762,14 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'inflict-wounds', name: '致伤术', englishName: 'Inflict Wounds', level: 1, school: '死灵',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
     dice: { count: 3, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'necrotic',
     description: '进行一次近战法术攻击；命中造成3d10黯蚀伤害，升环时每高一环增加1d10。',
   },
   {
     id: 'magic-missile', name: '魔法飞弹', englishName: 'Magic Missile', level: 1, school: '塑能',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'automatic-damage',
+    requiresVisibleTarget: true,
     dice: { count: 3, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'force', bonusPerDie: true,
     maximumTargets: 3, additionalTargetsPerHigherSlot: 1,
     description: '产生三枚自动命中的飞弹；每枚造成1d4＋1力场伤害。飞弹可分别指定射程内可见的目标，也可让多枚命中同一目标；升环时每高一环额外产生一枚飞弹。',
@@ -751,6 +777,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'scorching-ray', name: '灼热射线', englishName: 'Scorching Ray', level: 2, school: '塑能',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    allowsGuessedTargetCell: true,
     dice: { count: 2, sides: 6, bonus: 0 }, damageType: 'fire',
     baseProjectiles: 3, additionalProjectilesPerHigherSlot: 1,
     description: '创造三道火焰射线；每道射线分别进行远程法术攻击，命中造成2d6火焰伤害。射线可以分配给同一或不同目标；每升一环增加一道射线。',
@@ -812,7 +839,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'blight', name: '枯萎术', englishName: 'Blight', level: 4, school: '死灵',
-    classes: ['druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'con',
+    classes: ['druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'con', requiresVisibleTarget: true,
     dice: { count: 8, sides: 8, bonus: 0, perHigherSlot: 1 }, damageType: 'necrotic', damageOnSuccessfulSave: 'half',
     description: '目标进行体质豁免；失败受到8d8黯蚀伤害，成功减半，升环时每高一环增加1d8。构装生物和亡灵不受影响；植物目标以劣势豁免且伤害取最大值。',
   },
@@ -826,14 +853,14 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'chain-lightning', name: '连锁闪电', englishName: 'Chain Lightning', level: 6, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 150, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 150, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex', requiresVisibleTarget: 'primary',
     dice: { count: 10, sides: 8, bonus: 0 }, damageType: 'lightning', damageOnSuccessfulSave: 'half',
     maximumTargets: 4, additionalTargetsPerHigherSlot: 1, secondaryTargetsWithinFeetOfFirst: 30,
     description: '首个目标及其30尺内至多三个不同的后续目标分别进行敏捷豁免；失败受到10d8闪电伤害，成功减半。每升一环增加一个后续目标。',
   },
   {
     id: 'disintegrate', name: '解离术', englishName: 'Disintegrate', level: 6, school: '变化',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex', requiresVisibleTarget: true,
     dice: { count: 10, sides: 6, bonus: 40, perHigherSlot: 3 }, damageType: 'force', damageOnSuccessfulSave: 'none',
     description: '目标进行敏捷豁免；失败受到10d6＋40力场伤害，成功不受伤害。每升一环增加3d6；因此降至0生命的生物会被解离。',
   },
@@ -847,7 +874,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'finger-of-death', name: '死亡一指', englishName: 'Finger of Death', level: 7, school: '死灵',
-    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'con',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'con', requiresVisibleTarget: true,
     dice: { count: 7, sides: 8, bonus: 30 }, damageType: 'necrotic', damageOnSuccessfulSave: 'half',
     description: '目标进行体质豁免；失败受到7d8＋30黯蚀伤害，成功减半。若以此法术杀死人形生物，其在你的下回合开始时成为永久受控僵尸；僵尸生成与控制目前由DM裁定。',
   },
@@ -862,7 +889,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'power-word-kill', name: '律令死亡', englishName: 'Power Word Kill', level: 9, school: '附魔',
-    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'power-word-kill',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'power-word-kill', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 },
     description: '对射程内一个生物说出死亡律令。若目标当前生命值不高于100，目标立即死亡；否则法术无效。临时生命值不计入这项门槛。',
   },

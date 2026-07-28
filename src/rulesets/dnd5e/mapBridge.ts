@@ -7,6 +7,7 @@ import { getTokenTargetAc } from '../../lib/enemyCombatStats'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import {
+  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
@@ -31,7 +32,13 @@ import {
   type Dnd5eEffectiveRulesContextV1,
 } from './effectiveRulesContext'
 import { dnd5eMonsterHasStructuredShapechange } from './monsterAdvancedAbilities'
-import { dnd5eMonsterHasMagicResistance } from './monsterGenericAbilities'
+import {
+  dnd5eMonsterHasMagicResistance,
+  dnd5eMonsterLimitedMagicImmunityRule,
+} from './monsterGenericAbilities'
+import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
+import { dnd5eWeaponDamageSource } from './equipment'
+import type { Dnd5eMoralAlignment } from './damageDefenses'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -103,21 +110,39 @@ function tokenSpecialSenses(token: Token): Dnd5eSpecialSense[] {
   ].filter((sense): sense is Dnd5eSpecialSense => !!sense && sense.rangeFeet > 0)
 }
 
-function monsterDarkvisionRangeFeet(monster: Dnd5eMonsterStatBlock | undefined): number {
-  return Math.max(0, ...(monster?.senses ?? []).flatMap((sense) => {
-    const name = sense.name.trim().toLowerCase()
-    return name.includes('darkvision') || name.includes('黑暗视觉')
-      ? [Math.max(0, sense.distanceFeet ?? 0)]
-      : []
-  }))
-}
-
 function mergeSpecialSenses(...groups: readonly Dnd5eSpecialSense[][]): Dnd5eSpecialSense[] {
   const maximumByKind = new Map<Dnd5eSpecialSense['kind'], number>()
   for (const sense of groups.flat()) {
     maximumByKind.set(sense.kind, Math.max(maximumByKind.get(sense.kind) ?? 0, sense.rangeFeet))
   }
   return [...maximumByKind].map(([kind, rangeFeet]) => ({ kind, rangeFeet }))
+}
+
+function normalizeDnd5eMoralAlignment(alignment: unknown): Dnd5eMoralAlignment | undefined {
+  if (typeof alignment !== 'string') return undefined
+  const normalized = alignment.trim().toLowerCase()
+  if (
+    !normalized ||
+    /(?:任意|无阵营|any alignment|unaligned|non-|非善良|非邪恶|非中立)/.test(normalized)
+  ) return undefined
+  if (normalized.includes('善良') || /\bgood\b/.test(normalized)) return 'good'
+  if (normalized.includes('邪恶') || /\bevil\b/.test(normalized)) return 'evil'
+  if (normalized.includes('中立') || /\bneutral\b/.test(normalized)) return 'neutral'
+  const abbreviation = normalized.replace(/[\s_-]+/g, '').toUpperCase()
+  if (['LG', 'NG', 'CG'].includes(abbreviation)) return 'good'
+  if (['LE', 'NE', 'CE'].includes(abbreviation)) return 'evil'
+  return ['LN', 'N', 'TN', 'CN'].includes(abbreviation) ? 'neutral' : undefined
+}
+
+function characterWeaponDamageSources(
+  character: Character,
+): Record<string, { magical: boolean; specialMaterial?: 'silvered' | 'adamantine' }> | undefined {
+  const sources = [
+    dnd5eWeaponDamageSource(character.equipment?.mainWeapon),
+    dnd5eWeaponDamageSource(character.equipment?.offHand),
+  ].filter((source): source is NonNullable<typeof source> => source != null)
+  if (sources.length === 0) return undefined
+  return Object.fromEntries(sources.map(({ weaponId, ...source }) => [weaponId, source]))
 }
 
 export function dnd5eMapTokenCanThreatenRangedAttacker(
@@ -285,6 +310,12 @@ export function createDnd5eMapCombatSnapshot(input: {
     const character = token.characterId ? charactersById.get(token.characterId) : undefined
     if (character) {
       const migrated = migrateCharacterToDnd5e(character)
+      const visionProfile = compileDnd5eEffectiveVisionProfile({
+        token,
+        character: migrated,
+        fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
+          DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+      })
       characterIdByCombatantId[token.id] = character.id
       const combatant = createCombatantFromDnd5eCharacter({
         character: migrated,
@@ -292,13 +323,14 @@ export function createDnd5eMapCombatSnapshot(input: {
         initiativeD20: Math.max(1, Math.min(20, initiative - migrated.initiativeBonus)),
         position: { x: token.x, y: token.y },
       })
+      const weaponDamageSources = characterWeaponDamageSources(character)
+      const mainWeaponId = character.equipment?.mainWeapon?.id
       return [{
         ...combatant,
-        mainWeaponId: character.equipment?.mainWeapon?.id,
-        mainWeaponMagical: !!character.equipment?.mainWeapon && (
-          character.equipment.mainWeapon.baseEquipmentId != null ||
-          character.equipment.mainWeapon.effects != null
-        ),
+        mainWeaponId,
+        mainWeaponMagical: !!mainWeaponId && weaponDamageSources?.[mainWeaponId]?.magical === true,
+        weaponDamageSources,
+        moralAlignment: normalizeDnd5eMoralAlignment(character.alignment),
         id: token.id,
         name: token.label,
         initiative,
@@ -306,11 +338,20 @@ export function createDnd5eMapCombatSnapshot(input: {
         elevationFeet: mapGeometryTokenElevation(geometry, token),
         airborne: mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
-        darkvisionRangeFeet: token.darkvisionRangeFeet,
+        darkvisionRangeFeet: visionProfile.darkvisionRangeFeet || undefined,
+        darknessSightRangeFeet: visionProfile.darknessSightRangeFeet || undefined,
+        magicalDarknessSightRangeFeet:
+          visionProfile.magicalDarknessSightRangeFeet || undefined,
         specialSenses: tokenSpecialSenses(token),
       }]
     }
     const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
+    const visionProfile = compileDnd5eEffectiveVisionProfile({
+      token,
+      monster,
+      fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
+        DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+    })
     const maxHp = Math.max(1, token.maxHp ?? monster?.hitPoints.average ?? token.hp ?? 1)
     const {
       conditions: tokenConditions,
@@ -347,11 +388,18 @@ export function createDnd5eMapCombatSnapshot(input: {
       airborne: !!monster?.speed.fly &&
         mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
-      darkvisionRangeFeet: Math.max(token.darkvisionRangeFeet ?? 0, monsterDarkvisionRangeFeet(monster)) || undefined,
+      darkvisionRangeFeet: visionProfile.darkvisionRangeFeet || undefined,
+      darknessSightRangeFeet: visionProfile.darknessSightRangeFeet || undefined,
+      magicalDarknessSightRangeFeet:
+        visionProfile.magicalDarknessSightRangeFeet || undefined,
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
       magicResistance: dnd5eMonsterHasMagicResistance(monster),
+      limitedMagicImmunity: dnd5eMonsterLimitedMagicImmunityRule(monster),
       shapechanger: monster?.capabilities?.shapechanger === true ||
         (!!monster && dnd5eMonsterHasStructuredShapechange(monster.id)),
+      weaponAttacksMagical: monster?.traits.some((trait) =>
+        trait.rule?.kind === 'magic-weapons' && trait.rule.weaponAttacksMagical
+      ),
       mainWeaponId: monster?.actions.find((action) => action.kind === 'weapon-attack')?.id,
       concentrating: !!tokenClassState.concentrationSpellId,
       classState: {
@@ -393,6 +441,8 @@ export function createDnd5eMapCombatSnapshot(input: {
       damageVulnerabilities: monster?.damageVulnerabilities,
       damageResistances: monster?.damageResistances,
       damageImmunities: monster?.damageImmunities,
+      damageDefenseRules: monster?.damageDefenseRules,
+      moralAlignment: normalizeDnd5eMoralAlignment(monster?.alignment),
       conditionImmunities: dnd5eMonsterConditionImmunities(monster),
     })]
   })
@@ -403,6 +453,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   applyDraconicPresenceSources(input.map, combatants)
   const state = startDnd5eHeadlessCombat(input.combatId, combatants)
   state.mapId = input.map.id
+  state.environment = geometry?.environment
   const roomRules = getRoomRulesSnapshot()
   state.effectiveRules = input.effectiveRules
     ? restoreDnd5eEffectiveRulesContextForCombat(input.combatId, input.effectiveRules) ?? undefined
@@ -436,6 +487,10 @@ export function createDnd5eMapCombatSnapshot(input: {
             attacker.darkvisionRangeFeet ?? 0,
             dnd5eEffectiveDarkvisionRangeFeet(state.combatants[attacker.id]),
           ),
+          darknessSightRangeFeet:
+            state.combatants[attacker.id]?.darknessSightRangeFeet,
+          magicalDarknessSightRangeFeet:
+            state.combatants[attacker.id]?.magicalDarknessSightRangeFeet,
         }
         const physicalLineOfSightBlocked = mapGeometryLineOfSightBlocked({
           geometry,
@@ -516,6 +571,7 @@ export function planDnd5eMapResultApplication(input: {
             intimidatingPresenceImmunityRoundsBySource: combatant.classState.intimidatingPresenceImmunityRoundsBySource,
             natureSanctuaryImmunityRoundsByTarget: combatant.classState.natureSanctuaryImmunityRoundsByTarget,
             draconicPresenceImmunityRoundsBySource: combatant.classState.draconicPresenceImmunityRoundsBySource,
+            monsterFrightfulPresenceImmunityRoundsBySource: combatant.classState.monsterFrightfulPresenceImmunityRoundsBySource,
             turnedByClericId: combatant.classState.turnedByClericId,
             turnedRoundsRemaining: combatant.classState.turnedRoundsRemaining,
             holyNimbusRoundsRemaining: combatant.classState.holyNimbusRoundsRemaining,

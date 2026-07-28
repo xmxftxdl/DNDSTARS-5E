@@ -28,11 +28,19 @@ export type PreRollSpellPresentation = {
     | 'chill-touch'
     | 'sacred-flame'
     | 'sanctuary'
+    | 'spare-the-dying'
+    | 'acid-splash'
+    | 'poison-spray'
+    | 'vicious-mockery'
   id: string
   mapId: string
   transactionId: string
   sourceTokenId: string
   targetTokenId: string
+}
+
+export function hasSpellActionBannerPresentation(spellId: string): boolean {
+  return spellId.trim().length > 0
 }
 
 export function spellPresentationsBeforeRoll(input: {
@@ -51,6 +59,10 @@ export function spellPresentationsBeforeRoll(input: {
     'chill-touch',
     'sacred-flame',
     'sanctuary',
+    'spare-the-dying',
+    'acid-splash',
+    'poison-spray',
+    'vicious-mockery',
   ])
   if (!supported.has(input.spellId as PreRollSpellPresentation['spellId'])) return []
   const spellId = input.spellId as PreRollSpellPresentation['spellId']
@@ -166,6 +178,25 @@ export function hasSanctuaryPresentationEffect(combatState: {
     effect.source.rulesId === 'sanctuary' ||
     effect.definitionId === 'srd-5.1:spell:sanctuary',
   )
+}
+
+export function spellPresentationEffectSourceActorId(
+  combatState: {
+    concentrationEffectsBySource?: Readonly<Record<string, string>>
+    activeEffects?: readonly {
+      source: { actorId?: string; rulesId?: string }
+      definitionId?: string
+    }[]
+  } | undefined,
+  spellId: 'guidance' | 'resistance' | 'sanctuary',
+): string | undefined {
+  const activeEffect = (combatState?.activeEffects ?? []).find((effect) =>
+    effect.source.rulesId === spellId ||
+    effect.definitionId === `srd-5.1:spell:${spellId}`,
+  )
+  if (activeEffect?.source.actorId) return activeEffect.source.actorId
+  return Object.entries(combatState?.concentrationEffectsBySource ?? {})
+    .find(([, activeSpellId]) => activeSpellId === spellId)?.[0]
 }
 
 export function spellSettlementMapLayerChanges(before: BattleMap, after: BattleMap) {

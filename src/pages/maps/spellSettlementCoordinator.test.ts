@@ -2,18 +2,29 @@ import { describe, expect, it } from 'vitest'
 import {
   fireballPresentationForSettlement,
   guidancePresentationsForTargets,
+  hasSpellActionBannerPresentation,
   hasGuidancePresentationEffect,
   hasResistancePresentationEffect,
   hasSanctuaryPresentationEffect,
   mergeDnd5eSpellAreaDelta,
   resistancePresentationsForTargets,
   sanctuaryPresentationsForTargets,
+  spellPresentationEffectSourceActorId,
   spellPresentationsBeforeRoll,
   spellSettlementMapLayerChanges,
   spellSettlementSpentTurnResource,
 } from './spellSettlementCoordinator'
 
 describe('SpellSettlementCoordinator', () => {
+  it('allows every validated spell to use the shared action banner', () => {
+    expect(hasSpellActionBannerPresentation('shatter')).toBe(true)
+    expect(hasSpellActionBannerPresentation('thunderwave')).toBe(true)
+    expect(hasSpellActionBannerPresentation('fireball')).toBe(true)
+    expect(hasSpellActionBannerPresentation('fire-bolt')).toBe(true)
+    expect(hasSpellActionBannerPresentation('plugin.example:storm-song')).toBe(true)
+    expect(hasSpellActionBannerPresentation('')).toBe(false)
+  })
+
   it('plans every supported presentation before any attack or save result exists', () => {
     expect(spellPresentationsBeforeRoll({
       spellId: 'sacred-flame',
@@ -38,6 +49,10 @@ describe('SpellSettlementCoordinator', () => {
       'chill-touch',
       'sacred-flame',
       'sanctuary',
+      'spare-the-dying',
+      'acid-splash',
+      'poison-spray',
+      'vicious-mockery',
     ]) {
       expect(spellPresentationsBeforeRoll({
         spellId,
@@ -153,6 +168,19 @@ describe('SpellSettlementCoordinator', () => {
       }],
     })).toBe(true)
     expect(hasSanctuaryPresentationEffect(undefined)).toBe(false)
+  })
+
+  it('resolves the actor who granted a persistent spell status', () => {
+    expect(spellPresentationEffectSourceActorId({
+      activeEffects: [{
+        definitionId: 'srd-5.1:spell:sanctuary',
+        source: { actorId: 'cleric-token', rulesId: 'sanctuary' },
+      }],
+    }, 'sanctuary')).toBe('cleric-token')
+    expect(spellPresentationEffectSourceActorId({
+      concentrationEffectsBySource: { 'druid-token': 'guidance' },
+    }, 'guidance')).toBe('druid-token')
+    expect(spellPresentationEffectSourceActorId(undefined, 'resistance')).toBeUndefined()
   })
 
   it('derives Fireball presentation from the Host-validated area anchor', () => {

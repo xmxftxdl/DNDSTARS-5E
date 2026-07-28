@@ -57,7 +57,7 @@ describe('D&D 5e declarative monster mechanism compatibility', () => {
     expect(report.effective).toBe('partial')
     expect(report.reasons).toHaveLength(2)
     expect(dnd5eEligibleMonsterMechanics({
-      id: 'room-monster:test', slug: 'test', name: '测试', englishName: 'Test', source: 'DM 自定义',
+      id: 'room-monster:test', slug: 'test', name: '测试', englishName: 'Test', source: 'DM 自定义' as const,
       size: '中型', creatureType: '怪兽', alignment: '无阵营', armorClass: { value: 10 },
       hitPoints: { average: 10, dice: '2d8' }, speed: { walk: 30 },
       abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, senses: [],
@@ -90,5 +90,38 @@ describe('D&D 5e declarative monster mechanism compatibility', () => {
 
     const report = dnd5eMonsterMechanicCompatibility(mechanic)
     expect(report).toEqual({ requested: 'full', effective: 'full', reasons: [] })
+  })
+
+  it('supports fixed HP thresholds and inherited damage after any dealt damage', () => {
+    const mechanic: Dnd5eMonsterMechanicTrigger = {
+      ...base,
+      schemaVersion: 2,
+      trigger: { event: 'after-dealt-damage' },
+      predicates: { hpBelow: 10, requiresPositiveHp: true },
+      effects: [{
+        id: 'desperate-damage',
+        kind: 'damage',
+        target: 'trigger-target',
+        dice: { count: 1, sides: 6, bonus: 0 },
+        damageType: 'inherit-trigger',
+      }],
+      automation: 'full',
+    }
+    expect(dnd5eMonsterMechanicCompatibility(mechanic))
+      .toEqual({ requested: 'full', effective: 'full', reasons: [] })
+    const monster = {
+      id: 'room-monster:test', slug: 'test', name: '测试', englishName: 'Test', source: 'DM 自定义' as const,
+      size: '中型' as const, creatureType: '怪兽', alignment: '无阵营', armorClass: { value: 10 },
+      hitPoints: { average: 20, dice: '4d8' }, speed: { walk: 30 },
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, senses: [],
+      passivePerception: 10, languages: [], challenge: { rating: '0', xp: 0 }, traits: [], actions: [],
+      headlessMechanics: [mechanic], description: '测试。',
+    }
+    expect(dnd5eEligibleMonsterMechanics(monster, 'after-dealt-damage', {
+      combatId: 'combat', round: 1, actorId: 'monster', currentHp: 9, maxHp: 20,
+    })).toHaveLength(1)
+    expect(dnd5eEligibleMonsterMechanics(monster, 'after-dealt-damage', {
+      combatId: 'combat', round: 1, actorId: 'monster', currentHp: 10, maxHp: 20,
+    })).toEqual([])
   })
 })

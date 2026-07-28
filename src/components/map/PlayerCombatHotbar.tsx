@@ -37,6 +37,7 @@ import {
   type Dnd5eCombatHotbarPreferenceV1,
 } from '../../lib/dnd5eCombatActionDescriptors'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
+import { dnd5eCombatSpellSlotSummary } from './combatSpellSlotSummary'
 
 const STORAGE_PREFIX = 'dndstars5e:combat-hotbar:v1:'
 const SPELL_PAGE_SIZE = 12
@@ -125,6 +126,8 @@ export default function PlayerCombatHotbar({
   const bonusActionRemaining = turnEconomy.bonusAction.current
   const movementRemaining = turnEconomy.movement.current
   const importedSpells = useSpellbookStore((state) => state.spells)
+  const spellSlots = useMemo(() => dnd5eCombatSpellSlotSummary(character), [character])
+  const spellSlotLabel = spellSlots.map((slot) => `${slot.label} ${slot.current}/${slot.max}`).join('，')
   const spellModifierIntents = useMemo(
     () => dnd5eAvailableSpellModifierIntents(character),
     [character],
@@ -498,6 +501,29 @@ export default function PlayerCombatHotbar({
         </aside>
 
         <div data-testid="combat-hotbar-spells" className="rounded-lg border border-violet-300/15 bg-violet-950/15 p-1.5">
+          {spellSlots.length > 0 ? (
+            <div
+              data-testid="combat-hotbar-spell-slots"
+              aria-label={`${character.name}剩余法术位：${spellSlotLabel}`}
+              className="mb-1 flex min-h-5 flex-wrap items-center gap-1 rounded-md border border-violet-300/15 bg-black/25 px-1.5 py-0.5"
+            >
+              <span className="mr-0.5 text-[9px] font-semibold text-violet-200/75">剩余法术位</span>
+              {spellSlots.map((slot) => (
+                <span
+                  key={slot.key}
+                  title={`${slot.isPact ? '契约法术位' : `${slot.level}环法术位`}：剩余 ${slot.current}，总计 ${slot.max}`}
+                  className={[
+                    'whitespace-nowrap rounded border px-1.5 py-px text-[9px] font-semibold tabular-nums',
+                    slot.current > 0
+                      ? 'border-violet-300/25 bg-violet-400/10 text-violet-100'
+                      : 'border-white/[0.06] bg-black/20 text-slate-600',
+                  ].join(' ')}
+                >
+                  {slot.label} <strong className="text-[10px]">{slot.current}</strong>/{slot.max}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-violet-200/80">
             <Sparkles className="h-3 w-3" />法术
             <span className="ml-auto font-normal tracking-normal text-slate-500">{grouped.spells.length} 项 · {activeSpellPage + 1}/{spellPageCount}</span>

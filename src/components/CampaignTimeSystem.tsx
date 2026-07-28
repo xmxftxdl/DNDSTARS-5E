@@ -17,7 +17,9 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
 
   useEffect(() => {
     if (isDm) {
-      useCharacterStore.getState().reconcileCampaignTime(clock)
+      void useCharacterStore.getState().reconcileCampaignTimeAndSave(clock).catch((error) => {
+        console.error('[campaign-time] character reconciliation failed', error)
+      })
       useMapStore.getState().expireTimedLights(clock.worldMinute)
       useMapGeometryStore.getState().expireTimedLights(clock.worldMinute)
     }

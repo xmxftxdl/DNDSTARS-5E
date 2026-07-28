@@ -33,6 +33,9 @@ export interface Dnd5eCustomMonsterTraitDraft {
     | 'ambusher'
     | 'charge-damage'
     | 'magic-resistance'
+    | 'limited-magic-immunity'
+    | 'magic-weapons'
+    | 'pack-tactics'
     | 'conditional-target-bonus'
   amount: number
   dcBase: number
@@ -48,6 +51,9 @@ export interface Dnd5eCustomMonsterTraitDraft {
   chargeActionId: string
   chargeDamageDice: string
   chargeDamageType: Dnd5eDamageType
+  limitedMagicImmunityMaximumSpellLevel: number
+  limitedMagicImmunityAdvantageAboveMaximum: boolean
+  limitedMagicImmunityAllowsWilling: boolean
   targetBonusConditions: Dnd5eStandardConditionId[]
   targetAttackBonus: number
   targetDamageBonus: number
@@ -126,6 +132,10 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   movementFeet: number
   hpPercentageAtOrBelow?: number
   hpPercentageAtOrAbove?: number
+  hpBelow?: number
+  hpAtOrBelow?: number
+  hpAbove?: number
+  hpAtOrAbove?: number
   requiresPositiveHp: boolean
   effectKind:
     | 'healing'
@@ -139,7 +149,7 @@ export interface Dnd5eCustomMonsterMechanicDraft {
     | 'attack'
   effectTarget: Dnd5eMonsterMechanicEffectTargetV2
   healingDice: string
-  damageType: Dnd5eDamageType
+  damageType: Dnd5eDamageType | 'inherit-trigger'
   condition: Dnd5eStandardConditionId
   durationKind: 'permanent' | 'until-target-turn-start' | 'until-source-turn-start' | 'rounds'
   durationRounds: number
@@ -189,6 +199,13 @@ export interface Dnd5eCustomMonsterDraft {
   damageVulnerabilities: Dnd5eDamageType[]
   damageResistances: Dnd5eDamageType[]
   damageImmunities: Dnd5eDamageType[]
+  /**
+   * Advanced, source-aware defenses imported from a stat block.
+   * The basic workshop does not infer or edit these rules from prose.
+   */
+  damageDefenseRules?: NonNullable<Dnd5eMonsterStatBlock['damageDefenseRules']>
+  /** Canonical defense clauses that still require DM adjudication. */
+  unparsedDamageDefenses?: NonNullable<Dnd5eMonsterStatBlock['unparsedDamageDefenses']>
   conditionImmunities: Dnd5eStandardConditionId[]
   passivePerception: number
   languages: string
@@ -242,6 +259,9 @@ export function createDnd5eCustomMonsterTraitDraft(): Dnd5eCustomMonsterTraitDra
     chargeActionId: '',
     chargeDamageDice: '2d10',
     chargeDamageType: 'piercing',
+    limitedMagicImmunityMaximumSpellLevel: 6,
+    limitedMagicImmunityAdvantageAboveMaximum: true,
+    limitedMagicImmunityAllowsWilling: true,
     targetBonusConditions: ['frightened', 'stunned'],
     targetAttackBonus: 2,
     targetDamageBonus: 2,
@@ -293,6 +313,10 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     movementFeet: 20,
     hpPercentageAtOrBelow: 50,
     hpPercentageAtOrAbove: undefined,
+    hpBelow: undefined,
+    hpAtOrBelow: undefined,
+    hpAbove: undefined,
+    hpAtOrAbove: undefined,
     requiresPositiveHp: true,
     effectKind: 'healing',
     effectTarget: 'self',
@@ -598,6 +622,24 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                     })()
                   : trait.ruleKind === 'magic-resistance'
                     ? { kind: 'magic-resistance' as const, savingThrowAdvantageAgainstMagic: true as const }
+                    : trait.ruleKind === 'limited-magic-immunity'
+                      ? {
+                          kind: 'limited-magic-immunity' as const,
+                          maximumSpellLevel: Math.max(
+                            0,
+                            Math.min(9, Math.trunc(trait.limitedMagicImmunityMaximumSpellLevel)),
+                          ),
+                          advantageAboveMaximum: trait.limitedMagicImmunityAdvantageAboveMaximum,
+                          allowsWilling: trait.limitedMagicImmunityAllowsWilling,
+                        }
+                      : trait.ruleKind === 'magic-weapons'
+                        ? { kind: 'magic-weapons' as const, weaponAttacksMagical: true as const }
+                    : trait.ruleKind === 'pack-tactics'
+                      ? {
+                          kind: 'pack-tactics' as const,
+                          allyDistanceFeet: 5,
+                          requiresAllyNotIncapacitated: true as const,
+                        }
                     : trait.ruleKind === 'conditional-target-bonus'
                       ? {
                           kind: 'conditional-target-bonus' as const,
@@ -611,6 +653,8 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       rule?.kind === 'swarm' ||
       rule?.kind === 'nimble-escape' ||
       rule?.kind === 'magic-resistance' ||
+      rule?.kind === 'limited-magic-immunity' ||
+      rule?.kind === 'magic-weapons' ||
       rule?.kind === 'conditional-target-bonus'
     return {
       name: trait.name.trim(),
@@ -632,6 +676,9 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     hasSwimSpeed: draft.swim > 0,
   }
   const headlessMechanics: Dnd5eMonsterMechanicTriggerV2[] = (draft.headlessMechanics ?? []).map((mechanic) => {
+    const fixedDamageType: Dnd5eDamageType = mechanic.damageType === 'inherit-trigger'
+      ? 'force'
+      : mechanic.damageType
     if (!mechanic.name.trim()) throw new Error('怪物机制名称不能为空')
     const dice = (
       ['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) ||
@@ -639,7 +686,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     )
       ? parseDice(mechanic.healingDice)
       : undefined
-    const effect = mechanic.effectKind === 'healing' || mechanic.effectKind === 'temporary-hit-points'
+    const effect: Dnd5eMonsterMechanicEffectV2 = mechanic.effectKind === 'healing' || mechanic.effectKind === 'temporary-hit-points'
       ? { id: 'effect-0', kind: mechanic.effectKind, target: 'self' as const, dice: dice! }
       : mechanic.effectKind === 'damage'
         ? { id: 'effect-0', kind: 'damage' as const, target: mechanic.effectTarget, dice: dice!, damageType: mechanic.damageType }
@@ -680,19 +727,19 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                           average: Math.max(0, Math.trunc(mechanic.attackFixedDamage)),
                           count: 0, sides: 2,
                           bonus: Math.max(0, Math.trunc(mechanic.attackFixedDamage)),
-                          type: mechanic.damageType,
+                          type: fixedDamageType,
                         }
                       : {
                           average: Math.max(0, Math.floor(dice!.count * (dice!.sides + 1) / 2 + dice!.bonus)),
                           ...dice!,
-                          type: mechanic.damageType,
+                          type: fixedDamageType,
                         },
                   }
                 : {
                 id: 'effect-0', kind: 'area-attack' as const, shape: mechanic.areaShape,
                 rangeFeet: Math.max(0, Math.trunc(mechanic.areaRangeFeet)),
                 sizeFeet: Math.max(5, Math.trunc(mechanic.areaSizeFeet)),
-                dice: dice!, damageType: mechanic.damageType,
+                dice: dice!, damageType: fixedDamageType,
               }
     return {
       schemaVersion: 2,
@@ -719,6 +766,18 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
           : {}),
         ...(Number.isFinite(mechanic.hpPercentageAtOrAbove)
           ? { hpPercentageAtOrAbove: Math.max(0, Math.min(100, Number(mechanic.hpPercentageAtOrAbove))) }
+          : {}),
+        ...(Number.isFinite(mechanic.hpBelow)
+          ? { hpBelow: Math.max(0, Math.trunc(Number(mechanic.hpBelow))) }
+          : {}),
+        ...(Number.isFinite(mechanic.hpAtOrBelow)
+          ? { hpAtOrBelow: Math.max(0, Math.trunc(Number(mechanic.hpAtOrBelow))) }
+          : {}),
+        ...(Number.isFinite(mechanic.hpAbove)
+          ? { hpAbove: Math.max(0, Math.trunc(Number(mechanic.hpAbove))) }
+          : {}),
+        ...(Number.isFinite(mechanic.hpAtOrAbove)
+          ? { hpAtOrAbove: Math.max(0, Math.trunc(Number(mechanic.hpAtOrAbove))) }
           : {}),
         requiresPositiveHp: mechanic.requiresPositiveHp,
       },
@@ -773,6 +832,18 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     damageVulnerabilities: [...new Set(draft.damageVulnerabilities)],
     damageResistances: [...new Set(draft.damageResistances)],
     damageImmunities: [...new Set(draft.damageImmunities)],
+    ...(draft.damageDefenseRules !== undefined
+      ? {
+          damageDefenseRules: draft.damageDefenseRules.map((rule) =>
+            structuredClone(rule)),
+        }
+      : {}),
+    ...(draft.unparsedDamageDefenses !== undefined
+      ? {
+          unparsedDamageDefenses: draft.unparsedDamageDefenses.map((defense) =>
+            structuredClone(defense)),
+        }
+      : {}),
     conditionImmunities: [...new Set(draft.conditionImmunities)],
     passivePerception: Math.trunc(draft.passivePerception),
     languages: draft.languages.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean),
@@ -917,6 +988,10 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     damageVulnerabilities: [...(monster.damageVulnerabilities ?? [])],
     damageResistances: [...(monster.damageResistances ?? [])],
     damageImmunities: [...(monster.damageImmunities ?? [])],
+    damageDefenseRules: monster.damageDefenseRules?.map((rule) =>
+      structuredClone(rule)),
+    unparsedDamageDefenses: monster.unparsedDamageDefenses?.map((defense) =>
+      structuredClone(defense)),
     conditionImmunities: (monster.conditionImmunities ?? [])
       .filter((condition): condition is Dnd5eStandardConditionId =>
         Object.values(DND5E_STANDARD_CONDITIONS).some((definition) => definition.id === condition)),
@@ -973,6 +1048,10 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         movementFeet: mechanic.schemaVersion === 2 ? mechanic.trigger.movement?.feet ?? 20 : 20,
         hpPercentageAtOrBelow: mechanic.predicates.hpPercentageAtOrBelow,
         hpPercentageAtOrAbove: mechanic.schemaVersion === 2 ? mechanic.predicates.hpPercentageAtOrAbove : undefined,
+        hpBelow: mechanic.schemaVersion === 2 ? mechanic.predicates.hpBelow : undefined,
+        hpAtOrBelow: mechanic.schemaVersion === 2 ? mechanic.predicates.hpAtOrBelow : undefined,
+        hpAbove: mechanic.schemaVersion === 2 ? mechanic.predicates.hpAbove : undefined,
+        hpAtOrAbove: mechanic.schemaVersion === 2 ? mechanic.predicates.hpAtOrAbove : undefined,
         requiresPositiveHp: mechanic.predicates.requiresPositiveHp,
         effectKind: effect?.kind ?? 'healing',
         effectTarget: effect && 'target' in effect ? effect.target : 'self',
@@ -1012,7 +1091,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       name: trait.name,
       description: trait.description,
       automation: trait.automation ?? 'dm-adjudication',
-      ruleKind: trait.rule?.kind ?? 'none',
+      ruleKind: trait.rule?.kind === 'mucous-cloud' ? 'none' : trait.rule?.kind ?? 'none',
       amount: trait.rule?.kind === 'regeneration' ? trait.rule.amount : 10,
       dcBase: trait.rule?.kind === 'undead-fortitude' ? trait.rule.dcBase : 5,
       damageTypes: trait.rule?.kind === 'regeneration'
@@ -1043,6 +1122,15 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       chargeDamageType: trait.rule?.kind === 'charge-damage'
         ? trait.rule.extraDamage.type
         : 'piercing',
+      limitedMagicImmunityMaximumSpellLevel: trait.rule?.kind === 'limited-magic-immunity'
+        ? trait.rule.maximumSpellLevel
+        : 6,
+      limitedMagicImmunityAdvantageAboveMaximum: trait.rule?.kind === 'limited-magic-immunity'
+        ? trait.rule.advantageAboveMaximum
+        : true,
+      limitedMagicImmunityAllowsWilling: trait.rule?.kind === 'limited-magic-immunity'
+        ? trait.rule.allowsWilling
+        : true,
       targetBonusConditions: trait.rule?.kind === 'conditional-target-bonus'
         ? [...trait.rule.targetConditions]
         : ['frightened', 'stunned'],

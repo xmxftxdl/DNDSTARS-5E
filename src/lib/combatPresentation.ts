@@ -1,4 +1,7 @@
-import { publishSharedEvent, sampleSharedServerClock } from './sharedApi'
+import {
+  publishSharedEvent as publishSharedTransportEvent,
+  sampleSharedServerClock,
+} from './sharedApi'
 
 export const COMBAT_PRESENTATION_CHANNEL = 'combat-presentation'
 export const FIRE_BOLT_ANIMATION_DURATION_MS = 980
@@ -15,6 +18,10 @@ export const RESISTANCE_ORBIT_RADIUS_FACTOR = 0.52
 export const SANCTUARY_MANIFESTATION_DURATION_MS = 1_000
 export const SANCTUARY_ORBIT_RADIUS_FACTOR = 0.52
 export const SACRED_FLAME_ANIMATION_DURATION_MS = 1_200
+export const SPARE_THE_DYING_ANIMATION_DURATION_MS = 1_100
+export const ACID_SPLASH_ANIMATION_DURATION_MS = 1_050
+export const POISON_SPRAY_ANIMATION_DURATION_MS = 1_150
+export const VICIOUS_MOCKERY_ANIMATION_DURATION_MS = 1_100
 export const COMBAT_PRESENTATION_EVENT_TTL_MS = 1_600
 export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
 export const SPELL_BANNER_TOTAL_DURATION_MS = 3_000
@@ -27,10 +34,32 @@ export const KILL_STREAK_EFFECT_DURATION_MS = 4_000
 export const KILL_STREAK_BANNER_DURATION_MS = 4_000
 export const KILL_STREAK_BANNER_START_DELAY_MS = 650
 export const KILL_STREAK_PRESENTATION_EVENT_TTL_MS = 5_800
+export const SAVING_THROW_PENDING_TTL_MS = 300_000
+export const SAVING_THROW_RESULT_TTL_MS = 3_000
+export const SAVING_THROW_RESULT_HOLD_MS = 1_100
 
 let combatPresentationClockOffsetMs = 0
 let combatPresentationClockSampledAt = 0
 let combatPresentationClockPromise: Promise<number> | null = null
+const localCombatPresentationListeners = new Set<(event: unknown) => void>()
+
+/**
+ * 发布端立即投影表现事件，随后再交给共享事件流同步至其他客户端。
+ * 服务器 SSE 会把同一事件回送给发布端；表现 reducer 依靠稳定事件 ID 去重。
+ */
+async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
+  if (channel === COMBAT_PRESENTATION_CHANNEL) {
+    for (const listener of [...localCombatPresentationListeners]) listener(data)
+  }
+  await publishSharedTransportEvent(channel, data)
+}
+
+export function subscribeLocalCombatPresentationEvent(
+  listener: (event: unknown) => void,
+): () => void {
+  localCombatPresentationListeners.add(listener)
+  return () => localCombatPresentationListeners.delete(listener)
+}
 
 export function combatPresentationServerNow(localNow = Date.now()): number {
   return localNow + combatPresentationClockOffsetMs
@@ -61,9 +90,18 @@ export interface CombatPresentationSpellProjectileEventV1 {
   type: 'spell-projectile'
   mapId: string
   transactionId: string
-  spellId: 'fire-bolt' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame'
+  spellId:
+    | 'fire-bolt'
+    | 'ray-of-frost'
+    | 'eldritch-blast'
+    | 'produce-flame'
+    | 'acid-splash'
+    | 'poison-spray'
+    | 'vicious-mockery'
   sourceTokenId: string
   targetTokenId: string
+  accentColor?: string
+  glowColor?: string
   /** Legacy field; new presentations deliberately begin before attack resolution. */
   outcome?: 'hit' | 'miss'
   createdAt: number
@@ -103,13 +141,28 @@ export interface CombatPresentationSpellBannerEventV1 {
   expiresAt: number
 }
 
+export interface CombatPresentationAttackBannerEventV1 {
+  schemaVersion: 1
+  id: string
+  type: 'attack-banner'
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  actorName: string
+  attackName: string
+  attackKind: 'melee' | 'ranged'
+  classId: string
+  createdAt: number
+  expiresAt: number
+}
+
 export interface CombatPresentationShockingGraspEventV1 {
   schemaVersion: 1
   id: string
   type: 'spell-target-effect'
   mapId: string
   transactionId: string
-  spellId: 'shocking-grasp' | 'guidance' | 'resistance' | 'sanctuary'
+  spellId: 'shocking-grasp' | 'guidance' | 'resistance' | 'sanctuary' | 'spare-the-dying'
   sourceTokenId: string
   targetTokenId: string
   accentColor?: string
@@ -162,6 +215,56 @@ export interface CombatPresentationKillStreakEventV1 {
   expiresAt: number
 }
 
+export type CombatPresentationSavingThrowAbility = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+
+const COMBAT_PRESENTATION_SAVING_THROW_ABILITIES: readonly CombatPresentationSavingThrowAbility[] = [
+  'str',
+  'dex',
+  'con',
+  'int',
+  'wis',
+  'cha',
+]
+
+export function combatPresentationSavingThrowAbilityLabel(
+  ability: CombatPresentationSavingThrowAbility,
+): string {
+  return {
+    str: '力量豁免',
+    dex: '敏捷豁免',
+    con: '体质豁免',
+    int: '智力豁免',
+    wis: '感知豁免',
+    cha: '魅力豁免',
+  }[ability]
+}
+
+function isCombatPresentationSavingThrowAbility(
+  value: unknown,
+): value is CombatPresentationSavingThrowAbility {
+  return COMBAT_PRESENTATION_SAVING_THROW_ABILITIES.includes(
+    value as CombatPresentationSavingThrowAbility,
+  )
+}
+
+export interface CombatPresentationSavingThrowEventV1 {
+  schemaVersion: 1
+  id: string
+  type: 'saving-throw-status'
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  targetTokenId: string
+  targetName: string
+  ability: CombatPresentationSavingThrowAbility
+  phase: 'rolling' | 'result'
+  dc: number
+  total?: number
+  success?: boolean
+  createdAt: number
+  expiresAt: number
+}
+
 export type CombatPresentationEventV1 =
   | CombatPresentationSpellProjectileEventV1
   | CombatPresentationFireballEventV1
@@ -170,6 +273,8 @@ export type CombatPresentationEventV1 =
   | CombatPresentationChillTouchEventV1
   | CombatPresentationSacredFlameEventV1
   | CombatPresentationKillStreakEventV1
+  | CombatPresentationSavingThrowEventV1
+  | CombatPresentationAttackBannerEventV1
 
 export interface CombatPresentationState {
   spellProjectiles: CombatPresentationEventV1[]
@@ -179,7 +284,22 @@ export interface CombatPresentationMapProjectile {
   id: string
   from: { x: number; y: number }
   to: { x: number; y: number }
-  kind: 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame'
+  kind:
+    | 'fire-bolt'
+    | 'fireball'
+    | 'shocking-grasp'
+    | 'chill-touch'
+    | 'ray-of-frost'
+    | 'eldritch-blast'
+    | 'produce-flame'
+    | 'guidance'
+    | 'resistance'
+    | 'sanctuary'
+    | 'sacred-flame'
+    | 'spare-the-dying'
+    | 'acid-splash'
+    | 'poison-spray'
+    | 'vicious-mockery'
   hit: boolean
   issuedAt: number
   durationMs: number
@@ -199,6 +319,16 @@ export interface CombatPresentationSpellBanner {
   expiresAt: number
 }
 
+export interface CombatPresentationAttackBanner {
+  id: string
+  actorName: string
+  attackName: string
+  attackKind: 'melee' | 'ranged'
+  classId: string
+  createdAt: number
+  expiresAt: number
+}
+
 export interface CombatPresentationKillStreak {
   id: string
   actorName: string
@@ -207,6 +337,19 @@ export interface CombatPresentationKillStreak {
   killCount: 3
   createdAt: number
   bannerStartsAt: number
+  expiresAt: number
+}
+
+export interface CombatPresentationSavingThrow {
+  id: string
+  targetTokenId: string
+  targetName: string
+  ability: CombatPresentationSavingThrowAbility
+  phase: 'rolling' | 'result'
+  dc: number
+  total?: number
+  success?: boolean
+  createdAt: number
   expiresAt: number
 }
 
@@ -250,12 +393,24 @@ export function parseCombatPresentationEvent(
     !Number.isFinite(event.createdAt) || !Number.isFinite(event.expiresAt) ||
     Number(event.createdAt) < 0 || Number(event.expiresAt) <= Number(event.createdAt) ||
     Number(event.expiresAt) - Number(event.createdAt) >
-      Math.max(5_000, KILL_STREAK_PRESENTATION_EVENT_TTL_MS)
+      (event.type === 'saving-throw-status'
+        ? SAVING_THROW_PENDING_TTL_MS
+        : Math.max(5_000, KILL_STREAK_PRESENTATION_EVENT_TTL_MS))
   ) return null
   if (event.type === 'spell-projectile') {
     if (
-      !['fire-bolt', 'ray-of-frost', 'eldritch-blast', 'produce-flame'].includes(String(event.spellId)) ||
+      ![
+        'fire-bolt',
+        'ray-of-frost',
+        'eldritch-blast',
+        'produce-flame',
+        'acid-splash',
+        'poison-spray',
+        'vicious-mockery',
+      ].includes(String(event.spellId)) ||
       !boundedId(event.targetTokenId, 160) ||
+      (event.accentColor != null && !hexColor(event.accentColor)) ||
+      (event.glowColor != null && !hexColor(event.glowColor)) ||
       event.outcome != null && event.outcome !== 'hit' && event.outcome !== 'miss'
     ) return null
     return event as CombatPresentationSpellProjectileEventV1
@@ -290,15 +445,26 @@ export function parseCombatPresentationEvent(
     ) return null
     return banner as CombatPresentationSpellBannerEventV1
   }
+  if (event.type === 'attack-banner') {
+    const banner = event as Partial<CombatPresentationAttackBannerEventV1>
+    if (
+      !boundedId(banner.actorName, 80) ||
+      !boundedId(banner.attackName, 80) ||
+      (banner.attackKind !== 'melee' && banner.attackKind !== 'ranged') ||
+      !boundedId(banner.classId, 40)
+    ) return null
+    return banner as CombatPresentationAttackBannerEventV1
+  }
   if (event.type === 'spell-target-effect') {
     const effect = event as Partial<CombatPresentationShockingGraspEventV1>
     if (
       effect.spellId !== 'shocking-grasp' &&
-        effect.spellId !== 'guidance' &&
+      effect.spellId !== 'guidance' &&
         effect.spellId !== 'resistance' &&
-        effect.spellId !== 'sanctuary' ||
+        effect.spellId !== 'sanctuary' &&
+        effect.spellId !== 'spare-the-dying' ||
       !boundedId(effect.targetTokenId, 160) ||
-      effect.spellId === 'resistance' &&
+      (effect.spellId === 'resistance' || effect.spellId === 'spare-the-dying') &&
         (!hexColor(effect.accentColor) || !hexColor(effect.glowColor))
     ) return null
     return effect as CombatPresentationShockingGraspEventV1
@@ -335,6 +501,26 @@ export function parseCombatPresentationEvent(
     ) return null
     return streak as CombatPresentationKillStreakEventV1
   }
+  if (event.type === 'saving-throw-status') {
+    const savingThrow = event as Partial<CombatPresentationSavingThrowEventV1>
+    if (
+      !boundedId(savingThrow.targetTokenId, 160) ||
+      !boundedId(savingThrow.targetName, 80) ||
+      !isCombatPresentationSavingThrowAbility(savingThrow.ability) ||
+      (savingThrow.phase !== 'rolling' && savingThrow.phase !== 'result') ||
+      !Number.isInteger(savingThrow.dc) ||
+      Number(savingThrow.dc) < 0 ||
+      Number(savingThrow.dc) > 100 ||
+      (savingThrow.phase === 'rolling' &&
+        (savingThrow.total != null || savingThrow.success != null)) ||
+      (savingThrow.phase === 'result' &&
+        (!Number.isInteger(savingThrow.total) ||
+          Number(savingThrow.total) < -100 ||
+          Number(savingThrow.total) > 200 ||
+          typeof savingThrow.success !== 'boolean'))
+    ) return null
+    return savingThrow as CombatPresentationSavingThrowEventV1
+  }
   return null
 }
 
@@ -345,10 +531,19 @@ export function reduceCombatPresentationState(
 ): CombatPresentationState {
   const retained = current.spellProjectiles.filter((event) => event.expiresAt > now)
   const event = parseCombatPresentationEvent(value)
-  if (!event || event.expiresAt <= now || retained.some((candidate) => candidate.id === event.id)) {
+  if (!event || event.expiresAt <= now) {
     return retained.length === current.spellProjectiles.length
       ? current
       : { spellProjectiles: retained }
+  }
+  const existingIndex = retained.findIndex((candidate) => candidate.id === event.id)
+  if (existingIndex >= 0) {
+    if (event.type !== 'saving-throw-status') return current
+    return {
+      spellProjectiles: retained
+        .map((candidate, index) => index === existingIndex ? event : candidate)
+        .slice(-32),
+    }
   }
   return { spellProjectiles: [...retained, event].slice(-32) }
 }
@@ -359,7 +554,12 @@ export function combatPresentationProjectilesForMap(
   now = Date.now(),
 ): CombatPresentationMapProjectile[] {
   return state.spellProjectiles.flatMap<CombatPresentationMapProjectile>((event) => {
-    if (event.type === 'kill-streak' || event.type === 'spell-banner') return []
+    if (
+      event.type === 'kill-streak' ||
+      event.type === 'spell-banner' ||
+      event.type === 'attack-banner' ||
+      event.type === 'saving-throw-status'
+    ) return []
     const animationDuration = event.spellId === 'fireball'
       ? FIREBALL_ANIMATION_DURATION_MS
       : event.spellId === 'shocking-grasp'
@@ -372,6 +572,14 @@ export function combatPresentationProjectilesForMap(
             ? SANCTUARY_MANIFESTATION_DURATION_MS
           : event.spellId === 'sacred-flame'
             ? SACRED_FLAME_ANIMATION_DURATION_MS
+          : event.spellId === 'spare-the-dying'
+            ? SPARE_THE_DYING_ANIMATION_DURATION_MS
+          : event.spellId === 'acid-splash'
+            ? ACID_SPLASH_ANIMATION_DURATION_MS
+          : event.spellId === 'poison-spray'
+            ? POISON_SPRAY_ANIMATION_DURATION_MS
+          : event.spellId === 'vicious-mockery'
+            ? VICIOUS_MOCKERY_ANIMATION_DURATION_MS
         : event.spellId === 'chill-touch'
           ? CHILL_TOUCH_ANIMATION_DURATION_MS
           : event.spellId === 'ray-of-frost'
@@ -501,6 +709,8 @@ export function combatPresentationProjectilesForMap(
       hit,
       issuedAt: Date.now() - Math.max(0, now - event.createdAt),
       durationMs: animationDuration,
+      accentColor: event.accentColor,
+      glowColor: event.glowColor,
     } satisfies CombatPresentationMapProjectile]
   })
 }
@@ -531,6 +741,29 @@ export function combatPresentationSpellBannerForMap(
   }
 }
 
+export function combatPresentationAttackBannerForMap(
+  state: CombatPresentationState,
+  mapId: string,
+  now = Date.now(),
+): CombatPresentationAttackBanner | null {
+  const event = [...state.spellProjectiles].reverse().find((candidate) =>
+    candidate.type === 'attack-banner' &&
+    candidate.mapId === mapId &&
+    candidate.createdAt <= now &&
+    candidate.createdAt + SPELL_BANNER_TOTAL_DURATION_MS > now,
+  )
+  if (!event || event.type !== 'attack-banner') return null
+  return {
+    id: event.id,
+    actorName: event.actorName,
+    attackName: event.attackName,
+    attackKind: event.attackKind,
+    classId: event.classId,
+    createdAt: event.createdAt,
+    expiresAt: event.expiresAt,
+  }
+}
+
 export function combatPresentationKillStreakForMap(
   state: CombatPresentationState,
   mapId: string,
@@ -555,6 +788,32 @@ export function combatPresentationKillStreakForMap(
   }
 }
 
+export function combatPresentationSavingThrowForMap(
+  state: CombatPresentationState,
+  mapId: string,
+  now = Date.now(),
+): CombatPresentationSavingThrow | null {
+  const event = [...state.spellProjectiles].reverse().find((candidate) =>
+    candidate.type === 'saving-throw-status' &&
+    candidate.mapId === mapId &&
+    candidate.createdAt <= now &&
+    candidate.expiresAt > now,
+  )
+  if (!event || event.type !== 'saving-throw-status') return null
+  return {
+    id: event.id,
+    targetTokenId: event.targetTokenId,
+    targetName: event.targetName,
+    ability: event.ability,
+    phase: event.phase,
+    dc: event.dc,
+    total: event.total,
+    success: event.success,
+    createdAt: event.createdAt,
+    expiresAt: event.expiresAt,
+  }
+}
+
 export async function publishSpellBannerPresentation(input: {
   id: string
   mapId: string
@@ -570,6 +829,28 @@ export async function publishSpellBannerPresentation(input: {
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
     schemaVersion: 1,
     type: 'spell-banner',
+    ...input,
+    createdAt,
+    expiresAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS + 500,
+  })
+  return { completesAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS }
+}
+
+export async function publishAttackBannerPresentation(input: {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  actorName: string
+  attackName: string
+  attackKind: 'melee' | 'ranged'
+  classId: string
+}): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'attack-banner',
     ...input,
     createdAt,
     expiresAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS + 500,
@@ -655,6 +936,80 @@ export async function publishProduceFlamePresentation(input: {
     expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
   })
   return { completesAt: combatPresentationServerNow() + PRODUCE_FLAME_ANIMATION_DURATION_MS }
+}
+
+type ColoredCantripPresentationInput = {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  targetTokenId: string
+  accentColor: string
+  glowColor: string
+}
+
+async function publishColoredCantripProjectile(
+  spellId: 'acid-splash' | 'poison-spray' | 'vicious-mockery',
+  durationMs: number,
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-projectile',
+    spellId,
+    ...input,
+    createdAt,
+    expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+  })
+  return { completesAt: combatPresentationServerNow() + durationMs }
+}
+
+export function publishAcidSplashPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishColoredCantripProjectile(
+    'acid-splash',
+    ACID_SPLASH_ANIMATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishPoisonSprayPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishColoredCantripProjectile(
+    'poison-spray',
+    POISON_SPRAY_ANIMATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishViciousMockeryPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishColoredCantripProjectile(
+    'vicious-mockery',
+    VICIOUS_MOCKERY_ANIMATION_DURATION_MS,
+    input,
+  )
+}
+
+export async function publishSpareTheDyingPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-target-effect',
+    spellId: 'spare-the-dying',
+    ...input,
+    createdAt,
+    expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+  })
+  return { completesAt: combatPresentationServerNow() + SPARE_THE_DYING_ANIMATION_DURATION_MS }
 }
 
 export async function publishShockingGraspPresentation(input: {
@@ -837,4 +1192,43 @@ export async function publishKillStreakPresentation(input: {
     bannerStartsAt: createdAt + KILL_STREAK_BANNER_START_DELAY_MS,
     expiresAt: createdAt + KILL_STREAK_PRESENTATION_EVENT_TTL_MS,
   })
+}
+
+export async function publishSavingThrowPresentation(input: {
+  id: string
+  mapId: string
+  transactionId: string
+  targetTokenId: string
+  targetName: string
+  ability: CombatPresentationSavingThrowAbility
+  phase: 'rolling' | 'result'
+  dc: number
+  total?: number
+  success?: boolean
+}): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'saving-throw-status',
+    sourceTokenId: input.targetTokenId,
+    ...input,
+    createdAt,
+    expiresAt: createdAt + (
+      input.phase === 'rolling'
+        ? SAVING_THROW_PENDING_TTL_MS
+        : SAVING_THROW_RESULT_TTL_MS
+    ),
+  })
+  return {
+    completesAt: createdAt + (
+      input.phase === 'result' ? SAVING_THROW_RESULT_HOLD_MS : 0
+    ),
+  }
+}
+
+export async function publishDexteritySavingThrowPresentation(
+  input: Omit<Parameters<typeof publishSavingThrowPresentation>[0], 'ability'>,
+): Promise<{ completesAt: number }> {
+  return publishSavingThrowPresentation({ ...input, ability: 'dex' })
 }

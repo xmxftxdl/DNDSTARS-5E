@@ -327,6 +327,111 @@ describe('D&D 5e custom monster workshop', () => {
     ])
   })
 
+  it('round-trips conditional defenses, unresolved clauses, and magic weapons without relying on prose', () => {
+    const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const imported = {
+      ...original,
+      damageDefenseRules: [{
+        outcome: 'immune' as const,
+        damageTypes: ['bludgeoning', 'piercing', 'slashing'] as const,
+        delivery: 'weapon-attack' as const,
+        magical: false,
+        weaponMaterialNot: 'silvered' as const,
+        reason: 'lycanthrope-nonsilvered-immunity',
+      }],
+      unparsedDamageDefenses: [{
+        outcome: 'resistant' as const,
+        text: '来自非善良生物的钝击、穿刺与挥砍伤害',
+      }],
+      traits: [
+        ...original.traits,
+        {
+          name: '魔法武器',
+          description: '该生物的武器攻击视为魔法攻击。',
+          automation: 'headless' as const,
+          rule: { kind: 'magic-weapons' as const, weaponAttacksMagical: true as const },
+        },
+      ],
+    }
+
+    const draft = dnd5eCustomMonsterDraftFromStatBlock(imported)
+    expect(draft.damageDefenseRules).toEqual(imported.damageDefenseRules)
+    expect(draft.unparsedDamageDefenses).toEqual(imported.unparsedDamageDefenses)
+    expect(draft.traits).toContainEqual(expect.objectContaining({
+      name: '魔法武器',
+      automation: 'headless',
+      ruleKind: 'magic-weapons',
+    }))
+
+    const legacyDraft = dnd5eCustomMonsterDraftFromStatBlock(imported)
+    delete legacyDraft.damageDefenseRules
+    delete legacyDraft.unparsedDamageDefenses
+    const legacyRebuilt = buildDnd5eCustomMonster(legacyDraft)
+    expect(legacyRebuilt.damageDefenseRules).toEqual(imported.damageDefenseRules)
+    expect(legacyRebuilt.unparsedDamageDefenses).toEqual(imported.unparsedDamageDefenses)
+
+    // These fields are first-class draft data, not an accidental side effect of
+    // spreading the original stat block back into the result.
+    draft.preservedStatBlock = undefined
+    const rebuilt = buildDnd5eCustomMonster(draft)
+    expect(rebuilt.damageDefenseRules).toEqual(imported.damageDefenseRules)
+    expect(rebuilt.unparsedDamageDefenses).toEqual(imported.unparsedDamageDefenses)
+    expect(rebuilt.traits).toContainEqual(expect.objectContaining({
+      name: '魔法武器',
+      automation: 'headless',
+      rule: { kind: 'magic-weapons', weaponAttacksMagical: true },
+    }))
+    expect(parseDnd5eMonsterStatBlock(rebuilt).ok).toBe(true)
+  })
+
+  it('round-trips limited magic immunity as structured workshop data', () => {
+    const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const imported = {
+      ...original,
+      traits: [{
+        name: 'Limited Magic Immunity',
+        description: 'Unaffected by spells of 6th level or lower unless willing.',
+        automation: 'headless' as const,
+        rule: {
+          kind: 'limited-magic-immunity' as const,
+          maximumSpellLevel: 6,
+          advantageAboveMaximum: true,
+          allowsWilling: true,
+        },
+      }],
+    }
+
+    const draft = dnd5eCustomMonsterDraftFromStatBlock(imported)
+    expect(draft.traits).toContainEqual(expect.objectContaining({
+      ruleKind: 'limited-magic-immunity',
+      limitedMagicImmunityMaximumSpellLevel: 6,
+      limitedMagicImmunityAdvantageAboveMaximum: true,
+      limitedMagicImmunityAllowsWilling: true,
+    }))
+
+    draft.preservedStatBlock = undefined
+    const rebuilt = buildDnd5eCustomMonster(draft)
+    expect(rebuilt.traits).toContainEqual(expect.objectContaining({
+      automation: 'headless',
+      rule: {
+        kind: 'limited-magic-immunity',
+        maximumSpellLevel: 6,
+        advantageAboveMaximum: true,
+        allowsWilling: true,
+      },
+    }))
+    expect(parseDnd5eMonsterStatBlock(rebuilt).ok).toBe(true)
+  })
+
+  it('accepts legacy drafts without advanced defense fields and never infers them from prose', () => {
+    const legacyDraft = createDnd5eCustomMonsterDraft()
+    legacyDraft.description = '免疫非魔法且未镀银武器造成的伤害。'
+
+    const monster = buildDnd5eCustomMonster(legacyDraft)
+    expect(monster.damageDefenseRules).toBeUndefined()
+    expect(monster.unparsedDamageDefenses).toBeUndefined()
+  })
+
   it('preserves legendary, lair and spellcasting capabilities across a form save', () => {
     const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
     const imported = {

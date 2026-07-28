@@ -535,8 +535,15 @@ export const DND5E_SRD_MAGIC_CONSUMABLE_TEMPLATES: readonly Dnd5eInventoryItemTe
     source: SRD_SOURCE,
   }))
 
+const ABSTRACT_MAGIC_ITEM_CATALOG_TEMPLATE_IDS = new Set([
+  'srd-5.1:magic-item:armor',
+  'srd-5.1:magic-item:shield',
+  'srd-5.1:magic-item:weapon',
+  'srd-5.1:magic-item:potion-of-healing',
+])
+
 export const DND5E_SRD_MAGIC_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
-  ...DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES,
+  ...DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.filter((item) => !ABSTRACT_MAGIC_ITEM_CATALOG_TEMPLATE_IDS.has(item.id)),
   ...DND5E_SRD_MAGIC_WEAPON_TEMPLATES,
   ...DND5E_SRD_MAGIC_ARMOR_TEMPLATES,
   ...DND5E_SRD_MAGIC_SHIELD_TEMPLATES,

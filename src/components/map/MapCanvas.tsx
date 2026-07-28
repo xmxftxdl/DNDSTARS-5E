@@ -26,6 +26,14 @@ import {
   tokenMovementAnimationPosition,
   type TokenMovementAnimation,
 } from '../../lib/tokenMovementAnimation'
+import {
+  combatPresentationSavingThrowAbilityLabel,
+  type CombatPresentationSavingThrowAbility,
+} from '../../lib/combatPresentation'
+import {
+  dnd5eSpellActionIcon,
+  type Dnd5eActionIconSpec,
+} from '../../lib/dnd5eActionIcons'
 
 const TOKEN_MOVE_DURATION = TOKEN_MOVE_DURATION_S
 // Treat tiny drags as click jitter; do not submit movement or broadcast.
@@ -35,6 +43,32 @@ const TOKEN_DRAG_THRESHOLD_PX = 4
 // Poison/burning/stun effects used to run at full RAF; multiple tokens could drop frames.
 // These effects are slow pulses/drifts, so 30fps keeps the look while reducing repaint cost.
 const STATUS_ANIM_FPS = 30
+
+type MapSpellStatusId = 'guidance' | 'resistance' | 'sanctuary'
+
+const MAP_SPELL_STATUS_ICONS: Readonly<Record<MapSpellStatusId, Dnd5eActionIconSpec>> = {
+  guidance: dnd5eSpellActionIcon({
+    id: 'guidance',
+    name: '神导术',
+    englishName: 'Guidance',
+    school: '预言',
+    effect: '神圣增益',
+  }),
+  resistance: dnd5eSpellActionIcon({
+    id: 'resistance',
+    name: '提升抗性',
+    englishName: 'Resistance',
+    school: '防护',
+    effect: '防护增益',
+  }),
+  sanctuary: dnd5eSpellActionIcon({
+    id: 'sanctuary',
+    name: '庇护术',
+    englishName: 'Sanctuary',
+    school: '防护',
+    effect: '神圣防护',
+  }),
+}
 
 /**
  * Controlled Konva status effect animation hook.
@@ -160,10 +194,12 @@ import type {
 import type { SceneInteractionPointIcon, SceneRegion } from '../../lib/sceneOrchestration'
 import {
   mapLightingAmbientOpacity,
+  mapLightingDarkvisionCutoutOpacity,
   mapLightingGlowOpacity,
   mapLightingRadiusFromDrag,
   mapLightingShouldRender,
 } from './mapLightingPresentation'
+import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
 import {
   mapCanvasAoeGridCell,
   mapCanvasGeometryDrawShouldStart,
@@ -197,7 +233,7 @@ export interface MapProjectile {
   id: string
   from: { x: number; y: number }
   to: { x: number; y: number }
-  kind?: 'arrow' | 'focus' | 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame'
+  kind?: 'arrow' | 'focus' | 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame' | 'spare-the-dying' | 'acid-splash' | 'poison-spray' | 'vicious-mockery'
   hit?: boolean
   issuedAt?: number
   durationMs?: number
@@ -206,10 +242,19 @@ export interface MapProjectile {
   glowColor?: string
 }
 
-export interface ResistanceTokenMark {
+export interface SpellStatusTokenMark {
   tokenId: string
-  radiusPx: number
-  accentColor: string
+  statusId: MapSpellStatusId
+  backgroundColor: string
+  borderColor: string
+  glowColor: string
+}
+
+export interface StandardConditionTokenMark {
+  tokenId: string
+  condition: Dnd5eStandardConditionId
+  backgroundColor: string
+  borderColor: string
   glowColor: string
 }
 
@@ -264,22 +309,24 @@ interface MapCanvasProps {
   onAoeCancel?: () => void
   /** 由 5e Headless 快照得出的标准状态，显示在 Token 右上角。 */
   dnd5eConditionsByToken?: Record<string, readonly Dnd5eStandardConditionId[]>
+  standardConditionTokenMarks?: StandardConditionTokenMark[]
   onDnd5eConditionClick?: (tokenId: string, condition?: Dnd5eStandardConditionId) => void
   onDnd5ePluginAreaVisibilityToggle?: (areaId: string) => void
   tokenHoverLabels?: Record<string, string>
   projectiles?: MapProjectile[]
   /** Targets carrying the authoritative Chill Touch no-healing effect. */
   chillTouchTokenIds?: string[]
-  /** Targets carrying the authoritative Guidance concentration effect. */
-  guidanceTokenIds?: string[]
-  /** Targets carrying Resistance, rendered in the target character's primary class colors. */
-  resistanceTokenMarks?: ResistanceTokenMark[]
   /** Targets protected by the authoritative Sanctuary spell. */
   sanctuaryTokenIds?: string[]
+  /** Persistent spell statuses colored by the class of the actor who granted them. */
+  spellStatusTokenMarks?: SpellStatusTokenMark[]
   /** Characters currently wielding a club or quarterstaff empowered by Shillelagh. */
   shillelaghTokenIds?: string[]
   /** Defeated tokens are dimmed. */
   defeatedTokenIds?: string[]
+  /** Token currently resolving a saving throw. */
+  savingThrowTokenId?: string
+  savingThrowAbility?: CombatPresentationSavingThrowAbility
   /** 当前先攻回合的 Token；仅用于绘制呼吸闪烁光环，不改变占地和交互范围。 */
   currentTurnTokenId?: string
   /** 战斗中禁止拖动的 token */
@@ -570,7 +617,43 @@ function LightingLayer({
     magicalDarkness.length > 0 || spellDarkness.length > 0,
   )) return null
   const opacity = mapLightingAmbientOpacity(ambientLight, isDM)
-  const seesMagicalDarkness = visionSourceTokenIds.some((id) => map.tokens.find((token) => token.id === id)?.canSeeMagicalDarkness)
+  const viewerProfiles = viewers.map((viewer) => ({
+    viewer,
+    profile: compileDnd5eEffectiveVisionProfile({
+      token: viewer,
+      fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
+        DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+    }),
+  }))
+  const sensePolygon = (viewer: Token, rangeFeet: number) => rangeFeet > 0
+    ? mapGeometryVisibilityPolygon({
+        geometry,
+        map,
+        viewer,
+        forceEnabled: true,
+        fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
+          DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+        rangeOverrideFeet: rangeFeet,
+        worldMinute,
+      })
+    : []
+  const darknessSightPolygons = isDM ? [] : viewerProfiles.flatMap(({ viewer, profile }) => {
+    const rangeFeet = Math.max(profile.darknessSightRangeFeet, profile.truesightRangeFeet)
+    const polygon = sensePolygon(viewer, rangeFeet)
+    return polygon.length >= 3 ? [{ id: viewer.id, polygon }] : []
+  })
+  const darkvisionPolygons = isDM ? [] : viewerProfiles.flatMap(({ viewer, profile }) => {
+    const polygon = sensePolygon(viewer, profile.darkvisionRangeFeet)
+    return polygon.length >= 3 ? [{ id: viewer.id, polygon }] : []
+  })
+  const magicalDarknessSightPolygons = isDM ? [] : viewerProfiles.flatMap(({ viewer, profile }) => {
+    const rangeFeet = Math.max(
+      profile.magicalDarknessSightRangeFeet,
+      profile.truesightRangeFeet,
+    )
+    const polygon = sensePolygon(viewer, rangeFeet)
+    return polygon.length >= 3 ? [{ id: viewer.id, polygon }] : []
+  })
   const visibleTargets = isDM
     ? map.tokens
     : mapGeometryVisibleTargets({
@@ -626,6 +709,27 @@ function LightingLayer({
           source.dimPolygon.length >= 3 ? <Line key={`light-dim:${source.id}`} points={source.dimPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" opacity={0.52} globalCompositeOperation="destination-out" listening={false} /> : null,
           source.brightPolygon.length >= 3 ? <Line key={`light-bright:${source.id}`} points={source.brightPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" globalCompositeOperation="destination-out" listening={false} /> : null,
         ])}
+        {ambientLight !== 'bright' && darkvisionPolygons.map(({ id, polygon }) => (
+          <Line
+            key={`darkvision:${id}`}
+            points={polygon.flatMap((point) => [point.x, point.y])}
+            closed
+            fill="#000"
+            opacity={mapLightingDarkvisionCutoutOpacity(ambientLight, isDM)}
+            globalCompositeOperation="destination-out"
+            listening={false}
+          />
+        ))}
+        {ambientLight !== 'bright' && darknessSightPolygons.map(({ id, polygon }) => (
+          <Line
+            key={`darkness-sight:${id}`}
+            points={polygon.flatMap((point) => [point.x, point.y])}
+            closed
+            fill="#000"
+            globalCompositeOperation="destination-out"
+            listening={false}
+          />
+        ))}
         {visibleTargets.map((target) => (
           <Circle
             key={`lighting-visible-token:${target.id}`}
@@ -669,7 +773,7 @@ function LightingLayer({
             fill="#010108"
             stroke="rgba(139,92,246,0.7)"
             strokeWidth={isDM ? 2 : 0}
-            opacity={isDM ? 0.22 : seesMagicalDarkness ? 0.08 : 0.97}
+            opacity={isDM ? 0.22 : 0.97}
             listening={false}
           />
         ))}
@@ -682,7 +786,17 @@ function LightingLayer({
             fill="#010108"
             stroke="rgba(139,92,246,0.7)"
             strokeWidth={isDM ? 2 : 0}
-            opacity={isDM ? 0.22 : seesMagicalDarkness ? 0.08 : 0.97}
+            opacity={isDM ? 0.22 : 0.97}
+            listening={false}
+          />
+        ))}
+        {magicalDarknessSightPolygons.map(({ id, polygon }) => (
+          <Line
+            key={`magical-darkness-sight:${id}`}
+            points={polygon.flatMap((point) => [point.x, point.y])}
+            closed
+            fill="#000"
+            globalCompositeOperation="destination-out"
             listening={false}
           />
         ))}
@@ -1139,6 +1253,28 @@ function rightBadgeGridPos(radius: number, size: number, gridIndex: number): { x
   }
 }
 
+function useTokenBadgeImage(asset: string | undefined): HTMLImageElement | undefined {
+  const [loaded, setLoaded] = useState<{ asset: string; image?: HTMLImageElement }>()
+
+  useEffect(() => {
+    if (!asset) return
+    let disposed = false
+    const next = new Image()
+    next.onload = () => {
+      if (!disposed) setLoaded({ asset, image: next })
+    }
+    next.onerror = () => {
+      if (!disposed) setLoaded({ asset })
+    }
+    next.src = asset
+    return () => {
+      disposed = true
+    }
+  }, [asset])
+
+  return loaded && loaded.asset === asset ? loaded.image : undefined
+}
+
 function AoeCellHighlights({
   map,
   cells,
@@ -1193,18 +1329,23 @@ function Dnd5eStandardConditionBadge({
   radius,
   gridIndex,
   condition,
+  mark,
   overflowCount,
   onClick,
 }: {
   radius: number
   gridIndex: number
   condition?: Dnd5eStandardConditionId
+  mark?: StandardConditionTokenMark
   overflowCount?: number
   onClick?: () => void
 }) {
   const size = rightBadgeSize(radius)
   const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
   const style = condition ? DND5E_CONDITION_MARKERS[condition] : undefined
+  const proneImage = useTokenBadgeImage(
+    condition === 'prone' ? '/assets/icons/prone-condition-status.png' : undefined,
+  )
   return (
     <Group
       x={x}
@@ -1215,11 +1356,11 @@ function Dnd5eStandardConditionBadge({
     >
       <Circle
         radius={size / 2}
-        fill={style?.fill ?? '#312e81'}
-        stroke={style?.stroke ?? '#c4b5fd'}
+        fill={mark?.backgroundColor ?? style?.fill ?? '#312e81'}
+        stroke={mark?.borderColor ?? style?.stroke ?? '#c4b5fd'}
         strokeWidth={tokenLineWidth(radius, 1.5)}
         shadowBlur={4 * tokenScale(radius)}
-        shadowColor={style?.stroke ?? '#a78bfa'}
+        shadowColor={mark?.glowColor ?? style?.stroke ?? '#a78bfa'}
         listening={!!onClick}
       />
       <Text
@@ -1230,11 +1371,23 @@ function Dnd5eStandardConditionBadge({
         offsetY={size / 2}
         fontSize={Math.max(7, size * (overflowCount ? 0.34 : 0.52))}
         fontStyle="bold"
+        opacity={condition === 'prone' && proneImage && !overflowCount ? 0 : 1}
         fill={style?.text ?? '#f5f3ff'}
         align="center"
         verticalAlign="middle"
         listening={!!onClick}
       />
+      {proneImage && !overflowCount && (
+        <KonvaImage
+          image={proneImage}
+          crop={{ x: 48, y: 165, width: 424, height: 208 }}
+          x={-size * 0.5}
+          y={-size * 0.36}
+          width={size}
+          height={size * 0.72}
+          listening={!!onClick}
+        />
+      )}
     </Group>
   )
 }
@@ -1265,6 +1418,75 @@ function ShillelaghTokenBadge({ radius, gridIndex }: { radius: number; gridIndex
         fill="#4ade80"
         stroke="#bbf7d0"
         strokeWidth={Math.max(0.7, size * 0.04)}
+      />
+    </Group>
+  )
+}
+
+function SpellStatusTokenBadge(input: {
+  radius: number
+  gridIndex: number
+  mark: SpellStatusTokenMark
+}) {
+  const size = rightBadgeSize(input.radius)
+  const { x, y } = rightBadgeGridPos(input.radius, size, input.gridIndex)
+  const scale = tokenScale(input.radius)
+  const spec = MAP_SPELL_STATUS_ICONS[input.mark.statusId]
+  const image = useTokenBadgeImage(spec.asset)
+
+  return (
+    <Group
+      x={x}
+      y={y}
+      listening={false}
+      name={`spell-status-token spell-status-${input.mark.statusId}`}
+    >
+      <Circle
+        radius={size / 2}
+        fill={input.mark.backgroundColor}
+        stroke={input.mark.borderColor}
+        strokeWidth={tokenLineWidth(input.radius, 1.5)}
+        shadowBlur={6 * scale}
+        shadowColor={input.mark.glowColor}
+      />
+      {image ? (
+        <Group
+          clipFunc={(context) => {
+            context.beginPath()
+            context.arc(0, 0, size * 0.46, 0, Math.PI * 2)
+            context.closePath()
+          }}
+          listening={false}
+        >
+          <KonvaImage
+            image={image}
+            x={-size * 0.48}
+            y={-size * 0.48}
+            width={size * 0.96}
+            height={size * 0.96}
+            listening={false}
+          />
+        </Group>
+      ) : (
+        <Text
+          text={input.mark.statusId === 'guidance' ? '✦' : input.mark.statusId === 'resistance' ? '盾' : '◇'}
+          x={-size / 2}
+          y={-size / 2}
+          width={size}
+          height={size}
+          fontSize={Math.max(8, size * 0.5)}
+          fontStyle="bold"
+          fill={input.mark.borderColor}
+          align="center"
+          verticalAlign="middle"
+          listening={false}
+        />
+      )}
+      <Circle
+        radius={size / 2}
+        stroke="rgba(255,255,255,0.42)"
+        strokeWidth={tokenLineWidth(input.radius, 0.7)}
+        listening={false}
       />
     </Group>
   )
@@ -1860,16 +2082,18 @@ export default function MapCanvas({
   onAoeConfirm,
   onAoeCancel,
   dnd5eConditionsByToken = {},
+  standardConditionTokenMarks = [],
   onDnd5eConditionClick,
   onDnd5ePluginAreaVisibilityToggle,
   tokenHoverLabels = {},
   projectiles = [],
   chillTouchTokenIds = [],
-  guidanceTokenIds = [],
-  resistanceTokenMarks = [],
   sanctuaryTokenIds = [],
+  spellStatusTokenMarks = [],
   shillelaghTokenIds = [],
   defeatedTokenIds = [],
+  savingThrowTokenId,
+  savingThrowAbility,
   currentTurnTokenId,
   lockDragTokenIds = [],
   builtinGrid = false,
@@ -2862,6 +3086,15 @@ export default function MapCanvas({
     geometrySearchMode,
     sceneEditMode: sceneEditMode || scenePointPlacementMode,
   })
+  const savingThrowToken = savingThrowTokenId
+    ? map.tokens.find((candidate) => candidate.id === savingThrowTokenId)
+    : undefined
+  const savingThrowMarkerDiameter = savingThrowToken
+    ? Math.max(
+        52,
+        map.gridSize * Math.max(1, savingThrowToken.size ?? 1) * view.scale * 1.24,
+      )
+    : 0
 
   return (
     <div
@@ -2931,13 +3164,23 @@ export default function MapCanvas({
       data-combat-projectile-ids={projectiles.map((projectile) => projectile.id).join(',')}
       data-combat-projectile-kinds={projectiles.map((projectile) => projectile.kind ?? 'arrow').join(',')}
       data-sanctuary-token-count={sanctuaryTokenIds.length}
+      data-spell-status-token-count={spellStatusTokenMarks.length}
+      data-spell-status-token-colors={spellStatusTokenMarks
+        .map((mark) =>
+          `${mark.statusId}:${mark.backgroundColor}:${mark.borderColor}`)
+        .join(',')}
+      data-standard-condition-token-colors={standardConditionTokenMarks
+        .map((mark) =>
+          `${mark.condition}:${mark.backgroundColor}:${mark.borderColor}`)
+        .join(',')}
+      data-saving-throw-token-id={savingThrowTokenId ?? ''}
       data-scene-interaction-count={sceneInteractionPoints.length}
       data-viewport-x={view.x}
       data-viewport-y={view.y}
       data-viewport-scale={view.scale}
       data-geometry-tool={geometryEditMode ? geometryTool : 'off'}
       data-stage-can-pan={stageCanPan ? 'true' : 'false'}
-      className={`h-full w-full overflow-hidden rounded-2xl bg-void-900/60 ${
+      className={`relative h-full w-full overflow-hidden rounded-2xl bg-void-900/60 ${
         tabletopTool !== 'none'
           ? 'cursor-crosshair'
         : gridAdjustMode
@@ -3418,45 +3661,6 @@ export default function MapCanvas({
               />
             )]
           })}
-          {guidanceTokenIds.flatMap((tokenId) => {
-            const token = map.tokens.find((candidate) => candidate.id === tokenId)
-            if (!token) return []
-            return [(
-              <GuidancePersistentMark
-                key={`guidance:${token.id}`}
-                x={token.x}
-                y={token.y}
-                radius={map.gridSize * Math.max(1, token.size ?? 1) * 0.52}
-              />
-            )]
-          })}
-          {resistanceTokenMarks.flatMap((mark) => {
-            const token = map.tokens.find((candidate) => candidate.id === mark.tokenId)
-            if (!token) return []
-            return [(
-              <ResistancePersistentMark
-                key={`resistance:${token.id}`}
-                x={token.x}
-                y={token.y}
-                radius={mark.radiusPx}
-                accentColor={mark.accentColor}
-                glowColor={mark.glowColor}
-              />
-            )]
-          })}
-          {sanctuaryTokenIds.flatMap((tokenId) => {
-            const token = map.tokens.find((candidate) => candidate.id === tokenId)
-            if (!token) return []
-            return [(
-              <SanctuaryPersistentMark
-                key={`sanctuary:${token.id}`}
-                x={token.x}
-                y={token.y}
-                radius={map.gridSize * Math.max(1, token.size ?? 1) * 0.52}
-              />
-            )]
-          })}
-
           {projectiles.map((projectile) =>
             projectile.kind === 'fireball'
               ? <FireballProjectile key={projectile.id} projectile={projectile} />
@@ -3478,6 +3682,14 @@ export default function MapCanvas({
                       ? <SanctuaryManifestation key={projectile.id} projectile={projectile} />
                     : projectile.kind === 'sacred-flame'
                       ? <SacredFlameEffect key={projectile.id} projectile={projectile} />
+                    : projectile.kind === 'spare-the-dying'
+                      ? <SpareTheDyingEffect key={projectile.id} projectile={projectile} />
+                    : projectile.kind === 'acid-splash'
+                      ? <AcidSplashEffect key={projectile.id} projectile={projectile} />
+                    : projectile.kind === 'poison-spray'
+                      ? <PoisonSprayEffect key={projectile.id} projectile={projectile} />
+                    : projectile.kind === 'vicious-mockery'
+                      ? <ViciousMockeryEffect key={projectile.id} projectile={projectile} />
                   : projectile.kind === 'chill-touch'
                     ? <ChillTouchManifestation key={projectile.id} projectile={projectile} />
                 : <ProjectileArrow key={projectile.id} projectile={projectile} />)}
@@ -3609,7 +3821,9 @@ export default function MapCanvas({
                   (isDM || !!t.characterId || t.showHpOnToken !== false)
                 }
                 standardConditions={dnd5eConditionsByToken[t.id]}
+                standardConditionMarks={standardConditionTokenMarks.filter((mark) => mark.tokenId === t.id)}
                 shillelaghActive={shillelaghTokenIds.includes(t.id)}
+                spellStatusMarks={spellStatusTokenMarks.filter((mark) => mark.tokenId === t.id)}
                 airborne={mapGeometryTokenElevation(geometry, t) >
                   mapGeometryTerrainElevationAtPoint(geometry, t)}
                 onStandardConditionClick={(condition) => onDnd5eConditionClick?.(t.id, condition)}
@@ -3722,6 +3936,27 @@ export default function MapCanvas({
           inv={inv}
         />}
       </Stage>
+      {savingThrowToken ? (
+        <div
+          data-testid="saving-throw-marker"
+          data-saving-throw-ability={savingThrowAbility ?? ''}
+          className="pointer-events-none absolute z-[70] -translate-x-1/2 -translate-y-1/2"
+          style={{
+            left: view.x + savingThrowToken.x * view.scale,
+            top: view.y + savingThrowToken.y * view.scale,
+            width: savingThrowMarkerDiameter,
+            height: savingThrowMarkerDiameter,
+          }}
+        >
+          <div className="absolute inset-0 animate-ping rounded-full border-[3px] border-sky-300 bg-sky-400/15 shadow-[0_0_22px_rgba(56,189,248,0.95)]" />
+          <div className="absolute inset-0 rounded-full border-[3px] border-sky-400 shadow-[0_0_14px_rgba(14,165,233,0.9)]" />
+          <div className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-full border border-sky-300 bg-sky-800/95 px-3 py-1 text-xs font-bold text-sky-50 shadow-[0_0_14px_rgba(14,165,233,0.8)]">
+            {savingThrowAbility
+              ? combatPresentationSavingThrowAbilityLabel(savingThrowAbility)
+              : '豁免检定'}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -3935,6 +4170,364 @@ function ProjectileArrow({ projectile }: { projectile: MapProjectile }) {
       />
     </Group>
     </>
+  )
+}
+
+function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const haloRef = useRef<Konva.Circle>(null)
+  const pulseRef = useRef<Konva.Circle>(null)
+  const moteRefs = useRef<Array<Konva.Circle | null>>([])
+  const radius = Math.max(20, projectile.radiusPx ?? 32)
+  const accent = projectile.accentColor ?? '#22c55e'
+  const glow = projectile.glowColor ?? '#86efac'
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_100)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const animation = new Konva.Animation((frame) => {
+      const elapsed = initialElapsed + (frame?.time ?? 0)
+      const raw = Math.min(1, elapsed / duration)
+      const fade = raw < 0.12 ? raw / 0.12 : raw > 0.78 ? (1 - raw) / 0.22 : 1
+      effect.position(projectile.to)
+      effect.opacity(Math.max(0, fade))
+      haloRef.current?.radius(radius * (0.82 + raw * 0.28))
+      haloRef.current?.opacity(0.3 + Math.sin(elapsed * 0.018) * 0.12)
+      pulseRef.current?.radius(radius * (0.28 + (raw % 0.52) * 0.72))
+      pulseRef.current?.opacity(Math.max(0, 0.52 - (raw % 0.52)))
+      moteRefs.current.forEach((mote, index) => {
+        if (!mote) return
+        const phase = (raw * 1.2 + index * 0.17) % 1
+        const angle = index * 1.73 + elapsed * 0.0015
+        mote.position({
+          x: Math.cos(angle) * radius * (0.18 + phase * 0.62),
+          y: radius * 0.45 - phase * radius * 1.55 + Math.sin(angle) * radius * 0.12,
+        })
+        mote.opacity(Math.sin(phase * Math.PI) * 0.82)
+        mote.radius(1.5 + (index % 3) * 0.7)
+      })
+      if (raw >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile, radius])
+
+  return (
+    <Group ref={effectRef} x={projectile.to.x} y={projectile.to.y} listening={false}>
+      <Circle
+        radius={radius * 0.88}
+        fill="#22c55e"
+        opacity={0.1}
+        shadowColor="#4ade80"
+        shadowBlur={radius * 0.9}
+        perfectDrawEnabled={false}
+      />
+      <Circle
+        ref={haloRef}
+        radius={radius * 0.9}
+        stroke={accent}
+        strokeWidth={2.4}
+        dash={[radius * 0.18, radius * 0.12]}
+        shadowColor={glow}
+        shadowBlur={14}
+        perfectDrawEnabled={false}
+      />
+      <Circle
+        ref={pulseRef}
+        radius={radius * 0.3}
+        stroke="#86efac"
+        strokeWidth={2}
+        shadowColor={glow}
+        shadowBlur={12}
+        perfectDrawEnabled={false}
+      />
+      {Array.from({ length: 9 }, (_, index) => (
+        <Circle
+          key={index}
+          ref={(node) => { moteRefs.current[index] = node }}
+          radius={2}
+          fill={index % 3 === 0 ? accent : index % 2 === 0 ? '#bbf7d0' : '#4ade80'}
+          shadowColor={index % 3 === 0 ? glow : '#22c55e'}
+          shadowBlur={8}
+          perfectDrawEnabled={false}
+        />
+      ))}
+    </Group>
+  )
+}
+
+function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const streamRef = useRef<Konva.Line>(null)
+  const impactRef = useRef<Konva.Group>(null)
+  const dropRefs = useRef<Array<Konva.Circle | null>>([])
+  const accent = projectile.accentColor ?? '#84cc16'
+  const glow = projectile.glowColor ?? '#bef264'
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_050)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const dx = projectile.to.x - projectile.from.x
+    const dy = projectile.to.y - projectile.from.y
+    const distance = Math.max(1, Math.hypot(dx, dy))
+    const nx = -dy / distance
+    const ny = dx / distance
+    const animation = new Konva.Animation((frame) => {
+      const elapsed = initialElapsed + (frame?.time ?? 0)
+      const raw = Math.min(1, elapsed / duration)
+      const travel = Math.min(1, raw / 0.62)
+      const eased = 1 - Math.pow(1 - travel, 2.2)
+      const headX = projectile.from.x + dx * eased
+      const headY = projectile.from.y + dy * eased
+      const wobble = Math.sin(elapsed * 0.028) * 8
+      streamRef.current?.points([
+        projectile.from.x,
+        projectile.from.y,
+        projectile.from.x + dx * eased * 0.52 + nx * wobble,
+        projectile.from.y + dy * eased * 0.52 + ny * wobble,
+        headX - nx * wobble * 0.35,
+        headY - ny * wobble * 0.35,
+      ])
+      streamRef.current?.opacity(raw < 0.62 ? 0.9 : Math.max(0, (1 - raw) / 0.38))
+      impactRef.current?.position(projectile.to)
+      impactRef.current?.opacity(raw < 0.5 ? 0 : Math.min(1, (raw - 0.5) / 0.14) * Math.max(0, (1 - raw) / 0.18))
+      const impactPhase = Math.max(0, (raw - 0.5) / 0.5)
+      dropRefs.current.forEach((drop, index) => {
+        if (!drop) return
+        const angle = -Math.PI * 0.9 + index * (Math.PI * 1.8 / 8)
+        const spread = (8 + (index % 3) * 5) * impactPhase
+        drop.position({
+          x: Math.cos(angle) * spread,
+          y: Math.sin(angle) * spread + impactPhase * impactPhase * 13,
+        })
+        drop.opacity(Math.sin(Math.min(1, impactPhase) * Math.PI) * 0.9)
+      })
+      if (raw >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile])
+
+  return (
+    <Group ref={effectRef} listening={false}>
+      <Line
+        ref={streamRef}
+        points={[projectile.from.x, projectile.from.y, projectile.from.x, projectile.from.y]}
+        stroke="#a3e635"
+        strokeWidth={6}
+        dash={[13, 5, 4, 7]}
+        lineCap="round"
+        lineJoin="round"
+        tension={0.45}
+        shadowColor={glow}
+        shadowBlur={14}
+        perfectDrawEnabled={false}
+      />
+      <Line
+        points={[projectile.from.x, projectile.from.y, projectile.to.x, projectile.to.y]}
+        stroke={accent}
+        strokeWidth={2}
+        dash={[3, 13]}
+        opacity={0.34}
+        shadowColor={glow}
+        shadowBlur={8}
+        perfectDrawEnabled={false}
+      />
+      <Group ref={impactRef} x={projectile.to.x} y={projectile.to.y}>
+        <Circle
+          radius={18}
+          fill="#65a30d"
+          opacity={0.28}
+          stroke={accent}
+          strokeWidth={2}
+          shadowColor={glow}
+          shadowBlur={18}
+          perfectDrawEnabled={false}
+        />
+        {Array.from({ length: 9 }, (_, index) => (
+          <Circle
+            key={index}
+            ref={(node) => { dropRefs.current[index] = node }}
+            radius={2.5 + index % 3}
+            fill={index % 3 === 0 ? accent : '#bef264'}
+            shadowColor={glow}
+            shadowBlur={7}
+            perfectDrawEnabled={false}
+          />
+        ))}
+      </Group>
+    </Group>
+  )
+}
+
+function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const cloudRefs = useRef<Array<Konva.Circle | null>>([])
+  const accent = projectile.accentColor ?? '#22c55e'
+  const glow = projectile.glowColor ?? '#86efac'
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_150)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const dx = projectile.to.x - projectile.from.x
+    const dy = projectile.to.y - projectile.from.y
+    const distance = Math.max(1, Math.hypot(dx, dy))
+    const nx = -dy / distance
+    const ny = dx / distance
+    const animation = new Konva.Animation((frame) => {
+      const elapsed = initialElapsed + (frame?.time ?? 0)
+      const raw = Math.min(1, elapsed / duration)
+      cloudRefs.current.forEach((cloud, index) => {
+        if (!cloud) return
+        const delay = index * 0.055
+        const local = Math.max(0, Math.min(1, (raw - delay) / Math.max(0.1, 0.72 - delay)))
+        const drift = Math.sin(elapsed * 0.009 + index * 2.1) * (5 + index % 3)
+        cloud.position({
+          x: projectile.from.x + dx * local + nx * drift,
+          y: projectile.from.y + dy * local + ny * drift - Math.sin(local * Math.PI) * 8,
+        })
+        cloud.radius(7 + local * 10 + (index % 3) * 2)
+        cloud.opacity(local <= 0 ? 0 : Math.sin(local * Math.PI) * 0.52)
+      })
+      effect.opacity(raw > 0.84 ? Math.max(0, (1 - raw) / 0.16) : 1)
+      if (raw >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile])
+
+  return (
+    <Group ref={effectRef} listening={false}>
+      {Array.from({ length: 11 }, (_, index) => (
+        <Circle
+          key={index}
+          ref={(node) => { cloudRefs.current[index] = node }}
+          x={projectile.from.x}
+          y={projectile.from.y}
+          radius={8}
+          fill={index % 4 === 0 ? accent : index % 2 === 0 ? '#166534' : '#4d7c0f'}
+          stroke={index % 3 === 0 ? glow : '#84cc16'}
+          strokeWidth={index % 3 === 0 ? 1.5 : 0.6}
+          shadowColor={index % 4 === 0 ? glow : '#22c55e'}
+          shadowBlur={12}
+          perfectDrawEnabled={false}
+        />
+      ))}
+    </Group>
+  )
+}
+
+function ViciousMockeryEffect({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const mouthRef = useRef<Konva.Group>(null)
+  const soundRefs = useRef<Array<Konva.Line | null>>([])
+  const accent = projectile.accentColor ?? '#d946ef'
+  const glow = projectile.glowColor ?? '#e879f9'
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const mouth = mouthRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !mouth || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_100)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const animation = new Konva.Animation((frame) => {
+      const elapsed = initialElapsed + (frame?.time ?? 0)
+      const raw = Math.min(1, elapsed / duration)
+      const appear = Math.min(1, raw / 0.16)
+      const fade = raw > 0.8 ? Math.max(0, (1 - raw) / 0.2) : 1
+      effect.position({ x: projectile.to.x, y: projectile.to.y - 20 })
+      effect.opacity(appear * fade)
+      effect.scale({ x: 0.72 + appear * 0.28, y: 0.72 + appear * 0.28 })
+      const opening = 0.55 + Math.abs(Math.sin(elapsed * 0.026)) * 0.72
+      mouth.scaleY(opening)
+      mouth.rotation(Math.sin(elapsed * 0.008) * 5)
+      soundRefs.current.forEach((line, index) => {
+        if (!line) return
+        const wave = (raw * 1.7 + index * 0.24) % 1
+        line.x(26 + wave * 24)
+        line.scaleX(0.65 + wave * 0.7)
+        line.opacity(Math.sin(wave * Math.PI) * 0.8)
+      })
+      if (raw >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile])
+
+  return (
+    <Group ref={effectRef} x={projectile.to.x} y={projectile.to.y - 20} listening={false}>
+      <Circle
+        radius={30}
+        fill={accent}
+        opacity={0.12}
+        shadowColor={glow}
+        shadowBlur={24}
+        perfectDrawEnabled={false}
+      />
+      <Group ref={mouthRef}>
+        <Line
+          points={[-24, 0, -12, -12, 0, -15, 12, -12, 24, 0, 12, 13, 0, 17, -12, 13]}
+          closed
+          fill="#19051f"
+          stroke={accent}
+          strokeWidth={3}
+          lineJoin="round"
+          shadowColor={glow}
+          shadowBlur={14}
+          perfectDrawEnabled={false}
+        />
+        <Line
+          points={[-16, -2, -8, -7, 0, -8, 8, -7, 16, -2]}
+          stroke="#fff1ff"
+          strokeWidth={3}
+          lineCap="round"
+          tension={0.3}
+          perfectDrawEnabled={false}
+        />
+        <Line
+          points={[-15, 5, -7, 10, 0, 11, 7, 10, 15, 5]}
+          stroke={glow}
+          strokeWidth={2.4}
+          lineCap="round"
+          tension={0.35}
+          perfectDrawEnabled={false}
+        />
+      </Group>
+      {Array.from({ length: 3 }, (_, index) => (
+        <Line
+          key={index}
+          ref={(node) => { soundRefs.current[index] = node }}
+          x={28 + index * 8}
+          y={-9 + index * 9}
+          points={[0, 0, 6, -4, 12, 0]}
+          stroke={index % 2 === 0 ? accent : glow}
+          strokeWidth={2.2}
+          lineCap="round"
+          lineJoin="round"
+          shadowColor={glow}
+          shadowBlur={7}
+          perfectDrawEnabled={false}
+        />
+      ))}
+    </Group>
   )
 }
 
@@ -4170,63 +4763,6 @@ function SacredGuidanceSigil({ radius }: { radius: number }) {
   )
 }
 
-function GuidancePersistentMark(input: { x: number; y: number; radius: number }) {
-  const markRef = useRef<Konva.Group>(null)
-  const orbitRef = useRef<Konva.Group>(null)
-  const counterOrbitRef = useRef<Konva.Group>(null)
-  const glowRef = useRef<Konva.Circle>(null)
-  const reducedMotion = usePrefersReducedMotion()
-
-  useStatusAnimation(
-    () => markRef.current?.getLayer() ?? null,
-    (frame) => {
-      const time = frame?.time ?? 0
-      orbitRef.current?.rotation(reducedMotion ? 0 : time * 0.012)
-      counterOrbitRef.current?.rotation(reducedMotion ? 22.5 : 22.5 + time * 0.012)
-      glowRef.current?.opacity(reducedMotion ? 0.2 : 0.16 + Math.sin(time * 0.004) * 0.08)
-      markRef.current?.scale({
-        x: reducedMotion ? 1 : 1 + Math.sin(time * 0.0035) * 0.025,
-        y: reducedMotion ? 1 : 1 + Math.sin(time * 0.0035) * 0.025,
-      })
-    },
-    [input.radius, reducedMotion],
-    { fps: reducedMotion ? 1 : 30 },
-  )
-
-  return (
-    <Group
-      ref={markRef}
-      x={input.x}
-      y={input.y}
-      opacity={0.9}
-      listening={false}
-    >
-      <Circle
-        ref={glowRef}
-        radius={input.radius * 1.08}
-        fill="rgba(250,204,21,0.2)"
-        shadowColor="#facc15"
-        shadowBlur={18}
-        perfectDrawEnabled={false}
-      />
-      <Group ref={orbitRef}>
-        <SacredGuidanceSigil radius={input.radius} />
-      </Group>
-      <Group ref={counterOrbitRef} rotation={22.5}>
-        <Circle
-          radius={input.radius * 0.84}
-          stroke="rgba(255,255,255,0.48)"
-          strokeWidth={1.4}
-          dash={[2, input.radius * 0.2]}
-          shadowColor="#fde68a"
-          shadowBlur={6}
-          perfectDrawEnabled={false}
-        />
-      </Group>
-    </Group>
-  )
-}
-
 function ResistanceShieldGlyph(input: {
   size: number
   accentColor: string
@@ -4261,58 +4797,6 @@ function ResistanceShieldGlyph(input: {
         lineCap="round"
         perfectDrawEnabled={false}
       />
-    </Group>
-  )
-}
-
-function ResistancePersistentMark(input: {
-  x: number
-  y: number
-  radius: number
-  accentColor: string
-  glowColor: string
-}) {
-  const orbitRef = useRef<Konva.Group>(null)
-  const shieldRef = useRef<Konva.Group>(null)
-  const ringRef = useRef<Konva.Circle>(null)
-  const reducedMotion = usePrefersReducedMotion()
-
-  useStatusAnimation(
-    () => orbitRef.current?.getLayer() ?? null,
-    (frame) => {
-      const time = frame?.time ?? 0
-      // Match Guidance's clockwise angular velocity so the 22.5° phase
-      // separation remains constant instead of drifting into an intersection.
-      const rotation = reducedMotion ? 22.5 : 22.5 + time * 0.012
-      orbitRef.current?.rotation(rotation)
-      shieldRef.current?.rotation(-rotation + (reducedMotion ? 0 : Math.sin(time * 0.006) * 7))
-      ringRef.current?.opacity(reducedMotion ? 0.22 : 0.18 + Math.sin(time * 0.004) * 0.08)
-    },
-    [input.radius, input.accentColor, input.glowColor, reducedMotion],
-    { fps: reducedMotion ? 1 : 30 },
-  )
-
-  return (
-    <Group x={input.x} y={input.y} listening={false}>
-      <Circle
-        ref={ringRef}
-        radius={input.radius}
-        stroke={input.accentColor}
-        strokeWidth={1.5}
-        dash={[4, 8]}
-        shadowColor={input.glowColor}
-        shadowBlur={10}
-        perfectDrawEnabled={false}
-      />
-      <Group ref={orbitRef}>
-        <Group ref={shieldRef} x={input.radius}>
-          <ResistanceShieldGlyph
-            size={Math.max(7, input.radius * 0.17)}
-            accentColor={input.accentColor}
-            glowColor={input.glowColor}
-          />
-        </Group>
-      </Group>
     </Group>
   )
 }
@@ -4354,54 +4838,6 @@ function SanctuaryWardGlyph({ size }: { size: number }) {
         lineJoin="round"
         perfectDrawEnabled={false}
       />
-    </Group>
-  )
-}
-
-function SanctuaryPersistentMark(input: { x: number; y: number; radius: number }) {
-  const orbitRef = useRef<Konva.Group>(null)
-  const haloRef = useRef<Konva.Circle>(null)
-  const reducedMotion = usePrefersReducedMotion()
-
-  useStatusAnimation(
-    () => orbitRef.current?.getLayer() ?? null,
-    (frame) => {
-      const time = frame?.time ?? 0
-      orbitRef.current?.rotation(reducedMotion ? 52 : 52 + time * 0.012)
-      haloRef.current?.opacity(reducedMotion ? 0.42 : 0.34 + Math.sin(time * 0.004) * 0.11)
-    },
-    [input.radius, reducedMotion],
-    { fps: reducedMotion ? 1 : 30 },
-  )
-
-  return (
-    <Group x={input.x} y={input.y} listening={false}>
-      <Circle
-        ref={haloRef}
-        radius={input.radius * 0.96}
-        stroke="rgba(186,230,253,0.88)"
-        strokeWidth={2}
-        dash={[2, 9]}
-        shadowColor="#38bdf8"
-        shadowBlur={13}
-        perfectDrawEnabled={false}
-      />
-      <Circle
-        radius={input.radius * 1.08}
-        stroke="rgba(248,250,252,0.32)"
-        strokeWidth={1.2}
-        dash={[10, 14]}
-        perfectDrawEnabled={false}
-      />
-      <Group ref={orbitRef}>
-        {[0, 120, 240].map((rotation) => (
-          <Group key={rotation} rotation={rotation}>
-            <Group x={input.radius}>
-              <SanctuaryWardGlyph size={Math.max(8, input.radius * 0.13)} />
-            </Group>
-          </Group>
-        ))}
-      </Group>
     </Group>
   )
 }
@@ -5794,7 +6230,9 @@ function TokenNode({
   hp,
   showHpBar = true,
   standardConditions = [],
+  standardConditionMarks = [],
   shillelaghActive = false,
+  spellStatusMarks = [],
   airborne = false,
   onStandardConditionClick,
   hoverLabel,
@@ -5818,7 +6256,9 @@ function TokenNode({
   hp?: { hp: number; max: number; temp?: number }
   showHpBar?: boolean
   standardConditions?: readonly Dnd5eStandardConditionId[]
+  standardConditionMarks?: readonly StandardConditionTokenMark[]
   shillelaghActive?: boolean
+  spellStatusMarks?: readonly SpellStatusTokenMark[]
   airborne?: boolean
   onStandardConditionClick?: (condition?: Dnd5eStandardConditionId) => void
   hoverLabel?: string
@@ -6103,6 +6543,14 @@ function TokenNode({
                 gridIndex={airborne ? 1 : 0}
               />
             )}
+            {spellStatusMarks.map((mark) => (
+              <SpellStatusTokenBadge
+                key={`spell-status:${mark.statusId}`}
+                radius={radius}
+                gridIndex={grid++}
+                mark={mark}
+              />
+            ))}
             {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
               .map((condition) => (
                 <Dnd5eStandardConditionBadge
@@ -6110,6 +6558,7 @@ function TokenNode({
                   radius={radius}
                   gridIndex={grid++}
                   condition={condition}
+                  mark={standardConditionMarks.find((mark) => mark.condition === condition)}
                   onClick={() => onStandardConditionClick?.(condition)}
                 />
               ))}

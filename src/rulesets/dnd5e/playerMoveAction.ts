@@ -46,6 +46,8 @@ export interface PreparedDnd5ePlayerMove {
   path: Array<{ x: number; y: number }>
   pathElevationsFeet: number[]
   standFromProne: boolean
+  /** When present, the player attempted to stand but a rule keeps them prone. */
+  standPreventedBy?: 'hideous-laughter'
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
 }
@@ -160,6 +162,9 @@ export function prepareDnd5ePlayerMove(input: {
       path: path.points,
       pathElevationsFeet: path.elevationsFeet,
       standFromProne,
+      standPreventedBy: isProne && cannotStand && action.dnd5eStandFromProne !== false
+        ? 'hideous-laughter'
+        : undefined,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
     },

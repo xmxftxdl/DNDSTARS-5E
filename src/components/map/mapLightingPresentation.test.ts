@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   mapLightingAmbientOpacity,
+  mapLightingDarkvisionCutoutOpacity,
   mapLightingGlowOpacity,
   mapLightingRadiusFromDrag,
   mapLightingShouldRender,
@@ -26,6 +27,11 @@ describe('map lighting presentation', () => {
     expect(mapLightingGlowOpacity('bright', 'darkness', true)).toBeGreaterThan(
       mapLightingGlowOpacity('dim', 'darkness', true),
     )
+    const cutout = mapLightingDarkvisionCutoutOpacity('darkness', false)
+    expect(mapLightingAmbientOpacity('darkness', false) * (1 - cutout))
+      .toBeCloseTo(mapLightingAmbientOpacity('dim', false))
+    expect(mapLightingDarkvisionCutoutOpacity('dim', false)).toBe(1)
+    expect(mapLightingDarkvisionCutoutOpacity('darkness', true)).toBe(0)
   })
 
   it('places a useful default light on click and derives its radius from a drag', () => {

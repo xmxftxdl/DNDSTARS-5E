@@ -238,6 +238,8 @@ export interface Character {
     draconicWingsActive?: boolean
     /** 龙威豁免成功后，对各术士来源的24小时免疫。 */
     draconicPresenceImmunityRoundsBySource?: Record<string, number>
+    /** 怪物骇人威仪豁免后，对该来源的 24 小时免疫。 */
+    monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
     hurlThroughHellReady?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number

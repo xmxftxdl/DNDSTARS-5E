@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
+import type { Dnd5eDamageType } from './damageTypes'
+import { DND5E_LEATHER_ARMOR } from './equipment'
+import { DND5E_SRD_MONSTERS } from './monsters'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { prepareDnd5ePluginSpellCast, resolvePreparedDnd5ePluginSpellCast } from './pluginSpellTransaction'
-import { DND5E_LEATHER_ARMOR } from './equipment'
 
 function wizard(spellId: string): Character {
   return {
@@ -139,6 +142,143 @@ describe('plugin spell CombatTransaction', () => {
       expect(failedSave.result.state.combatants[enemy.id].classState.activeEffects?.[0]?.duration).toMatchObject({
         type: 'concentration', sourceActorId: actorToken.id, concentrationId: spellId,
       })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('routes plugin spell damage through static and source-aware defenses exactly once', () => {
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'com.example.spell-defenses', name: 'Spell Defenses', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'ember', resolve: ({ succeed }) => succeed() })
+        spellId = api.registerSpell({
+          id: 'ember', name: '余烬', level: 2, school: 'evocation', ritual: false,
+          castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+          components: { verbal: true, somatic: true, material: false },
+          duration: { type: 'instantaneous', concentration: false },
+          classes: ['wizard'], description: '用于验证插件法术伤害防御入口。',
+          mechanics: {
+            kind: 'damage', resolution: 'automatic',
+            damage: { dice: { count: 1, sides: 6, bonus: 0 }, type: 'fire' },
+          },
+          automation: { mode: 'headless-action', actionId: 'ember' },
+        })
+      },
+    })
+    try {
+      const actor = wizard(spellId)
+      actor.alignment = 'LG'
+      const actorToken = token('wizard-token', 'player', 25, actor.id)
+      const enemy = token('enemy-token', 'enemy', 125)
+      const map: BattleMap = { id: 'map', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actorToken, enemy] }
+      const action: SharedPlayerActionState = {
+        id: 'plugin-defense-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy.id,
+        dnd5eSpellCast: { spellId, slotLevel: 2, targetTokenId: enemy.id }, round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const prepared = prepareDnd5ePluginSpellCast({
+        action, map, characters: [actor],
+        initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+
+      const target = prepared.prepared.state.combatants[enemy.id]
+      const resolveWith = (defenses: {
+        immunities?: readonly Dnd5eDamageType[]
+        resistances?: readonly Dnd5eDamageType[]
+        vulnerabilities?: readonly Dnd5eDamageType[]
+        rules?: readonly Dnd5eConditionalDamageDefense[]
+      }) => {
+        target.damageImmunities = [...(defenses.immunities ?? [])]
+        target.damageResistances = [...(defenses.resistances ?? [])]
+        target.damageVulnerabilities = [...(defenses.vulnerabilities ?? [])]
+        target.damageDefenseRules = (defenses.rules ?? []).map((rule) => ({ ...rule }))
+        return resolvePreparedDnd5ePluginSpellCast({
+          prepared: prepared.prepared,
+          rolls: { damageRolls: [5] },
+        })
+      }
+
+      const unmodified = resolveWith({})
+      expect(unmodified.rawDamage).toBe(5)
+      expect(unmodified.finalDamage).toBe(5)
+      expect(unmodified.result.state.combatants[enemy.id].currentHp).toBe(25)
+
+      const immune = resolveWith({ immunities: ['fire'] })
+      expect(immune.finalDamage).toBe(0)
+      expect(immune.result.state.combatants[enemy.id].currentHp).toBe(30)
+
+      const resistant = resolveWith({ resistances: ['fire'] })
+      expect(resistant.finalDamage).toBe(2)
+      expect(resistant.result.state.combatants[enemy.id].currentHp).toBe(28)
+
+      const vulnerable = resolveWith({ vulnerabilities: ['fire'] })
+      expect(vulnerable.finalDamage).toBe(10)
+      expect(vulnerable.result.state.combatants[enemy.id].currentHp).toBe(20)
+
+      const resistantAndVulnerable = resolveWith({
+        resistances: ['fire'],
+        vulnerabilities: ['fire'],
+      })
+      expect(resistantAndVulnerable.finalDamage).toBe(4)
+      expect(resistantAndVulnerable.result.state.combatants[enemy.id].currentHp).toBe(26)
+
+      const archmage = DND5E_SRD_MONSTERS.find((monster) => monster.id === 'srd-5.1:archmage')
+      const archmageSpellRules = archmage?.damageDefenseRules?.filter((rule) =>
+        rule.outcome === 'resistant' && rule.delivery === 'spell' && rule.magical === true
+      )
+      expect(archmageSpellRules).toHaveLength(1)
+      const archmageSpellResistance = resolveWith({ rules: archmageSpellRules })
+      expect(archmageSpellResistance.finalDamage).toBe(2)
+      expect(archmageSpellResistance.result.state.combatants[enemy.id].currentHp).toBe(28)
+
+      const weaponOnlyImmunity = resolveWith({
+        rules: [{
+          outcome: 'immune',
+          damageTypes: ['fire'],
+          delivery: 'weapon-attack',
+          magical: false,
+          reason: 'ordinary-fire-weapon-only',
+        }],
+      })
+      expect(weaponOnlyImmunity.finalDamage).toBe(5)
+      expect(weaponOnlyImmunity.result.state.combatants[enemy.id].currentHp).toBe(25)
+
+      const vulnerableToGoodSpellcaster = resolveWith({
+        rules: [{
+          outcome: 'vulnerable',
+          damageTypes: ['fire'],
+          delivery: 'spell',
+          magical: true,
+          sourceMoralAlignment: 'good',
+          reason: 'good-spellcaster',
+        }],
+      })
+      expect(vulnerableToGoodSpellcaster.finalDamage).toBe(10)
+      expect(vulnerableToGoodSpellcaster.result.state.combatants[enemy.id].currentHp).toBe(20)
+
+      target.limitedMagicImmunity = {
+        kind: 'limited-magic-immunity',
+        maximumSpellLevel: 6,
+        advantageAboveMaximum: true,
+        allowsWilling: true,
+      }
+      const limitedMagicImmunity = resolveWith({})
+      expect(limitedMagicImmunity.finalDamage).toBe(0)
+      expect(limitedMagicImmunity.result.state.combatants[enemy.id].currentHp).toBe(30)
+      expect(limitedMagicImmunity.result.events).toContainEqual(expect.objectContaining({
+        type: 'spell-negated-by-limited-magic-immunity',
+        targetId: enemy.id,
+        spellId,
+        spellLevel: 2,
+      }))
+      expect(limitedMagicImmunity.result.events).toContainEqual(expect.objectContaining({
+        type: 'class-resource-spent',
+        resourceKey: 'dnd5e-spell-slot-2',
+      }))
     } finally {
       dispose()
     }

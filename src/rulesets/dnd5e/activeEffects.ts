@@ -123,6 +123,9 @@ export interface Dnd5eActiveEffectModifiers {
   carryingCapacityMultiplier?: number
   /** Prevents damage and prone from falls no longer than this distance while not incapacitated. */
   safeFallFeet?: number
+  armorClassBonus?: number
+  savingThrowBonus?: number
+  resistanceToAllDamage?: boolean
   weaponDamageD4?: 'add' | 'subtract'
   preventReactions?: boolean
   damageResistance?: Dnd5eDamageType
@@ -496,6 +499,21 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             rawModifiers.safeFallFeet <= 1_000
             ? rawModifiers.safeFallFeet
             : undefined,
+          armorClassBonus: typeof rawModifiers.armorClassBonus === 'number' &&
+            Number.isFinite(rawModifiers.armorClassBonus) &&
+            rawModifiers.armorClassBonus >= -20 &&
+            rawModifiers.armorClassBonus <= 20
+            ? rawModifiers.armorClassBonus
+            : undefined,
+          savingThrowBonus: typeof rawModifiers.savingThrowBonus === 'number' &&
+            Number.isFinite(rawModifiers.savingThrowBonus) &&
+            rawModifiers.savingThrowBonus >= -20 &&
+            rawModifiers.savingThrowBonus <= 20
+            ? rawModifiers.savingThrowBonus
+            : undefined,
+          resistanceToAllDamage: typeof rawModifiers.resistanceToAllDamage === 'boolean'
+            ? rawModifiers.resistanceToAllDamage
+            : undefined,
           weaponDamageD4: rawModifiers.weaponDamageD4 === 'add' ||
             rawModifiers.weaponDamageD4 === 'subtract'
             ? rawModifiers.weaponDamageD4 as 'add' | 'subtract'
@@ -549,6 +567,9 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.abilityCheckAdvantages != null ||
         modifiers.carryingCapacityMultiplier != null ||
         modifiers.safeFallFeet != null ||
+        modifiers.armorClassBonus != null ||
+        modifiers.savingThrowBonus != null ||
+        modifiers.resistanceToAllDamage != null ||
         modifiers.weaponDamageD4 != null ||
         modifiers.preventReactions != null ||
         modifiers.damageResistance != null ||
@@ -657,6 +678,22 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           raw.modifiers.safeFallFeet < 0 ||
           raw.modifiers.safeFallFeet > 1_000
         )) issues.push(`activeEffects[${index}].modifiers.safeFallFeet 无效`)
+        if (raw.modifiers.armorClassBonus != null && (
+          typeof raw.modifiers.armorClassBonus !== 'number' ||
+          !Number.isFinite(raw.modifiers.armorClassBonus) ||
+          raw.modifiers.armorClassBonus < -20 ||
+          raw.modifiers.armorClassBonus > 20
+        )) issues.push(`activeEffects[${index}].modifiers.armorClassBonus 无效`)
+        if (raw.modifiers.savingThrowBonus != null && (
+          typeof raw.modifiers.savingThrowBonus !== 'number' ||
+          !Number.isFinite(raw.modifiers.savingThrowBonus) ||
+          raw.modifiers.savingThrowBonus < -20 ||
+          raw.modifiers.savingThrowBonus > 20
+        )) issues.push(`activeEffects[${index}].modifiers.savingThrowBonus 无效`)
+        if (
+          raw.modifiers.resistanceToAllDamage != null &&
+          typeof raw.modifiers.resistanceToAllDamage !== 'boolean'
+        ) issues.push(`activeEffects[${index}].modifiers.resistanceToAllDamage 无效`)
         if (raw.modifiers.weaponDamageD4 != null &&
           raw.modifiers.weaponDamageD4 !== 'add' &&
           raw.modifiers.weaponDamageD4 !== 'subtract') {
@@ -796,6 +833,32 @@ export function dnd5eActiveSafeFallFeet(
   return normalizeDnd5eActiveEffects(effects).reduce(
     (maximum, effect) => Math.max(maximum, effect.modifiers?.safeFallFeet ?? 0),
     0,
+  )
+}
+
+export function dnd5eActiveArmorClassBonus(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (total, effect) => total + (effect.modifiers?.armorClassBonus ?? 0),
+    0,
+  )
+}
+
+export function dnd5eActiveSavingThrowBonus(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (total, effect) => total + (effect.modifiers?.savingThrowBonus ?? 0),
+    0,
+  )
+}
+
+export function dnd5eActiveResistanceToAllDamage(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): boolean {
+  return normalizeDnd5eActiveEffects(effects).some(
+    (effect) => effect.modifiers?.resistanceToAllDamage === true,
   )
 }
 

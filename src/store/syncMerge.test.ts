@@ -24,6 +24,7 @@ import {
   resetPendingLocalPluginFeaturesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
   resetPendingLocalCharacterHitPointEditMemoryForTest,
+  shouldApplySharedCharactersSnapshot,
 } from './characters'
 import {
   clearPendingLocalTokenHitPointEditsForTest,
@@ -334,6 +335,33 @@ describe('pending local character-sheet hit point edits', () => {
   })
 })
 
+describe('character shared snapshot ordering', () => {
+  it('accepts a newer server revision even when the DM wall clock is behind the player', () => {
+    expect(shouldApplySharedCharactersSnapshot({
+      incomingRevision: 84,
+      lastAppliedRevision: 83,
+      incomingUpdatedAt: 1_000,
+      lastAppliedUpdatedAt: 9_000,
+    })).toBe(true)
+  })
+
+  it('rejects an older revision even when its client timestamp is later', () => {
+    expect(shouldApplySharedCharactersSnapshot({
+      incomingRevision: 83,
+      lastAppliedRevision: 84,
+      incomingUpdatedAt: 9_000,
+      lastAppliedUpdatedAt: 1_000,
+    })).toBe(false)
+  })
+
+  it('uses timestamps only for legacy snapshots without server revisions', () => {
+    expect(shouldApplySharedCharactersSnapshot({
+      incomingUpdatedAt: 1_000,
+      lastAppliedUpdatedAt: 9_000,
+    })).toBe(false)
+  })
+})
+
 describe('pending local fighter choices', () => {
   afterEach(() => {
     clearPendingLocalFighterChoicesForTest()
@@ -439,7 +467,7 @@ describe('pending local plugin feature choices', () => {
   })
 })
 
-describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', () => {
+describe('T13/AC6 mergePlayerTokenCombatFields preserves DM-authoritative token positions', () => {
   it('keeps DM-authored item areas when a player publishes an unrelated map write', () => {
     const localMap = map({ dnd5eItemAreas: [] })
     const sharedArea = {
@@ -473,15 +501,20 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     expect(e1.dnd5eCombatState?.activeEffects).toEqual([blinded])
   })
 
-  it("a player-type token keeps its OWN local x/y (DM does not move the player's own token)", () => {
-    const localMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 120, y: 130, hp: 20, maxHp: 30 })] })
-    const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 999, y: 888, hp: 15, maxHp: 30 })] })
+  it('takes an authoritative forced-movement position for a player-type token', () => {
+    const localMap = map({ tokens: [token({
+      id: 'p1', type: 'player', x: 120, y: 130, elevationFeet: 40, hp: 20, maxHp: 30,
+    })] })
+    const sharedMap = map({ tokens: [token({
+      id: 'p1', type: 'player', x: 999, y: 888, elevationFeet: 0, hp: 15, maxHp: 30,
+    })] })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
     const p1 = result.tokens.find((t) => t.id === 'p1')!
-    // 玩家自己 token 的位置保留本地（dmControlledPosition 仅对非 player 生效）。
-    expect(p1.x).toBe(120)
-    expect(p1.y).toBe(130)
-    // 但战斗字段（hp 等）仍取 DM 权威值。
+    // 玩家端旧快照不能覆盖 DM 已结算的强制位移。
+    expect(p1.x).toBe(999)
+    expect(p1.y).toBe(888)
+    expect(p1.elevationFeet).toBe(0)
+    // 战斗字段（hp 等）同样取 DM 权威值。
     expect(p1.hp).toBe(15)
   })
 

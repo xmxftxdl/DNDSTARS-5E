@@ -5,6 +5,10 @@ import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeom
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
 import { planDnd5eMonsterTurn } from './monsterTurnPlanner'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
+import type { MonsterDecisionProvider } from './monsterDecisionProvider'
+import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
+import { getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 
 function token(patch: Partial<Token>): Token {
   return { id: 'token', label: 'Token', x: 0, y: 0, color: '', emoji: '', size: 1, type: 'enemy', hp: 10, maxHp: 10, ...patch }
@@ -19,13 +23,631 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('SRD monster 5e turn planner', () => {
-  afterEach(() => setMapGeometryRuntime([]))
+  afterEach(() => {
+    setMapGeometryRuntime([])
+    setDnd5eRoomMonsterCatalog([])
+  })
   it('uses a ranged stat-block action after a legal tactical reposition without AP', () => {
     const goblin = token({ id: 'goblin', label: '哥布林', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7 })
     const hero = token({ id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero', x: 50, hp: 20, maxHp: 20 })
     const plan = planDnd5eMonsterTurn(map([goblin, hero]), goblin)
     expect(plan).toMatchObject({ attacked: true, actionIndex: 1, attackerTokenId: goblin.id, targetTokenId: hero.id })
     expect(plan.moveApSpent).toBeUndefined()
+  })
+
+  it('scores the Bugbear javelin with melee damage at 5 feet and ranged damage at 30 feet', () => {
+    const bugbear = token({
+      id: 'bugbear',
+      label: 'Bugbear',
+      poolId: 'srd-5.1:bugbear',
+      hp: 27,
+      maxHp: 27,
+    })
+    const hero = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      hp: 20,
+      maxHp: 20,
+    })
+    const providerForDistance = (distanceFeet: number): MonsterDecisionProvider => ({
+      id: `test:bugbear-javelin:${distanceFeet}`,
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        const selected = candidate.id.startsWith(`attack:${hero.id}:1:`) &&
+          candidate.metrics.targetDistanceFeet === distanceFeet
+        return {
+          candidateId: candidate.id,
+          score: selected ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    })
+    const planAt = (x: number, distanceFeet: number) => planDnd5eMonsterTurn(
+      map([bugbear, { ...hero, x }]),
+      bugbear,
+      [character()],
+      { decisionProvider: providerForDistance(distanceFeet) },
+    )
+
+    const melee = planAt(10, 5)
+    expect(melee).toMatchObject({
+      attacked: true,
+      actionIndex: 1,
+      attack: {
+        sides: 6,
+        bonus: 2,
+        total: 9,
+        label: expect.stringContaining('2d6+2'),
+      },
+      damage: 9,
+      decision: {
+        metrics: {
+          targetDistanceFeet: 5,
+          hitProbability: 0.55,
+        },
+      },
+    })
+    expect(melee.decision?.metrics?.expectedDamage).toBeCloseTo(4.95, 5)
+
+    const ranged = planAt(60, 30)
+    expect(ranged).toMatchObject({
+      attacked: true,
+      actionIndex: 1,
+      attack: {
+        sides: 6,
+        bonus: 2,
+        total: 5,
+        label: expect.stringContaining('1d6+2'),
+      },
+      damage: 5,
+      decision: {
+        metrics: {
+          targetDistanceFeet: 30,
+          hitProbability: 0.55,
+        },
+      },
+    })
+    expect(ranged.decision?.metrics?.expectedDamage).toBeCloseTo(2.75, 5)
+  })
+
+  it('includes both indexed Assassin poison riders in Multiattack expected damage', () => {
+    const assassin = token({
+      id: 'assassin',
+      label: 'Assassin',
+      poolId: 'srd-5.1:assassin',
+      hp: 78,
+      maxHp: 78,
+    })
+    const hero = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      x: 10,
+      hp: 100,
+      maxHp: 100,
+    })
+    const forceMultiattack: MonsterDecisionProvider = {
+      id: 'test:assassin-poison-multiattack',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        return {
+          candidateId: candidate.id,
+          score: candidate.id.startsWith(`attack:${hero.id}:0:`) ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    }
+
+    const plan = planDnd5eMonsterTurn(
+      map([assassin, hero]),
+      assassin,
+      [character({
+        maxHp: 100,
+        currentHp: 100,
+        ac: 14,
+        abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      })],
+      { decisionProvider: forceMultiattack },
+    )
+
+    expect(plan).toMatchObject({
+      attacked: true,
+      actionIndex: 0,
+      decision: {
+        metrics: {
+          hitProbability: 0.65,
+        },
+      },
+    })
+    // Each attack: (6 piercing + 24 poison * (70% full + 30% half)) * 65% hit.
+    expect(plan.decision?.metrics?.expectedDamage).toBeCloseTo(34.32, 5)
+    expect(plan.decision?.metrics?.expectedDamage).toBeGreaterThan(7.8)
+  })
+
+  it('does not prefer a high raw-damage weapon that the target conditionally ignores', () => {
+    const goblin = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const ordinaryAttacker: Dnd5eMonsterStatBlock = {
+      ...goblin,
+      id: 'dm-custom:defense-aware-attacker',
+      slug: 'defense-aware-attacker',
+      name: '防御感知攻击者',
+      englishName: 'Defense-aware Attacker',
+      speed: { walk: 0 },
+      actions: [
+        {
+          ...goblin.actions[0],
+          id: 'huge-ordinary-slash',
+          name: '巨力普通斩击',
+          kind: 'weapon-attack',
+          automation: 'headless',
+          attack: {
+            mode: 'melee',
+            toHit: 20,
+            reachFeet: 5,
+            target: '一个目标',
+            damage: [{
+              count: 10,
+              sides: 10,
+              bonus: 0,
+              average: 55,
+              type: 'slashing',
+            }],
+          },
+        },
+        {
+          ...goblin.actions[0],
+          id: 'small-fire-strike',
+          name: '微火打击',
+          kind: 'weapon-attack',
+          automation: 'headless',
+          attack: {
+            mode: 'melee',
+            toHit: 20,
+            reachFeet: 5,
+            target: '一个目标',
+            damage: [{
+              count: 1,
+              sides: 4,
+              bonus: 0,
+              average: 2,
+              type: 'fire',
+            }],
+          },
+        },
+      ],
+      traits: [],
+    }
+    const magicAttacker: Dnd5eMonsterStatBlock = {
+      ...ordinaryAttacker,
+      id: 'dm-custom:defense-aware-magic-attacker',
+      slug: 'defense-aware-magic-attacker',
+      name: '魔法防御感知攻击者',
+      traits: [{
+        name: '魔法武器',
+        description: '武器攻击视为魔法攻击。',
+        automation: 'headless',
+        rule: { kind: 'magic-weapons', weaponAttacksMagical: true },
+      }],
+    }
+    setDnd5eRoomMonsterCatalog([ordinaryAttacker, magicAttacker])
+    const target = token({
+      id: 'werewolf-target',
+      label: '狼人目标',
+      type: 'player',
+      poolId: 'srd-5.1:werewolf-hybrid',
+      x: 10,
+      hp: 58,
+      maxHp: 58,
+    })
+    const planFor = (monster: Dnd5eMonsterStatBlock) => {
+      const attacker = token({
+        id: `${monster.id}:token`,
+        label: monster.name,
+        poolId: monster.id,
+        hp: monster.hitPoints.average,
+        maxHp: monster.hitPoints.average,
+      })
+      return planDnd5eMonsterTurn(map([attacker, target]), attacker)
+    }
+
+    const ordinaryPlan = planFor(ordinaryAttacker)
+    expect(ordinaryPlan).toMatchObject({
+      attacked: true,
+      actionIndex: 1,
+      decision: { metrics: { expectedDamage: expect.any(Number) } },
+    })
+    expect(ordinaryPlan.decision?.metrics?.expectedDamage).toBeGreaterThan(0)
+
+    const magicalPlan = planFor(magicAttacker)
+    expect(magicalPlan).toMatchObject({
+      attacked: true,
+      actionIndex: 0,
+      decision: { metrics: { expectedDamage: expect.any(Number) } },
+    })
+    expect(magicalPlan.decision?.metrics?.expectedDamage)
+      .toBeGreaterThan(ordinaryPlan.decision?.metrics?.expectedDamage ?? 0)
+  })
+
+  it('scores structured Pack Tactics as advantage and cancels it against Dodge', () => {
+    const rat = token({
+      id: 'rat',
+      label: 'Giant Rat',
+      poolId: 'srd-5.1:giant-rat',
+      hp: 7,
+      maxHp: 7,
+    })
+    const ally = token({
+      id: 'rat-ally',
+      label: 'Giant Rat Ally',
+      poolId: 'srd-5.1:giant-rat',
+      x: 20,
+      hp: 7,
+      maxHp: 7,
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      x: 10,
+      hp: 20,
+      maxHp: 20,
+    })
+    const selectFiveFootBite: MonsterDecisionProvider = {
+      id: 'test:pack-tactics',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        const selected = candidate.id.startsWith('attack:hero-token:0:') &&
+          candidate.metrics.targetDistanceFeet === 5
+        return { candidateId: candidate.id, score: selected ? 10_000 : -10_000, reasons: [] }
+      },
+    }
+    const plan = (hero: Character, allyToken = ally) => planDnd5eMonsterTurn(
+      map([rat, allyToken, heroToken]),
+      rat,
+      [hero],
+      { decisionProvider: selectFiveFootBite },
+    )
+
+    expect(plan(character()).decision?.metrics?.hitProbability).toBeCloseTo(0.7975, 5)
+    expect(plan(character({
+      dnd5eCombatState: { dodgingTurnKey: 'combat:round:turn' },
+    })).decision?.metrics?.hitProbability).toBeCloseTo(0.55, 5)
+
+    const incapacitatedAlly = {
+      ...ally,
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'incapacitated',
+          targetId: ally.id,
+          source: { kind: 'system', rulesId: 'test-incapacitated' },
+        })],
+      },
+    }
+    expect(plan(character(), incapacitatedAlly).decision?.metrics?.hitProbability).toBeCloseTo(0.55, 5)
+    expect(plan(character(), { ...ally, hp: 0 }).decision?.metrics?.hitProbability).toBeCloseTo(0.55, 5)
+  })
+
+  it('plans Cult Fanatic Multiattack only in melee and keeps one ranged dagger candidate', () => {
+    const fanatic = token({
+      id: 'cult-fanatic',
+      label: 'Cult Fanatic',
+      poolId: 'srd-5.1:cult-fanatic',
+      hp: 22,
+      maxHp: 22,
+    })
+    const hero = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      hp: 20,
+      maxHp: 20,
+    })
+    const selectActionAtDistance = (
+      actionIndex: number,
+      distanceFeet: number,
+    ): MonsterDecisionProvider => ({
+      id: `test:cult-fanatic:${actionIndex}:${distanceFeet}`,
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        const selected = candidate.id.startsWith(`attack:${hero.id}:${actionIndex}:`) &&
+          candidate.metrics.targetDistanceFeet === distanceFeet
+        return {
+          candidateId: candidate.id,
+          score: selected ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    })
+
+    const melee = planDnd5eMonsterTurn(
+      map([fanatic, { ...hero, x: 10 }]),
+      fanatic,
+      [character()],
+      { decisionProvider: selectActionAtDistance(0, 5) },
+    )
+    expect(melee).toMatchObject({
+      attacked: true,
+      actionIndex: 0,
+      decision: { metrics: { targetDistanceFeet: 5 } },
+    })
+
+    const ranged = planDnd5eMonsterTurn(
+      map([fanatic, { ...hero, x: 40 }]),
+      fanatic,
+      [character()],
+      { decisionProvider: selectActionAtDistance(1, 20) },
+    )
+    expect(ranged).toMatchObject({
+      attacked: true,
+      actionIndex: 1,
+      decision: { metrics: { targetDistanceFeet: 20 } },
+    })
+  })
+
+  it('selects an authoritative recharge area action when a dragon can catch hostile targets without allies', () => {
+    const dragon = token({
+      id: 'dragon', label: '成年黑龙', poolId: 'srd-5.1:adult-black-dragon',
+      x: 5, y: 45, hp: 195, maxHp: 195,
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { 'acid-breath': true } },
+    })
+    const first = token({ id: 'first', label: '第一名英雄', type: 'player', characterId: 'first-character', x: 45, y: 45 })
+    const second = token({ id: 'second', label: '第二名英雄', type: 'player', characterId: 'second-character', x: 85, y: 45 })
+    const plan = planDnd5eMonsterTurn(map([dragon, first, second]), dragon, [
+      character({ id: 'first-character', currentHp: 120, maxHp: 120 }),
+      character({ id: 'second-character', currentHp: 120, maxHp: 120 }),
+    ])
+
+    expect(plan).toMatchObject({
+      attacked: false,
+      areaAction: {
+        actionId: 'acid-breath',
+        targetTokenIds: expect.arrayContaining([first.id, second.id]),
+        saveAbility: 'dex',
+        saveDc: 18,
+      },
+    })
+  })
+
+  it('actively selects the Behir lightning breath when it can cover multiple hostiles', () => {
+    const behir = token({
+      id: 'behir',
+      label: 'Behir',
+      poolId: 'srd-5.1:behir',
+      x: 5,
+      y: 45,
+      hp: 168,
+      maxHp: 168,
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { 'lightning-breath': true } },
+    })
+    const first = token({
+      id: 'first',
+      label: 'First Hero',
+      type: 'player',
+      characterId: 'first-character',
+      x: 25,
+      y: 45,
+    })
+    const second = token({
+      id: 'second',
+      label: 'Second Hero',
+      type: 'player',
+      characterId: 'second-character',
+      x: 35,
+      y: 45,
+    })
+    const plan = planDnd5eMonsterTurn(map([behir, first, second]), behir, [
+      character({ id: 'first-character', currentHp: 120, maxHp: 120 }),
+      character({ id: 'second-character', currentHp: 120, maxHp: 120 }),
+    ])
+
+    expect(plan.areaAction).toMatchObject({
+      actionId: 'lightning-breath',
+      targetTokenIds: expect.arrayContaining([first.id, second.id]),
+      saveAbility: 'dex',
+      saveDc: 16,
+      damage: { diceCount: 12, diceSides: 10, damageType: 'lightning' },
+    })
+  })
+
+  it.each([
+    {
+      label: 'Chimera',
+      poolId: 'srd-5.1:chimera',
+      hp: 114,
+      actionId: 'fire-breath',
+      saveAbility: 'dex',
+      saveDc: 15,
+      diceCount: 7,
+      diceSides: 8,
+      damageType: 'fire',
+    },
+    {
+      label: 'Dragon Turtle',
+      poolId: 'srd-5.1:dragon-turtle',
+      hp: 341,
+      actionId: 'steam-breath',
+      saveAbility: 'con',
+      saveDc: 18,
+      diceCount: 15,
+      diceSides: 6,
+      damageType: 'fire',
+    },
+    {
+      label: 'Young Blue Dragon',
+      poolId: 'srd-5.1:young-blue-dragon',
+      hp: 152,
+      actionId: 'lightning-breath',
+      saveAbility: 'dex',
+      saveDc: 16,
+      diceCount: 10,
+      diceSides: 10,
+      damageType: 'lightning',
+    },
+    {
+      label: 'Winter Wolf',
+      poolId: 'srd-5.1:winter-wolf',
+      hp: 75,
+      actionId: 'cold-breath',
+      saveAbility: 'dex',
+      saveDc: 12,
+      diceCount: 4,
+      diceSides: 8,
+      damageType: 'cold',
+    },
+  ])('selects the $label recharge breath when its area covers two hostiles', ({
+    label,
+    poolId,
+    hp,
+    actionId,
+    saveAbility,
+    saveDc,
+    diceCount,
+    diceSides,
+    damageType,
+  }) => {
+    const monster = token({
+      id: 'monster',
+      label,
+      poolId,
+      x: 5,
+      y: 45,
+      hp,
+      maxHp: hp,
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { [actionId]: true } },
+    })
+    const first = token({
+      id: 'first',
+      label: 'First Hero',
+      type: 'player',
+      characterId: 'first-character',
+      x: 25,
+      y: 45,
+    })
+    const second = token({
+      id: 'second',
+      label: 'Second Hero',
+      type: 'player',
+      characterId: 'second-character',
+      x: 35,
+      y: 45,
+    })
+    const plan = planDnd5eMonsterTurn(map([monster, first, second]), monster, [
+      character({ id: 'first-character', currentHp: 200, maxHp: 200 }),
+      character({ id: 'second-character', currentHp: 200, maxHp: 200 }),
+    ])
+
+    expect(plan.areaAction).toMatchObject({
+      actionId,
+      targetTokenIds: expect.arrayContaining([first.id, second.id]),
+      saveAbility,
+      saveDc,
+      damage: { diceCount, diceSides, damageType },
+    })
+  })
+
+  it('scores each shared-recharge breath variant and returns its stable variant id', () => {
+    const dragon = token({
+      id: 'dragon', label: '成年黄铜龙', poolId: 'srd-5.1:adult-brass-dragon',
+      x: 5, y: 45, hp: 172, maxHp: 172,
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { 'breath-weapons': true } },
+    })
+    const first = token({
+      id: 'first', label: '第一名英雄', type: 'player',
+      characterId: 'first-character', x: 45, y: 45,
+    })
+    const second = token({
+      id: 'second', label: '第二名英雄', type: 'player',
+      characterId: 'second-character', x: 85, y: 45,
+    })
+    const plan = planDnd5eMonsterTurn(map([dragon, first, second]), dragon, [
+      character({ id: 'first-character', currentHp: 120, maxHp: 120 }),
+      character({ id: 'second-character', currentHp: 120, maxHp: 120 }),
+    ])
+
+    expect(plan.areaAction).toMatchObject({
+      actionId: 'breath-weapons',
+      variantId: 'fire-breath',
+      actionName: expect.stringContaining('火焰吐息'),
+      targetTokenIds: expect.arrayContaining([first.id, second.id]),
+      damage: { diceCount: 13, diceSides: 6, damageType: 'fire' },
+    })
+    expect(plan.decision?.candidateId).toContain(':fire-breath:')
+  })
+
+  it('uses Sanctuary only on an unprotected ally when only its bonus action remains', () => {
+    const acolyte = token({
+      id: 'acolyte', label: 'Acolyte', poolId: 'srd-5.1:acolyte',
+      x: 5, y: 45, hp: 9, maxHp: 9,
+    })
+    const ally = token({
+      id: 'ally', label: 'Guard', poolId: 'srd-5.1:guard',
+      x: 25, y: 45, hp: 1, maxHp: 30,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player', characterId: 'hero',
+      x: 45, y: 45, hp: 1, maxHp: 100,
+    })
+    const economy = createDnd5eTurnEconomyCounts('turn', 30)
+    economy.action.current = 0
+
+    const plan = planDnd5eMonsterTurn(
+      map([acolyte, ally, hero]),
+      acolyte,
+      [character({ currentHp: 1, maxHp: 100 })],
+      { turnEconomy: economy },
+    )
+
+    expect(plan).toMatchObject({
+      attacked: false,
+      targetTokenId: ally.id,
+      spellCast: {
+        spellId: 'sanctuary',
+        targetTokenIds: [ally.id],
+        castingTime: 'bonus-action',
+      },
+      decision: {
+        candidateId: `support:${ally.id}:sanctuary:1`,
+      },
+    })
+    expect(plan.spellCast?.targetTokenIds).not.toContain(hero.id)
+
+    const protectedAcolyte = {
+      ...acolyte,
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eMechanicalEffect({
+          definitionId: 'srd-5.1:spell:sanctuary',
+          label: 'Sanctuary',
+          kind: 'buff',
+          source: { kind: 'spell', actorId: 'acolyte', rulesId: 'sanctuary' },
+          targetId: acolyte.id,
+        })],
+      },
+    }
+    const protectedAlly = {
+      ...ally,
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eMechanicalEffect({
+          definitionId: 'srd-5.1:spell:sanctuary',
+          label: 'Sanctuary',
+          kind: 'buff',
+          source: { kind: 'spell', actorId: 'acolyte', rulesId: 'sanctuary' },
+          targetId: ally.id,
+        })],
+      },
+    }
+    const repeated = planDnd5eMonsterTurn(
+      map([protectedAcolyte, protectedAlly, hero]),
+      protectedAcolyte,
+      [character({ currentHp: 1, maxHp: 100 })],
+      { turnEconomy: economy },
+    )
+    expect(repeated.spellCast?.spellId).not.toBe('sanctuary')
+    expect(repeated.decision?.candidateId ?? '').not.toContain(':sanctuary:')
   })
 
   it('uses Nimble Escape to leave melee reach and make a ranged attack without opportunity risk', () => {
@@ -368,6 +990,43 @@ describe('SRD monster 5e turn planner', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.distanceFeet).toBe(10)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === goblin.id)?.x).toBe(20)
+  })
+
+  it('stands a prone monster by adding the half-speed cost to its Headless movement transaction', () => {
+    const hero = character()
+    const goblin = token({
+      id: 'goblin', label: 'Goblin', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7,
+      dnd5eCombatState: {
+        conditions: ['prone'],
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'prone', targetId: 'goblin', source: { kind: 'system', rulesId: 'falling' },
+        })],
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token', label: hero.name, type: 'player', characterId: hero.id,
+      x: 50, hp: 20, maxHp: 20,
+    })
+    const resolved = resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map: map([goblin, heroToken]), characters: [hero],
+      initiativeOrder: [
+        { tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: goblin.id,
+      to: { x: 20, y: 0 },
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok || !resolved.result.ok) return
+    expect(resolved.result.state.combatants[goblin.id]).toMatchObject({
+      turn: { movementRemaining: 5 },
+    })
+    expect(resolved.result.state.combatants[goblin.id].conditions).not.toContain('prone')
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: goblin.id, resource: 'movement', amount: 25,
+    }))
   })
 
   it('settles a turned monster Dash and movement in one Headless transaction', () => {

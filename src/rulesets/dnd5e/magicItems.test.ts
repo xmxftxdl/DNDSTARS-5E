@@ -118,6 +118,17 @@ describe('SRD 5.1 magic items', () => {
     })
   })
 
+  it('keeps abstract equipment families out of the distributable item list', () => {
+    const ids = new Set(DND5E_SRD_ITEM_TEMPLATES.map((item) => item.id))
+    expect(ids.has('srd-5.1:magic-item:armor')).toBe(false)
+    expect(ids.has('srd-5.1:magic-item:shield')).toBe(false)
+    expect(ids.has('srd-5.1:magic-item:weapon')).toBe(false)
+    expect(ids.has('srd-5.1:magic-item:potion-of-healing')).toBe(false)
+    expect(ids.has('srd-5.1:magic-item:armor-chain-mail-plus-1')).toBe(true)
+    expect(ids.has('srd-5.1:magic-item:armor-chain-mail-plus-2')).toBe(true)
+    expect(ids.has('srd-5.1:magic-item:armor-chain-mail-plus-3')).toBe(true)
+  })
+
   it('uses the SRD healing dice for greater, superior and supreme potions', () => {
     expect(DND5E_SRD_MAGIC_CONSUMABLE_TEMPLATES.map((item) => item.use?.effect)).toEqual([
       { kind: 'healing', dice: { count: 4, sides: 4, bonus: 4 } },

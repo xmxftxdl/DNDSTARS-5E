@@ -21,6 +21,8 @@ interface MapDiceRollerProps {
   canCheck: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
+  combatRollsVisible?: boolean
+  onCombatRollsVisibleChange?: (visible: boolean) => void
   onRoll: (request: MapFreeDiceRollRequest) => Promise<void>
   onCheck: (payload: Dnd5eAbilityCheckPayload) => void
 }
@@ -31,6 +33,8 @@ export default function MapDiceRoller({
   canCheck,
   pending,
   turnEconomy,
+  combatRollsVisible = true,
+  onCombatRollsVisibleChange,
   onRoll,
   onCheck,
 }: MapDiceRollerProps) {
@@ -121,12 +125,29 @@ export default function MapDiceRoller({
           </div>
 
           {isDm && !asCheck && (
-            <label className="mt-2 block text-[10px] font-semibold text-slate-500">可见性
-              <select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
-                <option value="public">明骰 · 全房间可见</option>
-                <option value="dm">暗骰 · 仅 DM 可见</option>
-              </select>
-            </label>
+            <div className="mt-2 space-y-2">
+              <label className="block text-[10px] font-semibold text-slate-500">自由掷骰可见性
+                <select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
+                  <option value="public">明骰 · 全房间可见</option>
+                  <option value="dm">暗骰 · 仅 DM 可见</option>
+                </select>
+              </label>
+              <label className="flex items-start gap-2 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] px-3 py-2.5 text-xs text-fuchsia-100">
+                <input
+                  type="checkbox"
+                  checked={combatRollsVisible}
+                  onChange={(event) => onCombatRollsVisibleChange?.(event.target.checked)}
+                  className="mt-0.5 accent-fuchsia-400"
+                  data-testid="combat-roll-visibility-toggle"
+                />
+                <span>
+                  <strong className="block font-semibold">战斗投掷对玩家可见</strong>
+                  <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">
+                    关闭后，怪物的命中、豁免、充能与伤害骰只在 DM 端显示；暗骰 d20 可由 DM 确认或修正。
+                  </span>
+                </span>
+              </label>
+            </div>
           )}
 
           <label className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-300/10 bg-cyan-500/[0.04] px-3 py-2.5 text-xs font-semibold text-cyan-100">

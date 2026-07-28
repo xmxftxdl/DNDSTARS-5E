@@ -57,6 +57,7 @@ import {
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
+  type MapGeometryState,
 } from '../../lib/mapGeometry'
 import { createDnd5eCoreSpellArea, dnd5eWallOfFireDamagingSideCells, getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
 import { dnd5eCharacterClassLevel } from './multiclass'
@@ -84,6 +85,8 @@ export interface PreparedDnd5eSpellCast {
   actorToken: Token
   targetToken: Token
   targetTokens: readonly Token[]
+  guessedTargetCell?: { col: number; row: number }
+  blindTargetMiss: boolean
   projectileTargetIds?: readonly string[]
   spell: Dnd5eSrdSpellDefinition
   slotLevel: number
@@ -175,6 +178,40 @@ export function dnd5eRepellingBlastPushDestination(
     steps = step
   }
   return { to: destination, distanceFeet: steps * feetPerCell }
+}
+
+/**
+ * Resolves whether a forced horizontal move actually carries a creature off
+ * the ground it was standing on. A lower terrain value alone is insufficient:
+ * airborne or otherwise unsupported tokens require DM adjudication instead.
+ */
+export function dnd5eForcedMovementFall(input: {
+  geometry?: MapGeometryState
+  target: Pick<Token, 'x' | 'y' | 'elevationFeet'>
+  to: { x: number; y: number }
+}): {
+  sourceElevationFeet: number
+  sourceGroundElevationFeet: number
+  landingGroundElevationFeet: number
+  groundedAtSource: boolean
+  fallDistanceFeet: number
+  toElevationFeet?: number
+} {
+  const sourceGroundElevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, input.target, 0)
+  const sourceElevationFeet = mapGeometryTokenElevation(input.geometry, input.target)
+  const landingGroundElevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, input.to, 0)
+  const groundedAtSource = Math.abs(sourceElevationFeet - sourceGroundElevationFeet) <= 1e-4
+  const fallDistanceFeet = groundedAtSource
+    ? Math.max(0, sourceElevationFeet - landingGroundElevationFeet)
+    : 0
+  return {
+    sourceElevationFeet,
+    sourceGroundElevationFeet,
+    landingGroundElevationFeet,
+    groundedAtSource,
+    fallDistanceFeet,
+    toElevationFeet: fallDistanceFeet > 0 ? landingGroundElevationFeet : undefined,
+  }
 }
 
 export function prepareDnd5eSpellCast(input: {
@@ -379,13 +416,99 @@ export function prepareDnd5eSpellCast(input: {
     : dnd5eSpellDiceCount(spell, actor.level, slotLevel)
   const projectileCount = dnd5eSpellProjectileCount(spell, actor.level, slotLevel)
   const repeatedTargets = dnd5eSpellAllowsRepeatedTargets(spell)
-  const projectileTargetIds = repeatedTargets ? payload.projectileTargetIds : undefined
+  const guessedTargetCell = payload.guessedTargetCell
+  let projectileTargetIds = repeatedTargets ? payload.projectileTargetIds : undefined
   if (
-    (repeatedTargets && projectileTargetIds?.length !== projectileCount) ||
+    (guessedTargetCell == null && repeatedTargets && projectileTargetIds?.length !== projectileCount) ||
+    (guessedTargetCell != null && (payload.projectileTargetIds?.length ?? 0) > 0) ||
     (!repeatedTargets && (payload.projectileTargetIds?.length ?? 0) > 0)
   ) return { ok: false, reason: 'invalid-target' }
   const persistentArea = spell.effect === 'persistent-area'
-  let requestedTargetIds = persistentArea || (spell.area && spell.target === 'area')
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  let blindTargetMiss = false
+  let guessedTargetId: string | undefined
+  if (guessedTargetCell != null) {
+    const guessedSpiritualWeapon = spell.id === 'spiritual-weapon' && sustainedAttack == null
+    const guessedDispelMagic = spell.effect === 'dispel-magic'
+    const guessedSanctuary = spell.id === 'sanctuary'
+    const guessedAnyCreature = guessedDispelMagic || guessedSanctuary
+    const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
+    const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
+    if (
+      spell.allowsGuessedTargetCell !== true ||
+      (spell.effect !== 'spell-attack' && spell.effect !== 'saving-throw' &&
+        !guessedDispelMagic && !guessedSanctuary) ||
+      (spell.target !== 'hostile' && !guessedAnyCreature) ||
+      (spell.area != null && !guessedSpiritualWeapon) ||
+      sustainedAttack != null ||
+      metamagic?.kind === 'twinned' ||
+      payload.targetTokenId !== '' ||
+      (payload.targetTokenIds?.length ?? 0) !== 0 ||
+      (input.action.targetTokenId != null && input.action.targetTokenId !== '') ||
+      (input.action.targetTokenIds?.length ?? 0) !== 0 ||
+      input.action.targetCell?.col !== guessedTargetCell.col ||
+      input.action.targetCell?.row !== guessedTargetCell.row ||
+      !Number.isInteger(guessedTargetCell.col) ||
+      !Number.isInteger(guessedTargetCell.row) ||
+      guessedTargetCell.col < 0 ||
+      guessedTargetCell.row < 0 ||
+      guessedTargetCell.col >= columns ||
+      guessedTargetCell.row >= rows
+    ) return { ok: false, reason: 'invalid-target' }
+    const guessedPoint = tokenCenterForAnchorCell(guessedTargetCell, { size: 1 }, input.map)
+    const guessedElevation = mapGeometryTerrainElevationAtPoint(geometry, guessedPoint)
+    const guessedToken = {
+      ...actorToken,
+      id: `${actorToken.id}:guessed-target`,
+      characterId: undefined,
+      type: 'enemy' as const,
+      size: 1,
+      ...guessedPoint,
+      elevationFeet: guessedElevation,
+    }
+    const spiritualWeaponOrigin = guessedSpiritualWeapon && payload.areaTargetCell
+      ? tokenCenterForAnchorCell(payload.areaTargetCell, { size: 1 }, input.map)
+      : undefined
+    if (guessedSpiritualWeapon && !spiritualWeaponOrigin) return { ok: false, reason: 'invalid-target' }
+    const invocationRange = spell.id === 'eldritch-blast' && invocations.includes('eldritch-spear')
+      ? 300
+      : guessedSpiritualWeapon
+        ? spell.sustainedAttack?.rangeFeet ?? 5
+        : spell.rangeFeet
+    const placementRange = metamagic?.kind === 'distant' ? invocationRange * 2 : invocationRange
+    const guessedOriginToken = spiritualWeaponOrigin
+      ? { ...actorToken, ...spiritualWeaponOrigin, size: 1 }
+      : actorToken
+    const distanceFeet = tokenFootprintDistanceCells(guessedOriginToken, guessedToken, input.map) *
+      Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    if (distanceFeet > placementRange) return { ok: false, reason: 'target-out-of-range' }
+    if (mapGeometryLineOfEffectBlocked({
+      geometry,
+      from: spiritualWeaponOrigin ?? actorToken,
+      to: guessedPoint,
+      fromElevationFeet: spiritualWeaponOrigin
+        ? mapGeometryTerrainElevationAtPoint(geometry, spiritualWeaponOrigin)
+        : mapGeometryTokenElevation(geometry, actorToken),
+      toElevationFeet: guessedElevation,
+    })) return { ok: false, reason: 'effect-line-blocked' }
+    const guessedKey = cellKey(guessedTargetCell)
+    guessedTargetId = input.map.tokens
+      .filter((candidate) =>
+        candidate.type !== 'obstacle' &&
+        candidate.id !== actorToken.id &&
+        (guessedAnyCreature || areOpposedCombatTokens(actorToken, candidate)) &&
+        tokenOccupiedCellsAt(candidate, input.map, candidate).some((cell) => cellKey(cell) === guessedKey),
+      )
+      .sort((left, right) => left.id.localeCompare(right.id))[0]?.id
+    blindTargetMiss = guessedTargetId == null
+    if (guessedTargetId && repeatedTargets && projectileCount != null) {
+      const authoritativeTargetId = guessedTargetId
+      projectileTargetIds = Array.from({ length: projectileCount }, () => authoritativeTargetId)
+    }
+  }
+  let requestedTargetIds = guessedTargetCell != null
+    ? guessedTargetId ? [guessedTargetId] : []
+    : persistentArea || (spell.area && spell.target === 'area')
     ? []
     : [...new Set(
         projectileTargetIds?.length
@@ -422,7 +545,8 @@ export function prepareDnd5eSpellCast(input: {
       : 1
     : metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, slotLevel, actor.level)
   if (
-    (!persistentArea && !spell.area && requestedTargetIds.length < 1) || requestedTargetIds.length > maximumTargets ||
+    (!persistentArea && spell.target !== 'area' && requestedTargetIds.length < 1 && !blindTargetMiss) ||
+    requestedTargetIds.length > maximumTargets ||
     (metamagic?.kind === 'twinned' && requestedTargetIds.length !== 2)
   ) {
     return { ok: false, reason: 'invalid-target' }
@@ -438,7 +562,6 @@ export function prepareDnd5eSpellCast(input: {
     return { ok: false, reason: 'invalid-target' }
   }
   let validTargetTokens = targetTokens as Token[]
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
   let areaCells: readonly { col: number; row: number }[] | undefined
   let areaAnchorCell: { col: number; row: number } | undefined
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
@@ -474,6 +597,23 @@ export function prepareDnd5eSpellCast(input: {
         y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
       }
       const areaPointElevation = mapGeometryTerrainElevationAtPoint(geometry, areaPoint)
+      if (
+        spell.requiresVisibleTarget === 'placement' &&
+        !mapGeometryCanSeeToken({
+          geometry,
+          map: input.map,
+          viewer: actorToken,
+          target: {
+            ...actorToken,
+            id: `${actorToken.id}:spell-placement`,
+            characterId: undefined,
+            ...areaPoint,
+            elevationFeet: areaPointElevation,
+          },
+          forceEnabled: true,
+          fallbackRangeFeet: areaTargeting.placeRangeFeet ?? spell.rangeFeet,
+        })
+      ) return { ok: false, reason: 'invalid-target' }
       if (spell.effect === 'teleport') {
         const destination = tokenCenterForAnchorCell(areaCell, actorToken, input.map)
         const destinationFootprint = tokenOccupiedCellsAt(actorToken, input.map, destination)
@@ -589,6 +729,21 @@ export function prepareDnd5eSpellCast(input: {
       return { ok: false, reason: 'target-out-of-range' }
     }
   }
+  if (
+    guessedTargetCell == null &&
+    spell.requiresVisibleTarget !== 'placement' &&
+    (spell.allowsGuessedTargetCell === true || spell.requiresVisibleTarget != null) &&
+    validTargetTokens.some((target, targetIndex) =>
+      (spell.requiresVisibleTarget !== 'primary' || targetIndex === 0) &&
+      !mapGeometryCanSeeToken({
+      geometry,
+      map: input.map,
+      viewer: actorToken,
+      target,
+      forceEnabled: true,
+      fallbackRangeFeet: metamagic?.kind === 'distant' ? spell.rangeFeet * 2 : spell.rangeFeet,
+    }))
+  ) return { ok: false, reason: 'invalid-target' }
   if (spell.maximumTargetSeparationFeet != null && validTargetTokens.length > 1) {
     for (let leftIndex = 0; leftIndex < validTargetTokens.length; leftIndex += 1) {
       for (let rightIndex = leftIndex + 1; rightIndex < validTargetTokens.length; rightIndex += 1) {
@@ -945,6 +1100,8 @@ export function prepareDnd5eSpellCast(input: {
       actorToken,
       targetToken,
       targetTokens: validTargetTokens,
+      guessedTargetCell,
+      blindTargetMiss,
       projectileTargetIds,
       spell,
       slotLevel,
@@ -1125,6 +1282,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     castingClassId: prepared.castingClassId,
     targetId: prepared.targetToken.id,
     targetIds: prepared.targetTokens.map((target) => target.id),
+    blindTargetMiss: prepared.blindTargetMiss || undefined,
     projectileTargetIds: prepared.projectileTargetIds,
     sculptedTargetIds: prepared.sculptedTargetIds,
     metamagic: prepared.metamagic,

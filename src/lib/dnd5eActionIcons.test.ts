@@ -13,9 +13,10 @@ describe('D&D 5e combat action icon registry', () => {
   })
 
   it('为全部戏法提供专属绘制缩略图', () => {
-    const cantrips = DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.level === 0)
-    expect(cantrips).toHaveLength(24)
-    expect(cantrips.filter((spell) => !dnd5eSpellActionIcon(spell).asset).map((spell) => spell.id)).toEqual([])
+    expect(DND5E_SRD_SPELL_CATALOG).toHaveLength(319)
+    for (const spell of DND5E_SRD_SPELL_CATALOG) {
+      expect(dnd5eSpellActionIcon(spell).asset).toBe(`/assets/icons/${spell.id}-spell-action.png`)
+    }
   })
 
   it('为全部核心物品模板生成稳定图标', () => {
@@ -23,6 +24,24 @@ describe('D&D 5e combat action icon registry', () => {
     expect(specs).toHaveLength(DND5E_SRD_ITEM_TEMPLATES.length)
     expect(specs.every((spec) => spec.key.startsWith('item:') && spec.accent.startsWith('#'))).toBe(true)
     expect(new Set(specs.map((spec) => spec.key)).size).toBe(DND5E_SRD_ITEM_TEMPLATES.length)
+  })
+
+  it('为绘制魔法物品绑定前景资源与稀有度背景', () => {
+    const adamantineArmor = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:adamantine-armor')
+    const amuletOfHealth = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:amulet-of-health')
+    expect(adamantineArmor).toBeDefined()
+    expect(amuletOfHealth).toBeDefined()
+    expect(dnd5eItemActionIcon(adamantineArmor!)).toMatchObject({
+      asset: '/assets/icons/adamantine-armor-item-action.png',
+      assetMode: 'foreground',
+      rarityBackdropId: 'uncommon',
+      background: '#237A4A',
+    })
+    expect(dnd5eItemActionIcon(amuletOfHealth!)).toMatchObject({
+      asset: '/assets/icons/amulet-of-health-item-action.png',
+      rarityBackdropId: 'rare',
+      background: '#2563A8',
+    })
   })
 
   it('优先按伤害与用途选择视觉母题', () => {
@@ -172,12 +191,97 @@ describe('D&D 5e combat action icon registry', () => {
       darkvision: '/assets/icons/darkvision-spell-action.png',
       darkness: '/assets/icons/darkness-spell-action.png',
       blur: '/assets/icons/blur-spell-action.png',
+      knock: '/assets/icons/knock-spell-action.png',
+      barkskin: '/assets/icons/barkskin-spell-action.png',
+      invisibility: '/assets/icons/invisibility-spell-action.png',
+      aid: '/assets/icons/aid-spell-action.png',
+      moonbeam: '/assets/icons/moonbeam-spell-action.png',
+      'animate-dead': '/assets/icons/animate-dead-spell-action.png',
+      'stinking-cloud': '/assets/icons/stinking-cloud-spell-action.png',
+      'hypnotic-pattern': '/assets/icons/hypnotic-pattern-spell-action.png',
+      'beacon-of-hope': '/assets/icons/beacon-of-hope-spell-action.png',
+      'bestow-curse': '/assets/icons/bestow-curse-spell-action.png',
+      blink: '/assets/icons/blink-spell-action.png',
+      'call-lightning': '/assets/icons/call-lightning-spell-action.png',
+      clairvoyance: '/assets/icons/clairvoyance-spell-action.png',
+      'conjure-animals': '/assets/icons/conjure-animals-spell-action.png',
+      counterspell: '/assets/icons/counterspell-spell-action.png',
+      'create-food-and-water': '/assets/icons/create-food-and-water-spell-action.png',
+      daylight: '/assets/icons/daylight-spell-action.png',
+      'dispel-magic': '/assets/icons/dispel-magic-spell-action.png',
+      fear: '/assets/icons/fear-spell-action.png',
+      fly: '/assets/icons/fly-spell-action.png',
+      'gaseous-form': '/assets/icons/gaseous-form-spell-action.png',
+      'glyph-of-warding': '/assets/icons/glyph-of-warding-spell-action.png',
+      haste: '/assets/icons/haste-spell-action.png',
+      'lightning-bolt': '/assets/icons/lightning-bolt-spell-action.png',
+      'magic-circle': '/assets/icons/magic-circle-spell-action.png',
+      'major-image': '/assets/icons/major-image-spell-action.png',
+      'mass-healing-word': '/assets/icons/mass-healing-word-spell-action.png',
+      'meld-into-stone': '/assets/icons/meld-into-stone-spell-action.png',
+      nondetection: '/assets/icons/nondetection-spell-action.png',
+      'phantom-steed': '/assets/icons/phantom-steed-spell-action.png',
+      'plant-growth': '/assets/icons/plant-growth-spell-action.png',
+      'protection-from-energy': '/assets/icons/protection-from-energy-spell-action.png',
+      'remove-curse': '/assets/icons/remove-curse-spell-action.png',
+      revivify: '/assets/icons/revivify-spell-action.png',
+      sending: '/assets/icons/sending-spell-action.png',
+      'sleet-storm': '/assets/icons/sleet-storm-spell-action.png',
+      slow: '/assets/icons/slow-spell-action.png',
+      'speak-with-dead': '/assets/icons/speak-with-dead-spell-action.png',
+      'speak-with-plants': '/assets/icons/speak-with-plants-spell-action.png',
+      'spirit-guardians': '/assets/icons/spirit-guardians-spell-action.png',
+      'tiny-hut': '/assets/icons/tiny-hut-spell-action.png',
+      tongues: '/assets/icons/tongues-spell-action.png',
+      'vampiric-touch': '/assets/icons/vampiric-touch-spell-action.png',
+      'water-breathing': '/assets/icons/water-breathing-spell-action.png',
+      'water-walk': '/assets/icons/water-walk-spell-action.png',
+      'wind-wall': '/assets/icons/wind-wall-spell-action.png',
+      'arcane-eye': '/assets/icons/arcane-eye-spell-action.png',
+      banishment: '/assets/icons/banishment-spell-action.png',
+      'black-tentacles': '/assets/icons/black-tentacles-spell-action.png',
+      blight: '/assets/icons/blight-spell-action.png',
+      compulsion: '/assets/icons/compulsion-spell-action.png',
+      confusion: '/assets/icons/confusion-spell-action.png',
+      'conjure-minor-elementals': '/assets/icons/conjure-minor-elementals-spell-action.png',
+      'conjure-woodland-beings': '/assets/icons/conjure-woodland-beings-spell-action.png',
+      'control-water': '/assets/icons/control-water-spell-action.png',
+      'death-ward': '/assets/icons/death-ward-spell-action.png',
+      'dimension-door': '/assets/icons/dimension-door-spell-action.png',
+      divination: '/assets/icons/divination-spell-action.png',
+      'dominate-beast': '/assets/icons/dominate-beast-spell-action.png',
+      fabricate: '/assets/icons/fabricate-spell-action.png',
     }
     for (const [id, asset] of Object.entries(expected)) {
       expect(dnd5eSpellActionIcon({ id, name: id, castingClassId: 'wizard' })).toMatchObject({
         asset,
         assetMode: 'foreground',
         classBackdropId: 'wizard',
+      })
+    }
+  })
+
+  it('为九种独立的强化护甲绑定各自图标和稀有度背景', () => {
+    const cases = [
+      ['armor-chain-mail-plus-1', 'armor-chain-mail-plus-1-item-action.png', 'rare', '#2563A8'],
+      ['armor-chain-mail-plus-2', 'armor-chain-mail-plus-2-item-action.png', 'very-rare', '#7138A8'],
+      ['armor-chain-mail-plus-3', 'armor-chain-mail-plus-3-item-action.png', 'legendary', '#B86A12'],
+      ['armor-scale-mail-plus-1', 'armor-scale-mail-plus-1-item-action.png', 'rare', '#2563A8'],
+      ['armor-scale-mail-plus-2', 'armor-scale-mail-plus-2-item-action.png', 'very-rare', '#7138A8'],
+      ['armor-scale-mail-plus-3', 'armor-scale-mail-plus-3-item-action.png', 'legendary', '#B86A12'],
+      ['armor-leather-armor-plus-1', 'armor-leather-armor-plus-1-item-action.png', 'rare', '#2563A8'],
+      ['armor-leather-armor-plus-2', 'armor-leather-armor-plus-2-item-action.png', 'very-rare', '#7138A8'],
+      ['armor-leather-armor-plus-3', 'armor-leather-armor-plus-3-item-action.png', 'legendary', '#B86A12'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
       })
     }
   })

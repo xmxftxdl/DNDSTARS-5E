@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Download, ImagePlus, Plus, Save, Trash2, Upload, X } from 'lucide-react'
+import { ClipboardPaste, Download, ImagePlus, Plus, Save, Trash2, Upload, X } from 'lucide-react'
 import { useCustomMonsterStore } from '../../store/customMonsters'
 import {
   DND5E_DAMAGE_TYPES,
@@ -13,17 +13,33 @@ import {
 } from '../../rulesets/dnd5e/customMonsterWorkshop'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eMonsterSize } from '../../rulesets/dnd5e/monsters'
+import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
+import { parseDnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsterSchema'
 import { DND5E_MONSTER_TARGET_PRIORITY_OPTIONS } from '../../rulesets/dnd5e/monsterAutomation'
 import { DND5E_STANDARD_CONDITIONS } from '../../rulesets/dnd5e/conditions'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { DND5E_DAMAGE_TYPE_LABELS } from '../../rulesets/dnd5e/damageTypes'
+import {
+  parseDnd5ePastedMonster,
+  type Dnd5ePastedMonsterParseResult,
+} from '../../rulesets/dnd5e/monsterStatBlockPaste'
+import { DND5E_SRD_SPELL_CATALOG } from '../../rulesets/dnd5e/spellCatalog'
+import {
+  parseDnd5eFeatureMechanicText,
+  parseDnd5eSpellListText,
+} from '../../rulesets/dnd5e/monsterContentAutoParser'
 
 const ABILITY_LABELS: readonly [AbilityKey, string][] = [
   ['str', '力量'], ['dex', '敏捷'], ['con', '体质'], ['int', '智力'], ['wis', '感知'], ['cha', '魅力'],
 ]
 const SIZES: Dnd5eMonsterSize[] = ['微型', '小型', '中型', '大型', '超大型', '巨型']
+const SPELL_CATALOG_BY_ID = new Map(DND5E_SRD_SPELL_CATALOG.map((spell) => [spell.id, spell]))
+const SPELL_CATALOG_BY_LEVEL = Array.from({ length: 10 }, (_, level) =>
+  DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.level === level))
 const MECHANIC_TRIGGERS = [
   ['turn-start', '回合开始'], ['turn-end', '回合结束'], ['after-hit', '攻击命中后'],
   ['after-miss', '攻击未命中时'], ['when-hit', '被命中时'], ['after-damaged', '受到伤害后'],
+  ['after-dealt-damage', '造成伤害后（攻击／法术／其他伤害）'],
   ['saving-throw-magic', '对抗魔法的豁免时'], ['saving-throw-physical', '对抗物理的豁免时'],
   ['movement', '移动指定距离时'], ['phase-transition', '阶段转换'],
 ] as const
@@ -47,15 +63,38 @@ function inputClass(): string {
   return 'w-full rounded-lg border border-white/10 bg-void-950/80 px-2.5 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500'
 }
 
-export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const monsters = useCustomMonsterStore((state) => state.monsters)
-  const upsertMonster = useCustomMonsterStore((state) => state.upsertMonster)
-  const importMonsters = useCustomMonsterStore((state) => state.importMonsters)
-  const removeMonster = useCustomMonsterStore((state) => state.removeMonster)
+interface Props {
+  open: boolean
+  onClose: () => void
+  /** 传入后进入插件受控模式；未传入时沿用房间共享怪物目录。 */
+  monsters?: readonly Dnd5eMonsterStatBlock[]
+  onMonstersChange?: (monsters: Dnd5eMonsterStatBlock[]) => void
+  context?: 'room' | 'plugin'
+}
+
+export default function Dnd5eMonsterWorkshopDialog({
+  open,
+  onClose,
+  monsters: controlledMonsters,
+  onMonstersChange,
+  context = 'room',
+}: Props) {
+  const roomMonsters = useCustomMonsterStore((state) => state.monsters)
+  const upsertRoomMonster = useCustomMonsterStore((state) => state.upsertMonster)
+  const importRoomMonsters = useCustomMonsterStore((state) => state.importMonsters)
+  const removeRoomMonster = useCustomMonsterStore((state) => state.removeMonster)
+  const monsters = controlledMonsters ? [...controlledMonsters] : roomMonsters
+  const pluginMode = context === 'plugin' && !!onMonstersChange
   const [draft, setDraft] = useState<Dnd5eCustomMonsterDraft>(() => createDnd5eCustomMonsterDraft())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pastedText, setPastedText] = useState('')
+  const [pasteResult, setPasteResult] = useState<Dnd5ePastedMonsterParseResult>()
+  const [pasteError, setPasteError] = useState<string>()
+  const [featureParseText, setFeatureParseText] = useState('')
+  const [spellParseText, setSpellParseText] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
   const tokenPortraitRef = useRef<HTMLInputElement>(null)
   const initiativePortraitRef = useRef<HTMLInputElement>(null)
@@ -89,15 +128,73 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
     }
   }
 
+  const analyzePastedMonster = () => {
+    setPasteError(undefined)
+    try {
+      setPasteResult(parseDnd5ePastedMonster(pastedText))
+    } catch (error) {
+      setPasteResult(undefined)
+      setPasteError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const applyPastedMonster = () => {
+    if (!pasteResult) return
+    setSelectedId(null)
+    setDraft(pasteResult.draft)
+    setMessage(`已自动填写 ${pasteResult.recognizedFields.length} 类字段；保存前请核对标记为手动裁定的复杂能力。`)
+    setPasteOpen(false)
+    setPasteResult(undefined)
+    setPasteError(undefined)
+  }
+
+  const parseFeature = () => {
+    const result = parseDnd5eFeatureMechanicText(featureParseText)
+    if (!result.mechanic) {
+      setMessage(result.warnings.join('；'))
+      return
+    }
+    patchDraft('headlessMechanics', [...draft.headlessMechanics, result.mechanic])
+    setFeatureParseText('')
+    setMessage(result.warnings.length > 0
+      ? `已解析特性，但仍需核对：${result.warnings.join('；')}`
+      : `已将“${result.mechanic.name}”转换为 Headless 机制。`)
+  }
+
+  const parseSpells = () => {
+    const result = parseDnd5eSpellListText(spellParseText)
+    if (result.spells.length === 0) {
+      setMessage(result.unknown.length > 0 ? `未在 SRD 5.1 中识别：${result.unknown.join('、')}` : '请先粘贴法术名称。')
+      return
+    }
+    const byId = new Map(draft.spells.map((spell) => [spell.id, spell]))
+    for (const spell of result.spells) byId.set(spell.id, spell)
+    patchDraft('spells', [...byId.values()])
+    patchDraft('spellcastingEnabled', true)
+    setSpellParseText('')
+    setMessage(`已识别 ${result.spells.length} 个 SRD 5.1 法术${result.unknown.length > 0 ? `；未识别：${result.unknown.join('、')}` : ''}。`)
+  }
+
   const save = async () => {
     setBusy(true)
     setMessage(null)
     try {
       const monster = buildDnd5eCustomMonster(draft)
-      await upsertMonster(monster)
+      if (pluginMode) {
+        const nextMonsters = [
+          ...monsters.filter((entry) => entry.id !== monster.id && entry.slug !== monster.slug),
+          monster,
+        ].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+        if (nextMonsters.length > 128) throw new Error('单个扩展最多包含 128 个怪物模板。')
+        onMonstersChange(nextMonsters)
+      } else {
+        await upsertRoomMonster(monster)
+      }
       setSelectedId(monster.id)
       setDraft(dnd5eCustomMonsterDraftFromStatBlock(monster))
-      setMessage(`已保存“${monster.name}”，房间内玩家会自动同步。`)
+      setMessage(pluginMode
+        ? `已将“${monster.name}”加入扩展草稿。`
+        : `已保存“${monster.name}”，房间内玩家会自动同步。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -125,8 +222,29 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
           ? (raw as { monsters: unknown[] }).monsters
           : null
       if (!entries) throw new Error('导入文件必须是怪物数组，或包含 monsters 数组的对象')
-      const result = await importMonsters(entries)
-      setMessage(`导入完成：新增 ${result.added}，替换 ${result.replaced}。`)
+      if (pluginMode) {
+        const parsedEntries = entries.map((entry) => {
+          const parsed = parseDnd5eMonsterStatBlock(entry)
+          if (!parsed.ok || parsed.value.source !== 'DM 自定义') {
+            throw new Error(parsed.ok ? '插件怪物必须标记为 DM 自定义' : parsed.issues[0]?.message ?? '怪物格式无效')
+          }
+          return parsed.value
+        })
+        const byId = new Map(monsters.map((monster) => [monster.id, monster]))
+        let added = 0
+        let replaced = 0
+        for (const monster of parsedEntries) {
+          if (byId.has(monster.id)) replaced += 1
+          else added += 1
+          byId.set(monster.id, monster)
+        }
+        if (byId.size > 128) throw new Error('单个扩展最多包含 128 个怪物模板。')
+        onMonstersChange([...byId.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')))
+        setMessage(`导入完成：新增 ${added}，替换 ${replaced}。`)
+      } else {
+        const result = await importRoomMonsters(entries)
+        setMessage(`导入完成：新增 ${result.added}，替换 ${result.replaced}。`)
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -144,12 +262,14 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
       >
         <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black/15">
           <div className="border-b border-white/10 p-3">
-            <p className="font-semibold text-slate-100">房间怪物</p>
-            <p className="mt-1 text-xs text-slate-500">{monsters.length} / 512 个自定义模板</p>
+            <p className="font-semibold text-slate-100">{pluginMode ? '扩展怪物' : '房间怪物'}</p>
+            <p className="mt-1 text-xs text-slate-500">{monsters.length} / {pluginMode ? 128 : 512} 个自定义模板</p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {monsters.length === 0 ? (
-              <p className="px-2 py-8 text-center text-xs leading-relaxed text-slate-500">尚无自定义怪物。保存后会同步给本房间玩家。</p>
+              <p className="px-2 py-8 text-center text-xs leading-relaxed text-slate-500">
+                {pluginMode ? '尚无扩展怪物。保存后会进入当前插件草稿。' : '尚无自定义怪物。保存后会同步给本房间玩家。'}
+              </p>
             ) : monsters.map((monster) => (
               <button
                 key={monster.id}
@@ -168,7 +288,7 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
             </button>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => importRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg bg-white/5 px-2 py-2 text-xs text-slate-300 hover:bg-white/10"><Upload className="h-3.5 w-3.5" /> 导入</button>
-              <button type="button" disabled={monsters.length === 0} onClick={() => downloadJson('dndstars-room-monsters.json', { schemaVersion: 1, monsters })} className="flex items-center justify-center gap-1 rounded-lg bg-white/5 px-2 py-2 text-xs text-slate-300 hover:bg-white/10 disabled:opacity-40"><Download className="h-3.5 w-3.5" /> 导出</button>
+              <button type="button" disabled={monsters.length === 0} onClick={() => downloadJson(pluginMode ? 'dndstars-plugin-monsters.json' : 'dndstars-room-monsters.json', { schemaVersion: 1, monsters })} className="flex items-center justify-center gap-1 rounded-lg bg-white/5 px-2 py-2 text-xs text-slate-300 hover:bg-white/10 disabled:opacity-40"><Download className="h-3.5 w-3.5" /> 导出</button>
             </div>
             <input ref={importRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importFile(event.target.files?.[0])} />
           </div>
@@ -178,8 +298,16 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
           <header className="flex items-center gap-3 border-b border-white/10 px-5 py-3">
             <div className="min-w-0 flex-1">
               <h2 className="font-semibold text-slate-100">怪物工坊</h2>
-              <p className="text-xs text-slate-500">表单会生成结构化 stat block，并通过 monsterSchema 后才能写入房间。</p>
+              <p className="text-xs text-slate-500">表单会生成结构化 stat block，并通过 monsterSchema 后才能{pluginMode ? '写入扩展' : '写入房间'}。</p>
             </div>
+            <button
+              type="button"
+              onClick={() => setPasteOpen((current) => !current)}
+              className="flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" />
+              粘贴自动填写
+            </button>
             <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
           </header>
 
@@ -187,6 +315,64 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
             data-testid="monster-workshop-scroll-region"
             className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-5 [scrollbar-gutter:stable]"
           >
+            {pasteOpen && (
+              <section
+                data-testid="monster-stat-block-paste"
+                className="rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.05] p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-cyan-100">粘贴 D&D 5e 怪物属性块</h3>
+                    <p className="mt-1 text-xs leading-5 text-cyan-100/60">
+                      支持 monsterSchema JSON，以及常见中英文属性块。解析只会生成声明式数据，不会执行粘贴内容中的代码。
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setPasteOpen(false)} className="rounded-lg p-1.5 text-cyan-100/60 hover:bg-white/5 hover:text-cyan-100"><X className="h-4 w-4" /></button>
+                </div>
+                <textarea
+                  data-testid="monster-stat-block-paste-input"
+                  rows={12}
+                  value={pastedText}
+                  onChange={(event) => {
+                    setPastedText(event.target.value)
+                    setPasteResult(undefined)
+                    setPasteError(undefined)
+                  }}
+                  placeholder={'例如：\nGoblin\nSmall humanoid (goblinoid), neutral evil\nArmor Class 15\nHit Points 7 (2d6)\nSpeed 30 ft.\n…'}
+                  className={`mt-3 resize-y font-mono text-xs leading-5 ${inputClass()}`}
+                />
+                {pasteError && <p className="mt-2 text-xs text-rose-300">{pasteError}</p>}
+                {pasteResult && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs">
+                    <p className="font-semibold text-emerald-200">
+                      已识别：{pasteResult.recognizedFields.join('、') || '无'}
+                    </p>
+                    <p className="mt-1 text-slate-400">
+                      预览：{pasteResult.draft.name} · AC {pasteResult.draft.armorClass} · HP {pasteResult.draft.hitPointsAverage}
+                      {' '}· CR {pasteResult.draft.challengeRating} · {pasteResult.draft.actions.length} 个动作
+                    </p>
+                    {pasteResult.warnings.length > 0 && (
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-200">
+                        {pasteResult.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                )}
+                <div className="mt-3 flex justify-end gap-2">
+                  <button type="button" onClick={analyzePastedMonster} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">
+                    分析并预览
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!pasteResult}
+                    onClick={applyPastedMonster}
+                    className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    覆盖当前表单
+                  </button>
+                </div>
+              </section>
+            )}
             {preservesAdvancedFields && (
               <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
                 此怪物含表单未直接展示的高级字段（如豁免、技能、感官、抗性、多段伤害、反应、传奇动作或施法）。保存时这些字段会原样保留；如需修改，请导出 JSON 后编辑并重新导入。
@@ -265,7 +451,7 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {DND5E_DAMAGE_TYPES.map((type) => {
                       const checked = draft[key].includes(type)
-                      return <button key={type} type="button" onClick={() => patchDraft(key, checked ? draft[key].filter((entry) => entry !== type) : [...draft[key], type])} className={`rounded-full border px-2 py-1 text-[11px] ${checked ? 'border-arcane-400/40 bg-arcane-500/15 text-arcane-100' : 'border-white/10 text-slate-500 hover:bg-white/5'}`}>{type}</button>
+                      return <button key={type} type="button" onClick={() => patchDraft(key, checked ? draft[key].filter((entry) => entry !== type) : [...draft[key], type])} className={`rounded-full border px-2 py-1 text-[11px] ${checked ? 'border-arcane-400/40 bg-arcane-500/15 text-arcane-100' : 'border-white/10 text-slate-500 hover:bg-white/5'}`}>{DND5E_DAMAGE_TYPE_LABELS[type]}</button>
                     })}
                   </div>
                 </div>
@@ -312,10 +498,49 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                 <label className="mt-2 block text-xs text-slate-400">施法说明<textarea rows={2} value={draft.spellcastingDescription} onChange={(event) => patchDraft('spellcastingDescription', event.target.value)} className={`mt-1 resize-y ${inputClass()}`} /></label>
                 <p className="mt-3 text-[11px] font-semibold text-slate-500">1–9 环法术位</p>
                 <div className="mt-1 grid grid-cols-3 gap-2 sm:grid-cols-9">{Array.from({ length: 9 }, (_, index) => String(index + 1)).map((level) => <label key={level} className="text-center text-[10px] text-slate-500">{level} 环<input type="number" min={0} max={99} value={draft.spellSlots[level] ?? 0} onChange={(event) => patchDraft('spellSlots', { ...draft.spellSlots, [level]: Number(event.target.value) })} className={`mt-1 text-center ${inputClass()}`} /></label>)}</div>
-                <div className="mt-4 flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">法术列表</p><button type="button" onClick={() => patchDraft('spells', [...draft.spells, { id: '', name: '', level: 0, usageKind: 'slots', usageMax: 1 }])} className="text-xs text-sky-200">+ 添加法术</button></div>
+                <div className="mt-3 rounded-xl border border-sky-400/10 bg-black/10 p-3">
+                  <p className="text-xs font-semibold text-sky-100">粘贴法术名称自动识别</p>
+                  <p className="mt-1 text-[11px] text-slate-500">支持中文名、英文名或 ID，以逗号、顿号或换行分隔；只会导入 SRD 5.1 目录中可确认的法术。</p>
+                  <div className="mt-2 flex gap-2">
+                    <textarea value={spellParseText} onChange={(event) => setSpellParseText(event.target.value)} rows={2} placeholder="例如：火球术、护盾术、Fire Bolt" className={`resize-y ${inputClass()}`} />
+                    <button type="button" onClick={parseSpells} className="shrink-0 rounded-lg bg-sky-500/15 px-3 text-xs font-semibold text-sky-100 hover:bg-sky-500/25">识别并加入</button>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between"><div><p className="text-xs font-semibold text-slate-300">法术列表</p><p className="mt-0.5 text-[11px] text-slate-500">从 SRD 5.1 法术目录选择，名称和环级会自动填写。</p></div><button type="button" onClick={() => patchDraft('spells', [...draft.spells, { id: '', name: '', level: 0, usageKind: 'slots', usageMax: 1 }])} className="text-xs text-sky-200">+ 添加法术</button></div>
                 <div className="mt-2 space-y-2">{draft.spells.map((spell, index) => {
                   const update = (patch: Partial<typeof spell>) => patchDraft('spells', draft.spells.map((entry, i) => i === index ? { ...entry, ...patch } : entry))
-                  return <div key={`${spell.id}:${index}`} className="grid grid-cols-2 gap-2 lg:grid-cols-[1fr_1fr_90px_140px_100px_auto]"><input value={spell.id} onChange={(event) => update({ id: event.target.value })} placeholder="fireball" className={inputClass()} /><input value={spell.name} onChange={(event) => update({ name: event.target.value })} placeholder="火球术" className={inputClass()} /><input type="number" min={0} max={9} value={spell.level} onChange={(event) => update({ level: Number(event.target.value) })} title="环位" className={inputClass()} /><select value={spell.usageKind} onChange={(event) => update({ usageKind: event.target.value as typeof spell.usageKind })} className={inputClass()}><option value="slots">消耗法术位</option><option value="at-will">随意</option><option value="per-day">每日 N 次</option></select>{spell.usageKind === 'per-day' ? <input type="number" min={1} max={99} value={spell.usageMax} onChange={(event) => update({ usageMax: Number(event.target.value) })} title="每日次数" className={inputClass()} /> : <div />}<button type="button" onClick={() => patchDraft('spells', draft.spells.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>
+                  const catalogSpell = SPELL_CATALOG_BY_ID.get(spell.id)
+                  return <div key={`${spell.id}:${index}`} className="grid grid-cols-2 gap-2 rounded-xl border border-white/8 bg-black/10 p-2 lg:grid-cols-[minmax(260px,2fr)_minmax(140px,1fr)_140px_100px_auto]">
+                    <select
+                      aria-label={`法术选择 ${index + 1}`}
+                      value={spell.id}
+                      onChange={(event) => {
+                        const selected = SPELL_CATALOG_BY_ID.get(event.target.value)
+                        update(selected
+                          ? { id: selected.id, name: selected.name, level: selected.level }
+                          : { id: '', name: '', level: 0 })
+                      }}
+                      className={inputClass()}
+                    >
+                      <option value="">选择法术…</option>
+                      {spell.id && !catalogSpell && <option value={spell.id}>自定义／插件：{spell.name || spell.id}</option>}
+                      {SPELL_CATALOG_BY_LEVEL.map((spells, level) => (
+                        <optgroup key={level} label={level === 0 ? '戏法' : `${level} 环法术`}>
+                          {spells.map((entry) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.name} · {entry.englishName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <div className="flex items-center rounded-lg border border-white/8 bg-void-950/50 px-3 text-xs text-slate-400">
+                      {catalogSpell ? `${catalogSpell.name} · ${catalogSpell.level === 0 ? '戏法' : `${catalogSpell.level} 环`}` : spell.name || '尚未选择'}
+                    </div>
+                    <select aria-label={`法术使用方式 ${index + 1}`} value={spell.usageKind} onChange={(event) => update({ usageKind: event.target.value as typeof spell.usageKind })} className={inputClass()}><option value="slots">消耗法术位</option><option value="at-will">随意</option><option value="per-day">每日 N 次</option></select>
+                    {spell.usageKind === 'per-day' ? <input aria-label={`每日次数 ${index + 1}`} type="number" min={1} max={99} value={spell.usageMax} onChange={(event) => update({ usageMax: Number(event.target.value) })} title="每日次数" className={inputClass()} /> : <div />}
+                    <button type="button" aria-label={`删除法术 ${index + 1}`} onClick={() => patchDraft('spells', draft.spells.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button>
+                  </div>
                 })}</div>
               </>}
             </section>
@@ -327,6 +552,14 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-500">已有特性模板在下方“特性”中选择；这里创建“监听对象 → 触发时机 → 条件 → 效果 → 数值”的自定义规则。Host 会重新校验目标、骰子和次数，尚无权威事件的组合会明确降级为半自动。</p>
                 </div>
                 <button type="button" onClick={() => patchDraft('headlessMechanics', [...draft.headlessMechanics, createDnd5eCustomMonsterMechanicDraft()])} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-500/15 px-2 py-1 text-xs text-violet-100 hover:bg-violet-500/25"><Plus className="h-3 w-3" /> 添加自定义特性</button>
+              </div>
+              <div className="mb-3 rounded-xl border border-violet-400/10 bg-black/10 p-3">
+                <p className="text-xs font-semibold text-violet-100">粘贴特性自动解析</p>
+                <p className="mt-1 text-[11px] text-slate-500">目前可靠支持固定生命阈值、造成／受到伤害后、额外伤害骰与继承伤害类型；无法确定的规则不会被静默自动化。</p>
+                <div className="mt-2 flex gap-2">
+                  <textarea value={featureParseText} onChange={(event) => setFeatureParseText(event.target.value)} rows={3} placeholder="不退斗志：当他的血量低于 10 时，他造成的所有伤害获得额外 1d6 的加值。" className={`resize-y ${inputClass()}`} />
+                  <button type="button" onClick={parseFeature} className="shrink-0 rounded-lg bg-violet-500/15 px-3 text-xs font-semibold text-violet-100 hover:bg-violet-500/25">解析为机制</button>
+                </div>
               </div>
               <label className="block max-w-sm text-xs text-slate-400">
                 模板默认攻击目标
@@ -348,7 +581,7 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                     ...(mechanic.trigger === 'phase-transition' ? ['阶段即时切换仍需要阈值穿越事务'] : []),
                     ...(mechanic.effectKind === 'summon' ? ['需要 DM 指定合法召唤落点'] : []),
                     ...(mechanic.effectKind === 'area-attack' ? ['需要 DM 确认方向、范围格与目标'] : []),
-                    ...(['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && mechanic.effectTarget === 'trigger-target' && !['after-hit', 'after-miss', 'when-hit'].includes(mechanic.trigger) ? ['该触发时机没有可绑定的攻击目标'] : []),
+                    ...(['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && mechanic.effectTarget === 'trigger-target' && !['after-hit', 'after-miss', 'when-hit', 'after-dealt-damage'].includes(mechanic.trigger) ? ['该触发时机没有可绑定的目标'] : []),
                     ...(['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && mechanic.effectTarget === 'damage-source' && mechanic.trigger !== 'after-damaged' ? ['伤害来源只存在于受到伤害后的事件'] : []),
                     ...preservedCompatibilityReasons,
                   ]
@@ -357,6 +590,7 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                     ...(mechanic.hpPercentageAtOrBelow != null && (mechanic.hpPercentageAtOrBelow < 0 || mechanic.hpPercentageAtOrBelow > 100) ? ['HP 上限阈值必须是 0–100'] : []),
                     ...(mechanic.hpPercentageAtOrAbove != null && (mechanic.hpPercentageAtOrAbove < 0 || mechanic.hpPercentageAtOrAbove > 100) ? ['HP 下限阈值必须是 0–100'] : []),
                     ...(mechanic.hpPercentageAtOrBelow != null && mechanic.hpPercentageAtOrAbove != null && mechanic.hpPercentageAtOrAbove > mechanic.hpPercentageAtOrBelow ? ['HP 下限不能高于上限'] : []),
+                    ...(mechanic.damageType === 'inherit-trigger' && !['after-dealt-damage', 'after-damaged'].includes(mechanic.trigger) ? ['继承伤害类型只能用于造成伤害后或受到伤害后'] : []),
                     ...(mechanic.triggerSubject !== 'self' && (!Number.isFinite(mechanic.triggerRadiusFeet) || mechanic.triggerRadiusFeet < 5) ? ['监听半径至少为 5 尺'] : []),
                     ...(mechanic.triggerSubject === 'self' && mechanic.effectTarget === 'selected-subject' ? ['监听自身时请将效果目标直接选择为“怪物自身”'] : []),
                     ...(mechanic.trigger === 'movement' && (!Number.isFinite(mechanic.movementFeet) || mechanic.movementFeet < 0) ? ['移动距离不能小于 0 尺'] : []),
@@ -377,6 +611,8 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                       <label className="text-xs text-slate-400">触发时机<select value={mechanic.trigger} onChange={(event) => update({ trigger: event.target.value as typeof mechanic.trigger })} className={`mt-1 ${inputClass()}`}>{MECHANIC_TRIGGERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                       <label className="text-xs text-slate-400">HP ≤（%）<input type="number" min={0} max={100} value={mechanic.hpPercentageAtOrBelow ?? ''} onChange={(event) => update({ hpPercentageAtOrBelow: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">HP ≥（%）<input type="number" min={0} max={100} value={mechanic.hpPercentageAtOrAbove ?? ''} onChange={(event) => update({ hpPercentageAtOrAbove: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="text-xs text-slate-400">当前 HP ＜<input type="number" min={0} value={mechanic.hpBelow ?? ''} onChange={(event) => update({ hpBelow: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="text-xs text-slate-400">当前 HP ≤<input type="number" min={0} value={mechanic.hpAtOrBelow ?? ''} onChange={(event) => update({ hpAtOrBelow: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">效果<select value={mechanic.effectKind} onChange={(event) => update({ effectKind: event.target.value as typeof mechanic.effectKind })} className={`mt-1 ${inputClass()}`}>{MECHANIC_EFFECTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                       <label className="text-xs text-slate-400">期望自动化<select value={mechanic.automation} onChange={(event) => update({ automation: event.target.value as typeof mechanic.automation })} className={`mt-1 ${inputClass()}`}><option value="full">完全自动</option><option value="partial">半自动</option><option value="manual">DM 裁定</option></select></label>
                       <button type="button" title="删除机制" onClick={() => patchDraft('headlessMechanics', draft.headlessMechanics.filter((_, entryIndex) => entryIndex !== index))} className="self-end rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button>
@@ -388,7 +624,7 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                       {(['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) || (mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'dice')) && <label className="text-xs text-slate-400">{mechanic.effectKind === 'attack' ? '攻击伤害骰' : '效果骰'}<input value={mechanic.healingDice} onChange={(event) => update({ healingDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>}
                       {mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'fixed' && <label className="text-xs text-slate-400">固定伤害点数<input type="number" min={0} value={mechanic.attackFixedDamage} onChange={(event) => update({ attackFixedDamage: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
                       {['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">效果目标<select value={mechanic.effectTarget} onChange={(event) => update({ effectTarget: event.target.value as typeof mechanic.effectTarget })} className={`mt-1 ${inputClass()}`}><option value="selected-subject">前一步监听到的对象</option><option value="self">怪物自身</option><option value="trigger-target">命中／触发目标</option><option value="damage-source">伤害来源</option></select></label>}
-                      {['damage', 'area-attack', 'attack'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">伤害类型<select value={mechanic.damageType} onChange={(event) => update({ damageType: event.target.value as typeof mechanic.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
+                      {['damage', 'area-attack', 'attack'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">伤害类型<select value={mechanic.damageType} onChange={(event) => update({ damageType: event.target.value as typeof mechanic.damageType })} className={`mt-1 ${inputClass()}`}>{mechanic.effectKind === 'damage' && <option value="inherit-trigger">继承本次伤害类型</option>}{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>}
                       {mechanic.effectKind === 'roll-modifier' && <><label className="text-xs text-slate-400">修正投骰<select value={mechanic.modifierRoll} onChange={(event) => update({ modifierRoll: event.target.value as typeof mechanic.modifierRoll })} className={`mt-1 ${inputClass()}`}><option value="attack">攻击投骰</option><option value="damage">伤害投骰</option><option value="saving-throw">豁免检定</option></select></label><label className="text-xs text-slate-400">修正方式<select value={mechanic.modifierMode} onChange={(event) => update({ modifierMode: event.target.value as typeof mechanic.modifierMode })} className={`mt-1 ${inputClass()}`}><option value="bonus">数值加值</option><option value="advantage">优势</option><option value="disadvantage">劣势</option></select></label>{mechanic.modifierMode === 'bonus' && <label className="text-xs text-slate-400">加值<input type="number" value={mechanic.modifierBonus} onChange={(event) => update({ modifierBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
                       {mechanic.effectKind === 'attack' && <><label className="text-xs text-slate-400">攻击加值<input type="number" value={mechanic.attackToHit} onChange={(event) => update({ attackToHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">动作资源<select value={mechanic.attackEconomy} onChange={(event) => update({ attackEconomy: event.target.value as typeof mechanic.attackEconomy })} className={`mt-1 ${inputClass()}`}><option value="reaction">消耗反应</option><option value="none">不消耗动作资源</option></select></label></>}
                       {mechanic.effectKind === 'standard-condition' && <><label className="text-xs text-slate-400">标准状态<select value={mechanic.condition} onChange={(event) => update({ condition: event.target.value as typeof mechanic.condition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label><label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
@@ -413,20 +649,20 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
               <div className="space-y-2">
                 {draft.traits.map((trait, index) => {
                   const update = (patch: Partial<typeof trait>) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
-                  const headlessPreset = ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'conditional-target-bonus'].includes(trait.ruleKind)
+                  const headlessPreset = ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(trait.ruleKind)
                   return <div key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
                     <div className="grid grid-cols-2 gap-2 lg:grid-cols-[1fr_220px_150px_auto]"><input value={trait.name} onChange={(event) => update({ name: event.target.value })} placeholder="特性名称" className={inputClass()} /><select value={trait.ruleKind} onChange={(event) => {
                       const ruleKind = event.target.value as typeof trait.ruleKind
                       update({
                         ruleKind,
-                        automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'conditional-target-bonus'].includes(ruleKind)
+                        automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(ruleKind)
                           ? 'headless'
                           : 'dm-adjudication',
                       })
-                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">Headless</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => patchDraft('traits', draft.traits.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">Headless</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => patchDraft('traits', draft.traits.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
                     {(trait.ruleKind === 'regeneration' || trait.ruleKind === 'undead-fortitude') && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       {trait.ruleKind === 'regeneration' ? <label className="text-xs text-slate-400">每回合恢复<input type="number" min={1} value={trait.amount} onChange={(event) => update({ amount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <label className="text-xs text-slate-400">DC 基数<input type="number" min={1} value={trait.dcBase} onChange={(event) => update({ dcBase: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
-                      <label className="col-span-2 text-xs text-slate-400">{trait.ruleKind === 'regeneration' ? '压制再生的伤害类型' : '不能触发的伤害类型'}<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ damageTypes: trait.damageTypes.includes(type) ? trait.damageTypes.filter((entry) => entry !== type) : [...trait.damageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.damageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{type}</button>)}</div></label>
+                      <label className="col-span-2 text-xs text-slate-400">{trait.ruleKind === 'regeneration' ? '压制再生的伤害类型' : '不能触发的伤害类型'}<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ damageTypes: trait.damageTypes.includes(type) ? trait.damageTypes.filter((entry) => entry !== type) : [...trait.damageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.damageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{DND5E_DAMAGE_TYPE_LABELS[type]}</button>)}</div></label>
                       {trait.ruleKind === 'regeneration' ? <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={trait.requiresPositiveHp} onChange={(event) => update({ requiresPositiveHp: event.target.checked })} />仅 HP 大于 0</label> : <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={trait.excludedOnCritical} onChange={(event) => update({ excludedOnCritical: event.target.checked })} />重击时不触发</label>}
                     </div>}
                     {trait.ruleKind === 'keen-sense' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -440,10 +676,16 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                       <label className="text-xs text-slate-400">至少直线移动（尺）<input type="number" min={5} value={trait.chargeMinimumFeet} onChange={(event) => update({ chargeMinimumFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">随后命中的攻击<select value={trait.chargeActionId} onChange={(event) => update({ chargeActionId: event.target.value })} className={`mt-1 ${inputClass()}`}><option value="">请选择攻击</option>{draft.actions.filter((action) => action.category === 'action' && action.kind === 'weapon-attack').map((action) => <option key={action.id} value={action.id}>{action.name || action.id}</option>)}</select></label>
                       <label className="text-xs text-slate-400">追加伤害骰<input value={trait.chargeDamageDice} onChange={(event) => update({ chargeDamageDice: event.target.value })} placeholder="2d10" className={`mt-1 ${inputClass()}`} /></label>
-                      <label className="text-xs text-slate-400">追加伤害类型<select value={trait.chargeDamageType} onChange={(event) => update({ chargeDamageType: event.target.value as typeof trait.chargeDamageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
+                      <label className="text-xs text-slate-400">追加伤害类型<select value={trait.chargeDamageType} onChange={(event) => update({ chargeDamageType: event.target.value as typeof trait.chargeDamageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>
                       <p className="col-span-2 text-[11px] leading-relaxed text-amber-200 lg:col-span-4">Headless 尚未持久化整段移动路径，无法可靠证明“直线移动后立即攻击”；基础攻击仍自动结算，追加伤害保持结构化并交由 DM 确认。</p>
                     </div>}
                     {trait.ruleKind === 'magic-resistance' && <p className="mt-2 rounded-lg border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-100">对抗法术和标记为魔法来源的效果时，Headless 豁免自动获得优势。</p>}
+                    {trait.ruleKind === 'limited-magic-immunity' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-3">
+                      <label className="text-xs text-slate-400">自动免疫至法术环级<input type="number" min={0} max={9} value={trait.limitedMagicImmunityMaximumSpellLevel} onChange={(event) => update({ limitedMagicImmunityMaximumSpellLevel: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={trait.limitedMagicImmunityAdvantageAboveMaximum} onChange={(event) => update({ limitedMagicImmunityAdvantageAboveMaximum: event.target.checked })} />更高环级豁免优势</label>
+                      <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={trait.limitedMagicImmunityAllowsWilling} onChange={(event) => update({ limitedMagicImmunityAllowsWilling: event.target.checked })} />允许自愿受影响</label>
+                    </div>}
+                    {trait.ruleKind === 'magic-weapons' && <p className="mt-2 rounded-lg border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-100">该怪物的武器攻击在伤害免疫与抗性判定中视为魔法攻击。</p>}
                     {trait.ruleKind === 'conditional-target-bonus' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       <label className="col-span-2 text-xs text-slate-400">目标满足任一状态<div className="mt-1 flex flex-wrap gap-1">{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <button key={condition.id} type="button" onClick={() => update({ targetBonusConditions: trait.targetBonusConditions.includes(condition.id) ? trait.targetBonusConditions.filter((entry) => entry !== condition.id) : [...trait.targetBonusConditions, condition.id] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.targetBonusConditions.includes(condition.id) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{condition.label}</button>)}</div></label>
                       <label className="text-xs text-slate-400">攻击投骰加值<input type="number" min={-100} max={100} value={trait.targetAttackBonus} onChange={(event) => update({ targetAttackBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
@@ -480,12 +722,12 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                       <label className="text-xs text-slate-400">最大速度比例<input type="number" min={0.05} max={1} step={0.05} value={action.movementSpeedFraction} onChange={(event) => update({ movementSpeedFraction: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                       <p className="col-span-1 flex items-end pb-2 text-xs text-slate-400 lg:col-span-3">目标固定为可见敌人，移动方式固定为朝目标直线移动；Host/DM 负责选择目标和落点。</p>
                     </div>}
-                    {action.kind === 'weapon-attack' && <div className="mt-2 grid grid-cols-3 gap-2 lg:grid-cols-8"><label className="text-xs text-slate-400">命中加值<input type="number" value={action.toHit} onChange={(event) => update({ toHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">重击阈值<input type="number" min={2} max={20} value={action.criticalThreshold} onChange={(event) => update({ criticalThreshold: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">触及<input type="number" min={0} value={action.reachFeet} onChange={(event) => update({ reachFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">正常射程<input type="number" min={0} value={action.rangeNormal} onChange={(event) => update({ rangeNormal: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">最远射程<input type="number" min={0} value={action.rangeLong} onChange={(event) => update({ rangeLong: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">伤害骰<input value={action.damageDice} onChange={(event) => update({ damageDice: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">伤害类型<select value={action.damageType} onChange={(event) => update({ damageType: event.target.value as typeof action.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label></div>}
+                    {action.kind === 'weapon-attack' && <div className="mt-2 grid grid-cols-3 gap-2 lg:grid-cols-8"><label className="text-xs text-slate-400">命中加值<input type="number" value={action.toHit} onChange={(event) => update({ toHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">重击阈值<input type="number" min={2} max={20} value={action.criticalThreshold} onChange={(event) => update({ criticalThreshold: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">触及<input type="number" min={0} value={action.reachFeet} onChange={(event) => update({ reachFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">正常射程<input type="number" min={0} value={action.rangeNormal} onChange={(event) => update({ rangeNormal: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">最远射程<input type="number" min={0} value={action.rangeLong} onChange={(event) => update({ rangeLong: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">伤害骰<input value={action.damageDice} onChange={(event) => update({ damageDice: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">伤害类型<select value={action.damageType} onChange={(event) => update({ damageType: event.target.value as typeof action.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label></div>}
                     {action.kind === 'weapon-attack' && <div className="mt-2 rounded-lg border border-white/8 bg-black/10 p-2">
                       <div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">附加伤害组件</p><button type="button" onClick={() => update({ additionalDamage: [...action.additionalDamage, { id: `damage-${Date.now()}`, dice: '1d6', damageType: 'fire' }] })} className="text-[11px] text-arcane-200">+ 添加</button></div>
-                      <div className="mt-1 space-y-1">{action.additionalDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type}>{type}</option>)}</select><button type="button" onClick={() => update({ additionalDamage: action.additionalDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                      <div className="mt-1 space-y-1">{action.additionalDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select><button type="button" onClick={() => update({ additionalDamage: action.additionalDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
                       <div className="mt-2 flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">仅重击追加伤害（不会再次翻倍）</p><button type="button" onClick={() => update({ criticalExtraDamage: [...action.criticalExtraDamage, { id: `critical-damage-${Date.now()}`, dice: '1d6', damageType: 'slashing' }] })} className="text-[11px] text-arcane-200">+ 添加</button></div>
-                      <div className="mt-1 space-y-1">{action.criticalExtraDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ criticalExtraDamage: action.criticalExtraDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ criticalExtraDamage: action.criticalExtraDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type}>{type}</option>)}</select><button type="button" onClick={() => update({ criticalExtraDamage: action.criticalExtraDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                      <div className="mt-1 space-y-1">{action.criticalExtraDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ criticalExtraDamage: action.criticalExtraDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ criticalExtraDamage: action.criticalExtraDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select><button type="button" onClick={() => update({ criticalExtraDamage: action.criticalExtraDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
                       <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-5">
                         <label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={action.onHitSaveEnabled} onChange={(event) => update({ onHitSaveEnabled: event.target.checked })} />命中后要求豁免</label>
                         {action.onHitSaveEnabled && <><label className="text-xs text-slate-400">豁免属性<select value={action.onHitSaveAbility} onChange={(event) => update({ onHitSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-slate-400">DC<input type="number" min={1} value={action.onHitSaveDc} onChange={(event) => update({ onHitSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">失败施加状态<select value={action.onHitCondition} onChange={(event) => update({ onHitCondition: event.target.value as typeof action.onHitCondition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label></>}
@@ -500,7 +742,21 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
 
           <footer className="flex items-center gap-3 border-t border-white/10 px-5 py-3">
             <p className={`min-w-0 flex-1 truncate text-xs ${message?.includes('已保存') || message?.includes('导入完成') ? 'text-emerald-300' : 'text-amber-300'}`}>{message ?? '高级施法、传奇动作、变形与再生可通过 JSON 导入保留；当前自动结算边界会明确标注。'}</p>
-            {selectedId && <button type="button" disabled={busy} onClick={() => { if (!window.confirm('删除此房间怪物模板？地图上已存在的 Token 将保留，但失去 stat block。')) return; void removeMonster(selectedId).then(() => { setSelectedId(null); setDraft(createDnd5eCustomMonsterDraft()); setMessage('已删除怪物模板。') }) }} className="flex items-center gap-1 rounded-lg bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"><Trash2 className="h-3.5 w-3.5" /> 删除</button>}
+            {selectedId && <button type="button" disabled={busy} onClick={() => {
+              if (!window.confirm(pluginMode ? '从扩展草稿中删除这个怪物模板？' : '删除此房间怪物模板？地图上已存在的 Token 将保留，但失去 stat block。')) return
+              if (pluginMode) {
+                onMonstersChange(monsters.filter((monster) => monster.id !== selectedId))
+                setSelectedId(null)
+                setDraft(createDnd5eCustomMonsterDraft())
+                setMessage('已从扩展草稿删除怪物模板。')
+              } else {
+                void removeRoomMonster(selectedId).then(() => {
+                  setSelectedId(null)
+                  setDraft(createDnd5eCustomMonsterDraft())
+                  setMessage('已删除怪物模板。')
+                })
+              }
+            }} className="flex items-center gap-1 rounded-lg bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"><Trash2 className="h-3.5 w-3.5" /> 删除</button>}
             <button type="button" disabled={busy} onClick={() => void save()} className="flex items-center gap-2 rounded-lg bg-arcane-500 px-4 py-2 text-sm font-semibold text-white hover:bg-arcane-400 disabled:opacity-50"><Save className="h-4 w-4" />{busy ? '处理中…' : '校验并保存'}</button>
           </footer>
         </main>

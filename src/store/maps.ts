@@ -23,7 +23,11 @@ import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
-import { dnd5eActiveDarkvisionRangeFeet, type Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import {
+  applyDnd5eEffectiveVisionProfile,
+  compileDnd5eEffectiveVisionProfile,
+} from '../../shared/dnd5e-vision-profile.mjs'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../rulesets/dnd5e/headlessCombatEngine'
 import type {
   Dnd5eDamageType,
@@ -288,17 +292,17 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
         ...map.tokens.flatMap((token) => {
         const sharedToken = sharedTokenById.get(token.id)
         if (!sharedToken) return token.type === 'player' ? [token] : []
-        const dmControlledPosition =
-          token.type !== 'player'
-            ? {
-                x: sharedToken.x,
-                y: sharedToken.y,
-                elevationFeet: sharedToken.elevationFeet,
-              }
-            : {}
+        // Token positions are resolved by the DM authority, including player
+        // tokens. Player movement uses action requests, so a stale local map
+        // snapshot must never undo forced movement such as Thunderwave.
+        const authoritativePosition = {
+          x: sharedToken.x,
+          y: sharedToken.y,
+          elevationFeet: sharedToken.elevationFeet,
+        }
         return [{
           ...token,
-          ...dmControlledPosition,
+          ...authoritativePosition,
           hp: sharedToken.hp,
           maxHp: sharedToken.maxHp,
           creatureTypes: sharedToken.creatureTypes,
@@ -453,6 +457,7 @@ export interface Token {
     turnedRoundsRemaining?: number
     holyNimbusRoundsRemaining?: number
     draconicPresenceImmunityRoundsBySource?: Record<string, number>
+    monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
     conditions?: string[]
     stunnedByActorId?: string
     stunnedAppliedTurnKey?: string
@@ -507,6 +512,10 @@ export interface Token {
   visionRangeFeet?: number
   /** 2014 规则中的黑暗视觉距离；0 或缺失表示没有黑暗视觉。 */
   darkvisionRangeFeet?: number
+  /** Sees normally in nonmagical darkness, such as Devil's Sight. */
+  darknessSightRangeFeet?: number
+  /** Sees normally through magical darkness, such as Devil's Sight. */
+  magicalDarknessSightRangeFeet?: number
   /** 特殊感官由地图快照投影到 Headless；距离外仍按普通视线判定。 */
   blindsightRangeFeet?: number
   tremorsenseRangeFeet?: number
@@ -760,6 +769,8 @@ function normalizeToken(raw: unknown): Token {
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
+    darknessSightRangeFeet: Number.isFinite(t.darknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.darknessSightRangeFeet as number)) : undefined,
+    magicalDarknessSightRangeFeet: Number.isFinite(t.magicalDarknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.magicalDarknessSightRangeFeet as number)) : undefined,
     blindsightRangeFeet: Number.isFinite(t.blindsightRangeFeet) ? Math.max(0, Math.min(10_000, t.blindsightRangeFeet as number)) : undefined,
     tremorsenseRangeFeet: Number.isFinite(t.tremorsenseRangeFeet) ? Math.max(0, Math.min(10_000, t.tremorsenseRangeFeet as number)) : undefined,
     truesightRangeFeet: Number.isFinite(t.truesightRangeFeet) ? Math.max(0, Math.min(10_000, t.truesightRangeFeet as number)) : undefined,
@@ -994,9 +1005,28 @@ type CharacterTokenPresentation = {
   avatar: string
   portrait?: string
   tokenPortrait?: string
+  race?: string
+  dnd5eRaceId?: string
+  dnd5eClassChoices?: unknown
   dnd5eCombatState?: {
     activeEffects?: Dnd5eActiveEffectInstance[]
   }
+}
+
+function projectTokenEffectiveVision(
+  token: Token,
+  character?: CharacterTokenPresentation,
+): Token {
+  const profile = compileDnd5eEffectiveVisionProfile({ token, character })
+  if (
+    (token.darkvisionRangeFeet ?? 0) === profile.darkvisionRangeFeet &&
+    (token.darknessSightRangeFeet ?? 0) === profile.darknessSightRangeFeet &&
+    (token.magicalDarknessSightRangeFeet ?? 0) === profile.magicalDarknessSightRangeFeet &&
+    (token.blindsightRangeFeet ?? 0) === profile.blindsightRangeFeet &&
+    (token.tremorsenseRangeFeet ?? 0) === profile.tremorsenseRangeFeet &&
+    (token.truesightRangeFeet ?? 0) === profile.truesightRangeFeet
+  ) return token
+  return applyDnd5eEffectiveVisionProfile(token, profile)
 }
 
 /** 角色资料与内置怪物素材只在渲染时投影，不写入地图存档。 */
@@ -1008,11 +1038,7 @@ export function projectCharacterTokenPresentations(
   let changed = false
   const projected = tokens.map((token) => {
     if (!token.characterId) {
-      const grantedDarkvision = dnd5eActiveDarkvisionRangeFeet(token.dnd5eCombatState?.activeEffects)
-      const effectiveDarkvision = Math.max(token.darkvisionRangeFeet ?? 0, grantedDarkvision)
-      const visionToken = effectiveDarkvision > (token.darkvisionRangeFeet ?? 0)
-        ? { ...token, darkvisionRangeFeet: effectiveDarkvision }
-        : token
+      const visionToken = projectTokenEffectiveVision(token)
       const presentation = token.poolId
         ? getEnemyVisualPresentation(token.poolId, token.visualVariantId)
         : undefined
@@ -1049,23 +1075,21 @@ export function projectCharacterTokenPresentations(
     const label = character.name || token.label
     const portrait = character.portrait
     const tokenPortrait = character.tokenPortrait
-    const grantedDarkvision = dnd5eActiveDarkvisionRangeFeet(character.dnd5eCombatState?.activeEffects)
-    const darkvisionRangeFeet = Math.max(token.darkvisionRangeFeet ?? 0, grantedDarkvision)
+    const visionToken = projectTokenEffectiveVision(token, character)
     if (
       emoji === token.emoji &&
       label === token.label &&
       portrait === token.portrait &&
       tokenPortrait === token.tokenPortrait &&
-      darkvisionRangeFeet === (token.darkvisionRangeFeet ?? 0)
+      visionToken === token
     ) return token
     changed = true
     return {
-      ...token,
+      ...visionToken,
       emoji,
       label,
       portrait,
       tokenPortrait,
-      darkvisionRangeFeet: darkvisionRangeFeet > 0 ? darkvisionRangeFeet : undefined,
     }
   })
   return changed ? projected : tokens

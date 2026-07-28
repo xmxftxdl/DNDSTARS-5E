@@ -39,6 +39,24 @@ const DAMAGE_TYPES = new Set([
   'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder',
 ])
 
+const DAMAGE_DEFENSE_FIELDS = [
+  {
+    source: 'damage_vulnerabilities',
+    target: 'damageVulnerabilities',
+    outcome: 'vulnerable',
+  },
+  {
+    source: 'damage_resistances',
+    target: 'damageResistances',
+    outcome: 'resistant',
+  },
+  {
+    source: 'damage_immunities',
+    target: 'damageImmunities',
+    outcome: 'immune',
+  },
+]
+
 const CHALLENGE_RATING_XP = {
   '1/8': 25, '1/4': 50, '1/2': 100,
   '1': 200, '2': 450, '3': 700, '4': 1_100, '5': 1_800,
@@ -272,8 +290,104 @@ function normalizedProficiencies(proficiencies = []) {
   }
 }
 
-function normalizedDamageTypes(values = []) {
-  return values.map((value) => String(value).toLowerCase()).filter((value) => DAMAGE_TYPES.has(value))
+function parsedDamageTypeList(value) {
+  const damageTypes = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s*,\s*and\s+/g, ',')
+    .replace(/\s+and\s+/g, ',')
+    .split(/\s*,\s*/)
+    .filter(Boolean)
+  if (damageTypes.length === 0 || damageTypes.some((damageType) => !DAMAGE_TYPES.has(damageType))) {
+    return null
+  }
+  return [...new Set(damageTypes)]
+}
+
+function parsedConditionalDamageDefense(value, outcome) {
+  const canonical = String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\.+$/, '')
+
+  if (/^damage from spells$/i.test(canonical)) {
+    return {
+      outcome,
+      delivery: 'spell',
+      magical: true,
+    }
+  }
+
+  const nonmagicalWeaponMatch = canonical.match(
+    /^(.+?) from nonmagical (?:weapons|attacks)(?: that (?:aren['’]t|are not) (silvered|adamantine))?(?: \(from stoneskin\))?$/i,
+  )
+  if (nonmagicalWeaponMatch) {
+    const damageTypes = parsedDamageTypeList(nonmagicalWeaponMatch[1])
+    if (!damageTypes) return null
+    return {
+      outcome,
+      damageTypes,
+      delivery: 'weapon-attack',
+      magical: false,
+      ...(nonmagicalWeaponMatch[2]
+        ? { weaponMaterialNot: nonmagicalWeaponMatch[2].toLowerCase() }
+        : {}),
+    }
+  }
+
+  const goodMagicWeaponMatch = canonical.match(
+    /^(.+?) from magic(?:al)? weapons wielded by good creatures$/i,
+  )
+  if (goodMagicWeaponMatch) {
+    const damageTypes = parsedDamageTypeList(goodMagicWeaponMatch[1])
+    if (!damageTypes) return null
+    return {
+      outcome,
+      damageTypes,
+      delivery: 'weapon-attack',
+      magical: true,
+      sourceMoralAlignment: 'good',
+    }
+  }
+
+  return null
+}
+
+export function normalizedDamageDefenses(raw = {}) {
+  const result = {
+    damageVulnerabilities: [],
+    damageResistances: [],
+    damageImmunities: [],
+    damageDefenseRules: [],
+    unparsedDamageDefenses: [],
+  }
+
+  for (const field of DAMAGE_DEFENSE_FIELDS) {
+    const values = Array.isArray(raw[field.source]) ? raw[field.source] : []
+    for (const value of values) {
+      const text = String(value ?? '').trim()
+      if (!text) continue
+
+      const staticDamageTypes = parsedDamageTypeList(
+        text.replace(/\s+/g, ' ').replace(/\.+$/, ''),
+      )
+      if (staticDamageTypes) {
+        result[field.target].push(...staticDamageTypes)
+        continue
+      }
+
+      const rule = parsedConditionalDamageDefense(text, field.outcome)
+      if (rule) {
+        result.damageDefenseRules.push(rule)
+        continue
+      }
+
+      result.unparsedDamageDefenses.push({ outcome: field.outcome, text })
+    }
+    result[field.target] = [...new Set(result[field.target])]
+  }
+
+  return result
 }
 
 function normalizedSenses(senses = {}) {
@@ -377,7 +491,7 @@ function normalizedTrait(trait) {
   return { name, description, automation: 'dm-adjudication' }
 }
 
-function normalizedMonster(raw) {
+export function normalizedMonster(raw) {
   const type = String(raw.type ?? '')
   const swarm = /^swarm of /i.test(type)
   const baseType = swarm ? 'beast' : type.toLowerCase()
@@ -392,6 +506,7 @@ function normalizedMonster(raw) {
   const rating = challengeRating(raw.challenge_rating)
   const canonicalXp = CHALLENGE_RATING_XP[rating]
   const actions = normalizedActions(raw.actions)
+  const damageDefenses = normalizedDamageDefenses(raw)
   return {
     id: `srd-5.1:${raw.index}`,
     slug: String(raw.index),
@@ -410,9 +525,15 @@ function normalizedMonster(raw) {
       int: Number(raw.intelligence), wis: Number(raw.wisdom), cha: Number(raw.charisma),
     },
     ...normalizedProficiencies(raw.proficiencies),
-    damageVulnerabilities: normalizedDamageTypes(raw.damage_vulnerabilities),
-    damageResistances: normalizedDamageTypes(raw.damage_resistances),
-    damageImmunities: normalizedDamageTypes(raw.damage_immunities),
+    damageVulnerabilities: damageDefenses.damageVulnerabilities,
+    damageResistances: damageDefenses.damageResistances,
+    damageImmunities: damageDefenses.damageImmunities,
+    ...(damageDefenses.damageDefenseRules.length > 0
+      ? { damageDefenseRules: damageDefenses.damageDefenseRules }
+      : {}),
+    ...(damageDefenses.unparsedDamageDefenses.length > 0
+      ? { unparsedDamageDefenses: damageDefenses.unparsedDamageDefenses }
+      : {}),
     conditionImmunities: (raw.condition_immunities ?? []).map((entry) => String(entry?.name ?? entry?.index ?? '')).filter(Boolean),
     senses: normalizedSenses(raw.senses),
     passivePerception: Number(raw.senses?.passive_perception) || 10,
@@ -441,27 +562,33 @@ function normalizedMonster(raw) {
   }
 }
 
-const { source, output } = args()
-const raw = await readSource(source)
-if (!Array.isArray(raw) || raw.length < 300) throw new Error(`Expected at least 300 SRD monsters, received ${Array.isArray(raw) ? raw.length : 'non-array'}`)
-const monsters = raw.map(normalizedMonster).sort((left, right) => left.englishName.localeCompare(right.englishName, 'en'))
-const ids = new Set(monsters.map((monster) => monster.id))
-if (ids.size !== monsters.length) throw new Error('Generated monster ids are not unique')
+async function main() {
+  const { source, output } = args()
+  const raw = await readSource(source)
+  if (!Array.isArray(raw) || raw.length < 300) throw new Error(`Expected at least 300 SRD monsters, received ${Array.isArray(raw) ? raw.length : 'non-array'}`)
+  const monsters = raw.map(normalizedMonster).sort((left, right) => left.englishName.localeCompare(right.englishName, 'en'))
+  const ids = new Set(monsters.map((monster) => monster.id))
+  if (ids.size !== monsters.length) throw new Error('Generated monster ids are not unique')
 
-const artifact = {
-  schemaVersion: 1,
-  source: {
-    rules: 'System Reference Document 5.1',
-    rulesUrl: 'https://media.dndbeyond.com/compendium-images/srd/5.1/SRD_CC_v5.1.pdf',
-    license: 'CC BY 4.0',
-    transcription: '5e-bits/5e-database',
-    transcriptionCommit: SOURCE_COMMIT,
-    transcriptionUrl: SOURCE_URL,
-  },
-  count: monsters.length,
-  monsters,
+  const artifact = {
+    schemaVersion: 1,
+    source: {
+      rules: 'System Reference Document 5.1',
+      rulesUrl: 'https://media.dndbeyond.com/compendium-images/srd/5.1/SRD_CC_v5.1.pdf',
+      license: 'CC BY 4.0',
+      transcription: '5e-bits/5e-database',
+      transcriptionCommit: SOURCE_COMMIT,
+      transcriptionUrl: SOURCE_URL,
+    },
+    count: monsters.length,
+    monsters,
+  }
+
+  await mkdir(dirname(output), { recursive: true })
+  await writeFile(output, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
+  console.log(`Generated ${monsters.length} SRD monsters -> ${output}`)
 }
 
-await mkdir(dirname(output), { recursive: true })
-await writeFile(output, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
-console.log(`Generated ${monsters.length} SRD monsters -> ${output}`)
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main()
+}

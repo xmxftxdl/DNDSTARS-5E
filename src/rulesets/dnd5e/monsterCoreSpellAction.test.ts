@@ -7,6 +7,10 @@ import {
   prepareDnd5eMonsterCoreSpell,
   resolvePreparedDnd5eMonsterCoreSpell,
 } from './monsterCoreSpellAction'
+import {
+  prepareDnd5eMonsterAreaAction,
+  resolvePreparedDnd5eMonsterAreaAction,
+} from './monsterAreaAction'
 import { planDnd5eMonsterTurn } from './monsterTurnPlanner'
 import { getDnd5eSrdMonster } from './monsters'
 
@@ -132,6 +136,64 @@ describe('monster core spell map action', () => {
       type: 'monster-core-spell-resolved',
       spellId: 'fire-bolt',
     }))
+  })
+
+  it('derives an adult black dragon breath target set from map cells and rejects a partial client submission', () => {
+    const dragon = token({
+      id: 'dragon', label: '成年黑龙', poolId: 'srd-5.1:adult-black-dragon',
+      hp: 195, maxHp: 195,
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { 'acid-breath': true } },
+    })
+    const first = token({
+      id: 'first', label: '第一名英雄', type: 'player', characterId: 'first-character', x: 45, y: 5,
+    })
+    const second = token({
+      id: 'second', label: '第二名英雄', type: 'player', characterId: 'second-character', x: 85, y: 5,
+    })
+    const battle = battleMap([dragon, first, second])
+    const characters = [
+      { ...character(), id: 'first-character', name: '第一名英雄', currentHp: 120, maxHp: 120 },
+      { ...character(), id: 'second-character', name: '第二名英雄', currentHp: 120, maxHp: 120 },
+    ]
+    const plan = planDnd5eMonsterTurn(battle, dragon, characters)
+    expect(plan.areaAction).toMatchObject({ actionId: 'acid-breath' })
+    if (!plan.areaAction) return
+
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: 'acid-map',
+      map: battle,
+      characters,
+      initiativeOrder: initiative(battle.tokens),
+      actorTokenId: dragon.id,
+      actionId: plan.areaAction.actionId,
+      targetTokenIds: plan.areaAction.targetTokenIds,
+      areaTargetCell: plan.areaAction.areaTargetCell,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetTokens.map((target) => target.id)).toEqual(expect.arrayContaining([first.id, second.id]))
+    const settled = resolvePreparedDnd5eMonsterAreaAction({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: prepared.prepared.targetTokens.map((target) => ({ targetId: target.id, d20: 1 })),
+        damageRolls: Array.from({ length: 12 }, () => 1),
+      },
+    })
+    expect(settled.result.ok, settled.result.ok ? undefined : settled.result.reason).toBe(true)
+    expect(settled.application?.characters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'first-character', currentHp: 108 }),
+      expect.objectContaining({ id: 'second-character', currentHp: 108 }),
+    ]))
+    expect(prepareDnd5eMonsterAreaAction({
+      combatId: 'acid-map',
+      map: battle,
+      characters,
+      initiativeOrder: initiative(battle.tokens),
+      actorTokenId: dragon.id,
+      actionId: plan.areaAction.actionId,
+      targetTokenIds: [first.id],
+      areaTargetCell: plan.areaAction.areaTargetCell,
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
   })
 
   it('prepares Magic Missile and applies its repeated projectile targets through the map bridge', () => {

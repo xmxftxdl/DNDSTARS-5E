@@ -8,6 +8,18 @@ export function mapLightingAmbientOpacity(ambientLight: MapAmbientLight, isDM: b
   return isDM ? 0.74 : 0.9
 }
 
+/** Alpha removed from the darkness mask so darkvision renders darkness as dim light. */
+export function mapLightingDarkvisionCutoutOpacity(
+  ambientLight: MapAmbientLight,
+  isDM: boolean,
+): number {
+  if (isDM || ambientLight === 'bright') return 0
+  if (ambientLight === 'dim') return 1
+  const darknessOpacity = mapLightingAmbientOpacity('darkness', false)
+  const dimOpacity = mapLightingAmbientOpacity('dim', false)
+  return 1 - dimOpacity / darknessOpacity
+}
+
 export function mapLightingShouldRender(
   ambientLight: MapAmbientLight,
   hasMagicalDarkness: boolean,

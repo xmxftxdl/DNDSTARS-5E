@@ -4,6 +4,7 @@ import {
 } from './monsters'
 import { DND5E_DAMAGE_TYPES } from './damageTypes'
 import { DND5E_STANDARD_CONDITION_IDS } from './conditions'
+import { isDnd5eConditionalDamageDefense } from './damageDefenses'
 
 export interface Dnd5eMonsterSchemaIssue {
   monsterId: string
@@ -30,7 +31,7 @@ const ATTACK_MODES = new Set(['melee', 'ranged', 'melee-or-ranged'])
 const TARGET_PRIORITIES = new Set(['nearest', 'lowest-current-hp', 'lowest-hp-percentage', 'lowest-armor-class', 'highest-threat'])
 const MECHANIC_LIMITS = new Set(['once-per-turn', 'once-per-combat', 'unlimited'])
 const MECHANIC_EVENTS = new Set([
-  'turn-start', 'turn-end', 'after-hit', 'after-miss', 'when-hit', 'after-damaged',
+  'turn-start', 'turn-end', 'after-hit', 'after-miss', 'when-hit', 'after-dealt-damage', 'after-damaged',
   'saving-throw-magic', 'saving-throw-physical', 'movement', 'phase-transition',
 ])
 const MECHANIC_AUTOMATION = new Set(['full', 'partial', 'manual'])
@@ -69,11 +70,85 @@ function validateDamageList(raw: unknown): boolean {
   return Array.isArray(raw) && raw.length >= 1 && raw.length <= 16 && raw.every(validateDamage)
 }
 
+function onHitEffectIsValid(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  const allowedKeys = new Set([
+    'id',
+    'kind',
+    'ability',
+    'dc',
+    'damage',
+    'damageOnSuccessfulSave',
+  ])
+  return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
+    requiredText(raw.id, 96) &&
+    /^[a-z][a-z0-9-]*$/.test(String(raw.id)) &&
+    raw.kind === 'saving-throw-damage' &&
+    ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+    finiteInteger(raw.dc, 1, 100) &&
+    validateDamageList(raw.damage) &&
+    (raw.damageOnSuccessfulSave === 'none' || raw.damageOnSuccessfulSave === 'half')
+}
+
+function areaTargetingIsValid(raw: unknown): boolean {
+  if (!isRecord(raw) || typeof raw.shape !== 'string') return false
+  if (raw.shape === 'circle') {
+    return (raw.origin === 'self' || raw.origin === 'point') &&
+      finiteInteger(raw.radiusFeet, 0, 100_000) &&
+      (raw.placeRangeFeet == null || finiteInteger(raw.placeRangeFeet, 0, 100_000))
+  }
+  if (raw.shape === 'line') {
+    return raw.origin === 'self' && finiteInteger(raw.widthFeet, 1, 100_000) &&
+      finiteInteger(raw.lengthFeet, 1, 100_000) &&
+      (raw.aimRangeFeet == null || finiteInteger(raw.aimRangeFeet, 0, 100_000))
+  }
+  if (raw.shape === 'cone') {
+    return raw.origin === 'self' && finiteInteger(raw.lengthFeet, 1, 100_000) &&
+      (raw.aimRangeFeet == null || finiteInteger(raw.aimRangeFeet, 0, 100_000))
+  }
+  if (raw.shape === 'rect') {
+    return raw.origin === 'point' && finiteInteger(raw.widthFeet, 1, 100_000) &&
+      finiteInteger(raw.heightFeet, 1, 100_000) &&
+      (raw.placeRangeFeet == null || finiteInteger(raw.placeRangeFeet, 0, 100_000)) &&
+      (raw.rotatable == null || typeof raw.rotatable === 'boolean')
+  }
+  return false
+}
+
+function areaSavingThrowEffectIsValid(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  return areaTargetingIsValid(raw.area) &&
+    raw.target === 'hostile' &&
+    ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+    finiteInteger(raw.dc, 1, 100) &&
+    (raw.damage == null || validateDamage(raw.damage)) &&
+    !(raw.damage == null && raw.damageOnSuccessfulSave != null) &&
+    !(raw.damage != null && !['none', 'half'].includes(String(raw.damageOnSuccessfulSave ?? 'none'))) &&
+    (raw.conditionOnFailedSave == null || (
+      isRecord(raw.conditionOnFailedSave) &&
+      STANDARD_CONDITIONS.has(String(raw.conditionOnFailedSave.condition)) &&
+      finiteInteger(raw.conditionOnFailedSave.durationRounds, 1, 10_000) &&
+      typeof raw.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn === 'boolean' &&
+      (raw.conditionOnFailedSave.breakOnDamage == null ||
+        typeof raw.conditionOnFailedSave.breakOnDamage === 'boolean')
+    )) &&
+    !(raw.damage == null && raw.conditionOnFailedSave == null) &&
+    (raw.frightfulPresenceImmunityRounds == null ||
+      finiteInteger(raw.frightfulPresenceImmunityRounds, 1, 14_400))
+}
+
 function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   if (!isRecord(action) || !requiredText(action.id, 120) || !requiredText(action.name, 240) ||
     !requiredText(action.description) || typeof action.kind !== 'string' || !ACTION_KINDS.has(action.kind)) return false
   if (action.automation != null && action.automation !== 'headless' && action.automation !== 'dm-adjudication') return false
   if (action.sequence != null && (!Array.isArray(action.sequence) || action.sequence.some((entry) => !requiredText(entry, 120)))) return false
+  if (
+    action.sequenceAttackMode != null &&
+    (
+      action.kind !== 'multiattack' ||
+      (action.sequenceAttackMode !== 'melee' && action.sequenceAttackMode !== 'ranged')
+    )
+  ) return false
   if (action.usage != null) {
     if (!isRecord(action.usage)) return false
     if (action.usage.kind === 'recharge') {
@@ -107,6 +182,22 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         typeof action.rule.requireSameSource !== 'boolean' ||
         !validateDamage(action.rule.damage)
       ) return false
+    } else if (action.rule.kind === 'area-saving-throw') {
+      if (action.rule.variants != null) {
+        if (
+          !Array.isArray(action.rule.variants) ||
+          action.rule.variants.length < 2 ||
+          action.rule.variants.length > 16 ||
+          new Set(action.rule.variants.map((variant) =>
+            isRecord(variant) ? String(variant.id) : '')).size !== action.rule.variants.length ||
+          action.rule.variants.some((variant) =>
+            !isRecord(variant) ||
+            !requiredText(variant.id, 96) ||
+            !/^[a-z][a-z0-9-]*$/.test(String(variant.id)) ||
+            !requiredText(variant.name, 240) ||
+            !areaSavingThrowEffectIsValid(variant))
+        ) return false
+      } else if (!areaSavingThrowEffectIsValid(action.rule)) return false
     } else return false
   }
   if (action.movement != null) {
@@ -127,6 +218,14 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   if (!isRecord(attack) || typeof attack.mode !== 'string' || !ATTACK_MODES.has(attack.mode) ||
     !finiteInteger(attack.toHit, -100, 100) || !requiredText(attack.target, 500) ||
     !validateDamageList(attack.damage)) return false
+  if (
+    attack.rangedDamage != null &&
+    (
+      attack.mode !== 'melee-or-ranged' ||
+      attack.rangeFeet == null ||
+      !validateDamageList(attack.rangedDamage)
+    )
+  ) return false
   if (attack.damageAtHalfHp != null && !validateDamageList(attack.damageAtHalfHp)) return false
   if (attack.criticalThreshold != null && !finiteInteger(attack.criticalThreshold, 2, 20)) return false
   if (attack.criticalExtraDamage != null && !validateDamageList(attack.criticalExtraDamage)) return false
@@ -135,6 +234,17 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     !finiteInteger(attack.rangeFeet.normal, 0, 100_000) || !finiteInteger(attack.rangeFeet.long, 0, 100_000) ||
     Number(attack.rangeFeet.long) < Number(attack.rangeFeet.normal))) return false
   if (attack.onHit != null && !requiredText(attack.onHit)) return false
+  if (attack.onHitEffects != null) {
+    if (
+      !Array.isArray(attack.onHitEffects) ||
+      attack.onHitEffects.length < 1 ||
+      attack.onHitEffects.length > 16 ||
+      attack.onHitEffects.some((effect) => !onHitEffectIsValid(effect))
+    ) return false
+    const effectIds = attack.onHitEffects.map((effect) =>
+      String((effect as Record<string, unknown>).id))
+    if (new Set(effectIds).size !== effectIds.length) return false
+  }
   if (attack.onHitRule != null) {
     if (!isRecord(attack.onHitRule) || attack.onHitRule.kind !== 'saving-throw-condition' ||
       !ABILITY_KEYS.includes(attack.onHitRule.ability as typeof ABILITY_KEYS[number]) ||
@@ -186,6 +296,18 @@ function traitShapeIsValid(raw: unknown): boolean {
   if (raw.rule.kind === 'magic-resistance') {
     return raw.rule.savingThrowAdvantageAgainstMagic === true
   }
+  if (raw.rule.kind === 'limited-magic-immunity') {
+    return raw.rule.maximumSpellLevel === 6 &&
+      raw.rule.advantageAboveMaximum === true &&
+      raw.rule.allowsWilling === true
+  }
+  if (raw.rule.kind === 'magic-weapons') {
+    return raw.rule.weaponAttacksMagical === true
+  }
+  if (raw.rule.kind === 'pack-tactics') {
+    return finiteInteger(raw.rule.allyDistanceFeet, 1, 100_000) &&
+      raw.rule.requiresAllyNotIncapacitated === true
+  }
   if (raw.rule.kind === 'conditional-target-bonus') {
     return Array.isArray(raw.rule.targetConditions) &&
       raw.rule.targetConditions.length >= 1 &&
@@ -193,6 +315,10 @@ function traitShapeIsValid(raw: unknown): boolean {
       raw.rule.targetConditions.every((condition) => STANDARD_CONDITIONS.has(String(condition))) &&
       finiteInteger(raw.rule.attackBonus, -100, 100) &&
       finiteInteger(raw.rule.damageBonus, -1_000_000, 1_000_000)
+  }
+  if (raw.rule.kind === 'mucous-cloud') {
+    return finiteInteger(raw.rule.saveDc, 1, 100) && raw.rule.condition === 'disease' &&
+      finiteInteger(raw.rule.maximumTriggerDistanceFeet, 5, 10_000)
   }
   return false
 }
@@ -208,7 +334,8 @@ function mechanicEffectV2IsValid(raw: unknown): boolean {
     return raw.target === 'self' && mechanicDiceIsValid(raw.dice)
   }
   if (raw.kind === 'damage') {
-    return MECHANIC_TARGETS.has(String(raw.target)) && mechanicDiceIsValid(raw.dice) && DAMAGE_TYPE_VALUES.has(String(raw.damageType))
+    return MECHANIC_TARGETS.has(String(raw.target)) && mechanicDiceIsValid(raw.dice) &&
+      (DAMAGE_TYPE_VALUES.has(String(raw.damageType)) || raw.damageType === 'inherit-trigger')
   }
   if (raw.kind === 'standard-condition') {
     const duration = isRecord(raw.duration) ? raw.duration : null
@@ -263,6 +390,9 @@ function mechanicShapeIsValid(raw: unknown): boolean {
     for (const threshold of ['hpPercentageAtOrBelow', 'hpPercentageAtOrAbove'] as const) {
       if (predicates[threshold] != null && (!Number.isFinite(predicates[threshold]) || Number(predicates[threshold]) < 0 || Number(predicates[threshold]) > 100)) return false
     }
+    for (const threshold of ['hpBelow', 'hpAtOrBelow', 'hpAbove', 'hpAtOrAbove'] as const) {
+      if (predicates[threshold] != null && !finiteInteger(predicates[threshold], 0, 1_000_000)) return false
+    }
     if (!Array.isArray(raw.effects) || raw.effects.length < 1 || raw.effects.length > 16 ||
       raw.effects.some((effect) => !mechanicEffectV2IsValid(effect))) return false
     if (
@@ -287,7 +417,11 @@ export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eM
   if (action.kind === 'other') return action.automation === 'headless' && action.rule ? 'headless' : action.automation === 'headless' ? 'invalid' : 'dm-adjudication'
   if (action.kind === 'multiattack') return action.sequence?.length ? 'headless' : 'invalid'
   if (!action.attack || action.attack.damage.length < 1) return 'invalid'
-  if (action.attack.onHit && !action.attack.onHitRule) return 'invalid'
+  if (
+    action.attack.onHit &&
+    !action.attack.onHitRule &&
+    !action.attack.onHitEffects?.length
+  ) return 'invalid'
   return 'headless'
 }
 
@@ -316,7 +450,8 @@ function validateActionList(
     const automation = dnd5eMonsterActionAutomation(action)
     if (automation === 'invalid') {
       const code = action.kind === 'multiattack' ? 'invalid-multiattack-sequence'
-        : action.kind === 'weapon-attack' && action.attack?.onHit && !action.attack.onHitRule
+        : action.kind === 'weapon-attack' && action.attack?.onHit &&
+            !action.attack.onHitRule && !action.attack.onHitEffects?.length
           ? 'unstructured-on-hit-rule'
           : action.kind === 'weapon-attack' ? 'invalid-weapon-attack' : 'unsupported-action-kind'
       issues.push({ monsterId: monster.id, actionId: action.id, code, message: `${section}动作 ${action.name} 缺少可验证的 Headless 结构` })
@@ -326,12 +461,28 @@ function validateActionList(
     if (!actionShapeIsValid(action) || action.kind !== 'multiattack' || dnd5eMonsterActionAutomation(action) !== 'headless') continue
     for (const childId of action.sequence ?? []) {
       const child = actions.find((candidate) => candidate.id === childId)
-      if (!child || child.kind !== 'weapon-attack' || dnd5eMonsterActionAutomation(child) !== 'headless') {
+      const optionalStructuredSpecial = child?.kind === 'other' &&
+        dnd5eMonsterActionAutomation(child) === 'headless' && !!child.rule
+      if (!optionalStructuredSpecial && (
+        !child || child.kind !== 'weapon-attack' || dnd5eMonsterActionAutomation(child) !== 'headless'
+      )) {
         issues.push({
           monsterId: monster.id,
           actionId: action.id,
           code: 'invalid-multiattack-sequence',
           message: `${section}多重攻击引用了不存在或不能由 Headless 结算的动作：${childId}`,
+        })
+      } else if (
+        action.sequenceAttackMode &&
+        child?.attack &&
+        child.attack.mode !== 'melee-or-ranged' &&
+        child.attack.mode !== action.sequenceAttackMode
+      ) {
+        issues.push({
+          monsterId: monster.id,
+          actionId: action.id,
+          code: 'invalid-multiattack-sequence',
+          message: `${section}多重攻击 ${action.name} 要求 ${action.sequenceAttackMode}，但子动作 ${childId} 不支持该攻击模式`,
         })
       }
     }
@@ -430,6 +581,31 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
     if (raw[key] != null && (!Array.isArray(raw[key]) || raw[key].some((entry) => typeof entry !== 'string' || !DAMAGE_TYPE_VALUES.has(entry)))) {
       issues.push(issue(monsterId, `${key} 包含未知伤害类型`))
     }
+  }
+  if (
+    raw.damageDefenseRules != null &&
+    (
+      !Array.isArray(raw.damageDefenseRules) ||
+      raw.damageDefenseRules.length > 128 ||
+      raw.damageDefenseRules.some((entry) => !isDnd5eConditionalDamageDefense(entry))
+    )
+  ) {
+    issues.push(issue(monsterId, '条件伤害防御数据无效'))
+  }
+  if (
+    raw.unparsedDamageDefenses != null &&
+    (
+      !Array.isArray(raw.unparsedDamageDefenses) ||
+      raw.unparsedDamageDefenses.length > 128 ||
+      raw.unparsedDamageDefenses.some((entry) =>
+        !isRecord(entry) ||
+        Object.keys(entry).some((key) => key !== 'outcome' && key !== 'text') ||
+        !['immune', 'resistant', 'vulnerable'].includes(String(entry.outcome)) ||
+        !requiredText(entry.text, 1_000)
+      )
+    )
+  ) {
+    issues.push(issue(monsterId, '未解析条件伤害防御数据无效'))
   }
   if (raw.conditionImmunities != null && (!Array.isArray(raw.conditionImmunities) || raw.conditionImmunities.some((entry) => !requiredText(entry, 120)))) {
     issues.push(issue(monsterId, '状态免疫数据无效'))

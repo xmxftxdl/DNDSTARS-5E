@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
+import { dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
 
 describe('Dnd5eActionIcon', () => {
@@ -110,5 +110,30 @@ describe('Dnd5eActionIcon', () => {
       expect(html).toContain(`data-class-backdrop="${castingClassId}"`)
       expect(html).toContain(`data-backdrop-detail="${detail}"`)
     }
+  })
+
+  it('renders bard music-note interiors in a pale white', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eSpellActionIcon({ id: 'message', name: '传讯术', castingClassId: 'bard' }),
+    }))
+    expect(html).toContain('data-backdrop-detail="resonant-song-filled-notes"')
+    expect(html).toContain('fill="#FFF7FF"')
+    expect(html).toContain('opacity=".9"')
+  })
+
+  it('renders a distinct ornamental frame for magic-item rarity', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eItemActionIcon({
+        id: 'srd-5.1:magic-item:amulet-of-health',
+        name: '健康护符',
+        englishName: 'Amulet of Health',
+        category: 'magic-item',
+        icon: 'magic-wondrous',
+        magicItem: { kind: 'wondrous-item', rarity: 'rare', attunement: 'required', automation: 'headless' },
+      }),
+    }))
+    expect(html).toContain('data-rarity-border="rare"')
+    expect(html).toContain('data-rarity-detail="four-gems"')
+    expect(html).toContain('data-icon-detail="painted-amulet-of-health"')
   })
 })

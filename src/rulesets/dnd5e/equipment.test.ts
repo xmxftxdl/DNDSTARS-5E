@@ -20,9 +20,11 @@ import {
   dnd5eArmorProficiencies,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eShillelaghAttackChoice,
+  dnd5eWeaponDamageSource,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponProficient,
   dnd5eWearingUnproficientArmor,
+  normalizeDnd5eCharacterEquipment,
 } from './equipment'
 import { dnd5eWalkingSpeed } from './classes'
 import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
@@ -46,6 +48,59 @@ describe('D&D 5e 2014 fighter equipment', () => {
       armor: { name: '链甲' },
     })
     expect(defaultEquipmentForDnd5eCharacter({ charClass: '法师' })?.mainWeapon?.name).toBe('长棍')
+  })
+
+  it('round-trips authoritative magic and special-material weapon provenance', () => {
+    const silveredMagicWeapon = structuredClone(DND5E_SHORTSWORD)
+    silveredMagicWeapon.id = 'plugin:moon-silver-shortsword'
+    silveredMagicWeapon.baseEquipmentId = DND5E_SHORTSWORD.id
+    if (silveredMagicWeapon.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    silveredMagicWeapon.dnd5e.magical = true
+    silveredMagicWeapon.dnd5e.specialMaterial = 'silvered'
+
+    const normalized = normalizeDnd5eCharacterEquipment({
+      charClass: '战士',
+      equipment: structuredClone({ mainWeapon: silveredMagicWeapon }),
+    })
+    expect(normalized?.mainWeapon?.dnd5e).toMatchObject({
+      kind: 'weapon',
+      magical: true,
+      specialMaterial: 'silvered',
+    })
+    expect(dnd5eWeaponDamageSource(normalized?.mainWeapon)).toEqual({
+      weaponId: silveredMagicWeapon.id,
+      magical: true,
+      specialMaterial: 'silvered',
+    })
+  })
+
+  it('migrates legacy +N magic weapons and drops invalid provenance values', () => {
+    const legacyMagicWeapon = {
+      ...structuredClone(DND5E_SHORTSWORD),
+      id: 'srd-5.1:magic-item:weapon-shortsword-plus-1',
+      baseEquipmentId: DND5E_SHORTSWORD.id,
+      effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+    }
+    expect(dnd5eWeaponDamageSource(legacyMagicWeapon)).toEqual({
+      weaponId: legacyMagicWeapon.id,
+      magical: true,
+    })
+    expect(normalizeDnd5eCharacterEquipment({
+      charClass: '战士',
+      equipment: { mainWeapon: legacyMagicWeapon },
+    })?.mainWeapon?.dnd5e).toMatchObject({ kind: 'weapon', magical: true })
+
+    const malformed = structuredClone(DND5E_SHORTSWORD)
+    if (malformed.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    const malformedRules = malformed.dnd5e as unknown as Record<string, unknown>
+    malformedRules.magical = 'yes'
+    malformedRules.specialMaterial = 'mithral'
+    const sanitized = normalizeDnd5eCharacterEquipment({
+      charClass: '战士',
+      equipment: { mainWeapon: malformed },
+    })?.mainWeapon?.dnd5e
+    expect(sanitized?.kind === 'weapon' && sanitized.magical).toBeUndefined()
+    expect(sanitized?.kind === 'weapon' && sanitized.specialMaterial).toBeUndefined()
   })
 
   it('derives AC 18 and a proficient +5 longsword attack', () => {

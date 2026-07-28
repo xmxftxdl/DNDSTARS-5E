@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { publishSharedEvent, sampleSharedServerClock } from './sharedApi'
 import {
+  ACID_SPLASH_ANIMATION_DURATION_MS,
   CHILL_TOUCH_ANIMATION_DURATION_MS,
   ELDRITCH_BLAST_ANIMATION_DURATION_MS,
   COMBAT_PRESENTATION_CHANNEL,
@@ -15,33 +16,49 @@ import {
   KILL_STREAK_BANNER_START_DELAY_MS,
   KILL_STREAK_PRESENTATION_EVENT_TTL_MS,
   PRODUCE_FLAME_ANIMATION_DURATION_MS,
+  POISON_SPRAY_ANIMATION_DURATION_MS,
   RAY_OF_FROST_ANIMATION_DURATION_MS,
   RESISTANCE_MANIFESTATION_DURATION_MS,
   RESISTANCE_ORBIT_RADIUS_FACTOR,
+  SAVING_THROW_PENDING_TTL_MS,
+  SAVING_THROW_RESULT_HOLD_MS,
+  SAVING_THROW_RESULT_TTL_MS,
   SANCTUARY_MANIFESTATION_DURATION_MS,
   SANCTUARY_ORBIT_RADIUS_FACTOR,
   SACRED_FLAME_ANIMATION_DURATION_MS,
   SHOCKING_GRASP_ANIMATION_DURATION_MS,
+  SPARE_THE_DYING_ANIMATION_DURATION_MS,
   SPELL_BANNER_TOTAL_DURATION_MS,
   combatPresentationKillStreakForMap,
   combatPresentationProjectilesForMap,
+  combatPresentationSavingThrowForMap,
   combatPresentationSpellBannerForMap,
   parseCombatPresentationEvent,
   publishChillTouchPresentation,
+  publishDexteritySavingThrowPresentation,
+  publishAttackBannerPresentation,
+  publishSavingThrowPresentation,
+  combatPresentationSavingThrowAbilityLabel,
+  subscribeLocalCombatPresentationEvent,
+  publishAcidSplashPresentation,
   publishEldritchBlastPresentation,
   publishFireBoltPresentation,
   publishFireballPresentation,
   publishGuidancePresentation,
   publishKillStreakPresentation,
   publishProduceFlamePresentation,
+  publishPoisonSprayPresentation,
   publishRayOfFrostPresentation,
   publishResistancePresentation,
   publishSanctuaryPresentation,
   publishSacredFlamePresentation,
   publishShockingGraspPresentation,
+  publishSpareTheDyingPresentation,
   publishSpellBannerPresentation,
   reduceCombatPresentationState,
   refreshCombatPresentationClock,
+  publishViciousMockeryPresentation,
+  VICIOUS_MOCKERY_ANIMATION_DURATION_MS,
 } from './combatPresentation'
 
 vi.mock('./sharedApi', () => ({
@@ -203,7 +220,15 @@ describe('combat presentation events', () => {
     expect(parseCombatPresentationEvent(rayOfFrost)).toEqual(rayOfFrost)
     expect(parseCombatPresentationEvent(eldritchBlast)).toEqual(eldritchBlast)
     expect(parseCombatPresentationEvent(produceFlame)).toEqual(produceFlame)
-    expect(parseCombatPresentationEvent({ ...fireBolt, spellId: 'acid-splash' })).toBeNull()
+    for (const spellId of ['acid-splash', 'poison-spray', 'vicious-mockery'] as const) {
+      expect(parseCombatPresentationEvent({
+        ...fireBolt,
+        spellId,
+        accentColor: '#d946ef',
+        glowColor: '#e879f9',
+      })).toMatchObject({ spellId, accentColor: '#d946ef', glowColor: '#e879f9' })
+    }
+    expect(parseCombatPresentationEvent({ ...fireBolt, spellId: 'unknown-cantrip' })).toBeNull()
     expect(parseCombatPresentationEvent({ ...fireBolt, expiresAt: fireBolt.createdAt + 6_000 })).toBeNull()
   })
 
@@ -525,6 +550,50 @@ describe('combat presentation events', () => {
     vi.useRealTimers()
   })
 
+  it('publishes a parser-valid Bard Thunderwave banner', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(21_000)
+    await refreshCombatPresentationClock(true)
+    await publishSpellBannerPresentation({
+      id: 'thunderwave-banner-live-1',
+      mapId: 'map-a',
+      transactionId: 'thunderwave-live-1',
+      sourceTokenId: 'bard',
+      spellId: 'thunderwave',
+      casterName: '吟游诗人',
+      spellName: '雷鸣波',
+      castingClassId: 'bard',
+    })
+    const event = vi.mocked(publishSharedEvent).mock.calls.at(-1)?.[1]
+    expect(event).toMatchObject({
+      type: 'spell-banner',
+      spellId: 'thunderwave',
+      spellName: '雷鸣波',
+      castingClassId: 'bard',
+    })
+    expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('publishes and projects melee and ranged attack banners', async () => {
+    await publishAttackBannerPresentation({
+      id: 'fighter-longbow:banner',
+      mapId: map.id,
+      transactionId: 'fighter-longbow',
+      sourceTokenId: 'fighter',
+      actorName: '战士',
+      attackName: '长弓',
+      attackKind: 'ranged',
+      classId: 'fighter',
+    })
+    const event = vi.mocked(publishSharedEvent).mock.calls.at(-1)?.[1]
+    expect(parseCombatPresentationEvent(event)).toEqual(expect.objectContaining({
+      type: 'attack-banner',
+      attackKind: 'ranged',
+      attackName: '长弓',
+    }))
+  })
+
   it('publishes a complete server-clock event that the receiving parser accepts', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(10_000)
@@ -544,6 +613,62 @@ describe('combat presentation events', () => {
     const event = vi.mocked(publishSharedEvent).mock.calls[0]?.[1]
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(10_500 + FIRE_BOLT_ANIMATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes the four class-colored cantrip animations before settlement', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(12_000)
+    await refreshCombatPresentationClock(true)
+    const common = {
+      mapId: 'map-a',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'goblin',
+      accentColor: '#d946ef',
+      glowColor: '#e879f9',
+    }
+    const schedules = await Promise.all([
+      publishSpareTheDyingPresentation({
+        ...common,
+        id: 'spare-live',
+        transactionId: 'spare-tx',
+      }),
+      publishAcidSplashPresentation({
+        ...common,
+        id: 'acid-live',
+        transactionId: 'acid-tx',
+      }),
+      publishPoisonSprayPresentation({
+        ...common,
+        id: 'poison-live',
+        transactionId: 'poison-tx',
+      }),
+      publishViciousMockeryPresentation({
+        ...common,
+        id: 'mockery-live',
+        transactionId: 'mockery-tx',
+      }),
+    ])
+    const events = vi.mocked(publishSharedEvent).mock.calls.map((call) => call[1])
+    expect(events.map((event) => (event as { spellId?: string }).spellId)).toEqual([
+      'spare-the-dying',
+      'acid-splash',
+      'poison-spray',
+      'vicious-mockery',
+    ])
+    for (const event of events) {
+      expect(parseCombatPresentationEvent(event)).not.toBeNull()
+      expect(event).toMatchObject({
+        accentColor: '#d946ef',
+        glowColor: '#e879f9',
+      })
+    }
+    expect(schedules.map((schedule) => schedule.completesAt - 12_500)).toEqual([
+      SPARE_THE_DYING_ANIMATION_DURATION_MS,
+      ACID_SPLASH_ANIMATION_DURATION_MS,
+      POISON_SPRAY_ANIMATION_DURATION_MS,
+      VICIOUS_MOCKERY_ANIMATION_DURATION_MS,
+    ])
     vi.useRealTimers()
   })
 
@@ -812,6 +937,142 @@ describe('combat presentation events', () => {
     const event = vi.mocked(publishSharedEvent).mock.calls[0]?.[1]
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(27_500 + CHILL_TOUCH_ANIMATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('replaces a pending Dexterity save marker with its final synchronized result', async () => {
+    const pending = {
+      schemaVersion: 1 as const,
+      id: 'save:fireball:goblin',
+      type: 'saving-throw-status' as const,
+      mapId: 'map-a',
+      transactionId: 'fireball-cast',
+      sourceTokenId: 'goblin',
+      targetTokenId: 'goblin',
+      targetName: '地精',
+      ability: 'dex' as const,
+      phase: 'rolling' as const,
+      dc: 15,
+      createdAt: 1_000,
+      expiresAt: 1_000 + SAVING_THROW_PENDING_TTL_MS,
+    }
+    const result = {
+      ...pending,
+      phase: 'result' as const,
+      total: 17,
+      success: true,
+      createdAt: 2_000,
+      expiresAt: 2_000 + SAVING_THROW_RESULT_TTL_MS,
+    }
+    const pendingState = reduceCombatPresentationState(EMPTY_COMBAT_PRESENTATION_STATE, pending, 1_000)
+    expect(combatPresentationSavingThrowForMap(pendingState, 'map-a', 1_500)).toEqual(
+      expect.objectContaining({ targetTokenId: 'goblin', phase: 'rolling', dc: 15 }),
+    )
+    const resultState = reduceCombatPresentationState(pendingState, result, 2_000)
+    expect(resultState.spellProjectiles).toHaveLength(1)
+    expect(combatPresentationSavingThrowForMap(resultState, 'map-a', 2_100)).toEqual(
+      expect.objectContaining({ phase: 'result', total: 17, success: true }),
+    )
+    expect(parseCombatPresentationEvent({ ...result, total: undefined })).toBeNull()
+  })
+
+  it('publishes pending and final Dexterity save states using the calibrated server clock', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(28_000)
+    await refreshCombatPresentationClock(true)
+    const base = {
+      id: 'save:fireball:goblin',
+      mapId: 'map-a',
+      transactionId: 'fireball-cast',
+      targetTokenId: 'goblin',
+      targetName: '地精',
+      dc: 15,
+    }
+    await publishDexteritySavingThrowPresentation({ ...base, phase: 'rolling' })
+    const resultSchedule = await publishDexteritySavingThrowPresentation({
+      ...base,
+      phase: 'result',
+      total: 17,
+      success: true,
+    })
+    expect(publishSharedEvent).toHaveBeenNthCalledWith(
+      1,
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({
+        type: 'saving-throw-status',
+        ability: 'dex',
+        phase: 'rolling',
+        createdAt: 28_500,
+        expiresAt: 28_500 + SAVING_THROW_PENDING_TTL_MS,
+      }),
+    )
+    expect(publishSharedEvent).toHaveBeenNthCalledWith(
+      2,
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({
+        type: 'saving-throw-status',
+        phase: 'result',
+        total: 17,
+        success: true,
+        expiresAt: 28_500 + SAVING_THROW_RESULT_TTL_MS,
+      }),
+    )
+    expect(resultSchedule.completesAt).toBe(28_500 + SAVING_THROW_RESULT_HOLD_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes and labels all six saving-throw abilities', async () => {
+    const abilities = [
+      ['str', '力量豁免'],
+      ['dex', '敏捷豁免'],
+      ['con', '体质豁免'],
+      ['int', '智力豁免'],
+      ['wis', '感知豁免'],
+      ['cha', '魅力豁免'],
+    ] as const
+    for (const [ability, label] of abilities) {
+      expect(combatPresentationSavingThrowAbilityLabel(ability)).toBe(label)
+      await publishSavingThrowPresentation({
+        id: `save:spell:${ability}`,
+        mapId: 'map-a',
+        transactionId: `cast-${ability}`,
+        targetTokenId: `target-${ability}`,
+        targetName: '目标',
+        ability,
+        phase: 'rolling',
+        dc: 15,
+      })
+      const event = vi.mocked(publishSharedEvent).mock.calls.at(-1)?.[1]
+      expect(parseCombatPresentationEvent(event)).toEqual(
+        expect.objectContaining({ type: 'saving-throw-status', ability }),
+      )
+    }
+  })
+
+  it('projects Dexterity save status locally before the SSE round trip', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(29_000)
+    await refreshCombatPresentationClock(true)
+    const received: unknown[] = []
+    const unsubscribe = subscribeLocalCombatPresentationEvent((event) => received.push(event))
+    try {
+      await publishDexteritySavingThrowPresentation({
+        id: 'save:fireball:local-goblin',
+        mapId: 'map-a',
+        transactionId: 'fireball-local-cast',
+        targetTokenId: 'local-goblin',
+        targetName: '地精',
+        phase: 'rolling',
+        dc: 15,
+      })
+    } finally {
+      unsubscribe()
+    }
+    expect(received).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-status',
+      targetTokenId: 'local-goblin',
+      phase: 'rolling',
+    }))
     vi.useRealTimers()
   })
 

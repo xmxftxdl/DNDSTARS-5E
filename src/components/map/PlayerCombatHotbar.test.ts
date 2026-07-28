@@ -62,6 +62,34 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('职业特性')
   })
 
+  it('在法术栏位上方显示剩余法术位', () => {
+    const wizard: Character = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      charClass: '法师',
+      level: 5,
+      dnd5eClassLevels: { wizard: 5 },
+      classResources: {
+        'dnd5e-spell-slot-1': { current: 2, max: 4 },
+        'dnd5e-spell-slot-2': { current: 0, max: 3 },
+        'dnd5e-spell-slot-3': { current: 1, max: 2 },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: wizard,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('data-testid="combat-hotbar-spell-slots"')
+    expect(html.indexOf('combat-hotbar-spell-slots')).toBeLessThan(html.indexOf('>法术<'))
+    expect(html).toContain('1环')
+    expect(html).toContain('<strong class="text-[10px]">2</strong>/4')
+    expect(html).toContain('<strong class="text-[10px]">0</strong>/3')
+  })
+
   it('从角色实际选择生成可分页的通用施法修正图标', () => {
     const sorcerer: Character = {
       ...character(),

@@ -1,4 +1,5 @@
-import type { Dnd5eInventoryItemTemplate } from '../types/inventory'
+import type { Dnd5eInventoryItemTemplate, Dnd5eMagicItemRarity } from '../types/inventory'
+import { DND5E_SRD_SPELL_CATALOG } from '../rulesets/dnd5e/spellCatalog'
 
 export type Dnd5eActionIconMotif =
   | 'acid'
@@ -18,6 +19,7 @@ export type Dnd5eActionIconMotif =
   | 'illusion'
   | 'lightning'
   | 'melee-attack'
+  | 'monster-attack'
   | 'move'
   | 'movement'
   | 'nature'
@@ -41,6 +43,8 @@ export interface Dnd5eActionIconSpec {
   assetMode?: 'cover' | 'foreground'
   /** Optional semantic backdrop rendered beneath transparent artwork. */
   classBackdropId?: string
+  /** Magic-item rarity controls the inventory background and ornamental frame. */
+  rarityBackdropId?: Dnd5eMagicItemRarity
 }
 
 export interface Dnd5eSpellActionIconInput {
@@ -75,6 +79,7 @@ const PALETTES: Record<Dnd5eActionIconMotif, readonly IconPalette[]> = {
   illusion: [['#73376e', '#21081f', '#ffd6fb', '#e879f9'], ['#3e3d83', '#0c0b25', '#e0e7ff', '#818cf8']],
   lightning: [['#3157a6', '#071232', '#fff6a8', '#fde047'], ['#4f3b9c', '#100927', '#e0f2fe', '#38bdf8']],
   'melee-attack': [['#7a2e1f', '#230907', '#ffe0b2', '#fb923c'], ['#73412a', '#211008', '#ffe4bd', '#f59e0b']],
+  'monster-attack': [['#7f1d1d', '#170506', '#fecaca', '#ef4444'], ['#581c1c', '#120304', '#fee2e2', '#f87171']],
   move: [['#126d76', '#031e22', '#d9ffff', '#22d3ee'], ['#285ea3', '#07172f', '#e0f2fe', '#60a5fa']],
   movement: [['#126d76', '#031e22', '#c7fbff', '#22d3ee'], ['#3558a0', '#081432', '#dbeafe', '#60a5fa']],
   nature: [['#2d6734', '#071d0c', '#d9f99d', '#4ade80'], ['#596324', '#171d07', '#efffa7', '#a3e635']],
@@ -86,6 +91,9 @@ const PALETTES: Record<Dnd5eActionIconMotif, readonly IconPalette[]> = {
 
 /** Semantic class colors used behind spell artwork when the casting source is known. */
 export const DND5E_CLASS_ICON_PALETTES: Readonly<Record<string, IconPalette>> = {
+  // 怪物使用与敌方当前回合流光相同的 #EF4444，但以暗血红为横幅底色，
+  // 避免与野蛮人的明亮珊瑚猩红混淆。
+  monster: ['#7F1D1D', '#170506', '#FECACA', '#EF4444'],
   barbarian: ['#E5484D', '#2B090B', '#FFE0E0', '#FF6B6B'],
   bard: ['#D946EF', '#26072C', '#F9D5FF', '#E879F9'],
   cleric: ['#FBBF24', '#2B1903', '#FFF3BF', '#FDE047'],
@@ -100,7 +108,21 @@ export const DND5E_CLASS_ICON_PALETTES: Readonly<Record<string, IconPalette>> = 
   wizard: ['#3B82F6', '#071A38', '#DBEAFE', '#60A5FA'],
 }
 
-const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = {
+export const DND5E_MAGIC_ITEM_RARITY_PALETTES: Readonly<Record<Dnd5eMagicItemRarity, IconPalette>> = {
+  common: ['#52606D', '#111820', '#E5E7EB', '#CBD5E1'],
+  uncommon: ['#237A4A', '#061F13', '#BBF7D0', '#4ADE80'],
+  rare: ['#2563A8', '#071A38', '#DBEAFE', '#60A5FA'],
+  'very-rare': ['#7138A8', '#1C082E', '#F3E8FF', '#C084FC'],
+  legendary: ['#B86A12', '#2B1403', '#FFF0B5', '#FBBF24'],
+  artifact: ['#A51D2D', '#2A050A', '#FFE4E6', '#FB7185'],
+  varies: ['#326C8C', '#160A2E', '#E0F2FE', '#A78BFA'],
+}
+
+const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = Object.freeze({
+  ...Object.fromEntries(DND5E_SRD_SPELL_CATALOG.map(({ id }) => [
+    id,
+    `/assets/icons/${id}-spell-action.png`,
+  ])),
   message: '/assets/icons/message-spell-action.png',
   'minor-illusion': '/assets/icons/minor-illusion-spell-action.png',
   druidcraft: '/assets/icons/druidcraft-spell-action.png',
@@ -225,6 +247,85 @@ const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = {
   darkvision: '/assets/icons/darkvision-spell-action.png',
   darkness: '/assets/icons/darkness-spell-action.png',
   blur: '/assets/icons/blur-spell-action.png',
+  knock: '/assets/icons/knock-spell-action.png',
+  barkskin: '/assets/icons/barkskin-spell-action.png',
+  invisibility: '/assets/icons/invisibility-spell-action.png',
+  aid: '/assets/icons/aid-spell-action.png',
+  moonbeam: '/assets/icons/moonbeam-spell-action.png',
+  'animate-dead': '/assets/icons/animate-dead-spell-action.png',
+  'stinking-cloud': '/assets/icons/stinking-cloud-spell-action.png',
+  'hypnotic-pattern': '/assets/icons/hypnotic-pattern-spell-action.png',
+  'beacon-of-hope': '/assets/icons/beacon-of-hope-spell-action.png',
+  'bestow-curse': '/assets/icons/bestow-curse-spell-action.png',
+  blink: '/assets/icons/blink-spell-action.png',
+  'call-lightning': '/assets/icons/call-lightning-spell-action.png',
+  clairvoyance: '/assets/icons/clairvoyance-spell-action.png',
+  'conjure-animals': '/assets/icons/conjure-animals-spell-action.png',
+  counterspell: '/assets/icons/counterspell-spell-action.png',
+  'create-food-and-water': '/assets/icons/create-food-and-water-spell-action.png',
+  daylight: '/assets/icons/daylight-spell-action.png',
+  'dispel-magic': '/assets/icons/dispel-magic-spell-action.png',
+  fear: '/assets/icons/fear-spell-action.png',
+  fly: '/assets/icons/fly-spell-action.png',
+  'gaseous-form': '/assets/icons/gaseous-form-spell-action.png',
+  'glyph-of-warding': '/assets/icons/glyph-of-warding-spell-action.png',
+  haste: '/assets/icons/haste-spell-action.png',
+  'lightning-bolt': '/assets/icons/lightning-bolt-spell-action.png',
+  'magic-circle': '/assets/icons/magic-circle-spell-action.png',
+  'major-image': '/assets/icons/major-image-spell-action.png',
+  'mass-healing-word': '/assets/icons/mass-healing-word-spell-action.png',
+  'meld-into-stone': '/assets/icons/meld-into-stone-spell-action.png',
+  nondetection: '/assets/icons/nondetection-spell-action.png',
+  'phantom-steed': '/assets/icons/phantom-steed-spell-action.png',
+  'plant-growth': '/assets/icons/plant-growth-spell-action.png',
+  'protection-from-energy': '/assets/icons/protection-from-energy-spell-action.png',
+  'remove-curse': '/assets/icons/remove-curse-spell-action.png',
+  revivify: '/assets/icons/revivify-spell-action.png',
+  sending: '/assets/icons/sending-spell-action.png',
+  'sleet-storm': '/assets/icons/sleet-storm-spell-action.png',
+  slow: '/assets/icons/slow-spell-action.png',
+  'speak-with-dead': '/assets/icons/speak-with-dead-spell-action.png',
+  'speak-with-plants': '/assets/icons/speak-with-plants-spell-action.png',
+  'spirit-guardians': '/assets/icons/spirit-guardians-spell-action.png',
+  'tiny-hut': '/assets/icons/tiny-hut-spell-action.png',
+  tongues: '/assets/icons/tongues-spell-action.png',
+  'vampiric-touch': '/assets/icons/vampiric-touch-spell-action.png',
+  'water-breathing': '/assets/icons/water-breathing-spell-action.png',
+  'water-walk': '/assets/icons/water-walk-spell-action.png',
+  'wind-wall': '/assets/icons/wind-wall-spell-action.png',
+  'arcane-eye': '/assets/icons/arcane-eye-spell-action.png',
+  banishment: '/assets/icons/banishment-spell-action.png',
+  'black-tentacles': '/assets/icons/black-tentacles-spell-action.png',
+  blight: '/assets/icons/blight-spell-action.png',
+  compulsion: '/assets/icons/compulsion-spell-action.png',
+  confusion: '/assets/icons/confusion-spell-action.png',
+  'conjure-minor-elementals': '/assets/icons/conjure-minor-elementals-spell-action.png',
+  'conjure-woodland-beings': '/assets/icons/conjure-woodland-beings-spell-action.png',
+  'control-water': '/assets/icons/control-water-spell-action.png',
+  'death-ward': '/assets/icons/death-ward-spell-action.png',
+  'dimension-door': '/assets/icons/dimension-door-spell-action.png',
+  divination: '/assets/icons/divination-spell-action.png',
+  'dominate-beast': '/assets/icons/dominate-beast-spell-action.png',
+  fabricate: '/assets/icons/fabricate-spell-action.png',
+})
+
+const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
+  'srd-5.1:magic-item:adamantine-armor': '/assets/icons/adamantine-armor-item-action.png',
+  'srd-5.1:magic-item:ammunition': '/assets/icons/ammunition-item-action.png',
+  'srd-5.1:magic-item:amulet-of-health': '/assets/icons/amulet-of-health-item-action.png',
+  'srd-5.1:magic-item:amulet-of-proof-against-detection-and-location': '/assets/icons/amulet-of-proof-against-detection-and-location-item-action.png',
+  'srd-5.1:magic-item:amulet-of-the-planes': '/assets/icons/amulet-of-the-planes-item-action.png',
+  'srd-5.1:magic-item:animated-shield': '/assets/icons/animated-shield-item-action.png',
+  'srd-5.1:magic-item:apparatus-of-the-crab': '/assets/icons/apparatus-of-the-crab-item-action.png',
+  'srd-5.1:magic-item:armor-chain-mail-plus-1': '/assets/icons/armor-chain-mail-plus-1-item-action.png',
+  'srd-5.1:magic-item:armor-chain-mail-plus-2': '/assets/icons/armor-chain-mail-plus-2-item-action.png',
+  'srd-5.1:magic-item:armor-chain-mail-plus-3': '/assets/icons/armor-chain-mail-plus-3-item-action.png',
+  'srd-5.1:magic-item:armor-scale-mail-plus-1': '/assets/icons/armor-scale-mail-plus-1-item-action.png',
+  'srd-5.1:magic-item:armor-scale-mail-plus-2': '/assets/icons/armor-scale-mail-plus-2-item-action.png',
+  'srd-5.1:magic-item:armor-scale-mail-plus-3': '/assets/icons/armor-scale-mail-plus-3-item-action.png',
+  'srd-5.1:magic-item:armor-leather-armor-plus-1': '/assets/icons/armor-leather-armor-plus-1-item-action.png',
+  'srd-5.1:magic-item:armor-leather-armor-plus-2': '/assets/icons/armor-leather-armor-plus-2-item-action.png',
+  'srd-5.1:magic-item:armor-leather-armor-plus-3': '/assets/icons/armor-leather-armor-plus-3-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [
@@ -319,15 +420,28 @@ export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' 
   const key = `item:${item.id}`
   const searchable = `${item.id} ${item.name} ${item.englishName ?? ''}`
   const textMotif = motifFromText(searchable)
-  if (textMotif) return paletteFor(key, textMotif)
-  if (item.icon === 'weapon' || item.magicItem?.kind === 'weapon' || item.magicItem?.kind === 'ammunition') return paletteFor(key, 'weapon')
-  if (item.icon === 'armor' || item.icon === 'shield' || item.magicItem?.kind === 'armor') return paletteFor(key, 'armor')
-  if (item.icon === 'healing-potion' || item.icon === 'healers-kit' || item.use?.effect.kind === 'healing') return paletteFor(key, 'healing')
-  if (item.icon === 'acid') return paletteFor(key, 'acid')
-  if (item.icon === 'alchemists-fire' || item.icon === 'torch' || item.icon === 'tinderbox') return paletteFor(key, 'fire')
-  if (item.icon === 'poison' || item.icon === 'antitoxin') return paletteFor(key, 'poison')
-  if (item.icon === 'holy-water') return paletteFor(key, 'radiant')
-  if (item.icon === 'magic-ring' || item.icon === 'magic-wand' || item.icon === 'magic-staff' || item.icon === 'magic-scroll' || item.icon === 'magic-wondrous') return paletteFor(key, 'arcane')
-  if (item.category === 'equipment') return paletteFor(key, 'weapon')
-  return paletteFor(key, 'beast')
+  const motif = textMotif ??
+    (item.icon === 'weapon' || item.magicItem?.kind === 'weapon' || item.magicItem?.kind === 'ammunition' ? 'weapon'
+      : item.icon === 'armor' || item.icon === 'shield' || item.magicItem?.kind === 'armor' ? 'armor'
+        : item.icon === 'healing-potion' || item.icon === 'healers-kit' || item.use?.effect.kind === 'healing' ? 'healing'
+          : item.icon === 'acid' ? 'acid'
+            : item.icon === 'alchemists-fire' || item.icon === 'torch' || item.icon === 'tinderbox' ? 'fire'
+              : item.icon === 'poison' || item.icon === 'antitoxin' ? 'poison'
+                : item.icon === 'holy-water' ? 'radiant'
+                  : item.icon === 'magic-ring' || item.icon === 'magic-wand' || item.icon === 'magic-staff' || item.icon === 'magic-scroll' || item.icon === 'magic-wondrous' ? 'arcane'
+                    : item.category === 'equipment' ? 'weapon' : 'beast')
+  const base = paletteFor(key, motif)
+  const rarityPalette = item.magicItem ? DND5E_MAGIC_ITEM_RARITY_PALETTES[item.magicItem.rarity] : undefined
+  const asset = DND5E_PAINTED_ITEM_ASSETS[item.id]
+  return {
+    ...base,
+    ...(rarityPalette ? {
+      background: rarityPalette[0],
+      backgroundDeep: rarityPalette[1],
+      accent: rarityPalette[2],
+      glow: rarityPalette[3],
+      rarityBackdropId: item.magicItem!.rarity,
+    } : {}),
+    ...(asset ? { asset, assetMode: 'foreground' as const } : {}),
+  }
 }

@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   COMBAT_PRESENTATION_CHANNEL,
   EMPTY_COMBAT_PRESENTATION_STATE,
   combatPresentationKillStreakForMap,
+  combatPresentationAttackBannerForMap,
   combatPresentationProjectilesForMap,
+  combatPresentationSavingThrowForMap,
   combatPresentationServerNow,
   combatPresentationSpellBannerForMap,
   reduceCombatPresentationState,
   refreshCombatPresentationClock,
+  subscribeLocalCombatPresentationEvent,
   type CombatPresentationMapProjectile,
   type CombatPresentationKillStreak,
+  type CombatPresentationAttackBanner,
   type CombatPresentationSpellBanner,
+  type CombatPresentationSavingThrow,
   type CombatPresentationState,
 } from '../../lib/combatPresentation'
 import { subscribeSharedEvent } from '../../lib/sharedApi'
@@ -21,6 +27,8 @@ export interface CombatPresentationCoordinator {
   projectiles: CombatPresentationMapProjectile[]
   spellBanner: CombatPresentationSpellBanner | null
   killStreak: CombatPresentationKillStreak | null
+  attackBanner: CombatPresentationAttackBanner | null
+  savingThrow: CombatPresentationSavingThrow | null
 }
 
 export function useCombatPresentationCoordinator(
@@ -37,9 +45,15 @@ export function useCombatPresentationCoordinator(
     const unsubscribe = subscribeSharedEvent(COMBAT_PRESENTATION_CHANNEL, (event) => {
       setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
     })
+    const unsubscribeLocal = subscribeLocalCombatPresentationEvent((event) => {
+      flushSync(() => {
+        setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
+      })
+    })
     return () => {
       cancelled = true
       unsubscribe()
+      unsubscribeLocal()
     }
   }, [])
 
@@ -77,5 +91,22 @@ export function useCombatPresentationCoordinator(
     [clockRevision, map, state],
   )
 
-  return { state, projectiles, spellBanner, killStreak }
+  const attackBanner = useMemo(
+    () => map
+      ? combatPresentationAttackBannerForMap(state, map.id, combatPresentationServerNow())
+      : null,
+    [clockRevision, map, state],
+  )
+
+  const savingThrow = useMemo(
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationSavingThrowForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
+    [clockRevision, map, state],
+  )
+
+  return { state, projectiles, spellBanner, killStreak, attackBanner, savingThrow }
 }

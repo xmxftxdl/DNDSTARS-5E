@@ -58,6 +58,7 @@ function registerLegacyContributions(api: Dnd5eRulesPluginApi, draft: Dnd5eCusto
   for (const spell of draft.spells) api.registerSpell(spell)
   for (const item of draft.items) api.registerItem(item)
   for (const method of draft.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
+  for (const monster of draft.monsters ?? []) api.registerMonster(monster)
 }
 
 export function dnd5eRulesPluginFromDeclarativePackageV1(
@@ -66,7 +67,7 @@ export function dnd5eRulesPluginFromDeclarativePackageV1(
   const legacy = value.legacy == null ? undefined : value.legacy as Dnd5eCustomRulesPluginDraft
   const hasLegacy = !!legacy && (
     legacy.races.length + legacy.backgrounds.length + legacy.features.length + legacy.spells.length +
-    legacy.items.length + legacy.abilityGenerationMethods.length > 0
+    legacy.items.length + legacy.abilityGenerationMethods.length + (legacy.monsters?.length ?? 0) > 0
   )
   if (hasLegacy) {
     const errors = validateDnd5eCustomRulesPluginDraft({ ...legacy, subclasses: [] })

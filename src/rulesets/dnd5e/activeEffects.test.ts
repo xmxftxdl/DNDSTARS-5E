@@ -4,6 +4,7 @@ import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
   dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveArmorClassBonus,
   dnd5eActiveCarryingCapacityMultiplier,
   dnd5eActiveConditionImmunities,
   dnd5eActiveDarkvisionRangeFeet,
@@ -11,6 +12,8 @@ import {
   dnd5eActiveEffectsSeeInvisible,
   dnd5eActiveFlySpeed,
   dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveResistanceToAllDamage,
+  dnd5eActiveSavingThrowBonus,
   dnd5eActiveSizeRankDelta,
   dnd5eActiveSafeFallFeet,
   dnd5eActiveSpeedPenalty,
@@ -29,6 +32,35 @@ import {
 } from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
+  it('normalizes reusable AC, saving throw, and all-damage resistance modifiers', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:warding-bond',
+      label: '守护之链',
+      source: { kind: 'spell', actorId: 'cleric' },
+      targetId: 'ally',
+      modifiers: {
+        armorClassBonus: 1,
+        savingThrowBonus: 1,
+        resistanceToAllDamage: true,
+      },
+    })
+    expect(dnd5eActiveArmorClassBonus([effect])).toBe(1)
+    expect(dnd5eActiveSavingThrowBonus([effect])).toBe(1)
+    expect(dnd5eActiveResistanceToAllDamage([effect])).toBe(true)
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: { armorClassBonus: 21, savingThrowBonus: Number.NaN, resistanceToAllDamage: 'yes' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.stringContaining('armorClassBonus'),
+        expect.stringContaining('savingThrowBonus'),
+        expect.stringContaining('resistanceToAllDamage'),
+      ]),
+    })
+  })
+
   it('normalizes the reusable see-invisible sight modifier', () => {
     const effect = createDnd5eMechanicalEffect({
       definitionId: 'srd-5.1:spell:see-invisibility',

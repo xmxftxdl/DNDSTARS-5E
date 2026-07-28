@@ -14,8 +14,10 @@ import {
   dnd5eOffHandWeaponAttackProfile,
   dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
+  dnd5eWeaponDamageSource,
   dnd5eWeaponRangeFeet,
   dnd5eWearingUnproficientArmor,
+  type Dnd5eWeaponDamageSource,
   type Dnd5eWeaponAttackProfile,
 } from './equipment'
 import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from './classes'
@@ -85,6 +87,8 @@ export interface PreparedDnd5eEquipmentAttack {
   actorToken: Token
   targetToken: Token
   profile: Dnd5eWeaponAttackProfile
+  /** 仅由权威角色装备与 ActiveEffect 生成；不读取客户端请求中的同名字段。 */
+  damageSource: Dnd5eWeaponDamageSource
   targetArmorClass: number
   cover: Dnd5eAttackCoverSnapshot & { overriddenByDm: boolean }
   distanceFeet: number
@@ -147,6 +151,17 @@ export function prepareDnd5eEquipmentAttack(input: {
     ? dnd5eOffHandWeaponAttackProfile(actor)
     : dnd5eWeaponAttackProfile(actor, { shillelaghAbility })
   if (!profile) return { ok: false, reason: 'no-weapon' }
+  const equippedWeapon = offHandAttack ? actor.equipment?.offHand : actor.equipment?.mainWeapon
+  const persistedDamageSource = dnd5eWeaponDamageSource(equippedWeapon)
+  if (!persistedDamageSource || persistedDamageSource.weaponId !== profile.weaponId) {
+    return { ok: false, reason: 'no-weapon' }
+  }
+  const damageSource: Dnd5eWeaponDamageSource = {
+    ...persistedDamageSource,
+    magical: persistedDamageSource.magical ||
+      dnd5eActiveMagicWeaponBonus(actor.dnd5eCombatState?.activeEffects, profile.weaponId) > 0 ||
+      (!offHandAttack && shillelagh?.weaponId === profile.weaponId),
+  }
   if (!consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
   if (
     offHandAttack && (
@@ -345,6 +360,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       actorToken,
       targetToken,
       profile,
+      damageSource,
       targetArmorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, targetToken.id),
       cover: { ...effectiveCover, overriddenByDm: coverOverride != null },
       distanceFeet,

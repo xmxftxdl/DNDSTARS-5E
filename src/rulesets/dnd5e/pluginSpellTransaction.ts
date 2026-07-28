@@ -28,6 +28,8 @@ import { dnd5eSpellcastingClassIdForSpell } from './spells'
 import type { Dnd5eSpellConditionDuration, Dnd5eSpellMechanicsDefinition } from './spellMechanics'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eWearingUnproficientArmor } from './equipment'
+import { resolveDnd5eDamageDefenses } from './damageDefenses'
+import { dnd5eLimitedMagicImmunityNegatesSpell } from './monsterGenericAbilities'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -331,6 +333,15 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
 
   let rawDamage = 0
   let finalDamage = 0
+  const sourceCombatant = prepared.state.combatants[prepared.actorToken.id]
+  const targetCombatant = prepared.state.combatants[prepared.targetToken.id]
+  const targetWilling = sourceCombatant.controller === targetCombatant.controller
+  const spellNegated = dnd5eLimitedMagicImmunityNegatesSpell({
+    rule: targetCombatant.limitedMagicImmunity,
+    spellLevel: prepared.slotLevel,
+    target: targetWilling ? 'ally' : 'hostile',
+    willing: targetWilling,
+  })
   const shouldDealDamage = !!mechanics.damage && (mechanics.resolution !== 'spell-attack' || attackHit)
   if (shouldDealDamage) {
     const count = prepared.damageDice.count * (critical ? 2 : 1)
@@ -348,7 +359,23 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
       const onSuccess = mechanics.savingThrow?.onSuccess ?? 'none'
       rawDamage = onSuccess === 'half' ? Math.floor(rawDamage / 2) : onSuccess === 'full' ? rawDamage : 0
     }
-    finalDamage = finalDamageForTarget(prepared.state.combatants[prepared.targetToken.id], rawDamage, mechanics.damage!.type)
+    finalDamage = resolveDnd5eDamageDefenses({
+      damage: rawDamage,
+      source: {
+        damageType: mechanics.damage!.type,
+        delivery: 'spell',
+        magical: true,
+        spellLevel: prepared.slotLevel,
+        sourceMoralAlignment: sourceCombatant.moralAlignment,
+      },
+      defenses: {
+        immunities: targetCombatant.damageImmunities,
+        resistances: targetCombatant.damageResistances,
+        vulnerabilities: targetCombatant.damageVulnerabilities,
+        damageDefenseRules: targetCombatant.damageDefenseRules,
+      },
+    }).finalDamage
+    if (spellNegated) finalDamage = 0
   }
 
   const conditions = (mechanics.conditions ?? []).filter((condition) => {
@@ -452,14 +479,6 @@ function validD20Pair(first: number | undefined, second: number | undefined, mod
 function selectedD20(first: number, second: number | undefined, mode: D20RollMode): number {
   if (mode === 'normal' || second == null) return first
   return mode === 'advantage' ? Math.max(first, second) : Math.min(first, second)
-}
-
-function finalDamageForTarget(target: Dnd5eHeadlessCombatState['combatants'][string], amount: number, type: string): number {
-  if (target.damageImmunities.includes(type as never)) return 0
-  let result = amount
-  if (target.damageResistances.includes(type as never)) result = Math.floor(result / 2)
-  if (target.damageVulnerabilities.includes(type as never)) result *= 2
-  return result
 }
 
 function spellDurationRounds(spell: RegisteredDnd5ePluginSpell): number {

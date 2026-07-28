@@ -192,6 +192,7 @@ function initializePlugin(source: string): {
   abilityGenerationMethods: readonly Record<string, unknown>[]
   spells: readonly Record<string, unknown>[]
   items: readonly Record<string, unknown>[]
+  monsters: readonly Record<string, unknown>[]
   resources: readonly Record<string, unknown>[]
   subclasses: readonly Record<string, unknown>[]
   migrations: readonly { fromVersion: number; toVersion: number }[]
@@ -239,6 +240,7 @@ function initializePlugin(source: string): {
   const abilityGenerationMethods: Record<string, unknown>[] = []
   const spells: Record<string, unknown>[] = []
   const items: Record<string, unknown>[] = []
+  const monsters: Record<string, unknown>[] = []
   const resources: Record<string, unknown>[] = []
   const subclasses: Record<string, unknown>[] = []
   const api = Object.freeze({
@@ -314,6 +316,14 @@ function initializePlugin(source: string): {
       items.push(safe)
       return `${manifest.id}:${safe.id}`
     },
+    registerMonster(definition: unknown) {
+      const safe = clonePlain(definition, 'monster') as Record<string, unknown>
+      if (typeof safe.id !== 'string' || !safe.id.startsWith('room-monster:')) {
+        throw new Error('Invalid monster id')
+      }
+      monsters.push(safe)
+      return safe.id
+    },
   })
   const dispose = plugin.setup(api)
   if (dispose != null && typeof dispose !== 'function') throw new Error('Plugin setup must be synchronous')
@@ -326,6 +336,7 @@ function initializePlugin(source: string): {
     abilityGenerationMethods,
     spells,
     items,
+    monsters,
     resources,
     subclasses,
     migrations: migrationDeclarations,

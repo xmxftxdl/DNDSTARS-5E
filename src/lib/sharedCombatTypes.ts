@@ -159,6 +159,11 @@ export interface Dnd5eSpellCastPayload {
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
+  /**
+   * An unseen-target spell attack may name only a map cell. The DM Host binds
+   * that cell to the current authoritative token snapshot, never the client.
+   */
+  guessedTargetCell?: GridCell
   /** 点起源范围法术的权威落点；DM 会据此重新计算效果线。 */
   areaTargetCell?: GridCell
   /** 可旋转矩形模板的方向；DM 只接受 0–3 并据此重建覆盖格。 */

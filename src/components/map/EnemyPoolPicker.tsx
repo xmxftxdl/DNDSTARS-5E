@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react'
-import { Search, Skull, Swords, Wrench, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Search, Skull, Swords, X } from 'lucide-react'
 import {
   DND5E_SRD_ENEMY_POOL,
   dnd5eMonsterToEnemyTemplate,
   searchEnemyPool,
+  selectNextEnemyVisualVariantId,
   type EnemyTemplate,
 } from '../../lib/enemyPool'
 import { useCustomMonsterStore } from '../../store/customMonsters'
-import Dnd5eMonsterWorkshopDialog from './Dnd5eMonsterWorkshopDialog'
 import Dnd5eEncounterBuilderDialog from './Dnd5eEncounterBuilderDialog'
 import type { Dnd5eEncounterEntry } from '../../rulesets/dnd5e/encounterBuilder'
+import {
+  registeredDnd5ePluginMonsters,
+  subscribeDnd5eRulesPluginRegistry,
+} from '../../rulesets/dnd5e/pluginApi'
 
 function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
   const [failedSource, setFailedSource] = useState<string>()
@@ -42,6 +46,8 @@ export default function EnemyPoolPicker({
   onClose,
   onPick,
   onBuildEncounter,
+  enableAutomaticAppearanceSelection = false,
+  getUsedVisualVariantIds,
 }: {
   open: boolean
   title?: string
@@ -50,16 +56,27 @@ export default function EnemyPoolPicker({
   onClose: () => void
   onPick: (template: EnemyTemplate) => void
   onBuildEncounter?: (entries: readonly Dnd5eEncounterEntry[]) => void
+  enableAutomaticAppearanceSelection?: boolean
+  getUsedVisualVariantIds?: (template: EnemyTemplate) => readonly (string | undefined)[]
 }) {
   const [query, setQuery] = useState('')
-  const [workshopOpen, setWorkshopOpen] = useState(false)
+  const [autoSelectNextAppearance, setAutoSelectNextAppearance] = useState(false)
   const [encounterOpen, setEncounterOpen] = useState(false)
   const [appearanceTarget, setAppearanceTarget] = useState<EnemyTemplate>()
   const customMonsters = useCustomMonsterStore((state) => state.monsters)
-  const pool = useMemo(
-    () => [...DND5E_SRD_ENEMY_POOL, ...customMonsters.map(dnd5eMonsterToEnemyTemplate)],
-    [customMonsters],
-  )
+  const [pluginMonsters, setPluginMonsters] = useState(() => registeredDnd5ePluginMonsters())
+  useEffect(() => subscribeDnd5eRulesPluginRegistry(() => {
+    setPluginMonsters(registeredDnd5ePluginMonsters())
+  }), [])
+  const pool = useMemo(() => {
+    const entries = [
+      ...DND5E_SRD_ENEMY_POOL,
+      ...pluginMonsters.map(dnd5eMonsterToEnemyTemplate),
+      // 旧房间内已保存的同 ID 怪物继续拥有最高优先级，避免迁移后战役内容被扩展覆盖。
+      ...customMonsters.map(dnd5eMonsterToEnemyTemplate),
+    ]
+    return [...new Map(entries.map((entry) => [entry.id, entry])).values()]
+  }, [customMonsters, pluginMonsters])
 
   const allResults = useMemo(() => searchEnemyPool(query, pool), [pool, query])
   const results = allResults
@@ -103,16 +120,6 @@ export default function EnemyPoolPicker({
               遭遇构建
             </button>
           )}
-          {canManageCustom && (
-            <button
-              type="button"
-              onClick={() => setWorkshopOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-arcane-500/15 px-2.5 py-1.5 text-xs font-semibold text-arcane-200 hover:bg-arcane-500/25"
-            >
-              <Wrench className="h-3.5 w-3.5" />
-              怪物工坊
-            </button>
-          )}
           <button
             type="button"
             onClick={closePicker}
@@ -133,8 +140,25 @@ export default function EnemyPoolPicker({
               className="w-full rounded-xl border border-white/10 bg-void-900/80 py-2.5 pl-10 pr-3 text-sm text-slate-200 outline-none focus:border-arcane-500"
             />
           </div>
+          {enableAutomaticAppearanceSelection && (
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 hover:bg-white/[0.06]">
+              <input
+                type="checkbox"
+                checked={autoSelectNextAppearance}
+                onChange={(event) => setAutoSelectNextAppearance(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-500"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-slate-200">自动选择下一张不同立绘</span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  勾选后不再询问立绘，优先使用当前地图中尚未添加的形象；全部用过后按顺序循环。
+                </span>
+              </span>
+            </label>
+          )}
           <p className="mt-2 text-xs text-slate-500">
-            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间自定义：{customMonsters.length} · 显示 {results.length}/{allResults.length} 项
+            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间兼容数据：{customMonsters.length}
+            {' '}· 扩展怪物：{pluginMonsters.length} · 显示 {results.length}/{allResults.length} 项
           </p>
         </div>
 
@@ -149,6 +173,13 @@ export default function EnemyPoolPicker({
                     type="button"
                     onClick={() => {
                       if ((m.visualVariants?.length ?? 0) > 1) {
+                        if (enableAutomaticAppearanceSelection && autoSelectNextAppearance) {
+                          finishPick(
+                            m,
+                            selectNextEnemyVisualVariantId(m, getUsedVisualVariantIds?.(m) ?? []),
+                          )
+                          return
+                        }
                         setAppearanceTarget(m)
                         return
                       }
@@ -260,7 +291,6 @@ export default function EnemyPoolPicker({
         </div>
       </div>
     )}
-    <Dnd5eMonsterWorkshopDialog open={workshopOpen} onClose={() => setWorkshopOpen(false)} />
     <Dnd5eEncounterBuilderDialog
       open={encounterOpen}
       pool={pool}

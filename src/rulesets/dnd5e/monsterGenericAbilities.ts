@@ -15,6 +15,7 @@ export type Dnd5eMonsterGenericAbilityId =
   | 'swarm'
   | 'recharge'
   | 'spellcasting'
+  | 'magic-weapons'
 
 export interface Dnd5eMonsterGenericAbility {
   id: Dnd5eMonsterGenericAbilityId
@@ -31,6 +32,7 @@ const DEFINITIONS: Record<Dnd5eMonsterGenericAbilityId, Omit<Dnd5eMonsterGeneric
   swarm: { name: '群集', automation: 'headless' },
   recharge: { name: '充能能力', automation: 'headless' },
   spellcasting: { name: '施法', automation: 'headless' },
+  'magic-weapons': { name: '魔法武器', automation: 'headless' },
 }
 
 function traitMatches(monster: Dnd5eMonsterStatBlock, pattern: RegExp): boolean {
@@ -41,7 +43,10 @@ export function dnd5eMonsterHasGenericAbility(
   monster: Dnd5eMonsterStatBlock,
   abilityId: Dnd5eMonsterGenericAbilityId,
 ): boolean {
-  if (abilityId === 'pack-tactics') return traitMatches(monster, /集群战术|pack tactics/i)
+  if (abilityId === 'pack-tactics') {
+    return dnd5eMonsterPackTacticsRule(monster) != null ||
+      traitMatches(monster, /集群战术|pack tactics/i)
+  }
   if (abilityId === 'multiattack') return monster.actions.some((action) => action.kind === 'multiattack')
   if (abilityId === 'legendary-resistance') {
     return (monster.legendaryResistanceUses ?? 0) > 0 || traitMatches(monster, /传奇抗性|legendary resistance/i)
@@ -53,6 +58,7 @@ export function dnd5eMonsterHasGenericAbility(
     return [...monster.actions, ...monster.legendaryActions ?? [], ...monster.lairActions ?? []]
       .some((action) => /充能|recharge/i.test(`${action.name} ${action.description}`))
   }
+  if (abilityId === 'magic-weapons') return dnd5eMonsterWeaponAttacksAreMagical(monster)
   return monster.spellcasting != null || monster.capabilities?.spellcaster === true
 }
 
@@ -69,6 +75,52 @@ export function dnd5eMonsterRegenerationRule(
     Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined
 }
 
+export type Dnd5eMonsterPackTacticsRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'pack-tactics' }
+>
+
+export interface Dnd5eMonsterPackTacticsCandidate {
+  id: string
+  alliedWithActor: boolean
+  currentHp: number
+  incapacitated: boolean
+  distanceFeetToTarget: number
+}
+
+export function dnd5eMonsterPackTacticsRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterPackTacticsRule | undefined {
+  const structured = monster?.traits.find((trait) => trait.rule?.kind === 'pack-tactics')?.rule as
+    Dnd5eMonsterPackTacticsRule | undefined
+  if (structured) return structured
+  return monster?.traits.some((trait) => /集群战术|pack tactics/i.test(trait.name))
+    ? {
+        kind: 'pack-tactics',
+        allyDistanceFeet: 5,
+        requiresAllyNotIncapacitated: true,
+      }
+    : undefined
+}
+
+export function dnd5eMonsterPackTacticsApplies(input: {
+  monster: Dnd5eMonsterStatBlock | undefined
+  actorId: string
+  targetId: string
+  candidates: readonly Dnd5eMonsterPackTacticsCandidate[]
+}): boolean {
+  const rule = dnd5eMonsterPackTacticsRule(input.monster)
+  if (!rule) return false
+  return input.candidates.some((candidate) =>
+    candidate.id !== input.actorId &&
+    candidate.id !== input.targetId &&
+    candidate.alliedWithActor &&
+    candidate.currentHp > 0 &&
+    (!rule.requiresAllyNotIncapacitated || !candidate.incapacitated) &&
+    Number.isFinite(candidate.distanceFeetToTarget) &&
+    candidate.distanceFeetToTarget <= rule.allyDistanceFeet)
+}
+
 export function dnd5eMonsterIsSwarm(monster: Dnd5eMonsterStatBlock | undefined): boolean {
   return monster?.traits.some((trait) => trait.rule?.kind === 'swarm') === true
 }
@@ -83,12 +135,74 @@ export function dnd5eMonsterEffectiveWeaponAttack(
     : attack
 }
 
+/**
+ * Resolves a hybrid weapon attack to the concrete mode used at an
+ * authoritative distance, unless a parent Multiattack explicitly restricts
+ * its hybrid child attacks to one mode. Call this after HP-dependent damage
+ * selection and before target-condition modifiers so every consumer validates
+ * and rolls the same damage expression.
+ */
+export function dnd5eMonsterWeaponAttackAtDistance(
+  attack: Dnd5eMonsterWeaponAttack,
+  distanceFeet: number,
+  forcedMode?: 'melee' | 'ranged',
+): Dnd5eMonsterWeaponAttack {
+  if (attack.mode !== 'melee-or-ranged') return attack
+  const usesRangedAttack = forcedMode
+    ? forcedMode === 'ranged'
+    : Number.isFinite(distanceFeet) && distanceFeet > (attack.reachFeet ?? 5)
+  const { rangedDamage, ...baseAttack } = attack
+  return {
+    ...baseAttack,
+    mode: usesRangedAttack ? 'ranged' : 'melee',
+    damage: usesRangedAttack && rangedDamage ? rangedDamage : attack.damage,
+  }
+}
+
 export function dnd5eMonsterHasMagicResistance(
   monster: Dnd5eMonsterStatBlock | undefined,
 ): boolean {
   return monster?.traits.some((trait) =>
     trait.rule?.kind === 'magic-resistance' ||
+    trait.rule?.kind === 'limited-magic-immunity' ||
     /魔法抗性|magic resistance/i.test(trait.name)) === true
+}
+
+export type Dnd5eLimitedMagicImmunityRule = Extract<
+  NonNullable<Dnd5eMonsterStatBlock['traits'][number]['rule']>,
+  { kind: 'limited-magic-immunity' }
+>
+
+export type Dnd5eLimitedMagicImmunitySpellTarget = 'hostile' | 'ally' | 'creature' | 'area'
+
+export function dnd5eMonsterLimitedMagicImmunityRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eLimitedMagicImmunityRule | undefined {
+  return monster?.traits
+    .map((trait) => trait.rule)
+    .find((rule): rule is Dnd5eLimitedMagicImmunityRule =>
+      rule?.kind === 'limited-magic-immunity')
+}
+
+export function dnd5eLimitedMagicImmunityNegatesSpell(input: {
+  rule: Dnd5eLimitedMagicImmunityRule | undefined
+  spellLevel: number
+  target: Dnd5eLimitedMagicImmunitySpellTarget
+  /** Must be inferred by the authoritative host, never accepted from a hostile client payload. */
+  willing: boolean
+}): boolean {
+  if (!input.rule || input.spellLevel > input.rule.maximumSpellLevel) return false
+  const mayBeWilling = input.target === 'ally' || input.target === 'creature'
+  return !(input.rule.allowsWilling && input.willing && mayBeWilling)
+}
+
+export function dnd5eMonsterWeaponAttacksAreMagical(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.rule?.kind === 'magic-weapons' ||
+    /^(?:魔法武器|天使武器|地狱武器|炼狱武器|magic weapons|angelic weapons|hellish weapons)$/i
+      .test(trait.name.trim())) === true
 }
 
 export function dnd5eMonsterWeaponAttackAgainstConditions(

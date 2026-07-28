@@ -16,6 +16,7 @@ import type {
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eStandardConditionId } from './conditions'
+import type { Dnd5eMonsterStatBlock } from './monsters'
 
 export interface Dnd5eSandboxConditionDuration {
   expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
@@ -57,6 +58,7 @@ interface SandboxContributions {
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   spells: Dnd5ePluginSpellDefinition[]
   items: Dnd5ePluginItemDefinition[]
+  monsters: Dnd5eMonsterStatBlock[]
   resources: Dnd5ePluginResourceDefinition[]
   subclasses: Dnd5ePluginSubclassDefinition[]
   migrations: Dnd5ePluginStateMigrationDeclaration[]
@@ -110,6 +112,7 @@ export interface Dnd5ePluginSandboxSession {
   readonly abilityGenerationMethods: readonly Dnd5ePluginAbilityGenerationDefinition[]
   readonly spells: readonly Dnd5ePluginSpellDefinition[]
   readonly items: readonly Dnd5ePluginItemDefinition[]
+  readonly monsters: readonly Dnd5eMonsterStatBlock[]
   readonly resources: readonly Dnd5ePluginResourceDefinition[]
   readonly subclasses: readonly Dnd5ePluginSubclassDefinition[]
   readonly migrations: readonly Dnd5ePluginStateMigrationDeclaration[]
@@ -316,6 +319,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
     get abilityGenerationMethods() { return initialized.abilityGenerationMethods },
     get spells() { return initialized.spells ?? [] },
     get items() { return initialized.items ?? [] },
+    get monsters() { return initialized.monsters ?? [] },
     get resources() { return initialized.resources ?? [] },
     get subclasses() { return initialized.subclasses ?? [] },
     get migrations() { return initialized.migrations },
@@ -396,6 +400,7 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
       for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
       for (const spell of session.spells) api.registerSpell(spell)
       for (const item of session.items) api.registerItem(item)
+      for (const monster of session.monsters) api.registerMonster(monster)
       return () => {
         if (activeSessions.get(session.manifest.id) === session) {
           activeSessions.delete(session.manifest.id)

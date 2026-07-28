@@ -8,6 +8,11 @@ import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
+import {
+  DND5E_LONGSWORD,
+  DND5E_OFFHAND_SHORTSWORD,
+  DND5E_SHORTSWORD,
+} from './equipment'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -31,6 +36,168 @@ describe('D&D 5e map bridge', () => {
   afterEach(() => {
     setMapGeometryRuntime([])
     setDnd5eRoomMonsterCatalog([])
+  })
+
+  it('projects authoritative main-hand and off-hand weapon provenance for players', () => {
+    const ordinary = { ...character(), id: 'ordinary', alignment: 'LG', equipment: { mainWeapon: DND5E_LONGSWORD } }
+    const silveredMain = structuredClone(DND5E_SHORTSWORD)
+    if (silveredMain.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    silveredMain.id = 'plugin:silvered-shortsword'
+    silveredMain.dnd5e.specialMaterial = 'silvered'
+    const magicalOffHand = structuredClone(DND5E_OFFHAND_SHORTSWORD)
+    if (magicalOffHand.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    magicalOffHand.id = 'plugin:magic-offhand-shortsword'
+    magicalOffHand.dnd5e.magical = true
+    const dualWielder = {
+      ...character(),
+      id: 'dual-wielder',
+      alignment: '中立邪恶',
+      equipment: { mainWeapon: silveredMain, offHand: magicalOffHand },
+    }
+    const magicalMain = structuredClone(DND5E_LONGSWORD)
+    if (magicalMain.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    magicalMain.id = 'plugin:magic-longsword'
+    magicalMain.dnd5e.magical = true
+    const magicUser = {
+      ...character(),
+      id: 'magic-user',
+      alignment: 'unknown homebrew alignment',
+      equipment: { mainWeapon: magicalMain },
+    }
+    const tokens = [ordinary, dualWielder, magicUser].map((entry, index) => token({
+      id: `${entry.id}-token`,
+      type: 'player',
+      characterId: entry.id,
+      x: index * 10,
+      hp: entry.currentHp,
+      maxHp: entry.maxHp,
+    }))
+    const map: BattleMap = {
+      id: 'weapon-provenance',
+      name: 'Weapon provenance',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens,
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'weapon-provenance',
+      map,
+      characters: [ordinary, dualWielder, magicUser],
+      initiativeOrder: tokens.map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      })),
+    })
+
+    expect(snapshot.state.combatants['ordinary-token']).toMatchObject({
+      mainWeaponId: DND5E_LONGSWORD.id,
+      mainWeaponMagical: false,
+      moralAlignment: 'good',
+      weaponDamageSources: {
+        [DND5E_LONGSWORD.id]: { magical: false },
+      },
+    })
+    expect(snapshot.state.combatants['dual-wielder-token']).toMatchObject({
+      mainWeaponId: silveredMain.id,
+      mainWeaponMagical: false,
+      moralAlignment: 'evil',
+      weaponDamageSources: {
+        [silveredMain.id]: { magical: false, specialMaterial: 'silvered' },
+        [magicalOffHand.id]: { magical: true },
+      },
+    })
+    expect(snapshot.state.combatants['magic-user-token']).toMatchObject({
+      mainWeaponId: magicalMain.id,
+      mainWeaponMagical: true,
+      weaponDamageSources: {
+        [magicalMain.id]: { magical: true },
+      },
+    })
+    expect(snapshot.state.combatants['magic-user-token'].moralAlignment).toBeUndefined()
+  })
+
+  it('projects monster conditional defenses, magic weapons, and moral alignment', () => {
+    const base = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const monster = {
+      ...base,
+      id: 'custom:fiendish-guardian',
+      alignment: '守序邪恶',
+      damageDefenseRules: [{
+        outcome: 'immune' as const,
+        damageTypes: ['bludgeoning', 'piercing', 'slashing'] as const,
+        delivery: 'weapon-attack' as const,
+        magical: false,
+        weaponMaterialNot: 'silvered' as const,
+        reason: 'test:nonsilvered-immunity',
+      }],
+      traits: [...base.traits, {
+        name: 'Magic Weapons',
+        description: 'Weapon attacks are magical.',
+        automation: 'headless' as const,
+        rule: { kind: 'magic-weapons' as const, weaponAttacksMagical: true as const },
+      }, {
+        name: 'Limited Magic Immunity',
+        description: 'Spells of 6th level or lower do not affect this creature unless it wishes.',
+        automation: 'headless' as const,
+        rule: {
+          kind: 'limited-magic-immunity' as const,
+          maximumSpellLevel: 6 as const,
+          advantageAboveMaximum: true as const,
+          allowsWilling: true as const,
+        },
+      }],
+    }
+    setDnd5eRoomMonsterCatalog([monster])
+    const monsterToken = token({
+      id: 'guardian-token',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'monster-provenance',
+      name: 'Monster provenance',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'monster-provenance',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: monsterToken.id,
+        label: monsterToken.label,
+        emoji: '',
+        color: '',
+        roll: 10,
+      }],
+    })
+    expect(snapshot.state.combatants[monsterToken.id]).toMatchObject({
+      weaponAttacksMagical: true,
+      magicResistance: true,
+      limitedMagicImmunity: {
+        kind: 'limited-magic-immunity',
+        maximumSpellLevel: 6,
+        advantageAboveMaximum: true,
+        allowsWilling: true,
+      },
+      moralAlignment: 'evil',
+      damageDefenseRules: monster.damageDefenseRules,
+    })
   })
 
   it('initializes and persists custom per-day action uses and legendary points', () => {
@@ -276,6 +443,91 @@ describe('D&D 5e map bridge', () => {
       characters: [hero],
       initiativeOrder,
     })
+    expect(dnd5eCombatantCanSee(snapshot.state, heroToken.id, enemy.id)).toBe(true)
+  })
+
+  it('keeps Devil’s Sight identical between map geometry and Headless visibility', () => {
+    const hero = {
+      ...character(),
+      charClass: '契术师',
+      dnd5eClassLevels: { warlock: 2 },
+      dnd5eClassChoices: {
+        classes: {
+          warlock: {
+            selections: { 'eldritch-invocations': ['devils-sight'] },
+          },
+        },
+      },
+    } satisfies Character
+    const heroToken = token({
+      id: 'hero-token',
+      type: 'player',
+      characterId: hero.id,
+      x: 10,
+      y: 50,
+      hp: 20,
+      maxHp: 20,
+    })
+    const enemy = token({ id: 'enemy-token', x: 90, y: 50 })
+    const map: BattleMap = {
+      id: 'devils-sight-map',
+      name: 'Devil’s Sight',
+      width: 120,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [heroToken, enemy],
+    }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      obstacles: [{
+        id: 'darkness',
+        kind: 'obstacle',
+        label: '黑暗术',
+        points: [{ x: 70, y: 30 }, { x: 110, y: 30 }, { x: 110, y: 70 }, { x: 70, y: 70 }],
+        blocksVision: false,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+        cover: 'none',
+        baseHeightFeet: 0,
+        heightFeet: 20,
+        magicalDarkness: true,
+        darknessSpellLevel: 2,
+        createdAt: 1,
+      }],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: false,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+    const initiativeOrder = [heroToken, enemy].map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: '',
+      color: '',
+      roll: 20 - index,
+    }))
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'devils-sight-map',
+      map,
+      characters: [hero],
+      initiativeOrder,
+    })
+    expect(snapshot.state.combatants[heroToken.id]).toMatchObject({
+      darknessSightRangeFeet: 120,
+      magicalDarknessSightRangeFeet: 120,
+    })
+    expect(snapshot.state.magicalDarknessByCombatantPair?.[
+      `${heroToken.id}\u0000${enemy.id}`
+    ]).toBe(true)
     expect(dnd5eCombatantCanSee(snapshot.state, heroToken.id, enemy.id)).toBe(true)
   })
 
