@@ -75,6 +75,20 @@ mkdir -p -- "$backup_path"
 chmod 700 -- "$backup_path"
 
 cd -- "$REPO_ROOT"
+if grep -q 'filter=lfs' .gitattributes; then
+  if ! command -v git-lfs >/dev/null 2>&1; then
+    printf '仓库包含 Git LFS 美术资源；请先安装 git-lfs，再重新执行 staging 发布。\n' >&2
+    exit 2
+  fi
+  git lfs pull
+  first_lfs_asset="$(git lfs ls-files --name-only | head -n 1)"
+  if [[ -n "$first_lfs_asset" ]] \
+    && grep -q '^version https://git-lfs.github.com/spec/v1$' "$first_lfs_asset"; then
+    printf 'Git LFS 资源仍是指针文件，拒绝构建缺少美术资源的 staging 镜像：%s\n' "$first_lfs_asset" >&2
+    exit 2
+  fi
+fi
+
 build_id="$(git rev-parse --short=12 HEAD)"
 STARS_BUILD_ID="$build_id" docker compose --env-file "$ENV_FILE" build dndstars
 STARS_BUILD_ID="$build_id" docker compose --env-file "$ENV_FILE" \
