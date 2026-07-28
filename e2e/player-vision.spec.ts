@@ -148,7 +148,10 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   const canvas = page.getByTestId('map-canvas')
   await expect.poll(() => page.evaluate(async () => {
     const { useMapStore } = await import('/src/store/maps.ts')
-    return useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'vision-hero')?.viewerControlled
+    return useMapStore.getState().maps
+      .flatMap((map) => map.tokens)
+      .find((token) => token.id === 'vision-hero')
+      ?.viewerControlled
   }), { timeout: 20_000 }).toBe(true)
   await expect(canvas).toHaveAttribute('data-vision-enabled', 'false')
   await expect(canvas).toHaveAttribute('data-fog-filled', 'true')
