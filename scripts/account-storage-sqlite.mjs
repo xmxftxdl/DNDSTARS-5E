@@ -394,6 +394,29 @@ export class SqliteAccountStore {
     })
   }
 
+  exportSnapshot() {
+    return {
+      entries: this.db.prepare(`
+        SELECT account_id, document_json
+        FROM accounts
+        ORDER BY account_id
+      `).all().map((row) => ({
+        account: JSON.parse(row.document_json),
+        sourcePath: `sqlite:${this.databasePath}#accounts/${row.account_id}`,
+      })),
+      identities: this.db.prepare(`
+        SELECT kind, identity_digest, account_id, created_at
+        FROM account_identities
+        ORDER BY kind, identity_digest
+      `).all().map((row) => ({
+        kind: row.kind,
+        digest: row.identity_digest,
+        accountId: row.account_id,
+        createdAt: Number(row.created_at),
+      })),
+    }
+  }
+
   diagnostics() {
     const scalar = (table) => Number(this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count)
     return {

@@ -44,6 +44,28 @@ export function validateProductionSecurityConfig(env?: Record<string, string | u
   allowedOrigins?: string[]
   errors: string[]
 }
+export function marketplaceCheckoutAdapter(env?: Record<string, string | undefined>): {
+  endpoint: string
+  secret: string
+  provider: string
+} | null
+export function createMarketplaceCheckout(
+  order: {
+    orderId: string
+    accountId: string
+    productId: string
+    version: string
+    amountMinor: number
+    currency: 'CNY' | 'USD'
+    expiresAt: number
+  },
+  env?: Record<string, string | undefined>,
+): Promise<{
+  provider: string
+  providerOrderId: string
+  checkoutUrl: string
+  expiresAt: number
+}>
 export function applySecurityHeaders(
   res: { setHeader(name: string, value: string): void },
   options?: { production?: boolean },

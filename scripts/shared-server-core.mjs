@@ -3,13 +3,25 @@
 // import 同一份纯逻辑，避免双份漂移；纯函数集中在此以便 src/ 下的 vitest 直接 import .mjs。
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
-import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import {
+  createHmac,
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  scryptSync,
+  sign as signBytes,
+  timingSafeEqual,
+  verify as verifyBytes,
+} from 'node:crypto'
 import path from 'node:path'
 import {
   deliverTencentVerification,
   tencentVerificationCapabilities,
 } from './tencent-verification-provider.mjs'
 import { openSqliteAccountStore } from './account-storage-sqlite.mjs'
+import { openPostgresStorage } from './postgres-storage.mjs'
 import {
   compileGeometryCached,
   doorOpenState,
@@ -17,6 +29,42 @@ import {
   validateGeometryRelationships,
   validateGeometryStructure,
 } from '../shared/map-geometry-kernel.mjs'
+import {
+  applyDnd5eEffectiveVisionProfile,
+  compileDnd5eEffectiveVisionProfile,
+} from '../shared/dnd5e-vision-profile.mjs'
+import {
+  analyzeMarketplaceDeclarativePackage,
+  MARKETPLACE_CREATOR_NOTICE_VERSION,
+  MARKETPLACE_CREATOR_POLICY_VERSION,
+  normalizeMarketplacePublication,
+} from '../shared/marketplace-publication.mjs'
+import {
+  activeMarketplaceEntitlement,
+  canonicalMarketplaceJson,
+  MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
+  MARKETPLACE_PRODUCT_MANIFEST_SCHEMA_VERSION,
+} from '../shared/marketplace-entitlement.mjs'
+import {
+  MARKETPLACE_ORDER_SCHEMA_VERSION,
+  MARKETPLACE_ORDER_TTL_MS,
+  marketplaceOrderAmounts,
+  marketplaceOrderIsPayable,
+  marketplaceOrderPublicRecord,
+} from '../shared/marketplace-order.mjs'
+import {
+  MARKETPLACE_LEDGER_SCHEMA_VERSION,
+  MARKETPLACE_SETTLEMENT_HOLD_MS,
+  marketplaceLedgerBalance,
+  marketplaceRevenueSplit,
+} from '../shared/marketplace-ledger.mjs'
+import {
+  MARKETPLACE_PAYOUT_SCHEMA_VERSION,
+  marketplacePayoutMinimum,
+  marketplacePayoutPublicRecord,
+  marketplacePayoutRecordValid,
+  marketplacePayoutTransitionAllowed,
+} from '../shared/marketplace-payout.mjs'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
@@ -63,6 +111,8 @@ export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
 export const FIREBALL_PRESENTATION_LIFETIME_MS = 3_500
 export const KILL_STREAK_BANNER_START_DELAY_MS = 650
 export const KILL_STREAK_PRESENTATION_LIFETIME_MS = 5_800
+export const SAVING_THROW_PENDING_LIFETIME_MS = 300_000
+export const SAVING_THROW_RESULT_LIFETIME_MS = 3_000
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION = 5
 export const SHARED_MIN_CLIENT_PROTOCOL = 5
@@ -133,6 +183,23 @@ export function validateProductionSecurityConfig(env = process.env) {
   if (configuredOrigins.includes('*')) errors.push('STARS_ALLOWED_ORIGINS cannot contain * in production')
   for (const origin of configuredOrigins) {
     if (!normalizedHttpOrigin(origin)) errors.push(`invalid STARS_ALLOWED_ORIGINS entry: ${origin}`)
+  }
+  if (String(env.STARS_ACCOUNT_STORAGE ?? '').trim().toLowerCase() === 'postgres') {
+    try {
+      const databaseUrl = new URL(String(env.STARS_DATABASE_URL ?? ''))
+      if (!['postgres:', 'postgresql:'].includes(databaseUrl.protocol)) {
+        errors.push('STARS_DATABASE_URL must use postgresql://')
+      }
+      if (
+        !databaseUrl.password ||
+        databaseUrl.password.length < 16 ||
+        databaseUrl.password === 'development-only-change-me'
+      ) {
+        errors.push('PostgreSQL password must be a non-default secret of at least 16 characters')
+      }
+    } catch {
+      errors.push('STARS_DATABASE_URL must be a valid PostgreSQL connection URL')
+    }
   }
   return {
     ok: errors.length === 0,
@@ -490,7 +557,7 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
       },
     }
     await atomicRename(filePath, JSON.stringify(next))
-    return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
+    return { ok: true, revision: currentRevision + 1, value: next, writtenAt, currentRevision, current }
   })
 }
 
@@ -625,7 +692,7 @@ export async function atomicDeleteJsonStateCasLocked(filePath, options = {}) {
       },
     }
     await atomicRename(filePath, JSON.stringify(next))
-    return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
+    return { ok: true, revision: currentRevision + 1, value: next, writtenAt, currentRevision, current }
   })
 }
 
@@ -992,7 +1059,7 @@ export function applyCors(req, res, env = process.env) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   return true
 }
@@ -1100,7 +1167,7 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
     await writeFile(tmpPath, body)
     await rename(tmpPath, filePath)
-    return { ...result, next }
+    return { ...result, next, previous: current }
   })
 }
 
@@ -1651,7 +1718,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     }
   }
 
-  if (common.type === 'spell-banner' && common.spellId === 'shatter') {
+  if (common.type === 'spell-banner') {
     const casterName = normalizedLabel(payload?.casterName, 80)
     const spellName = normalizedLabel(payload?.spellName, 80)
     const castingClassId = normalizedLabel(payload?.castingClassId, 40)
@@ -1665,6 +1732,32 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         casterName,
         spellName,
         castingClassId,
+        createdAt: now,
+        expiresAt: now + SPELL_BANNER_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'attack-banner') {
+    const actorName = normalizedLabel(payload?.actorName, 80)
+    const attackName = normalizedLabel(payload?.attackName, 80)
+    const attackKind = payload?.attackKind
+    const classId = normalizedLabel(payload?.classId, 40)
+    if (
+      !actorName ||
+      !attackName ||
+      (attackKind !== 'melee' && attackKind !== 'ranged') ||
+      !classId
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    const { spellId: _unusedSpellId, ...attackCommon } = common
+    return {
+      ok: true,
+      event: {
+        ...attackCommon,
+        actorName,
+        attackName,
+        attackKind,
+        classId,
         createdAt: now,
         expiresAt: now + SPELL_BANNER_PRESENTATION_LIFETIME_MS,
       },
@@ -1696,6 +1789,50 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         createdAt: now,
         animationStartsAt: now + FIREBALL_ANIMATION_START_DELAY_MS,
         expiresAt: now + FIREBALL_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'saving-throw-status') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const targetName = normalizedLabel(payload?.targetName, 80)
+    const phase = payload?.phase
+    const dc = payload?.dc
+    const total = payload?.total
+    const success = payload?.success
+    if (
+      !targetTokenId ||
+      !targetName ||
+      !['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(payload?.ability) ||
+      (phase !== 'rolling' && phase !== 'result') ||
+      !Number.isInteger(dc) ||
+      dc < 0 ||
+      dc > 100 ||
+      (phase === 'rolling' && (total != null || success != null)) ||
+      (phase === 'result' && (
+        !Number.isInteger(total) ||
+        total < -100 ||
+        total > 200 ||
+        typeof success !== 'boolean'
+      ))
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    const { spellId: _unusedSpellId, ...savingThrowCommon } = common
+    return {
+      ok: true,
+      event: {
+        ...savingThrowCommon,
+        targetTokenId,
+        targetName,
+        ability: payload.ability,
+        phase,
+        dc,
+        ...(phase === 'result' ? { total, success } : {}),
+        createdAt: now,
+        expiresAt: now + (
+          phase === 'rolling'
+            ? SAVING_THROW_PENDING_LIFETIME_MS
+            : SAVING_THROW_RESULT_LIFETIME_MS
+        ),
       },
     }
   }
@@ -3649,11 +3786,17 @@ function spellLightingRadius(source) {
     : source.radiusFeet
 }
 
-function spellLightingAffectsPoint(source, point, map) {
+function spellLightingAffectsPoint(source, point, map, elevationFeet = 0) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
-  const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
-    gridSize * feetPerCell
+  const horizontalDistanceFeet = Math.hypot(
+    point.x - source.point.x,
+    point.y - source.point.y,
+  ) / gridSize * feetPerCell
+  const distanceFeet = Math.hypot(
+    horizontalDistanceFeet,
+    elevationFeet - (Number(source.elevationFeet) || 0),
+  )
   return distanceFeet <= spellLightingRadius(source)
 }
 
@@ -3753,7 +3896,8 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
     geometryObstacleAffectsElevation(obstacle, elevationFeet) &&
     !magicalDarknessObstacleSuppressed(obstacle, map, spellLighting),
   ) || spellLighting.some((source) =>
-    source.kind === 'magical-darkness' && spellLightingAffectsPoint(source, point, map),
+    source.kind === 'magical-darkness' &&
+      spellLightingAffectsPoint(source, point, map, elevationFeet),
   )
   if (magicalDarkness) return 'magical-darkness'
 
@@ -3791,7 +3935,7 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
   for (const source of spellLighting) {
     if (
       source.kind !== 'light' ||
-      !spellLightingAffectsPoint(source, point, map) ||
+      !spellLightingAffectsPoint(source, point, map, elevationFeet) ||
       lineBlocked(source.point, point, source.elevationFeet + 2.5, elevationFeet + 2.5)
     ) continue
     const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
@@ -3805,20 +3949,26 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
 function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
-  const normalRangeFeet = Number.isFinite(viewer.visionRangeFeet)
-    ? Math.max(0, viewer.visionRangeFeet)
-    : Number.isFinite(fallbackRangeFeet)
-      ? Math.max(0, fallbackRangeFeet)
+  const profile = compileDnd5eEffectiveVisionProfile({
+    token: viewer,
+    fallbackRangeFeet: Number.isFinite(fallbackRangeFeet)
+      ? fallbackRangeFeet
       : Number.isFinite(geometry?.vision?.defaultRangeFeet)
-        ? Math.max(0, geometry.vision.defaultRangeFeet)
-        : DEFAULT_PLAYER_VISION_RANGE_FEET
-  const darkvisionRangeFeet = Number.isFinite(viewer.darkvisionRangeFeet) ? Math.max(0, viewer.darkvisionRangeFeet) : 0
-  const blindsightRangeFeet = Number.isFinite(viewer.blindsightRangeFeet) ? Math.max(0, viewer.blindsightRangeFeet) : 0
-  const truesightRangeFeet = Number.isFinite(viewer.truesightRangeFeet) ? Math.max(0, viewer.truesightRangeFeet) : 0
+        ? geometry.vision.defaultRangeFeet
+        : DEFAULT_PLAYER_VISION_RANGE_FEET,
+  })
   const carriedLightRangeFeet = viewer.lightSource?.enabled === true
     ? Math.max(0, Number(viewer.lightSource.brightRadiusFeet) || 0) + Math.max(0, Number(viewer.lightSource.dimRadiusFeet) || 0)
     : 0
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
+  const rangeFeet = Math.max(
+    profile.normalRangeFeet,
+    profile.darkvisionRangeFeet,
+    profile.darknessSightRangeFeet,
+    profile.magicalDarknessSightRangeFeet,
+    profile.blindsightRangeFeet,
+    profile.truesightRangeFeet,
+    carriedLightRangeFeet,
+  )
   const rangePx = rangeFeet / feetPerCell * gridSize
   const targetRadiusPx = Math.max(0, gridSize * Math.max(1, Number(target.size) || 1) * 0.4)
   const distancePx = Math.max(0, Math.hypot(target.x - viewer.x, target.y - viewer.y) - targetRadiusPx)
@@ -3844,11 +3994,19 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
     : 'bright'
   const distanceFeet = distancePx / gridSize * feetPerCell
   if (illumination === 'magical-darkness') {
-    const magicalRangeFeet = viewer.canSeeMagicalDarkness === true ? normalRangeFeet : 0
-    if (distanceFeet > Math.max(magicalRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
+    if (distanceFeet > Math.max(
+      profile.magicalDarknessSightRangeFeet,
+      profile.blindsightRangeFeet,
+      profile.truesightRangeFeet,
+    )) return false
   } else if (
     illumination === 'darkness' &&
-    distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)
+    distanceFeet > Math.max(
+      profile.darkvisionRangeFeet,
+      profile.darknessSightRangeFeet,
+      profile.blindsightRangeFeet,
+      profile.truesightRangeFeet,
+    )
   ) {
     return false
   }
@@ -3987,15 +4145,30 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const manualFallbackRangeFeet = Number.isFinite(geometry?.vision?.defaultRangeFeet)
         ? geometry.vision.defaultRangeFeet
         : DEFAULT_PLAYER_VISION_RANGE_FEET
-      const players = effectiveMap.tokens.filter((token) => plainObject(token) && token.type === 'player')
+      const players = effectiveMap.tokens
+        .filter((token) => plainObject(token) && token.type === 'player')
+        .map((token) => applyDnd5eEffectiveVisionProfile(
+          token,
+          compileDnd5eEffectiveVisionProfile({
+            token,
+            character: typeof token.characterId === 'string'
+              ? characterById.get(token.characterId)
+              : undefined,
+            fallbackRangeFeet: dynamicVision
+              ? geometry?.vision?.defaultRangeFeet
+              : manualFallbackRangeFeet,
+          }),
+        ))
+      const projectedPlayerById = new Map(players.map((token) => [token.id, token]))
       const viewers = geometry?.vision?.sharePartyVision === false
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players
       const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
         if (token.type === 'player') {
+          const projectedPlayer = projectedPlayerById.get(token.id) ?? token
           return [{
-            ...token,
+            ...projectedPlayer,
             viewerControlled: resolvedActiveCharacterId != null && token.characterId === resolvedActiveCharacterId,
           }]
         }
@@ -4244,6 +4417,280 @@ async function rotateJsonDirectory(root, limit) {
   for (const entry of files.slice(0, Math.max(0, files.length - limit))) {
     await rm(path.join(root, entry.name), { force: true }).catch(() => {})
   }
+}
+
+const DM_UNDO_SCHEMA_VERSION = 1
+const DM_UNDO_HISTORY_LIMIT = 100
+const DM_UNDOABLE_STATE = new Set([
+  'maps',
+  'characters',
+  'combat',
+  'combat-interrupts',
+  'combat-log',
+  'map-geometry',
+  'map-fog',
+  'map-exploration',
+  'campaign-time',
+  'scene-orchestration',
+  'scene-audio-playback',
+])
+
+function dmUndoJournalFile(ctx) {
+  return path.join(snapshotRoot(ctx), 'dm-undo-journal.json')
+}
+
+function normalizeDmUndoJournal(value) {
+  return {
+    schemaVersion: DM_UNDO_SCHEMA_VERSION,
+    revision: Number.isSafeInteger(value?.revision) ? Math.max(0, value.revision) : 0,
+    transactions: Array.isArray(value?.transactions)
+      ? value.transactions.filter((transaction) =>
+          plainObject(transaction) &&
+          typeof transaction.transactionId === 'string' &&
+          Array.isArray(transaction.changes),
+        ).slice(-DM_UNDO_HISTORY_LIMIT)
+      : [],
+    updatedAt: Number.isFinite(value?.updatedAt) ? value.updatedAt : 0,
+  }
+}
+
+function dmUndoTransactionId(req) {
+  const supplied = normalizedLabel(req?.headers?.['x-stars-undo-group'], 160)
+  return supplied && /^[a-zA-Z0-9:_-]+$/.test(supplied)
+    ? supplied
+    : `request:${Date.now()}:${randomUUID()}`
+}
+
+function dmUndoLabel(req, fallback) {
+  const supplied = String(req?.headers?.['x-stars-undo-label'] ?? '')
+  if (!supplied) return fallback
+  try {
+    return normalizedLabel(decodeURIComponent(supplied), 120) || fallback
+  } catch {
+    return fallback
+  }
+}
+
+async function appendDmUndoChange(ctx, input) {
+  if (!DM_UNDOABLE_STATE.has(input.resource)) return null
+  const filePath = dmUndoJournalFile(ctx)
+  await mkdir(path.dirname(filePath), { recursive: true })
+  return withWriteLock(filePath, async () => {
+    let journal
+    try {
+      journal = normalizeDmUndoJournal(JSON.parse(await readFile(filePath, 'utf8')))
+    } catch {
+      journal = normalizeDmUndoJournal(null)
+    }
+    const index = journal.transactions.findIndex((candidate) =>
+      candidate.transactionId === input.transactionId &&
+      candidate.status === 'applied')
+    const transaction = index >= 0
+      ? journal.transactions[index]
+      : {
+          schemaVersion: DM_UNDO_SCHEMA_VERSION,
+          transactionId: input.transactionId,
+          label: input.label,
+          actorMemberId: input.actorMemberId,
+          status: 'applied',
+          changes: [],
+          createdAt: input.changedAt,
+          updatedAt: input.changedAt,
+        }
+    const existingChangeIndex = transaction.changes.findIndex((change) =>
+      change.resource === input.resource)
+    const change = {
+      resource: input.resource,
+      before: input.before ?? null,
+      beforeRevision: input.beforeRevision,
+      afterRevision: input.afterRevision,
+    }
+    const changes = existingChangeIndex >= 0
+      ? transaction.changes.map((candidate, changeIndex) =>
+          changeIndex === existingChangeIndex
+            ? { ...change, before: candidate.before, beforeRevision: candidate.beforeRevision }
+            : candidate)
+      : [...transaction.changes, change]
+    const updatedTransaction = {
+      ...transaction,
+      label: transaction.label || input.label,
+      changes,
+      updatedAt: input.changedAt,
+    }
+    const transactions = index >= 0
+      ? journal.transactions.map((candidate, transactionIndex) =>
+          transactionIndex === index ? updatedTransaction : candidate)
+      : [...journal.transactions, updatedTransaction]
+    const next = {
+      ...journal,
+      revision: journal.revision + 1,
+      transactions: transactions.slice(-DM_UNDO_HISTORY_LIMIT),
+      updatedAt: input.changedAt,
+    }
+    await atomicRename(filePath, JSON.stringify(next))
+    return updatedTransaction
+  })
+}
+
+async function recordDmUndoMutation(req, ctx, member, resource, result, label) {
+  if (
+    ctx.accessRole !== 'dm' ||
+    !member ||
+    !result?.changed ||
+    !DM_UNDOABLE_STATE.has(resource)
+  ) return
+  await appendDmUndoChange(ctx, {
+    transactionId: dmUndoTransactionId(req),
+    label: dmUndoLabel(req, label),
+    actorMemberId: member.memberId,
+    resource,
+    before: result.previous,
+    beforeRevision: sharedStateRevision(result.previous),
+    afterRevision: sharedStateRevision(result.next),
+    changedAt: Number(result.next?._sync?.writtenAt) || Date.now(),
+  })
+}
+
+function dmUndoPublicTransaction(transaction) {
+  return {
+    transactionId: transaction.transactionId,
+    label: transaction.label,
+    status: transaction.status,
+    resources: transaction.changes.map((change) => change.resource),
+    createdAt: transaction.createdAt,
+    updatedAt: transaction.updatedAt,
+    ...(Number.isFinite(transaction.undoneAt) ? { undoneAt: transaction.undoneAt } : {}),
+  }
+}
+
+async function readDmUndoJournal(ctx) {
+  try {
+    return normalizeDmUndoJournal(JSON.parse(await readFile(dmUndoJournalFile(ctx), 'utf8')))
+  } catch {
+    return normalizeDmUndoJournal(null)
+  }
+}
+
+async function applyDmAuthoritativeUndo(ctx, requestedTransactionId, actorMemberId) {
+  const journalPath = dmUndoJournalFile(ctx)
+  await mkdir(path.dirname(journalPath), { recursive: true })
+  return withWriteLock(journalPath, async () => {
+    let journal
+    try {
+      journal = normalizeDmUndoJournal(JSON.parse(await readFile(journalPath, 'utf8')))
+    } catch {
+      journal = normalizeDmUndoJournal(null)
+    }
+    const transaction = [...journal.transactions].reverse().find((candidate) =>
+      candidate.status === 'applied' &&
+      (!requestedTransactionId || candidate.transactionId === requestedTransactionId))
+    if (!transaction) throw new RoomProtocolError(404, 'dm-undo-transaction-not-found')
+
+    const currentValues = new Map()
+    for (const change of transaction.changes) {
+      const resourcePath = path.join(ctx.stateRoot, `${safeName(change.resource)}.json`)
+      let current = null
+      try {
+        current = JSON.parse(await readFile(resourcePath, 'utf8'))
+      } catch {}
+      const currentRevision = sharedStateRevision(current)
+      if (currentRevision !== change.afterRevision) {
+        throw new RoomProtocolError(409, 'dm-undo-state-changed')
+      }
+      currentValues.set(change.resource, current)
+    }
+
+    const restored = []
+    try {
+      for (const change of transaction.changes) {
+        const resourcePath = path.join(ctx.stateRoot, `${safeName(change.resource)}.json`)
+        const current = currentValues.get(change.resource)
+        const result = change.before == null
+          ? await atomicDeleteJsonStateCasLocked(resourcePath, {
+              expectedRevision: change.afterRevision,
+              writerId: `dm-undo:${transaction.transactionId}`,
+            })
+          : await atomicWriteJsonStateCasLocked(resourcePath, change.before, {
+              expectedRevision: change.afterRevision,
+              writerId: `dm-undo:${transaction.transactionId}`,
+              validateIncoming: (candidate) => validateSharedStateShape(change.resource, candidate),
+            })
+        if (!result.ok) throw new RoomProtocolError(409, 'dm-undo-state-changed')
+        restored.push({ change, result, current })
+      }
+    } catch (error) {
+      for (const entry of restored.reverse()) {
+        const rollbackPath = path.join(ctx.stateRoot, `${safeName(entry.change.resource)}.json`)
+        const rollbackOptions = {
+          expectedRevision: entry.result.revision,
+          writerId: `dm-undo-rollback:${transaction.transactionId}`,
+        }
+        if (entry.current == null) {
+          await atomicDeleteJsonStateCasLocked(rollbackPath, rollbackOptions).catch(() => {})
+        } else {
+          await atomicWriteJsonStateCasLocked(rollbackPath, entry.current, {
+            ...rollbackOptions,
+            validateIncoming: (candidate) => validateSharedStateShape(entry.change.resource, candidate),
+          }).catch(() => {})
+        }
+      }
+      throw error
+    }
+
+    const now = Date.now()
+    const restoredByResource = new Map(restored.map((entry) => [
+      entry.change.resource,
+      entry,
+    ]))
+    const undoneChangesByResource = new Map(transaction.changes.map((change) => [
+      change.resource,
+      change,
+    ]))
+    const next = {
+      ...journal,
+      revision: journal.revision + 1,
+      transactions: journal.transactions.map((candidate) => {
+        if (candidate.transactionId === transaction.transactionId) {
+          return {
+              ...candidate,
+              status: 'undone',
+              undoneAt: now,
+              undoneByMemberId: actorMemberId,
+              updatedAt: now,
+            }
+        }
+        if (candidate.status !== 'applied') return candidate
+        let changed = false
+        const changes = candidate.changes.map((change) => {
+          const undoneChange = undoneChangesByResource.get(change.resource)
+          const restoredEntry = restoredByResource.get(change.resource)
+          if (
+            undoneChange &&
+            restoredEntry &&
+            change.afterRevision === undoneChange.beforeRevision
+          ) {
+            changed = true
+            return {
+              ...change,
+              afterRevision: restoredEntry.result.revision,
+            }
+          }
+          return change
+        })
+        return changed ? { ...candidate, changes, updatedAt: now } : candidate
+      }),
+      updatedAt: now,
+    }
+    await atomicRename(journalPath, JSON.stringify(next))
+    return {
+      transaction: next.transactions.find((candidate) =>
+        candidate.transactionId === transaction.transactionId),
+      restored: restored.map((entry) => ({
+        resource: entry.change.resource,
+        revision: entry.result.revision,
+      })),
+    }
+  })
 }
 
 async function quarantineSharedState(ctx, name, payload, reason) {
@@ -4621,7 +5068,7 @@ function accountStorageBackend(ctx) {
     process.env.STARS_ACCOUNT_STORAGE ??
     'json',
   ).trim().toLowerCase()
-  if (configured !== 'json' && configured !== 'sqlite') {
+  if (!['json', 'sqlite', 'postgres'].includes(configured)) {
     throw new Error(`Unsupported STARS_ACCOUNT_STORAGE: ${configured}`)
   }
   return configured
@@ -4635,32 +5082,57 @@ function accountDatabaseFile(ctx) {
   )
 }
 
-async function accountSqliteStore(ctx) {
-  if (accountStorageBackend(ctx) !== 'sqlite') return null
-  if (!ctx.accountSqliteStorePromise) {
-    ctx.accountSqliteStorePromise = openSqliteAccountStore(accountDatabaseFile(ctx))
+async function accountPersistentStore(ctx) {
+  const backend = accountStorageBackend(ctx)
+  if (backend === 'json') return null
+  if (!ctx.accountPersistentStorePromise) {
+    ctx.accountPersistentStorePromise = backend === 'postgres'
+      ? openPostgresStorage(
+          ctx.databaseUrl ?? process.env.STARS_DATABASE_URL ?? '',
+          {
+            maxConnections: Number.parseInt(
+              String(process.env.STARS_DATABASE_POOL_SIZE ?? '10'),
+              10,
+            ),
+          },
+        )
+      : openSqliteAccountStore(accountDatabaseFile(ctx))
   }
-  return ctx.accountSqliteStorePromise
+  return ctx.accountPersistentStorePromise
 }
 
 export async function initializeAccountStorage(ctx) {
-  const store = await accountSqliteStore(ctx)
+  const backend = accountStorageBackend(ctx)
+  const store = await accountPersistentStore(ctx)
   if (!store) return { backend: 'json' }
-  return { backend: 'sqlite', ...store.diagnostics() }
+  return { backend, ...await store.diagnostics() }
 }
 
 export async function closeAccountStorage(ctx) {
-  if (!ctx.accountSqliteStorePromise) return
-  const store = await ctx.accountSqliteStorePromise
-  store.close()
-  ctx.accountSqliteStorePromise = null
+  if (!ctx.accountPersistentStorePromise) return
+  const store = await ctx.accountPersistentStorePromise
+  await store.close()
+  ctx.accountPersistentStorePromise = null
 }
 
-async function syncAccountToSqlite(ctx, account, options = {}) {
-  const store = await accountSqliteStore(ctx)
+export async function accountStorageDiagnostics(ctx) {
+  const store = await accountPersistentStore(ctx)
+  if (!store) {
+    await mkdir(accountDirectory(ctx), { recursive: true })
+    await stat(accountDirectory(ctx))
+    return { backend: 'json', integrity: 'ok' }
+  }
+  return {
+    backend: accountStorageBackend(ctx),
+    ...await store.diagnostics(),
+  }
+}
+
+async function syncAccountToPersistentStore(ctx, account, options = {}) {
+  const store = await accountPersistentStore(ctx)
   if (!store) return
-  if (options.createOnly) store.createAccount(account, options)
-  else store.writeAccount(account, options)
+  if (options.createOnly) await store.createAccount(account, options)
+  else await store.writeAccount(account, options)
 }
 
 function accountIdentityDirectory(ctx) {
@@ -4684,8 +5156,72 @@ function pluginRegistryFile(ctx) {
   return path.join(lobbyRoot(ctx), 'plugin-registry.json')
 }
 
+function marketplaceSigningKeyFile(ctx) {
+  return path.join(lobbyRoot(ctx), '.marketplace-signing-key.json')
+}
+
+async function marketplaceSigningKey(ctx) {
+  const filePath = marketplaceSigningKeyFile(ctx)
+  try {
+    const stored = JSON.parse(await readFile(filePath, 'utf8'))
+    if (
+      stored?.schemaVersion === 1 &&
+      typeof stored.privateKeyPem === 'string' &&
+      typeof stored.publicKeyPem === 'string' &&
+      typeof stored.keyId === 'string'
+    ) return stored
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  const generated = {
+    schemaVersion: 1,
+    algorithm: 'Ed25519',
+    keyId: createHash('sha256').update(publicKeyPem).digest('base64url').slice(0, 24),
+    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    publicKeyPem,
+    createdAt: Date.now(),
+  }
+  await mkdir(lobbyRoot(ctx), { recursive: true })
+  try {
+    await writeFile(filePath, `${JSON.stringify(generated)}\n`, { flag: 'wx', mode: 0o600 })
+    return generated
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+    const stored = JSON.parse(await readFile(filePath, 'utf8'))
+    if (stored?.schemaVersion !== 1 || typeof stored.privateKeyPem !== 'string') throw error
+    return stored
+  }
+}
+
+async function signMarketplaceProduct(ctx, manifest) {
+  const key = await marketplaceSigningKey(ctx)
+  const payload = Buffer.from(canonicalMarketplaceJson(manifest), 'utf8')
+  const signature = signBytes(null, payload, key.privateKeyPem).toString('base64url')
+  if (!verifyBytes(null, payload, key.publicKeyPem, Buffer.from(signature, 'base64url'))) {
+    throw new RoomProtocolError(500, 'marketplace-signature-verification-failed')
+  }
+  return {
+    schemaVersion: 1,
+    algorithm: 'Ed25519',
+    keyId: key.keyId,
+    signature,
+  }
+}
+
 function emptyPluginRegistry() {
-  return { schemaVersion: 1, entries: [], reports: [] }
+  return {
+    schemaVersion: 1,
+    entries: [],
+    reports: [],
+    creators: [],
+    entitlements: [],
+    orders: [],
+    paymentEvents: [],
+    ledgerEntries: [],
+    payouts: [],
+  }
 }
 
 function normalizePluginRegistry(value) {
@@ -4694,10 +5230,54 @@ function normalizePluginRegistry(value) {
     schemaVersion: 1,
     entries: Array.isArray(value.entries) ? value.entries.filter(plainObject).slice(0, 5_000) : [],
     reports: Array.isArray(value.reports) ? value.reports.filter(plainObject).slice(-10_000) : [],
+    creators: Array.isArray(value.creators) ? value.creators.filter(plainObject).slice(0, 100_000) : [],
+    entitlements: Array.isArray(value.entitlements)
+      ? value.entitlements.filter(plainObject).slice(0, 1_000_000)
+      : [],
+    orders: Array.isArray(value.orders) ? value.orders.filter(plainObject).slice(-1_000_000) : [],
+    paymentEvents: Array.isArray(value.paymentEvents)
+      ? value.paymentEvents.filter(plainObject).slice(-1_000_000)
+      : [],
+    ledgerEntries: Array.isArray(value.ledgerEntries)
+      ? value.ledgerEntries.filter(plainObject).slice(-2_000_000)
+      : [],
+    payouts: Array.isArray(value.payouts)
+      ? value.payouts.filter(marketplacePayoutRecordValid).slice(-1_000_000)
+      : [],
+  }
+}
+
+function marketplaceCreatorPublicRecord(account, creator) {
+  return {
+    schemaVersion: 1,
+    accountId: account.accountId,
+    displayName: account.auth?.username ?? account.displayName,
+    status: creator?.status ?? 'unregistered',
+    ...(creator?.countryOrRegion ? { countryOrRegion: creator.countryOrRegion } : {}),
+    ...(creator?.verificationReference ? { verificationReference: creator.verificationReference } : {}),
+    ...(creator?.policyVersion ? { policyVersion: creator.policyVersion } : {}),
+    ...(creator?.noticeVersion ? { noticeVersion: creator.noticeVersion } : {}),
+    ...(Number.isFinite(creator?.appliedAt) ? { appliedAt: creator.appliedAt } : {}),
+    ...(Number.isFinite(creator?.verifiedAt) ? { verifiedAt: creator.verifiedAt } : {}),
+    ...(creator?.moderationNote ? { moderationNote: creator.moderationNote } : {}),
   }
 }
 
 async function readPluginRegistry(ctx) {
+  const store = await accountPersistentStore(ctx)
+  if (accountStorageBackend(ctx) === 'postgres' && store?.readMarketplaceRegistry) {
+    const persisted = await store.readMarketplaceRegistry(normalizePluginRegistry)
+    if (persisted) return persisted
+    let legacy = null
+    try {
+      legacy = normalizePluginRegistry(JSON.parse(await readFile(pluginRegistryFile(ctx), 'utf8')))
+    } catch {}
+    return store.mutateMarketplaceRegistry(
+      normalizePluginRegistry,
+      emptyPluginRegistry,
+      () => legacy ?? emptyPluginRegistry(),
+    )
+  }
   try {
     return normalizePluginRegistry(JSON.parse(await readFile(pluginRegistryFile(ctx), 'utf8')))
   } catch {
@@ -4705,7 +5285,37 @@ async function readPluginRegistry(ctx) {
   }
 }
 
+async function assertMarketplacePackageEntitlement(ctx, accountId, integrity) {
+  const registry = await readPluginRegistry(ctx)
+  const paidMatch = registry.entries.flatMap((entry) =>
+    (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
+    .find(({ version }) =>
+      version.integrity === integrity &&
+      version.status === 'published' &&
+      version.marketplace?.pricing?.kind === 'paid')
+  if (!paidMatch) return null
+  const entitled = accountId
+    ? activeMarketplaceEntitlement(registry.entitlements, {
+        accountId,
+        productId: paidMatch.entry.id,
+        version: paidMatch.version.version,
+      })
+    : null
+  if (!entitled && paidMatch.entry.publisher?.accountId !== accountId) {
+    throw new RoomProtocolError(403, 'marketplace-entitlement-required')
+  }
+  return { productId: paidMatch.entry.id, version: paidMatch.version.version, entitlement: entitled }
+}
+
 async function mutatePluginRegistry(ctx, updater) {
+  const store = await accountPersistentStore(ctx)
+  if (accountStorageBackend(ctx) === 'postgres' && store?.mutateMarketplaceRegistry) {
+    return store.mutateMarketplaceRegistry(
+      normalizePluginRegistry,
+      emptyPluginRegistry,
+      updater,
+    )
+  }
   await mkdir(lobbyRoot(ctx), { recursive: true })
   const result = await atomicMutateJsonStateLocked(pluginRegistryFile(ctx), (current) => {
     const registry = normalizePluginRegistry(current)
@@ -4727,7 +5337,782 @@ function pluginCatalogReviewRequired(env = process.env) {
   return productionSecurityEnabled(env) || env.STARS_PLUGIN_REVIEW_REQUIRED === 'true'
 }
 
+function marketplaceOrderProduct(registry, productId, version) {
+  const entry = registry.entries.find((candidate) => candidate.id === productId)
+  const productVersion = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+    candidate.version === version &&
+    candidate.status === 'published' &&
+    candidate.marketplace?.pricing?.kind === 'paid')
+  return entry && productVersion ? { entry, version: productVersion } : null
+}
+
+function marketplaceOrderPaymentMatches(order, payload) {
+  return payload.currency === order.currency &&
+    Number(payload.amountMinor) === order.amountMinor
+}
+
+function fulfillMarketplaceOrder(registry, orderId, input) {
+  const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+  if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+  if (!marketplaceOrderPaymentMatches(order, input)) {
+    throw new RoomProtocolError(409, 'marketplace-payment-amount-mismatch')
+  }
+  if (order.status === 'fulfilled') {
+    if (order.providerOrderId !== input.providerOrderId) {
+      throw new RoomProtocolError(409, 'marketplace-provider-order-mismatch')
+    }
+    return registry
+  }
+  if (!marketplaceOrderIsPayable(order, input.now)) {
+    throw new RoomProtocolError(409, 'marketplace-order-not-payable')
+  }
+  const netReceiptsMinor = input.netReceiptsMinor ?? order.amountMinor
+  if (
+    !Number.isSafeInteger(netReceiptsMinor) ||
+    netReceiptsMinor < 0 ||
+    netReceiptsMinor > order.amountMinor
+  ) throw new RoomProtocolError(409, 'invalid-marketplace-net-receipts')
+  const revenue = marketplaceRevenueSplit(
+    netReceiptsMinor,
+    order.creatorShareBps,
+    order.platformShareBps,
+  )
+  if (!revenue) throw new RoomProtocolError(409, 'invalid-marketplace-settlement')
+  const existing = activeMarketplaceEntitlement(registry.entitlements, {
+    accountId: order.accountId,
+    productId: order.productId,
+    version: order.version,
+  }, input.now)
+  const entitlementId = existing?.entitlementId ?? randomUUID()
+  const entitlement = existing ?? {
+    schemaVersion: MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
+    entitlementId,
+    accountId: order.accountId,
+    productId: order.productId,
+    version: order.version,
+    licenseType: 'personal',
+    source: 'purchase',
+    status: 'active',
+    grantedAt: input.now,
+    grantedBy: `payment:${input.provider}`,
+  }
+  const availableAt = input.provider === 'sandbox'
+    ? input.now
+    : input.now + MARKETPLACE_SETTLEMENT_HOLD_MS
+  const sourceEventId = input.sourceEventId ?? input.providerOrderId
+  const ledgerEntries = [
+    {
+      schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+      entryId: randomUUID(),
+      orderId: order.orderId,
+      productId: order.productId,
+      version: order.version,
+      beneficiaryAccountId: order.publisherAccountId,
+      beneficiaryRole: 'creator',
+      kind: 'sale',
+      currency: order.currency,
+      amountMinor: revenue.creatorAmountMinor,
+      sourceEventId,
+      createdAt: input.now,
+      availableAt,
+    },
+    {
+      schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+      entryId: randomUUID(),
+      orderId: order.orderId,
+      productId: order.productId,
+      version: order.version,
+      beneficiaryAccountId: 'astraltrace-platform',
+      beneficiaryRole: 'platform',
+      kind: 'sale',
+      currency: order.currency,
+      amountMinor: revenue.platformAmountMinor,
+      sourceEventId,
+      createdAt: input.now,
+      availableAt,
+    },
+  ]
+  return {
+    ...registry,
+    entitlements: existing ? registry.entitlements : [...registry.entitlements, entitlement],
+    ledgerEntries: [...registry.ledgerEntries, ...ledgerEntries],
+    orders: registry.orders.map((candidate) => candidate.orderId === orderId
+      ? {
+          ...candidate,
+          status: 'fulfilled',
+          provider: input.provider,
+          providerOrderId: input.providerOrderId,
+          paidAt: input.now,
+          fulfilledAt: input.now,
+          updatedAt: input.now,
+          entitlementId,
+          netReceiptsMinor: revenue.netReceiptsMinor,
+          creatorNetAmountMinor: revenue.creatorAmountMinor,
+          platformNetAmountMinor: revenue.platformAmountMinor,
+        }
+      : candidate),
+  }
+}
+
+function updateMarketplaceOrderAfterPaymentReversal(registry, orderId, input) {
+  const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+  if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+  if (!marketplaceOrderPaymentMatches(order, input)) {
+    throw new RoomProtocolError(409, 'marketplace-payment-amount-mismatch')
+  }
+  if (order.providerOrderId !== input.providerOrderId) {
+    throw new RoomProtocolError(409, 'marketplace-provider-order-mismatch')
+  }
+  if (!['fulfilled', 'refunded', 'disputed'].includes(order.status)) {
+    throw new RoomProtocolError(409, 'marketplace-order-not-reversible')
+  }
+  const reversalExists = registry.ledgerEntries.some((entry) =>
+    entry.orderId === orderId && ['refund', 'dispute'].includes(entry.kind))
+  const reversalEntries = reversalExists
+    ? []
+    : registry.ledgerEntries
+        .filter((entry) => entry.orderId === orderId && entry.kind === 'sale')
+        .map((entry) => ({
+          ...entry,
+          entryId: randomUUID(),
+          kind: input.status === 'refunded' ? 'refund' : 'dispute',
+          amountMinor: -entry.amountMinor,
+          sourceEventId: input.sourceEventId ?? input.providerOrderId,
+          createdAt: input.now,
+        }))
+  return {
+    ...registry,
+    ledgerEntries: [...registry.ledgerEntries, ...reversalEntries],
+    orders: registry.orders.map((candidate) => candidate.orderId === orderId
+      ? { ...candidate, status: input.status, updatedAt: input.now }
+      : candidate),
+    entitlements: registry.entitlements.map((entitlement) =>
+      entitlement.entitlementId === order.entitlementId
+        ? {
+            ...entitlement,
+            status: input.status,
+            updatedAt: input.now,
+            updatedBy: `payment:${input.provider}`,
+            statusReason: input.status === 'refunded' ? 'payment-refunded' : 'payment-disputed',
+          }
+        : entitlement),
+  }
+}
+
+function marketplacePaymentWebhookValid(bytes, suppliedSignature, secret) {
+  if (!secret || !suppliedSignature) return false
+  const expected = createHmac('sha256', secret).update(bytes).digest('hex')
+  const actual = String(suppliedSignature).trim().toLowerCase()
+  return actual.length === expected.length &&
+    timingSafeEqual(Buffer.from(actual), Buffer.from(expected))
+}
+
+export function marketplaceCheckoutAdapter(env = process.env) {
+  const endpoint = normalizedLabel(env.STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL, 1_000)
+  const secret = String(env.STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET ?? '')
+  const provider = normalizedLabel(env.STARS_MARKETPLACE_CHECKOUT_PROVIDER, 40) || 'external'
+  if (!endpoint || !secret) return null
+  let url
+  try {
+    url = new URL(endpoint)
+  } catch {
+    return null
+  }
+  if (productionSecurityEnabled(env) && url.protocol !== 'https:') return null
+  if (!['http:', 'https:'].includes(url.protocol)) return null
+  return { endpoint: url.toString(), secret, provider }
+}
+
+export async function createMarketplaceCheckout(order, env = process.env) {
+  const adapter = marketplaceCheckoutAdapter(env)
+  if (!adapter) throw new RoomProtocolError(503, 'marketplace-checkout-unavailable')
+  const body = JSON.stringify({
+    schemaVersion: 1,
+    orderId: order.orderId,
+    productId: order.productId,
+    version: order.version,
+    amountMinor: order.amountMinor,
+    currency: order.currency,
+    accountId: order.accountId,
+    returnUrl: `${normalizedHttpOrigin(env.STARS_PUBLIC_ORIGIN) ?? 'http://localhost:8080'}/app/extensions?section=orders`,
+  })
+  const signature = createHmac('sha256', adapter.secret).update(body).digest('hex')
+  let response
+  try {
+    response = await fetch(adapter.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': order.orderId,
+        'X-Stars-Checkout-Signature': signature,
+      },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch {
+    throw new RoomProtocolError(502, 'marketplace-checkout-provider-unavailable')
+  }
+  const result = await response.json().catch(() => null)
+  if (!response.ok || !plainObject(result)) {
+    throw new RoomProtocolError(502, 'marketplace-checkout-provider-rejected')
+  }
+  const providerOrderId = normalizedLabel(result.providerOrderId, 160)
+  const checkoutUrl = normalizedLabel(result.checkoutUrl, 2_000)
+  let parsedCheckoutUrl
+  try {
+    parsedCheckoutUrl = new URL(checkoutUrl)
+  } catch {
+    throw new RoomProtocolError(502, 'invalid-marketplace-checkout-response')
+  }
+  if (
+    !providerOrderId ||
+    !['http:', 'https:'].includes(parsedCheckoutUrl.protocol) ||
+    (productionSecurityEnabled(env) && parsedCheckoutUrl.protocol !== 'https:')
+  ) throw new RoomProtocolError(502, 'invalid-marketplace-checkout-response')
+  return {
+    provider: adapter.provider,
+    providerOrderId,
+    checkoutUrl: parsedCheckoutUrl.toString(),
+    expiresAt: Number.isFinite(result.expiresAt)
+      ? Math.min(Number(result.expiresAt), order.expiresAt)
+      : order.expiresAt,
+  }
+}
+
+async function handleMarketplaceCommerceApi(req, res, parsed, ctx) {
+  if (!parsed.pathname.startsWith('/api/marketplace/')) return false
+  if (!applyLobbyRateLimit(req, res, ctx)) return true
+
+  if (parsed.pathname === '/api/marketplace/payment-methods' && req.method === 'GET') {
+    const adapter = marketplaceCheckoutAdapter()
+    writeJson(res, 200, {
+      methods: [
+        ...(!productionSecurityEnabled()
+          ? [{ id: 'sandbox', label: '沙盒支付', mode: 'sandbox' }]
+          : []),
+        ...(adapter
+          ? [{ id: adapter.provider, label: adapter.provider, mode: 'redirect' }]
+          : []),
+      ],
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/ledger' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    const creator = registry.creators.find((candidate) =>
+      candidate.accountId === account.accountId)
+    const publishedOwnProduct = registry.entries.some((entry) =>
+      entry.publisher?.accountId === account.accountId)
+    if (!creator && !publishedOwnProduct) {
+      throw new RoomProtocolError(403, 'marketplace-creator-required')
+    }
+    const entries = registry.ledgerEntries
+      .filter((entry) => entry.beneficiaryAccountId === account.accountId)
+      .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+      .slice(0, 1_000)
+    const now = Date.now()
+    writeJson(res, 200, {
+      balances: [
+        marketplaceLedgerBalance(registry.ledgerEntries, account.accountId, 'CNY', now),
+        marketplaceLedgerBalance(registry.ledgerEntries, account.accountId, 'USD', now),
+      ],
+      entries,
+      settlementHoldDays: Math.round(MARKETPLACE_SETTLEMENT_HOLD_MS / 86_400_000),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/payouts' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      payouts: registry.payouts
+        .filter((payout) => payout.creatorAccountId === account.accountId)
+        .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+        .map(marketplacePayoutPublicRecord),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/payouts' && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const currency = normalizedLabel(payload?.currency, 3)
+    const amountMinor = Number(payload?.amountMinor)
+    const idempotencyKey = normalizedLabel(
+      req.headers['idempotency-key'] ?? payload?.idempotencyKey,
+      128,
+    )
+    const minimum = marketplacePayoutMinimum(currency)
+    if (
+      !minimum ||
+      !Number.isSafeInteger(amountMinor) ||
+      amountMinor < minimum ||
+      !idempotencyKey
+    ) throw new RoomProtocolError(400, 'invalid-marketplace-payout')
+    const now = Date.now()
+    let created = false
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const creator = current.creators.find((candidate) =>
+        candidate.accountId === account.accountId)
+      if (creator?.status !== 'verified' || !creator.verificationReference) {
+        throw new RoomProtocolError(403, 'verified-creator-required')
+      }
+      const existing = current.payouts.find((candidate) =>
+        candidate.creatorAccountId === account.accountId &&
+        candidate.idempotencyKey === idempotencyKey)
+      if (existing) {
+        if (existing.currency !== currency || existing.amountMinor !== amountMinor) {
+          throw new RoomProtocolError(409, 'marketplace-idempotency-conflict')
+        }
+        return current
+      }
+      const balance = marketplaceLedgerBalance(
+        current.ledgerEntries,
+        account.accountId,
+        currency,
+        now,
+      )
+      if (balance.availableMinor < amountMinor) {
+        throw new RoomProtocolError(409, 'marketplace-payout-insufficient-balance')
+      }
+      const payoutId = randomUUID()
+      created = true
+      return {
+        ...current,
+        payouts: [...current.payouts, {
+          schemaVersion: MARKETPLACE_PAYOUT_SCHEMA_VERSION,
+          payoutId,
+          creatorAccountId: account.accountId,
+          currency,
+          amountMinor,
+          status: 'pending',
+          idempotencyKey,
+          payoutDestinationReference: creator.verificationReference,
+          createdAt: now,
+        }],
+        ledgerEntries: [...current.ledgerEntries, {
+          schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+          entryId: randomUUID(),
+          orderId: payoutId,
+          productId: 'creator-payout',
+          version: '1',
+          beneficiaryAccountId: account.accountId,
+          beneficiaryRole: 'creator',
+          kind: 'payout',
+          currency,
+          amountMinor: -amountMinor,
+          sourceEventId: payoutId,
+          createdAt: now,
+          availableAt: now,
+        }],
+      }
+    })
+    const payout = registry.payouts.find((candidate) =>
+      candidate.creatorAccountId === account.accountId &&
+      candidate.idempotencyKey === idempotencyKey)
+    writeJson(res, created ? 201 : 200, { payout: marketplacePayoutPublicRecord(payout) })
+    return true
+  }
+
+  const payoutModerationMatch = parsed.pathname.match(
+    /^\/api\/marketplace\/payouts\/([^/]+)\/moderate$/,
+  )
+  if (payoutModerationMatch && req.method === 'POST') {
+    const administrator = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(administrator)) {
+      throw new RoomProtocolError(403, 'plugin-admin-required')
+    }
+    const payoutId = decodeURIComponent(payoutModerationMatch[1] ?? '')
+    const payload = await readJsonRequest(req)
+    const action = normalizedLabel(payload?.action, 24)
+    const note = normalizedLabel(payload?.note, 2_000)
+    const externalTransferReference = normalizedLabel(
+      payload?.externalTransferReference,
+      200,
+    )
+    if (!['approve', 'reject', 'mark-paid'].includes(action)) {
+      throw new RoomProtocolError(400, 'invalid-payout-moderation')
+    }
+    if (action === 'reject' && !note) {
+      throw new RoomProtocolError(400, 'payout-moderation-note-required')
+    }
+    if (action === 'mark-paid' && !externalTransferReference) {
+      throw new RoomProtocolError(400, 'payout-transfer-reference-required')
+    }
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const payout = current.payouts.find((candidate) => candidate.payoutId === payoutId)
+      if (!payout) throw new RoomProtocolError(404, 'marketplace-payout-not-found')
+      const targetStatus = action === 'approve'
+        ? 'approved'
+        : action === 'reject'
+          ? 'rejected'
+          : 'paid'
+      if (payout.status === targetStatus) return current
+      if (!marketplacePayoutTransitionAllowed(payout.status, action)) {
+        throw new RoomProtocolError(409, 'invalid-payout-status-transition')
+      }
+      const releaseEntry = action === 'reject'
+        ? {
+            schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+            entryId: randomUUID(),
+            orderId: payout.payoutId,
+            productId: 'creator-payout',
+            version: '1',
+            beneficiaryAccountId: payout.creatorAccountId,
+            beneficiaryRole: 'creator',
+            kind: 'payout-release',
+            currency: payout.currency,
+            amountMinor: payout.amountMinor,
+            sourceEventId: `payout-rejected:${payout.payoutId}`,
+            createdAt: now,
+            availableAt: now,
+          }
+        : null
+      return {
+        ...current,
+        payouts: current.payouts.map((candidate) => candidate.payoutId === payoutId
+          ? {
+              ...candidate,
+              status: targetStatus,
+              updatedAt: now,
+              moderatedBy: administrator.accountId,
+              ...(note ? { moderationNote: note } : {}),
+              ...(action === 'mark-paid'
+                ? { externalTransferReference, paidAt: now }
+                : {}),
+            }
+          : candidate),
+        ledgerEntries: releaseEntry
+          ? [...current.ledgerEntries, releaseEntry]
+          : current.ledgerEntries,
+      }
+    })
+    writeJson(res, 200, {
+      payout: marketplacePayoutPublicRecord(
+        registry.payouts.find((candidate) => candidate.payoutId === payoutId),
+      ),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/orders' && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const productId = normalizedLabel(payload?.productId, 160)
+    const version = normalizedLabel(payload?.version, 64)
+    const idempotencyKey = normalizedLabel(
+      req.headers['idempotency-key'] ?? payload?.idempotencyKey,
+      128,
+    )
+    if (!productId || !version || !idempotencyKey) {
+      throw new RoomProtocolError(400, 'invalid-marketplace-order')
+    }
+    const now = Date.now()
+    let created = false
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existingOrder = current.orders.find((candidate) =>
+        candidate.accountId === account.accountId &&
+        candidate.idempotencyKey === idempotencyKey)
+      if (existingOrder) {
+        if (existingOrder.productId !== productId || existingOrder.version !== version) {
+          throw new RoomProtocolError(409, 'marketplace-idempotency-conflict')
+        }
+        return current
+      }
+      const product = marketplaceOrderProduct(current, productId, version)
+      if (!product) throw new RoomProtocolError(404, 'paid-marketplace-product-not-found')
+      if (product.entry.publisher?.accountId === account.accountId) {
+        throw new RoomProtocolError(409, 'marketplace-product-owned-by-account')
+      }
+      if (activeMarketplaceEntitlement(current.entitlements, {
+        accountId: account.accountId,
+        productId,
+        version,
+      }, now)) throw new RoomProtocolError(409, 'marketplace-product-already-owned')
+      const livePendingOrders = current.orders.filter((candidate) =>
+        candidate.accountId === account.accountId &&
+        marketplaceOrderIsPayable(candidate, now))
+      if (livePendingOrders.length >= 20) {
+        throw new RoomProtocolError(429, 'marketplace-pending-order-limit')
+      }
+      const pricing = product.version.marketplace.pricing
+      const amounts = marketplaceOrderAmounts(
+        pricing.amountMinor,
+        pricing.creatorShareBps,
+        pricing.platformShareBps,
+      )
+      if (!amounts) throw new RoomProtocolError(409, 'invalid-marketplace-settlement')
+      created = true
+      return {
+        ...current,
+        orders: [...current.orders, {
+          schemaVersion: MARKETPLACE_ORDER_SCHEMA_VERSION,
+          orderId: randomUUID(),
+          accountId: account.accountId,
+          productId,
+          version,
+          publisherAccountId: product.entry.publisher.accountId,
+          integrity: product.version.integrity,
+          currency: pricing.currency,
+          ...amounts,
+          creatorShareBps: pricing.creatorShareBps,
+          platformShareBps: pricing.platformShareBps,
+          settlementBasis: pricing.settlementBasis,
+          status: 'pending',
+          provider: productionSecurityEnabled() ? 'external' : 'sandbox',
+          idempotencyKey,
+          createdAt: now,
+          expiresAt: now + MARKETPLACE_ORDER_TTL_MS,
+        }],
+      }
+    })
+    const order = registry.orders.find((candidate) =>
+      candidate.accountId === account.accountId && candidate.idempotencyKey === idempotencyKey)
+    writeJson(res, created ? 201 : 200, {
+      order: marketplaceOrderPublicRecord(order),
+      sandboxAvailable: !productionSecurityEnabled(),
+      checkoutAvailable: Boolean(marketplaceCheckoutAdapter()),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/orders' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      orders: registry.orders
+        .filter((order) => order.accountId === account.accountId)
+        .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+        .map(marketplaceOrderPublicRecord),
+    })
+    return true
+  }
+
+  const orderMatch = parsed.pathname.match(/^\/api\/marketplace\/orders\/([^/]+)$/)
+  if (orderMatch && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(orderMatch[1] ?? '')
+    const registry = await readPluginRegistry(ctx)
+    const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+    if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+    if (order.accountId !== account.accountId && !pluginRegistryAdministrator(account)) {
+      throw new RoomProtocolError(403, 'forbidden')
+    }
+    writeJson(res, 200, { order: marketplaceOrderPublicRecord(order) })
+    return true
+  }
+
+  const checkoutMatch = parsed.pathname.match(
+    /^\/api\/marketplace\/orders\/([^/]+)\/checkout$/,
+  )
+  if (checkoutMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(checkoutMatch[1] ?? '')
+    const current = await readPluginRegistry(ctx)
+    const order = current.orders.find((candidate) => candidate.orderId === orderId)
+    if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+    if (order.accountId !== account.accountId) throw new RoomProtocolError(403, 'forbidden')
+    if (!marketplaceOrderIsPayable(order)) {
+      throw new RoomProtocolError(409, 'marketplace-order-not-payable')
+    }
+    if (order.checkoutUrl && order.providerOrderId) {
+      writeJson(res, 200, {
+        order: marketplaceOrderPublicRecord(order),
+        checkout: {
+          provider: order.provider,
+          providerOrderId: order.providerOrderId,
+          checkoutUrl: order.checkoutUrl,
+          expiresAt: order.checkoutExpiresAt ?? order.expiresAt,
+        },
+      })
+      return true
+    }
+    const checkout = await createMarketplaceCheckout(order)
+    const registry = await mutatePluginRegistry(ctx, (latest) => {
+      const latestOrder = latest.orders.find((candidate) => candidate.orderId === orderId)
+      if (!latestOrder || latestOrder.accountId !== account.accountId) {
+        throw new RoomProtocolError(409, 'marketplace-order-changed')
+      }
+      if (!marketplaceOrderIsPayable(latestOrder)) {
+        throw new RoomProtocolError(409, 'marketplace-order-not-payable')
+      }
+      if (latestOrder.checkoutUrl && latestOrder.providerOrderId) return latest
+      return {
+        ...latest,
+        orders: latest.orders.map((candidate) => candidate.orderId === orderId
+          ? {
+              ...candidate,
+              provider: checkout.provider,
+              providerOrderId: checkout.providerOrderId,
+              checkoutUrl: checkout.checkoutUrl,
+              checkoutExpiresAt: checkout.expiresAt,
+              updatedAt: Date.now(),
+            }
+          : candidate),
+      }
+    })
+    const updatedOrder = registry.orders.find((candidate) => candidate.orderId === orderId)
+    writeJson(res, 201, {
+      order: marketplaceOrderPublicRecord(updatedOrder),
+      checkout: {
+        provider: updatedOrder.provider,
+        providerOrderId: updatedOrder.providerOrderId,
+        checkoutUrl: updatedOrder.checkoutUrl,
+        expiresAt: updatedOrder.checkoutExpiresAt ?? updatedOrder.expiresAt,
+      },
+    })
+    return true
+  }
+
+  const sandboxPaymentMatch = parsed.pathname.match(
+    /^\/api\/marketplace\/orders\/([^/]+)\/sandbox-payment$/,
+  )
+  if (sandboxPaymentMatch && req.method === 'POST') {
+    if (productionSecurityEnabled()) throw new RoomProtocolError(404, 'not-found')
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(sandboxPaymentMatch[1] ?? '')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const order = current.orders.find((candidate) => candidate.orderId === orderId)
+      if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+      if (order.accountId !== account.accountId && !pluginRegistryAdministrator(account)) {
+        throw new RoomProtocolError(403, 'forbidden')
+      }
+      return fulfillMarketplaceOrder(current, orderId, {
+        provider: 'sandbox',
+        providerOrderId: `sandbox:${orderId}`,
+        amountMinor: order.amountMinor,
+        currency: order.currency,
+        now,
+      })
+    })
+    const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+    writeJson(res, 200, { order: marketplaceOrderPublicRecord(order) })
+    return true
+  }
+
+  const cancelMatch = parsed.pathname.match(/^\/api\/marketplace\/orders\/([^/]+)\/cancel$/)
+  if (cancelMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(cancelMatch[1] ?? '')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const order = current.orders.find((candidate) => candidate.orderId === orderId)
+      if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+      if (order.accountId !== account.accountId) throw new RoomProtocolError(403, 'forbidden')
+      if (order.status === 'canceled') return current
+      if (order.status !== 'pending') throw new RoomProtocolError(409, 'marketplace-order-not-cancelable')
+      return {
+        ...current,
+        orders: current.orders.map((candidate) => candidate.orderId === orderId
+          ? { ...candidate, status: 'canceled', updatedAt: now }
+          : candidate),
+      }
+    })
+    writeJson(res, 200, {
+      order: marketplaceOrderPublicRecord(
+        registry.orders.find((candidate) => candidate.orderId === orderId),
+      ),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/payments/webhook' && req.method === 'POST') {
+    const bytes = await readBody(req, 128 * 1024)
+    const secret = String(process.env.STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET ?? '')
+    if (!marketplacePaymentWebhookValid(
+      bytes,
+      req.headers['x-stars-payment-signature'],
+      secret,
+    )) throw new RoomProtocolError(401, 'invalid-payment-webhook-signature')
+    let payload
+    try {
+      payload = JSON.parse(bytes.toString('utf8'))
+    } catch {
+      throw new RoomProtocolError(400, 'invalid-json')
+    }
+    const provider = normalizedLabel(payload?.provider, 40)
+    const providerEventId = normalizedLabel(payload?.providerEventId, 160)
+    const providerOrderId = normalizedLabel(payload?.providerOrderId, 160)
+    const orderId = normalizedLabel(payload?.orderId, 160)
+    const status = normalizedLabel(payload?.status, 24)
+    const currency = normalizedLabel(payload?.currency, 3)
+    const amountMinor = Number(payload?.amountMinor)
+    const netReceiptsMinor = payload?.netReceiptsMinor == null
+      ? amountMinor
+      : Number(payload.netReceiptsMinor)
+    if (
+      !provider ||
+      !providerEventId ||
+      !providerOrderId ||
+      !orderId ||
+      !['paid', 'refunded', 'disputed'].includes(status) ||
+      !['CNY', 'USD'].includes(currency) ||
+      !Number.isSafeInteger(amountMinor) ||
+      !Number.isSafeInteger(netReceiptsMinor)
+    ) throw new RoomProtocolError(400, 'invalid-payment-webhook')
+    const now = Date.now()
+    await mutatePluginRegistry(ctx, (current) => {
+      if (current.paymentEvents.some((event) =>
+        event.provider === provider && event.providerEventId === providerEventId)) return current
+      const updated = status === 'paid'
+        ? fulfillMarketplaceOrder(current, orderId, {
+            provider,
+            providerOrderId,
+            amountMinor,
+            netReceiptsMinor,
+            currency,
+            now,
+            sourceEventId: providerEventId,
+          })
+        : updateMarketplaceOrderAfterPaymentReversal(current, orderId, {
+            provider,
+            providerOrderId,
+            status,
+            amountMinor,
+            currency,
+            now,
+            sourceEventId: providerEventId,
+          })
+      return {
+        ...updated,
+        paymentEvents: [...updated.paymentEvents, {
+          provider,
+          providerEventId,
+          providerOrderId,
+          orderId,
+          status,
+          receivedAt: now,
+        }],
+      }
+    })
+    writeJson(res, 200, { ok: true })
+    return true
+  }
+
+  throw new RoomProtocolError(405, 'method-not-allowed')
+}
+
 function pluginRegistryPublicVersion(version) {
+  const marketplace = plainObject(version.marketplace)
+    ? {
+        ...version.marketplace,
+        ...(plainObject(version.marketplace.rightsManifest)
+          ? {
+              rightsManifest: {
+                ...version.marketplace.rightsManifest,
+                assets: (Array.isArray(version.marketplace.rightsManifest.assets)
+                  ? version.marketplace.rightsManifest.assets
+                  : []).map(({ evidenceReference: _privateEvidence, ...asset }) => asset),
+              },
+            }
+          : {}),
+      }
+    : undefined
   return {
     version: version.version,
     integrity: version.integrity,
@@ -4743,9 +6128,14 @@ function pluginRegistryPublicVersion(version) {
     fileName: version.fileName,
     sizeBytes: version.sizeBytes,
     changelog: version.changelog,
+    ...(version.storeDescription ? { storeDescription: version.storeDescription } : {}),
     visibility: version.visibility,
     status: version.status,
     submittedAt: version.submittedAt,
+    ...(marketplace ? { marketplace } : {}),
+    ...(plainObject(version.automatedAnalysis) ? { automatedAnalysis: version.automatedAnalysis } : {}),
+    ...(plainObject(version.productManifest) ? { productManifest: version.productManifest } : {}),
+    ...(plainObject(version.productSignature) ? { productSignature: version.productSignature } : {}),
     ...(version.publishedAt ? { publishedAt: version.publishedAt } : {}),
     ...(version.moderationNote ? { moderationNote: version.moderationNote } : {}),
   }
@@ -5034,6 +6424,7 @@ function accountPublicProfile(account) {
   return {
     accountId: account.accountId,
     displayName: account.displayName,
+    ...(typeof account.avatar === 'string' && account.avatar ? { avatar: account.avatar } : {}),
     ...(account.auth?.username ? { username: account.auth.username } : {}),
     ...(account.auth?.channel && account.auth?.destination
       ? {
@@ -5121,6 +6512,7 @@ function accountSessionResponse(account, token) {
   return {
     accountId: account.accountId,
     displayName: account.displayName,
+    ...(typeof account.avatar === 'string' && account.avatar ? { avatar: account.avatar } : {}),
     ...(account.auth?.username ? { username: account.auth.username } : {}),
     ...(account.auth?.channel && account.auth?.destination
       ? {
@@ -5133,15 +6525,21 @@ function accountSessionResponse(account, token) {
   }
 }
 
+function normalizeAccountAvatar(value) {
+  if (value == null || value === '') return ''
+  if (typeof value !== 'string' || value.length > 400_000) return null
+  return /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value) ? value : null
+}
+
 async function readAccount(ctx, accountId) {
   const normalized = normalizeAccountId(accountId)
   if (normalized !== accountId || normalized.length !== 12) throw new RoomProtocolError(401, 'invalid-account-session')
-  const store = await accountSqliteStore(ctx)
+  const store = await accountPersistentStore(ctx)
   if (store) {
-    const persisted = store.readAccount(normalized)
+    const persisted = await store.readAccount(normalized)
     if (persisted) {
       if (!plainObject(persisted) || persisted.accountId !== normalized) {
-        throw new Error('invalid SQLite account record')
+        throw new Error('invalid persistent account record')
       }
       return persisted
     }
@@ -5149,10 +6547,10 @@ async function readAccount(ctx, accountId) {
   try {
     const account = JSON.parse(await readFile(accountFile(ctx, normalized), 'utf8'))
     if (!plainObject(account) || account.accountId !== normalized) throw new Error('invalid account record')
-    // SQLite rollout is deliberately lazy-compatible: an account not present in
+    // Persistent-storage rollout is deliberately lazy-compatible: an account not present in
     // the new index is imported from the untouched JSON rollback source once.
     if (store) {
-      store.writeAccount(account, { sourcePath: accountFile(ctx, normalized) })
+      await store.writeAccount(account, { sourcePath: accountFile(ctx, normalized) })
     }
     return account
   } catch (error) {
@@ -5182,8 +6580,8 @@ async function mutateAccount(ctx, accountId, updater) {
   const filePath = accountFile(ctx, accountId)
   return withWriteLock(filePath, async () => {
     let account
-    const store = await accountSqliteStore(ctx)
-    if (store) account = store.readAccount(accountId)
+    const store = await accountPersistentStore(ctx)
+    if (store) account = await store.readAccount(accountId)
     if (!account) {
       try {
         account = JSON.parse(await readFile(filePath, 'utf8'))
@@ -5194,7 +6592,7 @@ async function mutateAccount(ctx, accountId, updater) {
     }
     const next = await updater(account)
     if (!plainObject(next) || next.accountId !== accountId) throw new RoomProtocolError(400, 'account-operation-failed')
-    if (store) store.writeAccount(next)
+    if (store) await store.writeAccount(next)
     await atomicRename(filePath, JSON.stringify(next))
     return next
   })
@@ -5225,7 +6623,7 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
     try {
       await writeFile(accountFile(ctx, accountId), JSON.stringify(account), { flag: 'wx' })
       try {
-        await syncAccountToSqlite(ctx, account, { createOnly: true })
+        await syncAccountToPersistentStore(ctx, account, { createOnly: true })
       } catch (error) {
         await rm(accountFile(ctx, accountId), { force: true })
         if (error?.code === 'ACCOUNT_EXISTS') continue
@@ -5240,9 +6638,9 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
 }
 
 async function readAccountIdentity(ctx, kind, key) {
-  const store = await accountSqliteStore(ctx)
+  const store = await accountPersistentStore(ctx)
   if (store) {
-    const accountId = store.findIdentity(kind, accountIdentityDigest(kind, key))
+    const accountId = await store.findIdentity(kind, accountIdentityDigest(kind, key))
     if (accountId) return accountId
   }
   try {
@@ -5407,7 +6805,7 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
       [challenge.channel, challenge.destination],
     ]
     const writtenIndexes = []
-    let sqliteCreated = false
+    let persistentCreated = false
     try {
       for (const [kind, key] of indexRecords) {
         const filePath = accountIdentityFile(ctx, kind, key)
@@ -5417,15 +6815,15 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
         })
         writtenIndexes.push(filePath)
       }
-      await syncAccountToSqlite(ctx, account, { createOnly: true })
-      sqliteCreated = accountStorageBackend(ctx) === 'sqlite'
+      await syncAccountToPersistentStore(ctx, account, { createOnly: true })
+      persistentCreated = accountStorageBackend(ctx) !== 'json'
       const consumed = { ...challenge, consumedAt: now, updatedAt: now }
       delete consumed.code
       await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify(consumed))
     } catch (error) {
-      if (sqliteCreated) {
-        const store = await accountSqliteStore(ctx).catch(() => null)
-        store?.deleteAccount(account.accountId)
+      if (persistentCreated) {
+        const store = await accountPersistentStore(ctx).catch(() => null)
+        await store?.deleteAccount(account.accountId)
       }
       await Promise.allSettled([
         rm(accountFile(ctx, account.accountId), { force: true }),
@@ -5991,6 +7389,17 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/plugins')) return false
   if (!applyLobbyRateLimit(req, res, ctx)) return true
 
+  if (parsed.pathname === '/api/plugins/signing-key' && req.method === 'GET') {
+    const key = await marketplaceSigningKey(ctx)
+    writeJson(res, 200, {
+      schemaVersion: 1,
+      algorithm: key.algorithm,
+      keyId: key.keyId,
+      publicKeyPem: key.publicKeyPem,
+    })
+    return true
+  }
+
   if (parsed.pathname === '/api/plugins/catalog' && req.method === 'GET') {
     const query = normalizedLabel(parsed.searchParams.get('q'), 100).toLocaleLowerCase()
     const category = normalizedLabel(parsed.searchParams.get('category'), 40)
@@ -6018,7 +7427,59 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       (Array.isArray(entry.versions) ? entry.versions : [])
         .filter((version) => version.status === 'pending')
         .map((version) => ({ plugin: { id: entry.id, name: entry.name, publisher: entry.publisher }, version })))
-    writeJson(res, 200, { pending, reports: registry.reports.slice(-500).reverse() })
+    writeJson(res, 200, {
+      pending,
+      reports: registry.reports.slice(-500).reverse(),
+      creatorApplications: registry.creators
+        .filter((creator) => creator.status === 'pending')
+        .sort((left, right) => Number(left.appliedAt ?? 0) - Number(right.appliedAt ?? 0)),
+      payouts: registry.payouts
+        .filter((payout) => ['pending', 'approved'].includes(payout.status))
+        .sort((left, right) => Number(left.createdAt ?? 0) - Number(right.createdAt ?? 0))
+        .map((payout) => ({
+          ...marketplacePayoutPublicRecord(payout),
+          verifiedRecipientReference: payout.payoutDestinationReference,
+        })),
+    })
+    return true
+  }
+
+  const creatorModerationMatch = parsed.pathname.match(/^\/api\/plugins\/creators\/([^/]+)\/moderate$/)
+  if (creatorModerationMatch && req.method === 'POST') {
+    const administrator = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(administrator)) throw new RoomProtocolError(403, 'plugin-admin-required')
+    const accountId = decodeURIComponent(creatorModerationMatch[1] ?? '')
+    const account = await readAccount(ctx, accountId).catch(() => null)
+    if (!account) throw new RoomProtocolError(404, 'account-not-found')
+    const payload = await readJsonRequest(req)
+    const action = payload?.action
+    if (!['approve', 'reject', 'suspend'].includes(action)) {
+      throw new RoomProtocolError(400, 'invalid-creator-moderation')
+    }
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existing = current.creators.find((creator) => creator.accountId === accountId)
+      if (!existing) throw new RoomProtocolError(404, 'creator-application-not-found')
+      const nextCreator = {
+        ...existing,
+        displayName: account.auth?.username ?? account.displayName,
+        status: action === 'approve' ? 'verified' : action === 'reject' ? 'rejected' : 'suspended',
+        moderatedAt: now,
+        moderatedBy: administrator.accountId,
+        moderationNote: normalizedLabel(payload?.note, 2_000),
+        ...(action === 'approve' ? { verifiedAt: now } : {}),
+      }
+      return {
+        ...current,
+        creators: [...current.creators.filter((creator) => creator.accountId !== accountId), nextCreator],
+        entries: current.entries.map((entry) => entry.publisher?.accountId === accountId
+          ? { ...entry, publisher: { ...entry.publisher, creatorVerified: action === 'approve' } }
+          : entry),
+      }
+    })
+    writeJson(res, 200, {
+      creator: registry.creators.find((creator) => creator.accountId === accountId),
+    })
     return true
   }
 
@@ -6048,13 +7509,28 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       candidate.version === pluginVersion && candidate.status === 'published' &&
       ['public', 'unlisted'].includes(candidate.visibility))
     if (!entry || !version) throw new RoomProtocolError(404, 'public-plugin-not-found')
+    const paid = version.marketplace?.pricing?.kind === 'paid'
+    const account = paid ? await authenticateAccount(req, ctx, true) : null
+    if (paid) {
+      const entitlement = account
+        ? activeMarketplaceEntitlement(registry.entitlements, {
+            accountId: account.accountId,
+            productId: pluginId,
+            version: pluginVersion,
+          })
+        : null
+      const publisherOwnsProduct = account?.accountId === entry.publisher?.accountId
+      if (!entitlement && !publisherOwnsProduct) {
+        throw new RoomProtocolError(account ? 403 : 401, 'marketplace-entitlement-required')
+      }
+    }
     const bytes = await readFile(accountPluginBlobFile(ctx, version.integrity))
     const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
     if (actualIntegrity !== version.integrity) throw new RoomProtocolError(409, 'public-plugin-integrity-mismatch')
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(bytes.length),
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': paid ? 'private, no-store' : 'public, max-age=31536000, immutable',
       'X-Stars-Plugin-Version': version.version,
       'X-Stars-Plugin-Integrity': version.integrity,
       'X-Stars-Plugin-Filename': encodeURIComponent(version.fileName),
@@ -6066,6 +7542,103 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       'X-Stars-Plugin-Ruleset': DND5E_2014_RULESET_ID,
     })
     res.end(bytes)
+    return true
+  }
+
+  const entitlementGrantMatch = parsed.pathname.match(
+    /^\/api\/plugins\/catalog\/([^/]+)\/versions\/([^/]+)\/entitlements$/,
+  )
+  if (entitlementGrantMatch && req.method === 'POST') {
+    const actor = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const administrator = pluginRegistryAdministrator(actor)
+    if (productionSecurityEnabled() && !administrator) {
+      throw new RoomProtocolError(403, 'plugin-admin-required')
+    }
+    const pluginId = decodeURIComponent(entitlementGrantMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(entitlementGrantMatch[2] ?? '')
+    const targetAccountId = administrator && normalizedLabel(payload?.accountId, 64)
+      ? normalizedLabel(payload.accountId, 64)
+      : actor.accountId
+    const target = await readAccount(ctx, targetAccountId).catch(() => null)
+    if (!target) throw new RoomProtocolError(404, 'account-not-found')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entry = current.entries.find((candidate) => candidate.id === pluginId)
+      const version = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+        candidate.version === pluginVersion && candidate.status === 'published')
+      if (!entry || !version || version.marketplace?.pricing?.kind !== 'paid') {
+        throw new RoomProtocolError(404, 'paid-marketplace-product-not-found')
+      }
+      const existing = activeMarketplaceEntitlement(current.entitlements, {
+        accountId: targetAccountId,
+        productId: pluginId,
+        version: pluginVersion,
+      }, now)
+      if (existing) return current
+      return {
+        ...current,
+        entitlements: [...current.entitlements, {
+          schemaVersion: MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
+          entitlementId: randomUUID(),
+          accountId: targetAccountId,
+          productId: pluginId,
+          version: pluginVersion,
+          licenseType: 'complimentary',
+          source: administrator ? 'admin' : 'sandbox',
+          status: 'active',
+          grantedAt: now,
+          grantedBy: actor.accountId,
+        }],
+      }
+    })
+    const entitlement = activeMarketplaceEntitlement(registry.entitlements, {
+      accountId: targetAccountId,
+      productId: pluginId,
+      version: pluginVersion,
+    }, now)
+    writeJson(res, 201, { entitlement })
+    return true
+  }
+
+  const entitlementStatusMatch = parsed.pathname.match(
+    /^\/api\/plugins\/entitlements\/([^/]+)\/status$/,
+  )
+  if (entitlementStatusMatch && req.method === 'POST') {
+    const administrator = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(administrator)) {
+      throw new RoomProtocolError(403, 'plugin-admin-required')
+    }
+    const entitlementId = decodeURIComponent(entitlementStatusMatch[1] ?? '')
+    const payload = await readJsonRequest(req)
+    const status = normalizedLabel(payload?.status, 24)
+    if (!['active', 'refunded', 'revoked', 'disputed'].includes(status)) {
+      throw new RoomProtocolError(400, 'invalid-entitlement-status')
+    }
+    const statusReason = normalizedLabel(payload?.reason, 1_000)
+    const updatedAt = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entitlement = current.entitlements.find((candidate) =>
+        candidate.entitlementId === entitlementId)
+      if (!entitlement) throw new RoomProtocolError(404, 'marketplace-entitlement-not-found')
+      return {
+        ...current,
+        entitlements: current.entitlements.map((candidate) =>
+          candidate.entitlementId === entitlementId
+            ? {
+                ...candidate,
+                status,
+                updatedAt,
+                updatedBy: administrator.accountId,
+                ...(statusReason ? { statusReason } : {}),
+              }
+            : candidate),
+      }
+    })
+    writeJson(res, 200, {
+      entitlement: registry.entitlements.find((candidate) =>
+        candidate.entitlementId === entitlementId) ?? null,
+    })
     return true
   }
 
@@ -6235,6 +7808,54 @@ async function handleAccountApi(req, res, parsed, ctx) {
   if (parsed.pathname === '/api/accounts/me' && req.method === 'GET') {
     const account = await authenticateAccount(req, ctx)
     writeJson(res, 200, accountPublicProfile(account))
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me' && req.method === 'PATCH') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req, 512 * 1024)
+    const displayName = normalizedLabel(payload?.displayName, 24)
+    const avatar = normalizeAccountAvatar(payload?.avatar)
+    if (!displayName) throw new RoomProtocolError(400, 'invalid-account-name')
+    if (avatar == null) throw new RoomProtocolError(400, 'invalid-account-avatar')
+    const now = Date.now()
+    const next = await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      displayName,
+      ...(avatar ? { avatar } : { avatar: undefined }),
+      updatedAt: now,
+    }))
+    writeJson(res, 200, accountPublicProfile(next))
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/password' && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const currentPassword = normalizeAccountPassword(payload?.currentPassword)
+    const newPassword = normalizeAccountPassword(payload?.newPassword)
+    if (!plainObject(account.auth) || !plainObject(account.auth.password)) {
+      throw new RoomProtocolError(409, 'registered-account-required')
+    }
+    if (!currentPassword || !secretMatches(account.auth.password, currentPassword)) {
+      throw new RoomProtocolError(401, 'invalid-account-current-password')
+    }
+    if (!newPassword) throw new RoomProtocolError(400, 'invalid-account-password')
+    const presentedToken = req.headers['x-stars-account-token']
+    const presentedHash = tokenHash(presentedToken)
+    const now = Date.now()
+    await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      auth: {
+        ...current.auth,
+        password: secretRecord(newPassword),
+      },
+      sessions: (Array.isArray(current.sessions) ? current.sessions : []).filter(
+        (session) => session?.tokenHash === presentedHash,
+      ),
+      updatedAt: now,
+    }))
+    writeJson(res, 200, { ok: true })
     return true
   }
 
@@ -6494,6 +8115,64 @@ async function handleAccountApi(req, res, parsed, ctx) {
     return true
   }
 
+  if (parsed.pathname === '/api/accounts/me/creator') {
+    const account = await authenticateAccount(req, ctx)
+    if (req.method === 'GET') {
+      const registry = await readPluginRegistry(ctx)
+      const creator = registry.creators.find((candidate) => candidate.accountId === account.accountId)
+      writeJson(res, 200, { creator: marketplaceCreatorPublicRecord(account, creator) })
+      return true
+    }
+    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+    const payload = await readJsonRequest(req)
+    const countryOrRegion = normalizedLabel(payload?.countryOrRegion, 80)
+    const verificationReference = normalizedLabel(payload?.verificationReference, 200)
+    if (
+      !countryOrRegion ||
+      verificationReference.length < 6 ||
+      payload?.acceptedPolicyVersion !== MARKETPLACE_CREATOR_POLICY_VERSION ||
+      payload?.acceptedNoticeVersion !== MARKETPLACE_CREATOR_NOTICE_VERSION
+    ) throw new RoomProtocolError(400, 'invalid-creator-application')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existing = current.creators.find((candidate) => candidate.accountId === account.accountId)
+      if (existing?.status === 'verified' || existing?.status === 'suspended') {
+        throw new RoomProtocolError(409, existing.status === 'verified'
+          ? 'creator-already-verified'
+          : 'creator-account-suspended')
+      }
+      const creator = {
+        schemaVersion: 1,
+        accountId: account.accountId,
+        displayName: account.auth?.username ?? account.displayName,
+        status: 'pending',
+        countryOrRegion,
+        verificationReference,
+        policyVersion: MARKETPLACE_CREATOR_POLICY_VERSION,
+        noticeVersion: MARKETPLACE_CREATOR_NOTICE_VERSION,
+        appliedAt: now,
+      }
+      return {
+        ...current,
+        creators: [...current.creators.filter((candidate) => candidate.accountId !== account.accountId), creator],
+      }
+    })
+    const creator = registry.creators.find((candidate) => candidate.accountId === account.accountId)
+    writeJson(res, 202, { creator: marketplaceCreatorPublicRecord(account, creator) })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/entitlements' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      entitlements: registry.entitlements
+        .filter((entitlement) => entitlement.accountId === account.accountId)
+        .sort((left, right) => Number(right.grantedAt ?? 0) - Number(left.grantedAt ?? 0)),
+    })
+    return true
+  }
+
   const accountPluginPublicationMatch = parsed.pathname.match(
     /^\/api\/accounts\/me\/plugins\/([^/]+)\/versions\/([^/]+)\/publication$/,
   )
@@ -6533,13 +8212,49 @@ async function handleAccountApi(req, res, parsed, ctx) {
       throw new RoomProtocolError(409, 'plugin-not-publicly-distributable')
     }
     const bytes = await readFile(accountPluginBlobFile(ctx, plugin.integrity))
-    validateDeclarativePackageForPublication(bytes, plugin)
+    const parsedPackage = validateDeclarativePackageForPublication(bytes, plugin)
+    const marketplaceResult = normalizeMarketplacePublication(payload, { allowLegacyFree: true })
+    if (!marketplaceResult.ok) throw new RoomProtocolError(400, marketplaceResult.error)
+    const creatorRegistry = await readPluginRegistry(ctx)
+    const creator = creatorRegistry.creators.find((candidate) => candidate.accountId === account.accountId)
+    if (marketplaceResult.value.pricing.kind === 'paid' && creator?.status !== 'verified') {
+      throw new RoomProtocolError(403, 'verified-creator-required')
+    }
+    const automatedAnalysis = analyzeMarketplaceDeclarativePackage(parsedPackage)
+    if (automatedAnalysis.riskLevel === 'blocked') {
+      throw new RoomProtocolError(400, 'marketplace-automated-analysis-blocked')
+    }
     const changelog = normalizedLabel(payload?.changelog, 4_000)
+    const storeDescription = normalizedLabel(payload?.storeDescription, 20_000)
+    if (payload?.commerce && storeDescription.length < 20) {
+      throw new RoomProtocolError(400, 'marketplace-store-description-required')
+    }
     const tags = Array.isArray(payload?.tags)
       ? [...new Set(payload.tags.map((tag) => normalizedLabel(tag, 32)).filter(Boolean))].slice(0, 12)
       : []
+    const productManifest = {
+      schemaVersion: MARKETPLACE_PRODUCT_MANIFEST_SCHEMA_VERSION,
+      productId: plugin.id,
+      listingId: plugin.id,
+      version: plugin.version,
+      publisherAccountId: account.accountId,
+      integrity: plugin.integrity,
+      rulesetId: plugin.rulesetId,
+      contentCategory: plugin.contentCategory,
+      pricing: {
+        kind: marketplaceResult.value.pricing.kind,
+        currency: marketplaceResult.value.pricing.currency,
+        amountMinor: marketplaceResult.value.pricing.amountMinor,
+      },
+      issuedAt: now,
+    }
+    const productSignature = await signMarketplaceProduct(ctx, productManifest)
     const status = pluginCatalogReviewRequired() ? 'pending' : 'published'
     const registry = await mutatePluginRegistry(ctx, (current) => {
+      const currentCreator = current.creators.find((candidate) => candidate.accountId === account.accountId)
+      if (marketplaceResult.value.pricing.kind === 'paid' && currentCreator?.status !== 'verified') {
+        throw new RoomProtocolError(403, 'verified-creator-required')
+      }
       const existing = current.entries.find((entry) => entry.id === pluginId)
       if (existing && existing.publisher?.accountId !== account.accountId) {
         throw new RoomProtocolError(409, 'plugin-id-owned-by-other-publisher')
@@ -6549,6 +8264,11 @@ async function handleAccountApi(req, res, parsed, ctx) {
         visibility,
         status,
         changelog,
+        storeDescription: storeDescription || plugin.description || '',
+        marketplace: marketplaceResult.value,
+        automatedAnalysis,
+        productManifest,
+        productSignature,
         submittedAt: now,
         ...(status === 'published' ? { publishedAt: now } : {}),
       }
@@ -6560,6 +8280,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
         publisher: {
           accountId: account.accountId,
           displayName: account.auth?.username ?? account.displayName,
+          creatorVerified: currentCreator?.status === 'verified',
         },
         contentCategory: plugin.contentCategory,
         tags,
@@ -6606,6 +8327,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
       if (actualIntegrity !== record.integrity) {
         throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
       }
+      await assertMarketplacePackageEntitlement(ctx, account.accountId, record.integrity)
       if (current) {
         if (current.integrity !== record.integrity) {
           throw new RoomProtocolError(409, 'account-plugin-version-conflict')
@@ -6919,7 +8641,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         stateSchemaVersion,
       }])?.[0]
       if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      await mutateLobbyRoom(ctx, roomId, (room) => {
+      const authorizedStageRoom = await mutateLobbyRoom(ctx, roomId, (room) => {
         if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
         return { ok: true }
@@ -6928,6 +8650,11 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      await assertMarketplacePackageEntitlement(
+        ctx,
+        authorizedStageRoom.room.host?.accountId,
+        requirement.integrity,
+      )
       await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
       const storagePath = roomPluginVersionFile(ctx, roomId, pluginId, requirement.integrity)
       await withWriteLock(storagePath, () => atomicRename(storagePath, bytes))
@@ -7125,7 +8852,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         stateSchemaVersion: Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1),
       }])?.[0]
       if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      await mutateLobbyRoom(ctx, roomId, (room) => {
+      const authorizedLegacyRoom = await mutateLobbyRoom(ctx, roomId, (room) => {
         if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
         return { ok: true, member: room.host }
@@ -7134,6 +8861,11 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      await assertMarketplacePackageEntitlement(
+        ctx,
+        authorizedLegacyRoom.room.host?.accountId,
+        requirement.integrity,
+      )
       await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
       await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
       await withWriteLock(roomPluginFile(ctx, roomId, pluginId), () =>
@@ -7717,6 +9449,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   }
 
   try {
+    if (await handleMarketplaceCommerceApi(req, res, parsed, ctx)) return true
     if (await handlePluginCatalogApi(req, res, parsed, ctx)) return true
     if (await handleAccountApi(req, res, parsed, ctx)) return true
     if (await handleRoomLobbyApi(req, res, parsed, ctx)) return true
@@ -7845,6 +9578,58 @@ export async function handleSharedApi(req, res, parsed, ctx) {
 
     if (parsed.pathname === '/api/time' && req.method === 'GET') {
       writeJson(res, 200, { serverNow: Date.now() })
+      return true
+    }
+
+    if (parsed.pathname === '/api/dm/undo') {
+      if (!authenticatedRoomMember || ctx.accessRole !== 'dm') {
+        writeJson(res, 403, { error: 'dm-authority-required' })
+        return true
+      }
+      if (req.method === 'GET') {
+        const journal = await readDmUndoJournal(ctx)
+        writeJson(res, 200, {
+          schemaVersion: DM_UNDO_SCHEMA_VERSION,
+          transactions: journal.transactions
+            .slice(-30)
+            .reverse()
+            .map(dmUndoPublicTransaction),
+        })
+        return true
+      }
+      if (req.method === 'POST') {
+        const payload = await readJsonRequest(req)
+        const requestedTransactionId = payload?.transactionId == null
+          ? ''
+          : normalizedLabel(payload.transactionId, 160)
+        if (
+          payload?.transactionId != null &&
+          (!requestedTransactionId || !/^[a-zA-Z0-9:_-]+$/.test(requestedTransactionId))
+        ) {
+          writeJson(res, 400, { error: 'invalid-dm-undo-transaction' })
+          return true
+        }
+        const result = await applyDmAuthoritativeUndo(
+          ctx,
+          requestedTransactionId,
+          authenticatedRoomMember.memberId,
+        )
+        const now = Date.now()
+        for (const restored of result.restored) {
+          publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `dm-undo:${result.transaction.transactionId}:${restored.resource}:${now}`,
+            name: restored.resource,
+            updatedAt: now,
+          })
+        }
+        writeJson(res, 200, {
+          ok: true,
+          transaction: dmUndoPublicTransaction(result.transaction),
+          restored: result.restored,
+        })
+        return true
+      }
+      writeJson(res, 405, { error: 'method-not-allowed' })
       return true
     }
 
@@ -8140,6 +9925,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'campaign-time',
+        result,
+        '调整战役时间',
+      )
       if (result.changed) {
         for (const name of ['campaign-time', 'maps', 'map-geometry']) {
           publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
@@ -8188,6 +9981,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'scene-audio-playback',
+        result,
+        '调整场景音频',
+      )
       if (result.changed) {
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `scene-audio-playback:${now}:${Math.random().toString(36).slice(2)}`,
@@ -8234,6 +10035,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         res.end(JSON.stringify({ error: result?.error ?? 'mutation-failed' }))
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'combat-interrupts',
+        result,
+        '处理战斗中断',
+      )
       if (result.changed) {
         const updatedAt = result.next.updatedAt
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
@@ -8494,6 +10303,22 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 422, { error: 'invalid-state', name, reason: writeResult.reason })
           return true
         }
+        if (
+          ctx.accessRole === 'dm' &&
+          authenticatedRoomMember &&
+          DM_UNDOABLE_STATE.has(name)
+        ) {
+          await appendDmUndoChange(ctx, {
+            transactionId: dmUndoTransactionId(req),
+            label: dmUndoLabel(req, `更新 ${name}`),
+            actorMemberId: authenticatedRoomMember.memberId,
+            resource: name,
+            before: writeResult.current,
+            beforeRevision: writeResult.currentRevision,
+            afterRevision: writeResult.revision,
+            changedAt: writeResult.writtenAt,
+          })
+        }
         const updatedAt = Number(parsedBody?.updatedAt)
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `${name}:${Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now()}:${Math.random().toString(36).slice(2)}`,
@@ -8542,6 +10367,22 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             currentRevision: deleteResult.currentRevision,
           }))
           return true
+        }
+        if (
+          ctx.accessRole === 'dm' &&
+          authenticatedRoomMember &&
+          DM_UNDOABLE_STATE.has(name)
+        ) {
+          await appendDmUndoChange(ctx, {
+            transactionId: dmUndoTransactionId(req),
+            label: dmUndoLabel(req, `删除 ${name}`),
+            actorMemberId: authenticatedRoomMember.memberId,
+            resource: name,
+            before: deleteResult.current,
+            beforeRevision: deleteResult.currentRevision,
+            afterRevision: deleteResult.revision,
+            changedAt: deleteResult.writtenAt,
+          })
         }
         await rm(path.join(ctx.legacyStateRoot, `${name}.json`), { force: true })
         const updatedAt = deleteResult.writtenAt

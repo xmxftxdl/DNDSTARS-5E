@@ -1079,6 +1079,75 @@ describe('map geometry player projection', () => {
     expect(project({ truesightRangeFeet: 60 }, {}).map((token: { id: string }) => token.id)).toContain('target')
   })
 
+  it('projects character-derived Darkvision and Devil’s Sight before hiding enemy tokens', () => {
+    const maps = {
+      maps: [{
+        id: 'map-1', width: 120, height: 60, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'target', type: 'enemy', x: 80, y: 20 },
+        ],
+      }],
+    }
+    const baseMapGeometry = {
+      mapId: 'map-1',
+      walls: [],
+      doors: [],
+      windows: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: false,
+        ambientLight: 'darkness',
+      },
+      updatedAt: 1,
+    }
+    const project = (
+      character: Record<string, unknown>,
+      mapGeometry: Record<string, unknown> = baseMapGeometry,
+    ) =>
+      sharedServerCore.projectMapsForPlayer(
+        maps,
+        { schemaVersion: 2, updatedAt: 1, maps: [mapGeometry] },
+        'character-1',
+        { characters: [{ id: 'character-1', ...character }] },
+      ).maps[0].tokens
+
+    expect(project({ race: '人类' }).map((token: { id: string }) => token.id))
+      .not.toContain('target')
+    expect(project({ race: '精灵' }).map((token: { id: string }) => token.id))
+      .toContain('target')
+    const magicalDarknessGeometry = {
+      ...baseMapGeometry,
+      vision: { ...baseMapGeometry.vision, ambientLight: 'bright' },
+      obstacles: [{
+        ...common,
+        id: 'darkness',
+        kind: 'obstacle',
+        points: [{ x: 65, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 35 }, { x: 65, y: 35 }],
+        blocksVision: false,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+        magicalDarkness: true,
+        darknessSpellLevel: 2,
+        heightFeet: 20,
+      }],
+    }
+    expect(project({ race: '精灵' }, magicalDarknessGeometry)
+      .map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({
+      dnd5eClassChoices: {
+        classes: {
+          warlock: {
+            selections: { 'eldritch-invocations': ['devils-sight'] },
+          },
+        },
+      },
+    }, magicalDarknessGeometry).map((token: { id: string }) => token.id))
+      .toContain('target')
+  })
+
   it('raises a scene light to its terrain surface before tracing over a low wall', () => {
     const elevatedLightGeometry = {
       schemaVersion: 2,
@@ -1366,7 +1435,7 @@ describe('map geometry player projection', () => {
     )).toMatchObject({ ok: false, status: 400 })
   })
 
-  it('accepts Shatter spell banners and authors their display lifetime', () => {
+  it('accepts Shatter and Thunderwave spell banners and authors their display lifetime', () => {
     const timestamp = 33_000
     const payload = {
       schemaVersion: 1,
@@ -1404,13 +1473,71 @@ describe('map geometry player projection', () => {
     })
     if (!normalized.ok) throw new Error('expected Shatter banner normalization')
     expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    expect(normalizeCombatPresentationEvent({
+      ...payload,
+      id: 'thunderwave-transaction-1:spell-banner',
+      transactionId: 'thunderwave-transaction-1',
+      spellId: 'thunderwave',
+      spellName: '雷鸣波',
+    }, { role: 'dm' }, timestamp)).toMatchObject({
+      ok: true,
+      event: {
+        spellId: 'thunderwave',
+        spellName: '雷鸣波',
+        castingClassId: 'bard',
+        expiresAt: timestamp + 3_500,
+      },
+    })
     expect(normalizeCombatPresentationEvent(
       { ...payload, spellName: '' },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
     expect(normalizeCombatPresentationEvent(
-      { ...payload, spellId: 'unknown' },
+      { ...payload, spellId: 'plugin.example:storm-song', spellName: '风暴歌' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({
+      ok: true,
+      event: { spellId: 'plugin.example:storm-song', spellName: '风暴歌' },
+    })
+  })
+
+  it('accepts authoritative melee and ranged attack banners', () => {
+    const timestamp = 34_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'attack-1:banner',
+      type: 'attack-banner',
+      mapId: 'map-1',
+      transactionId: 'attack-1',
+      sourceTokenId: 'fighter',
+      actorName: '战士',
+      attackName: '长剑',
+      attackKind: 'melee',
+      classId: 'fighter',
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    expect(normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp))
+      .toMatchObject({
+        ok: true,
+        event: {
+          actorName: '战士',
+          attackName: '长剑',
+          attackKind: 'melee',
+          classId: 'fighter',
+          createdAt: timestamp,
+          expiresAt: timestamp + 3_500,
+        },
+      })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, id: 'attack-2:banner', transactionId: 'attack-2', attackKind: 'ranged', attackName: '长弓' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: true, event: { attackKind: 'ranged', attackName: '长弓' } })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, attackKind: 'magic' },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
@@ -1447,6 +1574,64 @@ describe('map geometry player projection', () => {
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('authors all saving-throw abilities for cross-client presentation', () => {
+    const timestamp = 8_000
+    const rolling = {
+      schemaVersion: 1,
+      id: 'cast-1:dex-save:goblin',
+      type: 'saving-throw-status',
+      mapId: 'map',
+      transactionId: 'cast-1',
+      sourceTokenId: 'goblin',
+      targetTokenId: 'goblin',
+      targetName: '地精',
+      ability: 'dex',
+      phase: 'rolling',
+      dc: 15,
+    }
+    expect(normalizeCombatPresentationEvent(rolling, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    const normalizedRolling = normalizeCombatPresentationEvent(rolling, { role: 'dm' }, timestamp)
+    expect(normalizedRolling).toEqual({
+      ok: true,
+      event: {
+        ...rolling,
+        createdAt: timestamp,
+        expiresAt: timestamp + 300_000,
+      },
+    })
+    if (!normalizedRolling.ok) throw new Error('expected Dexterity save presentation normalization')
+    expect(parseCombatPresentationEvent(normalizedRolling.event)).toEqual(normalizedRolling.event)
+    for (const ability of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
+      expect(normalizeCombatPresentationEvent(
+        { ...rolling, id: `cast-1:${ability}-save:goblin`, ability },
+        { role: 'dm' },
+        timestamp,
+      )).toMatchObject({ ok: true, event: { ability } })
+    }
+    expect(normalizeCombatPresentationEvent(
+      { ...rolling, ability: 'luck' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+
+    expect(normalizeCombatPresentationEvent({
+      ...rolling,
+      phase: 'result',
+      total: 17,
+      success: true,
+    }, { role: 'dm' }, timestamp)).toMatchObject({
+      ok: true,
+      event: {
+        phase: 'result',
+        total: 17,
+        success: true,
+        createdAt: timestamp,
+        expiresAt: timestamp + 3_000,
+      },
+    })
   })
 
   it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {
