@@ -22,7 +22,7 @@ const sharedResourceWriteChains = new Map<string, Promise<unknown>>()
 
 export type SharedResourceSaveResult =
   | { status: 'saved'; revision?: number }
-  | { status: 'skipped'; reason: 'spectator' | 'forbidden' | 'combat-active' }
+  | { status: 'skipped'; reason: 'spectator' | 'forbidden' }
   | { status: 'invalid'; reason: 'schema' | 'serialization' }
   | { status: 'too-large' }
   | { status: 'conflict'; expectedRevision: number; currentRevision: number }
@@ -222,11 +222,6 @@ export interface SharedStateChangedEvent {
 const sharedStateChangedListeners = new Set<(event: SharedStateChangedEvent) => void>()
 let stopSharedStateChangedSource: (() => void) | null = null
 
-async function sharedCombatIsActive(): Promise<boolean> {
-  const combat = await requestJson<{ active?: boolean }>('/state/combat', undefined, 'combat')
-  return !!combat?.active
-}
-
 async function performSharedResourceSave<T>(
   name: string,
   data: T,
@@ -247,9 +242,6 @@ async function performSharedResourceSave<T>(
       name !== 'dice-events' &&
       name !== 'combat-log'
     ) return { status: 'skipped', reason: 'forbidden' }
-    if (name === 'characters' && (await sharedCombatIsActive())) {
-      return { status: 'skipped', reason: 'combat-active' }
-    }
   }
   const validation = validateAndMigrateSharedResource(name, data)
   if (validation.status === 'invalid') {

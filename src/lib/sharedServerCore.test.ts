@@ -2719,6 +2719,16 @@ describe('player character aggregate authority', () => {
         conditions: ['paralyzed'], concentrating: true,
         dnd5eCombatState: { schemaVersion: 2, activeEffects: [activeEffect], concentrationSpellId: 'bless' },
         dnd5eInventory: { schemaVersion: 2, entries: [{ id: 'potion', templateId: 'potion', quantity: 1 }] },
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              selections: {
+                'wizard-spellbook': ['magic-missile'],
+                'spell-prepared': [],
+              },
+            },
+          },
+        },
         classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 2 } },
         equipment: { armorId: 'chain-mail' }, dmNotes: 'secret', visibleToPlayers: true,
       },
@@ -2735,6 +2745,16 @@ describe('player character aggregate authority', () => {
         name: 'Renamed Hero', ownerAccountId: 'forged-account', currentHp: 20, tempHp: 0,
         hitPointDice: [{ sides: 10, current: 2, max: 2 }], conditions: [], concentrating: false,
         dnd5eCombatState: undefined, dnd5eInventory: { schemaVersion: 2, entries: [] },
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              selections: {
+                'wizard-spellbook': ['magic-missile'],
+                'spell-prepared': ['magic-missile'],
+              },
+            },
+          },
+        },
         classResources: { 'dnd5e-spell-slot-1': { current: 2, max: 2 } }, equipment: undefined,
         dmNotes: 'stolen', visibleToPlayers: false,
       }],
@@ -2746,6 +2766,7 @@ describe('player character aggregate authority', () => {
       conditions: ['paralyzed'], concentrating: true, dmNotes: 'secret', visibleToPlayers: true,
       dnd5eCombatState: current.characters[0].dnd5eCombatState,
       dnd5eInventory: current.characters[0].dnd5eInventory,
+      dnd5eClassChoices: forged.characters[0].dnd5eClassChoices,
       classResources: current.characters[0].classResources,
       equipment: current.characters[0].equipment,
     })
