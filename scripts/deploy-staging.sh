@@ -81,7 +81,10 @@ if grep -q 'filter=lfs' .gitattributes; then
     exit 2
   fi
   git lfs pull
-  first_lfs_asset="$(git lfs ls-files --name-only | head -n 1)"
+  # `head` closes the pipe after one line. With `set -o pipefail`, a large LFS
+  # catalog can then make `git lfs ls-files` exit on SIGPIPE and abort a valid
+  # deployment before the image build starts.
+  first_lfs_asset="$(git lfs ls-files --name-only | sed -n '1p')"
   if [[ -n "$first_lfs_asset" ]] \
     && grep -q '^version https://git-lfs.github.com/spec/v1$' "$first_lfs_asset"; then
     printf 'Git LFS 资源仍是指针文件，拒绝构建缺少美术资源的 staging 镜像：%s\n' "$first_lfs_asset" >&2
