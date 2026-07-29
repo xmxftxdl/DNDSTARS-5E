@@ -7,15 +7,18 @@ import {
   dnd5eDarkOnesOwnLuckAvailable,
   dnd5eHeldBardicInspirationDie,
   dnd5eHellishRebukeSlotLevel,
+  dnd5ePendingMonsterDeathAreaEffects,
   dnd5eRacialInnateSpellGrant,
   dnd5eSavingThrowMode,
   dnd5eSavingThrowRerollFeature,
+  getDnd5eSrdMonster,
   planDnd5eMapResultApplication,
   previewDnd5eSavingThrowRoll,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
   type Dnd5eMapResultPlan,
+  type Dnd5eSpellTargetSavingThrowRoll,
 } from '../../rulesets/dnd5e'
 import { resolveDnd5eRollMode } from '../../rulesets/dnd5e/rollMode'
 
@@ -433,6 +436,128 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (!resolved.ok) continue
     state = resolved.state
     events.push(...resolved.events)
+  }
+  const pendingDeathArea = dnd5ePendingMonsterDeathAreaEffects(state)[0]
+  if (pendingDeathArea) {
+    const source = state.combatants[pendingDeathArea.sourceId]
+    const monster = source?.statBlockId
+      ? getDnd5eSrdMonster(source.statBlockId)
+      : undefined
+    const rule = monster?.traits.find((trait) =>
+      trait.automation === 'headless' &&
+      trait.rule?.kind === 'death-area-saving-throw' &&
+      trait.rule.ruleId === pendingDeathArea.ruleId)?.rule
+    if (source && monster && rule?.kind === 'death-area-saving-throw') {
+      const liveTargetIds = pendingDeathArea.targetIds.filter((targetId) => {
+        const target = state.combatants[targetId]
+        return !!target && target.currentHp > 0 && !target.deathSaves.dead
+      })
+      const targetSavingThrows: Dnd5eSpellTargetSavingThrowRoll[] = []
+      const legendaryResistanceTargetIds: string[] = []
+      for (const targetId of liveTargetIds) {
+        const target = state.combatants[targetId]!
+        const targetName =
+          input.map.tokens.find((token) => token.id === targetId)?.label ??
+          target.name
+        const mode = dnd5eSavingThrowMode(target, rule.ability, {
+          effectVisible: true,
+          sourceCreatureType: source.creatureType,
+          sourceIsSpell: false,
+        })
+        const d20 = await input.rollD20(
+          `${monster.name}·${rule.ruleId} ${rule.ability.toUpperCase()} 豁免 DC ${rule.dc}`,
+          targetName,
+        )
+        const d20Second = mode !== 'normal'
+          ? await input.rollD20(
+              `${monster.name}·${rule.ruleId} 豁免（${
+                mode === 'advantage' ? '优势' : '劣势'
+              }）`,
+              targetName,
+            )
+          : undefined
+        const lucky = await rollHalflingLucky(
+          target,
+          d20,
+          d20Second,
+          `${rule.ruleId} 豁免`,
+          targetName,
+        )
+        const blessRoll = dnd5eCombatantHasConcentrationEffect(
+          state,
+          target.id,
+          'bless',
+        )
+          ? await input.rollD4('祝福术·死亡爆发豁免加值', targetName)
+          : undefined
+        const baneRoll = dnd5eCombatantHasConcentrationEffect(
+          state,
+          target.id,
+          'bane',
+        )
+          ? await input.rollD4('灾祸术·死亡爆发豁免减值', targetName)
+          : undefined
+        const modifier =
+          (target.savingThrowBonuses[rule.ability] ??
+            Math.floor((target.abilities[rule.ability] - 10) / 2)) +
+          (blessRoll ?? 0) -
+          (baneRoll ?? 0)
+        const preview = previewDnd5eSavingThrowRoll({
+          rolls: mode === 'normal'
+            ? [lucky.first ?? d20]
+            : [
+                lucky.first ?? d20,
+                lucky.second ?? d20Second ?? 0,
+              ],
+          mode,
+          modifier,
+          dc: rule.dc,
+        })
+        if (
+          !preview.success &&
+          (target.classState.legendaryResistanceUses ?? 0) > 0
+        ) {
+          legendaryResistanceTargetIds.push(target.id)
+        }
+        targetSavingThrows.push({
+          targetId: target.id,
+          d20,
+          d20Second,
+          halflingLuckyD20: lucky.first,
+          halflingLuckyD20Second: lucky.second,
+          blessRoll,
+          baneRoll,
+        })
+      }
+      const damageRolls = rule.damage
+        ? await input.rollDice(
+            rule.damage.count,
+            rule.damage.sides,
+            `${monster.name}·${rule.ruleId} 伤害`,
+            source.name,
+          )
+        : []
+      const resolved = resolveDnd5eHeadlessAction(state, {
+        type: 'resolve-monster-death-area-effect',
+        actorId: source.id,
+        snapshotId: pendingDeathArea.id,
+        resolution: {
+          schemaVersion: 1,
+          targetIds: liveTargetIds,
+          targetSavingThrows,
+          legendaryResistanceTargetIds,
+          damageRolls,
+        },
+      })
+      if (resolved.ok) {
+        const nested = await settleDnd5eConcentrationChecks({
+          ...input,
+          result: resolved,
+        })
+        state = nested.result.state
+        events.push(...nested.result.events)
+      }
+    }
   }
   if (input.requestHellishRebuke) {
     const damageEvents = input.result.events.filter((event) =>

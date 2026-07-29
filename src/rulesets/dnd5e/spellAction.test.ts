@@ -794,7 +794,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     input.action.dnd5eSpellCast!.sustainedEffectAttack = 'flame-blade'
     expect(prepareDnd5eSpellCast(input)).toMatchObject({
       ok: false,
-      reason: 'spell-unavailable',
+      reason: 'sustained-spell-unavailable',
     })
   })
 
@@ -919,7 +919,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       characters: cast.application.characters,
       initiativeOrder: input.initiativeOrder,
       turnEconomy: createDnd5eTurnEconomyCounts('spiritual-weapon-forged'),
-    })).toMatchObject({ ok: false, reason: 'spell-unavailable' })
+    })).toMatchObject({ ok: false, reason: 'sustained-spell-unavailable' })
 
     expect(prepareDnd5eSpellCast({
       action: {
@@ -2366,7 +2366,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       dnd5eCombatState: { wildShapeFormId: 'srd-5.1:wolf' },
     })
     expect(prepareDnd5eSpellCast(fixture(shaped, 'produce-flame', 0, enemy))).toEqual({
-      ok: false, reason: 'spell-unavailable',
+      ok: false, reason: 'wild-shape-spellcasting-unavailable',
     })
     expect(prepareDnd5eSpellCast(fixture({ ...shaped, level: 18 }, 'produce-flame', 0, enemy)).ok).toBe(true)
   })
@@ -2406,7 +2406,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(dnd5eBardMagicalSecretSpellIds(lore)).toEqual(['fireball'])
     const enemy = token('enemy', 'enemy', 575)
     expect(prepareDnd5eSpellCast(fixture(lore, 'fireball', 3, enemy)).ok).toBe(true)
-    expect(prepareDnd5eSpellCast(fixture(lore, 'power-word-kill', 9, enemy))).toEqual({ ok: false, reason: 'spell-unavailable' })
+    expect(prepareDnd5eSpellCast(fixture(lore, 'power-word-kill', 9, enemy))).toEqual({ ok: false, reason: 'spell-not-known-or-prepared' })
   })
 
   it('casts a level-five Fire Bolt as a two-die spell attack without spending a slot', () => {
@@ -3915,7 +3915,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
   it('rejects a spell that was not selected on the character sheet', () => {
     const wizard = character('wizard', '法师')
     const enemy = token('enemy', 'enemy', 575)
-    expect(prepareDnd5eSpellCast(fixture(wizard, 'fire-bolt', 0, enemy))).toEqual({ ok: false, reason: 'spell-unavailable' })
+    expect(prepareDnd5eSpellCast(fixture(wizard, 'fire-bolt', 0, enemy))).toEqual({ ok: false, reason: 'spell-not-known-or-prepared' })
   })
 
   it('applies Ray of Frost speed reduction until the caster next turn starts', () => {

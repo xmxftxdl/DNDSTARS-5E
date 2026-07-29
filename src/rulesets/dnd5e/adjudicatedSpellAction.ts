@@ -33,6 +33,9 @@ export type Dnd5eAdjudicatedSpellRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'spell-unavailable'
+  | 'spell-not-known-or-prepared'
+  | 'spellcasting-class-unavailable'
+  | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
   | 'slot-unavailable'
   | 'action-unavailable'
@@ -139,12 +142,15 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     payload.castingClassId,
     input.spell.classes,
   )
+  if (!castingClassId) return { ok: false, reason: 'spell-not-known-or-prepared' }
   const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  if (
-    !definition?.spellcasting || !castingClassId || castingClassLevel < 1 ||
-    (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18))
-  ) return { ok: false, reason: 'spell-unavailable' }
+  if (!definition?.spellcasting || castingClassLevel < 1) {
+    return { ok: false, reason: 'spellcasting-class-unavailable' }
+  }
+  if (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18)) {
+    return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
+  }
   const castingTime = dnd5eSpellbookEntryCastingTime(input.spell)
   if (castingTime === 'reaction' || castingTime === 'unsupported') return { ok: false, reason: 'invalid-action' }
 

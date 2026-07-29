@@ -954,6 +954,13 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
     return colors.length === statusKinds.length &&
       colors.every((entry) => entry.endsWith(':#26072C:#F9D5FF'))
   }).toBe(true)
+  await expect.poll(async () => {
+    const backgrounds = (await canvas.getAttribute('data-spell-status-token-backgrounds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return backgrounds.length === statusKinds.length &&
+      backgrounds.every((entry) => entry.endsWith(':#D946EF:#26072C'))
+  }).toBe(true)
 
   await player.evaluate(async ({ activeMapId, kinds, targetTokenId }) => {
     const presentation = await import('/src/lib/combatPresentation.ts')

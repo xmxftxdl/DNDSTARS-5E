@@ -401,6 +401,7 @@ import {
   type Dnd5eMonsterRechargeRoll,
   type Dnd5eActionResult,
   type Dnd5eBattleMasterAttackIntentPayload,
+  type Dnd5eBattleMasterOpportunityAttack,
   type Dnd5eBattleMasterReactionWeaponAttack,
   type Dnd5eBattleMasterTargetReaction,
   type Dnd5eCombatEvent,
@@ -590,6 +591,7 @@ import {
   resolvePreparedDnd5eFighterFeature,
   resolvePreparedDnd5eHunterMultiattack,
   resolvePreparedDnd5eMonsterAttack,
+  dnd5ePreparedMonsterTraitDamageDefinitions,
   resolvePreparedDnd5eOpportunityAttack,
   resolvePreparedDnd5ePlayerMove,
   resolvePreparedDnd5ePlayerBasicAction,
@@ -763,6 +765,7 @@ import { settleDnd5eConcentrationChecks } from './maps/settleDnd5eCombatResult'
 import {
   applyDnd5eCombatResultApplication as applyCoordinatedDnd5eCombatResult,
   commitDnd5eCombatResult as commitCoordinatedDnd5eCombatResult,
+  mergeDnd5eCombatCharacterResult,
 } from './maps/commitDnd5eCombatResult'
 import { withForcedMovementPresentation } from './maps/forcedMovementPresentation'
 import {
@@ -831,8 +834,10 @@ const dnd5eCharacterPresentationColors = (character: Character | undefined) => {
   return {
     accentColor: palette?.[0] ?? '#94a3b8',
     glowColor: palette?.[3] ?? '#e2e8f0',
+    statusBackgroundHighlightColor: palette?.[0] ?? '#334155',
     statusBackgroundColor: palette?.[1] ?? '#111827',
     statusBorderColor: palette?.[2] ?? '#e2e8f0',
+    classId,
   }
 }
 const dnd5eDamageTypeLabels: Readonly<Record<Dnd5eDamageType, string>> = {
@@ -920,11 +925,20 @@ export default function MapsPage() {
   const updateChar = useCharacterStore((s) => s.update)
   const applyAuthorityCharacterUpdate = useCharacterStore((s) => s.applyAuthorityUpdate)
   const saveCharactersSharedNow = useCharacterStore((s) => s.saveSharedNow)
+  const applyDnd5eCombatCharacterUpdate = (characterId: string, resolved: Character) => {
+    const current = useCharacterStore.getState().characters
+      .find((character) => character.id === characterId)
+    if (!current) return
+    applyAuthorityCharacterUpdate(
+      characterId,
+      mergeDnd5eCombatCharacterResult(current, resolved),
+    )
+  }
   const applyDnd5eCombatApplication = (application: Dnd5eMapResultPlan) =>
     applyCoordinatedDnd5eCombatResult({
       application,
       mapId: application.map.id,
-      applyCharacter: applyAuthorityCharacterUpdate,
+      applyCharacter: applyDnd5eCombatCharacterUpdate,
       applyToken: applyAuthorityTokenUpdate,
     })
   const commitDnd5eCombatApplication = (
@@ -933,7 +947,7 @@ export default function MapsPage() {
   ) => commitCoordinatedDnd5eCombatResult({
     application,
     mapId: application.map.id,
-    applyCharacter: applyAuthorityCharacterUpdate,
+    applyCharacter: applyDnd5eCombatCharacterUpdate,
     applyToken: applyAuthorityTokenUpdate,
     saveCharacters: () => useCharacterStore.getState().saveSharedNow(),
     saveMap: () => useMapStore.getState().saveSharedNow(),
@@ -3584,9 +3598,11 @@ export default function MapsPage() {
       return {
         tokenId: token.id,
         statusId,
+        backgroundHighlightColor: colors.statusBackgroundHighlightColor,
         backgroundColor: colors.statusBackgroundColor,
         borderColor: colors.statusBorderColor,
         glowColor: colors.glowColor,
+        classId: colors.classId,
       }
     })
   })
@@ -4380,7 +4396,7 @@ export default function MapsPage() {
     applyCoordinatedDnd5eCombatResult({
       application: monsterMovementApplication,
       mapId: latestMap.id,
-      applyCharacter: applyAuthorityCharacterUpdate,
+      applyCharacter: applyDnd5eCombatCharacterUpdate,
       applyToken: updateToken,
     })
     for (const log of hazards.logs) pushCombatLog(log, 'system')
@@ -4432,7 +4448,7 @@ export default function MapsPage() {
     applyCoordinatedDnd5eCombatResult({
       application: resolved.application,
       mapId: latestMap.id,
-      applyCharacter: applyAuthorityCharacterUpdate,
+      applyCharacter: applyDnd5eCombatCharacterUpdate,
       applyToken: updateToken,
     })
     pushHeadlessCombatLog(
@@ -4476,7 +4492,7 @@ export default function MapsPage() {
     applyCoordinatedDnd5eCombatResult({
       application: resolved.application,
       mapId: latestMap.id,
-      applyCharacter: applyAuthorityCharacterUpdate,
+      applyCharacter: applyDnd5eCombatCharacterUpdate,
       applyToken: updateToken,
     })
     const targetName = latestMap.tokens.find((token) =>
@@ -4631,7 +4647,7 @@ export default function MapsPage() {
     applyCoordinatedDnd5eCombatResult({
       application,
       mapId: latestMap.id,
-      applyCharacter: applyAuthorityCharacterUpdate,
+      applyCharacter: applyDnd5eCombatCharacterUpdate,
       applyToken: updateToken,
     })
     const check = [...result.events].reverse().find((event) =>
@@ -8397,6 +8413,9 @@ export default function MapsPage() {
       let shieldSpellUsed = false
       let standAgainstTideUsed = false
       let didHit = false
+      let monsterTraitUsedTurnKeys = {
+        ...(actorCombatant?.classState.declarativeUsedTurnKeys ?? {}),
+      }
       const onHitResourceUsage: Dnd5eMonsterOnHitResourceUsage = {
         bardicInspiration: false,
         darkOnesOwnLuck: 0,
@@ -8610,6 +8629,35 @@ export default function MapsPage() {
             ))
           }
         }
+        const traitDamageDefinitions = attackHit
+          ? dnd5ePreparedMonsterTraitDamageDefinitions(
+              monsterAttack,
+              index,
+              attackMode,
+              monsterTraitUsedTurnKeys,
+            )
+          : []
+        const traitDamageRolls: Array<{
+          traitId: 'sneak-attack' | 'martial-advantage'
+          rolls: number[]
+        }> = []
+        for (const definition of traitDamageDefinitions) {
+          const rolls = await rollDiceBoxValues(
+            definition.damage.count * (preview.critical ? 2 : 1),
+            definition.damage.sides,
+            `${monsterAttack.monster.name}路${definition.traitName}`,
+            targetChar.name,
+          )
+          traitDamageRolls.push({
+            traitId: definition.traitId,
+            rolls,
+          })
+          monsterTraitUsedTurnKeys = {
+            ...monsterTraitUsedTurnKeys,
+            [`monster-trait:${definition.traitId}`]:
+              monsterAttack.monsterAttackTraitContext.turnKey ?? '',
+          }
+        }
         const onHitEffectResolution = attackHit && (attackEntry.attack.onHitEffects?.length ?? 0) > 0
           ? targetCombatant
             ? await rollDnd5eMonsterOnHitEffects({
@@ -8641,12 +8689,19 @@ export default function MapsPage() {
         const baseRawDamageTotal = componentRolls.reduce((sum, rolls, componentIndex) =>
           sum + Math.max(0, rolls.reduce((subtotal, value) => subtotal + value, 0) +
             (damageDefinitions[componentIndex]?.bonus ?? 0)), 0)
+        const traitRawDamageTotal = traitDamageRolls.reduce((sum, supplied) => {
+          const definition = traitDamageDefinitions.find((candidate) =>
+            candidate.traitId === supplied.traitId)
+          return sum + supplied.rolls.reduce((subtotal, value) =>
+            subtotal + value, 0) + (definition?.damage.bonus ?? 0)
+        }, 0)
         const onHitRawDamageTotal = onHitEffectResolution.effectiveDamageTotal
         const sizeDamageTotal = sizeDamageRolls.reduce((sum, value) => sum + value, 0)
         const weaponRawDamageTotal = monsterAttack.sizeDamageD4Mode === 'subtract'
           ? Math.max(1, baseRawDamageTotal - sizeDamageTotal)
           : baseRawDamageTotal + sizeDamageTotal
-        const rawDamageTotal = weaponRawDamageTotal + onHitRawDamageTotal
+        const rawDamageTotal =
+          weaponRawDamageTotal + traitRawDamageTotal + onHitRawDamageTotal
         const damageReactionExclusions = new Set([
           ...protectionReactionTokenIds,
           ...cuttingWordsReactionTokenIds,
@@ -8675,6 +8730,7 @@ export default function MapsPage() {
         }
         displayedDamageRolls.push([
           ...componentRolls.flat(),
+          ...traitDamageRolls.flatMap((entry) => entry.rolls),
           ...onHitEffectRolls.flatMap((effectRoll) => effectRoll.damageRolls?.flat() ?? []),
         ])
         actionRolls.push({
@@ -8691,6 +8747,7 @@ export default function MapsPage() {
           deflectMissilesD10,
           tranquilitySave: tranquility.roll,
           damageRolls: componentRolls,
+          traitDamageRolls,
           onHitEffectRolls,
           sizeDamageRolls,
           standAgainstTide,
@@ -10882,6 +10939,23 @@ export default function MapsPage() {
     dnd5eDeclarativeAttackIntents?: SharedPlayerActionAckState['dnd5eDeclarativeAttackIntents'],
   ) => {
     if (!activeMap || mode !== 'dm') return
+    if (status === 'rejected') {
+      const actorName = useCharacterStore.getState().characters.find(
+        (character) => character.id === action.characterId,
+      )?.name ?? activeMap.tokens.find((token) => token.id === action.actorTokenId)?.label ?? '玩家角色'
+      const actionLabel = action.type === 'dnd5e-spell-cast'
+        ? `施放${getDnd5eSrdCombatSpell(action.dnd5eSpellCast?.spellId ?? '')?.name ?? action.dnd5eSpellCast?.spellId ?? '法术'}`
+        : action.type === 'dnd5e-adjudicated-spell'
+          ? `施放${getDnd5eSrdCombatSpell(action.dnd5eAdjudicatedSpell?.spellId ?? '')?.name ?? action.dnd5eAdjudicatedSpell?.spellId ?? '待裁定法术'}`
+          : '执行行动'
+      const notice = playerActionRejectionNotice(reason)
+      pushCombatLog(
+        `${actorName}${actionLabel}未结算：${notice.message}`,
+        'system',
+        roundRef.current,
+        [`权威拒绝码：${reason ?? 'unknown'}`],
+      )
+    }
     playerActionTransactionOutcomeRef.current.set(
       action.id,
       status === 'accepted'
@@ -11030,7 +11104,7 @@ export default function MapsPage() {
     applyCoordinatedDnd5eCombatResult({
       application: resolved.application,
       mapId: latestMap.id,
-      applyCharacter: applyAuthorityCharacterUpdate,
+      applyCharacter: applyDnd5eCombatCharacterUpdate,
       applyToken: updateToken,
     })
     updateDnd5eTurnEconomy(
@@ -11613,7 +11687,7 @@ export default function MapsPage() {
       applyCoordinatedDnd5eCombatResult({
         application: resolved.application,
         mapId: authorityMap.id,
-        applyCharacter: applyAuthorityCharacterUpdate,
+        applyCharacter: applyDnd5eCombatCharacterUpdate,
         applyToken: updateToken,
       })
       updateDnd5eTurnEconomy(
@@ -11761,7 +11835,7 @@ export default function MapsPage() {
       applyCoordinatedDnd5eCombatResult({
         application: presentedBasicApplication,
         mapId: authorityMap.id,
-        applyCharacter: applyAuthorityCharacterUpdate,
+        applyCharacter: applyDnd5eCombatCharacterUpdate,
         applyToken: updateToken,
       })
       if (JSON.stringify(basicApplication.map.dnd5ePluginAreas ?? []) !== JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])) {
@@ -15235,7 +15309,7 @@ export default function MapsPage() {
       await commitCoordinatedDnd5eCombatResult({
         application: pluginApplication,
         mapId: authorityMap.id,
-        applyCharacter: applyAuthorityCharacterUpdate,
+        applyCharacter: applyDnd5eCombatCharacterUpdate,
         applyToken: applyAuthorityTokenUpdate,
         applyMap: (mapId, map) => applyAuthorityMapUpdate(mapId, map),
         applicationMode: 'map',
@@ -17793,6 +17867,11 @@ export default function MapsPage() {
       }
       const declarativeIntentPayloads:
         Record<string, Dnd5eBattleMasterAttackIntentPayload> = {}
+      let maneuveringMovementTrace: {
+        tokenId: string
+        to: { x: number; y: number }
+        path: readonly { x: number; y: number }[]
+      } | undefined
       if (attackHit && battleMasterIntent?.definition) {
         const maneuver = battleMasterIntent.definition.mechanic.maneuver
         const saveAbility = (
@@ -18069,6 +18148,7 @@ export default function MapsPage() {
               description: string
               position: { x: number; y: number }
               distanceFeet: number
+              path: readonly { x: number; y: number }[]
             }> = []
             for (let dc = -radiusCells; dc <= radiusCells; dc += 1) {
               for (let dr = -radiusCells; dr <= radiusCells; dr += 1) {
@@ -18104,6 +18184,7 @@ export default function MapsPage() {
                   description: `路径 ${path.distanceFeet} 尺，消耗 ${path.movementCostFeet} 尺移动`,
                   position,
                   distanceFeet: path.distanceFeet,
+                  path: path.points,
                 })
               }
             }
@@ -18131,9 +18212,83 @@ export default function MapsPage() {
               : undefined
             const destination = destinations.find((candidate) => candidate.id === destinationChoice)
             if (destination) {
+              const opportunityAttacks: Dnd5eBattleMasterOpportunityAttack[] = []
+              const opportunityAttackers = findDnd5eOpportunityAttackersForMove({
+                map: authorityMap,
+                characters: attack.characters,
+                movingToken: selectedAlly,
+                to: destination.position,
+                path: [...destination.path],
+                turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
+              }).filter((candidate) => candidate.id !== attack.targetToken.id)
+              for (const opportunityAttacker of opportunityAttackers) {
+                let triggerMap: BattleMap | undefined
+                for (let index = 0; index < destination.path.length - 1; index += 1) {
+                  const at = destination.path[index]
+                  const next = destination.path[index + 1]
+                  const allyAtTrigger = { ...selectedAlly, ...at }
+                  const mapAtTrigger: BattleMap = {
+                    ...authorityMap,
+                    tokens: authorityMap.tokens.map((token) =>
+                      token.id === selectedAlly.id ? allyAtTrigger : token,
+                    ),
+                  }
+                  const triggerPreparation = prepareDnd5eOpportunityAttack({
+                    combatId: combatIdRef.current || `map-${authorityMap.id}`,
+                    round: roundRef.current,
+                    map: mapAtTrigger,
+                    characters: attack.characters,
+                    initiativeOrder: initiativeOrderRef.current,
+                    actorTokenId: opportunityAttacker.id,
+                    targetTokenId: selectedAlly.id,
+                    turnEconomy: currentDnd5eTurnEconomy(opportunityAttacker.id),
+                    targetTurnEconomy: currentDnd5eTurnEconomy(selectedAlly.id),
+                  })
+                  if (!triggerPreparation.ok) continue
+                  const allyAtNext = { ...selectedAlly, ...next }
+                  const nextDistanceFeet = tokenFootprintDistanceCells(
+                    opportunityAttacker,
+                    allyAtNext,
+                    authorityMap,
+                  ) * feetPerCell
+                  if (nextDistanceFeet <= triggerPreparation.prepared.reachFeet) continue
+                  triggerMap = mapAtTrigger
+                  break
+                }
+                if (!triggerMap) continue
+                const opportunityAttackerCharacter = opportunityAttacker.characterId
+                  ? attack.characters.find((character) => character.id === opportunityAttacker.characterId)
+                  : undefined
+                const accepted = opportunityAttackerCharacter
+                  ? await requestSharedOpportunityAttackChoice(opportunityAttackerCharacter, {
+                      attackerTokenId: opportunityAttacker.id,
+                      targetTokenId: selectedAlly.id,
+                      targetName: selectedAlly.label,
+                      trigger: 'movement',
+                    })
+                  : true
+                if (!accepted) continue
+                const opportunityAttack = await buildDnd5eBattleMasterReactionWeaponAttack({
+                  map: triggerMap,
+                  actorToken: opportunityAttacker,
+                  targetToken: triggerMap.tokens.find((token) => token.id === selectedAlly.id)!,
+                  label: `${battleMasterIntent.definition.feature.name}·借机攻击`,
+                })
+                if (!opportunityAttack) continue
+                opportunityAttacks.push({
+                  actorId: opportunityAttacker.id,
+                  weaponAttack: opportunityAttack.weaponAttack,
+                })
+              }
               payload.secondaryTargetId = selectedAlly.id
               payload.destination = destination.position
               payload.distanceFeet = destination.distanceFeet
+              payload.opportunityAttacks = opportunityAttacks
+              maneuveringMovementTrace = {
+                tokenId: selectedAlly.id,
+                to: destination.position,
+                path: destination.path,
+              }
               maneuveringAccepted = true
             }
           }
@@ -18298,8 +18453,27 @@ export default function MapsPage() {
       requestBardicInspiration: requestDnd5eBardicInspirationRoll,
       requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      let applicationCharacters = resolved.application.characters
-      const changedCharacterIds = new Set(resolved.application.changedCharacterIds)
+      let combatApplication = resolved.application
+      const maneuveringMoveCompleted = maneuveringMovementTrace &&
+        resolved.result.events.some((event) =>
+          event.type === 'moved' &&
+          event.actorId === maneuveringMovementTrace?.tokenId &&
+          event.to.x === maneuveringMovementTrace.to.x &&
+          event.to.y === maneuveringMovementTrace.to.y,
+        )
+      if (maneuveringMovementTrace && maneuveringMoveCompleted) {
+        const hazards = await settleDnd5eMovementHazards({
+          state: resolved.result.state,
+          map: combatApplication.map,
+          characters: combatApplication.characters,
+          characterIdByCombatantId: attack.characterIdByCombatantId,
+          movements: [maneuveringMovementTrace],
+        })
+        combatApplication = hazards.application
+        for (const log of hazards.logs) pushCombatLog(log, 'system')
+      }
+      let applicationCharacters = combatApplication.characters
+      const changedCharacterIds = new Set(combatApplication.changedCharacterIds)
       if (equipmentRerollSpend) {
         const postAttackActor = applicationCharacters.find((character) => character.id === attack.actor.id)
         if (!postAttackActor) {
@@ -18324,7 +18498,7 @@ export default function MapsPage() {
         )
       }
       applyDnd5eCombatApplication({
-        ...resolved.application,
+        ...combatApplication,
         changedCharacterIds: [...changedCharacterIds],
         characters: applicationCharacters,
       })

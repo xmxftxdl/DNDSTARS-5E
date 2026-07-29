@@ -1,6 +1,7 @@
 import type {
   Dnd5eDamageType,
   Dnd5eMonsterAction,
+  Dnd5eMonsterDamage,
   Dnd5eMonsterStatBlock,
   Dnd5eMonsterTrait,
   Dnd5eMonsterWeaponAttack,
@@ -142,6 +143,16 @@ export interface Dnd5eMonsterAttackTraitContext {
   targetMaxHp: number
   targetSurprisedCombatId?: string
   targetSurpriseResolvedCombatId?: string
+  /** True after this target has crossed any authoritative turn-start boundary in this combat. */
+  targetHasTakenTurn?: boolean
+  /** An active, allied, non-incapacitated creature is close enough to the target. */
+  adjacentActiveAllyNearTarget?: boolean
+  /** Final effective attack mode after all advantage and disadvantage sources cancel. */
+  effectiveRollMode?: 'normal' | 'advantage' | 'disadvantage'
+  /** Stable initiative-slot turn key used by once-per-turn monster damage traits. */
+  turnKey?: string
+  /** Shared authoritative ledger; keys use `monster-trait:<kind>`. */
+  usedTurnKeys?: Readonly<Record<string, string>>
   /** Set only after the authoritative turn-start lifecycle activates Reckless. */
   actorRecklessActive?: boolean
 }
@@ -188,11 +199,79 @@ export function dnd5eMonsterAttackTraitAdvantage(
     if (trait.rule?.kind === 'ambusher-attack-advantage') {
       return context.round === trait.rule.requiredRound && currentlySurprised
     }
+    if (trait.rule?.kind === 'assassinate') {
+      return context.round === trait.rule.requiredRound &&
+        context.targetHasTakenTurn === false
+    }
     if (trait.rule?.kind === 'reckless') {
       return context.actorRecklessActive === true &&
         attack.mode === trait.rule.outgoing.mode
     }
     return false
+  })
+}
+
+export function dnd5eMonsterAssassinateAutomaticCritical(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  context: Dnd5eMonsterAttackTraitContext,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'assassinate' &&
+    context.round === trait.rule.requiredRound &&
+    dnd5eMonsterTargetIsCurrentlySurprised(context)) === true
+}
+
+export interface Dnd5eMonsterTraitDamageDefinition {
+  traitId: 'sneak-attack' | 'martial-advantage'
+  traitName: string
+  damage: Dnd5eMonsterDamage
+}
+
+/**
+ * Returns the extra-damage traits eligible for this concrete hit. The caller
+ * still owns dice validation and must write the returned trait key to the
+ * shared once-per-turn ledger only after the hit is committed.
+ */
+export function dnd5eMonsterTraitDamageDefinitions(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  attack: Dnd5eMonsterWeaponAttack,
+  context: Dnd5eMonsterAttackTraitContext,
+): readonly Dnd5eMonsterTraitDamageDefinition[] {
+  const inheritedType = attack.damage[0]?.type
+  if (!monster || !inheritedType || !context.turnKey) return []
+  return monster.traits.flatMap((trait) => {
+    if (
+      trait.automation !== 'headless' ||
+      (
+        trait.rule?.kind !== 'sneak-attack' &&
+        trait.rule?.kind !== 'martial-advantage'
+      )
+    ) return []
+    const rule = trait.rule
+    const traitId = rule.kind
+    if (context.usedTurnKeys?.[`monster-trait:${traitId}`] === context.turnKey) {
+      return []
+    }
+    const qualifies = rule.kind === 'martial-advantage'
+      ? context.adjacentActiveAllyNearTarget === true
+      : context.effectiveRollMode !== 'disadvantage' &&
+        (
+          context.effectiveRollMode === 'advantage' ||
+          context.adjacentActiveAllyNearTarget === true
+        )
+    if (!qualifies) return []
+    return [{
+      traitId,
+      traitName: trait.name,
+      damage: {
+        average: rule.extraDamage.average,
+        count: rule.extraDamage.count,
+        sides: rule.extraDamage.sides,
+        bonus: rule.extraDamage.bonus,
+        type: inheritedType,
+      },
+    }]
   })
 }
 

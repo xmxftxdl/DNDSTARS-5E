@@ -57,10 +57,12 @@ import {
   type Dnd5eStandardConditionId,
 } from './conditions'
 import {
+  dnd5eMonsterAssassinateAutomaticCritical,
   dnd5eMonsterAttackTraitAdvantage,
   dnd5eMonsterEffectiveWeaponAttack,
   dnd5eMonsterLimitedMagicImmunityRule,
   dnd5eMonsterPackTacticsApplies,
+  dnd5eMonsterTraitDamageDefinitions,
   dnd5eMonsterWeaponAttacksAreMagical,
   dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
@@ -1457,6 +1459,37 @@ function monsterPackTacticsAdvantage(input: {
   })
 }
 
+function monsterAdjacentActiveAlly(input: {
+  map: BattleMap
+  attacker: Token
+  target: Token
+  characters: readonly Character[]
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
+}): boolean {
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const actorSide = dnd5eCombatTokenSide(input.attacker)
+  return input.map.tokens.some((candidate) =>
+    candidate.id !== input.attacker.id &&
+    candidate.id !== input.target.id &&
+    candidate.type !== 'obstacle' &&
+    actorSide != null &&
+    dnd5eCombatTokenSide(candidate) === actorSide &&
+    (candidate.hp ?? 1) > 0 &&
+    !dnd5eConditionIncapacitated({
+      conditions: targetConditions(
+        candidate,
+        input.characters,
+        input.reconciledActiveEffects,
+      ),
+    }) &&
+    tokenThreeDimensionalDistanceFeet(
+      input.map,
+      geometry,
+      candidate,
+      input.target,
+    ) <= 5)
+}
+
 function actionExpectedValue(input: {
   map: BattleMap
   monster: Dnd5eMonsterStatBlock
@@ -1498,6 +1531,14 @@ function actionExpectedValue(input: {
     : undefined
   const attackerState = attackerCharacter?.dnd5eCombatState ?? attacker.dnd5eCombatState
   const targetHp = targetHitPoints(target, characters)
+  const currentTurnPrefix = `${input.combatId ?? ''}:${input.round ?? 0}:`
+  const recordedMonsterTraitTurnKey = Object.entries(
+    attackerState?.declarativeUsedTurnKeys ?? {},
+  ).find(([key, value]) =>
+    key.startsWith('monster-trait:') &&
+    value.startsWith(currentTurnPrefix))?.[1]
+  const plannerTurnKey = recordedMonsterTraitTurnKey ??
+    `${currentTurnPrefix}planner:${attacker.id}`
   const monsterAttackTraitContext = {
     combatId: input.combatId ?? '',
     round: input.round ?? 0,
@@ -1505,6 +1546,19 @@ function actionExpectedValue(input: {
     targetMaxHp: targetHp.maximum,
     targetSurprisedCombatId: targetState?.surprisedCombatId,
     targetSurpriseResolvedCombatId: targetState?.surpriseResolvedCombatId,
+    targetHasTakenTurn:
+      targetState?.turnStartResolvedTurnKey?.startsWith(
+        `${input.combatId ?? ''}:`,
+      ) === true,
+    adjacentActiveAllyNearTarget: monsterAdjacentActiveAlly({
+      map,
+      attacker,
+      target,
+      characters,
+      reconciledActiveEffects: input.reconciledActiveEffects,
+    }),
+    turnKey: plannerTurnKey,
+    usedTurnKeys: attackerState?.declarativeUsedTurnKeys,
     actorRecklessActive: attackerState?.recklessAttackTurnKey != null,
   }
   const packTacticsAdvantage = monsterPackTacticsAdvantage({
@@ -1534,6 +1588,8 @@ function actionExpectedValue(input: {
   let expectedDamage = 0
   let controlValue = 0
   let probabilityTotal = 0
+  const traitRemainingMissProbability =
+    new Map<'sneak-attack' | 'martial-advantage', number>()
   let firstAttack: Dnd5eMonsterWeaponAttack | undefined
   const weaponDamageSource: PlannerDamageSourceDetails = {
     delivery: 'weapon-attack',
@@ -1626,13 +1682,47 @@ function actionExpectedValue(input: {
       : advantaged
         ? 1 - (1 - baseProbability) ** 2
         : baseProbability ** 2
+    const effectiveRollMode = advantaged === disadvantaged
+      ? 'normal' as const
+      : advantaged ? 'advantage' as const : 'disadvantage' as const
+    const automaticCritical = dnd5eMonsterAssassinateAutomaticCritical(
+      monster,
+      monsterAttackTraitContext,
+    )
     const weaponDamage = attack.damage.reduce((sum, entry) =>
       sum + resolvePlannerDamage(
         target,
-        entry.average,
+        automaticCritical
+          ? entry.count * (entry.sides + 1) + entry.bonus
+          : entry.average,
         entry.type,
         weaponDamageSource,
       ), 0)
+    const traitDamageOpportunity = dnd5eMonsterTraitDamageDefinitions(
+      monster,
+      attack,
+      {
+        ...monsterAttackTraitContext,
+        effectiveRollMode,
+      },
+    ).reduce((sum, definition) => {
+      const remainingMiss =
+        traitRemainingMissProbability.get(definition.traitId) ?? 1
+      traitRemainingMissProbability.set(
+        definition.traitId,
+        remainingMiss * (1 - hitProbability),
+      )
+      const raw = automaticCritical
+        ? definition.damage.count * (definition.damage.sides + 1) +
+          definition.damage.bonus
+        : definition.damage.average
+      return sum + remainingMiss * resolvePlannerDamage(
+        target,
+        raw,
+        definition.damage.type,
+        weaponDamageSource,
+      )
+    }, 0)
     const onHitDamage = (attack.onHitEffects ?? []).reduce((effectSum, effect) => {
       if (effect.kind === 'source-linked-condition') return effectSum
       const modifier = targetSavingThrowModifier(target, characters, effect.ability)
@@ -1684,7 +1774,9 @@ function actionExpectedValue(input: {
         )
       }
     }
-    expectedDamage += (weaponDamage + onHitDamage) * hitProbability
+    expectedDamage +=
+      (weaponDamage + onHitDamage + traitDamageOpportunity) *
+      hitProbability
     probabilityTotal += hitProbability
   }
   if (!firstAttack) return undefined

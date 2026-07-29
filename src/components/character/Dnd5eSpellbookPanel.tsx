@@ -26,6 +26,7 @@ import { useSpellbookStore } from '../../store/spellbook'
 import { DND5E_SRD_5_1_LICENSE_URL, DND5E_SRD_5_1_SOURCE_URL } from '../../rulesets/dnd5e/srdContent'
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
+import { dnd5eWizardSpellPreparationDisabled } from './dnd5eSpellbookPanelRules'
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
@@ -152,7 +153,10 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     disabled={spell.level === 0
       ? !selectedCantrips.includes(spell.id) && selectedCantrips.length >= limits.cantrips
       : definition.id !== 'wizard' && !selectedSpells.includes(spell.id) && selectedSpells.length >= limits.spells}
-    preparationDisabled={definition.id === 'wizard' && !wizardBook.includes(spell.id)}
+    preparationDisabled={definition.id === 'wizard' && dnd5eWizardSpellPreparationDisabled(
+      spell.level,
+      wizardBook.includes(spell.id),
+    )}
     selectionMode={preparationMode ? 'prepared' : 'known'}
     showPreparedCheck={showPreparedCheck}
     onView={() => setDetailSpellId(spell.id)}

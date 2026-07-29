@@ -5841,10 +5841,16 @@ describe('D&D 5e 2014 headless combat engine', () => {
         savingThrowBonuses: { con: 2 },
         ...targetPatch,
       })
+      const state = startDnd5eHeadlessCombat('assassin-on-hit-effects', [assassin, target])
+      // These cases isolate the indexed poison payload. Mark the target as
+      // having already acted so Assassinate does not also make Sneak Attack
+      // mandatory in the same submitted roll bundle.
+      state.combatants[target.id].classState.turnStartResolvedTurnKey =
+        `${state.combatId}:prior-target-turn`
       return {
         assassin,
         target,
-        state: startDnd5eHeadlessCombat('assassin-on-hit-effects', [assassin, target]),
+        state,
       }
     }
 

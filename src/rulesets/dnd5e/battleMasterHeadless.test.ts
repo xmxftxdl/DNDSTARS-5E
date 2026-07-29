@@ -346,6 +346,105 @@ describe('Battle Master 2014 Headless settlement', () => {
     }))
   })
 
+  it('settles Maneuvering Attack opportunity attacks atomically and exempts the original target', () => {
+    const opportunityWeaponAttack = {
+      attackModifier: 5,
+      d20: 15,
+      mode: 'normal' as const,
+      damage: {
+        count: 1,
+        sides: 6,
+        bonus: 0,
+        rolls: [4],
+        type: 'slashing' as const,
+      },
+      classDamageContext: {
+        weaponId: 'enemy-two-sword',
+        mode: 'melee' as const,
+        reachFeet: 5,
+        finesse: false,
+        strengthBased: true,
+        weaponDamageSides: 6,
+        damageType: 'slashing' as const,
+        adjacentEnemyOfTarget: false,
+      },
+    }
+    const maneuvering = success(weaponAttack(stateWith([
+      battleMaster('fighter', ['maneuvering-attack']),
+      combatant('ally', 'player', 15, { position: { x: 0, y: 5 } }),
+      combatant('enemy', 'dm', 10),
+      combatant('enemy-two', 'dm', 5, { armorClass: 12, position: { x: 5, y: 5 } }),
+    ], [
+      ['fighter', 'enemy', 5],
+      ['enemy-two', 'ally', 5],
+    ]), 'maneuvering-attack', {
+      payload: {
+        secondaryTargetId: 'ally',
+        destination: { x: 15, y: 5 },
+        distanceFeet: 15,
+        opportunityAttacks: [{
+          actorId: 'enemy-two',
+          weaponAttack: opportunityWeaponAttack,
+        }],
+      },
+    }))
+    expect(maneuvering.state.combatants.ally.currentHp).toBe(36)
+    expect(maneuvering.state.combatants.ally.position).toEqual({ x: 15, y: 5 })
+    expect(maneuvering.state.combatants['enemy-two'].turn.reactionAvailable).toBe(false)
+    expect(maneuvering.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: 'enemy-two',
+      targetId: 'ally',
+      hit: true,
+    }))
+
+    const forbiddenOriginalTarget = weaponAttack(stateWith([
+      battleMaster('fighter', ['maneuvering-attack']),
+      combatant('ally', 'player', 15, { position: { x: 0, y: 5 } }),
+      combatant('enemy', 'dm', 10),
+    ], [
+      ['fighter', 'enemy', 5],
+      ['enemy', 'ally', 5],
+    ]), 'maneuvering-attack', {
+      payload: {
+        secondaryTargetId: 'ally',
+        destination: { x: 15, y: 5 },
+        distanceFeet: 15,
+        opportunityAttacks: [{
+          actorId: 'enemy',
+          weaponAttack: opportunityWeaponAttack,
+        }],
+      },
+    })
+    expect(forbiddenOriginalTarget).toMatchObject({ ok: false, reason: 'invalid-plugin-action' })
+
+    const interrupted = success(weaponAttack(stateWith([
+      battleMaster('fighter', ['maneuvering-attack']),
+      combatant('ally', 'player', 15, { currentHp: 3, position: { x: 0, y: 5 } }),
+      combatant('enemy', 'dm', 10),
+      combatant('enemy-two', 'dm', 5, { position: { x: 5, y: 5 } }),
+    ], [
+      ['fighter', 'enemy', 5],
+      ['enemy-two', 'ally', 5],
+    ]), 'maneuvering-attack', {
+      payload: {
+        secondaryTargetId: 'ally',
+        destination: { x: 15, y: 5 },
+        distanceFeet: 15,
+        opportunityAttacks: [{
+          actorId: 'enemy-two',
+          weaponAttack: opportunityWeaponAttack,
+        }],
+      },
+    }))
+    expect(interrupted.state.combatants.ally.currentHp).toBe(0)
+    expect(interrupted.state.combatants.ally.position).toEqual({ x: 0, y: 5 })
+    expect(interrupted.state.combatants.ally.turn.reactionAvailable).toBe(false)
+    expect(interrupted.events.some((event) =>
+      event.type === 'moved' && event.actorId === 'ally',
+    )).toBe(false)
+  })
+
   it('settles Feinting, Lunging and Precision Attack at their distinct roll timings', () => {
     const feinting = success(weaponAttack(stateWith([
       battleMaster('fighter', ['feinting-attack']),

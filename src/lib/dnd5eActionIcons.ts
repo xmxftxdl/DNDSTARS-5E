@@ -381,6 +381,10 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:dust-of-disappearance': '/assets/icons/dust-of-disappearance-item-action.png',
   'srd-5.1:magic-item:dust-of-dryness': '/assets/icons/dust-of-dryness-item-action.png',
   'srd-5.1:magic-item:dust-of-sneezing-and-choking': '/assets/icons/dust-of-sneezing-and-choking-item-action.png',
+  'srd-5.1:magic-item:dwarven-plate': '/assets/icons/dwarven-plate-item-action.png',
+  'srd-5.1:magic-item:dwarven-thrower': '/assets/icons/dwarven-thrower-item-action.png',
+  'srd-5.1:magic-item:efficient-quiver': '/assets/icons/efficient-quiver-item-action.png',
+  'srd-5.1:magic-item:efreeti-bottle': '/assets/icons/efreeti-bottle-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [

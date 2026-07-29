@@ -39,6 +39,9 @@ export type Dnd5ePluginSpellRejectReason =
   | 'plugin-not-enabled-for-room'
   | 'plugin-version-mismatch'
   | 'spell-unavailable'
+  | 'spell-not-known-or-prepared'
+  | 'spellcasting-class-unavailable'
+  | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
   | 'spell-not-headless'
   | 'component-unavailable'
@@ -154,12 +157,15 @@ export function prepareDnd5ePluginSpellCast(input: {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
   const castingClassId = dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
+  if (!castingClassId) return { ok: false, reason: 'spell-not-known-or-prepared' }
   const classDefinition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  if (
-    !classDefinition?.spellcasting || !castingClassId || castingClassLevel < 1 ||
-    (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18))
-  ) return { ok: false, reason: 'spell-unavailable' }
+  if (!classDefinition?.spellcasting || castingClassLevel < 1) {
+    return { ok: false, reason: 'spellcasting-class-unavailable' }
+  }
+  if (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18)) {
+    return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
+  }
   if (spell.castingTime.value !== 1 || !['action', 'bonus-action'].includes(spell.castingTime.unit)) {
     return { ok: false, reason: 'invalid-action' }
   }

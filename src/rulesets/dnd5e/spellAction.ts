@@ -75,6 +75,12 @@ export type Dnd5eSpellCastRejectReason =
   | 'target-out-of-range'
   | 'effect-line-blocked'
   | 'spell-unavailable'
+  | 'spell-definition-unavailable'
+  | 'spell-not-known-or-prepared'
+  | 'spellcasting-class-unavailable'
+  | 'innate-spell-unavailable'
+  | 'sustained-spell-unavailable'
+  | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
   | 'slot-unavailable'
   | 'combatant-missing'
@@ -249,11 +255,12 @@ export function prepareDnd5eSpellCast(input: {
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
   const spell = getDnd5eSrdCombatSpell(payload.spellId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  if (!spell) return { ok: false, reason: 'spell-definition-unavailable' }
   if (!payload.sustainedEffectAttack && dnd5eWearingUnproficientArmor(actor)) {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
   const sustainedEffectAttack = payload.sustainedEffectAttack
-  const sustainedAttack = sustainedEffectAttack && spell?.sustainedAttack?.id === sustainedEffectAttack
+  const sustainedAttack = sustainedEffectAttack && spell.sustainedAttack?.id === sustainedEffectAttack
     ? spell.sustainedAttack
     : undefined
   if ((sustainedEffectAttack != null) !== (sustainedAttack != null)) {
@@ -272,7 +279,7 @@ export function prepareDnd5eSpellCast(input: {
     ? input.map.dnd5ePluginAreas?.find((area) =>
         area.id === sustainedEffectAreaId &&
         area.sourceKind === 'core-spell' &&
-        area.coreSpellId === spell?.id &&
+        area.coreSpellId === spell.id &&
         area.sourceCharacterId === actor.id &&
         area.sourceTokenId === actorToken.id &&
         area.anchorMode === (sustainedAttack?.origin === 'effect-token' ? 'effect-token' : 'fixed') &&
@@ -282,7 +289,7 @@ export function prepareDnd5eSpellCast(input: {
         input.action.round <= area.expiresAfterRound,
       )
     : undefined
-  const sustainedEffect = spell && sustainedAttack
+  const sustainedEffect = sustainedAttack
     ? normalizeDnd5eActiveEffects(actor.dnd5eCombatState?.activeEffects).find((effect) =>
         effect.source.kind === 'spell' &&
         effect.source.actorId === actorToken.id &&
@@ -296,24 +303,24 @@ export function prepareDnd5eSpellCast(input: {
   if (
     sustainedAttack && (
       !sustainedEffect || !Number.isInteger(sustainedEffect.potency) ||
-      sustainedEffect.potency! < (spell?.level ?? 1) || sustainedEffect.potency! > 9 ||
+      sustainedEffect.potency! < spell.level || sustainedEffect.potency! > 9 ||
       (sustainedAttack.origin === 'effect-token' && (
         !sustainedArea || sustainedArea.slotLevel !== sustainedEffect.potency ||
         !input.map.tokens.some((token) =>
           token.id === sustainedArea.anchorTokenId &&
-          token.dnd5eSpellEffect?.spellId === spell?.id &&
+          token.dnd5eSpellEffect?.spellId === spell.id &&
           token.dnd5eSpellEffect?.sourceCharacterId === actor.id &&
           token.dnd5eSpellEffect?.sourceTokenId === actorToken.id
         )
       )) ||
       (sustainedAttack.origin === 'persistent-area' && (
         !sustainedArea || sustainedArea.slotLevel !== sustainedEffect.potency ||
-        sustainedArea.concentrationId !== spell?.id ||
-        actor.dnd5eCombatState?.concentrationSpellId !== spell?.id
+        sustainedArea.concentrationId !== spell.id ||
+        actor.dnd5eCombatState?.concentrationSpellId !== spell.id
       ))
     )
-  ) return { ok: false, reason: 'spell-unavailable' }
-  const authorizedSustainedEffectAreaId = spell?.sustainedAttack?.origin === 'effect-token'
+  ) return { ok: false, reason: 'sustained-spell-unavailable' }
+  const authorizedSustainedEffectAreaId = spell.sustainedAttack?.origin === 'effect-token'
     ? sustainedEffectAreaId ?? `core-spell-area:${input.action.id}`
     : sustainedAttack?.origin === 'persistent-area'
       ? sustainedEffectAreaId
@@ -336,32 +343,36 @@ export function prepareDnd5eSpellCast(input: {
         : 'invalid-target',
     }
   }
-  const racialGrant = spell && payload.racialInnate
+  const racialGrant = payload.racialInnate
     ? dnd5eRacialInnateSpellGrant(dnd5eRacialRulesForCharacter(actor), spell.id)
     : undefined
-  const castingClassId = spell && !racialGrant
+  if (payload.racialInnate === true && (
+    !racialGrant ||
+    payload.castingClassId != null ||
+    payload.slotLevel !== racialGrant.castAtLevel
+  )) {
+    return { ok: false, reason: 'innate-spell-unavailable' }
+  }
+  const castingClassId = !racialGrant
     ? dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
     : undefined
+  if (!racialGrant && !castingClassId) {
+    return { ok: false, reason: 'spell-not-known-or-prepared' }
+  }
   const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
   const castingClassLevel = racialGrant
     ? actor.level
     : castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
   const spellcastingAbility = racialGrant?.ability ?? definition?.spellcasting?.ability
   if (
-    !spell ||
     !spellcastingAbility ||
-    (!racialGrant && (!definition?.spellcasting || !castingClassId || castingClassLevel < 1)) ||
-    (payload.racialInnate === true && (
-      !racialGrant ||
-      payload.castingClassId != null ||
-      payload.slotLevel !== racialGrant.castAtLevel
-    ))
+    (!racialGrant && (!definition?.spellcasting || castingClassLevel < 1))
   ) {
-    return { ok: false, reason: 'spell-unavailable' }
+    return { ok: false, reason: 'spellcasting-class-unavailable' }
   }
   const druidLevel = dnd5eCharacterClassLevel(actor, 'druid')
   if (actor.dnd5eCombatState?.wildShapeFormId && druidLevel < 18) {
-    return { ok: false, reason: 'spell-unavailable' }
+    return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   }
   if (spell.castingTime === 'reaction') return { ok: false, reason: 'invalid-action' }
 

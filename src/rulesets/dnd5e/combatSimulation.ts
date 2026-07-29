@@ -44,12 +44,14 @@ import {
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import {
+  dnd5eMonsterAssassinateAutomaticCritical,
   dnd5eMonsterAttackTraitAdvantage,
   dnd5eMonsterEffectiveWeaponAttack,
   dnd5eMonsterHasMagicResistance,
   dnd5eMonsterLimitedMagicImmunityRule,
   dnd5eMonsterPackTacticsApplies,
   dnd5eMonsterRechargeActions,
+  dnd5eMonsterTraitDamageDefinitions,
   dnd5eMonsterWeaponAttacksAreMagical,
   dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
@@ -122,6 +124,7 @@ import {
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantPairKey,
   dnd5eDirectedCombatantPairKey,
+  dnd5ePendingMonsterDeathAreaEffects,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
   dnd5eHitIsAutomaticCritical,
@@ -1515,6 +1518,24 @@ function simulationMonsterPackTacticsAdvantage(
       distanceFeetToTarget: actorDistanceFeet(candidate, target, battlefield),
     })),
   })
+}
+
+function simulationMonsterAdjacentActiveAlly(
+  actor: SimulationActor,
+  target: SimulationActor,
+  actors: readonly SimulationActor[],
+  battlefield?: SimulationBattlefield,
+): boolean {
+  const actorSide = effectiveSide(actor, actors)
+  return actors.some((candidate) =>
+    candidate.id !== actor.id &&
+    candidate.id !== target.id &&
+    effectiveSide(candidate, actors) === actorSide &&
+    candidate.hp > 0 &&
+    !dnd5eConditionIncapacitated({
+      conditions: dnd5eConditionsFromActiveEffects(candidate.activeEffects),
+    }) &&
+    actorDistanceFeet(candidate, target, battlefield) <= 5)
 }
 
 function simulationAttackRollMode(input: {
@@ -3439,6 +3460,23 @@ function executeHeadlessWeaponAction(input: {
         targetMaxHp: targetCombatant.maxHp,
         targetSurprisedCombatId: targetCombatant.classState.surprisedCombatId,
         targetSurpriseResolvedCombatId: targetCombatant.classState.surpriseResolvedCombatId,
+        targetHasTakenTurn:
+          targetCombatant.classState.turnStartResolvedTurnKey?.startsWith(
+            `${holder.state.combatId}:`,
+          ) === true,
+        adjacentActiveAllyNearTarget: simulationMonsterAdjacentActiveAlly(
+          actor,
+          target,
+          actors,
+          input.battlefield,
+        ),
+        turnKey:
+          `${holder.state.combatId}:${holder.state.round}:${
+            holder.state.initiativeSlotIds?.[actorIndex] ??
+            holder.state.turnSlotId ??
+            actor.id
+          }`,
+        usedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
         actorRecklessActive:
           combatant.classState.recklessAttackTurnKey ===
           `${holder.state.combatId}:${holder.state.round}:${
@@ -3529,6 +3567,9 @@ function executeHeadlessWeaponAction(input: {
   if (actor.monster) {
     const damageGroups = rollDamageGroups(effectiveParts, random)
     const submittedDamageGroups: Array<readonly (readonly number[])[]> = []
+    let monsterTraitUsedTurnKeys = {
+      ...(combatant.classState.declarativeUsedTurnKeys ?? {}),
+    }
     const submittedRolls = effectiveParts.map((part, index) => {
       const rollMode = rollModes[index]!
       const d20 = random.die(20)
@@ -3547,7 +3588,15 @@ function executeHeadlessWeaponAction(input: {
         targetArmorClass,
         criticalThreshold: part.criticalThreshold,
         automaticCritical: targetCombatant
-          ? dnd5eHitIsAutomaticCritical(holder.state, actor.id, targetCombatant)
+          ? dnd5eHitIsAutomaticCritical(holder.state, actor.id, targetCombatant) ||
+            (
+              actor.monster != null &&
+              monsterAttackTraitContext != null &&
+              dnd5eMonsterAssassinateAutomaticCritical(
+                actor.monster,
+                monsterAttackTraitContext,
+              )
+            )
           : false,
       })
       const { hit, critical } = attackOutcome
@@ -3565,6 +3614,30 @@ function executeHeadlessWeaponAction(input: {
           ))
         }
       }
+      const traitDefinitions = hit && actor.monster && part.monsterAttack &&
+        monsterAttackTraitContext
+        ? dnd5eMonsterTraitDamageDefinitions(
+            actor.monster,
+            part.monsterAttack,
+            {
+              ...monsterAttackTraitContext,
+              effectiveRollMode: rollMode.resolvedMode,
+              usedTurnKeys: monsterTraitUsedTurnKeys,
+            },
+          )
+        : []
+      const traitDamageRolls = traitDefinitions.map((definition) => {
+        const rolls = Array.from(
+          { length: definition.damage.count * (critical ? 2 : 1) },
+          () => random.die(definition.damage.sides),
+        )
+        monsterTraitUsedTurnKeys = {
+          ...monsterTraitUsedTurnKeys,
+          [`monster-trait:${definition.traitId}`]:
+            monsterAttackTraitContext?.turnKey ?? '',
+        }
+        return { traitId: definition.traitId, rolls }
+      })
       submittedDamageGroups.push(damageRolls)
       const onHitEffectRolls = hit && targetCombatant
         ? (part.monsterAttack?.onHitEffects ?? []).map((effect) => {
@@ -3600,6 +3673,7 @@ function executeHeadlessWeaponAction(input: {
         d20Second,
         mode: input.attackMode,
         damageRolls,
+        traitDamageRolls,
         onHitEffectRolls,
       }
     })
@@ -3980,6 +4054,121 @@ function simulationMappedMovementPathIsValid(input: {
     }
   }
   return true
+}
+
+function settleSimulationMonsterDeathAreaEffects(input: {
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  captureLog: boolean
+}): {
+  transactions: number
+  steps: Dnd5eCombatSimulationExecutionStep[]
+} {
+  let transactions = 0
+  const steps: Dnd5eCombatSimulationExecutionStep[] = []
+  for (let guard = 0; guard < 128; guard += 1) {
+    const snapshot = dnd5ePendingMonsterDeathAreaEffects(
+      input.holder.state,
+    )[0]
+    if (!snapshot) break
+    const source = input.holder.state.combatants[snapshot.sourceId]
+    const monster = source?.statBlockId
+      ? getDnd5eSrdMonster(source.statBlockId)
+      : undefined
+    const rule = monster?.traits.find((trait) =>
+      trait.automation === 'headless' &&
+      trait.rule?.kind === 'death-area-saving-throw' &&
+      trait.rule.ruleId === snapshot.ruleId)?.rule
+    if (!source || !monster || rule?.kind !== 'death-area-saving-throw') {
+      break
+    }
+    const targetIds = snapshot.targetIds.filter((targetId) => {
+      const target = input.holder.state.combatants[targetId]
+      return !!target && target.currentHp > 0 && !target.deathSaves.dead
+    })
+    const legendaryResistanceTargetIds: string[] = []
+    const targetSavingThrows = targetIds.map((targetId) => {
+      const target = input.holder.state.combatants[targetId]!
+      const mode = dnd5eSavingThrowMode(target, rule.ability, {
+        effectVisible: true,
+        sourceCreatureType: source.creatureType,
+        sourceIsSpell: false,
+      })
+      const d20 = input.random.die(20)
+      const d20Second = mode !== 'normal'
+        ? input.random.die(20)
+        : undefined
+      const blessRoll = dnd5eCombatantHasConcentrationEffect(
+        input.holder.state,
+        target.id,
+        'bless',
+      ) ? input.random.die(4) : undefined
+      const baneRoll = dnd5eCombatantHasConcentrationEffect(
+        input.holder.state,
+        target.id,
+        'bane',
+      ) ? input.random.die(4) : undefined
+      const effectiveD20 = mode === 'advantage'
+        ? Math.max(d20, d20Second ?? d20)
+        : mode === 'disadvantage'
+          ? Math.min(d20, d20Second ?? d20)
+          : d20
+      const modifier =
+        (target.savingThrowBonuses[rule.ability] ??
+          rules.abilityModifier(target.abilities[rule.ability])) +
+        (blessRoll ?? 0) -
+        (baneRoll ?? 0)
+      if (
+        effectiveD20 + modifier < rule.dc &&
+        (target.classState.legendaryResistanceUses ?? 0) > 0
+      ) {
+        legendaryResistanceTargetIds.push(target.id)
+      }
+      return {
+        targetId,
+        d20,
+        d20Second,
+        blessRoll,
+        baneRoll,
+      }
+    })
+    const damageRolls = rule.damage
+      ? Array.from(
+          { length: rule.damage.count },
+          () => input.random.die(rule.damage!.sides),
+        )
+      : []
+    const result = resolveDnd5eHeadlessAction(input.holder.state, {
+      type: 'resolve-monster-death-area-effect',
+      actorId: source.id,
+      snapshotId: snapshot.id,
+      resolution: {
+        schemaVersion: 1,
+        targetIds,
+        targetSavingThrows,
+        legendaryResistanceTargetIds,
+        damageRolls,
+      },
+    }, {
+      transactionId:
+        `${input.holder.state.combatId}:${input.holder.state.round}:${
+          source.id
+        }:${snapshot.ruleId}`,
+      now: input.holder.state.round,
+    })
+    if (!result.ok) break
+    input.holder.state = result.state
+    if (result.transaction?.status === 'committed') transactions += 1
+    if (input.captureLog) {
+      steps.push(...executionStepsFromEvents(result.events, input.actors))
+    }
+    for (const actor of input.actors) {
+      const resolved = input.holder.state.combatants[actor.id]
+      if (resolved) synchronizeSimulationActorFromHeadless(actor, resolved)
+    }
+  }
+  return { transactions, steps }
 }
 
 function executeAction(
@@ -5021,6 +5210,19 @@ function simulateTrial(
         captureExecutionLog,
         battlefield,
       )
+      const deathAreas = settleSimulationMonsterDeathAreaEffects({
+        actors,
+        holder: headless,
+        random,
+        captureLog: captureExecutionLog,
+      })
+      executed.transactions += deathAreas.transactions
+      if (captureExecutionLog && deathAreas.steps.length > 0) {
+        executed.steps = [
+          ...(executed.steps ?? []),
+          ...deathAreas.steps,
+        ]
+      }
       const relationEvents = reconcileSimulationSourceLinkedRelations({
         holder: headless,
         actors,

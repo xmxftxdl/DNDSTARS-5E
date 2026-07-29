@@ -692,9 +692,9 @@ export default function PlayerCombatHotbar({
   return (<>
     <section
       data-testid="player-combat-hotbar"
-      className="pointer-events-auto w-full max-w-[1480px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
+      className="pointer-events-auto w-full max-w-[1320px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
     >
-      <div className="grid min-w-[1290px] grid-cols-[82px_minmax(330px,1fr)_218px_406px_218px] gap-1.5">
+      <div className="grid min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px] gap-1.5">
         <aside className="flex flex-col items-center justify-between rounded-lg border border-amber-100/10 bg-black/25 p-1.5">
           <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)]">
             {portrait
@@ -774,7 +774,7 @@ export default function PlayerCombatHotbar({
               快捷 {itemQuickbarPreference.slots.filter(Boolean).length}/{COMBAT_ITEM_QUICK_SLOT_COUNT} · 背包 {inventory.entries.length}
             </span>
           </div>
-          <div className="grid grid-cols-8 gap-1">
+          <div data-testid="combat-item-quick-grid" className="grid grid-cols-4 gap-1">
             {itemQuickbarPreference.slots.map(quickbarItemButton)}
             <button
               type="button"

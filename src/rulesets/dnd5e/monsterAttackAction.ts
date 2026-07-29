@@ -39,12 +39,16 @@ import {
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eEligibleMonsterMechanics, dnd5eMonsterMechanicDiceRequirements } from './monsterAutomation'
 import {
+  dnd5eMonsterAssassinateAutomaticCritical,
   dnd5eMonsterAttackTraitAdvantage,
   dnd5eMonsterEffectiveWeaponAttack,
   dnd5eMonsterPackTacticsApplies,
+  dnd5eMonsterTraitDamageDefinitions,
   dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
   dnd5eMonsterWeaponAttackAgainstConditions,
+  type Dnd5eMonsterAttackTraitContext,
+  type Dnd5eMonsterTraitDamageDefinition,
 } from './monsterGenericAbilities'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
@@ -82,6 +86,7 @@ export interface PreparedDnd5eMonsterAttack {
   blessed: boolean
   baned: boolean
   sizeDamageD4Mode?: 'add' | 'subtract'
+  monsterAttackTraitContext: Dnd5eMonsterAttackTraitContext
 }
 
 function monsterAttackAllowsDistance(
@@ -254,20 +259,44 @@ export function prepareDnd5eMonsterAttack(input: {
     ...entry,
     attack: dnd5eMonsterWeaponAttackAgainstConditions(monster, entry.attack, target.conditions),
   }))
-  const monsterAttackTraitContext = {
+  const actorTurnKey =
+    `${snapshot.state.combatId}:${snapshot.state.round}:${
+      snapshot.state.initiativeSlotIds?.[actorIndex] ??
+      snapshot.state.turnSlotId ??
+      actorCombatant.id
+    }`
+  const actorSideForTraits = dnd5eCombatTokenSide(actorToken)
+  const adjacentActiveAllyNearTarget = input.map.tokens.some((candidate) => {
+    const ally = snapshot.state.combatants[candidate.id]
+    return candidate.id !== actorToken.id &&
+      candidate.id !== targetToken.id &&
+      candidate.type !== 'obstacle' &&
+      !!ally &&
+      actorSideForTraits != null &&
+      dnd5eCombatTokenSide(candidate) === actorSideForTraits &&
+      ally.currentHp > 0 &&
+      !ally.deathSaves.dead &&
+      !dnd5eIsIncapacitated(ally) &&
+      tokenFootprintDistanceCells(candidate, targetToken, input.map) *
+        Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+  })
+  const monsterAttackTraitContext: Dnd5eMonsterAttackTraitContext = {
     combatId: snapshot.state.combatId,
     round: snapshot.state.round,
     targetCurrentHp: target.currentHp,
     targetMaxHp: target.maxHp,
     targetSurprisedCombatId: target.classState.surprisedCombatId,
     targetSurpriseResolvedCombatId: target.classState.surpriseResolvedCombatId,
+    targetHasTakenTurn:
+      target.classState.turnStartResolvedTurnKey?.startsWith(
+        `${snapshot.state.combatId}:`,
+      ) === true,
+    adjacentActiveAllyNearTarget,
+    turnKey: actorTurnKey,
+    usedTurnKeys: actorCombatant.classState.declarativeUsedTurnKeys,
     actorRecklessActive:
       actorCombatant.classState.recklessAttackTurnKey ===
-      `${snapshot.state.combatId}:${snapshot.state.round}:${
-        snapshot.state.initiativeSlotIds?.[actorIndex] ??
-        snapshot.state.turnSlotId ??
-        actorCombatant.id
-      }`,
+      actorTurnKey,
   }
   attacks = attacks.map((entry) => ({
     ...entry,
@@ -414,6 +443,7 @@ export function prepareDnd5eMonsterAttack(input: {
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
       baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
       sizeDamageD4Mode: dnd5eActiveWeaponDamageD4Mode(actorCombatant.classState.activeEffects),
+      monsterAttackTraitContext,
     },
   }
 }
@@ -442,7 +472,31 @@ export function previewDnd5eMonsterAttack(
       targetAc: prepared.targetArmorClass,
     }),
     criticalThreshold: definition.attack.criticalThreshold,
+    automaticCritical: dnd5eMonsterAssassinateAutomaticCritical(
+      prepared.monster,
+      prepared.monsterAttackTraitContext,
+    ),
   })
+}
+
+export function dnd5ePreparedMonsterTraitDamageDefinitions(
+  prepared: PreparedDnd5eMonsterAttack,
+  attackIndex: number,
+  effectiveRollMode: 'normal' | 'advantage' | 'disadvantage',
+  usedTurnKeys?: Readonly<Record<string, string>>,
+): readonly Dnd5eMonsterTraitDamageDefinition[] {
+  const definition = prepared.attacks[attackIndex]
+  if (!definition) return []
+  return dnd5eMonsterTraitDamageDefinitions(
+    prepared.monster,
+    definition.attack,
+    {
+      ...prepared.monsterAttackTraitContext,
+      effectiveRollMode,
+      usedTurnKeys:
+        usedTurnKeys ?? prepared.monsterAttackTraitContext.usedTurnKeys,
+    },
+  )
 }
 
 export function dnd5eMonsterAttackModeWithProtection(

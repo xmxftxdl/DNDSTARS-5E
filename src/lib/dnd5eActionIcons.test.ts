@@ -545,4 +545,24 @@ describe('D&D 5e combat action icon registry', () => {
       })
     }
   })
+
+  it('binds painted icons for the dwarven gear, efficient quiver, and efreeti bottle', () => {
+    const cases = [
+      ['dwarven-plate', 'dwarven-plate-item-action.png', 'very-rare', '#7138A8'],
+      ['dwarven-thrower', 'dwarven-thrower-item-action.png', 'very-rare', '#7138A8'],
+      ['efficient-quiver', 'efficient-quiver-item-action.png', 'uncommon', '#237A4A'],
+      ['efreeti-bottle', 'efreeti-bottle-item-action.png', 'very-rare', '#7138A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
 })

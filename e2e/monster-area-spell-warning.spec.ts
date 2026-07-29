@@ -167,14 +167,14 @@ test('shared-recharge breath variants preview the selected shape and spend one p
   const first = {
     ...hero(`${mapId}:hero-one`, 'Hero One'),
     dnd5eClassLevels: { fighter: 5 },
-    hitPointMaximumMode: 'fixed',
+    hitPointMaximumMode: 'manual',
     maxHp: 44,
     currentHp: 44,
   }
   const second = {
     ...hero(`${mapId}:hero-two`, 'Hero Two'),
     dnd5eClassLevels: { fighter: 5 },
-    hitPointMaximumMode: 'fixed',
+    hitPointMaximumMode: 'manual',
     maxHp: 44,
     currentHp: 44,
   }
@@ -204,6 +204,8 @@ test('shared-recharge breath variants preview the selected shape and spend one p
     size: 1,
     type: 'player',
     characterId: first.id,
+    hp: first.currentHp,
+    maxHp: first.maxHp,
   }
   const secondToken = {
     id: `${mapId}:hero-two-token`,
@@ -215,6 +217,8 @@ test('shared-recharge breath variants preview the selected shape and spend one p
     size: 1,
     type: 'player',
     characterId: second.id,
+    hp: second.currentHp,
+    maxHp: second.maxHp,
   }
 
   await request.delete(`${DM}/api/events/_all`)

@@ -158,6 +158,8 @@ describe('PlayerCombatHotbar', () => {
 
     expect(html.match(/data-testid="combat-item-quick-slot-/g)).toHaveLength(7)
     expect(html).toContain('data-testid="combat-item-backpack"')
+    expect(html).toContain('data-testid="combat-item-quick-grid"')
+    expect(html).toContain('class="grid grid-cols-4 gap-1"')
     expect(html).toContain('快捷 7/7 · 背包 9')
     expect(html).toContain('aria-label="道具-7（打开背包查看）"')
     expect(html).not.toContain('aria-label="道具-8（打开背包查看）"')

@@ -377,6 +377,17 @@ export type Dnd5eMonsterSpecialActionRule =
       requiresSight: true
       requiresWieldedMeleeWeapon: true
     }
+  | {
+      /** Chain Devil Unnerving Mask, offered when a visible creature starts its turn. */
+      kind: 'turn-start-saving-throw-reaction'
+      rangeFeet: number
+      ability: AbilityKey
+      dc: number
+      condition: Dnd5eStandardConditionId
+      duration: 'until-target-turn-end'
+      magical: true
+      requiresMutualVisualSight: true
+    }
   | Dnd5eMonsterAreaSavingThrowRule
 
 export function dnd5eMonsterAreaSavingThrowVariants(
@@ -405,6 +416,14 @@ export interface Dnd5eMonsterTrait {
   description: string
   automation?: Dnd5eMonsterAutomation
   rule?: {
+    /**
+     * Declarative catalog ownership for the already-authoritative Legendary
+     * Resistance resource. Runtime uses remain stored on the stat block and
+     * combatant state rather than duplicated in this declaration.
+     */
+    kind: 'legendary-resistance'
+    maximumUses: number
+  } | {
     kind: 'undead-fortitude'
     dcBase: number
     excludedDamageTypes: readonly Dnd5eDamageType[]
@@ -449,6 +468,27 @@ export interface Dnd5eMonsterTrait {
     requiredRound: 1
     targetState: 'currently-surprised'
     applyOn: 'each-qualifying-hit'
+    extraDamage: Omit<Dnd5eMonsterDamage, 'type'> & { type: 'inherit-primary' }
+  } | {
+    /** Assassin: first-round advantage before the target acts and critical hits against surprise. */
+    kind: 'assassinate'
+    requiredRound: 1
+    advantageAgainst: 'target-not-yet-acted'
+    automaticCriticalAgainst: 'currently-surprised'
+  } | {
+    /** Rogue-style monster Sneak Attack, consumed by the first qualifying hit each turn. */
+    kind: 'sneak-attack'
+    oncePerTurn: true
+    allyDistanceFeet: number
+    requireNoDisadvantage: true
+    advantageOrAdjacentAlly: true
+    extraDamage: Omit<Dnd5eMonsterDamage, 'type'> & { type: 'inherit-primary' }
+  } | {
+    /** Hobgoblin Martial Advantage, consumed by the first qualifying hit each turn. */
+    kind: 'martial-advantage'
+    oncePerTurn: true
+    allyDistanceFeet: number
+    requiresAdjacentAlly: true
     extraDamage: Omit<Dnd5eMonsterDamage, 'type'> & { type: 'inherit-primary' }
   } | {
     /**
@@ -509,6 +549,17 @@ export interface Dnd5eMonsterTrait {
     /** Unlimited survival when one qualifying damage instance would reduce the creature to 0 HP. */
     kind: 'relentless'
     maximumDamage: number
+  } | {
+    /** A passive area saving throw emitted exactly once when this creature dies. */
+    kind: 'death-area-saving-throw'
+    ruleId: string
+    area: Extract<SkillAoeTargeting, { shape: 'circle' }> & { origin: 'self' }
+    target: 'all-creatures-except-self'
+    ability: AbilityKey
+    dc: number
+    damage?: Dnd5eMonsterDamage
+    damageOnSuccessfulSave?: 'none' | 'half'
+    conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
   } | {
     /**
      * An optional magical gaze offered at another creature's turn start.
@@ -2380,6 +2431,91 @@ const CATALOG_AMBUSHER_ATTACK_TRAIT_INDEX = {
   doppelganger: 1,
 } as const satisfies Readonly<Record<string, number>>
 
+const CATALOG_ASSASSINATE_TRAIT_INDEX = {
+  assassin: 0,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_SNEAK_ATTACK_TRAITS = {
+  assassin: {
+    traitIndex: 1,
+    extraDamage: {
+      average: 13,
+      count: 4,
+      sides: 6,
+      bonus: 0,
+      type: 'inherit-primary',
+    },
+  },
+  spy: {
+    traitIndex: 1,
+    extraDamage: {
+      average: 7,
+      count: 2,
+      sides: 6,
+      bonus: 0,
+      type: 'inherit-primary',
+    },
+  },
+} as const
+
+const CATALOG_MARTIAL_ADVANTAGE_TRAIT_INDEX = {
+  hobgoblin: 0,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_DEATH_AREA_TRAITS = {
+  balor: {
+    ruleId: 'death-throes',
+    radiusFeet: 30,
+    ability: 'dex',
+    dc: 20,
+    damage: { average: 70, count: 20, sides: 6, bonus: 0, type: 'fire' },
+    damageOnSuccessfulSave: 'half',
+  },
+  'dust-mephit': {
+    ruleId: 'death-burst',
+    radiusFeet: 5,
+    ability: 'con',
+    dc: 10,
+    conditionOnFailedSave: {
+      condition: 'blinded',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+  'ice-mephit': {
+    ruleId: 'death-burst',
+    radiusFeet: 5,
+    ability: 'dex',
+    dc: 10,
+    damage: { average: 4, count: 1, sides: 8, bonus: 0, type: 'slashing' },
+    damageOnSuccessfulSave: 'half',
+  },
+  'magma-mephit': {
+    ruleId: 'death-burst',
+    radiusFeet: 5,
+    ability: 'dex',
+    dc: 11,
+    damage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'fire' },
+    damageOnSuccessfulSave: 'half',
+  },
+  magmin: {
+    ruleId: 'death-burst',
+    radiusFeet: 10,
+    ability: 'dex',
+    dc: 11,
+    damage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'fire' },
+    damageOnSuccessfulSave: 'half',
+  },
+  'steam-mephit': {
+    ruleId: 'death-burst',
+    radiusFeet: 5,
+    ability: 'dex',
+    dc: 10,
+    damage: { average: 4, count: 1, sides: 8, bonus: 0, type: 'fire' },
+    damageOnSuccessfulSave: 'none',
+  },
+} as const
+
 const CATALOG_RECKLESS_TRAIT_INDEX = {
   berserker: 0,
   minotaur: 2,
@@ -2772,6 +2908,22 @@ function applyCatalogMonsterActionRules(
       }),
     ],
     reactions: monster.reactions?.map((reaction) => {
+      if (monster.slug === 'chain-devil' && reaction.id === 'unnerving-mask') {
+        return {
+          ...reaction,
+          automation: 'headless' as const,
+          rule: {
+            kind: 'turn-start-saving-throw-reaction' as const,
+            rangeFeet: 30,
+            ability: 'wis' as const,
+            dc: 14,
+            condition: 'frightened' as const,
+            duration: 'until-target-turn-end' as const,
+            magical: true as const,
+            requiresMutualVisualSight: true as const,
+          },
+        }
+      }
       const armorClassBonus = CATALOG_PARRY_ARMOR_CLASS_BONUSES[
         monster.slug as keyof typeof CATALOG_PARRY_ARMOR_CLASS_BONUSES
       ]
@@ -2803,6 +2955,106 @@ function applyCatalogMonsterTraitRules(
   monster: Dnd5eMonsterStatBlock,
 ): Dnd5eMonsterStatBlock {
   const traits = monster.traits.map((trait, traitIndex) => {
+    if (
+      monster.legendaryResistanceUses != null &&
+      /legendary resistance|传奇抗性/i.test(trait.name.trim())
+    ) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'legendary-resistance' as const,
+          maximumUses: monster.legendaryResistanceUses,
+        },
+      }
+    }
+    const assassinateTraitIndex = CATALOG_ASSASSINATE_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_ASSASSINATE_TRAIT_INDEX
+    ]
+    if (assassinateTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'assassinate' as const,
+          requiredRound: 1 as const,
+          advantageAgainst: 'target-not-yet-acted' as const,
+          automaticCriticalAgainst: 'currently-surprised' as const,
+        },
+      }
+    }
+    const sneakAttack = CATALOG_SNEAK_ATTACK_TRAITS[
+      monster.slug as keyof typeof CATALOG_SNEAK_ATTACK_TRAITS
+    ]
+    if (sneakAttack?.traitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'sneak-attack' as const,
+          oncePerTurn: true as const,
+          allyDistanceFeet: 5,
+          requireNoDisadvantage: true as const,
+          advantageOrAdjacentAlly: true as const,
+          extraDamage: sneakAttack.extraDamage,
+        },
+      }
+    }
+    const martialAdvantageTraitIndex = CATALOG_MARTIAL_ADVANTAGE_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_MARTIAL_ADVANTAGE_TRAIT_INDEX
+    ]
+    if (martialAdvantageTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'martial-advantage' as const,
+          oncePerTurn: true as const,
+          allyDistanceFeet: 5,
+          requiresAdjacentAlly: true as const,
+          extraDamage: {
+            average: 7,
+            count: 2,
+            sides: 6,
+            bonus: 0,
+            type: 'inherit-primary' as const,
+          },
+        },
+      }
+    }
+    const deathArea = CATALOG_DEATH_AREA_TRAITS[
+      monster.slug as keyof typeof CATALOG_DEATH_AREA_TRAITS
+    ]
+    if (
+      deathArea &&
+      /^(?:Death Burst|Death Throes|死亡爆发|死亡挣扎|临死爆发|死亡爆裂)$/i.test(
+        trait.name.trim(),
+      )
+    ) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'death-area-saving-throw' as const,
+          ruleId: deathArea.ruleId,
+          area: {
+            shape: 'circle' as const,
+            origin: 'self' as const,
+            radiusFeet: deathArea.radiusFeet,
+          },
+          target: 'all-creatures-except-self' as const,
+          ability: deathArea.ability,
+          dc: deathArea.dc,
+          ...('damage' in deathArea ? { damage: deathArea.damage } : {}),
+          ...('damageOnSuccessfulSave' in deathArea
+            ? { damageOnSuccessfulSave: deathArea.damageOnSuccessfulSave }
+            : {}),
+          ...('conditionOnFailedSave' in deathArea
+            ? { conditionOnFailedSave: deathArea.conditionOnFailedSave }
+            : {}),
+        },
+      }
+    }
     const bloodFrenzyTraitIndex = CATALOG_BLOOD_FRENZY_TRAIT_INDEX[
       monster.slug as keyof typeof CATALOG_BLOOD_FRENZY_TRAIT_INDEX
     ]

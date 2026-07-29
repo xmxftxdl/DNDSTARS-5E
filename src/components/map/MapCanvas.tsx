@@ -475,9 +475,11 @@ export interface MapProjectile {
 export interface SpellStatusTokenMark {
   tokenId: string
   statusId: MapSpellStatusId
+  backgroundHighlightColor: string
   backgroundColor: string
   borderColor: string
   glowColor: string
+  classId?: string
 }
 
 export interface StandardConditionTokenMark {
@@ -1672,6 +1674,7 @@ function SpellStatusTokenBadge(input: {
   const scale = tokenScale(input.radius)
   const spec = MAP_SPELL_STATUS_ICONS[input.mark.statusId]
   const image = useTokenBadgeImage(spec.asset)
+  const backdropLines = [-0.28, -0.14, 0, 0.14, 0.28]
 
   return (
     <Group
@@ -1682,12 +1685,106 @@ function SpellStatusTokenBadge(input: {
     >
       <Circle
         radius={size / 2}
-        fill={input.mark.backgroundColor}
+        fillRadialGradientStartPoint={{ x: -size * 0.12, y: -size * 0.16 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+        fillRadialGradientEndRadius={size * 0.55}
+        fillRadialGradientColorStops={[
+          0,
+          input.mark.backgroundHighlightColor,
+          0.48,
+          input.mark.backgroundHighlightColor,
+          1,
+          input.mark.backgroundColor,
+        ]}
         stroke={input.mark.borderColor}
         strokeWidth={tokenLineWidth(input.radius, 1.5)}
         shadowBlur={6 * scale}
         shadowColor={input.mark.glowColor}
       />
+      <Group
+        clipFunc={(context) => {
+          context.beginPath()
+          context.arc(0, 0, size * 0.47, 0, Math.PI * 2)
+          context.closePath()
+        }}
+        opacity={0.34}
+        listening={false}
+      >
+        {input.mark.classId === 'bard' ? (
+          <>
+            {backdropLines.map((offset, index) => (
+              <Line
+                key={`bard-wave-${index}`}
+                points={[
+                  -size * 0.58,
+                  size * offset,
+                  -size * 0.25,
+                  size * (offset - 0.09),
+                  size * 0.08,
+                  size * (offset + 0.06),
+                  size * 0.55,
+                  size * (offset - 0.03),
+                ]}
+                stroke={input.mark.borderColor}
+                strokeWidth={Math.max(0.55, size * 0.025)}
+                tension={0.45}
+                opacity={0.62}
+                listening={false}
+              />
+            ))}
+            <Text
+              text="♪"
+              x={-size * 0.38}
+              y={-size * 0.4}
+              width={size * 0.32}
+              height={size * 0.32}
+              fontSize={Math.max(7, size * 0.27)}
+              fontStyle="bold"
+              fill={input.mark.glowColor}
+              align="center"
+              verticalAlign="middle"
+              listening={false}
+            />
+          </>
+        ) : (
+          <Group rotation={spec.textureRotation} listening={false}>
+            {backdropLines.map((offset, index) => (
+              <Line
+                key={`spell-bg-horizontal-${index}`}
+                points={[-size * 0.7, size * offset, size * 0.7, size * offset]}
+                stroke={input.mark.borderColor}
+                strokeWidth={Math.max(0.45, size * 0.018)}
+                opacity={0.48}
+                listening={false}
+              />
+            ))}
+            {backdropLines.map((offset, index) => (
+              <Line
+                key={`spell-bg-vertical-${index}`}
+                points={[size * offset, -size * 0.7, size * offset, size * 0.7]}
+                stroke={input.mark.borderColor}
+                strokeWidth={Math.max(0.45, size * 0.018)}
+                opacity={0.48}
+                listening={false}
+              />
+            ))}
+          </Group>
+        )}
+        <Circle
+          radius={size * 0.35}
+          stroke={input.mark.glowColor}
+          strokeWidth={Math.max(0.5, size * 0.022)}
+          opacity={0.52}
+          listening={false}
+        />
+        <Circle
+          radius={size * 0.44}
+          fill={input.mark.glowColor}
+          opacity={0.08}
+          listening={false}
+        />
+      </Group>
       {image ? (
         <Group
           clipFunc={(context) => {
@@ -3423,6 +3520,10 @@ export default function MapCanvas({
       data-spell-status-token-colors={spellStatusTokenMarks
         .map((mark) =>
           `${mark.statusId}:${mark.backgroundColor}:${mark.borderColor}`)
+        .join(',')}
+      data-spell-status-token-backgrounds={spellStatusTokenMarks
+        .map((mark) =>
+          `${mark.statusId}:${mark.backgroundHighlightColor}:${mark.backgroundColor}`)
         .join(',')}
       data-standard-condition-token-colors={standardConditionTokenMarks
         .map((mark) =>
@@ -5288,23 +5389,41 @@ function ThunderwaveMaterialEffect({
       ))}
       {[0, 1, 2, 3, 4, 5, 6, 7].map((index) => (
         <Line
-          key={`thunderwave-debris:${index}`}
+          key={`thunderwave-air-streak:${index}`}
           ref={(node) => { debrisRefs.current[index] = node }}
           points={[
-            -areaWidth * 0.055, -areaWidth * 0.025,
-            areaWidth * 0.07, 0,
-            -areaWidth * 0.03, areaWidth * 0.055,
+            -areaWidth * (0.11 + (index % 3) * 0.018), areaWidth * 0.025,
+            -areaWidth * 0.035, -areaWidth * (0.035 + (index % 2) * 0.018),
+            areaWidth * 0.045, areaWidth * 0.018,
+            areaWidth * (0.1 + (index % 2) * 0.025), -areaWidth * 0.012,
           ]}
-          closed
-          fill={index % 2 === 0 ? '#94a3b8' : '#cbd5e1'}
-          stroke="#e2e8f0"
-          strokeWidth={Math.max(0.7, areaWidth * 0.012)}
+          tension={0.58}
+          stroke={index % 3 === 0 ? '#ffffff' : index % 3 === 1 ? '#bae6fd' : '#7dd3fc'}
+          strokeWidth={Math.max(1, areaWidth * (0.014 + (index % 2) * 0.006))}
+          lineCap="round"
+          lineJoin="round"
+          dash={index % 2 === 0 ? [areaWidth * 0.055, areaWidth * 0.04] : undefined}
+          shadowColor="#38bdf8"
+          shadowBlur={5}
           opacity={0}
           perfectDrawEnabled={false}
           listening={false}
         />
       ))}
       <Group ref={frontRef} listening={false}>
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => (
+          <Circle
+            key={`thunderwave-dust:${index}`}
+            x={-areaWidth * (0.08 + (index % 4) * 0.075)}
+            y={areaWidth * (-0.42 + (index % 6) * 0.16)}
+            radius={Math.max(0.8, areaWidth * (0.012 + (index % 3) * 0.005))}
+            fill={index % 2 === 0 ? '#e0f2fe' : '#7dd3fc'}
+            opacity={0.42 + (index % 3) * 0.14}
+            shadowColor="#38bdf8"
+            shadowBlur={4}
+            perfectDrawEnabled={false}
+          />
+        ))}
         {[0, 1, 2].map((index) => {
           const offset = -areaWidth * index * 0.075
           return (

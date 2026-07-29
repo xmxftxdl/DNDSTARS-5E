@@ -162,6 +162,14 @@ economy, target relationship, size, distance and destination limits, then
 emits `battle-master-maneuver-resolved`. The browser never receives or stores
 any PHB prose or official artwork from this example.
 
+For Maneuvering Attack, the Host also signs the selected ally's legal path and
+any accepted opportunity attacks in `opportunityAttacks`. Headless spends the
+ally's reaction first, exempts the original attack target, settles other
+hostile reactions before movement, cancels the move if the ally is dropped,
+and only then commits the destination. The map authority layer subsequently
+feeds the accepted path through the normal item-area and persistent-area
+hazard settlement.
+
 The rights-safe, unreferenced example is:
 
 `examples/phb-local-collection-template/subclass-protocol.example.json`

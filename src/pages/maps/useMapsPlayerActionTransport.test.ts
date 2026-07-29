@@ -82,4 +82,15 @@ describe('player action rejection notice', () => {
       message: 'DM 权威结算拒绝了这次行动（future-authority-rule），本次行动未结算。',
     })
   })
+
+  it('explains why a spell was rejected instead of collapsing every failure into spell unavailable', () => {
+    expect(playerActionRejectionNotice('spell-not-known-or-prepared')).toEqual({
+      title: '尚未学习或准备',
+      message: '当前角色未学习该戏法，或该法术未被当前施法职业学习并准备，本次施法未结算。',
+    })
+    expect(playerActionRejectionNotice('spell-definition-unavailable')).toEqual({
+      title: '法术尚未接入',
+      message: '该法术没有可用的 Headless 定义，或当前房间规则包未提供它，本次施法未结算。',
+    })
+  })
 })

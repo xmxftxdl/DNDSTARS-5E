@@ -436,6 +436,25 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         action.rule.requiresSight !== true ||
         action.rule.requiresWieldedMeleeWeapon !== true
       ) return false
+    } else if (action.rule.kind === 'turn-start-saving-throw-reaction') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'rangeFeet' ||
+          key === 'ability' ||
+          key === 'dc' ||
+          key === 'condition' ||
+          key === 'duration' ||
+          key === 'magical' ||
+          key === 'requiresMutualVisualSight') ||
+        !finiteInteger(action.rule.rangeFeet, 1, 100_000) ||
+        !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
+        !finiteInteger(action.rule.dc, 1, 100) ||
+        !STANDARD_CONDITIONS.has(String(action.rule.condition)) ||
+        action.rule.duration !== 'until-target-turn-end' ||
+        action.rule.magical !== true ||
+        action.rule.requiresMutualVisualSight !== true
+      ) return false
     } else if (action.rule.kind === 'area-saving-throw') {
       if (action.rule.variants != null) {
         if (
@@ -522,6 +541,11 @@ function traitShapeIsValid(raw: unknown): boolean {
   if (raw.automation != null && raw.automation !== 'headless' && raw.automation !== 'dm-adjudication') return false
   if (raw.rule == null) return true
   if (!isRecord(raw.rule) || typeof raw.rule.kind !== 'string') return false
+  if (raw.rule.kind === 'legendary-resistance') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' || key === 'maximumUses') &&
+      finiteInteger(raw.rule.maximumUses, 1, 99)
+  }
   if (raw.rule.kind === 'undead-fortitude') {
     return finiteInteger(raw.rule.dcBase, 1, 100) &&
       Array.isArray(raw.rule.excludedDamageTypes) && raw.rule.excludedDamageTypes.every((type) => DAMAGE_TYPE_VALUES.has(String(type))) &&
@@ -583,6 +607,47 @@ function traitShapeIsValid(raw: unknown): boolean {
       finiteInteger(damage.bonus, -1_000_000, 1_000_000) &&
       damage.type === 'inherit-primary'
   }
+  if (raw.rule.kind === 'assassinate') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' ||
+      key === 'requiredRound' ||
+      key === 'advantageAgainst' ||
+      key === 'automaticCriticalAgainst') &&
+      raw.rule.requiredRound === 1 &&
+      raw.rule.advantageAgainst === 'target-not-yet-acted' &&
+      raw.rule.automaticCriticalAgainst === 'currently-surprised'
+  }
+  if (raw.rule.kind === 'sneak-attack' || raw.rule.kind === 'martial-advantage') {
+    const damage = raw.rule.extraDamage
+    const commonValid =
+      raw.rule.oncePerTurn === true &&
+      finiteInteger(raw.rule.allyDistanceFeet, 1, 100_000) &&
+      isRecord(damage) &&
+      finiteInteger(damage.average, 0, 1_000_000) &&
+      finiteInteger(damage.count, 1, 1_000) &&
+      finiteInteger(damage.sides, 2, 1_000_000) &&
+      finiteInteger(damage.bonus, -1_000_000, 1_000_000) &&
+      damage.type === 'inherit-primary'
+    if (!commonValid) return false
+    if (raw.rule.kind === 'sneak-attack') {
+      return Object.keys(raw.rule).every((key) =>
+        key === 'kind' ||
+        key === 'oncePerTurn' ||
+        key === 'allyDistanceFeet' ||
+        key === 'requireNoDisadvantage' ||
+        key === 'advantageOrAdjacentAlly' ||
+        key === 'extraDamage') &&
+        raw.rule.requireNoDisadvantage === true &&
+        raw.rule.advantageOrAdjacentAlly === true
+    }
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' ||
+      key === 'oncePerTurn' ||
+      key === 'allyDistanceFeet' ||
+      key === 'requiresAdjacentAlly' ||
+      key === 'extraDamage') &&
+      raw.rule.requiresAdjacentAlly === true
+  }
   if (raw.rule.kind === 'reckless') {
     const outgoing = raw.rule.outgoing
     const incoming = raw.rule.incoming
@@ -642,6 +707,44 @@ function traitShapeIsValid(raw: unknown): boolean {
   if (raw.rule.kind === 'relentless') {
     return Object.keys(raw.rule).every((key) => key === 'kind' || key === 'maximumDamage') &&
       finiteInteger(raw.rule.maximumDamage, 1, 1_000_000)
+  }
+  if (raw.rule.kind === 'death-area-saving-throw') {
+    const area = raw.rule.area
+    const condition = raw.rule.conditionOnFailedSave
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' ||
+      key === 'ruleId' ||
+      key === 'area' ||
+      key === 'target' ||
+      key === 'ability' ||
+      key === 'dc' ||
+      key === 'damage' ||
+      key === 'damageOnSuccessfulSave' ||
+      key === 'conditionOnFailedSave') &&
+      requiredText(raw.rule.ruleId, 120) &&
+      /^[a-z][a-z0-9-]*$/.test(String(raw.rule.ruleId)) &&
+      isRecord(area) &&
+      Object.keys(area).every((key) =>
+        key === 'shape' || key === 'origin' || key === 'radiusFeet') &&
+      area.shape === 'circle' &&
+      area.origin === 'self' &&
+      finiteInteger(area.radiusFeet, 1, 100_000) &&
+      raw.rule.target === 'all-creatures-except-self' &&
+      ABILITY_KEYS.includes(raw.rule.ability as typeof ABILITY_KEYS[number]) &&
+      finiteInteger(raw.rule.dc, 1, 100) &&
+      (raw.rule.damage == null || validateDamage(raw.rule.damage)) &&
+      (raw.rule.damage == null
+        ? raw.rule.damageOnSuccessfulSave == null
+        : raw.rule.damageOnSuccessfulSave === 'none' ||
+          raw.rule.damageOnSuccessfulSave === 'half') &&
+      (condition == null || (
+        isRecord(condition) &&
+        STANDARD_CONDITIONS.has(String(condition.condition)) &&
+        finiteInteger(condition.durationRounds, 1, 10_000) &&
+        typeof condition.repeatSaveAtEndOfTargetTurn === 'boolean' &&
+        (condition.breakOnDamage == null ||
+          typeof condition.breakOnDamage === 'boolean')
+      ))
   }
   if (raw.rule.kind === 'turn-start-gaze') {
     return requiredText(raw.rule.ruleId, 120) &&
