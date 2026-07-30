@@ -13,9 +13,6 @@ import {
   gridStrokeRgba,
   measureSegmentCells,
   measureSnapsToGrid,
-  resolveFreeDropCell,
-  resolveTokenDropPosition,
-  shouldSnapTokenOnDrop,
   snapToCellCenter,
   tokenCenterForAnchorCell,
   tokenDisplayRadius,
@@ -31,6 +28,7 @@ import {
   shouldReleaseOptimisticTokenMovePreview,
   shouldValidateMapTokenMoveLocally,
 } from '../../lib/mapTokenDragPolicy'
+import { planMapTokenDrop } from '../../lib/mapTokenDropPlanner'
 import {
   THUNDERWAVE_ANIMATION_DURATION_MS,
   combatPresentationSavingThrowAbilityLabel,
@@ -393,7 +391,6 @@ import {
   mapGeometryDoorLockState,
   mapGeometryDoorOpenState,
   mapGeometryDoorPhysicalState,
-  mapGeometryMovementBlocked,
   mapGeometryMagicalDarknessObstacleIsSuppressed,
   mapGeometryObstacleAffectsElevation,
   mapGeometryAttachOpeningToWall,
@@ -2614,47 +2611,35 @@ export default function MapCanvas({
   }, [map.tokens, optimisticTokenMoveIds])
 
   const commitTokenDrag = (token: Token, x: number, y: number) => {
-    const snapped = resolveTokenDropPosition(x, y, token, map)
-    const pos = shouldSnapTokenOnDrop(token, map)
-      ? resolveFreeDropCell(snapped.x, snapped.y, token.id, map)
-      : snapped
-    const fromTerrainElevation = mapGeometryTerrainElevationAtPoint(geometry, token)
-    const toTerrainElevation = mapGeometryTerrainElevationAtPoint(geometry, pos)
-    const heightAboveGround = Math.max(
-      0,
-      mapGeometryTokenElevation(geometry, token) - fromTerrainElevation,
-    )
-    const toElevationFeet = toTerrainElevation + heightAboveGround
-    if (shouldValidateMapTokenMoveLocally({
-      isDm: isDM,
+    const plan = planMapTokenDrop({
       token,
-      authoritativeMovementTokenIds,
-    })) {
-      const blocker = mapGeometryMovementBlocked({
-        geometry,
-        map,
+      map,
+      geometry,
+      x,
+      y,
+      validateMovementLocally: shouldValidateMapTokenMoveLocally({
+        isDm: isDM,
         token,
-        to: pos,
-        fromElevationFeet: mapGeometryTokenElevation(geometry, token),
-        toElevationFeet,
-      })
-      if (blocker.blocked) {
-        clearTokenDragPreview(token.id)
-        onTokenMoveBlocked?.(blocker.entityId)
-        return
-      }
+        authoritativeMovementTokenIds,
+      }),
+    })
+    if (plan.status === 'blocked') {
+      clearTokenDragPreview(token.id)
+      onTokenMoveBlocked?.(plan.entityId)
+      return
     }
-    const requestResult = onTokenMoveRequest?.(token, pos, toElevationFeet)
+    const { position, elevationFeet } = plan
+    const requestResult = onTokenMoveRequest?.(token, position, elevationFeet)
     if (requestResult) {
       if (requestResult === 'pending') {
-        previewTokenDrag(token, pos.x, pos.y)
+        previewTokenDrag(token, position.x, position.y)
       } else {
         clearTokenDragPreview(token.id)
       }
       return
     }
-    previewTokenDrag(token, pos.x, pos.y)
-    onTokenMoveCommit?.(token, pos, toElevationFeet)
+    previewTokenDrag(token, position.x, position.y)
+    onTokenMoveCommit?.(token, position, elevationFeet)
     window.requestAnimationFrame(() => clearTokenDragPreview(token.id))
   }
 
