@@ -23,6 +23,10 @@ import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster,
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
 import { dnd5eChallengeRatingValue } from './wildShape'
 import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
+import {
+  dnd5eEffectiveHitPointMaximum,
+  normalizeDnd5eHitPointMaximumReductionLedger,
+} from './hitPointMaximumReductions'
 import { normalizeDnd5eSpecialSenses, type Dnd5eSpecialSense } from './specialSenses'
 import { getRoomRulesSnapshot } from '../../lib/roomRulesState'
 import { getRoomSession } from '../../lib/roomSession'
@@ -391,7 +395,16 @@ export function createDnd5eMapCombatSnapshot(input: {
       fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
         DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
     })
-    const maxHp = Math.max(1, token.maxHp ?? monster?.hitPoints.average ?? token.hp ?? 1)
+    const maximumReductionLedger =
+      normalizeDnd5eHitPointMaximumReductionLedger(
+        token.dnd5eCombatState?.hitPointMaximumReductionLedger,
+      )
+    const maxHp = maximumReductionLedger
+      ? dnd5eEffectiveHitPointMaximum(
+          maximumReductionLedger.baseMaximum,
+          maximumReductionLedger,
+        )
+      : Math.max(1, token.maxHp ?? monster?.hitPoints.average ?? token.hp ?? 1)
     const {
       conditions: tokenConditions,
       temporaryHp: tokenTemporaryHp,
@@ -706,6 +719,15 @@ export function planDnd5eMapResultApplication(input: {
                 ? true as const
                 : undefined,
             temporaryHp: combatant.temporaryHp > 0 ? combatant.temporaryHp : undefined,
+            hitPointMaximumReductionLedger:
+              combatant.classState.hitPointMaximumReductionLedger
+                ? {
+                    ...combatant.classState.hitPointMaximumReductionLedger,
+                    entries:
+                      combatant.classState.hitPointMaximumReductionLedger.entries
+                        .map((entry) => ({ ...entry })),
+                  }
+                : undefined,
             undeadFortitudePending: combatant.classState.undeadFortitudePending
               ? { ...combatant.classState.undeadFortitudePending }
               : undefined,
@@ -741,6 +763,7 @@ export function planDnd5eMapResultApplication(input: {
             natureSanctuaryImmunityRoundsByTarget: combatant.classState.natureSanctuaryImmunityRoundsByTarget,
             draconicPresenceImmunityRoundsBySource: combatant.classState.draconicPresenceImmunityRoundsBySource,
             monsterFrightfulPresenceImmunityRoundsBySource: combatant.classState.monsterFrightfulPresenceImmunityRoundsBySource,
+            monsterActionImmunityRoundsByKey: combatant.classState.monsterActionImmunityRoundsByKey,
             turnedByClericId: combatant.classState.turnedByClericId,
             turnedRoundsRemaining: combatant.classState.turnedRoundsRemaining,
             holyNimbusRoundsRemaining: combatant.classState.holyNimbusRoundsRemaining,
@@ -751,6 +774,11 @@ export function planDnd5eMapResultApplication(input: {
             declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
             declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
             battleMasterDroppedWeaponIds: combatant.classState.battleMasterDroppedWeaponIds,
+            eldritchStrikeBySource: combatant.classState.eldritchStrikeBySource,
+            totemWarriorWolfAttunementTargetIds:
+              combatant.classState.totemWarriorWolfAttunementTargetIds,
+            totemWarriorWolfAttunementTurnKey:
+              combatant.classState.totemWarriorWolfAttunementTurnKey,
             monsterMechanicRollModifiers: combatant.classState.monsterMechanicRollModifiers,
             pendingMonsterMechanicTriggers: combatant.classState.pendingMonsterMechanicTriggers,
             monsterMechanicTriggerSequence: combatant.classState.monsterMechanicTriggerSequence,
@@ -775,6 +803,12 @@ export function planDnd5eMapResultApplication(input: {
             monsterShapechangeFormId: combatant.classState.monsterShapechangeFormId,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
             monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
+            monsterHydraHeadCount: combatant.classState.monsterHydraHeadCount,
+            monsterHydraHeadsLostSinceLastTurn: combatant.classState.monsterHydraHeadsLostSinceLastTurn,
+            monsterHydraDamageTurnKey: combatant.classState.monsterHydraDamageTurnKey,
+            monsterHydraDamageTakenThisTurn: combatant.classState.monsterHydraDamageTakenThisTurn,
+            monsterHydraHeadSeveredTurnKey: combatant.classState.monsterHydraHeadSeveredTurnKey,
+            monsterHydraFireDamageSinceLastTurn: combatant.classState.monsterHydraFireDamageSinceLastTurn,
             monsterThreatByTargetId: combatant.classState.monsterThreatByTargetId,
             hurlThroughHellSourceId: combatant.classState.hurlThroughHellSourceId,
             hurlThroughHellDamage: combatant.classState.hurlThroughHellDamage,
@@ -814,7 +848,18 @@ export function planDnd5eMapResultApplication(input: {
     const nextClassResources = Object.keys(combatant.classResources).length > 0
       ? Object.fromEntries(Object.entries(combatant.classResources).map(([key, resource]) => [key, { ...resource }]))
       : undefined
-    const nextClassState = compactOptionalRecord(combatant.classState)
+    const nextClassState = compactOptionalRecord({
+      ...combatant.classState,
+      hitPointMaximumReductionLedger:
+        combatant.classState.hitPointMaximumReductionLedger
+          ? {
+              ...combatant.classState.hitPointMaximumReductionLedger,
+              entries:
+                combatant.classState.hitPointMaximumReductionLedger.entries
+                  .map((entry) => ({ ...entry })),
+            }
+          : undefined,
+    })
     const nextCharacterCurrentHp = combatant.classState.wildShapeFormId
       ? combatant.classState.wildShapeOriginalCurrentHp ?? character.currentHp
       : combatant.currentHp
@@ -823,6 +868,7 @@ export function planDnd5eMapResultApplication(input: {
     const conditionsUnchanged = JSON.stringify(character.conditions) === JSON.stringify(combatant.conditions)
     if (
       character.currentHp === nextCharacterCurrentHp &&
+      character.maxHp === combatant.maxHp &&
       character.tempHp === combatant.temporaryHp &&
       (character.exhaustionLevel ?? 0) === combatant.exhaustionLevel &&
       (character.deathSaveSuccesses ?? 0) === combatant.deathSaves.successes &&
@@ -837,6 +883,7 @@ export function planDnd5eMapResultApplication(input: {
     return {
       ...character,
       currentHp: nextCharacterCurrentHp,
+      maxHp: combatant.maxHp,
       tempHp: combatant.temporaryHp,
       exhaustionLevel: combatant.exhaustionLevel,
       deathSaveSuccesses: combatant.deathSaves.successes,

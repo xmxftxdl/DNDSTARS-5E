@@ -14,7 +14,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
+import { dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBlurImposesAttackDisadvantage,
@@ -25,6 +25,8 @@ import {
   endDnd5eConcentration,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
+  dnd5eTotemBearGuardianDisadvantage,
+  dnd5eTotemWolfPackAdvantage,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
@@ -35,6 +37,7 @@ import {
   type Dnd5eSpellForcedMovement,
   type Dnd5eSpellTeleportDestination,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eOptionalBonusDieUse,
   type Dnd5eSpellTargetAttackRoll,
   type Dnd5eSpellTargetSavingThrowRoll,
   type Dnd5eTargetTranquilitySaveRoll,
@@ -61,6 +64,13 @@ import {
 } from '../../lib/mapGeometry'
 import { createDnd5eCoreSpellArea, dnd5eWallOfFireDamagingSideCells, getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
+import { dnd5eEldritchStrikeApplies } from './eldritchKnight'
+import {
+  dnd5eCoreSpellComponentRequirements,
+  dnd5eSpellComponentCheck,
+  dnd5eSpellComponentsAvailable,
+} from './spellComponents'
 import {
   DND5E_RACIAL_RESOURCE_KEYS,
   dnd5eRacialInnateSpellGrant,
@@ -82,6 +92,7 @@ export type Dnd5eSpellCastRejectReason =
   | 'sustained-spell-unavailable'
   | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
+  | 'component-unavailable'
   | 'slot-unavailable'
   | 'combatant-missing'
 
@@ -192,6 +203,66 @@ export function dnd5eForcedPushDestination(
     )) break
     if (mapGeometryMovementBlocked({
       geometry, map, token: { ...target, ...destination }, to: position,
+    }).blocked) break
+    destination = position
+    steps = step
+  }
+  return { to: destination, distanceFeet: steps * feetPerCell }
+}
+
+/**
+ * Finds the furthest legal grid destination for movement directly toward a
+ * source. The source itself remains occupied, so a pulled creature stops in
+ * the nearest legal space instead of overlapping it.
+ */
+export function dnd5eForcedPullDestination(
+  map: BattleMap,
+  actor: Token,
+  target: Token,
+  maximumDistanceFeet: number,
+): { to: { x: number; y: number }; distanceFeet: number } {
+  const feetPerCell = Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+  const maximumSteps = Number.isFinite(maximumDistanceFeet)
+    ? Math.max(0, Math.floor(maximumDistanceFeet / feetPerCell))
+    : 0
+  const actorAnchor = tokenAnchorCellFromPixel(actor.x, actor.y, actor, map)
+  const targetAnchor = tokenAnchorCellFromPixel(target.x, target.y, target, map)
+  const dc = Math.sign(actorAnchor.col - targetAnchor.col)
+  const dr = Math.sign(actorAnchor.row - targetAnchor.row)
+  if (maximumSteps < 1 || (dc === 0 && dr === 0)) {
+    return { to: { x: target.x, y: target.y }, distanceFeet: 0 }
+  }
+  const blocked = occupiedCells(map.tokens, map, target.id)
+  const columns = Math.max(
+    1,
+    Math.floor((map.width - map.gridOffsetX) / Math.max(1, map.gridSize)),
+  )
+  const rows = Math.max(
+    1,
+    Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)),
+  )
+  let destination = { x: target.x, y: target.y }
+  let steps = 0
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  for (let step = 1; step <= maximumSteps; step += 1) {
+    const anchor = {
+      col: targetAnchor.col + dc * step,
+      row: targetAnchor.row + dr * step,
+    }
+    const position = tokenCenterForAnchorCell(anchor, target, map)
+    const footprint = tokenOccupiedCellsAt(target, map, position)
+    if (footprint.some((cell) =>
+      cell.col < 0 ||
+      cell.row < 0 ||
+      cell.col >= columns ||
+      cell.row >= rows ||
+      blocked.has(cellKey(cell)),
+    )) break
+    if (mapGeometryMovementBlocked({
+      geometry,
+      map,
+      token: { ...target, ...destination },
+      to: position,
     }).blocked) break
     destination = position
     steps = step
@@ -359,7 +430,10 @@ export function prepareDnd5eSpellCast(input: {
   if (!racialGrant && !castingClassId) {
     return { ok: false, reason: 'spell-not-known-or-prepared' }
   }
-  const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
+  const castingSource = castingClassId
+    ? dnd5eEffectiveSpellcastingSource(actor, castingClassId)
+    : undefined
+  const definition = castingSource?.definition
   const castingClassLevel = racialGrant
     ? actor.level
     : castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
@@ -375,6 +449,16 @@ export function prepareDnd5eSpellCast(input: {
     return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   }
   if (spell.castingTime === 'reaction') return { ok: false, reason: 'invalid-action' }
+  if (!racialGrant && !sustainedAttack) {
+    const componentCheck = dnd5eSpellComponentCheck(
+      actor,
+      dnd5eCoreSpellComponentRequirements(spell.id),
+      castingClassId,
+    )
+    if (!dnd5eSpellComponentsAvailable(componentCheck)) {
+      return { ok: false, reason: 'component-unavailable' }
+    }
+  }
 
   const slotLevel = sustainedAttack
     ? sustainedEffect!.potency!
@@ -1031,11 +1115,18 @@ export function prepareDnd5eSpellCast(input: {
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5))
+      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5) ||
+      dnd5eTotemWolfPackAdvantage(
+        snapshot.state,
+        actorCombatant,
+        targetCombatant,
+        spellAttackDelivery === 'melee',
+      ))
   const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
     dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
     dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
-    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
+    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5) ||
+    dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, targetCombatant)
   const attackMode = usesSpellAttackRoll && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
     ? resolveDnd5eRollMode({
         advantage: [{ active: advantage, reason: 'spell-attack-advantage' }],
@@ -1058,12 +1149,19 @@ export function prepareDnd5eSpellCast(input: {
             (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
             !!currentTarget.classState.recklessAttackTurnKey || !!currentTarget.classState.stunnedByActorId ||
             dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) ||
-            (currentTargetProne && currentDistanceFeet <= 5))
+            (currentTargetProne && currentDistanceFeet <= 5) ||
+            dnd5eTotemWolfPackAdvantage(
+              snapshot.state,
+              actorCombatant,
+              currentTarget,
+              spellAttackDelivery === 'melee',
+            ))
         const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(currentTarget) ||
           dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, currentTarget.id) ||
           (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
           dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) || actorProne ||
-          (currentTargetProne && currentDistanceFeet > 5)
+          (currentTargetProne && currentDistanceFeet > 5) ||
+          dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, currentTarget)
         return {
           targetToken: currentTargetToken,
           mode: resolveDnd5eRollMode({
@@ -1100,6 +1198,9 @@ export function prepareDnd5eSpellCast(input: {
       spell.id === 'sunburst' &&
       (creatureType === 'undead' || creatureType.includes('亡灵') || creatureType === 'ooze' || creatureType.includes('泥怪'))
     ) mode = dnd5eHeightenedSavingThrowMode(mode, true)
+    if (dnd5eEldritchStrikeApplies(actorCombatant, combatant)) {
+      mode = imposeDnd5eRollDisadvantage(mode, 'eldritch-strike').mode
+    }
     return mode
   }
   const usesSingleSavingThrow = (
@@ -1333,6 +1434,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   savingThrowRerollD20Second?: number
   bardicInspirationRoll?: number
   darkOnesOwnLuckRoll?: number
+  optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
   hurlThroughHellDamageRolls?: readonly number[]
   overchannelSelfDamageRolls?: readonly number[]
   protectionReactionActorId?: string
@@ -1403,6 +1505,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     savingThrowRerollD20Second: input.savingThrowRerollD20Second,
     bardicInspirationRoll: input.bardicInspirationRoll,
     darkOnesOwnLuckRoll: input.darkOnesOwnLuckRoll,
+    optionalBonusDice: input.optionalBonusDice,
       hurlThroughHellDamageRolls: input.hurlThroughHellDamageRolls,
       overchannel: input.prepared.overchannel,
       overchannelSelfDamageRolls: input.overchannelSelfDamageRolls,

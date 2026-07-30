@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type { DeclarativeSubclassDefinitionV1 } from './declarativeSubclassAbility'
 import {
   createDnd5eCombatant,
@@ -10,12 +10,20 @@ import {
   type Dnd5eCombatant,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
-import { registerDnd5eRulesPlugin } from './pluginApi'
+import {
+  dnd5eDeclarativeAttackIntentDefinition,
+  dnd5eDeclarativeAttackIntentRollPlan,
+  registerDnd5eRulesPlugin,
+} from './pluginApi'
 
 const PLUGIN_ID = 'local.doco.battle-master-headless-test'
 const SUBCLASS_ID = `${PLUGIN_ID}:battle-master-2014`
 const RESOURCE_ID = `${PLUGIN_ID}:superiority-dice`
 const ABILITIES = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 10 }
+const LOCAL_DEFINITION_PATH = new URL(
+  '../../../local-content/phb-2014/subclasses/battle-master/subclasses.json',
+  import.meta.url,
+)
 let stateSequence = 0
 
 function featureId(maneuver: string): string {
@@ -155,30 +163,42 @@ function weaponAttack(
 
 let unregister: (() => void) | undefined
 
-beforeAll(() => {
-  const definition = JSON.parse(readFileSync(new URL(
-    '../../../examples/battle-master-local-collection/subclasses.json',
-    import.meta.url,
-  ), 'utf8'))[0] as DeclarativeSubclassDefinitionV1
-  unregister = registerDnd5eRulesPlugin({
-    manifest: {
-      id: PLUGIN_ID,
-      name: 'Battle Master Headless Test',
-      version: '1.0.0',
-      apiVersion: 2,
-      rulesetId: 'dnd5e-2014-srd-5.1',
-      publisher: 'Local test',
-      license: 'Private local use',
-    },
-    setup(api) {
-      api.registerDeclarativeSubclass(definition)
-    },
+describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('Battle Master 2014 local Headless settlement', () => {
+  beforeAll(() => {
+    const definition = JSON.parse(readFileSync(LOCAL_DEFINITION_PATH, 'utf8'))[0] as DeclarativeSubclassDefinitionV1
+    unregister = registerDnd5eRulesPlugin({
+      manifest: {
+        id: PLUGIN_ID,
+        name: 'Battle Master Headless Test',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Local test',
+        license: 'Private local use',
+      },
+      setup(api) {
+        api.registerDeclarativeSubclass(definition)
+      },
+    })
   })
-})
 
-afterAll(() => unregister?.())
+  afterAll(() => unregister?.())
 
-describe('Battle Master 2014 Headless settlement', () => {
+  it('compiles Maneuvering Attack into a Host-owned pre-roll intent', () => {
+    const actor = battleMaster('fighter', ['maneuvering-attack'])
+    const id = featureId('maneuvering-attack')
+
+    expect(dnd5eDeclarativeAttackIntentDefinition(id)).toMatchObject({
+      feature: { id, automation: 'full' },
+      hook: { timing: 'after-attack-hit', activation: 'prearm' },
+    })
+    expect(dnd5eDeclarativeAttackIntentRollPlan(actor, id, false)).toMatchObject({
+      ok: true,
+      featureId: id,
+      declarations: [{ id: 'superiority-damage', count: 1, sides: 10 }],
+    })
+  })
+
   it('settles disarming, pushing, trip and menacing saves authoritatively', () => {
     const disarm = success(weaponAttack(stateWith([
       battleMaster('fighter', ['disarming-attack']),

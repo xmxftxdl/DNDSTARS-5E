@@ -120,9 +120,12 @@ describe('D&D 5e opportunity attack bridge', () => {
       level: 14,
       equipment: DND5E_FIGHTER_STARTING_EQUIPMENT,
       dnd5eClassChoices: { classes: { barbarian: { subclass: 'berserker', selections: {} } } },
+      dnd5eCombatState: {
+        berserkerRetaliationTrigger: { sourceId: 'kobold', round: 1 },
+      },
     }
     const prepared = prepareDnd5eOpportunityAttack({
-      combatId: 'combat', map, characters: [berserker], initiativeOrder,
+      combatId: 'combat', round: 1, map, characters: [berserker], initiativeOrder,
       actorTokenId: 'hero-token', targetTokenId: 'kobold',
       turnEconomy: createDnd5eTurnEconomyCounts('berserker-turn', 30),
       reactionFeature: 'berserker-retaliation',

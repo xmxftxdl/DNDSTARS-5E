@@ -6,6 +6,7 @@ import {
   dnd5ePactSlotLevel,
   type Dnd5eClassId,
 } from './classes'
+import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
 
 export type Dnd5eClassLevels = Partial<Record<Dnd5eClassId, number>>
 
@@ -84,30 +85,35 @@ export function validateDnd5eMulticlassLevelGain(
 
 /** SRD 5.1 兼职施法者等级；邪术师契约魔法始终保持独立。 */
 export function dnd5eMulticlassCasterLevel(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): number {
   const levels = normalizeDnd5eClassLevels(character)
   let casterLevel = 0
   for (const [classId, level] of Object.entries(levels) as Array<[Dnd5eClassId, number]>) {
     if (FULL_CASTERS.has(classId)) casterLevel += level
     else if (HALF_CASTERS.has(classId)) casterLevel += Math.floor(level / 2)
+    else if (dnd5eEffectiveSpellcastingSource(character as Character, classId)?.definition.spellcasting?.kind === 'one-third-known') {
+      casterLevel += Math.floor(level / 3)
+    }
   }
   return Math.max(0, Math.min(20, casterLevel))
 }
 
 export function dnd5eMulticlassSpellSlots(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): readonly number[] {
   const levels = normalizeDnd5eClassLevels(character)
-  const spellcastingClasses = (Object.entries(levels) as Array<[Dnd5eClassId, number]>).filter(([classId]) =>
-    FULL_CASTERS.has(classId) || HALF_CASTERS.has(classId),
-  )
+  const spellcastingClasses = (Object.entries(levels) as Array<[Dnd5eClassId, number]>).flatMap(([classId, level]) => {
+    const source = dnd5eEffectiveSpellcastingSource(character as Character, classId)
+    return source?.definition.spellcasting && source.definition.spellcasting.kind !== 'pact'
+      ? [{ source, level }]
+      : []
+  })
   // The multiclass slot table applies only after Spellcasting is gained from
   // more than one class. A Paladin/Fighter, for example, keeps the Paladin table.
   if (spellcastingClasses.length === 1) {
-    const [classId, classLevel] = spellcastingClasses[0]
-    const definition = dnd5eClassDefinition(classId)
-    return definition ? dnd5eClassSpellSlots(definition, classLevel) : []
+    const [{ source, level: classLevel }] = spellcastingClasses
+    return dnd5eClassSpellSlots(source.definition, classLevel)
   }
   const casterLevel = dnd5eMulticlassCasterLevel(character)
   const fullCaster = dnd5eClassDefinition('wizard')

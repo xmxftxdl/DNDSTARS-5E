@@ -365,6 +365,76 @@ describe('D&D 5e player basic action bridge', () => {
     })
   })
 
+  it('routes shaking a Hypnotic Pattern target through the same authoritative wake action', () => {
+    const hypnotizedMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((entry) => entry.id === 'enemy'
+        ? {
+            ...entry,
+            dnd5eCombatState: {
+              schemaVersion: 2,
+              conditions: ['charmed', 'incapacitated'],
+              activeEffects: [
+                createDnd5eConditionEffect({
+                  id: 'hypnotic-pattern-charmed',
+                  condition: 'charmed',
+                  source: { kind: 'spell', actorId: 'wizard', rulesId: 'hypnotic-pattern' },
+                  targetId: 'enemy',
+                  duration: {
+                    type: 'concentration',
+                    sourceActorId: 'wizard',
+                    concentrationId: 'hypnotic-pattern',
+                    remainingRounds: 10,
+                  },
+                  breakOn: ['takes-damage', 'awakened'],
+                  removal: {
+                    action: { label: '摇醒受术者', economy: 'action', maxDistanceFeet: 5 },
+                  },
+                }),
+                createDnd5eConditionEffect({
+                  id: 'hypnotic-pattern-incapacitated',
+                  condition: 'incapacitated',
+                  source: { kind: 'spell', actorId: 'wizard', rulesId: 'hypnotic-pattern' },
+                  targetId: 'enemy',
+                  duration: {
+                    type: 'concentration',
+                    sourceActorId: 'wizard',
+                    concentrationId: 'hypnotic-pattern',
+                    remainingRounds: 10,
+                  },
+                  dependsOnEffectId: 'hypnotic-pattern-charmed',
+                  modifiers: { speedPenaltyFeet: 1_000 },
+                }),
+              ],
+            },
+          }
+        : entry),
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'wake', targetTokenId: 'enemy' }),
+      map: hypnotizedMap,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === 'enemy')?.dnd5eCombatState?.conditions)
+      .not.toEqual(expect.arrayContaining(['charmed', 'incapacitated']))
+    expect(resolved.result.events).toContainEqual({
+      type: 'sleeping-creature-awakened',
+      actorId: 'hero-token',
+      targetId: 'enemy',
+      sourceRulesIds: ['hypnotic-pattern'],
+    })
+  })
+
   it('routes an Entangle escape check through the authoritative basic-action bridge', () => {
     const restrainedHero: Character = {
       ...hero,

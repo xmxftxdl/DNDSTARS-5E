@@ -9,6 +9,11 @@ import type { Dnd5eDamageType } from './monsters'
 import { dnd5eBardMagicalSecretsOptions } from './spellCatalog'
 import { imposeDnd5eRollAdvantage, imposeDnd5eRollDisadvantage } from './rollMode'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
+import {
+  dnd5eEffectiveSpellcastingSource,
+  dnd5eEffectiveSpellcastingSources,
+  dnd5eEffectiveSpellSelections,
+} from './subclassSpellcasting'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
@@ -136,6 +141,8 @@ export interface Dnd5eSrdSpellDefinition {
     | 'hold-monster'
     | 'banishment'
     | 'faerie-fire'
+    | 'hypnotic-pattern'
+    | 'slow'
     | 'phantasmal-killer'
   appliedEffect?:
     | 'invisibility'
@@ -160,6 +167,8 @@ export interface Dnd5eSrdSpellDefinition {
     | 'shillelagh'
     | 'magic-weapon'
     | 'sanctuary'
+    | 'guidance'
+    | 'resistance'
   /** 法术持续期间授予的重复攻击。Host 会从 ActiveEffect 中恢复原始施法环位。 */
   sustainedAttack?: Dnd5eSustainedSpellAttackDefinition
   enlargeReduceOptions?: readonly ('enlarge' | 'reduce')[]
@@ -193,6 +202,22 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['cleric'], castingTime: 'action', rangeFeet: 0,
     target: 'ally', effect: 'narrative-effect', dice: { count: 0, sides: 4, bonus: 0 },
     description: '种族先天施法的 Headless 授权入口。非伤害性的环境表现由地图层处理。',
+  },
+  {
+    id: 'guidance', name: '神导术', englishName: 'Guidance', level: 0, school: '预言',
+    classes: ['cleric', 'druid'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
+    appliedEffect: 'guidance',
+    description: '你触碰一个自愿生物。法术结束前，目标可以在一次属性检定中掷一枚 d4，并将结果加到该检定中。目标可以在进行属性检定前或之后掷这枚骰子。掷骰后法术结束。需要专注，持续至多 1 分钟。',
+  },
+  {
+    id: 'resistance', name: '抗力术', englishName: 'Resistance', level: 0, school: '防护',
+    classes: ['cleric', 'druid'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
+    appliedEffect: 'resistance',
+    description: '你触碰一个自愿生物。法术结束前，目标可以在一次豁免检定中掷一枚 d4，并将结果加到该豁免中。目标可以在进行豁免检定前或之后掷这枚骰子。掷骰后法术结束。需要专注，持续至多 1 分钟。',
   },
   {
     id: 'shillelagh', name: '橡棍术', englishName: 'Shillelagh', level: 0, school: '变化',
@@ -427,6 +452,28 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
     onFailedSaveEffect: 'faerie-fire',
     description: '指定60尺内一处20尺立方区域。区域内生物进行敏捷豁免；失败者被光包围，无法受益于隐形，且能看见它的攻击者对其攻击具有优势。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'hypnotic-pattern', name: '催眠图纹', englishName: 'Hypnotic Pattern', level: 3, school: '幻术',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action',
+    rangeFeet: 120, target: 'area', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 30, heightFeet: 30, placeRangeFeet: 120 },
+    onFailedSaveEffect: 'hypnotic-pattern',
+    description: '在射程内一处30尺立方区域中显现旋转的彩色图纹。区域内能看见图纹的生物进行感知豁免；失败者在持续期间被魅惑、陷入失能且速度为0。目标受到伤害，或另一个生物在其5尺内使用动作将它摇醒时，目标所受效应结束。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'slow', name: '缓慢术', englishName: 'Slow', level: 3, school: '变化',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action',
+    rangeFeet: 120, target: 'creature', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 6, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 40, heightFeet: 40, placeRangeFeet: 120 },
+    onFailedSaveEffect: 'slow',
+    description: '选择射程内一处40尺立方区域中的至多六个生物。每个目标进行感知豁免；失败者的速度减半，AC与敏捷豁免承受−2减值，无法使用反应，且在其回合中只能使用一个动作或一个附赠动作。无论具有多少次攻击或能力，目标在其回合中都不能进行超过一次近战或远程攻击。目标在自己每个回合结束时重复豁免，成功则结束其身上的效果。需要专注，持续至多1分钟。',
   },
   {
     id: 'phantasmal-killer', name: '魅影杀手', englishName: 'Phantasmal Killer', level: 4, school: '幻术',
@@ -870,6 +917,19 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '目标进行体质豁免；失败受到8d8黯蚀伤害，成功减半，升环时每高一环增加1d8。构装生物和亡灵不受影响；植物目标以劣势豁免且伤害取最大值。',
   },
   {
+    id: 'ice-storm', name: '冰风暴', englishName: 'Ice Storm', level: 4, school: '塑能',
+    classes: ['druid', 'sorcerer', 'wizard'], castingTime: 'action',
+    rangeFeet: 300, target: 'area', effect: 'saving-throw', saveAbility: 'dex',
+    dice: { count: 2, sides: 8, bonus: 0 }, damageType: 'bludgeoning',
+    additionalDamageComponents: [
+      { dice: { count: 4, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'cold' },
+    ],
+    damageOnSuccessfulSave: 'half',
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 300 },
+    description: '以射程内一点为中心，冰雹砸落在20尺半径、40尺高的柱状区域。区域内生物进行敏捷豁免；失败受到2d8钝击伤害和4d6冷冻伤害，成功时两种伤害均减半。冰雹使区域在施法者下一回合结束前成为困难地形。每使用高于4环一环的法术位，冷冻伤害增加1d6。',
+  },
+  {
     id: 'cone-of-cold', name: '寒冰锥', englishName: 'Cone of Cold', level: 5, school: '塑能',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'saving-throw', saveAbility: 'con',
     dice: { count: 8, sides: 8, bonus: 0, perHigherSlot: 1 }, damageType: 'cold', damageOnSuccessfulSave: 'half',
@@ -1068,7 +1128,9 @@ export function dnd5eSpellAreaLabel(
 export function dnd5eSpellSelectionKey(character: Pick<Character, 'charClass'>): 'spell-known' | 'spell-prepared' | undefined {
   const kind = dnd5eClassDefinitionForCharacter(character)?.spellcasting?.kind
   if (!kind) return undefined
-  return kind === 'full-known' || kind === 'half-known' || kind === 'pact' ? 'spell-known' : 'spell-prepared'
+  return kind === 'full-known' || kind === 'half-known' || kind === 'one-third-known' || kind === 'pact'
+    ? 'spell-known'
+    : 'spell-prepared'
 }
 
 export const DND5E_BARD_MAGICAL_SECRETS_KEY = 'magical-secrets'
@@ -1111,15 +1173,19 @@ export function dnd5eBardMagicalSecretSpellIds(character: Character): readonly s
 
 /** All spells selected on the character sheet, including reference-only entries. */
 export function dnd5eSelectedSpellIdsForClass(character: Character, classId: Dnd5eClassId): readonly string[] {
-  const definition = dnd5eClassDefinition(classId)
-  if (!definition?.spellcasting) return []
-  const classLevel = dnd5eCharacterClassLevel(character, classId)
-  if (classLevel < 1) return []
-  const classCharacter = { ...character, charClass: definition.name, level: classLevel }
-  const selections = character.dnd5eClassChoices?.classes?.[definition.id]?.selections
+  const source = dnd5eEffectiveSpellcastingSource(character, classId)
+  if (!source) return []
+  const selections = dnd5eEffectiveSpellSelections(character, source)
+  const classCharacter = classId === 'bard'
+    ? {
+        ...character,
+        charClass: dnd5eClassDefinition('bard')!.name,
+        level: dnd5eCharacterClassLevel(character, 'bard'),
+      }
+    : character
   return [...new Set([
-    ...(selections?.['spell-cantrips'] ?? []),
-    ...(selections?.[dnd5eSpellSelectionKey(classCharacter) ?? ''] ?? []),
+    ...(selections[source.cantripSelectionKey] ?? []),
+    ...(selections[source.spellSelectionKey] ?? []),
     ...(selections?.['spell-mastery-1'] ?? []),
     ...(selections?.['spell-mastery-2'] ?? []),
     ...(selections?.['signature-spells'] ?? []),
@@ -1147,10 +1213,10 @@ export function dnd5eSpellcastingClassIdsForSpell(
   spellId: string,
   allowedClasses?: readonly Dnd5eClassId[],
 ): readonly Dnd5eClassId[] {
-  return (Object.keys(normalizeDnd5eClassLevels(character)) as Dnd5eClassId[]).filter((classId) => {
-    if (!dnd5eClassDefinition(classId)?.spellcasting) return false
-    if (!dnd5eSelectedSpellIdsForClass(character, classId).includes(spellId)) return false
-    if (!allowedClasses || allowedClasses.includes(classId)) return true
+  return dnd5eEffectiveSpellcastingSources(character).map((source) => source.classId).filter((classId) => {
+    const source = dnd5eEffectiveSpellcastingSource(character, classId)
+    if (!source || !dnd5eSelectedSpellIdsForClass(character, classId).includes(spellId)) return false
+    if (!allowedClasses || allowedClasses.includes(source.spellListClassId)) return true
     return classId === 'bard' && dnd5eBardMagicalSecretSpellIds({
       ...character,
       charClass: dnd5eClassDefinition('bard')!.name,
@@ -1381,22 +1447,31 @@ export function dnd5eFreeSpellCastSource(
 }
 
 export function dnd5eAvailableCombatSpells(character: Character): readonly Dnd5eSrdSpellDefinition[] {
-  const definition = dnd5eClassDefinitionForCharacter(character)
-  if (!definition?.spellcasting) return []
-  const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, character.level - 1))]
-  const highestLevel = definition.spellcasting.kind === 'pact'
-    ? dnd5ePactSlotLevel(character.level)
+  const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id
+  const source = primaryClassId ? dnd5eEffectiveSpellcastingSource(character, primaryClassId) : undefined
+  if (!source) return []
+  const progression = dnd5eClassProgression(source.definition)[Math.max(0, Math.min(19, source.classLevel - 1))]
+  const highestLevel = source.definition.spellcasting?.kind === 'pact'
+    ? dnd5ePactSlotLevel(source.classLevel)
     : progression.spellSlots.length
   return DND5E_SRD_COMBAT_SPELLS.filter((spell) =>
-    spell.classes.includes(definition.id) && (spell.level === 0 ? (progression.cantripsKnown ?? 0) > 0 : spell.level <= highestLevel),
+    spell.classes.includes(source.spellListClassId) &&
+    (spell.level === 0 ? (progression.cantripsKnown ?? 0) > 0 : spell.level <= highestLevel),
   )
 }
 
 export function dnd5eCombatSpellSelectionLimits(character: Character): { cantrips: number; spells: number } {
-  const definition = dnd5eClassDefinitionForCharacter(character)
-  if (!definition?.spellcasting) return { cantrips: 0, spells: 0 }
-  const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, character.level - 1))]
-  let spells = definition.spellcasting.kind === 'full-known' || definition.spellcasting.kind === 'half-known' || definition.spellcasting.kind === 'pact'
+  const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id
+  const source = primaryClassId ? dnd5eEffectiveSpellcastingSource(character, primaryClassId) : undefined
+  if (!source) return { cantrips: 0, spells: 0 }
+  const definition = source.definition
+  const spellcasting = definition.spellcasting
+  if (!spellcasting) return { cantrips: 0, spells: 0 }
+  const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, source.classLevel - 1))]
+  let spells = spellcasting.kind === 'full-known' ||
+    spellcasting.kind === 'half-known' ||
+    spellcasting.kind === 'one-third-known' ||
+    spellcasting.kind === 'pact'
     ? progression.spellsKnown ?? 0
     : dnd5ePreparedSpellCount(character) ?? 0
   // 吟游诗人表中的 Spells Known 已包含 10、14、18 级各两项魔法奥秘，

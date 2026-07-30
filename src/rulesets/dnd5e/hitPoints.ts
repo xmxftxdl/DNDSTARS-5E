@@ -2,6 +2,11 @@ import type { Character } from '../../types/character'
 import { dnd5eClassDefinition } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 import { dnd5ePluginRaceDefinition } from './pluginApi'
+import {
+  dnd5eEffectiveHitPointMaximum,
+  normalizeDnd5eHitPointMaximumReductionLedger,
+  rebaseDnd5eHitPointMaximumReductionLedger,
+} from './hitPointMaximumReductions'
 
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
 
@@ -290,11 +295,22 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
   const level = clampLevel(character.level)
   const rule = dnd5eClassHitPointRule(character)
   const mode = dnd5eHitPointMaximumMode(character)
-  const previousMaximum = Math.max(1, Math.floor(Number(character.maxHp) || 1))
+  const storedReductionLedger =
+    normalizeDnd5eHitPointMaximumReductionLedger(
+      character.dnd5eCombatState?.hitPointMaximumReductionLedger,
+    )
+  const previousMaximum = storedReductionLedger
+    ? Math.max(0, Math.floor(Number(character.maxHp) || 0))
+    : Math.max(1, Math.floor(Number(character.maxHp) || 1))
   const hitPointRolls = mode === 'manual' ? dnd5eManualHitPointRolls({ ...character, level }) : character.hitPointRolls
-  const maxHp = mode === 'fixed'
+  const baseMaxHp = mode === 'fixed'
     ? dnd5eFixedMaxHp({ ...character, level })
     : dnd5eManualMaxHp({ ...character, level }, hitPointRolls)
+  const reductionLedger = rebaseDnd5eHitPointMaximumReductionLedger(
+    storedReductionLedger,
+    baseMaxHp,
+  )
+  const maxHp = dnd5eEffectiveHitPointMaximum(baseMaxHp, reductionLedger)
   const previousCurrent = Math.max(0, Math.floor(Number(character.currentHp) || 0))
   const currentHp = previousCurrent > 0 && maxHp > previousMaximum
     ? Math.min(maxHp, previousCurrent + (maxHp - previousMaximum))
@@ -309,6 +325,12 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
     hitPointDice: syncHitPointDice(character),
     hitPointMaximumMode: mode,
     hitPointRolls,
+    dnd5eCombatState: character.dnd5eCombatState
+      ? {
+          ...character.dnd5eCombatState,
+          hitPointMaximumReductionLedger: reductionLedger,
+        }
+      : undefined,
   }
 }
 

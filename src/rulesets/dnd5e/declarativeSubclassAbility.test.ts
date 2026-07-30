@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { restoreClassResources, syncCharacterClassResources } from '../../lib/classResources'
 import type { Character } from '../../types/character'
 import {
@@ -34,6 +34,11 @@ import {
   dnd5ePluginSubclassDefinition,
   registerDnd5eRulesPlugin,
 } from './pluginApi'
+
+const LOCAL_BATTLE_MASTER_DEFINITION_PATH = new URL(
+  '../../../local-content/phb-2014/subclasses/battle-master/subclasses.json',
+  import.meta.url,
+)
 
 const ABILITIES = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
 
@@ -670,12 +675,13 @@ describe('DeclarativeSubclassAbilityV1', () => {
     } finally { dispose() }
   })
 
-  it('loads the local Battle Master JSON with selected maneuvers, exclusivity and active Rally', () => {
+  it.runIf(existsSync(LOCAL_BATTLE_MASTER_DEFINITION_PATH))(
+    'loads the private local subclass JSON with selected maneuvers, exclusivity and active Rally',
+    () => {
     const pluginId = 'local.doco.battle-master-test'
-    const definition = JSON.parse(readFileSync(new URL(
-      '../../../examples/battle-master-local-collection/subclasses.json',
-      import.meta.url,
-    ), 'utf8'))[0] as DeclarativeSubclassDefinitionV1
+    const definition = JSON.parse(
+      readFileSync(LOCAL_BATTLE_MASTER_DEFINITION_PATH, 'utf8'),
+    )[0] as DeclarativeSubclassDefinitionV1
     const dispose = registerDnd5eRulesPlugin({
       manifest: {
         id: pluginId,
@@ -814,7 +820,8 @@ describe('DeclarativeSubclassAbilityV1', () => {
       expect(rally.state.combatants.hero.classResources[resourceId].current).toBe(4)
       expect(rally.state.combatants.hero.turn.bonusActionAvailable).toBe(false)
     } finally { dispose() }
-  })
+    },
+  )
 
   it('uses the actor as the authoritative target for self-targeted after-hit abilities', () => {
     const pluginId = 'com.example.on-hit-self'

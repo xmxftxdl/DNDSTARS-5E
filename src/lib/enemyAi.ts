@@ -13,6 +13,10 @@ import {
   tokenOccupiedCellsAt,
   type GridCell,
 } from './gridCombat'
+import {
+  getDnd5eSrdMonster,
+  getDnd5eSrdMonsterBySlug,
+} from '../rulesets/dnd5e/monsters'
 
 const MOVE_CELLS_PER_TURN = 6
 const MELEE_RANGE_CELLS = 1
@@ -57,6 +61,12 @@ export interface EnemyTurnResult {
   attacked: boolean
   attackerTokenId?: string
   targetTokenId?: string
+  /**
+   * Concrete target for each runtime attack occurrence. Multiattack planners
+   * may distribute siblings across several targets, while legacy callers use
+   * the primary target as a one-entry fallback.
+   */
+  attackTargetTokenIds?: readonly string[]
   actionIndex?: number
   attack?: EnemyAttackRoll
   /** 物理攻击默认命中；范围法术需敏捷豁免 */
@@ -221,6 +231,7 @@ function buildEnemyAttack(
     attacked: true,
     attackerTokenId: enemy.id,
     targetTokenId: target.id,
+    attackTargetTokenIds: [target.id],
     actionIndex: selectedAction?.index,
     attack: {
       values,
@@ -249,14 +260,88 @@ export function buildSelectedEnemyAttack(
   enemy: Token,
   target: Token,
   actionIndex: number,
+  attackTargetTokenIds?: readonly string[],
 ): EnemyTurnResult | undefined {
   const action = enemy.poolId ? getEnemyStatBlock(enemy.poolId)?.actions[actionIndex] : undefined
+  const occurrenceTargetTokenIds = attackTargetTokenIds?.length
+    ? [...attackTargetTokenIds]
+    : [target.id]
+  if (
+    action?.kind === 'multiattack' &&
+    action.automation === 'headless' &&
+    enemy.poolId
+  ) {
+    const monster =
+      getDnd5eSrdMonster(enemy.poolId) ??
+      getDnd5eSrdMonsterBySlug(enemy.poolId)
+    const parent = monster?.actions[actionIndex]
+    const firstWeaponId = parent?.kind === 'multiattack'
+      ? parent.sequence?.find((actionId) =>
+          monster?.actions.some((candidate) =>
+            candidate.id === actionId &&
+            candidate.attack?.damage.some((damage) => damage.count > 0))) ??
+        parent.randomRepeat?.actionId
+      : undefined
+    const childIndex = firstWeaponId
+      ? monster?.actions.findIndex((candidate) => candidate.id === firstWeaponId)
+      : -1
+    const child = childIndex != null && childIndex >= 0
+      ? getEnemyStatBlock(enemy.poolId)?.actions[childIndex]
+      : undefined
+    if (
+      childIndex != null &&
+      childIndex >= 0 &&
+      child?.damageDice &&
+      (child.kind === 'melee' || child.kind === 'ranged')
+    ) {
+      const result = buildEnemyAttack(
+        enemy,
+        target,
+        false,
+        undefined,
+        child.kind,
+        childIndex,
+      )
+      return {
+        ...result,
+        attackTargetTokenIds: occurrenceTargetTokenIds,
+        actionIndex,
+        attack: result.attack
+          ? {
+              ...result.attack,
+              label: `${action.name}·${result.attack.label}`,
+            }
+          : result.attack,
+        message: `${enemy.label} 使用${action.name}攻击 ${target.label}。`,
+      }
+    }
+    // Some valid composite parents consist entirely of special children
+    // (for example Kraken's three Fling variant). The concrete Headless
+    // transaction does not need a legacy damage-roll preview, but it still
+    // needs the parent action index and occurrence targets to survive the
+    // transport layer.
+    const result: EnemyTurnResult = {
+      moved: false,
+      attacked: true,
+      attackerTokenId: enemy.id,
+      targetTokenId: target.id,
+      attackTargetTokenIds: occurrenceTargetTokenIds,
+      actionIndex,
+      message: `${enemy.label} 使用${action.name}攻击 ${target.label}。`,
+    }
+    const targetCharacterId = resolveTokenCharacterId(target)
+    if (targetCharacterId) result.targetCharacterId = targetCharacterId
+    return result
+  }
   if (
     !action?.damageDice ||
     (action.kind !== 'melee' && action.kind !== 'ranged') ||
     action.automation !== 'headless'
   ) return undefined
-  return buildEnemyAttack(enemy, target, false, undefined, action.kind, actionIndex)
+  return {
+    ...buildEnemyAttack(enemy, target, false, undefined, action.kind, actionIndex),
+    attackTargetTokenIds: occurrenceTargetTokenIds,
+  }
 }
 
 /**
@@ -278,6 +363,7 @@ function buildBreathAttack(
     attacked: true,
     attackerTokenId: enemy.id,
     targetTokenId: target.id,
+    attackTargetTokenIds: [target.id],
     actionIndex: enemy.poolId ? getEnemyStatBlock(enemy.poolId)?.actions.indexOf(breath) : undefined,
     damageType: 'aoe',
     saveDC: dc,

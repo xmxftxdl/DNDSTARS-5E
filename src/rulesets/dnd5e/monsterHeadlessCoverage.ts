@@ -1,5 +1,6 @@
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
+import { dnd5eMonsterMultiattackChildIsCompositeSupported } from './monsterCompositeMultiattack'
 import {
   DND5E_SRD_MONSTERS,
   type Dnd5eMonsterAction,
@@ -21,6 +22,7 @@ export type Dnd5eMonsterActionSection = typeof DND5E_MONSTER_ACTION_SECTIONS[num
 export type Dnd5eMonsterActionStructure =
   | 'weapon'
   | 'multiattack'
+  | 'unparsed-multiattack'
   | 'rule'
   | 'reference'
   | 'none'
@@ -108,6 +110,12 @@ export interface Dnd5eMonsterHeadlessCoverageReport {
         blockedByChild: number
         invalid: number
       }
+      multiattack: {
+        total: number
+        headless: number
+        incomplete: number
+        unparsed: number
+      }
     }
   }
   spells: {
@@ -145,6 +153,10 @@ function actionStructure(action: Dnd5eMonsterAction): Dnd5eMonsterActionStructur
   if (action.referencedActionId) return 'reference'
   if (action.kind === 'weapon-attack') return 'weapon'
   if (action.kind === 'multiattack') return 'multiattack'
+  if (
+    action.id.toLowerCase() === 'multiattack' ||
+    /^(?:multiattack|多重攻击)$/i.test(action.name.trim())
+  ) return 'unparsed-multiattack'
   if (action.rule) return 'rule'
   return 'none'
 }
@@ -159,7 +171,10 @@ function multiattackBlockers(
   if (action.kind !== 'multiattack') return { childIds: [], reasons: [] }
   const childIds: string[] = []
   const reasons: Dnd5eMonsterActionCoverageReason[] = []
-  for (const childId of action.sequence ?? []) {
+  const referencedChildIds = action.randomRepeat
+    ? [action.randomRepeat.actionId]
+    : action.sequence ?? []
+  for (const childId of referencedChildIds) {
     const child = monster.actions.find((candidate) => candidate.id === childId)
     if (!child) {
       childIds.push(childId)
@@ -171,8 +186,7 @@ function multiattackBlockers(
       reasons.push('multiattack-child-not-headless')
       continue
     }
-    const supportedSpecial = child.kind === 'other' && !!child.rule
-    if (child.kind !== 'weapon-attack' && !supportedSpecial) {
+    if (!dnd5eMonsterMultiattackChildIsCompositeSupported(child)) {
       childIds.push(childId)
       reasons.push('multiattack-child-unsupported')
     }
@@ -289,6 +303,12 @@ export function auditDnd5eMonsterHeadlessCoverage(
   }))
 
   const fullSpells = countWhere(spellOccurrences, (row) => row.compatibility === 'full')
+  const multiattackRows = actionRows.filter((row) =>
+    row.structure === 'multiattack' || row.structure === 'unparsed-multiattack')
+  const headlessMultiattacks = countWhere(
+    multiattackRows,
+    (row) => row.effectiveAutomation === 'headless',
+  )
   return {
     schemaVersion: 1,
     monsterCount: monsters.length,
@@ -307,6 +327,15 @@ export function auditDnd5eMonsterHeadlessCoverage(
           unstructured: countWhere(actionRows, (row) => row.effectiveAutomation === 'unstructured'),
           blockedByChild: countWhere(actionRows, (row) => row.effectiveAutomation === 'blocked-by-child'),
           invalid: countWhere(actionRows, (row) => row.effectiveAutomation === 'invalid'),
+        },
+        multiattack: {
+          total: multiattackRows.length,
+          headless: headlessMultiattacks,
+          incomplete: multiattackRows.length - headlessMultiattacks,
+          unparsed: countWhere(
+            multiattackRows,
+            (row) => row.structure === 'unparsed-multiattack',
+          ),
         },
       },
     },

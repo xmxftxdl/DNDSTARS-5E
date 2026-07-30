@@ -126,7 +126,13 @@ describe('SRD 5.1 monster catalog', () => {
         frightfulPresenceImmunityRounds: 14_400,
       },
     })
-    expect(adultBlackDragon.actions.find((action) => action.id === 'multiattack')?.automation).toBe('headless')
+    expect(adultBlackDragon.actions.find((action) => action.id === 'multiattack')?.automation)
+      .toBe('headless')
+    expect(adultBlackDragon.actions.find((action) =>
+      action.id === 'multiattack-weapons-only')).toMatchObject({
+      automation: 'headless',
+      sequence: ['bite', 'claw', 'claw'],
+    })
 
     const adultBlueDragon = getDnd5eSrdMonster('srd-5.1:adult-blue-dragon')!
     expect(adultBlueDragon.actions.find((action) => action.id === 'lightning-breath')).toMatchObject({
@@ -145,7 +151,13 @@ describe('SRD 5.1 monster catalog', () => {
     expect(adultBlueDragon.legendaryActions?.find((action) => action.id === 'detect')?.automation).toBe('headless')
 
     const adultBrassDragon = getDnd5eSrdMonster('srd-5.1:adult-brass-dragon')!
-    expect(adultBrassDragon.actions.find((action) => action.id === 'multiattack')?.automation).toBe('headless')
+    expect(adultBrassDragon.actions.find((action) => action.id === 'multiattack')?.automation)
+      .toBe('headless')
+    expect(adultBrassDragon.actions.find((action) =>
+      action.id === 'multiattack-weapons-only')).toMatchObject({
+      automation: 'headless',
+      sequence: ['bite', 'claw', 'claw'],
+    })
     expect(adultBrassDragon.actions.find((action) => action.id === 'frightful-presence')).toMatchObject({
       automation: 'headless', rule: { ability: 'wis', dc: 16 },
     })
@@ -455,7 +467,14 @@ describe('SRD 5.1 monster catalog', () => {
     })
     expect(dragonTurtle.actions.find((action) => action.id === 'tail')).toMatchObject({
       kind: 'weapon-attack',
-      automation: 'dm-adjudication',
+      automation: 'headless',
+      attack: {
+        onHitEffects: [{
+          kind: 'forced-movement',
+          maximumDistanceFeet: 10,
+          conditionOnFailedResistance: 'prone',
+        }],
+      },
     })
     expect(dragonTurtle.actions.find((action) => action.id === 'steam-breath')).toMatchObject({
       automation: 'headless',
@@ -484,11 +503,19 @@ describe('SRD 5.1 monster catalog', () => {
         monsterId: 'srd-5.1:unicorn',
         baseActionId: 'hooves',
         legendaryActionId: 'legendary-hooves',
+        automation: 'headless',
       },
       {
         monsterId: 'srd-5.1:vampire-vampire',
         baseActionId: 'unarmed-strike',
         legendaryActionId: 'legendary-unarmed-strike',
+        automation: 'dm-adjudication',
+      },
+      {
+        monsterId: 'srd-5.1:lich',
+        baseActionId: 'paralyzing-touch',
+        legendaryActionId: 'paralyzing-touch-costs-2-actions',
+        automation: 'headless',
       },
     ] as const) {
       const monster = getDnd5eSrdMonster(expected.monsterId)!
@@ -496,6 +523,7 @@ describe('SRD 5.1 monster catalog', () => {
       expect(monster.legendaryActions).toContainEqual(expect.objectContaining({
         id: expected.legendaryActionId,
         referencedActionId: expected.baseActionId,
+        automation: expected.automation,
       }))
       expect(monster.legendaryActions?.some((action) =>
         action.id === expected.baseActionId)).toBe(false)
@@ -891,7 +919,7 @@ describe('SRD 5.1 monster catalog', () => {
 
     for (const slug of ['purple-worm', 'wyvern'] as const) {
       expect(getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
-        .find((action) => action.id === 'multiattack')?.automation).toBe('dm-adjudication')
+        .find((action) => action.id === 'multiattack')?.automation).toBe('headless')
     }
   })
 
@@ -1285,12 +1313,29 @@ describe('SRD 5.1 monster catalog', () => {
     })
   })
 
-  it('never marks a generated weapon attack headless after dropping a damage segment', () => {
-    for (const slug of ['djinni', 'pit-fiend']) {
-      const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
-      const suspect = monster.actions.filter((action) => action.kind === 'weapon-attack')
-      expect(suspect.some((action) => action.automation === 'dm-adjudication')).toBe(true)
-    }
+  it('keeps every reviewed damage segment before marking generated attacks Headless', () => {
+    expect(getDnd5eSrdMonster('srd-5.1:djinni')?.actions
+      .find((action) => action.id === 'scimitar')).toMatchObject({
+      automation: 'headless',
+      attack: {
+        damage: [
+          { count: 2, sides: 6, bonus: 5, type: 'slashing' },
+          { count: 1, sides: 6, bonus: 0, type: 'lightning' },
+        ],
+      },
+    })
+    expect(getDnd5eSrdMonster('srd-5.1:pit-fiend')?.actions
+      .find((action) => action.id === 'bite')).toMatchObject({
+      automation: 'headless',
+      attack: {
+        damage: [{ count: 4, sides: 6, bonus: 8, type: 'piercing' }],
+        onHitEffects: [{
+          id: 'bite-poison',
+          kind: 'persistent-effect',
+          standardCondition: 'poisoned',
+        }],
+      },
+    })
   })
 
   it('supports Chinese, English and type search plus CR proficiency', () => {
@@ -1299,6 +1344,7 @@ describe('SRD 5.1 monster catalog', () => {
     expect(searchDnd5eSrdMonsters('亡灵').map((monster) => monster.slug)).toEqual(expect.arrayContaining(['skeleton', 'zombie', 'lich']))
     expect(dnd5eMonsterProficiencyBonus('1/8')).toBe(2)
     expect(dnd5eMonsterProficiencyBonus('17')).toBe(6)
+    expect(dnd5eMonsterProficiencyBonus('23')).toBe(7)
   })
 
   it('drives the visible map pool and the compatibility detail block from the same SRD source', () => {
@@ -1584,7 +1630,7 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
     expect(result.events.filter((event) => event.type === 'turn-resource-spent')).toHaveLength(1)
   })
 
-  it('keeps the adult black dragon weapon portion of Multiattack Headless when Frightful Presence is optional', () => {
+  it('uses an explicit weapon-only sibling when Frightful Presence is declined', () => {
     const state = startDnd5eHeadlessCombat('dragon-multiattack', [
       combatant('dragon', 20, { statBlockId: 'srd-5.1:adult-black-dragon' }),
       combatant('hero', 10, { currentHp: 100, maxHp: 100 }),
@@ -1592,7 +1638,7 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
     const result = resolveDnd5eHeadlessAction(state, {
       type: 'monster-action',
       actorId: 'dragon',
-      actionId: 'multiattack',
+      actionId: 'multiattack-weapons-only',
       rolls: [
         { targetId: 'hero', d20: 10, damageRolls: [[5, 5], [4]] },
         { targetId: 'hero', d20: 10, damageRolls: [[3, 3]] },

@@ -30,6 +30,11 @@ import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eWearingUnproficientArmor } from './equipment'
 import { resolveDnd5eDamageDefenses } from './damageDefenses'
 import { dnd5eLimitedMagicImmunityNegatesSpell } from './monsterGenericAbilities'
+import {
+  dnd5eSpellComponentCheck,
+  dnd5eSpellComponentsAvailable,
+  type Dnd5eSpellComponentCheck,
+} from './spellComponents'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -54,11 +59,7 @@ export type Dnd5ePluginSpellRejectReason =
   | 'combatant-missing'
   | 'invalid-dice'
 
-export interface Dnd5ePluginSpellComponentCheck {
-  verbal: 'not-required' | 'available'
-  somatic: 'not-required' | 'available'
-  material: 'not-required' | 'focus-or-pouch' | 'unsupported-costly-material'
-}
+export type Dnd5ePluginSpellComponentCheck = Dnd5eSpellComponentCheck
 
 export interface PreparedDnd5ePluginSpellCast {
   action: SharedPlayerActionState
@@ -173,8 +174,8 @@ export function prepareDnd5ePluginSpellCast(input: {
   if (castingTime === 'action' && input.turnEconomy && input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
   if (castingTime === 'bonus-action' && input.turnEconomy && input.turnEconomy.bonusAction.current < 1) return { ok: false, reason: 'bonus-action-unavailable' }
 
-  const componentCheck = dnd5ePluginSpellComponentCheck(actor, spell)
-  if (componentCheck.material === 'unsupported-costly-material') return { ok: false, reason: 'component-unavailable' }
+  const componentCheck = dnd5ePluginSpellComponentCheck(actor, spell, castingClassId)
+  if (!dnd5eSpellComponentsAvailable(componentCheck)) return { ok: false, reason: 'component-unavailable' }
 
   const requestedSlot = Math.floor(payload.slotLevel)
   const slotLevel = spell.level === 0
@@ -454,17 +455,18 @@ function dnd5ePluginSpellConditionLifecycle(
   return {}
 }
 
-export function dnd5ePluginSpellComponentCheck(actor: Character, spell: RegisteredDnd5ePluginSpell): Dnd5ePluginSpellComponentCheck {
-  const costly = (spell.components.materialCostGp ?? 0) > 0 || spell.components.materialConsumed === true
-  const hasFocusOrPouch = actor.dnd5eInventory?.entries.some((entry) => {
-    const id = entry.templateId.toLowerCase()
-    return id.includes('component-pouch') || id.includes('arcane-focus') || id.includes('druidic-focus') || id.includes('holy-symbol')
-  }) === true
-  return {
-    verbal: spell.components.verbal ? 'available' : 'not-required',
-    somatic: spell.components.somatic ? 'available' : 'not-required',
-    material: !spell.components.material ? 'not-required' : costly || !hasFocusOrPouch ? 'unsupported-costly-material' : 'focus-or-pouch',
-  }
+export function dnd5ePluginSpellComponentCheck(
+  actor: Character,
+  spell: RegisteredDnd5ePluginSpell,
+  classId?: Dnd5eClassId,
+): Dnd5ePluginSpellComponentCheck {
+  return dnd5eSpellComponentCheck(actor, {
+    verbal: spell.components.verbal,
+    somatic: spell.components.somatic,
+    material: spell.components.material,
+    costlyMaterial: (spell.components.materialCostGp ?? 0) > 0,
+    consumedMaterial: spell.components.materialConsumed === true,
+  }, classId)
 }
 
 function invalidDice(prepared: PreparedDnd5ePluginSpellCast, transaction: CombatTransaction, now: number): Dnd5ePluginSpellResolution {

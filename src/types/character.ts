@@ -1,6 +1,7 @@
 import type { AbilityKey } from '../lib/dnd'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
 import type { DND5E_COMBAT_STATE_SCHEMA_VERSION } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
 import type { CharacterEquipment } from './equipment'
 import type { Dnd5eInventory } from './inventory'
 
@@ -155,6 +156,8 @@ export interface Character {
     rageSustainedThisTurn?: boolean
     relentlessRageDc?: number
     relentlessRagePendingDc?: number
+    /** 狂战士“反击”的一次性权威触发；由造成伤害的 Headless 事务写入。 */
+    berserkerRetaliationTrigger?: { sourceId: string; round: number }
     undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
     monsterOnHitSavePending?: {
       sourceId: string
@@ -166,6 +169,8 @@ export interface Character {
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
+    /** Recoverable maximum-HP reductions applied by authoritative combat. */
+    hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
@@ -227,6 +232,20 @@ export interface Character {
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
     battleMasterDroppedWeaponIds?: string[]
+    /** Weapon IDs bonded by the audited Eldritch Knight protocol (maximum two). */
+    eldritchKnightBondedWeaponIds?: string[]
+    /** Action-cantrip entitlement for the level-7 bonus-action weapon attack. */
+    eldritchKnightWarMagicCantripTurnKey?: string
+    /** Action-spell entitlement for Improved War Magic. */
+    eldritchKnightWarMagicTurnKey?: string
+    /** Source fighter IDs and the source-turn boundary after which the effect expires. */
+    eldritchStrikeBySource?: Record<string, { appliedTurnKey: string; sourceTurnsRemaining: number }>
+    /** Action Surge has opened the level-15 teleport window this turn. */
+    eldritchKnightArcaneChargeTurnKey?: string
+    eldritchKnightArcaneChargeUsedTurnKey?: string
+    /** 14级狼图腾：本回合近战命中后可选择击倒的目标。 */
+    totemWarriorWolfAttunementTargetIds?: string[]
+    totemWarriorWolfAttunementTurnKey?: string
     /** 成功躲藏后的检定结果；进行攻击时由 Headless 清除。 */
     hiddenCheckTotal?: number
     /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */
@@ -254,6 +273,8 @@ export interface Character {
     draconicPresenceImmunityRoundsBySource?: Record<string, number>
     /** 怪物骇人威仪豁免后，对该来源的 24 小时免疫。 */
     monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
+    /** 怪物动作免疫，键由来源动作或图鉴动作族稳定派生。 */
+    monsterActionImmunityRoundsByKey?: Record<string, number>
     hurlThroughHellReady?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number

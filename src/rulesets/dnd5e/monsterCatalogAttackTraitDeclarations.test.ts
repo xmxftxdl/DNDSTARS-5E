@@ -5,6 +5,33 @@ import {
   type Dnd5eMonsterTrait,
 } from './monsters'
 
+const TRAIT_SEMANTICS = {
+  assassinate: {
+    name: /^(?:Assassinate|刺杀)$/i,
+    description: [
+      /(?:first turn|第一个回合)/i,
+      /(?:advantage|优势)/i,
+      /(?:critical hit|重击)/i,
+    ],
+  },
+  'sneak-attack': {
+    name: /(?:Sneak Attack|偷袭)/i,
+    description: [
+      /(?:weapon attack|武器攻击)/i,
+      /(?:advantage|优势)/i,
+      /(?:extra|额外)/i,
+    ],
+  },
+  'martial-advantage': {
+    name: /(?:Martial Advantage|武技优势)/i,
+    description: [
+      /(?:weapon attack|武器攻击)/i,
+      /(?:5 ft|5 尺)/i,
+      /(?:extra|额外)/i,
+    ],
+  },
+} as const
+
 function srdMonster(slug: string): Dnd5eMonsterStatBlock {
   const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)
   if (!monster) throw new Error(`missing SRD monster: ${slug}`)
@@ -13,7 +40,7 @@ function srdMonster(slug: string): Dnd5eMonsterStatBlock {
 
 function headlessTrait(
   slug: string,
-  kind: string,
+  kind: keyof typeof TRAIT_SEMANTICS,
 ): Dnd5eMonsterTrait {
   const monster = srdMonster(slug)
   const traits = monster.traits.filter(
@@ -23,7 +50,14 @@ function headlessTrait(
   )
 
   expect(traits, `${monster.id}:${kind}`).toHaveLength(1)
-  return traits[0]
+  const trait = traits[0]
+  const semantics = TRAIT_SEMANTICS[kind]
+  expect(trait.name, `${monster.id}:${kind}:name`).toMatch(semantics.name)
+  for (const pattern of semantics.description) {
+    expect(trait.description, `${monster.id}:${kind}:description:${pattern.source}`)
+      .toMatch(pattern)
+  }
+  return trait
 }
 
 describe('SRD catalog precision attack trait declarations', () => {
@@ -49,6 +83,12 @@ describe('SRD catalog precision attack trait declarations', () => {
         type: 'inherit-primary',
       },
     })
+
+    const evasion = srdMonster('assassin').traits.find(
+      (trait) => /^(?:Evasion|闪避)$/i.test(trait.name),
+    )
+    expect(evasion).toMatchObject({ automation: 'dm-adjudication' })
+    expect(evasion?.rule).toBeUndefined()
   })
 
   it('structures the Spy 2d6 Sneak Attack trait', () => {

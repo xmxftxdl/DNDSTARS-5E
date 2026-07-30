@@ -1,6 +1,10 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { isMovementLocked } from '../../lib/combatStatus'
-import { snapTokenToGridCenter } from '../../lib/gridCombat'
+import {
+  resolveFreeDropCell,
+  resolveTokenDropPosition,
+  snapTokenToGridCenter,
+} from '../../lib/gridCombat'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -33,6 +37,21 @@ export type Dnd5ePlayerMoveRejectReason =
   | 'insufficient-movement'
   | 'combatant-missing'
 
+export type Dnd5eExplorationMoveRejectReason =
+  | 'invalid-action'
+  | 'invalid-actor'
+  | 'movement-locked'
+  | 'movement-blocked'
+
+export interface PreparedDnd5eExplorationMove {
+  actor: Character
+  actorToken: Token
+  to: { x: number; y: number }
+  toElevationFeet: number
+  path: Array<{ x: number; y: number }>
+  pathElevationsFeet: number[]
+}
+
 export interface Dnd5eMapMovementTrace {
   tokenId: string
   to: { x: number; y: number }
@@ -60,6 +79,85 @@ export interface PreparedDnd5ePlayerMove {
   standPreventedBy?: 'hideous-laughter'
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
+}
+
+/**
+ * Validates free exploration movement without creating a combat turn or
+ * spending turn economy. The DM Host canonicalizes the destination and path,
+ * so a player cannot bypass walls, occupied cells, terrain steps, ownership,
+ * or movement-locking conditions by forging the client request.
+ */
+export function prepareDnd5eExplorationMove(input: {
+  action: SharedPlayerActionState
+  map: BattleMap
+  characters: readonly Character[]
+}): { ok: true; prepared: PreparedDnd5eExplorationMove } | {
+  ok: false
+  reason: Dnd5eExplorationMoveRejectReason
+} {
+  const { action } = input
+  if (
+    action.type !== 'move-token' ||
+    action.combatId != null ||
+    !action.targetPosition ||
+    !Number.isFinite(action.targetPosition.x) ||
+    !Number.isFinite(action.targetPosition.y)
+  ) return { ok: false, reason: 'invalid-action' }
+
+  const actor = input.characters.find((character) => character.id === action.characterId)
+  const actorToken = input.map.tokens.find((token) =>
+    token.id === action.actorTokenId &&
+    token.type === 'player' &&
+    token.characterId === action.characterId,
+  )
+  if (
+    !actor ||
+    actor.rulesetId !== 'dnd5e-2014-srd-5.1' ||
+    actor.currentHp <= 0 ||
+    !actorToken
+  ) return { ok: false, reason: 'invalid-actor' }
+  if (isMovementLocked(actor.conditions)) return { ok: false, reason: 'movement-locked' }
+
+  const snapped = resolveTokenDropPosition(
+    action.targetPosition.x,
+    action.targetPosition.y,
+    actorToken,
+    input.map,
+  )
+  const to = resolveFreeDropCell(snapped.x, snapped.y, actorToken.id, input.map)
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
+  const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
+  const heightAboveGround = Math.max(0, fromElevationFeet - fromTerrainElevationFeet)
+  const targetTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, to)
+  const toElevationFeet = targetTerrainElevationFeet + heightAboveGround
+  const path = findMapGeometryPath({
+    map: {
+      ...input.map,
+      tokens: input.map.tokens.filter((token) => token.id !== actorToken.id),
+    },
+    geometry,
+    token: actorToken,
+    to,
+    canClimb: false,
+    canSwim: false,
+    canFly: heightAboveGround > 0,
+    targetElevationFeet: toElevationFeet,
+    maximumTerrainStepFeet: 10,
+  })
+  if (!path) return { ok: false, reason: 'movement-blocked' }
+
+  return {
+    ok: true,
+    prepared: {
+      actor,
+      actorToken,
+      to,
+      toElevationFeet,
+      path: path.points,
+      pathElevationsFeet: path.elevationsFeet,
+    },
+  }
 }
 
 export function prepareDnd5ePlayerMove(input: {

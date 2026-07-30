@@ -97,6 +97,26 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode({ ...barbarian, exhaustionLevel: 3 }, 'str')).toBe('normal')
   })
 
+  it('grants Mindless Rage immunity only to a raging level-6 Berserker', () => {
+    const berserker = creature({
+      classId: 'barbarian',
+      subclassId: 'berserker',
+      level: 6,
+      classState: { raging: true },
+    })
+    expect(dnd5eConditionImmuneFromSource(berserker, 'charmed')).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(berserker, '恐慌')).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(berserker, 'poisoned')).toBe(false)
+    expect(dnd5eConditionImmuneFromSource({
+      ...berserker,
+      classState: {},
+    }, 'charmed')).toBe(false)
+    expect(dnd5eConditionImmuneFromSource({
+      ...berserker,
+      level: 5,
+    }, 'frightened')).toBe(false)
+  })
+
   it('grants a dodging creature advantage on Dexterity saving throws', () => {
     const dodging = creature({ classState: { dodgingTurnKey: 'combat:2:hero' } })
     expect(dnd5eSavingThrowMode(dodging, 'dex')).toBe('advantage')

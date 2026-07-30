@@ -62,6 +62,266 @@ describe('SRD monster map action adapter', () => {
     expect(swimmingAttack.prepared.attackModes[0]).toBe('normal')
   })
 
+  it('keeps a mixed Roper Multiattack selected by either the parent or Tendril child', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:roper')!
+    const roper = token({
+      id: 'roper',
+      label: monster.name,
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: hero.name,
+      x: 10,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'roper-composite-map',
+      name: 'Roper composite',
+      width: 200,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [roper, heroToken],
+    }
+    const initiativeOrder = [
+      { tokenId: roper.id, label: roper.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const parentIndex = monster.actions.findIndex((action) => action.id === 'multiattack')
+    const childIndex = monster.actions.findIndex((action) => action.id === 'tendril')
+    for (const actionIndex of [parentIndex, childIndex]) {
+      const prepared = prepareDnd5eMonsterAttack({
+        combatId: `roper-composite-${actionIndex}`,
+        map,
+        characters: [hero],
+        initiativeOrder,
+        actorTokenId: roper.id,
+        targetTokenId: heroToken.id,
+        actionIndex,
+      })
+      expect(prepared.ok, `action index ${actionIndex}`).toBe(true)
+      if (!prepared.ok) continue
+      expect(prepared.prepared.action.id).toBe('multiattack')
+      expect(prepared.prepared.compositeRuntime?.children.map((child) => child.kind))
+        .toEqual(['weapon', 'weapon', 'weapon', 'weapon', 'special', 'weapon'])
+      expect(prepared.prepared.attacks.map((attack) => attack.sequenceIndex))
+        .toEqual([0, 1, 2, 3, 5])
+    }
+  })
+
+  it('prepares and submits one stable target per Tyrannosaurus occurrence', () => {
+    const heroA = character()
+    const heroB = { ...character(), id: 'hero-b', name: '英雄B', ac: 20 }
+    const monster = getDnd5eSrdMonster('srd-5.1:tyrannosaurus-rex')!
+    const tyrannosaurus = token({
+      id: 'tyrannosaurus',
+      label: monster.name,
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const targetA = token({
+      id: 'hero-a-token',
+      label: heroA.name,
+      x: 10,
+      type: 'player',
+      characterId: heroA.id,
+      hp: heroA.currentHp,
+      maxHp: heroA.maxHp,
+    })
+    const targetB = token({
+      id: 'hero-b-token',
+      label: heroB.name,
+      y: 10,
+      type: 'player',
+      characterId: heroB.id,
+      hp: heroB.currentHp,
+      maxHp: heroB.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'tyrannosaurus-multi-target',
+      name: 'Tyrannosaurus multi-target',
+      width: 200,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [tyrannosaurus, targetA, targetB],
+    }
+    const initiativeOrder = [tyrannosaurus, targetA, targetB].map(
+      (entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      }),
+    )
+    const actionIndex = monster.actions.findIndex((action) =>
+      action.id === 'multiattack')
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'tyrannosaurus-multi-target',
+      map,
+      characters: [heroA, heroB],
+      initiativeOrder,
+      actorTokenId: tyrannosaurus.id,
+      targetTokenId: targetA.id,
+      targetTokenIds: [targetA.id, targetB.id],
+      actionIndex,
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetOccurrences.map((entry) => entry.targetId))
+      .toEqual([targetA.id, targetB.id])
+    expect(prepared.prepared.attacks.map((entry) => ({
+      targetId: entry.targetToken.id,
+      armorClass: entry.targetArmorClass,
+    }))).toEqual([
+      {
+        targetId: targetA.id,
+        armorClass:
+          prepared.prepared.state.combatants[targetA.id].armorClass,
+      },
+      {
+        targetId: targetB.id,
+        armorClass:
+          prepared.prepared.state.combatants[targetB.id].armorClass,
+      },
+    ])
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [
+        { d20: 1, damageRolls: [] },
+        { d20: 1, damageRolls: [] },
+      ],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events.flatMap((event) =>
+      event.type === 'attack-resolved' ? [event.targetId] : [],
+    )).toEqual([targetA.id, targetB.id])
+  })
+
+  it('trims planner targets to the rolled Violet Fungus repeat count', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:violet-fungus')!
+    const fungus = token({
+      id: 'fungus',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const target = token({
+      id: 'hero-token',
+      x: 10,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'violet-fungus-random-repeat',
+      name: 'Violet Fungus random repeat',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [fungus, target],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'violet-fungus-random-repeat',
+      map,
+      characters: [hero],
+      initiativeOrder: [fungus, target].map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      })),
+      actorTokenId: fungus.id,
+      targetTokenId: target.id,
+      // The planner scores the unresolved 1d4 action at its maximum.
+      targetTokenIds: [target.id, target.id, target.id, target.id],
+      actionIndex: monster.actions.findIndex((action) =>
+        action.id === 'multiattack'),
+      randomRepeatRoll: 2,
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetOccurrences).toHaveLength(2)
+    expect(prepared.prepared.attacks.map((entry) => entry.targetToken.id))
+      .toEqual([target.id, target.id])
+  })
+
+  it('retains legacy same-target preparation for Giant Crocodile', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:giant-crocodile')!
+    const crocodile = token({
+      id: 'crocodile',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const target = token({
+      id: 'hero-token',
+      x: 10,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'crocodile-legacy-target',
+      name: 'Crocodile legacy target',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [crocodile, target],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'crocodile-legacy-target',
+      map,
+      characters: [hero],
+      initiativeOrder: [crocodile, target].map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      })),
+      actorTokenId: crocodile.id,
+      targetTokenId: target.id,
+      actionIndex: monster.actions.findIndex((action) =>
+        action.id === 'multiattack'),
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetOccurrences.map((entry) => entry.targetId))
+      .toEqual([target.id, target.id])
+  })
+
   it('keeps Ankheg Bite locked to its linked target and prepares that attack with advantage', () => {
     const grapple = createDnd5eConditionEffect({
       id: 'relation:grapple:ankheg:bite:linked-hero-token',

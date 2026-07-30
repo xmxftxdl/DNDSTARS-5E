@@ -1,7 +1,19 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { buildSelectedEnemyAttack, planEnemyTurn, clearEnemyAiWarnings } from './enemyAi'
+import {
+  buildSelectedEnemyAttack,
+  planEnemyTurn,
+  clearEnemyAiWarnings,
+  type EnemyTurnResult,
+} from './enemyAi'
 import { getEnemyStatBlock } from './enemyStatBlocks'
 import type { BattleMap, Token } from '../store/maps'
+import {
+  DND5E_SRD_MONSTERS,
+  getDnd5eSrdMonster,
+} from '../rulesets/dnd5e/monsters'
+import { dnd5eMonsterActionAutomation } from '../rulesets/dnd5e/monsterSchema'
+import { dnd5eMonsterMultiattackRuntimeActionIds } from '../rulesets/dnd5e/monsterDynamicMultiattack'
+import type { Dnd5eMonsterTurnPlan } from '../rulesets/dnd5e/monsterTurnPlanner'
 
 // 50px/格、无偏移：cell(c,r) 中心 = ((c+0.5)*50, (r+0.5)*50)，相邻格距离 = 1（近战触及）。
 function makeMap(tokens: Token[]): BattleMap {
@@ -28,6 +40,12 @@ function token(partial: Partial<Token> & Pick<Token, 'id' | 'type'>): Token {
     size: 1,
     ...partial,
   } as Token
+}
+
+function transportPlannerResult(
+  plan: Dnd5eMonsterTurnPlan,
+): EnemyTurnResult {
+  return plan
 }
 
 afterEach(() => {
@@ -81,6 +99,7 @@ describe('[T7/AC1] buildEnemyAttack 按怪物真实结构化攻击数据投骰',
     expect(result).toMatchObject({
       attackerTokenId: enemy.id,
       targetTokenId: player.id,
+      attackTargetTokenIds: [player.id],
       actionIndex: rangedIndex,
       attacked: true,
     })
@@ -91,6 +110,171 @@ describe('[T7/AC1] buildEnemyAttack 按怪物真实结构化攻击数据投骰',
     const enemy = token({ id: 'e', type: 'enemy', poolId: 'goblin' })
     const player = token({ id: 'p', type: 'player' })
     expect(buildSelectedEnemyAttack(enemy, player, -1)).toBeUndefined()
+  })
+
+  it('preserves the explicitly selected parent Multiattack action index', () => {
+    for (const poolId of [
+      'srd-5.1:roper',
+      'roper',
+      'srd-5.1:violet-fungus',
+    ]) {
+      const enemy = token({ id: `enemy:${poolId}`, type: 'enemy', poolId })
+      const player = token({ id: 'player', type: 'player', x: 75, y: 25 })
+      const actions = getEnemyStatBlock(poolId)?.actions ?? []
+      const parentIndex = actions.findIndex((action) =>
+        action.kind === 'multiattack' && action.automation === 'headless')
+      expect(parentIndex, poolId).toBeGreaterThanOrEqual(0)
+
+      const result = buildSelectedEnemyAttack(enemy, player, parentIndex)
+      expect(result, poolId).toMatchObject({
+        attacked: true,
+        attackerTokenId: enemy.id,
+        targetTokenId: player.id,
+        attackTargetTokenIds: [player.id],
+        actionIndex: parentIndex,
+      })
+      expect(result?.attack?.label).toContain(actions[parentIndex].name)
+    }
+  })
+
+  it('preserves planner occurrence targets when building a selected Multiattack', () => {
+    const enemy = token({
+      id: 'enemy:roper',
+      type: 'enemy',
+      poolId: 'srd-5.1:roper',
+    })
+    const primary = token({ id: 'player:a', type: 'player', x: 75, y: 25 })
+    const actions = getEnemyStatBlock(enemy.poolId!)?.actions ?? []
+    const parentIndex = actions.findIndex((action) =>
+      action.kind === 'multiattack' && action.automation === 'headless')
+
+    const occurrenceTargets = [
+      primary.id,
+      'player:b',
+      'player:c',
+      primary.id,
+    ] as const
+    const result = buildSelectedEnemyAttack(
+      enemy,
+      primary,
+      parentIndex,
+      occurrenceTargets,
+    )
+
+    expect(result?.actionIndex).toBe(parentIndex)
+    expect(result?.targetTokenId).toBe(primary.id)
+    expect(result?.attackTargetTokenIds).toEqual(occurrenceTargets)
+    expect(result?.attackTargetTokenIds).not.toBe(occurrenceTargets)
+  })
+
+  it('keeps all-special composite parents even without a legacy attack preview', () => {
+    const poolId = 'srd-5.1:kraken'
+    const enemy = token({ id: 'enemy:kraken', type: 'enemy', poolId })
+    const primary = token({ id: 'player:a', type: 'player', x: 75, y: 25 })
+    const monster = getDnd5eSrdMonster(poolId)
+    const parentIndex = monster?.actions.findIndex((action) =>
+      action.id === 'multiattack-flings') ?? -1
+    expect(parentIndex).toBeGreaterThanOrEqual(0)
+
+    const occurrenceTargets = ['player:a', 'player:b', 'player:c'] as const
+    const result = buildSelectedEnemyAttack(
+      enemy,
+      primary,
+      parentIndex,
+      occurrenceTargets,
+    )
+
+    expect(result).toMatchObject({
+      attacked: true,
+      attackerTokenId: enemy.id,
+      targetTokenId: primary.id,
+      attackTargetTokenIds: occurrenceTargets,
+      actionIndex: parentIndex,
+    })
+    expect(result?.attack).toBeUndefined()
+    expect(result?.damage).toBeUndefined()
+  })
+
+  it('preserves parent index and occurrence targets for all 240 catalog Multiattacks', () => {
+    const parents = DND5E_SRD_MONSTERS.flatMap((monster) =>
+      monster.actions.flatMap((action, actionIndex) =>
+        action.kind === 'multiattack' &&
+        dnd5eMonsterActionAutomation(action) === 'headless'
+          ? [{ monster, action, actionIndex }]
+          : []))
+    expect(parents).toHaveLength(240)
+    expect(parents
+      .filter(({ action }) => action.randomRepeat != null)
+      .map(({ monster, action }) => `${monster.slug}:${action.id}`))
+      .toEqual(['violet-fungus:multiattack'])
+    expect(parents
+      .filter(({ monster, action }) => {
+        const actionIds = dnd5eMonsterMultiattackRuntimeActionIds({
+          monster,
+          action,
+          unresolvedRandomRepeat: 'maximum',
+        }) ?? []
+        return actionIds.length > 0 && actionIds.every((actionId) =>
+          monster.actions.find((candidate) =>
+            candidate.id === actionId)?.attack == null)
+      })
+      .map(({ monster, action }) => `${monster.slug}:${action.id}`))
+      .toEqual(['kraken:multiattack-flings'])
+
+    for (const { monster, action, actionIndex } of parents) {
+      const actionIds = dnd5eMonsterMultiattackRuntimeActionIds({
+        monster,
+        action,
+        unresolvedRandomRepeat: 'maximum',
+      })
+      expect(actionIds?.length, `${monster.slug}:${action.id}`).toBeGreaterThan(0)
+      const occurrenceTargets = actionIds!.map((_, index) =>
+        `target:${index}`)
+      const enemy = token({
+        id: `enemy:${monster.slug}`,
+        type: 'enemy',
+        poolId: monster.id,
+      })
+      const primary = token({
+        id: occurrenceTargets[0],
+        type: 'player',
+        x: 75,
+        y: 25,
+      })
+
+      const result = buildSelectedEnemyAttack(
+        enemy,
+        primary,
+        actionIndex,
+        occurrenceTargets,
+      )
+
+      expect(result, `${monster.slug}:${action.id}`).toBeDefined()
+      expect(result?.actionIndex, `${monster.slug}:${action.id}`)
+        .toBe(actionIndex)
+      expect(result?.attackTargetTokenIds, `${monster.slug}:${action.id}`)
+        .toEqual(occurrenceTargets)
+    }
+  })
+
+  it('retains dynamic Hydra occurrences across the planner result transport type', () => {
+    const plannerResult: Dnd5eMonsterTurnPlan = {
+      moved: false,
+      attacked: true,
+      attackerTokenId: 'hydra',
+      targetTokenId: 'hero',
+      attackTargetTokenIds: ['hero', 'hero', 'hero'],
+      actionIndex: 0,
+      message: 'Hydra uses its current three heads.',
+    }
+
+    const transported = transportPlannerResult(plannerResult)
+
+    expect(transported).toMatchObject({
+      attacked: true,
+      actionIndex: 0,
+      attackTargetTokenIds: ['hero', 'hero', 'hero'],
+    })
   })
 })
 
@@ -103,6 +287,7 @@ describe('[T7/AC2] AI 目标集合包含 npc/友方', () => {
     expect(result.attacked).toBe(true)
     // 玩家与 npc 同格等距，nearest 取先出现者（player 先入列）→ 仍打玩家。
     expect(result.targetTokenId).toBe('p')
+    expect(result.attackTargetTokenIds).toEqual(['p'])
   })
 
   it('只有 npc 友方的遭遇：enemy 攻击 npc（不再 no-op）', () => {

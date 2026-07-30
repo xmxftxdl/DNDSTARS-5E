@@ -18,6 +18,7 @@ import {
 } from './classes'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import { syncDnd5ePrimalChampion } from './hitPoints'
+import { normalizeDnd5eHitPointMaximumReductionLedger } from './hitPointMaximumReductions'
 import {
   dnd5eCharacterHasPluginFeature,
   dnd5ePluginBackgroundDefinition,
@@ -181,8 +182,16 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       : undefined
   const armor = character.equipment?.armor?.dnd5e
   const exhaustionLevel = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
-  const storedMaxHp = Math.max(1, Math.floor(character.maxHp))
-  const effectiveMaxHp = exhaustionLevel >= 4 ? Math.max(1, Math.floor(storedMaxHp / 2)) : storedMaxHp
+  const maximumReductionLedger =
+    normalizeDnd5eHitPointMaximumReductionLedger(
+      character.dnd5eCombatState?.hitPointMaximumReductionLedger,
+    )
+  const storedMaxHp = maximumReductionLedger
+    ? Math.max(0, Math.floor(character.maxHp))
+    : Math.max(1, Math.floor(character.maxHp))
+  const effectiveMaxHp = exhaustionLevel >= 4
+    ? Math.max(maximumReductionLedger ? 0 : 1, Math.floor(storedMaxHp / 2))
+    : storedMaxHp
   const classSelectionsByClass = Object.fromEntries(Object.keys(classLevels).map((classId) => {
     const typedClassId = classId as Dnd5eClassId
     const selections = Object.fromEntries(Object.entries(character.dnd5eClassChoices?.classes?.[typedClassId]?.selections ?? {})

@@ -182,6 +182,52 @@ export interface DeclarativeBattleMasterMechanicV1 {
   superiorityRollId: string
 }
 
+export const DND5E_2014_ELDRITCH_KNIGHT_FEATURES = [
+  'weapon-bond',
+  'war-magic',
+  'eldritch-strike',
+  'arcane-charge',
+  'improved-war-magic',
+] as const
+
+export type Dnd5e2014EldritchKnightFeatureId =
+  typeof DND5E_2014_ELDRITCH_KNIGHT_FEATURES[number]
+
+/**
+ * Closed Host semantics for the 2014 Eldritch Knight. Imported JSON only
+ * identifies the audited feature; executable behavior remains in Headless.
+ */
+export interface DeclarativeEldritchKnightMechanicV1 {
+  kind: 'eldritch-knight-2014'
+  feature: Dnd5e2014EldritchKnightFeatureId
+}
+
+export const DND5E_2014_TOTEM_WARRIOR_FEATURES = [
+  'spirit-seeker',
+  'totem-spirit-bear',
+  'totem-spirit-eagle',
+  'totem-spirit-wolf',
+  'aspect-of-the-beast-bear',
+  'aspect-of-the-beast-eagle',
+  'aspect-of-the-beast-wolf',
+  'spirit-walker',
+  'totemic-attunement-bear',
+  'totemic-attunement-eagle',
+  'totemic-attunement-wolf',
+] as const
+
+export type Dnd5e2014TotemWarriorFeatureId =
+  typeof DND5E_2014_TOTEM_WARRIOR_FEATURES[number]
+
+/**
+ * Closed Host semantics for the 2014 Totem Warrior. Local JSON chooses only
+ * an audited feature identifier; all combat behavior remains in Headless.
+ */
+export interface DeclarativeTotemWarriorMechanicV1 {
+  kind: 'totem-warrior-2014'
+  feature: Dnd5e2014TotemWarriorFeatureId
+}
+
 /**
  * Pure-data subclass ability protocol. Imported packages never supply a resolver;
  * the Host compiles supported declarations into its whitelisted Headless executor.
@@ -200,7 +246,10 @@ export interface DeclarativeSubclassAbilityV1 {
   effects: readonly DeclarativeSubclassEffectV1[]
   limits?: DeclarativeSubclassLimitsV1
   duration?: DeclarativeSubclassDurationV1
-  mechanic?: DeclarativeBattleMasterMechanicV1
+  mechanic?:
+    | DeclarativeBattleMasterMechanicV1
+    | DeclarativeEldritchKnightMechanicV1
+    | DeclarativeTotemWarriorMechanicV1
   /**
    * Opens the post-result reaction window when an enemy succeeds on a d20.
    * This is only an eligibility declaration; the Host and DM still validate
@@ -519,15 +568,26 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
   }
   if (value.mechanic != null) {
     if (!record(value.mechanic)) throw new Error(`${path}机械协议无效`)
-    assertKeys(value.mechanic, ['kind', 'maneuver', 'resourceId', 'superiorityRollId'], `${path}机械协议`)
-    if (
-      value.mechanic.kind !== 'battle-master-2014' ||
-      !DND5E_2014_BATTLE_MASTER_MANEUVERS.includes(
+    if (value.mechanic.kind === 'battle-master-2014') {
+      assertKeys(value.mechanic, ['kind', 'maneuver', 'resourceId', 'superiorityRollId'], `${path}机械协议`)
+      if (!DND5E_2014_BATTLE_MASTER_MANEUVERS.includes(
         value.mechanic.maneuver as Dnd5e2014BattleMasterManeuverId,
-      )
-    ) throw new Error(`${path}战斗大师战技协议无效`)
-    assertId(value.mechanic.resourceId, `${path}战技资源`)
-    assertId(value.mechanic.superiorityRollId, `${path}卓越骰`)
+      )) throw new Error(`${path}战斗大师战技协议无效`)
+      assertId(value.mechanic.resourceId, `${path}战技资源`)
+      assertId(value.mechanic.superiorityRollId, `${path}卓越骰`)
+    } else if (value.mechanic.kind === 'eldritch-knight-2014') {
+      assertKeys(value.mechanic, ['kind', 'feature'], `${path}机械协议`)
+      if (!DND5E_2014_ELDRITCH_KNIGHT_FEATURES.includes(
+        value.mechanic.feature as Dnd5e2014EldritchKnightFeatureId,
+      )) throw new Error(`${path}奥法骑士特性协议无效`)
+    } else if (value.mechanic.kind === 'totem-warrior-2014') {
+      assertKeys(value.mechanic, ['kind', 'feature'], `${path}机械协议`)
+      if (!DND5E_2014_TOTEM_WARRIOR_FEATURES.includes(
+        value.mechanic.feature as Dnd5e2014TotemWarriorFeatureId,
+      )) throw new Error(`${path}图腾武者特性协议无效`)
+    } else {
+      throw new Error(`${path}机械协议无效`)
+    }
   }
 
   if (value.predicates != null) {
@@ -611,7 +671,10 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
     value.effects.length > 64
   ) throw new Error(`${path}效果无效`)
   for (const effect of value.effects) validateEffect(effect, rollIds, `${path}效果`)
-  if (value.mechanic != null && !rollIds.has(value.mechanic.superiorityRollId as string)) {
+  if (
+    value.mechanic?.kind === 'battle-master-2014' &&
+    !rollIds.has(String(value.mechanic.superiorityRollId))
+  ) {
     throw new Error(`${path}战技协议引用了未声明卓越骰`)
   }
   if (value.limits != null) {
@@ -939,7 +1002,7 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
           ? [roll.hostRoll.die.resourceId]
           : []
       ),
-      ...(ability.mechanic ? [ability.mechanic.resourceId] : []),
+      ...(ability.mechanic?.kind === 'battle-master-2014' ? [ability.mechanic.resourceId] : []),
       ...ability.effects.flatMap((effect) => effect.kind === 'spend-resource' || effect.kind === 'restore-resource' ? [effect.resourceId] : []),
     ]
     const missing = referenced.find((resourceId) => !resourceIds.has(resourceId))
@@ -981,26 +1044,29 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
 export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAbilityV1): DeclarativeAbilityCompatibilityEntryV1 {
   const reasons: string[] = []
   const auditedBattleMaster = ability.mechanic?.kind === 'battle-master-2014'
+  const auditedEldritchKnight = ability.mechanic?.kind === 'eldritch-knight-2014'
+  const auditedTotemWarrior = ability.mechanic?.kind === 'totem-warrior-2014'
+  const auditedMechanic = auditedBattleMaster || auditedEldritchKnight || auditedTotemWarrior
   if (ability.canModifyEnemyD20) {
     reasons.push('改变敌方 d20 需要玩家声明并由 DM 在投掷后 Interrupt 窗口确认')
   }
-  if (!auditedBattleMaster && ability.effects.some((effect) =>
+  if (!auditedMechanic && ability.effects.some((effect) =>
     effect.kind === 'temporary-hit-points' &&
     effect.amount?.kind === 'fixed' &&
     effect.amount.value === 0
   )) reasons.push('旧 feature/action 未提供结构化效果，需由 DM 补全后才能自动结算')
   if (ability.predicates?.equipmentIds?.length) reasons.push('战斗快照尚未暴露可验证的装备实例 ID')
-  if (!auditedBattleMaster && (ability.cost?.movementFeet ?? 0) > 0) reasons.push('移动消耗尚未接入通用特性事务')
+  if (!auditedMechanic && (ability.cost?.movementFeet ?? 0) > 0) reasons.push('移动消耗尚未接入通用特性事务')
   if (ability.limits?.uses && (!ability.limits.reset || ability.limits.reset === 'none')) reasons.push('有限次数必须声明战斗、短休或长休恢复时点')
   if (ability.targeting.kind === 'multiple-creatures') reasons.push('任意多目标选择尚无通用地图选择器')
-  if (!auditedBattleMaster && ability.rolls?.some((roll) => roll.kind === 'attack')) reasons.push('声明式能力攻击检定尚需通用攻击事务')
-  if (!auditedBattleMaster && ability.rolls?.some((roll) => roll.kind === 'saving-throw')) reasons.push('声明式能力目标豁免尚需批量豁免事务')
+  if (!auditedMechanic && ability.rolls?.some((roll) => roll.kind === 'attack')) reasons.push('声明式能力攻击检定尚需通用攻击事务')
+  if (!auditedMechanic && ability.rolls?.some((roll) => roll.kind === 'saving-throw')) reasons.push('声明式能力目标豁免尚需批量豁免事务')
   if (ability.rolls?.some((roll) =>
     (roll.kind === 'damage' || roll.kind === 'healing') &&
     roll.dice.scaling &&
     !roll.hostRoll
   )) reasons.push('动态增加骰数尚需按角色快照生成 Host 掷骰配方')
-  if (!auditedBattleMaster && ability.effects.some((effect) => effect.kind === 'move')) reasons.push('强制移动需要地图三维路径与碰撞事务')
+  if (!auditedMechanic && ability.effects.some((effect) => effect.kind === 'move')) reasons.push('强制移动需要地图三维路径与碰撞事务')
   if (ability.duration?.kind === 'concentration' || ability.effects.some((effect) => effect.kind === 'standard-condition' && effect.duration.kind === 'concentration')) reasons.push('声明式专注来源尚未开放安全绑定')
   if (ability.duration?.kind === 'permanent' || ability.effects.some((effect) => effect.kind === 'standard-condition' && effect.duration.kind === 'permanent')) reasons.push('永久效果必须由 DM 审核并写入长期角色数据')
   if (ability.effects.some((effect) => effect.kind === 'standard-condition' && effect.duration.kind === 'until-source-turn-end')) reasons.push('来源回合结束边界尚未开放为插件状态 capability')
@@ -1012,7 +1078,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
     ability.effects.length > 0 &&
     ability.effects.every((effect) => effect.kind === 'restore-resource')
   if (
-    !auditedBattleMaster &&
+    !auditedMechanic &&
     !safeTurnStartResourceRestore &&
     ability.trigger.kind !== 'active-use' &&
     ability.trigger.kind !== 'after-attack-hit'
@@ -1027,7 +1093,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
       !roll.hostRoll
     )) reasons.push('命中后追加骰需要预先声明的 Interrupt 掷骰事务')
   }
-  const executableEffects = auditedBattleMaster || ability.effects.some((effect) => effect.kind !== 'move')
+  const executableEffects = auditedMechanic || ability.effects.some((effect) => effect.kind !== 'move')
   if (ability.automation === 'partial' && reasons.length === 0) reasons.push('作者要求在执行安全子集前由 DM 确认')
   if (ability.automation === 'manual' && reasons.length === 0) reasons.push('作者将该能力标记为仅供 DM 手动裁定')
   let effective: DeclarativeSubclassAbilityV1['automation']
@@ -1071,7 +1137,23 @@ export function declarativeSubclassCompatibilityReportV1(
         reasons.push('Host 掷骰配方当前只支持主动能力或绑定到 actor-choice 的命中后预激活钩子')
       }
       for (const hook of abilityHooks) {
-        const directlyExecutable =
+        const auditedEldritchKnightHook =
+          ability.mechanic?.kind === 'eldritch-knight-2014' &&
+          hook.activation === 'automatic' &&
+          hook.decision === 'automatic' &&
+          (
+            (ability.mechanic.feature === 'eldritch-strike' && hook.timing === 'after-attack-hit') ||
+            (
+              (ability.mechanic.feature === 'war-magic' ||
+                ability.mechanic.feature === 'improved-war-magic') &&
+              hook.timing === 'spell-cast'
+            )
+          )
+        const auditedTotemWarriorHook =
+          ability.mechanic?.kind === 'totem-warrior-2014' &&
+          hook.activation === 'automatic' &&
+          hook.decision === 'automatic'
+        const directlyExecutable = auditedEldritchKnightHook || auditedTotemWarriorHook ||
           (
             hook.timing === 'after-attack-hit' ||
             (

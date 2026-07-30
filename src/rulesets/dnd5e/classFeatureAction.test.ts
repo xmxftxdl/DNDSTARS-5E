@@ -159,6 +159,50 @@ describe('D&D 5e generic class feature authority bridge', () => {
     })
   })
 
+  it('allows an existing Intimidating Presence to be extended beyond its initial 30-foot range', () => {
+    const actor = character('barbarian', '野蛮人', {
+      level: 10,
+      dnd5eClassChoices: { classes: { barbarian: { subclass: 'berserker' } } },
+    })
+    const initialInput = fixture(actor, {
+      feature: 'barbarian-intimidating-presence',
+      targetTokenId: 'enemy-token',
+    })
+    initialInput.map.tokens.find((entry) => entry.id === 'enemy-token')!.x = 75
+    initialInput.map.tokens.find((entry) => entry.id === 'enemy-token')!.y = 25
+    const initialPrepared = prepareDnd5eClassFeature(initialInput)
+    expect(initialPrepared.ok).toBe(true)
+    if (!initialPrepared.ok) return
+    const initialResolved = resolvePreparedDnd5eClassFeature({
+      prepared: initialPrepared.prepared,
+      savingThrowD20: 2,
+    })
+    expect(initialResolved.result.ok).toBe(true)
+    if (!initialResolved.application) return
+
+    const extensionInput = fixture(initialResolved.application.characters[0], {
+      feature: 'barbarian-intimidating-presence',
+      targetTokenId: 'enemy-token',
+    })
+    extensionInput.map = {
+      ...initialResolved.application.map,
+      tokens: initialResolved.application.map.tokens.map((entry) =>
+        entry.id === 'enemy-token' ? { ...entry, x: 575, y: 25 } : entry,
+      ),
+    }
+    const extensionPrepared = prepareDnd5eClassFeature(extensionInput)
+    expect(extensionPrepared.ok).toBe(true)
+    if (!extensionPrepared.ok) return
+    expect(extensionPrepared.prepared.intimidatingPresence?.extending).toBe(true)
+    const extended = resolvePreparedDnd5eClassFeature({
+      prepared: extensionPrepared.prepared,
+    })
+    expect(extended.result.ok).toBe(true)
+    expect(extended.application?.map.tokens.find(
+      (entry) => entry.id === 'enemy-token',
+    )?.dnd5eCombatState?.intimidatingPresenceRoundsRemaining).toBe(2)
+  })
+
   it('grants Bardic Inspiration to another character within 60 feet and persists the die', () => {
     const bard = character('bard', '吟游诗人', {
       level: 10,

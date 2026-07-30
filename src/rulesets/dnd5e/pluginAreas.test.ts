@@ -3,6 +3,7 @@ import type { Dnd5ePluginArea } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   collectDnd5ePersistentAreaTriggers,
+  expireDnd5ePluginAreasAtTurnBoundary,
   recordDnd5ePersistentAreaTrigger,
   reconcileDnd5ePluginAreas,
   reconcileDnd5ePluginAreasOnMap,
@@ -31,6 +32,33 @@ describe('D&D 5e plugin persistent areas', () => {
   it('expires finite areas after their declared round', () => {
     expect(reconcileDnd5ePluginAreas([area()], [character()], 3)).toHaveLength(1)
     expect(reconcileDnd5ePluginAreas([area()], [character()], 4)).toHaveLength(0)
+  })
+
+  it('keeps a source-bound area through the next round and expires it at the source turn end', () => {
+    const iceStorm = area({
+      sourceKind: 'core-spell',
+      coreSpellId: 'ice-storm',
+      createdRound: 1,
+      expiresAfterRound: 2,
+      expiresAtSourceTurnEndAfterRound: 2,
+    })
+    const map = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [],
+      dnd5ePluginAreas: [iceStorm],
+    }
+    expect(expireDnd5ePluginAreasAtTurnBoundary({
+      map, timing: 'turn-start', round: 2, tokenId: 'caster-token',
+    })).toBe(map)
+    expect(expireDnd5ePluginAreasAtTurnBoundary({
+      map, timing: 'turn-end', round: 2, tokenId: 'other-token',
+    })).toBe(map)
+    expect(expireDnd5ePluginAreasAtTurnBoundary({
+      map, timing: 'turn-end', round: 1, tokenId: 'caster-token',
+    })).toBe(map)
+    expect(expireDnd5ePluginAreasAtTurnBoundary({
+      map, timing: 'turn-end', round: 2, tokenId: 'caster-token',
+    }).dnd5ePluginAreas).toEqual([])
   })
 
   it('removes concentration areas as soon as the source concentration no longer matches', () => {

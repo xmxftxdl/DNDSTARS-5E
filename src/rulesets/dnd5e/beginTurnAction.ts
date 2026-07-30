@@ -5,6 +5,7 @@ import type { Character } from '../../types/character'
 import { dnd5eClassDefinitionForCharacter } from './classes'
 import {
   dnd5eCombatantHasConcentrationEffect,
+  dnd5ePendingTurnStartPeriodicDamage,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
   resolveDnd5eHeadlessAction,
@@ -22,9 +23,11 @@ import {
 } from './mapBridge'
 import {
   type Dnd5eActiveEffectInstance,
+  type Dnd5eActiveEffectPeriodicDamageRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
+import type { Dnd5eDamageType } from './damageTypes'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eMonsterRechargeActions } from './monsterGenericAbilities'
 import {
@@ -49,6 +52,26 @@ export interface PreparedDnd5eTurnStartSavingThrow {
   baned: boolean
 }
 
+export interface PreparedDnd5eTurnStartPeriodicDamage {
+  effect: Dnd5eActiveEffectInstance
+  targetId: string
+  targetName: string
+  count: number
+  sides: number
+  modifier: number
+  damageType?: Dnd5eDamageType
+  savingThrow?: {
+    ability: AbilityKey
+    dc: number
+    modifier: number
+    mode: 'normal' | 'advantage' | 'disadvantage'
+    blessed: boolean
+    baned: boolean
+    halflingLucky: boolean
+    legendaryResistanceUses: number
+  }
+}
+
 export interface PreparedDnd5eBeginTurnMonsterMechanic {
   actorId: string
   actorName: string
@@ -66,6 +89,7 @@ export interface PreparedDnd5eBeginTurn {
   characterIdByCombatantId: Record<string, string>
   turnSlotId: string
   alreadyResolved: boolean
+  turnStartActiveEffectPeriodicDamage: readonly PreparedDnd5eTurnStartPeriodicDamage[]
   turnStartActiveEffectSavingThrows: readonly PreparedDnd5eTurnStartSavingThrow[]
   turnStartGazeRequirements: readonly Dnd5eTurnStartGazeRequirement[]
   monsterRechargeRolls: readonly {
@@ -173,6 +197,57 @@ export function prepareDnd5eBeginTurn(
           ),
         }]
       })
+  const turnStartActiveEffectPeriodicDamage = alreadyResolved
+    ? []
+    : dnd5ePendingTurnStartPeriodicDamage(
+        preview,
+        previewActor.id,
+      ).map(({ target, effect }) => {
+        const periodicDamage = effect.periodicDamage!
+        const savingThrow = periodicDamage.savingThrow
+        const source = effect.source.actorId
+          ? preview.combatants[effect.source.actorId]
+          : undefined
+        return {
+          effect,
+          targetId: target.id,
+          targetName: target.name,
+          count: periodicDamage.count,
+          sides: periodicDamage.sides,
+          modifier: periodicDamage.modifier ?? 0,
+          damageType: periodicDamage.type,
+          savingThrow: savingThrow
+            ? {
+                ability: savingThrow.ability,
+                dc: savingThrow.dc,
+                modifier: turnStartSavingThrowModifier(target, savingThrow.ability),
+                mode: dnd5eSavingThrowMode(target, savingThrow.ability, {
+                  effectVisible: effect.visibility !== 'dm-only',
+                  condition: effect.standardCondition,
+                  sourceCreatureType: source?.creatureType,
+                  sourceIsSpell: effect.source.kind === 'spell',
+                  sourceIsMagical:
+                    savingThrow.magical ?? effect.source.magical === true,
+                }),
+                blessed: dnd5eCombatantHasConcentrationEffect(
+                  preview,
+                  target.id,
+                  'bless',
+                ),
+                baned: dnd5eCombatantHasConcentrationEffect(
+                  preview,
+                  target.id,
+                  'bane',
+                ),
+                halflingLucky: target.racialRules?.halflingLucky === true,
+                legendaryResistanceUses: Math.max(
+                  0,
+                  Math.floor(target.classState.legendaryResistanceUses ?? 0),
+                ),
+              }
+            : undefined,
+        }
+      })
   const turnStartGazeRequirements = alreadyResolved
     ? []
     : prepareDnd5eTurnStartGazeRequirements(
@@ -225,6 +300,7 @@ export function prepareDnd5eBeginTurn(
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       turnSlotId,
       alreadyResolved,
+      turnStartActiveEffectPeriodicDamage,
       turnStartActiveEffectSavingThrows,
       turnStartGazeRequirements,
       monsterRechargeRolls,
@@ -235,6 +311,7 @@ export function prepareDnd5eBeginTurn(
 
 export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
+  turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]
   turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
   monsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
   monsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
@@ -261,6 +338,8 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     actorId: actorToken.id,
     turnSlotId,
     turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
+    turnStartActiveEffectPeriodicDamageRolls:
+      input.turnStartActiveEffectPeriodicDamageRolls,
     turnStartGazeResolutions: input.turnStartGazeResolutions,
     nextMonsterRechargeRolls: input.monsterRechargeRolls,
     nextMonsterMechanicRolls: input.monsterMechanicRolls,

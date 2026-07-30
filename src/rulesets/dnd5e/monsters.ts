@@ -6,7 +6,12 @@ import { getDnd5eRoomMonster } from './roomMonsterCatalog'
 import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eStandardConditionId } from './conditions'
 import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
-import type { Dnd5eActiveEffectModifiers } from './activeEffects'
+import type {
+  Dnd5eActiveEffectModifiers,
+  Dnd5eActiveEffectPeriodicDamage,
+  Dnd5eActiveEffectRemoval,
+  Dnd5eActiveEffectRepeatSave,
+} from './activeEffects'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
 
 export { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
@@ -198,10 +203,14 @@ export interface Dnd5eMonsterSavingThrowDamageOnHitEffect {
   kind: 'saving-throw-damage'
   ability: AbilityKey
   dc: number
+  /** The saving throw is against a magical effect rather than the weapon damage. */
+  magical?: boolean
   damage: readonly Dnd5eMonsterDamage[]
   damageOnSuccessfulSave: 'none' | 'half'
   /** A condition applied by this same saving throw only when the save fails. */
   conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
+  /** Additional dependent or margin-gated conditions from the same save. */
+  additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
   /**
    * A special outcome caused by this effect's final damage component. It is
    * eligible only when removing this effect's damage would leave the target
@@ -228,14 +237,18 @@ export interface Dnd5eMonsterSavingThrowConditionOnHitEffect {
   kind: 'saving-throw-condition'
   ability: AbilityKey
   dc: number
+  /** The saving throw is against a magical effect rather than the weapon damage. */
+  magical?: boolean
   conditionOnFailedSave: Dnd5eMonsterFailedSaveCondition
+  /** Additional dependent or margin-gated conditions from the same save. */
+  additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
 }
 
 export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
   id: string
   kind: 'source-linked-condition'
   relation: {
-    kind: 'grapple'
+    kind: 'grapple' | 'attachment' | 'swallowed' | 'engulfed'
     /**
      * Stable source-local capacity bucket. Different actions may intentionally
      * share one slot group (for example, two claws backed by the same pool).
@@ -246,20 +259,146 @@ export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
     /** Tiny=0, Small=1, Medium=2, Large=3, Huge=4, Gargantuan=5. */
     targetMaxSizeRank: number
     whenCapacityFull: 'skip-application' | 'linked-target-only'
+    /**
+     * How the two combatants remain coupled while this relation is active.
+     * Ordinary grapples drag the target; swallowed/engulfed targets are
+     * carried; an attached cloaker rides its target.
+     */
+    movement?: 'drag-target' | 'carry-target' | 'source-rides-target'
+    /** Defaults to true for grapples/attachments and false for internal holds. */
+    endsOnSourceIncapacitated?: boolean
     attackAdvantageAgainstLinkedTarget?: boolean
+    /** The relation's source attack automatically hits this already-linked target. */
+    attackAutomaticallyHitsLinkedTarget?: boolean
   }
-  escapeDc: number
+  /** Omit only when the relation has no ordinary escape check (for example swallowed). */
+  escapeDc?: number
+  /** Some relations are applied only after a failed save on the weapon hit. */
+  savingThrow?: {
+    ability: AbilityKey
+    dc: number
+    magical?: boolean
+  }
   conditions: readonly {
-    condition: 'grappled' | 'restrained'
+    condition: Dnd5eStandardConditionId
     /** Dependent conditions end together with their source-specific parent. */
-    dependsOnCondition?: 'grappled' | 'restrained'
+    dependsOnCondition?: Dnd5eStandardConditionId
   }[]
+  /**
+   * Non-standard mechanical states that end with the relation root. This is
+   * intentionally bounded text rather than an executable callback; examples
+   * include "unable-to-breathe" while engulfed.
+   */
+  dependentLegacyConditions?: readonly string[]
+  /** Mechanical relation roots such as a cloaker attachment have no standard condition. */
+  rootLegacyCondition?: string
+  /** Conditions that apply only when the triggering attack had effective advantage. */
+  conditionsWhenAttackHasAdvantage?: readonly {
+    condition: Dnd5eStandardConditionId
+  }[]
+  /**
+   * Replaces an existing relation from another slot group atomically. Tarrasque
+   * Swallow, for example, ends the Bite grapple only after Swallow hits.
+   */
+  removeSourceRelationSlotGroupOnApply?: string
+  /** Mechanical modifiers owned by the root relation for exactly its lifetime. */
+  modifiers?: Dnd5eActiveEffectModifiers
+  /** Optional damage carried by the root relation for exactly its lifetime. */
+  periodicDamage?: Omit<Dnd5eActiveEffectPeriodicDamage, 'lastResolvedTurnKey'>
+}
+
+export interface Dnd5eMonsterPersistentOnHitEffect {
+  id: string
+  kind: 'persistent-effect'
+  /** Whether the persistent rider itself is magical, independent of a save. */
+  magical?: boolean
+  /** Omit when a hit always applies the effect. */
+  savingThrow?: {
+    ability: AbilityKey
+    dc: number
+    magical?: boolean
+  }
+  /** Creature categories that do not receive or roll against this effect. */
+  targetCreatureTypeExclusions?: readonly ('construct' | 'undead')[]
+  /** Creature categories that are eligible to receive or roll against this effect. */
+  targetCreatureTypeRequirements?: readonly ['humanoid']
+  definitionId: string
+  label: string
+  /** A non-standard ailment projected alongside any standard condition. */
+  ailment?: 'disease' | 'curse'
+  /** Combat duration. Omit for a permanent effect. */
+  durationRounds?: number
+  standardCondition?: Dnd5eStandardConditionId
+  periodicDamage?: Omit<Dnd5eActiveEffectPeriodicDamage, 'lastResolvedTurnKey'>
+  /**
+   * A calendar-time maximum-HP reduction retained for the campaign clock.
+   * Headless combat must never reinterpret this declaration as turn damage.
+   */
+  campaignPeriodicHitPointMaximumReduction?: {
+    intervalHours: number
+    reduction: {
+      average: number
+      count: number
+      sides: number
+      bonus: number
+    }
+    execution: 'campaign-time-only'
+    recovery: 'when-effect-removed'
+  }
+  repeatSave?: Dnd5eActiveEffectRepeatSave
+  modifiers?: Dnd5eActiveEffectModifiers
+  removal?: Dnd5eActiveEffectRemoval
+  stacking: 'refresh' | 'increase-periodic-dice'
+}
+
+export interface Dnd5eMonsterForcedMovementOnHitEffect {
+  id: string
+  kind: 'forced-movement'
+  resistance:
+    | {
+        kind: 'saving-throw'
+        ability: AbilityKey
+        dc: number
+        magical?: boolean
+      }
+    | {
+        kind: 'opposed-ability-check'
+        sourceAbility: AbilityKey
+        targetAbility: AbilityKey
+      }
+  direction: 'away-from-source' | 'toward-source'
+  maximumDistanceFeet: number
+  /** Tiny=0, Small=1, Medium=2, Large=3, Huge=4, Gargantuan=5. */
+  targetMaxSizeRank?: number
+  /** Optional condition applied when the target fails to resist the movement. */
+  conditionOnFailedResistance?: Dnd5eStandardConditionId
+}
+
+export interface Dnd5eMonsterHitPointMaximumReductionOnHitEffect {
+  id: string
+  kind: 'hit-point-maximum-reduction'
+  /** Selects already-resolved, post-defense damage from this concrete hit. */
+  damageBasis:
+    | { kind: 'all-attack-damage' }
+    | { kind: 'damage-type'; damageType: Dnd5eDamageType }
+  /** Omit for effects such as a vampire's Bite that do not allow a save. */
+  savingThrow?: {
+    ability: AbilityKey
+    dc: number
+    magical?: boolean
+  }
+  recovery: 'long-rest' | 'greater-restoration-or-other-magic'
+  /** The source regains HP equal to the selected damage, not the capped max-HP delta. */
+  healSourceByAmount?: boolean
 }
 
 export type Dnd5eMonsterOnHitEffect =
   | Dnd5eMonsterSavingThrowDamageOnHitEffect
   | Dnd5eMonsterSavingThrowConditionOnHitEffect
   | Dnd5eMonsterSourceLinkedConditionOnHitEffect
+  | Dnd5eMonsterPersistentOnHitEffect
+  | Dnd5eMonsterForcedMovementOnHitEffect
+  | Dnd5eMonsterHitPointMaximumReductionOnHitEffect
 
 export interface Dnd5eMonsterWeaponAttack {
   mode: 'melee' | 'ranged' | 'melee-or-ranged'
@@ -300,10 +439,18 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   target: 'hostile' | 'all-creatures-except-self'
   ability: AbilityKey
   dc: number
+  /** The saving throw is against a magical monster effect. */
+  magical?: boolean
+  /** Every submitted target must be visible to the acting monster. */
+  requiresSourceCanSeeTarget?: boolean
+  /** Every submitted target must be able to see the acting monster. */
+  requiresTargetCanSeeSource?: boolean
   /** Omit for pure control effects such as Frightful Presence. */
   damage?: Dnd5eMonsterDamage
   damageOnSuccessfulSave?: 'none' | 'half'
   conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
+  /** Additional margin-gated or dependent conditions caused by the same save. */
+  additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
   forcedMovementOnFailedSave?: {
     direction: 'away-from-source'
     maximumDistanceFeet: number
@@ -324,13 +471,45 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   }
   /** Source-specific immunity granted after this Frightful Presence save. */
   frightfulPresenceImmunityRounds?: number
+  /** Immunity granted on an initial success or when the failed-save effect ends. */
+  immunityOnSuccessfulSaveOrEffectEnd?: Dnd5eMonsterActionImmunityRule
 }
 
 export interface Dnd5eMonsterFailedSaveCondition {
   condition: Dnd5eStandardConditionId
   durationRounds: number
   repeatSaveAtEndOfTargetTurn: boolean
+  /** Use the end of the source's next turn instead of target-round ticking. */
+  expiresAtSourceTurnEnd?: boolean
+  /** Repeat saves have disadvantage while the source remains visible. */
+  repeatSaveDisadvantageWhenSourceVisible?: boolean
   breakOnDamage?: boolean
+  /** Another creature within reach can spend an action to wake this target. */
+  canBeAwakenedByAction?: boolean
+  /** Apply only when the saving throw total misses the DC by at least this amount. */
+  minimumFailureMargin?: number
+  /** The condition is removed automatically when its sibling parent ends. */
+  dependsOnCondition?: Dnd5eStandardConditionId
+  /** Healing is prevented while this condition instance remains active. */
+  preventHealing?: boolean
+  /** A failed repeat save replaces this condition with a permanent condition. */
+  onRepeatSaveFailureTransition?: {
+    replaceWithCondition: Dnd5eStandardConditionId
+    duration: 'permanent'
+  }
+}
+
+export type Dnd5eMonsterActionImmunityRule = {
+  durationRounds: number
+  scope:
+    | { kind: 'source-action' }
+    | {
+        kind: 'catalog-action'
+        /** Stable key checked by this action before it accepts a target. */
+        actionKey: string
+        /** Stable action-family keys granted when immunity begins. */
+        grantedActionKeys: readonly string[]
+      }
 }
 
 export interface Dnd5eMonsterAreaSavingThrowVariant extends Dnd5eMonsterAreaSavingThrowEffect {
@@ -357,6 +536,15 @@ export type Dnd5eMonsterSpecialActionRule =
       ability: AbilityKey
       dc: number
       condition: Dnd5eStandardConditionId
+      magical?: boolean
+      requiresSourceCanSeeTarget?: boolean
+      requiresTargetCanSeeSource?: boolean
+      durationRounds?: number
+      expiresAtSourceTurnEnd?: boolean
+      repeatSaveAtEndOfTargetTurn?: boolean
+      repeatSaveDisadvantageWhenSourceVisible?: boolean
+      additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
+      immunityOnSuccessfulSaveOrEffectEnd?: Dnd5eMonsterActionImmunityRule
       preventReactions?: boolean
       repeatSaveOnDamage?: boolean
     }
@@ -365,6 +553,39 @@ export type Dnd5eMonsterSpecialActionRule =
       requiredCondition: Dnd5eStandardConditionId
       requireSameSource: boolean
       damage: Dnd5eMonsterDamage
+    }
+  | {
+      /** Roper Reel: move every target held by one source-linked slot group. */
+      kind: 'source-linked-reel'
+      slotGroup: string
+      maximumDistanceFeet: number
+    }
+  | {
+      /**
+       * Converts a creature already grappled by this source into a carried
+       * engulf relation. A composite Multiattack may satisfy the grapple
+       * prerequisite with its immediately preceding hit pair.
+       */
+      kind: 'source-linked-engulf'
+      targetMaxSizeRank: number
+      effect: Dnd5eMonsterSourceLinkedConditionOnHitEffect
+    }
+  | {
+      /**
+       * Throws one creature held by a source-linked grapple. The Host owns
+       * wall-aware placement while Headless verifies the submitted straight
+       * displacement, releases the exact relation and resolves any collision.
+       */
+      kind: 'throw-linked-target'
+      slotGroup: string
+      maximumDistanceFeet: number
+      targetMaxSizeRank: number
+      collisionDamage: {
+        distanceFeetPerDie: number
+        sides: number
+        type: Dnd5eDamageType
+      }
+      conditionAfterThrow: Dnd5eStandardConditionId
     }
   | {
       /**
@@ -602,6 +823,35 @@ export interface Dnd5eMonsterEquipment {
   linkedActionId?: string
 }
 
+export type Dnd5eMonsterTargetEligibilityPredicate =
+  | {
+      /** A durable relation whose authoritative source is the acting monster. */
+      kind: 'source-linked-relation'
+      relationKind: 'grapple' | 'attachment' | 'swallowed' | 'engulfed'
+      slotGroup?: string
+    }
+  | {
+      /** Semantic incapacitation also includes stunned, paralyzed, and similar states. */
+      kind: 'incapacitated'
+    }
+  | {
+      kind: 'standard-condition'
+      condition: Dnd5eStandardConditionId
+    }
+
+export interface Dnd5eMonsterTargetEligibility {
+  kind: 'any-of'
+  predicates: readonly Dnd5eMonsterTargetEligibilityPredicate[]
+  /**
+   * Alternatives that Headless cannot trust without an explicit authorized
+   * transaction field. They remain visible to the DM but never pass automatic
+   * eligibility on their own.
+   */
+  dmAdjudicationAlternatives?: readonly {
+    kind: 'willing-target'
+  }[]
+}
+
 export interface Dnd5eMonsterAction {
   id: string
   name: string
@@ -610,6 +860,18 @@ export interface Dnd5eMonsterAction {
   automation?: Dnd5eMonsterAutomation
   attack?: Dnd5eMonsterWeaponAttack
   sequence?: readonly string[]
+  /**
+   * A Multiattack whose number of identical weapon occurrences is decided by
+   * one authoritative die roll supplied with the transaction.  This keeps
+   * variable attacks such as the Violet Fungus's 1d4 Rotting Touches
+   * deterministic and replayable instead of sampling inside the rules core.
+   */
+  randomRepeat?: {
+    actionId: string
+    dieSides: number
+    minimum: number
+    maximum: number
+  }
   /**
    * Restricts hybrid child attacks in this multiattack to one concrete mode.
    * For example, the Cult Fanatic may throw one dagger at range, but its
@@ -621,10 +883,17 @@ export interface Dnd5eMonsterAction {
   /** Structured non-weapon rule resolved entirely by the Headless engine. */
   rule?: Dnd5eMonsterSpecialActionRule
   /** Source-linked relation precondition shared by weapon and special actions. */
-  relationRequirement?: {
-    kind: 'none-from-source'
-    slotGroup: string
-  }
+  relationRequirement?:
+    | {
+        kind: 'none-from-source'
+        slotGroup: string
+      }
+    | {
+        kind: 'target-linked-to-source'
+        slotGroup: string
+      }
+  /** Target prerequisites shared by direct use and every Multiattack occurrence. */
+  targetEligibility?: Dnd5eMonsterTargetEligibility
   /** 传奇动作直接调用普通武器动作时指向其 ID。 */
   referencedActionId?: string
   movement?: {
@@ -2084,6 +2353,16 @@ const CATALOG_BASE_WEAPON_ATTACKS = {
       rangedDamage: [{ average: 3, count: 1, sides: 6, bonus: 0, type: 'piercing' }],
     },
   },
+  roper: {
+    actionId: 'tendril',
+    attack: {
+      mode: 'melee',
+      toHit: 7,
+      reachFeet: 50,
+      target: 'one creature',
+      damage: [],
+    },
+  },
   veteran: {
     actionId: 'longsword',
     attack: {
@@ -2095,6 +2374,448 @@ const CATALOG_BASE_WEAPON_ATTACKS = {
     },
   },
 } as const
+
+/**
+ * The SRD generator intentionally leaves attacks with prose alternatives in
+ * DM adjudication when it cannot infer one unambiguous damage expression.
+ * These catalog-owned rows choose one canonical, legal branch for the stable
+ * source action id. Other legal branches are exposed as sibling actions below
+ * instead of silently dropping damage dice or guessing at runtime.
+ */
+const CATALOG_EXACT_WEAPON_ATTACKS = {
+  cloaker: [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee',
+      toHit: 6,
+      reachFeet: 5,
+      target: 'one creature',
+      damage: [
+        { average: 10, count: 2, sides: 6, bonus: 3, type: 'piercing' },
+      ],
+      onHitEffects: [{
+        id: 'bite-attachment',
+        kind: 'source-linked-condition',
+        relation: {
+          kind: 'attachment',
+          slotGroup: 'bite',
+          capacity: 1,
+          maxDistanceFeet: 5,
+          targetMaxSizeRank: 3,
+          whenCapacityFull: 'linked-target-only',
+          movement: 'source-rides-target',
+          endsOnSourceIncapacitated: true,
+          attackAdvantageAgainstLinkedTarget: true,
+        },
+        escapeDc: 16,
+        conditions: [],
+        rootLegacyCondition: 'attached',
+        conditionsWhenAttackHasAdvantage: [{ condition: 'blinded' }],
+      }],
+    },
+  }],
+  djinni: [{
+    actionId: 'scimitar',
+    branchNote: 'Headless 固定分支：本动作选择闪电伤害；雷鸣伤害请使用“弯刀（雷鸣）”。',
+    attack: {
+      mode: 'melee',
+      toHit: 9,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [
+        { average: 12, count: 2, sides: 6, bonus: 5, type: 'slashing' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'lightning' },
+      ],
+    },
+  }],
+  drider: [{
+    actionId: 'longsword',
+    branchNote: 'Headless 固定分支：本动作以单手使用长剑；双手伤害请使用“长剑（双手）”。',
+    attack: {
+      mode: 'melee',
+      toHit: 6,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 7, count: 1, sides: 8, bonus: 3, type: 'slashing' }],
+    },
+  }],
+  erinyes: [
+    {
+      actionId: 'longsword',
+      branchNote: 'Headless 固定分支：本动作以单手使用长剑；双手伤害请使用“长剑（双手）”。',
+      attack: {
+        mode: 'melee',
+        toHit: 8,
+        reachFeet: 5,
+        target: 'one target',
+        damage: [
+          { average: 8, count: 1, sides: 8, bonus: 4, type: 'slashing' },
+          { average: 13, count: 3, sides: 8, bonus: 0, type: 'poison' },
+        ],
+      },
+    },
+    {
+      actionId: 'longbow',
+      attack: {
+        mode: 'ranged',
+        toHit: 7,
+        rangeFeet: { normal: 150, long: 600 },
+        target: 'one target',
+        damage: [
+          { average: 7, count: 1, sides: 8, bonus: 3, type: 'piercing' },
+          { average: 13, count: 3, sides: 8, bonus: 0, type: 'poison' },
+        ],
+        onHit: 'DC 14 Constitution save; poisoned until removed by lesser restoration or similar magic.',
+        onHitEffects: [{
+          id: 'longbow-poisoned',
+          kind: 'saving-throw-condition',
+          ability: 'con',
+          dc: 14,
+          conditionOnFailedSave: {
+            condition: 'poisoned',
+            // The condition has no natural expiry. One million rounds is the
+            // schema's persistent-condition ceiling; condition-removal magic
+            // can still remove the source-specific active effect normally.
+            durationRounds: 1_000_000,
+            repeatSaveAtEndOfTargetTurn: false,
+          },
+        }],
+      },
+    },
+  ],
+  gladiator: [{
+    actionId: 'spear',
+    branchNote:
+      'Headless 固定分支：近战时本动作以单手使用长矛，远程时使用投掷伤害；双手近战请使用“长矛（双手近战）”。',
+    attack: {
+      mode: 'melee-or-ranged',
+      toHit: 7,
+      reachFeet: 5,
+      rangeFeet: { normal: 20, long: 60 },
+      target: 'one target',
+      damage: [{ average: 11, count: 2, sides: 6, bonus: 4, type: 'piercing' }],
+      rangedDamage: [{ average: 11, count: 2, sides: 6, bonus: 4, type: 'piercing' }],
+    },
+  }],
+  lamia: [{
+    actionId: 'intoxicating-touch',
+    attack: {
+      mode: 'melee',
+      toHit: 5,
+      reachFeet: 5,
+      target: 'one creature',
+      damage: [],
+      onHitEffects: [{
+        id: 'intoxicating-touch-curse',
+        kind: 'persistent-effect',
+        magical: true,
+        definitionId: 'srd-5.1:monster:lamia:intoxicating-touch-curse',
+        label: 'Intoxicating Touch',
+        ailment: 'curse',
+        durationRounds: 600,
+        modifiers: {
+          abilityCheckDisadvantages: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+          savingThrowDisadvantages: ['wis'],
+        },
+        stacking: 'refresh',
+      }],
+    },
+  }],
+  kraken: [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee',
+      toHit: 17,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [
+        { average: 23, count: 3, sides: 8, bonus: 10, type: 'piercing' },
+      ],
+    },
+  }],
+  'purple-worm': [
+    {
+      actionId: 'bite',
+      attack: {
+        mode: 'melee',
+        toHit: 14,
+        reachFeet: 10,
+        target: 'one target',
+        damage: [
+          { average: 22, count: 3, sides: 8, bonus: 9, type: 'piercing' },
+        ],
+        onHitEffects: [{
+          id: 'bite-swallow',
+          kind: 'source-linked-condition',
+          savingThrow: { ability: 'dex', dc: 19 },
+          relation: {
+            kind: 'swallowed',
+            slotGroup: 'swallow',
+            capacity: 20,
+            maxDistanceFeet: 5,
+            targetMaxSizeRank: 3,
+            whenCapacityFull: 'skip-application',
+            movement: 'carry-target',
+            endsOnSourceIncapacitated: false,
+          },
+          conditions: [
+            { condition: 'restrained' },
+            { condition: 'blinded', dependsOnCondition: 'restrained' },
+          ],
+          periodicDamage: {
+            timing: 'source-turn-start',
+            count: 6,
+            sides: 6,
+            modifier: 0,
+            type: 'acid',
+          },
+        }],
+      },
+    },
+    {
+      actionId: 'tail-stinger',
+      attack: {
+        mode: 'melee',
+        toHit: 14,
+        reachFeet: 10,
+        target: 'one creature',
+        damage: [
+          { average: 19, count: 3, sides: 6, bonus: 9, type: 'piercing' },
+        ],
+        onHitEffects: [{
+          id: 'poison-save-damage',
+          kind: 'saving-throw-damage',
+          ability: 'con',
+          dc: 19,
+          damage: [
+            { average: 42, count: 12, sides: 6, bonus: 0, type: 'poison' },
+          ],
+          damageOnSuccessfulSave: 'half',
+        }],
+      },
+    },
+  ],
+  sahuagin: [{
+    actionId: 'spear',
+    branchNote:
+      'Headless 固定分支：近战时本动作以单手使用长矛，远程时使用投掷伤害；双手近战请使用“长矛（双手近战）”。',
+    attack: {
+      mode: 'melee-or-ranged',
+      toHit: 3,
+      reachFeet: 5,
+      rangeFeet: { normal: 20, long: 60 },
+      target: 'one target',
+      damage: [{ average: 4, count: 1, sides: 6, bonus: 1, type: 'piercing' }],
+      rangedDamage: [{ average: 4, count: 1, sides: 6, bonus: 1, type: 'piercing' }],
+    },
+  }],
+  salamander: [{
+    actionId: 'spear',
+    branchNote:
+      'Headless 固定分支：近战时本动作以单手使用长矛，远程时使用投掷伤害；双手近战请使用“长矛（双手近战）”。',
+    attack: {
+      mode: 'melee-or-ranged',
+      toHit: 7,
+      reachFeet: 5,
+      rangeFeet: { normal: 20, long: 60 },
+      target: 'one target',
+      damage: [
+        { average: 11, count: 2, sides: 6, bonus: 4, type: 'piercing' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'fire' },
+      ],
+      rangedDamage: [
+        { average: 11, count: 2, sides: 6, bonus: 4, type: 'piercing' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'fire' },
+      ],
+    },
+  }],
+  'werewolf-human': [{
+    actionId: 'spear',
+    branchNote:
+      'Headless 固定分支：近战时本动作以单手使用长矛，远程时使用投掷伤害；双手近战请使用“长矛（双手近战）”。',
+    attack: {
+      mode: 'melee-or-ranged',
+      toHit: 4,
+      reachFeet: 5,
+      rangeFeet: { normal: 20, long: 60 },
+      target: 'one creature',
+      damage: [{ average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+      rangedDamage: [{ average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+    },
+  }],
+  wight: [{
+    actionId: 'longsword',
+    branchNote: 'Headless 固定分支：本动作以单手使用长剑；双手伤害请使用“长剑（双手）”。',
+    attack: {
+      mode: 'melee',
+      toHit: 4,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 6, count: 1, sides: 8, bonus: 2, type: 'slashing' }],
+    },
+  }],
+  'horned-devil': [{
+    actionId: 'hurl-flame',
+    attack: {
+      mode: 'ranged',
+      toHit: 7,
+      rangeFeet: { normal: 150, long: 150 },
+      target: 'one target',
+      damage: [{ average: 14, count: 4, sides: 6, bonus: 0, type: 'fire' }],
+    },
+  }],
+  oni: [{
+    actionId: 'glaive',
+    branchNote:
+      'Headless 固定分支：本动作使用鬼人的大型／真实形态伤害；小型或中型形态请使用“长柄刀（小型／中型形态）”。',
+    attack: {
+      mode: 'melee',
+      toHit: 7,
+      reachFeet: 10,
+      target: 'one target',
+      damage: [{ average: 15, count: 2, sides: 10, bonus: 4, type: 'slashing' }],
+    },
+  }],
+} as const satisfies Readonly<Record<string, readonly {
+  actionId: string
+  branchNote?: string
+  attack: Dnd5eMonsterWeaponAttack
+}[]>>
+
+const CATALOG_WEAPON_ATTACK_VARIANTS = {
+  djinni: [{
+    sourceActionId: 'scimitar',
+    id: 'scimitar-thunder',
+    nameSuffix: '（雷鸣）',
+    branchNote: 'Headless 固定分支：本动作选择雷鸣伤害。',
+    attack: {
+      mode: 'melee',
+      toHit: 9,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [
+        { average: 12, count: 2, sides: 6, bonus: 5, type: 'slashing' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'thunder' },
+      ],
+    },
+  }],
+  drider: [{
+    sourceActionId: 'longsword',
+    id: 'longsword-two-handed',
+    nameSuffix: '（双手）',
+    branchNote: 'Headless 固定分支：本动作以双手使用长剑。',
+    attack: {
+      mode: 'melee',
+      toHit: 6,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 8, count: 1, sides: 10, bonus: 3, type: 'slashing' }],
+    },
+  }],
+  erinyes: [{
+    sourceActionId: 'longsword',
+    id: 'longsword-two-handed',
+    nameSuffix: '（双手）',
+    branchNote: 'Headless 固定分支：本动作以双手使用长剑。',
+    attack: {
+      mode: 'melee',
+      toHit: 8,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [
+        { average: 9, count: 1, sides: 10, bonus: 4, type: 'slashing' },
+        { average: 13, count: 3, sides: 8, bonus: 0, type: 'poison' },
+      ],
+    },
+  }],
+  gladiator: [{
+    sourceActionId: 'spear',
+    id: 'spear-two-handed',
+    nameSuffix: '（双手近战）',
+    branchNote: 'Headless 固定分支：本动作以双手发动近战长矛攻击。',
+    attack: {
+      mode: 'melee',
+      toHit: 7,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 13, count: 2, sides: 8, bonus: 4, type: 'piercing' }],
+    },
+  }],
+  sahuagin: [{
+    sourceActionId: 'spear',
+    id: 'spear-two-handed',
+    nameSuffix: '（双手近战）',
+    branchNote: 'Headless 固定分支：本动作以双手发动近战长矛攻击。',
+    attack: {
+      mode: 'melee',
+      toHit: 3,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 5, count: 1, sides: 8, bonus: 1, type: 'piercing' }],
+    },
+  }],
+  salamander: [{
+    sourceActionId: 'spear',
+    id: 'spear-two-handed',
+    nameSuffix: '（双手近战）',
+    branchNote: 'Headless 固定分支：本动作以双手发动近战长矛攻击。',
+    attack: {
+      mode: 'melee',
+      toHit: 7,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [
+        { average: 13, count: 2, sides: 8, bonus: 4, type: 'piercing' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'fire' },
+      ],
+    },
+  }],
+  'werewolf-human': [{
+    sourceActionId: 'spear',
+    id: 'spear-two-handed',
+    nameSuffix: '（双手近战）',
+    branchNote: 'Headless 固定分支：本动作以双手发动近战长矛攻击。',
+    attack: {
+      mode: 'melee',
+      toHit: 4,
+      reachFeet: 5,
+      target: 'one creature',
+      damage: [{ average: 6, count: 1, sides: 8, bonus: 2, type: 'piercing' }],
+    },
+  }],
+  wight: [{
+    sourceActionId: 'longsword',
+    id: 'longsword-two-handed',
+    nameSuffix: '（双手）',
+    branchNote: 'Headless 固定分支：本动作以双手使用长剑。',
+    attack: {
+      mode: 'melee',
+      toHit: 4,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 7, count: 1, sides: 10, bonus: 2, type: 'slashing' }],
+    },
+  }],
+  oni: [{
+    sourceActionId: 'glaive',
+    id: 'glaive-small-or-medium',
+    nameSuffix: '（小型／中型形态）',
+    branchNote: 'Headless 固定分支：本动作使用鬼人的小型或中型形态伤害。',
+    attack: {
+      mode: 'melee',
+      toHit: 7,
+      reachFeet: 10,
+      target: 'one target',
+      damage: [{ average: 9, count: 1, sides: 10, bonus: 4, type: 'slashing' }],
+    },
+  }],
+} as const satisfies Readonly<Record<string, readonly {
+  sourceActionId: string
+  id: string
+  nameSuffix: string
+  branchNote: string
+  attack: Dnd5eMonsterWeaponAttack
+}[]>>
 
 const CATALOG_ASSASSIN_POISON_WEAPON_ATTACKS = {
   shortsword: {
@@ -2243,6 +2964,18 @@ const CATALOG_COMPLEX_POISON_ATTACKS = {
 }>>
 
 const CATALOG_SAVING_THROW_CONDITION_ATTACKS = {
+  'bearded-devil': {
+    actionId: 'beard',
+    effectId: 'beard-poisoned',
+    ability: 'con',
+    dc: 12,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+      preventHealing: true,
+    },
+  },
   'bone-devil': {
     actionId: 'sting',
     effectId: 'sting-poisoned',
@@ -2254,12 +2987,121 @@ const CATALOG_SAVING_THROW_CONDITION_ATTACKS = {
       repeatSaveAtEndOfTargetTurn: true,
     },
   },
+  couatl: {
+    actionId: 'bite',
+    effectId: 'bite-poisoned-unconscious',
+    ability: 'con',
+    dc: 13,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 14_400,
+      repeatSaveAtEndOfTargetTurn: false,
+    },
+    additionalConditionsOnFailedSave: [{
+      condition: 'unconscious',
+      durationRounds: 14_400,
+      repeatSaveAtEndOfTargetTurn: false,
+      dependsOnCondition: 'poisoned',
+      canBeAwakenedByAction: true,
+    }],
+  },
+  cockatrice: {
+    actionId: 'bite',
+    effectId: 'bite-petrification',
+    ability: 'con',
+    dc: 11,
+    magical: true,
+    conditionOnFailedSave: {
+      condition: 'restrained',
+      durationRounds: 1,
+      repeatSaveAtEndOfTargetTurn: true,
+      onRepeatSaveFailureTransition: {
+        replaceWithCondition: 'petrified',
+        duration: 'permanent',
+      },
+    },
+  },
+  'deep-gnome-svirfneblin': {
+    actionId: 'poisoned-dart',
+    effectId: 'dart-poisoned',
+    ability: 'con',
+    dc: 12,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+  drow: {
+    actionId: 'hand-crossbow',
+    effectId: 'crossbow-poisoned-unconscious',
+    ability: 'con',
+    dc: 13,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 600,
+      repeatSaveAtEndOfTargetTurn: false,
+    },
+    additionalConditionsOnFailedSave: [{
+      condition: 'unconscious',
+      durationRounds: 600,
+      repeatSaveAtEndOfTargetTurn: false,
+      minimumFailureMargin: 5,
+      dependsOnCondition: 'poisoned',
+      breakOnDamage: true,
+      canBeAwakenedByAction: true,
+    }],
+  },
+  ettercap: {
+    actionId: 'bite',
+    effectId: 'bite-poisoned',
+    ability: 'con',
+    dc: 11,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+  lich: {
+    actionId: 'paralyzing-touch',
+    effectId: 'touch-paralyzed',
+    ability: 'con',
+    dc: 18,
+    conditionOnFailedSave: {
+      condition: 'paralyzed',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+  pseudodragon: {
+    actionId: 'sting',
+    effectId: 'sting-poisoned-unconscious',
+    ability: 'con',
+    dc: 11,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 600,
+      repeatSaveAtEndOfTargetTurn: false,
+    },
+    additionalConditionsOnFailedSave: [{
+      condition: 'unconscious',
+      durationRounds: 600,
+      repeatSaveAtEndOfTargetTurn: false,
+      minimumFailureMargin: 5,
+      dependsOnCondition: 'poisoned',
+      breakOnDamage: true,
+      canBeAwakenedByAction: true,
+    }],
+  },
 } as const satisfies Readonly<Record<string, {
   actionId: string
   effectId: string
   ability: AbilityKey
   dc: number
+  magical?: boolean
   conditionOnFailedSave: Dnd5eMonsterFailedSaveCondition
+  additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
 }>>
 
 const CATALOG_PRONE_BITE_DCS = {
@@ -2269,6 +3111,9 @@ const CATALOG_PRONE_BITE_DCS = {
 } as const
 
 const CATALOG_PRONE_ATTACK_SAVES = {
+  'giant-crocodile': { actionId: 'tail', dc: 16 },
+  'gibbering-mouther': { actionId: 'bites', dc: 10, targetMaxSizeRank: 2 },
+  gladiator: { actionId: 'shield-bash', dc: 15, targetMaxSizeRank: 2 },
   'stone-giant': { actionId: 'rock', dc: 17 },
   tarrasque: { actionId: 'tail', dc: 20 },
 } as const
@@ -2300,6 +3145,38 @@ const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
       { condition: 'restrained', dependsOnCondition: 'grappled' },
     ],
   },
+  'chain-devil': {
+    actionId: 'chain',
+    effectId: 'chain-grapple',
+    slotGroup: 'chain',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 14,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+    periodicDamage: {
+      timing: 'target-turn-start',
+      count: 2,
+      sides: 6,
+      modifier: 0,
+      type: 'piercing',
+    },
+  },
+  chuul: {
+    actionId: 'pincer',
+    effectId: 'pincer-grapple',
+    slotGroup: 'pincer',
+    capacity: 2,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 3,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 14,
+    conditions: [{ condition: 'grappled' }],
+  },
   'constrictor-snake': {
     actionId: 'constrict',
     effectId: 'constrict-grapple',
@@ -2314,6 +3191,45 @@ const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
       { condition: 'restrained', dependsOnCondition: 'grappled' },
     ],
   },
+  couatl: {
+    actionId: 'constrict',
+    effectId: 'constrict-grapple',
+    slotGroup: 'constrict',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 2,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 15,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  crocodile: {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 12,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'giant-crab': {
+    actionId: 'claw',
+    effectId: 'claw-grapple',
+    slotGroup: 'claw',
+    capacity: 2,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 11,
+    conditions: [{ condition: 'grappled' }],
+  },
   'giant-constrictor-snake': {
     actionId: 'constrict',
     effectId: 'constrict-grapple',
@@ -2323,6 +3239,34 @@ const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
     targetMaxSizeRank: 5,
     whenCapacityFull: 'linked-target-only',
     escapeDc: 16,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'giant-crocodile': {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 16,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'giant-frog': {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 11,
     conditions: [
       { condition: 'grappled' },
       { condition: 'restrained', dependsOnCondition: 'grappled' },
@@ -2353,6 +3297,163 @@ const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
     escapeDc: 12,
     conditions: [{ condition: 'grappled' }],
   },
+  'giant-toad': {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 13,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  glabrezu: {
+    actionId: 'pincer',
+    effectId: 'pincer-grapple',
+    slotGroup: 'pincer',
+    capacity: 2,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 2,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 15,
+    conditions: [{ condition: 'grappled' }],
+  },
+  marilith: {
+    actionId: 'tail',
+    effectId: 'tail-grapple',
+    slotGroup: 'tail',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 2,
+    whenCapacityFull: 'linked-target-only',
+    attackAutomaticallyHitsLinkedTarget: true,
+    escapeDc: 19,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  kraken: {
+    actionId: 'tentacle',
+    effectId: 'tentacle-grapple',
+    slotGroup: 'tentacle',
+    capacity: 10,
+    maxDistanceFeet: 30,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 18,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  otyugh: {
+    actionId: 'tentacle',
+    effectId: 'tentacle-grapple',
+    slotGroup: 'tentacle',
+    capacity: 2,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 2,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 13,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  remorhaz: {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 17,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  roc: {
+    actionId: 'talons',
+    effectId: 'talons-grapple',
+    slotGroup: 'talons',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 19,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  salamander: {
+    actionId: 'tail',
+    effectId: 'tail-grapple',
+    slotGroup: 'tail',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    attackAutomaticallyHitsLinkedTarget: true,
+    escapeDc: 14,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  roper: {
+    actionId: 'tendril',
+    effectId: 'tendril-grapple',
+    slotGroup: 'tendril',
+    capacity: 6,
+    maxDistanceFeet: 50,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 15,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+    modifiers: {
+      abilityCheckDisadvantages: ['str'],
+      savingThrowDisadvantages: ['str'],
+    },
+  },
+  tarrasque: {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 20,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'tyrannosaurus-rex': {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 10,
+    targetMaxSizeRank: 2,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 17,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
 } as const satisfies Readonly<Record<string, {
   actionId: string
   effectId: string
@@ -2362,12 +3463,386 @@ const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
   targetMaxSizeRank: number
   whenCapacityFull: 'skip-application' | 'linked-target-only'
   attackAdvantageAgainstLinkedTarget?: boolean
+  attackAutomaticallyHitsLinkedTarget?: boolean
   escapeDc: number
   conditions: readonly {
     condition: 'grappled' | 'restrained'
     dependsOnCondition?: 'grappled' | 'restrained'
   }[]
+  modifiers?: Dnd5eActiveEffectModifiers
+  periodicDamage?: Omit<Dnd5eActiveEffectPeriodicDamage, 'lastResolvedTurnKey'>
 }>>
+
+const CATALOG_DAMAGE_OR_GRAPPLE_ATTACKS = {
+  'vampire-spawn': {
+    actionId: 'claws',
+    grappleActionId: 'claws-grapple',
+    effectId: 'claws-grapple',
+    slotGroup: 'claws-grapple',
+    escapeDc: 13,
+  },
+  'vampire-vampire': {
+    actionId: 'unarmed-strike',
+    grappleActionId: 'unarmed-strike-grapple',
+    effectId: 'unarmed-strike-grapple',
+    slotGroup: 'unarmed-strike-grapple',
+    escapeDc: 18,
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  grappleActionId: string
+  effectId: string
+  slotGroup: string
+  escapeDc: number
+}>>
+
+const CATALOG_FORCED_MOVEMENT_ATTACKS = {
+  balor: {
+    actionId: 'whip',
+    effect: {
+      id: 'whip-pull',
+      kind: 'forced-movement',
+      resistance: {
+        kind: 'saving-throw',
+        ability: 'str',
+        dc: 20,
+      },
+      direction: 'toward-source',
+      maximumDistanceFeet: 25,
+    },
+  },
+  merrow: {
+    actionId: 'harpoon',
+    effect: {
+      id: 'harpoon-pull',
+      kind: 'forced-movement',
+      resistance: {
+        kind: 'opposed-ability-check',
+        sourceAbility: 'str',
+        targetAbility: 'str',
+      },
+      direction: 'toward-source',
+      maximumDistanceFeet: 20,
+      targetMaxSizeRank: 4,
+    },
+  },
+  'dragon-turtle': {
+    actionId: 'tail',
+    effect: {
+      id: 'tail-push',
+      kind: 'forced-movement',
+      resistance: {
+        kind: 'saving-throw',
+        ability: 'str',
+        dc: 20,
+      },
+      direction: 'away-from-source',
+      maximumDistanceFeet: 10,
+      conditionOnFailedResistance: 'prone',
+    },
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  effect: Dnd5eMonsterForcedMovementOnHitEffect
+}>>
+
+const CATALOG_PERSISTENT_EFFECT_ATTACKS = {
+  'bearded-devil': {
+    actionId: 'glaive',
+    effect: {
+      id: 'glaive-infernal-wound',
+      kind: 'persistent-effect',
+      savingThrow: { ability: 'con', dc: 12 },
+      targetCreatureTypeExclusions: ['construct', 'undead'],
+      definitionId: 'srd-5.1:monster:infernal-wound',
+      label: 'Infernal Wound',
+      periodicDamage: {
+        timing: 'target-turn-start',
+        count: 1,
+        sides: 10,
+        modifier: 0,
+      },
+      removal: {
+        action: {
+          label: 'Stanch Infernal Wound',
+          economy: 'action',
+          maxDistanceFeet: 5,
+          abilityCheck: { ability: 'wis', skill: 'medicine', dc: 12 },
+        },
+        onMagicalHealing: true,
+      },
+      stacking: 'increase-periodic-dice',
+    },
+  },
+  'fire-elemental': {
+    actionId: 'touch',
+    effect: {
+      id: 'touch-ignite',
+      kind: 'persistent-effect',
+      definitionId: 'srd-5.1:monster:fire-elemental:ignite',
+      label: 'Ignited',
+      periodicDamage: {
+        timing: 'target-turn-start',
+        count: 1,
+        sides: 10,
+        modifier: 0,
+        type: 'fire',
+      },
+      removal: {
+        action: {
+          label: 'Douse Flames',
+          economy: 'action',
+          maxDistanceFeet: 5,
+        },
+      },
+      stacking: 'refresh',
+    },
+  },
+  'horned-devil': {
+    actionId: 'tail',
+    effect: {
+      id: 'tail-infernal-wound',
+      kind: 'persistent-effect',
+      savingThrow: { ability: 'con', dc: 17 },
+      targetCreatureTypeExclusions: ['construct', 'undead'],
+      definitionId: 'srd-5.1:monster:infernal-wound',
+      label: 'Infernal Wound',
+      periodicDamage: {
+        timing: 'target-turn-start',
+        count: 3,
+        sides: 6,
+        modifier: 0,
+      },
+      removal: {
+        action: {
+          label: 'Stanch Infernal Wound',
+          economy: 'action',
+          maxDistanceFeet: 5,
+          abilityCheck: { ability: 'wis', skill: 'medicine', dc: 12 },
+        },
+        onMagicalHealing: true,
+      },
+      stacking: 'increase-periodic-dice',
+    },
+  },
+  'pit-fiend': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-poison',
+      kind: 'persistent-effect',
+      savingThrow: { ability: 'con', dc: 21 },
+      definitionId: 'srd-5.1:monster:pit-fiend:bite-poison',
+      label: 'Pit Fiend Bite Poison',
+      standardCondition: 'poisoned',
+      periodicDamage: {
+        timing: 'target-turn-start',
+        count: 6,
+        sides: 6,
+        modifier: 0,
+        type: 'poison',
+      },
+      repeatSave: {
+        ability: 'con',
+        dc: 21,
+        timing: 'target-turn-end',
+        onSuccess: 'remove',
+      },
+      modifiers: { preventHealing: true },
+      stacking: 'refresh',
+    },
+  },
+  rakshasa: {
+    actionId: 'claw',
+    effect: {
+      id: 'claw-rest-curse',
+      kind: 'persistent-effect',
+      magical: true,
+      definitionId: 'srd-5.1:monster:rakshasa:claw-rest-curse',
+      label: 'Rakshasa Claw Curse',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  mummy: {
+    actionId: 'rotting-fist',
+    effect: {
+      id: 'rotting-fist-mummy-rot',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 12, magical: true },
+      definitionId: 'srd-5.1:monster:mummy:mummy-rot',
+      label: 'Mummy Rot',
+      ailment: 'curse',
+      modifiers: { preventHealing: true },
+      campaignPeriodicHitPointMaximumReduction: {
+        intervalHours: 24,
+        reduction: {
+          average: 10,
+          count: 3,
+          sides: 6,
+          bonus: 0,
+        },
+        execution: 'campaign-time-only',
+        recovery: 'when-effect-removed',
+      },
+      stacking: 'refresh',
+    },
+  },
+  'mummy-lord': {
+    actionId: 'rotting-fist',
+    effect: {
+      id: 'rotting-fist-mummy-rot',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 16, magical: true },
+      definitionId: 'srd-5.1:monster:mummy:mummy-rot',
+      label: 'Mummy Rot',
+      ailment: 'curse',
+      modifiers: { preventHealing: true },
+      campaignPeriodicHitPointMaximumReduction: {
+        intervalHours: 24,
+        reduction: {
+          average: 10,
+          count: 3,
+          sides: 6,
+          bonus: 0,
+        },
+        execution: 'campaign-time-only',
+        recovery: 'when-effect-removed',
+      },
+      stacking: 'refresh',
+    },
+  },
+  'wereboar-hybrid': {
+    actionId: 'tusks',
+    effect: {
+      id: 'tusks-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 12 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:wereboar:lycanthropy',
+      label: 'Wereboar Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'wererat-hybrid': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 11 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:wererat:lycanthropy',
+      label: 'Wererat Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'werewolf-hybrid': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 12 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:werewolf:lycanthropy',
+      label: 'Werewolf Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'death-dog': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-disease',
+      kind: 'persistent-effect',
+      savingThrow: { ability: 'con', dc: 12 },
+      definitionId: 'srd-5.1:monster:death-dog:bite-disease',
+      label: 'Death Dog Disease',
+      ailment: 'disease',
+      standardCondition: 'poisoned',
+      stacking: 'refresh',
+    },
+  },
+  otyugh: {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-disease',
+      kind: 'persistent-effect',
+      savingThrow: { ability: 'con', dc: 15 },
+      definitionId: 'srd-5.1:monster:otyugh:bite-disease',
+      label: 'Otyugh Disease',
+      ailment: 'disease',
+      standardCondition: 'poisoned',
+      stacking: 'refresh',
+    },
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  effect: Dnd5eMonsterPersistentOnHitEffect
+}>>
+
+const CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS = {
+  'clay-golem': {
+    actionId: 'slam',
+    effectId: 'slam-hit-point-maximum-reduction',
+    damageBasis: { kind: 'all-attack-damage' },
+    savingThrow: { ability: 'con', dc: 15 },
+    recovery: 'greater-restoration-or-other-magic',
+  },
+  wight: {
+    actionId: 'life-drain',
+    effectId: 'life-drain-hit-point-maximum-reduction',
+    damageBasis: { kind: 'damage-type', damageType: 'necrotic' },
+    savingThrow: { ability: 'con', dc: 13 },
+    recovery: 'long-rest',
+  },
+  'vampire-spawn': {
+    actionId: 'bite',
+    effectId: 'bite-hit-point-maximum-reduction',
+    damageBasis: { kind: 'damage-type', damageType: 'necrotic' },
+    recovery: 'long-rest',
+    healSourceByAmount: true,
+  },
+  'vampire-vampire': {
+    actionId: 'bite',
+    effectId: 'bite-hit-point-maximum-reduction',
+    damageBasis: { kind: 'damage-type', damageType: 'necrotic' },
+    recovery: 'long-rest',
+    healSourceByAmount: true,
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  effectId: string
+  damageBasis:
+    | { kind: 'all-attack-damage' }
+    | { kind: 'damage-type'; damageType: Dnd5eDamageType }
+  savingThrow?: { ability: AbilityKey; dc: number; magical?: boolean }
+  recovery: 'long-rest' | 'greater-restoration-or-other-magic'
+  healSourceByAmount?: boolean
+}>>
+
+const VAMPIRE_BITE_TARGET_ELIGIBILITY = {
+  kind: 'any-of',
+  predicates: [
+    {
+      kind: 'source-linked-relation',
+      relationKind: 'grapple',
+    },
+    { kind: 'incapacitated' },
+    {
+      kind: 'standard-condition',
+      condition: 'restrained',
+    },
+  ],
+  // "Willing" is SRD-legal, but Headless has no authenticated target-consent
+  // field. Keep the option visible for DM adjudication without guessing it.
+  dmAdjudicationAlternatives: [{ kind: 'willing-target' }],
+} as const satisfies Dnd5eMonsterTargetEligibility
 
 const CATALOG_MAGICAL_WEAPON_TRAIT_MONSTERS = new Set([
   'androsphinx',
@@ -2437,7 +3912,7 @@ const CATALOG_ASSASSINATE_TRAIT_INDEX = {
 
 const CATALOG_SNEAK_ATTACK_TRAITS = {
   assassin: {
-    traitIndex: 1,
+    traitIndex: 2,
     extraDamage: {
       average: 13,
       count: 4,
@@ -2535,6 +4010,11 @@ const CATALOG_PARRY_ARMOR_CLASS_BONUSES = {
 } as const satisfies Readonly<Record<string, number>>
 
 const CATALOG_LEGENDARY_ACTION_REFERENCES = {
+  lich: {
+    legacyActionId: 'paralyzing-touch-costs-2-actions',
+    actionId: 'paralyzing-touch-costs-2-actions',
+    referencedActionId: 'paralyzing-touch',
+  },
   unicorn: {
     legacyActionId: 'hooves',
     actionId: 'legendary-hooves',
@@ -2547,6 +4027,248 @@ const CATALOG_LEGENDARY_ACTION_REFERENCES = {
   },
 } as const
 
+interface Dnd5eCatalogCompositeSpecialAction {
+  rule: Dnd5eMonsterSpecialActionRule
+  relationRequirement?: Dnd5eMonsterAction['relationRequirement']
+}
+
+/**
+ * Reviewed non-spell children used by composite Multiattacks. These rules are
+ * explicit because the SRD prose includes visibility, linked-target, staged
+ * condition, repeat-save and immunity semantics that cannot be inferred safely.
+ */
+const CATALOG_COMPOSITE_SPECIAL_ACTIONS: Readonly<
+  Record<string, Readonly<Record<string, Dnd5eCatalogCompositeSpecialAction>>>
+> = {
+  'gibbering-mouther': {
+    'blinding-spittle': {
+      rule: {
+        kind: 'area-saving-throw',
+        area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 15 },
+        target: 'all-creatures-except-self',
+        ability: 'dex',
+        dc: 13,
+        requiresSourceCanSeeTarget: true,
+        conditionOnFailedSave: {
+          condition: 'blinded',
+          durationRounds: 1,
+          repeatSaveAtEndOfTargetTurn: false,
+          expiresAtSourceTurnEnd: true,
+        },
+      },
+    },
+  },
+  nalfeshnee: {
+    'horror-nimbus': {
+      rule: {
+        kind: 'area-saving-throw',
+        area: { shape: 'circle', origin: 'self', radiusFeet: 15 },
+        target: 'all-creatures-except-self',
+        ability: 'wis',
+        dc: 15,
+        magical: true,
+        requiresTargetCanSeeSource: true,
+        conditionOnFailedSave: {
+          condition: 'frightened',
+          durationRounds: 10,
+          repeatSaveAtEndOfTargetTurn: true,
+        },
+        immunityOnSuccessfulSaveOrEffectEnd: {
+          durationRounds: 14_400,
+          scope: { kind: 'source-action' },
+        },
+      },
+    },
+  },
+  kraken: {
+    fling: {
+      relationRequirement: {
+        kind: 'target-linked-to-source',
+        slotGroup: 'tentacle',
+      },
+      rule: {
+        kind: 'throw-linked-target',
+        slotGroup: 'tentacle',
+        maximumDistanceFeet: 60,
+        targetMaxSizeRank: 3,
+        collisionDamage: {
+          distanceFeetPerDie: 10,
+          sides: 6,
+          type: 'bludgeoning',
+        },
+        conditionAfterThrow: 'prone',
+      },
+    },
+  },
+  roper: {
+    reel: {
+      rule: {
+        kind: 'source-linked-reel',
+        slotGroup: 'tendril',
+        maximumDistanceFeet: 25,
+      },
+    },
+  },
+  'shambling-mound': {
+    engulf: {
+      rule: {
+        kind: 'source-linked-engulf',
+        targetMaxSizeRank: 2,
+        effect: {
+          id: 'engulf',
+          kind: 'source-linked-condition',
+          relation: {
+            kind: 'engulfed',
+            slotGroup: 'engulf',
+            capacity: 1,
+            maxDistanceFeet: 5,
+            targetMaxSizeRank: 2,
+            whenCapacityFull: 'skip-application',
+            movement: 'carry-target',
+            endsOnSourceIncapacitated: false,
+          },
+          escapeDc: 14,
+          conditions: [
+            { condition: 'grappled' },
+            {
+              condition: 'restrained',
+              dependsOnCondition: 'grappled',
+            },
+            {
+              condition: 'blinded',
+              dependsOnCondition: 'grappled',
+            },
+          ],
+          dependentLegacyConditions: ['unable-to-breathe'],
+          periodicDamage: {
+            timing: 'source-turn-start',
+            count: 2,
+            sides: 8,
+            modifier: 4,
+            type: 'bludgeoning',
+            savingThrow: {
+              ability: 'con',
+              dc: 14,
+              damageOnSuccessfulSave: 'none',
+            },
+          },
+        },
+      },
+    },
+  },
+  tarrasque: {
+    'frightful-presence': {
+      rule: {
+        kind: 'area-saving-throw',
+        area: { shape: 'circle', origin: 'self', radiusFeet: 120 },
+        target: 'hostile',
+        ability: 'wis',
+        dc: 17,
+        conditionOnFailedSave: {
+          condition: 'frightened',
+          durationRounds: 10,
+          repeatSaveAtEndOfTargetTurn: true,
+          repeatSaveDisadvantageWhenSourceVisible: true,
+        },
+        immunityOnSuccessfulSaveOrEffectEnd: {
+          durationRounds: 14_400,
+          scope: { kind: 'source-action' },
+        },
+      },
+    },
+  },
+  chuul: {
+    tentacles: {
+      relationRequirement: {
+        kind: 'target-linked-to-source',
+        slotGroup: 'pincer',
+      },
+      rule: {
+        kind: 'saving-throw-condition',
+        rangeFeet: 10,
+        ability: 'con',
+        dc: 13,
+        condition: 'poisoned',
+        durationRounds: 10,
+        repeatSaveAtEndOfTargetTurn: true,
+        additionalConditionsOnFailedSave: [{
+          condition: 'paralyzed',
+          durationRounds: 10,
+          repeatSaveAtEndOfTargetTurn: false,
+          dependsOnCondition: 'poisoned',
+        }],
+      },
+    },
+  },
+  mummy: {
+    'dreadful-glare': {
+      rule: {
+        kind: 'saving-throw-condition',
+        rangeFeet: 60,
+        ability: 'wis',
+        dc: 11,
+        condition: 'frightened',
+        magical: true,
+        requiresSourceCanSeeTarget: true,
+        requiresTargetCanSeeSource: true,
+        durationRounds: 1,
+        expiresAtSourceTurnEnd: true,
+        additionalConditionsOnFailedSave: [{
+          condition: 'paralyzed',
+          durationRounds: 1,
+          repeatSaveAtEndOfTargetTurn: false,
+          expiresAtSourceTurnEnd: true,
+          minimumFailureMargin: 5,
+          dependsOnCondition: 'frightened',
+        }],
+        immunityOnSuccessfulSaveOrEffectEnd: {
+          durationRounds: 14_400,
+          scope: {
+            kind: 'catalog-action',
+            actionKey: 'mummy:dreadful-glare',
+            grantedActionKeys: ['mummy:dreadful-glare'],
+          },
+        },
+      },
+    },
+  },
+  'mummy-lord': {
+    'dreadful-glare': {
+      rule: {
+        kind: 'saving-throw-condition',
+        rangeFeet: 60,
+        ability: 'wis',
+        dc: 16,
+        condition: 'frightened',
+        magical: true,
+        requiresSourceCanSeeTarget: true,
+        requiresTargetCanSeeSource: true,
+        durationRounds: 1,
+        expiresAtSourceTurnEnd: true,
+        additionalConditionsOnFailedSave: [{
+          condition: 'paralyzed',
+          durationRounds: 1,
+          repeatSaveAtEndOfTargetTurn: false,
+          expiresAtSourceTurnEnd: true,
+          minimumFailureMargin: 5,
+          dependsOnCondition: 'frightened',
+        }],
+        immunityOnSuccessfulSaveOrEffectEnd: {
+          durationRounds: 14_400,
+          scope: {
+            kind: 'catalog-action',
+            actionKey: 'mummy-lord:dreadful-glare',
+            grantedActionKeys: [
+              'mummy:dreadful-glare',
+              'mummy-lord:dreadful-glare',
+            ],
+          },
+        },
+      },
+    },
+  },
+}
+
 interface Dnd5eCatalogMultiattackOverride {
   sequence: readonly string[]
   sequenceAttackMode?: 'melee' | 'ranged'
@@ -2557,6 +4279,12 @@ interface Dnd5eCatalogMultiattackOverride {
   }[]
 }
 
+interface Dnd5eCatalogMultiattackCandidate {
+  id: string
+  sequence: readonly string[]
+  sequenceAttackMode?: 'melee' | 'ranged'
+}
+
 /**
  * The SRD generator deliberately leaves prose containing "or"/"alternatively"
  * for DM adjudication. These reviewed overrides keep each legal sequence as a
@@ -2564,6 +4292,15 @@ interface Dnd5eCatalogMultiattackOverride {
  * the existing atomic Multiattack transaction without guessing player intent.
  */
 const CATALOG_MULTIATTACK_OVERRIDES: Readonly<Record<string, Dnd5eCatalogMultiattackOverride>> = {
+  'bandit-captain': {
+    sequence: ['scimitar', 'scimitar', 'dagger'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-daggers-ranged',
+      sequence: ['dagger', 'dagger'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
   'half-red-dragon-veteran': {
     sequence: ['longsword', 'longsword', 'shortsword'],
   },
@@ -2601,6 +4338,623 @@ const CATALOG_MULTIATTACK_OVERRIDES: Readonly<Record<string, Dnd5eCatalogMultiat
       sequenceAttackMode: 'ranged',
     }],
   },
+  chimera: {
+    sequence: ['bite', 'horns', 'claws'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-fire-breath-instead-of-bite',
+        sequence: ['fire-breath', 'horns', 'claws'],
+      },
+      {
+        id: 'multiattack-fire-breath-instead-of-horns',
+        sequence: ['bite', 'fire-breath', 'claws'],
+      },
+    ],
+  },
+  'dragon-turtle': {
+    sequence: ['bite', 'claw', 'claw'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-bite-and-tail',
+      sequence: ['bite', 'tail'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  efreeti: {
+    sequence: ['scimitar', 'scimitar'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-hurl-flame',
+      sequence: ['hurl-flame', 'hurl-flame'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  ettercap: {
+    sequence: ['bite', 'claws'],
+    sequenceAttackMode: 'melee',
+  },
+  'iron-golem': {
+    sequence: ['sword', 'sword'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-slams',
+        sequence: ['slam', 'slam'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-sword-and-slam',
+        sequence: ['sword', 'slam'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  lizardfolk: {
+    sequence: ['bite', 'heavy-club'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-bite-javelin',
+        sequence: ['bite', 'javelin'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-bite-spiked-shield',
+        sequence: ['bite', 'spiked-shield'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-heavy-club-javelin',
+        sequence: ['heavy-club', 'javelin'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-heavy-club-spiked-shield',
+        sequence: ['heavy-club', 'spiked-shield'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-javelin-spiked-shield',
+        sequence: ['javelin', 'spiked-shield'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  medusa: {
+    sequence: ['snake-hair', 'shortsword', 'shortsword'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-longbow',
+      sequence: ['longbow', 'longbow'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  roc: {
+    sequence: ['beak', 'talons'],
+    sequenceAttackMode: 'melee',
+  },
+  scout: {
+    sequence: ['shortsword', 'shortsword'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-longbow',
+      sequence: ['longbow', 'longbow'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  'werebear-bear': {
+    sequence: ['claw', 'claw'],
+    sequenceAttackMode: 'melee',
+  },
+  'werebear-human': {
+    sequence: ['greataxe', 'greataxe'],
+    sequenceAttackMode: 'melee',
+  },
+  'werebear-hybrid': {
+    sequence: ['claw', 'claw'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-greataxe',
+      sequence: ['greataxe', 'greataxe'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  'wereboar-human': {
+    sequence: ['maul', 'maul'],
+    sequenceAttackMode: 'melee',
+  },
+  'wererat-human': {
+    sequence: ['shortsword', 'shortsword'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-hand-crossbow',
+      sequence: ['hand-crossbow', 'hand-crossbow'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  'weretiger-human': {
+    sequence: ['scimitar', 'scimitar'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-longbow',
+      sequence: ['longbow', 'longbow'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  'weretiger-hybrid': {
+    sequence: ['claw', 'claw'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-scimitar',
+        sequence: ['scimitar', 'scimitar'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-longbow',
+        sequence: ['longbow', 'longbow'],
+        sequenceAttackMode: 'ranged',
+      },
+    ],
+  },
+  balor: {
+    sequence: ['longsword', 'whip'],
+    sequenceAttackMode: 'melee',
+  },
+  'bearded-devil': {
+    sequence: ['beard', 'glaive'],
+    sequenceAttackMode: 'melee',
+  },
+  'chain-devil': {
+    sequence: ['chain', 'chain'],
+    sequenceAttackMode: 'melee',
+  },
+  chuul: {
+    sequence: ['pincer', 'pincer'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-pincers-and-tentacles',
+      sequence: ['pincer', 'pincer', 'tentacles'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  'clay-golem': {
+    sequence: ['slam', 'slam'],
+    sequenceAttackMode: 'melee',
+  },
+  cloaker: {
+    sequence: ['bite', 'tail'],
+    sequenceAttackMode: 'melee',
+  },
+  'death-dog': {
+    sequence: ['bite', 'bite'],
+    sequenceAttackMode: 'melee',
+  },
+  djinni: {
+    sequence: ['scimitar', 'scimitar', 'scimitar'],
+    sequenceAttackMode: 'melee',
+  },
+  drider: {
+    sequence: ['longbow', 'longbow', 'longbow'],
+    sequenceAttackMode: 'ranged',
+    alternatives: [
+      {
+        id: 'multiattack-longsword',
+        sequence: ['longsword', 'longsword', 'longsword'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-bite-and-longbow',
+        sequence: ['bite', 'longbow', 'longbow'],
+      },
+      {
+        id: 'multiattack-bite-and-longsword',
+        sequence: ['bite', 'longsword', 'longsword'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  erinyes: {
+    sequence: ['longsword', 'longsword', 'longsword'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-two-longswords-and-longbow',
+        sequence: ['longsword', 'longsword', 'longbow'],
+      },
+      {
+        id: 'multiattack-longsword-and-two-longbows',
+        sequence: ['longsword', 'longbow', 'longbow'],
+      },
+      {
+        id: 'multiattack-longbow',
+        sequence: ['longbow', 'longbow', 'longbow'],
+        sequenceAttackMode: 'ranged',
+      },
+    ],
+  },
+  'fire-elemental': {
+    sequence: ['touch', 'touch'],
+    sequenceAttackMode: 'melee',
+  },
+  'giant-crocodile': {
+    sequence: ['bite', 'tail'],
+    sequenceAttackMode: 'melee',
+  },
+  'gibbering-mouther': {
+    sequence: ['bites', 'blinding-spittle'],
+    sequenceAttackMode: 'melee',
+  },
+  glabrezu: {
+    sequence: ['pincer', 'pincer', 'fist', 'fist'],
+    sequenceAttackMode: 'melee',
+  },
+  gladiator: {
+    sequence: ['spear', 'spear', 'spear'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-shield-bash-and-two-spears',
+        sequence: ['shield-bash', 'spear', 'spear'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-two-shield-bashes-and-spear',
+        sequence: ['shield-bash', 'shield-bash', 'spear'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-shield-bashes',
+        sequence: ['shield-bash', 'shield-bash', 'shield-bash'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-spears-ranged',
+        sequence: ['spear', 'spear'],
+        sequenceAttackMode: 'ranged',
+      },
+    ],
+  },
+  grick: {
+    sequence: ['tentacles', 'beak'],
+    sequenceAttackMode: 'melee',
+  },
+  'horned-devil': {
+    sequence: ['fork', 'fork', 'tail'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-forks-and-hurl-flame',
+        sequence: ['fork', 'fork', 'hurl-flame'],
+      },
+      {
+        id: 'multiattack-fork-tail-and-hurl-flame',
+        sequence: ['fork', 'tail', 'hurl-flame'],
+      },
+      {
+        id: 'multiattack-fork-and-two-hurl-flames',
+        sequence: ['fork', 'hurl-flame', 'hurl-flame'],
+      },
+      {
+        id: 'multiattack-tail-and-two-hurl-flames',
+        sequence: ['tail', 'hurl-flame', 'hurl-flame'],
+      },
+      {
+        id: 'multiattack-hurl-flames',
+        sequence: ['hurl-flame', 'hurl-flame', 'hurl-flame'],
+        sequenceAttackMode: 'ranged',
+      },
+    ],
+  },
+  hydra: {
+    sequence: ['bite', 'bite', 'bite', 'bite', 'bite'],
+    sequenceAttackMode: 'melee',
+  },
+  kraken: {
+    sequence: ['tentacle', 'tentacle', 'tentacle'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-two-tentacles-and-fling',
+        sequence: ['tentacle', 'tentacle', 'fling'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-tentacle-and-two-flings',
+        sequence: ['tentacle', 'fling', 'fling'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-flings',
+        sequence: ['fling', 'fling', 'fling'],
+      },
+    ],
+  },
+  lamia: {
+    sequence: ['claws', 'dagger'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-claws-and-intoxicating-touch',
+      sequence: ['claws', 'intoxicating-touch'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  manticore: {
+    sequence: ['bite', 'claw', 'claw'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-tail-spikes',
+      sequence: ['tail-spike', 'tail-spike', 'tail-spike'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  marilith: {
+    sequence: ['longsword', 'longsword', 'longsword', 'longsword', 'longsword', 'longsword', 'tail'],
+    sequenceAttackMode: 'melee',
+  },
+  merrow: {
+    sequence: ['bite', 'claws'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-bite-and-harpoon',
+      sequence: ['bite', 'harpoon'],
+    }],
+  },
+  mummy: {
+    sequence: ['dreadful-glare', 'rotting-fist'],
+    sequenceAttackMode: 'melee',
+  },
+  'mummy-lord': {
+    sequence: ['dreadful-glare', 'rotting-fist'],
+    sequenceAttackMode: 'melee',
+  },
+  nalfeshnee: {
+    sequence: ['horror-nimbus', 'bite', 'claw', 'claw'],
+    sequenceAttackMode: 'melee',
+  },
+  oni: {
+    sequence: ['claw-oni-form-only', 'claw-oni-form-only'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-glaive',
+      sequence: ['glaive', 'glaive'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  otyugh: {
+    sequence: ['bite', 'tentacle', 'tentacle'],
+    sequenceAttackMode: 'melee',
+  },
+  'pit-fiend': {
+    sequence: ['bite', 'claw', 'mace', 'tail'],
+    sequenceAttackMode: 'melee',
+  },
+  'purple-worm': {
+    sequence: ['bite', 'tail-stinger'],
+    sequenceAttackMode: 'melee',
+  },
+  rakshasa: {
+    sequence: ['claw', 'claw'],
+    sequenceAttackMode: 'melee',
+  },
+  roper: {
+    sequence: ['tendril', 'tendril', 'tendril', 'tendril', 'reel', 'bite'],
+    sequenceAttackMode: 'melee',
+  },
+  sahuagin: {
+    sequence: ['bite', 'claws'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-bite-and-spear',
+      sequence: ['bite', 'spear'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  salamander: {
+    sequence: ['spear', 'tail'],
+    sequenceAttackMode: 'melee',
+  },
+  'shambling-mound': {
+    sequence: ['slam', 'slam', 'engulf'],
+    sequenceAttackMode: 'melee',
+  },
+  tarrasque: {
+    sequence: ['bite', 'claw', 'claw', 'horns', 'tail'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-swallow',
+        sequence: ['swallow', 'claw', 'claw', 'horns', 'tail'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-frightful-presence',
+        sequence: ['frightful-presence', 'bite', 'claw', 'claw', 'horns', 'tail'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-frightful-presence-and-swallow',
+        sequence: ['frightful-presence', 'swallow', 'claw', 'claw', 'horns', 'tail'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  'tyrannosaurus-rex': {
+    sequence: ['bite', 'tail'],
+    sequenceAttackMode: 'melee',
+  },
+  'vampire-spawn': {
+    sequence: ['claws', 'claws'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-claws-and-bite',
+        sequence: ['claws', 'bite'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-claws-and-grapple',
+        sequence: ['claws', 'claws-grapple'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-grapple-and-claws',
+        sequence: ['claws-grapple', 'claws'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-grapples',
+        sequence: ['claws-grapple', 'claws-grapple'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-grapple-and-bite',
+        sequence: ['claws-grapple', 'bite'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  'vampire-vampire': {
+    sequence: ['unarmed-strike', 'unarmed-strike'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-unarmed-strike-and-bite',
+        sequence: ['unarmed-strike', 'bite'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-unarmed-strike-and-grapple',
+        sequence: ['unarmed-strike', 'unarmed-strike-grapple'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-grapple-and-unarmed-strike',
+        sequence: ['unarmed-strike-grapple', 'unarmed-strike'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-unarmed-grapples',
+        sequence: ['unarmed-strike-grapple', 'unarmed-strike-grapple'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-unarmed-grapple-and-bite',
+        sequence: ['unarmed-strike-grapple', 'bite'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  'wereboar-hybrid': {
+    sequence: ['maul', 'maul'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-maul-and-tusks',
+      sequence: ['maul', 'tusks'],
+      sequenceAttackMode: 'melee',
+    }],
+  },
+  'wererat-hybrid': {
+    sequence: ['shortsword', 'shortsword'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-hand-crossbow',
+        sequence: ['hand-crossbow', 'hand-crossbow'],
+        sequenceAttackMode: 'ranged',
+      },
+      {
+        id: 'multiattack-shortsword-and-hand-crossbow',
+        sequence: ['shortsword', 'hand-crossbow'],
+      },
+      {
+        id: 'multiattack-shortsword-and-bite',
+        sequence: ['shortsword', 'bite'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-hand-crossbow-and-bite',
+        sequence: ['hand-crossbow', 'bite'],
+      },
+    ],
+  },
+  'werewolf-human': {
+    sequence: ['spear', 'spear'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-spears-ranged',
+      sequence: ['spear', 'spear'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  'werewolf-hybrid': {
+    sequence: ['bite', 'claws'],
+    sequenceAttackMode: 'melee',
+  },
+  wight: {
+    sequence: ['longbow', 'longbow'],
+    sequenceAttackMode: 'ranged',
+    alternatives: [
+      {
+        id: 'multiattack-longsword',
+        sequence: ['longsword', 'longsword'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-life-drain-and-longsword',
+        sequence: ['life-drain', 'longsword'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+  wyvern: {
+    sequence: ['bite', 'stinger'],
+    sequenceAttackMode: 'melee',
+    alternatives: [
+      {
+        id: 'multiattack-claws-and-stinger',
+        sequence: ['claws', 'stinger'],
+        sequenceAttackMode: 'melee',
+      },
+      {
+        id: 'multiattack-bite-and-claws',
+        sequence: ['bite', 'claws'],
+        sequenceAttackMode: 'melee',
+      },
+    ],
+  },
+}
+
+/**
+ * These are complete legal choices from a broader prose Multiattack whose
+ * remaining branches still require DM adjudication. They are separate stable
+ * actions so exposing a useful candidate never turns the original prose into
+ * a false Headless claim.
+ */
+const CATALOG_MULTIATTACK_CANDIDATES: Readonly<
+  Record<string, readonly Dnd5eCatalogMultiattackCandidate[]>
+> = {
+  'gibbering-mouther': [{
+    id: 'multiattack-bites-only',
+    sequence: ['bites'],
+    sequenceAttackMode: 'melee',
+  }],
+  mummy: [{
+    id: 'multiattack-rotting-fist-only',
+    sequence: ['rotting-fist'],
+    sequenceAttackMode: 'melee',
+  }],
+  'mummy-lord': [{
+    id: 'multiattack-rotting-fist-only',
+    sequence: ['rotting-fist'],
+    sequenceAttackMode: 'melee',
+  }],
+  nalfeshnee: [{
+    id: 'multiattack-weapons-only',
+    sequence: ['bite', 'claw', 'claw'],
+    sequenceAttackMode: 'melee',
+  }],
 }
 
 function applyCatalogMonsterActionRules(
@@ -2612,6 +4966,12 @@ function applyCatalogMonsterActionRules(
   const baseWeaponAttack = CATALOG_BASE_WEAPON_ATTACKS[
     monster.slug as keyof typeof CATALOG_BASE_WEAPON_ATTACKS
   ]
+  const exactWeaponAttacks = CATALOG_EXACT_WEAPON_ATTACKS[
+    monster.slug as keyof typeof CATALOG_EXACT_WEAPON_ATTACKS
+  ] ?? []
+  const weaponAttackVariants = CATALOG_WEAPON_ATTACK_VARIANTS[
+    monster.slug as keyof typeof CATALOG_WEAPON_ATTACK_VARIANTS
+  ] ?? []
   const poisonSaveDamageAttack = CATALOG_POISON_SAVE_DAMAGE_ATTACKS[
     monster.slug as keyof typeof CATALOG_POISON_SAVE_DAMAGE_ATTACKS
   ]
@@ -2630,19 +4990,117 @@ function applyCatalogMonsterActionRules(
   const sourceLinkedConditionAttack = CATALOG_SOURCE_LINKED_CONDITION_ATTACKS[
     monster.slug as keyof typeof CATALOG_SOURCE_LINKED_CONDITION_ATTACKS
   ]
+  const damageOrGrappleAttack = CATALOG_DAMAGE_OR_GRAPPLE_ATTACKS[
+    monster.slug as keyof typeof CATALOG_DAMAGE_OR_GRAPPLE_ATTACKS
+  ]
+  const forcedMovementAttack = CATALOG_FORCED_MOVEMENT_ATTACKS[
+    monster.slug as keyof typeof CATALOG_FORCED_MOVEMENT_ATTACKS
+  ]
+  const persistentEffectAttack = CATALOG_PERSISTENT_EFFECT_ATTACKS[
+    monster.slug as keyof typeof CATALOG_PERSISTENT_EFFECT_ATTACKS
+  ]
+  const hitPointMaximumReductionAttack =
+    CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS[
+      monster.slug as keyof typeof CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS
+    ]
   const legendaryActionReference = CATALOG_LEGENDARY_ACTION_REFERENCES[
     monster.slug as keyof typeof CATALOG_LEGENDARY_ACTION_REFERENCES
   ]
+  const compositeSpecialActions = CATALOG_COMPOSITE_SPECIAL_ACTIONS[monster.slug] ?? {}
   const multiattackOverride = CATALOG_MULTIATTACK_OVERRIDES[monster.slug]
+  const multiattackCandidates = CATALOG_MULTIATTACK_CANDIDATES[monster.slug] ?? []
+  const optionalSpecialMultiattacks = monster.actions.flatMap((action) => {
+    if (action.kind !== 'multiattack' || !action.sequence?.length) return []
+    const hasStructuredSpecial = action.sequence.some((actionId) => {
+      const child = monster.actions.find((candidate) => candidate.id === actionId)
+      return child?.kind === 'other' && child.automation === 'headless' && !!child.rule
+    })
+    if (!hasStructuredSpecial) return []
+    const weaponSequence = action.sequence.filter((actionId) => {
+      const child = monster.actions.find((candidate) => candidate.id === actionId)
+      return child?.kind === 'weapon-attack' && child.automation === 'headless'
+    })
+    return weaponSequence.length > 0 ? [{ action, weaponSequence }] : []
+  })
 
   return {
     ...monster,
     actions: [
       ...monster.actions.map((action) => {
+        const compositeSpecialAction = compositeSpecialActions[action.id]
+        const exactWeaponAttack = exactWeaponAttacks.find((candidate) =>
+          candidate.actionId === action.id)
         const assassinPoisonWeaponAttack = monster.slug === 'assassin' &&
           (action.id === 'shortsword' || action.id === 'light-crossbow')
           ? CATALOG_ASSASSIN_POISON_WEAPON_ATTACKS[action.id]
           : undefined
+        if (monster.slug === 'tarrasque' && action.id === 'swallow') {
+          const bite = monster.actions.find((candidate) =>
+            candidate.id === 'bite')?.attack
+          if (bite) {
+            return {
+              ...action,
+              kind: 'weapon-attack' as const,
+              automation: 'headless' as const,
+              referencedActionId: 'bite',
+              relationRequirement: {
+                kind: 'target-linked-to-source' as const,
+                slotGroup: 'bite',
+              },
+              attack: {
+                ...bite,
+                targetMaxSizeRank: 3,
+                onHitEffects: [{
+                  id: 'swallow',
+                  kind: 'source-linked-condition' as const,
+                  relation: {
+                    kind: 'swallowed' as const,
+                    slotGroup: 'swallow',
+                    capacity: 20,
+                    maxDistanceFeet: 5,
+                    targetMaxSizeRank: 3,
+                    whenCapacityFull: 'skip-application' as const,
+                    movement: 'carry-target' as const,
+                    endsOnSourceIncapacitated: false,
+                  },
+                  conditions: [
+                    { condition: 'restrained' as const },
+                    {
+                      condition: 'blinded' as const,
+                      dependsOnCondition: 'restrained' as const,
+                    },
+                  ],
+                  periodicDamage: {
+                    timing: 'source-turn-start' as const,
+                    count: 16,
+                    sides: 6,
+                    modifier: 0,
+                    type: 'acid' as const,
+                  },
+                  removeSourceRelationSlotGroupOnApply: 'bite',
+                }],
+              },
+            }
+          }
+        }
+        if (monster.slug === 'roper' && action.id === 'bite') {
+          return {
+            ...action,
+            relationRequirement: {
+              kind: 'target-linked-to-source' as const,
+              slotGroup: 'tendril',
+            },
+          }
+        }
+        if (compositeSpecialAction) {
+          return {
+            ...action,
+            kind: 'other' as const,
+            automation: 'headless' as const,
+            rule: compositeSpecialAction.rule,
+            relationRequirement: compositeSpecialAction.relationRequirement,
+          }
+        }
         if (fixedDamageAttack && action.id === fixedDamageAttack.actionId) {
           return {
             ...action,
@@ -2664,11 +5122,88 @@ function applyCatalogMonsterActionRules(
           }
         }
         if (baseWeaponAttack && action.id === baseWeaponAttack.actionId) {
+          const sourceLinkedEffect =
+            sourceLinkedConditionAttack &&
+            action.id === sourceLinkedConditionAttack.actionId
+              ? ({
+                  id: sourceLinkedConditionAttack.effectId,
+                  kind: 'source-linked-condition' as const,
+                  relation: {
+                    kind: 'grapple' as const,
+                    slotGroup: sourceLinkedConditionAttack.slotGroup,
+                    capacity: sourceLinkedConditionAttack.capacity,
+                    maxDistanceFeet: sourceLinkedConditionAttack.maxDistanceFeet,
+                    targetMaxSizeRank: sourceLinkedConditionAttack.targetMaxSizeRank,
+                    whenCapacityFull: sourceLinkedConditionAttack.whenCapacityFull,
+                    attackAdvantageAgainstLinkedTarget:
+                      'attackAdvantageAgainstLinkedTarget' in sourceLinkedConditionAttack
+                        ? sourceLinkedConditionAttack.attackAdvantageAgainstLinkedTarget
+                        : undefined,
+                    attackAutomaticallyHitsLinkedTarget:
+                      'attackAutomaticallyHitsLinkedTarget' in sourceLinkedConditionAttack
+                        ? sourceLinkedConditionAttack.attackAutomaticallyHitsLinkedTarget
+                        : undefined,
+                  },
+                  escapeDc: sourceLinkedConditionAttack.escapeDc,
+                  conditions: sourceLinkedConditionAttack.conditions,
+                  modifiers:
+                    'modifiers' in sourceLinkedConditionAttack
+                      ? sourceLinkedConditionAttack.modifiers
+                      : undefined,
+                  periodicDamage:
+                    'periodicDamage' in sourceLinkedConditionAttack
+                      ? sourceLinkedConditionAttack.periodicDamage
+                      : undefined,
+                } as Dnd5eMonsterSourceLinkedConditionOnHitEffect)
+              : undefined
           return {
             ...action,
             kind: 'weapon-attack' as const,
             automation: 'headless' as const,
-            attack: baseWeaponAttack.attack,
+            attack: {
+              ...baseWeaponAttack.attack,
+              onHitEffects: sourceLinkedEffect
+                ? [sourceLinkedEffect]
+                : undefined,
+            },
+          }
+        }
+        if (exactWeaponAttack) {
+          return {
+            ...action,
+            description:
+              ('branchNote' in exactWeaponAttack && exactWeaponAttack.branchNote
+                ? `${exactWeaponAttack.branchNote}\n${action.description}`
+                : action.description),
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: exactWeaponAttack.attack,
+          }
+        }
+        if (monster.slug === 'manticore' && action.id === 'tail-spike') {
+          return {
+            ...action,
+            usage: { kind: 'per-day' as const, max: 24 },
+          }
+        }
+        if (monster.slug === 'violet-fungus' && action.id === 'multiattack') {
+          return {
+            ...action,
+            kind: 'multiattack' as const,
+            automation: 'headless' as const,
+            sequence: undefined,
+            randomRepeat: {
+              actionId: 'rotting-touch',
+              dieSides: 4,
+              minimum: 1,
+              maximum: 4,
+            },
+          }
+        }
+        if (optionalSpecialMultiattacks.some((entry) => entry.action.id === action.id)) {
+          return {
+            ...action,
+            automation: 'headless' as const,
           }
         }
         if (multiattackOverride && action.id === 'multiattack') {
@@ -2698,8 +5233,15 @@ function applyCatalogMonsterActionRules(
                   kind: 'saving-throw-condition' as const,
                   ability: savingThrowConditionAttack.ability,
                   dc: savingThrowConditionAttack.dc,
+                  magical: 'magical' in savingThrowConditionAttack
+                    ? savingThrowConditionAttack.magical
+                    : undefined,
                   conditionOnFailedSave:
                     savingThrowConditionAttack.conditionOnFailedSave,
+                  additionalConditionsOnFailedSave:
+                    'additionalConditionsOnFailedSave' in savingThrowConditionAttack
+                      ? savingThrowConditionAttack.additionalConditionsOnFailedSave
+                      : undefined,
                 },
               ],
             },
@@ -2715,6 +5257,17 @@ function applyCatalogMonsterActionRules(
           }
         }
         if (
+          damageOrGrappleAttack &&
+          action.id === damageOrGrappleAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+          }
+        }
+        if (
           sourceLinkedConditionAttack &&
           action.id === sourceLinkedConditionAttack.actionId &&
           action.attack
@@ -2727,7 +5280,9 @@ function applyCatalogMonsterActionRules(
               ...action.attack,
               ...(monster.slug === 'behir'
                 ? { targetMaxSizeRank: 3 }
-                : {}),
+                : monster.slug === 'kraken'
+                  ? { toHit: 17 }
+                  : {}),
               onHitEffects: [
                 ...(action.attack.onHitEffects ?? []),
                 {
@@ -2744,10 +5299,101 @@ function applyCatalogMonsterActionRules(
                       'attackAdvantageAgainstLinkedTarget' in sourceLinkedConditionAttack
                         ? sourceLinkedConditionAttack.attackAdvantageAgainstLinkedTarget
                         : undefined,
+                    attackAutomaticallyHitsLinkedTarget:
+                      'attackAutomaticallyHitsLinkedTarget' in sourceLinkedConditionAttack
+                        ? sourceLinkedConditionAttack.attackAutomaticallyHitsLinkedTarget
+                        : undefined,
                   },
                   escapeDc: sourceLinkedConditionAttack.escapeDc,
                   conditions: sourceLinkedConditionAttack.conditions,
+                  modifiers:
+                    'modifiers' in sourceLinkedConditionAttack
+                      ? sourceLinkedConditionAttack.modifiers
+                      : undefined,
+                  periodicDamage:
+                    'periodicDamage' in sourceLinkedConditionAttack
+                      ? sourceLinkedConditionAttack.periodicDamage
+                      : undefined,
                 },
+              ],
+            },
+          }
+        }
+        if (
+          forcedMovementAttack &&
+          action.id === forcedMovementAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              onHitEffects: [
+                ...(action.attack.onHitEffects ?? []),
+                forcedMovementAttack.effect,
+              ],
+            },
+          }
+        }
+        if (
+          hitPointMaximumReductionAttack &&
+          action.id === hitPointMaximumReductionAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            ...(
+              (
+                monster.slug === 'vampire-spawn' ||
+                monster.slug === 'vampire-vampire'
+              ) &&
+              action.id === 'bite'
+                ? {
+                    targetEligibility:
+                      VAMPIRE_BITE_TARGET_ELIGIBILITY,
+                  }
+                : {}
+            ),
+            attack: {
+              ...action.attack,
+              onHitEffects: [
+                ...(action.attack.onHitEffects ?? []),
+                {
+                  id: hitPointMaximumReductionAttack.effectId,
+                  kind: 'hit-point-maximum-reduction' as const,
+                  damageBasis: hitPointMaximumReductionAttack.damageBasis,
+                  savingThrow:
+                    'savingThrow' in hitPointMaximumReductionAttack
+                      ? hitPointMaximumReductionAttack.savingThrow
+                      : undefined,
+                  recovery: hitPointMaximumReductionAttack.recovery,
+                  healSourceByAmount:
+                    'healSourceByAmount' in hitPointMaximumReductionAttack
+                      ? hitPointMaximumReductionAttack.healSourceByAmount
+                      : undefined,
+                },
+              ],
+            },
+          }
+        }
+        if (
+          persistentEffectAttack &&
+          action.id === persistentEffectAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              onHitEffects: [
+                ...(action.attack.onHitEffects ?? []),
+                persistentEffectAttack.effect,
               ],
             },
           }
@@ -2852,6 +5498,10 @@ function applyCatalogMonsterActionRules(
             automation: 'headless' as const,
             attack: {
               ...action.attack,
+              targetMaxSizeRank:
+                'targetMaxSizeRank' in proneAttackSave
+                  ? proneAttackSave.targetMaxSizeRank
+                  : action.attack.targetMaxSizeRank,
               onHit: `DC ${proneAttackSave.dc} Strength save; prone on a failure.`,
               onHitRule: {
                 kind: 'saving-throw-condition' as const,
@@ -2893,6 +5543,56 @@ function applyCatalogMonsterActionRules(
         }
         return action
       }),
+      ...(damageOrGrappleAttack
+        ? monster.actions.flatMap((source) => {
+            if (
+              source.id !== damageOrGrappleAttack.actionId ||
+              !source.attack
+            ) return []
+            return [{
+              ...source,
+              id: damageOrGrappleAttack.grappleActionId,
+              name: `${source.name} (Grapple)`,
+              description:
+                `Instead of dealing damage, this attack grapples its target ` +
+                `(escape DC ${damageOrGrappleAttack.escapeDc}).`,
+              kind: 'weapon-attack' as const,
+              automation: 'headless' as const,
+              attack: {
+                ...source.attack,
+                damage: [],
+                onHitEffects: [{
+                  id: damageOrGrappleAttack.effectId,
+                  kind: 'source-linked-condition' as const,
+                  relation: {
+                    kind: 'grapple' as const,
+                    slotGroup: damageOrGrappleAttack.slotGroup,
+                    capacity: 2,
+                    maxDistanceFeet: 5,
+                    targetMaxSizeRank: 3,
+                    whenCapacityFull: 'skip-application' as const,
+                  },
+                  escapeDc: damageOrGrappleAttack.escapeDc,
+                  conditions: [{ condition: 'grappled' as const }],
+                }],
+              },
+            }]
+          })
+        : []),
+      ...weaponAttackVariants.flatMap((variant) => {
+        const source = monster.actions.find((action) =>
+          action.id === variant.sourceActionId)
+        if (!source) return []
+        return [{
+          ...source,
+          id: variant.id,
+          name: `${source.name}${variant.nameSuffix}`,
+          description: `${variant.branchNote}\n${source.description}`,
+          kind: 'weapon-attack' as const,
+          automation: 'headless' as const,
+          attack: variant.attack,
+        }]
+      }),
       ...(multiattackOverride?.alternatives ?? []).map((alternative) => {
         const base = monster.actions.find((action) => action.id === 'multiattack')
         const child = monster.actions.find((action) => action.id === alternative.sequence[0])
@@ -2906,6 +5606,30 @@ function applyCatalogMonsterActionRules(
           sequenceAttackMode: alternative.sequenceAttackMode,
         }
       }),
+      ...multiattackCandidates.map((candidate) => {
+        const base = monster.actions.find((action) => action.id === 'multiattack')
+        const child = monster.actions.find((action) => action.id === candidate.sequence[0])
+        return {
+          id: candidate.id,
+          name: `${base?.name ?? 'Multiattack'}: ${child?.name ?? candidate.sequence[0]}`,
+          description: `A complete Headless choice from: ${base?.description ?? 'Multiattack'}`,
+          kind: 'multiattack' as const,
+          automation: 'headless' as const,
+          sequence: candidate.sequence,
+          sequenceAttackMode: candidate.sequenceAttackMode,
+        }
+      }),
+      ...optionalSpecialMultiattacks.map(({ action, weaponSequence }) => ({
+        id: `${action.id}-weapons-only`,
+        name: `${action.name}: Weapons Only`,
+        description:
+          `The creature declines the optional special action and resolves only ` +
+          `the weapon attacks from: ${action.description}`,
+        kind: 'multiattack' as const,
+        automation: 'headless' as const,
+        sequence: weaponSequence,
+        sequenceAttackMode: action.sequenceAttackMode,
+      })),
     ],
     reactions: monster.reactions?.map((reaction) => {
       if (monster.slug === 'chain-devil' && reaction.id === 'unnerving-mask') {
@@ -2946,6 +5670,16 @@ function applyCatalogMonsterActionRules(
             ...action,
             id: legendaryActionReference.actionId,
             referencedActionId: legendaryActionReference.referencedActionId,
+            automation:
+              (
+                monster.actions.find((candidate) =>
+                  candidate.id === legendaryActionReference.referencedActionId)
+                  ?.automation === 'headless' ||
+                savingThrowConditionAttack?.actionId ===
+                  legendaryActionReference.referencedActionId
+              )
+                ? 'headless' as const
+                : 'dm-adjudication' as const,
           }
         : action),
   }

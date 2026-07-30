@@ -39,6 +39,218 @@ describe('SRD monster 5e turn planner', () => {
     expect(plan.moveApSpent).toBeUndefined()
   })
 
+  it('allocates the Tyrannosaurus Bite and Tail to different targets', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:tyrannosaurus-rex')!
+    const multiattackIndex = monster.actions.findIndex((action) =>
+      action.id === 'multiattack')
+    const tyrannosaurus = token({
+      id: 'tyrannosaurus',
+      label: 'Tyrannosaurus',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const heroA = token({
+      id: 'hero-a-token',
+      label: 'Hero A',
+      type: 'player',
+      characterId: 'hero-a',
+      x: 10,
+      hp: 40,
+      maxHp: 40,
+    })
+    const heroB = token({
+      id: 'hero-b-token',
+      label: 'Hero B',
+      type: 'player',
+      characterId: 'hero-b',
+      x: 20,
+      hp: 40,
+      maxHp: 40,
+    })
+    const forceMultiattack: MonsterDecisionProvider = {
+      id: 'test:tyrannosaurus-split',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        return {
+          candidateId: candidate.id,
+          score: candidate.id.startsWith(
+            `attack:${heroA.id}:${multiattackIndex}:`,
+          ) ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    }
+
+    const plan = planDnd5eMonsterTurn(
+      map([tyrannosaurus, heroA, heroB]),
+      tyrannosaurus,
+      [
+        character({
+          id: 'hero-a',
+          name: 'Hero A',
+          currentHp: 40,
+          maxHp: 40,
+        }),
+        character({
+          id: 'hero-b',
+          name: 'Hero B',
+          currentHp: 40,
+          maxHp: 40,
+        }),
+      ],
+      { decisionProvider: forceMultiattack },
+    )
+
+    expect(plan).toMatchObject({
+      attacked: true,
+      actionIndex: multiattackIndex,
+      targetTokenId: heroA.id,
+      attackTargetTokenIds: [heroA.id, heroB.id],
+    })
+  })
+
+  it('uses the Hydra current head count when planning Bite occurrences', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:hydra')!
+    const multiattackIndex = monster.actions.findIndex((action) =>
+      action.id === 'multiattack')
+    const hydra = token({
+      id: 'hydra',
+      label: 'Hydra',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+      dnd5eCombatState: { monsterHydraHeadCount: 3 },
+    })
+    const hero = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      x: 10,
+      hp: 80,
+      maxHp: 80,
+    })
+    const forceMultiattack: MonsterDecisionProvider = {
+      id: 'test:hydra-runtime-heads',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        return {
+          candidateId: candidate.id,
+          score: candidate.id.startsWith(
+            `attack:${hero.id}:${multiattackIndex}:`,
+          ) ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    }
+
+    const plan = planDnd5eMonsterTurn(
+      map([hydra, hero]),
+      hydra,
+      [character({ currentHp: 80, maxHp: 80 })],
+      { decisionProvider: forceMultiattack },
+    )
+
+    expect(plan.attackTargetTokenIds).toEqual([
+      hero.id,
+      hero.id,
+      hero.id,
+    ])
+  })
+
+  it('plans three distinct Kraken Flings without treating CR as a character level', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:kraken')!
+    const multiattackIndex = monster.actions.findIndex((action) =>
+      action.id === 'multiattack-flings')
+    const kraken = token({
+      id: 'kraken',
+      label: 'Kraken',
+      poolId: monster.id,
+      x: 100,
+      y: 50,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const targetPositions = [
+      { x: 120, y: 50 },
+      { x: 80, y: 50 },
+      { x: 100, y: 70 },
+    ]
+    const heroes = ['a', 'b', 'c'].map((suffix, index) => {
+      const id = `hero-${suffix}-token`
+      const relation = createDnd5eConditionEffect({
+        id: `kraken-tentacle-${suffix}`,
+        condition: 'grappled',
+        source: {
+          kind: 'monster',
+          actorId: kraken.id,
+          rulesId: `monster:${monster.id}:tentacle`,
+        },
+        targetId: id,
+        relation: {
+          schemaVersion: 1,
+          kind: 'grapple',
+          sourceActorId: kraken.id,
+          sourceActionId: 'tentacle',
+          slotGroup: 'tentacle',
+          maxDistanceFeet: 30,
+          movement: 'drag-target',
+          endsOnSourceIncapacitated: true,
+        },
+      })
+      return token({
+        id,
+        label: `Hero ${suffix.toUpperCase()}`,
+        type: 'player',
+        characterId: `hero-${suffix}`,
+        ...targetPositions[index],
+        hp: 100,
+        maxHp: 100,
+        dnd5eCombatState: {
+          schemaVersion: 2,
+          activeEffects: [relation],
+          conditions: ['grappled'],
+        },
+      })
+    })
+    const forceFlings: MonsterDecisionProvider = {
+      id: 'test:kraken-three-flings',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        return {
+          candidateId: candidate.id,
+          score:
+            candidate.id.startsWith('attack:') &&
+            candidate.id.includes(`:${multiattackIndex}:`)
+              ? 10_000
+              : -10_000,
+          reasons: [],
+        }
+      },
+    }
+
+    const plan = planDnd5eMonsterTurn(
+      map([kraken, ...heroes]),
+      kraken,
+      heroes.map((hero, index) =>
+        character({
+          id: hero.characterId!,
+          name: hero.label,
+          currentHp: 100,
+          maxHp: 100,
+          ac: 14 + index,
+        })),
+      { decisionProvider: forceFlings },
+    )
+
+    expect(plan.actionIndex).toBe(multiattackIndex)
+    expect(plan.attackTargetTokenIds).toHaveLength(3)
+    expect(new Set(plan.attackTargetTokenIds)).toEqual(
+      new Set(heroes.map((hero) => hero.id)),
+    )
+  })
+
   it('scores the Bugbear javelin with melee damage at 5 feet and ranged damage at 30 feet', () => {
     const bugbear = token({
       id: 'bugbear',
@@ -583,7 +795,7 @@ describe('SRD monster 5e turn planner', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: biteDeclaration.escapeDc,
+        dc: biteDeclaration.escapeDc!,
         economy: 'action',
       },
       relation: {
@@ -802,7 +1014,7 @@ describe('SRD monster 5e turn planner', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: biteDeclaration.escapeDc,
+        dc: biteDeclaration.escapeDc!,
         economy: 'action',
       },
       relation: {

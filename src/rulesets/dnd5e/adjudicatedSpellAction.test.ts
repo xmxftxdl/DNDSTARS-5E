@@ -85,6 +85,15 @@ describe('DM-adjudicated spell Headless transaction', () => {
     })
   })
 
+  it('rejects a verbal DM-adjudicated spell while the caster is silenced', () => {
+    const input = fixture()
+    input.actor.conditions = ['沉默']
+    expect(prepareDnd5eAdjudicatedSpell(input)).toEqual({
+      ok: false,
+      reason: 'component-unavailable',
+    })
+  })
+
   it('does not spend resources during preparation and commits all approved effects atomically', () => {
     const input = fixture()
     const prepared = prepareDnd5eAdjudicatedSpell({

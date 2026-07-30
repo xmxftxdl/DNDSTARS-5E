@@ -1945,7 +1945,10 @@ export function registerDnd5eRulesPlugin(
             formula: ability.limits.uses,
           })
         }
-        const action = compatibility.effective === 'manual' ? undefined : {
+        const hostManagedClosedSubclass =
+          ability.mechanic?.kind === 'eldritch-knight-2014' ||
+          ability.mechanic?.kind === 'totem-warrior-2014'
+        const action = compatibility.effective === 'manual' || hostManagedClosedSubclass ? undefined : {
           id: actionLocalId,
           label: ability.name,
           description: ability.description,

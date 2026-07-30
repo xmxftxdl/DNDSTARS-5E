@@ -29,6 +29,8 @@ import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBattleMasterDistractingAdvantage,
   dnd5eBattleMasterGoadingDisadvantage,
+  dnd5eTotemBearGuardianDisadvantage,
+  dnd5eTotemWolfPackAdvantage,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
   dnd5eTargetArmorClassForAttack,
@@ -63,6 +65,7 @@ import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage,
 import { consumeDnd5eWeaponAmmunition } from './items'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
+import { dnd5eEldritchKnightWarMagicAvailable } from './eldritchKnight'
 import { dnd5eActiveMagicWeaponBonus } from './activeEffects'
 import type { Dnd5ePluginDiceRollResult } from './pluginApi'
 
@@ -241,6 +244,15 @@ export function prepareDnd5eEquipmentAttack(input: {
     )
   ) return { ok: false, reason: 'reckless-attack-unavailable' }
   const frenzyAttack = action.dnd5eWeaponAttackOptions?.frenzyAttack === true
+  const eldritchKnightWarMagicAttack =
+    action.dnd5eWeaponAttackOptions?.eldritchKnightWarMagicAttack === true
+  if (
+    eldritchKnightWarMagicAttack && (
+      frenzyAttack || offHandAttack ||
+      !dnd5eEldritchKnightWarMagicAvailable(actor, turnKey) ||
+      (input.turnEconomy?.bonusAction.current ?? 1) < 1
+    )
+  ) return { ok: false, reason: 'attack-action-spent' }
   const barbarianSubclass = actor.dnd5eClassChoices?.classes?.barbarian?.subclass
   if (
     frenzyAttack && (
@@ -276,7 +288,8 @@ export function prepareDnd5eEquipmentAttack(input: {
     )
   ) return { ok: false, reason: 'stunning-strike-unavailable' }
   const foeSlayer = action.dnd5eWeaponAttackOptions?.foeSlayer
-  const specialAttack = frenzyAttack || hordeBreakerAttack || offHandAttack
+  const specialAttack = frenzyAttack || hordeBreakerAttack || offHandAttack ||
+    eldritchKnightWarMagicAttack
   const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
   const weaponAttacksPerAction = loadingWeapon ? 1 : attacksPerAction
   const attacksAllowed = specialAttack ? 1 : weaponAttacksPerAction * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
@@ -362,7 +375,13 @@ export function prepareDnd5eEquipmentAttack(input: {
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5) ||
-      dnd5eBattleMasterDistractingAdvantage(actorCombatant, target))
+      dnd5eBattleMasterDistractingAdvantage(actorCombatant, target) ||
+      dnd5eTotemWolfPackAdvantage(
+        snapshot.state,
+        actorCombatant,
+        target,
+        profile.mode === 'melee',
+      ))
   const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
     dnd5eWearingUnproficientArmor(actor) ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
@@ -380,7 +399,8 @@ export function prepareDnd5eEquipmentAttack(input: {
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
     dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || attackerHasDisadvantage ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-    dnd5eBattleMasterGoadingDisadvantage(actorCombatant, target)
+    dnd5eBattleMasterGoadingDisadvantage(actorCombatant, target) ||
+    dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, target)
   const attackMode = resolveDnd5eRollMode({
     advantage: [{ active: attackerHasAdvantage, reason: 'equipment-attack-advantage' }],
     disadvantage: [{ active: targetImposesDisadvantage, reason: 'equipment-attack-disadvantage' }],
@@ -411,7 +431,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       attackNumber: specialAttack ? 1 : input.attacksUsed + 1,
       attacksAllowed,
       spendsAction,
-      spendsBonusAction: frenzyAttack || offHandAttack,
+      spendsBonusAction: frenzyAttack || offHandAttack || eldritchKnightWarMagicAttack,
       countsTowardAttackAction: !specialAttack,
       attackMode,
       declarativeIntentFeatureIds: [...declarativeIntentFeatureIds],
@@ -550,6 +570,8 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     criticalThreshold: prepared.profile.criticalThreshold,
     spendAction: prepared.spendsAction,
     spendBonusAction: prepared.spendsBonusAction,
+    eldritchKnightWarMagicAttack:
+      prepared.action.dnd5eWeaponAttackOptions?.eldritchKnightWarMagicAttack === true,
     d20: input.d20,
     d20Second: input.d20Second,
     halflingLuckyD20: input.halflingLuckyD20,

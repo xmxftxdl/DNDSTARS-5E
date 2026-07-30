@@ -59,6 +59,7 @@ const SPELLCASTING_KIND_LABELS = {
   'full-prepared': '完整施法者（准备法术）',
   'half-known': '半施法者（已知法术）',
   'half-prepared': '半施法者（准备法术）',
+  'one-third-known': '三分之一施法者（已知法术）',
   pact: '契约魔法',
 } as const
 

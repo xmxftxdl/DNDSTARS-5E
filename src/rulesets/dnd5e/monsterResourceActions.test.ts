@@ -51,6 +51,47 @@ describe('D&D 5e monster resource actions', () => {
     })
   })
 
+  it('resolves the Lich legendary Paralyzing Touch through its base on-hit rule', () => {
+    const hero = combatant('hero', 20, {
+      controller: 'player',
+      position: { x: 5, y: 0 },
+      savingThrowBonuses: { con: 0 },
+    })
+    const lich = combatant('lich', 10, {
+      statBlockId: 'srd-5.1:lich',
+      position: { x: 0, y: 0 },
+      classState: { monsterLegendaryActionPoints: 3 },
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('lich-legendary-touch', [hero, lich]),
+      {
+        type: 'monster-legendary-action',
+        actorId: 'lich',
+        actionId: 'paralyzing-touch-costs-2-actions',
+        rolls: [{
+          targetId: 'hero',
+          d20: 15,
+          damageRolls: [[1, 1, 1]],
+          onHitEffectRolls: [{
+            effectId: 'touch-paralyzed',
+            d20: 1,
+          }],
+        }],
+      },
+    )
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.lich.classState.monsterLegendaryActionPoints).toBe(1)
+    expect(result.state.combatants.hero.currentHp).toBe(97)
+    expect(result.state.combatants.hero.conditions).toContain('paralyzed')
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-legendary-action-used',
+      actionId: 'paralyzing-touch-costs-2-actions',
+      cost: 2,
+    }))
+  })
+
   it('declares every SRD 5.1 aboleth action as Headless and keeps Tail Swipe linked to Tail', () => {
     const aboleth = getDnd5eSrdMonster('srd-5.1:aboleth')!
     expect([
@@ -969,7 +1010,9 @@ describe('D&D 5e monster resource actions', () => {
     if (!frightened.ok) return
     expect(frightened.state.combatants.hero.conditions).toContain('frightened')
     expect(frightened.state.combatants.hero.classState.monsterFrightfulPresenceImmunityRoundsBySource)
-      .toEqual({ dragon: 14_400 })
+      .toBeUndefined()
+    expect(frightened.state.combatants.hero.classState.monsterActionImmunityRoundsByKey)
+      .toBeUndefined()
 
     const dragonEnd = resolveDnd5eHeadlessAction(frightened.state, { type: 'end-turn', actorId: 'dragon' })
     expect(dragonEnd.ok, dragonEnd.ok ? undefined : dragonEnd.reason).toBe(true)
@@ -986,6 +1029,8 @@ describe('D&D 5e monster resource actions', () => {
     expect(heroEnd.state.combatants.hero.conditions).not.toContain('frightened')
     expect(heroEnd.state.combatants.hero.classState.monsterFrightfulPresenceImmunityRoundsBySource)
       .toEqual({ dragon: 14_399 })
+    expect(heroEnd.state.combatants.hero.classState.monsterActionImmunityRoundsByKey)
+      .toEqual({ 'source-action:dragon:frightful-presence': 14_399 })
   })
 
   it('supports authoritative vampire alternate forms and forced return to true form', () => {

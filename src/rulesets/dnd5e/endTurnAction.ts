@@ -1,4 +1,5 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import type { AbilityKey } from '../../lib/dnd'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -6,6 +7,7 @@ import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCo
 import { dnd5eClassDefinitionForCharacter } from './classes'
 import {
   dnd5eCombatantHasConcentrationEffect,
+  dnd5ePendingTurnStartPeriodicDamage,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
   resolveDnd5eHeadlessAction,
@@ -17,14 +19,18 @@ import {
   type Dnd5eTurnStartGazeResolution,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eSavingThrowMode } from './passiveDefenses'
+import { dnd5eIsIncapacitated, dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
 import {
+  dnd5eActiveFlySpeed,
+  dnd5eActiveSafeFallFeet,
   dnd5eConditionsFromActiveEffects,
   removeDnd5eActiveEffectsByStandardCondition,
   type Dnd5eActiveEffectInstance,
+  type Dnd5eActiveEffectPeriodicDamageRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
+import type { Dnd5eDamageType } from './damageTypes'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eMonsterRechargeActions } from './monsterGenericAbilities'
 import {
@@ -32,6 +38,11 @@ import {
   dnd5eMonsterMechanicDiceRequirements,
   type Dnd5eMonsterMechanicDiceRequirement,
 } from './monsterAutomation'
+import {
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+} from '../../lib/mapGeometry'
+import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
 
 export type Dnd5eEndTurnRejectReason = 'invalid-action' | 'invalid-actor' | 'combatant-missing'
 
@@ -68,7 +79,31 @@ export interface PreparedDnd5ePlayerEndTurn {
     blessed: boolean
     baned: boolean
   }[]
+  turnStartActiveEffectPeriodicDamage: readonly {
+    effect: Dnd5eActiveEffectInstance
+    targetId: string
+    targetName: string
+    count: number
+    sides: number
+    modifier: number
+    damageType?: Dnd5eDamageType
+    savingThrow?: {
+      ability: AbilityKey
+      dc: number
+      modifier: number
+      mode: 'normal' | 'advantage' | 'disadvantage'
+      blessed: boolean
+      baned: boolean
+      halflingLucky: boolean
+      legendaryResistanceUses: number
+    }
+  }[]
   turnStartGazeRequirements: readonly Dnd5eTurnStartGazeRequirement[]
+  totemEagleFall?: {
+    landingElevationFeet: number
+    distanceFeet: number
+    fallingDamageDice: number
+  }
   nextTurnSlotId?: string
   nextMonsterRechargeRolls: readonly {
     actorId: string
@@ -240,6 +275,58 @@ export function prepareDnd5ePlayerEndTurn(input: {
         : false,
     }]
   })
+  const turnStartActiveEffectPeriodicDamage = previewNextCombatant && turnStartPreview
+    ? dnd5ePendingTurnStartPeriodicDamage(
+        turnStartPreview,
+        previewNextCombatant.id,
+      ).map(({ target, effect }) => {
+        const periodicDamage = effect.periodicDamage!
+        const savingThrow = periodicDamage.savingThrow
+        const source = effect.source.actorId
+          ? turnStartPreview.combatants[effect.source.actorId]
+          : undefined
+        return {
+          effect,
+          targetId: target.id,
+          targetName: target.name,
+          count: periodicDamage.count,
+          sides: periodicDamage.sides,
+          modifier: periodicDamage.modifier ?? 0,
+          damageType: periodicDamage.type,
+          savingThrow: savingThrow
+            ? {
+                ability: savingThrow.ability,
+                dc: savingThrow.dc,
+                modifier: target.savingThrowBonuses[savingThrow.ability] ??
+                  Math.floor((target.abilities[savingThrow.ability] - 10) / 2),
+                mode: dnd5eSavingThrowMode(target, savingThrow.ability, {
+                  effectVisible: effect.visibility !== 'dm-only',
+                  condition: effect.standardCondition,
+                  sourceCreatureType: source?.creatureType,
+                  sourceIsSpell: effect.source.kind === 'spell',
+                  sourceIsMagical:
+                    savingThrow.magical ?? effect.source.magical === true,
+                }),
+                blessed: dnd5eCombatantHasConcentrationEffect(
+                  turnStartPreview,
+                  target.id,
+                  'bless',
+                ),
+                baned: dnd5eCombatantHasConcentrationEffect(
+                  turnStartPreview,
+                  target.id,
+                  'bane',
+                ),
+                halflingLucky: target.racialRules?.halflingLucky === true,
+                legendaryResistanceUses: Math.max(
+                  0,
+                  Math.floor(target.classState.legendaryResistanceUses ?? 0),
+                ),
+              }
+            : undefined,
+        }
+      })
+    : []
   const turnStartGazeRequirements = nextCombatant
     ? prepareDnd5eTurnStartGazeRequirements(
         snapshot.state,
@@ -248,6 +335,38 @@ export function prepareDnd5ePlayerEndTurn(input: {
         nextTurnRound,
       )
     : []
+  const eagleAttunement =
+    !!dnd5eTotemWarriorFeatureForCombatant(
+      actorCombatant,
+      'totemic-attunement-eagle',
+    )
+  const hasOtherFlight = Math.max(
+    actorCombatant.movementSpeeds?.fly ?? 0,
+    dnd5eActiveFlySpeed(actorCombatant.classState.activeEffects) ?? 0,
+  ) > 0
+  const landingElevationFeet = mapGeometryTerrainElevationAtPoint(
+    mapGeometryRuntimeForMap(input.map.id),
+    actorToken,
+  )
+  const eagleFallDistanceFeet = Math.max(
+    0,
+    (actorCombatant.elevationFeet ?? landingElevationFeet) - landingElevationFeet,
+  )
+  const safeFall = eagleFallDistanceFeet <= dnd5eActiveSafeFallFeet(
+    actorCombatant.classState.activeEffects,
+  ) && !dnd5eIsIncapacitated(actorCombatant)
+  const totemEagleFall =
+    eagleAttunement &&
+    !hasOtherFlight &&
+    actorCombatant.airborne === true
+      ? {
+          landingElevationFeet,
+          distanceFeet: eagleFallDistanceFeet,
+          fallingDamageDice: safeFall
+            ? 0
+            : Math.min(20, Math.floor(eagleFallDistanceFeet / 10)),
+        }
+      : undefined
   return {
     ok: true,
     prepared: {
@@ -258,7 +377,9 @@ export function prepareDnd5ePlayerEndTurn(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows,
+      turnStartActiveEffectPeriodicDamage,
       turnStartGazeRequirements,
+      totemEagleFall,
       nextTurnSlotId,
       nextMonsterRechargeRolls,
       currentMonsterMechanicRolls,
@@ -274,10 +395,12 @@ export function resolveDnd5ePlayerEndTurn(input: {
   initiativeOrder: readonly InitiativeEntry[]
   activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
+  turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]
   turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
   nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
   currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
+  totemEagleFallingDamageRolls?: readonly number[]
 }): {
   ok: true
   actor?: Character
@@ -295,11 +418,16 @@ export function resolveDnd5ePlayerEndTurn(input: {
       type: 'end-turn', actorId: actorToken.id,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
+      turnStartActiveEffectPeriodicDamageRolls:
+        input.turnStartActiveEffectPeriodicDamageRolls,
       turnStartGazeResolutions: input.turnStartGazeResolutions,
       nextTurnSlotId: prepared.prepared.nextTurnSlotId,
       currentMonsterMechanicRolls: input.currentMonsterMechanicRolls,
       nextMonsterRechargeRolls: input.nextMonsterRechargeRolls,
       nextMonsterMechanicRolls: input.nextMonsterMechanicRolls,
+      totemEagleLandingElevationFeet:
+        prepared.prepared.totemEagleFall?.landingElevationFeet,
+      totemEagleFallingDamageRolls: input.totemEagleFallingDamageRolls,
     },
   )
   if (!result.ok) return { ok: false, reason: 'invalid-action' }

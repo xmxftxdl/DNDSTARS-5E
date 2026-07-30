@@ -40,7 +40,12 @@ import {
   DND5E_MAGIC_ITEM_RARITY_LABELS,
 } from '../../rulesets/dnd5e/magicItems'
 import { dnd5eArmorProficient, dnd5eWeaponProficient } from '../../rulesets/dnd5e/equipment'
-import type { Dnd5eCurrency, Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
+import { dnd5eEldritchKnightFeatureForCharacter } from '../../rulesets/dnd5e/eldritchKnight'
+import {
+  DND5E_EDITABLE_CURRENCIES,
+  DND5E_EDITABLE_CURRENCY_LABELS,
+} from '../../types/inventory'
+import type { Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
 import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type { Character } from '../../types/character'
 
@@ -91,9 +96,6 @@ const CATEGORY_LABELS = {
   tool: '工具',
   container: '容器',
 } as const
-
-const CURRENCY_LABELS: Readonly<Record<Dnd5eCurrency, string>> = { cp: '铜币', sp: '银币', ep: '银金币', gp: '金币', pp: '铂金币' }
-const CURRENCIES = Object.keys(CURRENCY_LABELS) as Dnd5eCurrency[]
 
 export interface EquipmentTabProps {
   charId: string
@@ -168,6 +170,7 @@ export default function EquipmentTab({
 }: EquipmentTabProps) {
   const character = useCharacterStore((state) => state.characters.find((candidate) => candidate.id === charId))
   const characters = useCharacterStore((state) => state.characters)
+  const updateCharacter = useCharacterStore((state) => state.update)
   const [group, setGroup] = useState<'equipment' | 'items'>(compact ? 'items' : 'equipment')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transferTargetId, setTransferTargetId] = useState('')
@@ -194,6 +197,27 @@ export default function EquipmentTab({
   )
   const load = dnd5eInventoryLoad(character)
   const containers = inventory.entries.filter((entry) => entry.item.containerCapacityWeightLb != null && entry.instanceId !== selected?.instanceId)
+  const weaponBondFeature = dnd5eEldritchKnightFeatureForCharacter(character, 'weapon-bond')
+  const bondedWeaponIds = character.dnd5eCombatState?.eldritchKnightBondedWeaponIds ?? []
+
+  const toggleWeaponBond = (weaponId: string, weaponName: string) => {
+    const alreadyBonded = bondedWeaponIds.includes(weaponId)
+    if (!alreadyBonded && bondedWeaponIds.length >= 2) {
+      setNotice('奥法骑士最多登记两件联结武器；请先解除一件现有联结。')
+      return
+    }
+    if (!alreadyBonded && !window.confirm(`确认已完成联结仪式，并将“${weaponName}”登记为联结武器吗？`)) return
+    const nextBonded = alreadyBonded
+      ? bondedWeaponIds.filter((id) => id !== weaponId)
+      : [...bondedWeaponIds, weaponId]
+    updateCharacter(character.id, {
+      dnd5eCombatState: {
+        ...character.dnd5eCombatState,
+        eldritchKnightBondedWeaponIds: nextBonded.length > 0 ? nextBonded : undefined,
+      },
+    })
+    setNotice(alreadyBonded ? `已解除“${weaponName}”的武器联结。` : `已登记“${weaponName}”为联结武器。`)
+  }
 
   const run = (mutation: Parameters<typeof submitDnd5eInventoryMutation>[0]) => {
     const result = submitDnd5eInventoryMutation(mutation)
@@ -310,10 +334,10 @@ export default function EquipmentTab({
         )}
 
         {!compact && <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
-          <div className="grid grid-cols-5 gap-2 rounded-xl border border-white/8 bg-black/15 p-3">
-            {CURRENCIES.map((currency) => (
+          <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/8 bg-black/15 p-3">
+            {DND5E_EDITABLE_CURRENCIES.map((currency) => (
               <label key={`${currency}:${inventory.currency?.[currency] ?? 0}`} className="space-y-1 text-[10px] text-slate-500">
-                <span>{CURRENCY_LABELS[currency]}</span>
+                <span>{DND5E_EDITABLE_CURRENCY_LABELS[currency]}</span>
                 <input
                   type="number"
                   min={0}
@@ -364,6 +388,19 @@ export default function EquipmentTab({
                       className="mt-2 rounded-lg border border-white/8 px-2 py-1 text-[11px] text-slate-400 hover:bg-white/5 hover:text-slate-200 disabled:opacity-40"
                     >
                       卸下
+                    </button>
+                  )}
+                  {editable && !combatManagementLocked && weaponBondFeature && item?.dnd5e?.kind === 'weapon' && (
+                    <button
+                      type="button"
+                      onClick={() => toggleWeaponBond(item.id, item.name)}
+                      disabled={
+                        pending ||
+                        (!bondedWeaponIds.includes(item.id) && bondedWeaponIds.length >= 2)
+                      }
+                      className="mt-2 ml-1 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.06] px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/15 disabled:opacity-40"
+                    >
+                      {bondedWeaponIds.includes(item.id) ? '解除联结' : '登记联结'}
                     </button>
                   )}
                 </div>

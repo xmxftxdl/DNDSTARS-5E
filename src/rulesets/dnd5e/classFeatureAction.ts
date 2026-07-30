@@ -22,10 +22,13 @@ import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eCombatantCanSee,
   dnd5eCombatantClassLevel,
   dnd5eCombatantHasSubclass,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
+  dnd5eTotemBearGuardianDisadvantage,
+  dnd5eTotemWolfPackAdvantage,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   resolveDnd5eHeadlessAction,
@@ -44,9 +47,15 @@ import {
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
-import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import {
+  mapGeometryMovementBlocked,
+  mapGeometryPlacementBlocked,
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+} from '../../lib/mapGeometry'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
 
 export type Dnd5eClassFeatureRejectReason =
   | 'invalid-action'
@@ -208,6 +217,8 @@ function openHandPushDestination(map: BattleMap, actor: Token, target: Token): {
 
 const FEATURE_LABELS: Record<Dnd5eClassFeaturePayload['feature'], string> = {
   'barbarian-rage': '狂暴',
+  'barbarian-totem-eagle-dash': '鹰图腾疾走',
+  'barbarian-totem-wolf-knockdown': '狼图腾击倒',
   'barbarian-intimidating-presence': '威吓气势',
   'rogue-cunning-action': '巧妙动作',
   'rogue-fast-hands': '快手',
@@ -241,6 +252,8 @@ const FEATURE_LABELS: Record<Dnd5eClassFeaturePayload['feature'], string> = {
   'druid-wild-shape': '荒野变形',
   'druid-end-wild-shape': '恢复原形',
   'warlock-hurl-through-hell-ready': '坠入地狱',
+  'eldritch-knight-summon-bonded-weapon': '召回联结武器',
+  'eldritch-knight-arcane-charge': '奥术冲锋',
 }
 
 export function dnd5eClassFeatureLabel(payload: Dnd5eClassFeaturePayload): string {
@@ -252,12 +265,14 @@ function targetDistanceFeet(actor: Token, target: Token, map: BattleMap): number
 }
 
 function featureClassRequirement(payload: Dnd5eClassFeaturePayload): {
-  classId: 'barbarian' | 'bard' | 'paladin' | 'monk' | 'cleric' | 'rogue' | 'ranger' | 'sorcerer' | 'druid' | 'warlock'
+  classId: 'barbarian' | 'bard' | 'paladin' | 'monk' | 'cleric' | 'rogue' | 'ranger' | 'sorcerer' | 'druid' | 'warlock' | 'fighter'
   minimumLevel: number
   subclassId?: string
 } {
   switch (payload.feature) {
     case 'barbarian-rage': return { classId: 'barbarian', minimumLevel: 1 }
+    case 'barbarian-totem-eagle-dash': return { classId: 'barbarian', minimumLevel: 3 }
+    case 'barbarian-totem-wolf-knockdown': return { classId: 'barbarian', minimumLevel: 14 }
     case 'barbarian-intimidating-presence': return { classId: 'barbarian', minimumLevel: 10, subclassId: 'berserker' }
     case 'rogue-cunning-action': return { classId: 'rogue', minimumLevel: 2 }
     case 'rogue-fast-hands': return { classId: 'rogue', minimumLevel: 3, subclassId: 'thief' }
@@ -302,6 +317,10 @@ function featureClassRequirement(payload: Dnd5eClassFeaturePayload): {
       return { classId: 'druid', minimumLevel: 2 }
     case 'warlock-hurl-through-hell-ready':
       return { classId: 'warlock', minimumLevel: 14, subclassId: 'fiend' }
+    case 'eldritch-knight-summon-bonded-weapon':
+      return { classId: 'fighter', minimumLevel: 3 }
+    case 'eldritch-knight-arcane-charge':
+      return { classId: 'fighter', minimumLevel: 15 }
   }
 }
 
@@ -311,10 +330,23 @@ function buildHeadlessAction(
   detectedTargetIds: readonly string[] = [],
   turnUndeadTargetIds: readonly string[] = [],
   monkBonusAttack?: PreparedDnd5eMonkBonusAttack,
+  arcaneCharge?: {
+    to: { x: number; y: number }
+    distanceFeet: number
+    toElevationFeet: number
+  },
 ): Dnd5eAction | undefined {
   switch (payload.feature) {
     case 'barbarian-rage':
       return { type: payload.feature, actorId: actorTokenId, frenzy: payload.frenzy, end: payload.end }
+    case 'barbarian-totem-eagle-dash':
+      return { type: payload.feature, actorId: actorTokenId }
+    case 'barbarian-totem-wolf-knockdown':
+      return {
+        type: payload.feature,
+        actorId: actorTokenId,
+        targetId: payload.targetTokenId,
+      }
     case 'barbarian-intimidating-presence':
       return { type: payload.feature, actorId: actorTokenId, targetId: payload.targetTokenId }
     case 'rogue-cunning-action':
@@ -445,6 +477,20 @@ function buildHeadlessAction(
       return { type: payload.feature, actorId: actorTokenId }
     case 'warlock-hurl-through-hell-ready':
       return { type: payload.feature, actorId: actorTokenId, active: payload.active }
+    case 'eldritch-knight-summon-bonded-weapon':
+      if (!payload.weaponId) return undefined
+      return {
+        type: payload.feature,
+        actorId: actorTokenId,
+        weaponId: payload.weaponId,
+      }
+    case 'eldritch-knight-arcane-charge':
+      if (!arcaneCharge) return undefined
+      return {
+        type: payload.feature,
+        actorId: actorTokenId,
+        ...arcaneCharge,
+      }
   }
 }
 
@@ -483,6 +529,22 @@ export function prepareDnd5eClassFeature(input: {
   ) {
     return { ok: false, reason: 'feature-locked' }
   }
+  if (
+    payload.feature === 'barbarian-totem-eagle-dash' &&
+    !dnd5eTotemWarriorFeatureForCombatant(actorCombatant, 'totem-spirit-eagle')
+  ) return { ok: false, reason: 'feature-locked' }
+  if (
+    payload.feature === 'barbarian-totem-wolf-knockdown' &&
+    !dnd5eTotemWarriorFeatureForCombatant(actorCombatant, 'totemic-attunement-wolf')
+  ) return { ok: false, reason: 'feature-locked' }
+  if (payload.feature === 'barbarian-totem-wolf-knockdown') {
+    const target = input.map.tokens.find((token) =>
+      token.id === payload.targetTokenId && token.type !== 'obstacle',
+    )
+    if (!target || !snapshot.state.combatants[target.id] || !areOpposedCombatTokens(actorToken, target)) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+  }
 
   const divineSenseCreatureTypes = new Set(['天界', '天界生物', '邪魔', '亡灵'])
   const primevalAwarenessCreatureTypes = new Set([
@@ -519,6 +581,11 @@ export function prepareDnd5eClassFeature(input: {
   let intimidatingPresence: PreparedDnd5eClassFeature['intimidatingPresence']
   let turnUndead: PreparedDnd5eClassFeature['turnUndead']
   let rogueAbilityCheck: PreparedDnd5eClassFeature['rogueAbilityCheck']
+  let arcaneCharge: {
+    to: { x: number; y: number }
+    distanceFeet: number
+    toElevationFeet: number
+  } | undefined
   if (payload.feature === 'cleric-turn-undead' || payload.feature === 'paladin-turn-the-unholy') {
     const saveAbility = payload.feature === 'cleric-turn-undead' ? actor.abilities.wis : actor.abilities.cha
     const saveDc = 8 + actorCombatant.proficiencyBonus + rules.abilityModifier(saveAbility)
@@ -542,7 +609,14 @@ export function prepareDnd5eClassFeature(input: {
     const target = input.map.tokens.find((token) => token.id === payload.targetTokenId)
     const targetCombatant = target ? snapshot.state.combatants[target.id] : undefined
     if (!target || !targetCombatant || !areOpposedCombatTokens(actorToken, target)) return { ok: false, reason: 'invalid-target' }
-    if (targetDistanceFeet(actorToken, target, input.map) > 30) return { ok: false, reason: 'target-out-of-range' }
+    const extending = targetCombatant.classState.intimidatingPresenceSourceId === actorToken.id &&
+      (targetCombatant.classState.intimidatingPresenceRoundsRemaining ?? 0) > 0
+    if (!extending && targetDistanceFeet(actorToken, target, input.map) > 30) {
+      return { ok: false, reason: 'target-out-of-range' }
+    }
+    if (!extending && !dnd5eCombatantCanSee(snapshot.state, actorToken.id, target.id)) {
+      return { ok: false, reason: 'invalid-target' }
+    }
     intimidatingPresence = {
       target,
       targetName: target.label,
@@ -551,8 +625,7 @@ export function prepareDnd5eClassFeature(input: {
       saveMode: dnd5eSavingThrowMode(targetCombatant, 'wis', { effectVisible: true, condition: 'frightened' }),
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, targetCombatant.id, 'bless'),
       baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, targetCombatant.id, 'bane'),
-      extending: targetCombatant.classState.intimidatingPresenceSourceId === actorToken.id &&
-        (targetCombatant.classState.intimidatingPresenceRoundsRemaining ?? 0) > 0,
+      extending,
     }
   }
   if (
@@ -628,12 +701,14 @@ export function prepareDnd5eClassFeature(input: {
         (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
           !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
           dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-          (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant)) || targetProne)
+          (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant)) || targetProne ||
+          dnd5eTotemWolfPackAdvantage(snapshot.state, actorCombatant, targetCombatant, true))
       const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) ||
         dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || (actor.exhaustionLevel ?? 0) >= 3 ||
         dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
         (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
-        dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne
+        dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne ||
+        dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, targetCombatant)
       const attackMode = resolveDnd5eRollMode({
         advantage: [{ active: targetGrantsAdvantage, reason: 'monk-attack-advantage' }],
         disadvantage: [{ active: targetImposesDisadvantage, reason: 'monk-attack-disadvantage' }],
@@ -716,7 +791,41 @@ export function prepareDnd5eClassFeature(input: {
       !sourceCombatant.concentrating
     ) return { ok: false, reason: 'invalid-target' }
   }
-  const headlessAction = buildHeadlessAction(payload, actorToken.id, detectedTargetIds, turnUndeadTargetIds, monkBonusAttack)
+  if (payload.feature === 'eldritch-knight-arcane-charge') {
+    const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    const origin = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
+    const distanceFeet = Math.max(
+      Math.abs(payload.targetCell.col - origin.col),
+      Math.abs(payload.targetCell.row - origin.row),
+    ) * feetPerCell
+    if (distanceFeet > 30) return { ok: false, reason: 'target-out-of-range' }
+    const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
+    const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
+    const to = tokenCenterForAnchorCell(payload.targetCell, actorToken, input.map)
+    const occupied = occupiedCells(input.map.tokens, input.map, actorToken.id)
+    const footprint = tokenOccupiedCellsAt(actorToken, input.map, to)
+    if (footprint.some((cell) =>
+      cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows || occupied.has(cellKey(cell))
+    )) return { ok: false, reason: 'invalid-target' }
+    const geometry = mapGeometryRuntimeForMap(input.map.id)
+    const toElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, to)
+    if (mapGeometryPlacementBlocked({
+      geometry,
+      map: input.map,
+      token: actorToken,
+      at: to,
+      elevationFeet: toElevationFeet,
+    }).blocked) return { ok: false, reason: 'invalid-target' }
+    arcaneCharge = { to, distanceFeet, toElevationFeet }
+  }
+  const headlessAction = buildHeadlessAction(
+    payload,
+    actorToken.id,
+    detectedTargetIds,
+    turnUndeadTargetIds,
+    monkBonusAttack,
+    arcaneCharge,
+  )
   if (!headlessAction) return { ok: false, reason: 'invalid-action' }
 
   const rangeTargets: Array<{ tokenId: string; rangeFeet: number }> = []

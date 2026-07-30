@@ -4,6 +4,7 @@ import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
   dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveAbilityCheckDisadvantages,
   dnd5eActiveActionOrBonusActionOnly,
   dnd5eActiveArmorClassBonus,
   dnd5eActiveCarryingCapacityMultiplier,
@@ -14,8 +15,10 @@ import {
   dnd5eActiveFlySpeed,
   dnd5eActiveJumpDistanceMultiplier,
   dnd5eActiveMaximumAttacksPerTurn,
+  dnd5eActiveOptionalBonusDice,
   dnd5eActiveResistanceToAllDamage,
   dnd5eActiveSavingThrowBonus,
+  dnd5eActiveSavingThrowDisadvantages,
   dnd5eActiveSizeRankDelta,
   dnd5eActiveSafeFallFeet,
   dnd5eActiveSpeedPenalty,
@@ -36,6 +39,75 @@ import {
 } from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
+  it('keeps suspended effects authoritative while excluding their conditions and modifiers', () => {
+    const charmed = {
+      ...createDnd5eConditionEffect({
+        id: 'mindless-rage:charmed',
+        condition: 'charmed',
+        source: { kind: 'spell', actorId: 'caster', rulesId: 'charm-person' },
+        targetId: 'berserker',
+        duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      }),
+      suspendedBy: ['class:berserker:mindless-rage'],
+    }
+    const dependent = {
+      ...createDnd5eMechanicalEffect({
+        id: 'mindless-rage:dependent',
+        definitionId: 'test:charm-dependent',
+        label: '魅惑依赖效果',
+        source: { kind: 'spell', actorId: 'caster', rulesId: 'charm-person' },
+        targetId: 'berserker',
+        dependsOnEffectId: charmed.id,
+        modifiers: { armorClassBonus: -2 },
+      }),
+      suspendedBy: ['class:berserker:mindless-rage'],
+    }
+
+    expect(normalizeDnd5eActiveEffects([charmed, dependent])).toHaveLength(2)
+    expect(dnd5eConditionsFromActiveEffects([charmed, dependent])).toEqual([])
+    expect(dnd5eActiveArmorClassBonus([charmed, dependent])).toBe(0)
+    expect(validateDnd5eActiveEffectsStrict([charmed, dependent])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...charmed,
+      suspendedBy: ['duplicate', 'duplicate'],
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('suspendedBy')]),
+    })
+  })
+
+  it('normalizes and validates player-controlled optional bonus dice', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:guidance',
+      label: '神导术',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'guidance' },
+      targetId: 'ally',
+      modifiers: {
+        optionalBonusDie: {
+          sides: 4,
+          appliesTo: ['ability-check'],
+          consumeOnUse: true,
+        },
+      },
+    })
+    expect(dnd5eActiveOptionalBonusDice([effect], 'ability-check')).toHaveLength(1)
+    expect(dnd5eActiveOptionalBonusDice([effect], 'saving-throw')).toHaveLength(0)
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: {
+        optionalBonusDie: {
+          sides: 20,
+          appliesTo: ['attack'],
+          consumeOnUse: false,
+        },
+      },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('optionalBonusDie')]),
+    })
+  })
+
   it('normalizes reusable AC, saving throw, and all-damage resistance modifiers', () => {
     const effect = createDnd5eMechanicalEffect({
       definitionId: 'srd-5.1:spell:warding-bond',
@@ -45,21 +117,30 @@ describe('D&D 5e ActiveEffectInstance', () => {
       modifiers: {
         armorClassBonus: 1,
         savingThrowBonus: 1,
+        savingThrowBonusByAbility: { dex: -2 },
         resistanceToAllDamage: true,
       },
     })
     expect(dnd5eActiveArmorClassBonus([effect])).toBe(1)
     expect(dnd5eActiveSavingThrowBonus([effect])).toBe(1)
+    expect(dnd5eActiveSavingThrowBonus([effect], 'dex')).toBe(-1)
+    expect(dnd5eActiveSavingThrowBonus([effect], 'wis')).toBe(1)
     expect(dnd5eActiveResistanceToAllDamage([effect])).toBe(true)
     expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
     expect(validateDnd5eActiveEffectsStrict([{
       ...effect,
-      modifiers: { armorClassBonus: 21, savingThrowBonus: Number.NaN, resistanceToAllDamage: 'yes' },
+      modifiers: {
+        armorClassBonus: 21,
+        savingThrowBonus: Number.NaN,
+        savingThrowBonusByAbility: { dex: -21 },
+        resistanceToAllDamage: 'yes',
+      },
     }])).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([
         expect.stringContaining('armorClassBonus'),
         expect.stringContaining('savingThrowBonus'),
+        expect.stringContaining('savingThrowBonusByAbility'),
         expect.stringContaining('resistanceToAllDamage'),
       ]),
     })
@@ -113,6 +194,52 @@ describe('D&D 5e ActiveEffectInstance', () => {
     }])).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('safeFallFeet')]),
+    })
+  })
+
+  it('normalizes and queries ability-check and saving-throw disadvantages', () => {
+    const first = createDnd5eMechanicalEffect({
+      definitionId: 'test:disadvantage:first',
+      label: '能力检定与豁免劣势',
+      source: { kind: 'monster', actorId: 'monster' },
+      targetId: 'target',
+      modifiers: {
+        abilityCheckDisadvantages: ['str', 'str', 'dex'],
+        savingThrowDisadvantages: ['wis', 'wis'],
+      },
+    })
+    const second = createDnd5eMechanicalEffect({
+      definitionId: 'test:disadvantage:second',
+      label: '额外劣势',
+      source: { kind: 'monster', actorId: 'monster' },
+      targetId: 'target',
+      modifiers: {
+        abilityCheckDisadvantages: ['dex', 'con'],
+        savingThrowDisadvantages: ['cha', 'wis'],
+      },
+    })
+
+    expect(first.modifiers?.abilityCheckDisadvantages).toEqual(['str', 'dex'])
+    expect(first.modifiers?.savingThrowDisadvantages).toEqual(['wis'])
+    expect(dnd5eActiveAbilityCheckDisadvantages([first, second])).toEqual(['str', 'dex', 'con'])
+    expect(dnd5eActiveSavingThrowDisadvantages([first, second])).toEqual(['wis', 'cha'])
+    expect(validateDnd5eActiveEffectsStrict([first, second])).toMatchObject({ ok: true })
+
+    const malformed = {
+      ...first,
+      modifiers: {
+        ...first.modifiers,
+        abilityCheckDisadvantages: ['luck'],
+        savingThrowDisadvantages: 'wis',
+      },
+    }
+    expect(normalizeDnd5eActiveEffects([malformed])[0].modifiers).toBeUndefined()
+    expect(validateDnd5eActiveEffectsStrict([malformed])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.stringContaining('abilityCheckDisadvantages'),
+        expect.stringContaining('savingThrowDisadvantages'),
+      ]),
     })
   })
 

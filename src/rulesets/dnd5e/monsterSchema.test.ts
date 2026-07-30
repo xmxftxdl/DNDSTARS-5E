@@ -208,6 +208,102 @@ describe('D&D 5e monster action schema', () => {
     }
   })
 
+  it('validates margin-gated dependent conditions and mechanical condition modifiers', () => {
+    const valid = structuredClone(
+      DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'drow')!,
+    )
+    const action = valid.actions.find((entry) => entry.id === 'hand-crossbow')!
+    expect(dnd5eMonsterActionAutomation(action)).toBe('headless')
+    expect(validateDnd5eMonsterSchema(valid)).toEqual([])
+
+    const invalidMutations: Array<(effect: Record<string, unknown>) => void> = [
+      (effect) => {
+        const additional = effect.additionalConditionsOnFailedSave as
+          Array<Record<string, unknown>>
+        additional[0]!.minimumFailureMargin = 0
+      },
+      (effect) => {
+        const additional = effect.additionalConditionsOnFailedSave as
+          Array<Record<string, unknown>>
+        additional[0]!.dependsOnCondition = 'frightened'
+      },
+      (effect) => {
+        const additional = effect.additionalConditionsOnFailedSave as
+          Array<Record<string, unknown>>
+        additional.push(structuredClone(additional[0]!))
+      },
+      (effect) => {
+        const root = effect.conditionOnFailedSave as Record<string, unknown>
+        root.minimumFailureMargin = 5
+      },
+      (effect) => {
+        const root = effect.conditionOnFailedSave as Record<string, unknown>
+        root.preventHealing = 'yes'
+      },
+      (effect) => {
+        const additional = effect.additionalConditionsOnFailedSave as
+          Array<Record<string, unknown>>
+        additional[0]!.canBeAwakenedByAction = 'yes'
+      },
+    ]
+
+    for (const mutate of invalidMutations) {
+      const monster = structuredClone(valid)
+      const effect = (
+        monster.actions.find((entry) => entry.id === 'hand-crossbow')!
+          .attack!.onHitEffects as unknown as Array<Record<string, unknown>>
+      )[0]!
+      mutate(effect)
+      expect(validateDnd5eMonsterSchema(monster)).toContainEqual(
+        expect.objectContaining({
+          actionId: 'hand-crossbow',
+          code: 'invalid-stat-block',
+        }),
+      )
+    }
+  })
+
+  it('validates magical staged on-hit condition transitions', () => {
+    const valid = structuredClone(
+      DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'cockatrice')!,
+    )
+    const bite = valid.actions.find((entry) => entry.id === 'bite')!
+    expect(dnd5eMonsterActionAutomation(bite)).toBe('headless')
+    expect(validateDnd5eMonsterSchema(valid)).toEqual([])
+
+    const invalidMutations: Array<(effect: Record<string, unknown>) => void> = [
+      (effect) => {
+        effect.magical = 'yes'
+      },
+      (effect) => {
+        const root = effect.conditionOnFailedSave as Record<string, unknown>
+        root.repeatSaveAtEndOfTargetTurn = false
+      },
+      (effect) => {
+        const root = effect.conditionOnFailedSave as Record<string, unknown>
+        const transition = root.onRepeatSaveFailureTransition as Record<string, unknown>
+        transition.replaceWithCondition = 'burning'
+      },
+      (effect) => {
+        const root = effect.conditionOnFailedSave as Record<string, unknown>
+        const transition = root.onRepeatSaveFailureTransition as Record<string, unknown>
+        transition.duration = 'rounds'
+      },
+    ]
+
+    for (const mutate of invalidMutations) {
+      const monster = structuredClone(valid)
+      const effect = (
+        monster.actions.find((entry) => entry.id === 'bite')!
+          .attack!.onHitEffects as unknown as Array<Record<string, unknown>>
+      )[0]!
+      mutate(effect)
+      expect(validateDnd5eMonsterSchema(monster)).toContainEqual(
+        expect.objectContaining({ actionId: 'bite', code: 'invalid-stat-block' }),
+      )
+    }
+  })
+
   it('strictly validates monster-area forced movement, target scope, and mechanical effects', () => {
     const expectInvalid = (
       slug: 'adult-bronze-dragon' | 'adult-copper-dragon' | 'adult-gold-dragon',

@@ -73,7 +73,7 @@ describe('official SRD 5.1 spell-list catalog', () => {
   })
 
   it('requires every mechanically implemented combat spell to agree with the official catalog', () => {
-    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(96)
+    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(101)
     for (const spell of DND5E_SRD_COMBAT_SPELLS) {
       const catalog = getDnd5eSrdSpellCatalogEntry(spell.id)
       expect(catalog, spell.id).toBeDefined()

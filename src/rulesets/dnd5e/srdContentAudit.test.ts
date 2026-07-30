@@ -7,7 +7,7 @@ describe('SRD 5.1 published content consistency audit', () => {
 
     expect(report).toMatchObject({
       spellCatalogCount: 319,
-      headlessSpellCount: 96,
+      headlessSpellCount: 101,
       magicItemCatalogCount: 240,
     })
     expect(report.reviewedSpellCount).toBe(319)

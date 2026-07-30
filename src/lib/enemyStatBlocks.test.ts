@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getEnemyDerivedCombatStats, getEnemyMaxHp, enemyHasDerivedCombat } from './enemyCombatStats'
 import { DND5E_SRD_ENEMY_POOL, ENEMY_POOL, enemyTemplateToTokenPatch } from './enemyPool'
 import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
+import { DND5E_SRD_MONSTERS } from '../rulesets/dnd5e/monsters'
 
 describe('SRD 5.1 monster stat-block adapter', () => {
   it('exposes only namespaced SRD catalog templates in the built-in pool', () => {
@@ -35,5 +36,15 @@ describe('SRD 5.1 monster stat-block adapter', () => {
     expect(getEnemyStatBlock('goblin')).toMatchObject({ ac: 15, maxHp: 7 })
     expect(getEnemyStatBlock('slime')).toBeUndefined()
     expect(getEnemyStatBlock('mage-apprentice')).toBeUndefined()
+  })
+
+  it('keeps DM action indexes aligned with the canonical catalog after adding Multiattack variants', () => {
+    for (const monster of DND5E_SRD_MONSTERS) {
+      const displayed = getEnemyStatBlock(monster.id)?.actions
+      expect(
+        displayed?.map((action) => action.name),
+        monster.id,
+      ).toEqual(monster.actions.map((action) => action.name))
+    }
   })
 })

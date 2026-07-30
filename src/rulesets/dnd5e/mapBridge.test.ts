@@ -1142,6 +1142,79 @@ describe('D&D 5e map bridge', () => {
     expect(plan.changedTokenIds).toEqual([enemy.id])
   })
 
+  it('persists and rehydrates the Berserker Retaliation damage trigger', () => {
+    const berserker: Character = {
+      ...character(),
+      charClass: '野蛮人',
+      level: 14,
+      dnd5eClassChoices: {
+        classes: { barbarian: { subclass: 'berserker', selections: {} } },
+      },
+    }
+    const berserkerToken = token({
+      id: 'berserker-token',
+      type: 'player',
+      characterId: berserker.id,
+      label: berserker.name,
+      x: 10,
+      hp: berserker.currentHp,
+      maxHp: berserker.maxHp,
+    })
+    const enemy = token({ id: 'enemy-token', label: 'Enemy', x: 0 })
+    const map: BattleMap = {
+      id: 'retaliation-map',
+      name: 'Retaliation',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [enemy, berserkerToken],
+    }
+    const initiativeOrder = [
+      { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 20 },
+      { tokenId: berserkerToken.id, label: berserkerToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'retaliation',
+      map,
+      characters: [berserker],
+      initiativeOrder,
+    })
+    const damaged = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'attack',
+      actorId: enemy.id,
+      targetId: berserkerToken.id,
+      attackModifier: 20,
+      d20: 10,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [4], type: 'slashing' },
+    })
+    expect(damaged.ok).toBe(true)
+    if (!damaged.ok) return
+    const plan = planDnd5eMapResultApplication({
+      state: damaged.state,
+      map,
+      characters: [berserker],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.characters[0].dnd5eCombatState?.berserkerRetaliationTrigger).toEqual({
+      sourceId: enemy.id,
+      round: 1,
+    })
+
+    const rehydrated = createDnd5eMapCombatSnapshot({
+      combatId: 'retaliation',
+      map: plan.map,
+      characters: plan.characters,
+      initiativeOrder,
+    })
+    expect(
+      rehydrated.state.combatants[berserkerToken.id].classState.berserkerRetaliationTrigger,
+    ).toEqual({ sourceId: enemy.id, round: 1 })
+  })
+
   it('hydrates a namespaced SRD monster with its exact stat block', () => {
     const enemy = token({
       id: 'goblin-token',

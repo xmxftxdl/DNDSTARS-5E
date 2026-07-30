@@ -641,7 +641,7 @@ describe('D&D 5e combat simulator', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: declaration.escapeDc,
+        dc: declaration.escapeDc!,
         economy: 'action',
       },
       relation: {
@@ -678,7 +678,7 @@ describe('D&D 5e combat simulator', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: tailDeclaration.escapeDc,
+        dc: tailDeclaration.escapeDc!,
         economy: 'action',
       },
       relation: {
@@ -926,7 +926,7 @@ describe('D&D 5e combat simulator', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: declaration.escapeDc,
+        dc: declaration.escapeDc!,
         economy: 'action',
       },
       relation: {
@@ -1033,7 +1033,7 @@ describe('D&D 5e combat simulator', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: declaration.escapeDc,
+        dc: declaration.escapeDc!,
         economy: 'action',
       },
       relation: {
@@ -1300,7 +1300,7 @@ describe('D&D 5e combat simulator', () => {
         skill: 'athletics',
         alternativeAbility: 'dex',
         alternativeSkill: 'acrobatics',
-        dc: declaration.escapeDc,
+        dc: declaration.escapeDc!,
         economy: 'action',
       },
       relation: {

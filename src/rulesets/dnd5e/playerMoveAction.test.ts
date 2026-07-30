@@ -3,7 +3,12 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { prepareDnd5ePlayerMove, resolveDnd5ePlayerDodge, resolvePreparedDnd5ePlayerMove } from './playerMoveAction'
+import {
+  prepareDnd5eExplorationMove,
+  prepareDnd5ePlayerMove,
+  resolveDnd5ePlayerDodge,
+  resolvePreparedDnd5ePlayerMove,
+} from './playerMoveAction'
 import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
@@ -78,6 +83,92 @@ function playerDragMap(): BattleMap {
 
 describe('D&D 5e player map movement', () => {
   afterEach(() => setMapGeometryRuntime([]))
+
+  it('allows an owned living player Token to move outside combat without turn economy', () => {
+    const prepared = prepareDnd5eExplorationMove({
+      action: {
+        ...action,
+        combatId: undefined,
+        targetPosition: { x: 25, y: 5 },
+      },
+      map,
+      characters: [character()],
+    })
+
+    expect(prepared).toMatchObject({
+      ok: true,
+      prepared: {
+        actor: { id: 'hero' },
+        actorToken: { id: 'hero-token' },
+        to: { x: 25, y: 5 },
+        toElevationFeet: 0,
+      },
+    })
+    if (!prepared.ok) return
+    expect(prepared.prepared.path.at(0)).toEqual({ x: 5, y: 5 })
+    expect(prepared.prepared.path.at(-1)).toEqual({ x: 25, y: 5 })
+  })
+
+  it('rejects exploration movement for a combat envelope, a defeated actor, or another Token', () => {
+    expect(prepareDnd5eExplorationMove({
+      action,
+      map,
+      characters: [character()],
+    })).toEqual({ ok: false, reason: 'invalid-action' })
+
+    expect(prepareDnd5eExplorationMove({
+      action: { ...action, combatId: undefined },
+      map,
+      characters: [{ ...character(), currentHp: 0 }],
+    })).toEqual({ ok: false, reason: 'invalid-actor' })
+
+    expect(prepareDnd5eExplorationMove({
+      action: {
+        ...action,
+        combatId: undefined,
+        actorTokenId: 'enemy-token',
+      },
+      map,
+      characters: [character()],
+    })).toEqual({ ok: false, reason: 'invalid-actor' })
+  })
+
+  it('keeps exploration movement behind DM-authored walls', () => {
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [{
+        id: 'sealed-wall',
+        kind: 'wall',
+        label: 'Sealed wall',
+        points: [{ x: 10, y: 0 }, { x: 10, y: 200 }],
+        blocksVision: true,
+        blocksMovement: true,
+        blocksLineOfEffect: true,
+        baseHeightFeet: 0,
+        heightFeet: 10,
+        createdAt: 1,
+      }],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: false,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+
+    expect(prepareDnd5eExplorationMove({
+      action: {
+        ...action,
+        combatId: undefined,
+        targetPosition: { x: 25, y: 5 },
+      },
+      map,
+      characters: [character()],
+    })).toEqual({ ok: false, reason: 'movement-blocked' })
+  })
 
   it('routes around a DM-authored movement blocker instead of crossing it', () => {
     setMapGeometryRuntime([{
@@ -596,6 +687,36 @@ describe('D&D 5e player map movement', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+  })
+
+  it('charges double movement through Ice Storm difficult terrain', () => {
+    const stormMap: BattleMap = {
+      ...map,
+      dnd5ePluginAreas: [{
+        id: 'ice-storm', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:ice-storm',
+        sourceKind: 'core-spell', coreSpellId: 'ice-storm', label: '冰风暴·冰雹地面', color: '#bfdbfe',
+        sourceCharacterId: 'enemy', sourceTokenId: 'enemy-token',
+        cells: Array.from({ length: 20 }, (_, row) => [
+          { col: 1, row },
+          { col: 2, row },
+        ]).flat(),
+        createdRound: 1, expiresAfterRound: 2, expiresAtSourceTurnEndAfterRound: 2,
+        relation: 'any', includeSelf: true, movementCostMultiplier: 2,
+      }],
+    }
+    const prepared = prepareDnd5ePlayerMove({
+      action,
+      map: stormMap,
+      characters: [character()],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ distanceFeet: 10, movementCostFeet: 20 })
   })
 
   it('spends half speed to stand from prone before moving and clears the condition', () => {

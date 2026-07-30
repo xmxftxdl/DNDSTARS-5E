@@ -98,6 +98,8 @@ export interface Dnd5eSpellbookEntry {
   classes: readonly Dnd5eSpellcastingClassId[]
   sourceKind: 'srd-core' | 'room-import'
   headless: boolean
+  automationLevel: 'full' | 'partial' | 'manual'
+  automationReason?: string
   catalogOnly: boolean
   iconAssetId?: string
   visibilityRequirement?: Dnd5eSpellVisibilityRequirement
@@ -105,6 +107,36 @@ export interface Dnd5eSpellbookEntry {
   reference?: Dnd5eSrdSpellDescriptionZh
   imported?: Dnd5eImportedSpell
   combat?: Dnd5eSrdSpellDefinition
+}
+
+const DND5E_PARTIAL_CORE_SPELL_REASONS: Readonly<Record<string, string>> = {
+  'produce-flame': '投掷火焰的攻击与伤害已自动化；手持火焰的照明、熄灭和持续时间仍需地图层处理。',
+  'fire-bolt': '生物目标的攻击与伤害已自动化；点燃未被穿戴或携带的易燃物仍需 DM 裁定。',
+  'burning-hands': '范围豁免、伤害与升环已自动化；点燃区域内未被穿戴或携带的易燃物仍需 DM 裁定。',
+  shatter: '生物目标的范围豁免、伤害与升环已自动化；非魔法物体伤害及无机生物的豁免劣势仍需 DM 裁定。',
+  fireball: '范围豁免、伤害与升环已自动化；点燃区域内未被穿戴或携带的易燃物仍需 DM 裁定。',
+  'lightning-bolt': '范围豁免、伤害与升环已自动化；点燃线内未被穿戴或携带的易燃物仍需 DM 裁定。',
+  'cone-of-cold': '范围豁免、伤害与升环已自动化；被法术杀死的生物形成冰冻塑像仍需 DM 或地图层处理。',
+  'dancing-lights': '光源位置、组合与移动仍需要地图层或 DM 处理。',
+  'minor-illusion': '幻象内容、交互方式与识破结果仍需要 DM 裁定。',
+  thaumaturgy: '环境与叙事效果仍需要 DM 裁定。',
+  'enlarge-reduce': '生物目标已自动化；物件目标仍需要 DM 裁定。',
+  'call-lightning': '伤害与持续发动已自动化；室内空间和暴风天气加骰仍需要 DM 裁定。',
+  slow: '速度、AC、敏捷豁免、反应、攻击次数与行动经济已自动化；施法动作延迟的 d20 判定仍需要 DM 裁定。',
+  banishment: '战斗状态已自动化；异界生物维持满时长后的位面归返仍需要 DM 裁定。',
+  'freezing-sphere': '立即发射已自动化；延迟发射与冻结水面仍需要 DM 裁定。',
+  'finger-of-death': '伤害已自动化；击杀人形生物后的僵尸生成与控制仍需要 DM 裁定。',
+}
+
+function dnd5eCoreSpellAutomation(
+  spellId: string,
+  headless: boolean,
+): Pick<Dnd5eSpellbookEntry, 'automationLevel' | 'automationReason'> {
+  if (!headless) return { automationLevel: 'manual' }
+  const automationReason = DND5E_PARTIAL_CORE_SPELL_REASONS[spellId]
+  return automationReason
+    ? { automationLevel: 'partial', automationReason }
+    : { automationLevel: 'full' }
 }
 
 export interface Dnd5ePluginSpellbookReference extends Omit<Dnd5eImportedSpell, 'automation'> {
@@ -371,6 +403,7 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
       classes: catalog.classes as readonly Dnd5eSpellcastingClassId[],
       sourceKind: 'srd-core',
       headless: !!combat,
+      ...dnd5eCoreSpellAutomation(catalog.id, !!combat),
       catalogOnly: !combat,
       visibilityRequirement: catalog.visibilityRequirement,
       translationStatus: reviewedReference ? 'context-reviewed' : 'pending-srd-translation',
@@ -386,6 +419,7 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
     classes: spell.classes,
     sourceKind: 'room-import',
     headless: false,
+    automationLevel: 'manual',
     catalogOnly: false,
     imported: spell,
   }))
@@ -408,7 +442,7 @@ export function dnd5eSpellbookEntriesWithPlugins(
   return dnd5eSpellbookEntries([...imported.filter((spell) => !pluginIds.has(spell.id)), ...references]).map((entry) => {
     const iconAssetId = iconAssets.get(entry.id)
     const withAutomation = automation.get(entry.id)?.mode === 'headless-action'
-      ? { ...entry, headless: true, catalogOnly: false }
+      ? { ...entry, headless: true, automationLevel: 'full' as const, catalogOnly: false }
       : entry
     return iconAssetId ? { ...withAutomation, iconAssetId } : withAutomation
   })

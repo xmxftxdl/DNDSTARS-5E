@@ -91,7 +91,42 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference?.sourcePage).toBe(118)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
       .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(96)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(101)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(85)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(16)
+    expect(entries.find((entry) => entry.id === 'produce-flame')).toMatchObject({
+      headless: true,
+      automationLevel: 'partial',
+      automationReason: expect.stringContaining('照明'),
+    })
+    expect(entries.find((entry) => entry.id === 'shatter')).toMatchObject({
+      headless: true,
+      automationLevel: 'partial',
+      automationReason: expect.stringContaining('非魔法物体'),
+    })
+    expect(entries.find((entry) => entry.id === 'cone-of-cold')).toMatchObject({
+      headless: true,
+      automationLevel: 'partial',
+      automationReason: expect.stringContaining('冰冻塑像'),
+    })
+    expect(entries.find((entry) => entry.id === 'call-lightning')).toMatchObject({
+      headless: true,
+      automationLevel: 'partial',
+      automationReason: expect.stringContaining('暴风天气'),
+    })
+    expect(entries.find((entry) => entry.id === 'hypnotic-pattern')).toMatchObject({
+      headless: true,
+      automationLevel: 'full',
+    })
+    expect(entries.find((entry) => entry.id === 'ice-storm')).toMatchObject({
+      headless: true,
+      automationLevel: 'full',
+    })
+    expect(entries.find((entry) => entry.id === 'slow')).toMatchObject({
+      headless: true,
+      automationLevel: 'partial',
+      automationReason: expect.stringContaining('施法动作延迟'),
+    })
     expect(entries.find((entry) => entry.id === 'test-pack:ember-lance')).toMatchObject({ sourceKind: 'room-import', headless: false })
   })
 
@@ -104,6 +139,7 @@ describe('D&D 5e room spellbook import', () => {
     }])
     expect(entries.find((entry) => entry.id === 'test-pack:guided-glow')).toMatchObject({
       sourceKind: 'room-import', headless: true, catalogOnly: false,
+      automationLevel: 'full',
       imported: { automation: { mode: 'reference-only' } },
     })
   })

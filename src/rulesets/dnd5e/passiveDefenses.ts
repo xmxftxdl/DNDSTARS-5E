@@ -5,6 +5,7 @@ import type { Dnd5eDamageType } from './monsters'
 import {
   dnd5eActiveConditionImmunities,
   dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveSavingThrowDisadvantages,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveSpeedBonus,
   dnd5eActiveSpeedPenalty,
@@ -251,6 +252,12 @@ export function dnd5eSavingThrowModeExplanation(
         reason: 'condition-save-disadvantage',
       },
       {
+        active: dnd5eActiveSavingThrowDisadvantages(
+          creature.classState.activeEffects,
+        ).includes(ability),
+        reason: 'active-effect-save-disadvantage',
+      },
+      {
         active: creature.wearingUnproficientArmor === true && (ability === 'str' || ability === 'dex'),
         reason: 'unproficient-armor',
       },
@@ -438,13 +445,19 @@ export function dnd5eConditionImmuneFromSource(
   if (standard != null && dnd5eActiveConditionImmunities(target.classState.activeEffects).includes(standard)) {
     return true
   }
+  const charmOrFear = standard === 'charmed' || standard === 'frightened'
+  if (
+    charmOrFear &&
+    defensiveClassLevel(target, 'barbarian') >= 6 &&
+    defensiveHasSubclass(target, 'barbarian', 'berserker') &&
+    target.classState.raging === true
+  ) return true
   const charmFearOrPossession = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌', 'possessed', '附身'].includes(normalized)
   if (
     charmFearOrPossession && defensiveClassLevel(target, 'paladin') >= 15 &&
     defensiveHasSubclass(target, 'paladin', 'devotion') &&
     dnd5eProtectionCreatureType(source?.creatureType)
   ) return true
-  const charmOrFear = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌'].includes(normalized)
   if (
     !charmOrFear || defensiveClassLevel(target, 'druid') < 10 || !defensiveHasSubclass(target, 'druid', 'land')
   ) return false
@@ -468,9 +481,6 @@ export function dnd5eClassPassiveDefenses(creature: Dnd5eDefensiveCreature): {
   if (defensiveClassLevel(creature, 'druid') >= 10 && defensiveHasSubclass(creature, 'druid', 'land')) {
     damageImmunities.push('poison')
     conditionImmunities.push('poisoned', '中毒', 'disease', '疾病')
-  }
-  if (defensiveClassLevel(creature, 'barbarian') >= 6 && defensiveHasSubclass(creature, 'barbarian', 'berserker') && creature.classState.raging) {
-    conditionImmunities.push('charmed', '魅惑', 'frightened', '惊惧', '恐慌')
   }
   return { damageImmunities, conditionImmunities }
 }

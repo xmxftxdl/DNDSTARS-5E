@@ -3,6 +3,7 @@ import { createDnd5eCombatant, dnd5eAbilityCheckRollMode, dnd5eAttackerIsUnseenF
 import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
+  dnd5eActiveSavingThrowBonus,
   dnd5eConditionsFromActiveEffects,
   type Dnd5eActiveEffectInstance,
 } from './activeEffects'
@@ -1823,6 +1824,190 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dnd5eUnseenTargetImposesDisadvantage(bard, outlined)).toBe(false)
   })
 
+  it('applies Hypnotic Pattern as a linked charm, incapacitation, and zero-speed effect', () => {
+    const bard = fighter('bard', 20, {
+      classId: 'bard', level: 5, proficiencyBonus: 3, abilities: { ...abilities, cha: 18 },
+      classSelections: { 'spell-known': ['hypnotic-pattern'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const failed = fighter('failed', 10, {
+      controller: 'dm', abilities: { ...abilities, wis: 8 },
+    })
+    const immune = fighter('immune', 5, {
+      controller: 'dm', abilities: { ...abilities, wis: 8 },
+      conditionImmunities: ['charmed'],
+    })
+    const helper = fighter('helper', 15)
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('hypnotic-pattern', [bard, helper, failed, immune]),
+      {
+        type: 'cast-spell', actorId: bard.id, targetId: failed.id,
+        targetIds: [failed.id, immune.id], spellId: 'hypnotic-pattern', slotLevel: 3,
+        targetSavingThrows: [
+          { targetId: failed.id, d20: 1 },
+          { targetId: immune.id, d20: 1 },
+        ],
+        effectRolls: [],
+      },
+    )
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.failed.conditions).toEqual(
+      expect.arrayContaining(['charmed', 'incapacitated']),
+    )
+    expect(dnd5eEffectiveSpeed(cast.state.combatants.failed)).toBe(0)
+    expect(cast.state.combatants.immune.conditions).not.toEqual(
+      expect.arrayContaining(['charmed', 'incapacitated']),
+    )
+
+    const root = cast.state.combatants.failed.classState.activeEffects?.find(
+      (effect) => effect.standardCondition === 'charmed' && effect.source.rulesId === 'hypnotic-pattern',
+    )
+    expect(root?.removal?.action).toMatchObject({
+      label: '摇醒受术者',
+      economy: 'action',
+      maxDistanceFeet: 5,
+    })
+    expect(cast.state.combatants.failed.classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        standardCondition: 'incapacitated',
+        dependsOnEffectId: root?.id,
+        modifiers: expect.objectContaining({ speedPenaltyFeet: 1_000 }),
+      }),
+    )
+
+    cast.state.initiativeIndex = cast.state.initiativeOrder.indexOf(helper.id)
+    cast.state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(helper.id, failed.id)]: 5,
+    }
+    const awakened = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'wake-sleeping-creature',
+      actorId: helper.id,
+      targetId: failed.id,
+    })
+    expect(awakened.ok).toBe(true)
+    if (!awakened.ok) return
+    expect(awakened.state.combatants.failed.conditions).not.toEqual(
+      expect.arrayContaining(['charmed', 'incapacitated']),
+    )
+    expect(dnd5eEffectiveSpeed(awakened.state.combatants.failed)).toBe(30)
+    expect(awakened.events).toContainEqual({
+      type: 'sleeping-creature-awakened',
+      actorId: helper.id,
+      targetId: failed.id,
+      sourceRulesIds: ['hypnotic-pattern'],
+    })
+  })
+
+  it('automates Slow penalties, concentration duration, and the end-of-turn repeat save', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 5, proficiencyBonus: 3, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['slow'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const failed = fighter('failed', 10, {
+      controller: 'dm', abilities: { ...abilities, wis: 8, dex: 16 },
+    })
+    const passed = fighter('passed', 5, {
+      controller: 'dm', abilities: { ...abilities, wis: 18, dex: 16 },
+    })
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('slow', [wizard, failed, passed]),
+      {
+        type: 'cast-spell', actorId: wizard.id, targetId: failed.id,
+        targetIds: [failed.id, passed.id], spellId: 'slow', slotLevel: 3,
+        targetSavingThrows: [
+          { targetId: failed.id, d20: 1 },
+          { targetId: passed.id, d20: 20 },
+        ],
+        effectRolls: [],
+      },
+    )
+    expect(cast.ok, cast.ok ? undefined : cast.reason).toBe(true)
+    if (!cast.ok) return
+
+    const slowed = cast.state.combatants.failed
+    const effect = slowed.classState.activeEffects?.find(
+      (candidate) => candidate.definitionId === 'srd-5.1:spell:slow',
+    )
+    expect(effect).toMatchObject({
+      duration: {
+        type: 'concentration',
+        sourceActorId: wizard.id,
+        concentrationId: 'slow',
+        remainingRounds: 10,
+      },
+      repeatSave: {
+        ability: 'wis',
+        timing: 'target-turn-end',
+        onSuccess: 'remove',
+      },
+      modifiers: {
+        speedMultiplier: 0.5,
+        maximumAttacksPerTurn: 1,
+        actionOrBonusActionOnly: true,
+        armorClassBonus: -2,
+        savingThrowBonusByAbility: { dex: -2 },
+        preventReactions: true,
+      },
+    })
+    expect(dnd5eEffectiveSpeed(slowed)).toBe(15)
+    expect(dnd5eTargetArmorClassForAttack(cast.state, wizard.id, failed.id)).toBe(14)
+    expect(dnd5eActiveSavingThrowBonus(slowed.classState.activeEffects, 'dex')).toBe(-2)
+    expect(dnd5eActiveSavingThrowBonus(slowed.classState.activeEffects, 'wis')).toBe(0)
+    expect(slowed.turn.reactionAvailable).toBe(false)
+    expect(cast.state.combatants.passed.classState.activeEffects).toBeUndefined()
+
+    cast.state.initiativeIndex = cast.state.initiativeOrder.indexOf(failed.id)
+    const recovered = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'end-turn',
+      actorId: failed.id,
+      activeEffectSavingThrows: [{ effectId: effect!.id, d20: 20 }],
+    })
+    expect(recovered.ok, recovered.ok ? undefined : recovered.reason).toBe(true)
+    if (!recovered.ok) return
+    expect(recovered.state.combatants.failed.classState.activeEffects?.some(
+      (candidate) => candidate.definitionId === 'srd-5.1:spell:slow',
+    )).not.toBe(true)
+  })
+
+  it('resolves both Ice Storm damage components and halves each on a successful save', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 7, proficiencyBonus: 3, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['ice-storm'] },
+      classResources: { 'dnd5e-spell-slot-4': { current: 1, max: 1 } },
+    })
+    const failed = fighter('failed', 10, {
+      controller: 'dm', currentHp: 100, maxHp: 100, abilities: { ...abilities, dex: 8 },
+    })
+    const passed = fighter('passed', 5, {
+      controller: 'dm', currentHp: 100, maxHp: 100, abilities: { ...abilities, dex: 18 },
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('ice-storm', [wizard, failed, passed]),
+      {
+        type: 'cast-spell', actorId: wizard.id, targetId: failed.id,
+        targetIds: [failed.id, passed.id], spellId: 'ice-storm', slotLevel: 4,
+        targetSavingThrows: [
+          { targetId: failed.id, d20: 1 },
+          { targetId: passed.id, d20: 20 },
+        ],
+        effectRolls: [8, 8],
+        additionalEffectRolls: [[6, 6, 6, 6]],
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.failed.currentHp).toBe(60)
+    expect(result.state.combatants.passed.currentHp).toBe(80)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied',
+      targetId: failed.id,
+      damageTypes: ['bludgeoning', 'cold'],
+      amount: 40,
+    }))
+  })
+
   it('expires Chill Touch healing prevention at the caster next turn start and its undead rider at turn end', () => {
     const warlock = fighter('warlock', 20, {
       classId: 'warlock', level: 1, controller: 'player', abilities: { ...abilities, cha: 18 },
@@ -2929,9 +3114,29 @@ describe('D&D 5e 2014 headless combat engine', () => {
   it('authoritatively validates the Berserker Retaliation reaction feature', () => {
     const berserker = fighter('berserker', 10, {
       classId: 'barbarian', subclassId: 'berserker', level: 14,
+      position: { x: 5, y: 0 },
     })
-    const state = startDnd5eHeadlessCombat('retaliation', [fighter('enemy', 20), berserker])
-    const result = resolveDnd5eHeadlessAction(state, {
+    const enemy = fighter('enemy', 20, {
+      controller: 'dm',
+      position: { x: 0, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('retaliation', [enemy, berserker])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('enemy', 'berserker')]: 5,
+    }
+    const damaged = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'enemy', targetId: 'berserker', attackModifier: 5, d20: 15,
+      classDamageContext: meleeWeaponContext(),
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+    })
+    expect(damaged.ok).toBe(true)
+    if (!damaged.ok) return
+    expect(damaged.state.combatants.berserker.classState.berserkerRetaliationTrigger).toEqual({
+      sourceId: 'enemy',
+      round: 1,
+    })
+
+    const result = resolveDnd5eHeadlessAction(damaged.state, {
       type: 'opportunity-attack', reactionFeature: 'berserker-retaliation',
       actorId: 'berserker', targetId: 'enemy', attackModifier: 5, d20: 15,
       damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
@@ -2939,19 +3144,20 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.state.combatants.berserker.turn.reactionAvailable).toBe(false)
+    expect(result.state.combatants.berserker.classState.berserkerRetaliationTrigger).toBeUndefined()
     expect(result.events).toContainEqual(expect.objectContaining({
       type: 'damage-applied', sourceId: 'berserker', targetId: 'enemy', amount: 8,
     }))
 
-    const invalid = resolveDnd5eHeadlessAction(
-      startDnd5eHeadlessCombat('invalid-retaliation', [fighter('enemy', 20), fighter('fighter', 10)]),
+    const forged = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('forged-retaliation', [enemy, berserker]),
       {
         type: 'opportunity-attack', reactionFeature: 'berserker-retaliation',
-        actorId: 'fighter', targetId: 'enemy', attackModifier: 5, d20: 15,
+        actorId: 'berserker', targetId: 'enemy', attackModifier: 5, d20: 15,
         damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
       },
     )
-    expect(invalid).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+    expect(forged).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
   })
 
   it('authoritatively validates the Hunter Giant Killer reaction feature', () => {
@@ -3029,6 +3235,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
       controller: 'dm', position: { x: 10, y: 0 }, savingThrowBonuses: { wis: 0 },
     })
     const state = startDnd5eHeadlessCombat('intimidating-presence', [berserker, enemy, fighter('victim', 5)])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('berserker', 'enemy')]: 10,
+      [dnd5eCombatantPairKey('enemy', 'victim')]: 10,
+    }
     const frightened = resolveDnd5eHeadlessAction(state, {
       type: 'barbarian-intimidating-presence', actorId: 'berserker', targetId: 'enemy', savingThrowD20: 2,
     })
@@ -3071,14 +3281,97 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'attack-resolved', actorId: 'enemy', d20: 18, hit: true,
     }))
 
+    const immunityState = startDnd5eHeadlessCombat('intimidating-immunity', [berserker, enemy])
+    immunityState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('berserker', 'enemy')]: 10,
+    }
     const immune = resolveDnd5eHeadlessAction(
-      startDnd5eHeadlessCombat('intimidating-immunity', [berserker, enemy]),
+      immunityState,
       { type: 'barbarian-intimidating-presence', actorId: 'berserker', targetId: 'enemy', savingThrowD20: 20 },
     )
     expect(immune.ok).toBe(true)
     if (!immune.ok) return
     expect(immune.state.combatants.enemy.classState.intimidatingPresenceImmunityRoundsBySource?.berserker).toBe(14_400)
     expect(immune.state.combatants.enemy.conditions).not.toContain('frightened')
+  })
+
+  it('enforces Intimidating Presence range and line of sight, then ends only its own fear effect', () => {
+    const berserker = fighter('berserker', 20, {
+      classId: 'barbarian', subclassId: 'berserker', level: 10,
+      abilities: { ...abilities, cha: 14 },
+    })
+    const otherFear = createDnd5eConditionEffect({
+      id: 'other-fear',
+      condition: 'frightened',
+      source: { kind: 'feature', actorId: 'dragon', rulesId: 'frightful-presence' },
+      targetId: 'enemy',
+      duration: { type: 'permanent' },
+    })
+    const enemy = fighter('enemy', 10, {
+      controller: 'dm',
+      savingThrowBonuses: { wis: 0 },
+      classState: { activeEffects: [otherFear] },
+    })
+
+    const tooFar = startDnd5eHeadlessCombat('intimidating-too-far', [berserker, enemy])
+    tooFar.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('berserker', 'enemy')]: 35,
+    }
+    expect(resolveDnd5eHeadlessAction(tooFar, {
+      type: 'barbarian-intimidating-presence',
+      actorId: 'berserker',
+      targetId: 'enemy',
+      savingThrowD20: 2,
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const blocked = startDnd5eHeadlessCombat('intimidating-blocked', [berserker, enemy])
+    blocked.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('berserker', 'enemy')]: 10,
+    }
+    blocked.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('berserker', 'enemy')]: true,
+    }
+    expect(resolveDnd5eHeadlessAction(blocked, {
+      type: 'barbarian-intimidating-presence',
+      actorId: 'berserker',
+      targetId: 'enemy',
+      savingThrowD20: 2,
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const state = startDnd5eHeadlessCombat('intimidating-precise-cleanup', [berserker, enemy])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('berserker', 'enemy')]: 10,
+    }
+    const frightened = resolveDnd5eHeadlessAction(state, {
+      type: 'barbarian-intimidating-presence',
+      actorId: 'berserker',
+      targetId: 'enemy',
+      savingThrowD20: 2,
+    })
+    expect(frightened.ok).toBe(true)
+    if (!frightened.ok) return
+    expect(frightened.state.combatants.enemy.classState.activeEffects).toHaveLength(2)
+
+    frightened.state.initiativeIndex = frightened.state.initiativeOrder.indexOf('enemy')
+    frightened.state.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('enemy', 'berserker')]: true,
+    }
+    const ended = resolveDnd5eHeadlessAction(frightened.state, {
+      type: 'end-turn',
+      actorId: 'enemy',
+    })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    expect(ended.state.combatants.enemy.classState.intimidatingPresenceSourceId).toBeUndefined()
+    expect(ended.state.combatants.enemy.conditions).toContain('frightened')
+    expect(ended.state.combatants.enemy.classState.activeEffects).toEqual([
+      expect.objectContaining({ id: 'other-fear' }),
+    ])
+    expect(ended.events).not.toContainEqual({
+      type: 'condition-ended',
+      targetId: 'enemy',
+      condition: 'frightened',
+    })
   })
 
   it('spends the target reaction and halves one visible attack with Uncanny Dodge', () => {
@@ -4150,6 +4443,194 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(expired.state.combatants.a.classState.raging).toBeUndefined()
   })
 
+  it('suspends and resumes charm effects through Berserker Mindless Rage', () => {
+    const charmed = createDnd5eConditionEffect({
+      id: 'mindless-rage:charmed',
+      condition: 'charmed',
+      source: { kind: 'spell', actorId: 'original-caster', rulesId: 'charm-person' },
+      targetId: 'berserker',
+      duration: { type: 'rounds', remainingRounds: 3, tickOn: 'target-turn-end' },
+      repeatSave: { ability: 'wis', dc: 13, timing: 'target-turn-end', onSuccess: 'remove' },
+    })
+    const charmPenalty = createDnd5eMechanicalEffect({
+      id: 'mindless-rage:charm-penalty',
+      definitionId: 'test:charm-dependent-penalty',
+      label: '魅惑依赖减值',
+      source: { kind: 'spell', actorId: 'original-caster', rulesId: 'charm-person' },
+      targetId: 'berserker',
+      duration: { type: 'rounds', remainingRounds: 3, tickOn: 'target-turn-end' },
+      dependsOnEffectId: charmed.id,
+      modifiers: { armorClassBonus: -2 },
+    })
+    const berserker = fighter('berserker', 20, {
+      classId: 'barbarian',
+      subclassId: 'berserker',
+      level: 6,
+      creatureType: 'humanoid',
+      classResources: { 'dnd5e-rage': { current: 2, max: 2 } },
+      classState: { activeEffects: [charmed, charmPenalty] },
+    })
+    const wizard = fighter('wizard', 10, {
+      controller: 'dm',
+      classId: 'wizard',
+      level: 3,
+      abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-prepared': ['charm-person'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const state = startDnd5eHeadlessCombat('mindless-rage', [berserker, wizard])
+    expect(state.combatants.berserker.conditions).toContain('charmed')
+    expect(dnd5eTargetArmorClassForAttack(state, 'wizard', 'berserker')).toBe(14)
+
+    const raged = resolveDnd5eHeadlessAction(state, {
+      type: 'barbarian-rage',
+      actorId: 'berserker',
+    })
+    expect(raged.ok).toBe(true)
+    if (!raged.ok) return
+    expect(raged.state.combatants.berserker.conditions).not.toContain('charmed')
+    expect(raged.state.combatants.berserker.classState.activeEffects).toHaveLength(2)
+    expect(raged.state.combatants.berserker.classState.activeEffects?.every((effect) =>
+      effect.suspendedBy?.includes('class:berserker:mindless-rage'),
+    )).toBe(true)
+    expect(dnd5eTargetArmorClassForAttack(raged.state, 'wizard', 'berserker')).toBe(16)
+    expect(raged.events).toContainEqual({
+      type: 'class-state-changed',
+      actorId: 'berserker',
+      stateKey: 'berserker-mindless-rage',
+      active: true,
+      value: 2,
+    })
+
+    const wizardTurn = structuredClone(raged.state)
+    wizardTurn.initiativeIndex = wizardTurn.initiativeOrder.indexOf('wizard')
+    const blockedCharm = resolveDnd5eHeadlessAction(wizardTurn, {
+      type: 'cast-spell',
+      actorId: 'wizard',
+      targetId: 'berserker',
+      spellId: 'charm-person',
+      slotLevel: 1,
+      savingThrowD20: 1,
+      savingThrowD20Second: 1,
+      effectRolls: [],
+    })
+    expect(blockedCharm.ok).toBe(true)
+    if (!blockedCharm.ok) return
+    expect(blockedCharm.state.combatants.berserker.conditions).not.toContain('charmed')
+    expect(blockedCharm.state.combatants.berserker.classState.activeEffects).toHaveLength(2)
+
+    const ended = resolveDnd5eHeadlessAction(raged.state, {
+      type: 'end-turn',
+      actorId: 'berserker',
+    })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    expect(ended.state.combatants.berserker.classState.raging).toBeUndefined()
+    expect(ended.state.combatants.berserker.conditions).toContain('charmed')
+    expect(ended.state.combatants.berserker.classState.activeEffects?.every(
+      (effect) => effect.suspendedBy == null,
+    )).toBe(true)
+    expect(ended.state.combatants.berserker.classState.activeEffects?.every(
+      (effect) => effect.duration.type === 'rounds' && effect.duration.remainingRounds === 2,
+    )).toBe(true)
+    expect(dnd5eTargetArmorClassForAttack(ended.state, 'wizard', 'berserker')).toBe(14)
+    expect(ended.events).toContainEqual({
+      type: 'class-state-changed',
+      actorId: 'berserker',
+      stateKey: 'berserker-mindless-rage',
+      active: false,
+      value: 2,
+    })
+  })
+
+  it('grants the Frenzy melee bonus attack only from the turn after entering Rage', () => {
+    const berserker = fighter('berserker', 20, {
+      classId: 'barbarian',
+      subclassId: 'berserker',
+      level: 6,
+      classResources: { 'dnd5e-rage': { current: 2, max: 2 } },
+    })
+    const enemy = fighter('enemy', 10, {
+      controller: 'dm',
+      armorClass: 12,
+    })
+    const state = startDnd5eHeadlessCombat('berserker-frenzy', [berserker, enemy])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('berserker', 'enemy')]: 5,
+    }
+    const raged = resolveDnd5eHeadlessAction(state, {
+      type: 'barbarian-rage',
+      actorId: 'berserker',
+      frenzy: true,
+    })
+    expect(raged.ok).toBe(true)
+    if (!raged.ok) return
+    expect(raged.state.combatants.berserker.classState).toMatchObject({
+      raging: true,
+      frenzying: true,
+    })
+
+    const tooEarly = resolveDnd5eHeadlessAction(raged.state, {
+      type: 'attack',
+      actorId: 'berserker',
+      targetId: 'enemy',
+      attackModifier: 5,
+      d20: 15,
+      spendAction: false,
+      spendBonusAction: true,
+      classDamageContext: { ...meleeWeaponContext(), frenzyAttack: true },
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+    })
+    expect(tooEarly).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+
+    const sustainingAttack = resolveDnd5eHeadlessAction(raged.state, {
+      type: 'attack',
+      actorId: 'berserker',
+      targetId: 'enemy',
+      attackModifier: 5,
+      d20: 15,
+      classDamageContext: meleeWeaponContext(),
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+    })
+    expect(sustainingAttack.ok).toBe(true)
+    if (!sustainingAttack.ok) return
+    const berserkerEnded = resolveDnd5eHeadlessAction(sustainingAttack.state, {
+      type: 'end-turn',
+      actorId: 'berserker',
+    })
+    expect(berserkerEnded.ok).toBe(true)
+    if (!berserkerEnded.ok) return
+    const enemyEnded = resolveDnd5eHeadlessAction(berserkerEnded.state, {
+      type: 'end-turn',
+      actorId: 'enemy',
+    })
+    expect(enemyEnded.ok).toBe(true)
+    if (!enemyEnded.ok) return
+
+    const frenzyAttack = resolveDnd5eHeadlessAction(enemyEnded.state, {
+      type: 'attack',
+      actorId: 'berserker',
+      targetId: 'enemy',
+      attackModifier: 5,
+      d20: 15,
+      spendAction: false,
+      spendBonusAction: true,
+      classDamageContext: { ...meleeWeaponContext(), frenzyAttack: true },
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+    })
+    expect(frenzyAttack.ok).toBe(true)
+    if (!frenzyAttack.ok) return
+    expect(frenzyAttack.state.combatants.berserker.turn).toMatchObject({
+      actionAvailable: true,
+      bonusActionAvailable: false,
+    })
+    expect(frenzyAttack.events).toContainEqual({
+      type: 'turn-resource-spent',
+      actorId: 'berserker',
+      resource: 'bonusAction',
+    })
+  })
+
   it('keeps a level-15 Barbarian raging without attacking or taking damage', () => {
     const barbarian = fighter('a', 20, {
       classId: 'barbarian', level: 15,
@@ -5199,6 +5680,102 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(empowered.ok).toBe(true)
     if (!empowered.ok) return
     expect(empowered.state.combatants.target.currentHp).toBe(6)
+  })
+
+  it('emits Magic Missile dice, per-projectile damage, total damage, and Empowered Evocation source', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', subclassId: 'evocation', level: 10,
+      abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['magic-missile'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const target = fighter('target', 10, {
+      controller: 'dm',
+      currentHp: 50,
+      maxHp: 50,
+    })
+    const resolved = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('magic-missile-log', [wizard, target]),
+      {
+        type: 'cast-spell',
+        actorId: wizard.id,
+        targetId: target.id,
+        targetIds: [target.id],
+        projectileTargetIds: [target.id, target.id, target.id, target.id, target.id],
+        spellId: 'magic-missile',
+        slotLevel: 3,
+        effectRolls: [4, 3, 2, 1, 4],
+      },
+    )
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants.target.currentHp).toBe(27)
+    expect(resolved.events).toContainEqual({
+      type: 'spell-damage-feature-bonus-applied',
+      actorId: wizard.id,
+      spellId: 'magic-missile',
+      featureId: 'evocation-empowered',
+      ability: 'int',
+      amount: 4,
+      application: 'first-projectile',
+    })
+    expect(resolved.events).toContainEqual({
+      type: 'magic-missile-damage-resolved',
+      actorId: wizard.id,
+      spellId: 'magic-missile',
+      slotLevel: 3,
+      dieSides: 4,
+      baseBonusPerProjectile: 1,
+      projectiles: [
+        {
+          targetId: target.id,
+          dieRoll: 4,
+          featureBonus: 4,
+          cuttingWordsReduction: 0,
+          damageBeforeDefenses: 9,
+          finalDamage: 9,
+          outcome: 'damage',
+        },
+        {
+          targetId: target.id,
+          dieRoll: 3,
+          featureBonus: 0,
+          cuttingWordsReduction: 0,
+          damageBeforeDefenses: 4,
+          finalDamage: 4,
+          outcome: 'damage',
+        },
+        {
+          targetId: target.id,
+          dieRoll: 2,
+          featureBonus: 0,
+          cuttingWordsReduction: 0,
+          damageBeforeDefenses: 3,
+          finalDamage: 3,
+          outcome: 'damage',
+        },
+        {
+          targetId: target.id,
+          dieRoll: 1,
+          featureBonus: 0,
+          cuttingWordsReduction: 0,
+          damageBeforeDefenses: 2,
+          finalDamage: 2,
+          outcome: 'damage',
+        },
+        {
+          targetId: target.id,
+          dieRoll: 4,
+          featureBonus: 0,
+          cuttingWordsReduction: 0,
+          damageBeforeDefenses: 5,
+          finalDamage: 5,
+          outcome: 'damage',
+        },
+      ],
+      totalDamage: 23,
+    })
   })
 
   it('expires Draconic Elemental Affinity resistance after its last remaining turn', () => {

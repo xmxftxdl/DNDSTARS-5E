@@ -5,6 +5,7 @@ import {
 import { DND5E_DAMAGE_TYPES } from './damageTypes'
 import { DND5E_STANDARD_CONDITION_IDS } from './conditions'
 import { isDnd5eConditionalDamageDefense } from './damageDefenses'
+import { dnd5eMonsterMultiattackChildIsCompositeSupported } from './monsterCompositeMultiattack'
 
 export interface Dnd5eMonsterSchemaIssue {
   monsterId: string
@@ -66,8 +67,11 @@ function validateDamage(raw: unknown): boolean {
     typeof raw.type === 'string' && DAMAGE_TYPE_VALUES.has(raw.type)
 }
 
-function validateDamageList(raw: unknown): boolean {
-  return Array.isArray(raw) && raw.length >= 1 && raw.length <= 16 && raw.every(validateDamage)
+function validateDamageList(raw: unknown, allowEmpty = false): boolean {
+  return Array.isArray(raw) &&
+    raw.length >= (allowEmpty ? 0 : 1) &&
+    raw.length <= 16 &&
+    raw.every(validateDamage)
 }
 
 function failedSaveConditionIsValid(raw: unknown): boolean {
@@ -76,13 +80,127 @@ function failedSaveConditionIsValid(raw: unknown): boolean {
     'condition',
     'durationRounds',
     'repeatSaveAtEndOfTargetTurn',
+    'expiresAtSourceTurnEnd',
+    'repeatSaveDisadvantageWhenSourceVisible',
     'breakOnDamage',
+    'canBeAwakenedByAction',
+    'minimumFailureMargin',
+    'dependsOnCondition',
+    'preventHealing',
+    'onRepeatSaveFailureTransition',
   ])
   return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
     STANDARD_CONDITIONS.has(String(raw.condition)) &&
-    finiteInteger(raw.durationRounds, 1, 10_000) &&
+    finiteInteger(raw.durationRounds, 1, 1_000_000) &&
     typeof raw.repeatSaveAtEndOfTargetTurn === 'boolean' &&
-    (raw.breakOnDamage == null || typeof raw.breakOnDamage === 'boolean')
+    (
+      raw.expiresAtSourceTurnEnd == null ||
+      typeof raw.expiresAtSourceTurnEnd === 'boolean'
+    ) &&
+    (
+      raw.repeatSaveDisadvantageWhenSourceVisible == null ||
+      typeof raw.repeatSaveDisadvantageWhenSourceVisible === 'boolean'
+    ) &&
+    (
+      raw.repeatSaveDisadvantageWhenSourceVisible !== true ||
+      raw.repeatSaveAtEndOfTargetTurn === true
+    ) &&
+    (raw.breakOnDamage == null || typeof raw.breakOnDamage === 'boolean') &&
+    (
+      raw.canBeAwakenedByAction == null ||
+      typeof raw.canBeAwakenedByAction === 'boolean'
+    ) &&
+    (
+      raw.minimumFailureMargin == null ||
+      finiteInteger(raw.minimumFailureMargin, 1, 100)
+    ) &&
+    (
+      raw.dependsOnCondition == null ||
+      STANDARD_CONDITIONS.has(String(raw.dependsOnCondition))
+    ) &&
+    (raw.preventHealing == null || typeof raw.preventHealing === 'boolean') &&
+    (
+      raw.onRepeatSaveFailureTransition == null ||
+      (
+        isRecord(raw.onRepeatSaveFailureTransition) &&
+        Object.keys(raw.onRepeatSaveFailureTransition).every((key) =>
+          key === 'replaceWithCondition' || key === 'duration') &&
+        STANDARD_CONDITIONS.has(String(
+          raw.onRepeatSaveFailureTransition.replaceWithCondition,
+        )) &&
+        raw.onRepeatSaveFailureTransition.duration === 'permanent'
+      )
+    ) &&
+    (
+      raw.onRepeatSaveFailureTransition == null ||
+      raw.repeatSaveAtEndOfTargetTurn === true
+    )
+}
+
+function monsterActionImmunityRuleIsValid(raw: unknown): boolean {
+  if (
+    !isRecord(raw) ||
+    !Object.keys(raw).every((key) => key === 'durationRounds' || key === 'scope') ||
+    !finiteInteger(raw.durationRounds, 1, 14_400) ||
+    !isRecord(raw.scope)
+  ) return false
+  if (raw.scope.kind === 'source-action') {
+    return Object.keys(raw.scope).every((key) => key === 'kind')
+  }
+  return raw.scope.kind === 'catalog-action' &&
+    Object.keys(raw.scope).every((key) =>
+      key === 'kind' || key === 'actionKey' || key === 'grantedActionKeys') &&
+    requiredText(raw.scope.actionKey, 160) &&
+    /^[a-z0-9][a-z0-9:-]*$/.test(String(raw.scope.actionKey)) &&
+    Array.isArray(raw.scope.grantedActionKeys) &&
+    raw.scope.grantedActionKeys.length >= 1 &&
+    raw.scope.grantedActionKeys.length <= 16 &&
+    raw.scope.grantedActionKeys.every((key) =>
+      requiredText(key, 160) && /^[a-z0-9][a-z0-9:-]*$/.test(String(key)))
+}
+
+function failedSaveConditionSetIsValid(
+  root: unknown,
+  additional: unknown,
+): boolean {
+  if (!failedSaveConditionIsValid(root) || !isRecord(root)) return false
+  if (root.dependsOnCondition != null || root.minimumFailureMargin != null) return false
+  if (
+    additional != null &&
+    (
+      !Array.isArray(additional) ||
+      additional.length < 1 ||
+      additional.length > 8 ||
+      additional.some((condition) => !failedSaveConditionIsValid(condition))
+    )
+  ) return false
+  const conditions = [
+    root,
+    ...((additional as readonly unknown[] | undefined) ?? []),
+  ] as Record<string, unknown>[]
+  const conditionIds = new Set(conditions.map((condition) =>
+    String(condition.condition)))
+  if (conditionIds.size !== conditions.length) return false
+  const dependencyByCondition = new Map<string, string>()
+  for (const condition of conditions) {
+    if (condition.dependsOnCondition == null) continue
+    const dependency = String(condition.dependsOnCondition)
+    if (
+      dependency === String(condition.condition) ||
+      !conditionIds.has(dependency)
+    ) return false
+    dependencyByCondition.set(String(condition.condition), dependency)
+  }
+  for (const condition of conditionIds) {
+    const path = new Set<string>()
+    let current: string | undefined = condition
+    while (current != null) {
+      if (path.has(current)) return false
+      path.add(current)
+      current = dependencyByCondition.get(current)
+    }
+  }
+  return true
 }
 
 function zeroHitPointOutcomeIsValid(raw: unknown): boolean {
@@ -139,16 +257,230 @@ function zeroHitPointOutcomeIsValid(raw: unknown): boolean {
   return true
 }
 
+function periodicDamageIsValid(raw: unknown): boolean {
+  if (
+    !isRecord(raw) ||
+    !Object.keys(raw).every((key) =>
+      key === 'timing' ||
+      key === 'count' ||
+      key === 'sides' ||
+      key === 'modifier' ||
+      key === 'type' ||
+      key === 'savingThrow') ||
+    (
+      raw.timing !== 'target-turn-start' &&
+      raw.timing !== 'source-turn-start'
+    ) ||
+    !finiteInteger(raw.count, 1, 100) ||
+    !finiteInteger(raw.sides, 2, 100) ||
+    !finiteInteger(raw.modifier ?? 0, -1_000, 1_000) ||
+    (
+      raw.type != null &&
+      (typeof raw.type !== 'string' || !DAMAGE_TYPE_VALUES.has(raw.type))
+    )
+  ) return false
+  if (raw.savingThrow == null) return true
+  return isRecord(raw.savingThrow) &&
+    Object.keys(raw.savingThrow).every((key) =>
+      key === 'ability' ||
+      key === 'dc' ||
+      key === 'magical' ||
+      key === 'damageOnSuccessfulSave') &&
+    ABILITY_KEYS.includes(
+      raw.savingThrow.ability as typeof ABILITY_KEYS[number],
+    ) &&
+    finiteInteger(raw.savingThrow.dc, 1, 100) &&
+    (
+      raw.savingThrow.magical == null ||
+      typeof raw.savingThrow.magical === 'boolean'
+    ) &&
+    (
+      raw.savingThrow.damageOnSuccessfulSave === 'none' ||
+      raw.savingThrow.damageOnSuccessfulSave === 'half'
+    )
+}
+
+function campaignPeriodicHitPointMaximumReductionIsValid(
+  raw: unknown,
+): boolean {
+  if (
+    !isRecord(raw) ||
+    !Object.keys(raw).every((key) =>
+      key === 'intervalHours' ||
+      key === 'reduction' ||
+      key === 'execution' ||
+      key === 'recovery') ||
+    !finiteInteger(raw.intervalHours, 1, 24 * 365 * 100) ||
+    raw.execution !== 'campaign-time-only' ||
+    raw.recovery !== 'when-effect-removed' ||
+    !isRecord(raw.reduction)
+  ) return false
+  return Object.keys(raw.reduction).every((key) =>
+    key === 'average' ||
+    key === 'count' ||
+    key === 'sides' ||
+    key === 'bonus') &&
+    finiteInteger(raw.reduction.average, 0, 1_000_000) &&
+    finiteInteger(raw.reduction.count, 1, 1_000) &&
+    finiteInteger(raw.reduction.sides, 2, 1_000_000) &&
+    finiteInteger(raw.reduction.bonus, -1_000_000, 1_000_000)
+}
+
+function activeEffectRemovalIsValid(raw: unknown): boolean {
+  if (!isRecord(raw) ||
+    !Object.keys(raw).every((key) =>
+      key === 'action' || key === 'onMagicalHealing') ||
+    (raw.onMagicalHealing != null && raw.onMagicalHealing !== true)
+  ) return false
+  const action = raw.action
+  if (action == null) return raw.onMagicalHealing === true
+  if (
+    !isRecord(action) ||
+    !Object.keys(action).every((key) =>
+      key === 'label' ||
+      key === 'economy' ||
+      key === 'maxDistanceFeet' ||
+      key === 'abilityCheck') ||
+    !requiredText(action.label, 120) ||
+    action.economy !== 'action' ||
+    typeof action.maxDistanceFeet !== 'number' ||
+    !Number.isFinite(action.maxDistanceFeet) ||
+    action.maxDistanceFeet < 0 ||
+    action.maxDistanceFeet > 1_000
+  ) return false
+  if (action.abilityCheck == null) return true
+  return isRecord(action.abilityCheck) &&
+    Object.keys(action.abilityCheck).every((key) =>
+      key === 'ability' || key === 'skill' || key === 'dc') &&
+    ABILITY_KEYS.includes(
+      action.abilityCheck.ability as typeof ABILITY_KEYS[number],
+    ) &&
+    (
+      action.abilityCheck.skill == null ||
+      action.abilityCheck.skill === 'medicine'
+    ) &&
+    finiteInteger(action.abilityCheck.dc, 1, 100)
+}
+
+function repeatSaveIsValid(raw: unknown): boolean {
+  return isRecord(raw) &&
+    Object.keys(raw).every((key) =>
+      key === 'ability' ||
+      key === 'dc' ||
+      key === 'timing' ||
+      key === 'onSuccess') &&
+    ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+    finiteInteger(raw.dc, 1, 100) &&
+    (
+      raw.timing === 'target-turn-start' ||
+      raw.timing === 'target-turn-end'
+    ) &&
+    raw.onSuccess === 'remove'
+}
+
 function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boolean {
-  const allowedKeys = new Set(['id', 'kind', 'relation', 'escapeDc', 'conditions'])
+  const allowedKeys = new Set([
+    'id',
+    'kind',
+    'relation',
+    'escapeDc',
+    'savingThrow',
+    'conditions',
+    'dependentLegacyConditions',
+    'rootLegacyCondition',
+    'conditionsWhenAttackHasAdvantage',
+    'removeSourceRelationSlotGroupOnApply',
+    'modifiers',
+    'periodicDamage',
+  ])
   if (
     !Object.keys(raw).every((key) => allowedKeys.has(key)) ||
     raw.kind !== 'source-linked-condition' ||
     !isRecord(raw.relation) ||
-    !finiteInteger(raw.escapeDc, 1, 100) ||
     !Array.isArray(raw.conditions) ||
-    raw.conditions.length < 1 ||
-    raw.conditions.length > 2
+    raw.conditions.length > 8 ||
+    (
+      raw.escapeDc != null &&
+      !finiteInteger(raw.escapeDc, 1, 100)
+    ) ||
+    (
+      raw.savingThrow != null &&
+      (
+        !isRecord(raw.savingThrow) ||
+        !Object.keys(raw.savingThrow).every((key) =>
+          key === 'ability' || key === 'dc' || key === 'magical') ||
+        !ABILITY_KEYS.includes(
+          raw.savingThrow.ability as typeof ABILITY_KEYS[number],
+        ) ||
+        !finiteInteger(raw.savingThrow.dc, 1, 100) ||
+        (
+          raw.savingThrow.magical != null &&
+          typeof raw.savingThrow.magical !== 'boolean'
+        )
+      )
+    ) ||
+    (
+      raw.dependentLegacyConditions != null &&
+      (
+        !Array.isArray(raw.dependentLegacyConditions) ||
+        raw.dependentLegacyConditions.length < 1 ||
+        raw.dependentLegacyConditions.length > 8 ||
+        new Set(raw.dependentLegacyConditions).size !==
+          raw.dependentLegacyConditions.length ||
+        raw.dependentLegacyConditions.some((entry) =>
+          !requiredText(entry, 120))
+      )
+    ) ||
+    (
+      raw.rootLegacyCondition != null &&
+      !requiredText(raw.rootLegacyCondition, 120)
+    ) ||
+    (
+      raw.removeSourceRelationSlotGroupOnApply != null &&
+      (
+        !requiredText(raw.removeSourceRelationSlotGroupOnApply, 96) ||
+        !/^[a-z][a-z0-9-]*$/.test(
+          String(raw.removeSourceRelationSlotGroupOnApply),
+        )
+      )
+    ) ||
+    (
+      raw.periodicDamage != null &&
+      !periodicDamageIsValid(raw.periodicDamage)
+    ) ||
+    (
+      raw.modifiers != null &&
+      (
+        !isRecord(raw.modifiers) ||
+        !Object.keys(raw.modifiers).every((key) =>
+          key === 'abilityCheckDisadvantages' ||
+          key === 'savingThrowDisadvantages') ||
+        (
+          raw.modifiers.abilityCheckDisadvantages != null &&
+          (
+            !Array.isArray(raw.modifiers.abilityCheckDisadvantages) ||
+            raw.modifiers.abilityCheckDisadvantages.length < 1 ||
+            raw.modifiers.abilityCheckDisadvantages.length > ABILITY_KEYS.length ||
+            new Set(raw.modifiers.abilityCheckDisadvantages).size !==
+              raw.modifiers.abilityCheckDisadvantages.length ||
+            raw.modifiers.abilityCheckDisadvantages.some((entry) =>
+              !ABILITY_KEYS.includes(entry as typeof ABILITY_KEYS[number]))
+          )
+        ) ||
+        (
+          raw.modifiers.savingThrowDisadvantages != null &&
+          (
+            !Array.isArray(raw.modifiers.savingThrowDisadvantages) ||
+            raw.modifiers.savingThrowDisadvantages.length < 1 ||
+            raw.modifiers.savingThrowDisadvantages.length > ABILITY_KEYS.length ||
+            new Set(raw.modifiers.savingThrowDisadvantages).size !==
+              raw.modifiers.savingThrowDisadvantages.length ||
+            raw.modifiers.savingThrowDisadvantages.some((entry) =>
+              !ABILITY_KEYS.includes(entry as typeof ABILITY_KEYS[number]))
+          )
+        )
+      )
+    )
   ) return false
 
   const relation = raw.relation
@@ -160,10 +492,15 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     'targetMaxSizeRank',
     'whenCapacityFull',
     'attackAdvantageAgainstLinkedTarget',
+    'attackAutomaticallyHitsLinkedTarget',
+    'movement',
+    'endsOnSourceIncapacitated',
   ])
   if (
     !Object.keys(relation).every((key) => allowedRelationKeys.has(key)) ||
-    relation.kind !== 'grapple' ||
+    !['grapple', 'attachment', 'swallowed', 'engulfed'].includes(
+      String(relation.kind),
+    ) ||
     !requiredText(relation.slotGroup, 96) ||
     !/^[a-z][a-z0-9-]*$/.test(String(relation.slotGroup)) ||
     !finiteInteger(relation.capacity, 1, 20) ||
@@ -176,7 +513,32 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     (
       relation.attackAdvantageAgainstLinkedTarget != null &&
       typeof relation.attackAdvantageAgainstLinkedTarget !== 'boolean'
+    ) ||
+    (
+      relation.attackAutomaticallyHitsLinkedTarget != null &&
+      typeof relation.attackAutomaticallyHitsLinkedTarget !== 'boolean'
+    ) ||
+    (
+      relation.movement != null &&
+      !['drag-target', 'carry-target', 'source-rides-target'].includes(
+        String(relation.movement),
+      )
+    ) ||
+    (
+      relation.endsOnSourceIncapacitated != null &&
+      typeof relation.endsOnSourceIncapacitated !== 'boolean'
     )
+  ) return false
+
+  if (
+    relation.kind === 'swallowed'
+      ? raw.escapeDc != null
+      : !finiteInteger(raw.escapeDc, 1, 100)
+  ) return false
+  if (
+    relation.kind === 'attachment'
+      ? raw.rootLegacyCondition !== 'attached'
+      : raw.rootLegacyCondition != null
   ) return false
 
   const conditionIds = new Set<string>()
@@ -186,11 +548,10 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     const allowedConditionKeys = new Set(['condition', 'dependsOnCondition'])
     if (
       !Object.keys(condition).every((key) => allowedConditionKeys.has(key)) ||
-      (condition.condition !== 'grappled' && condition.condition !== 'restrained') ||
+      !STANDARD_CONDITIONS.has(String(condition.condition)) ||
       (
         condition.dependsOnCondition != null &&
-        condition.dependsOnCondition !== 'grappled' &&
-        condition.dependsOnCondition !== 'restrained'
+        !STANDARD_CONDITIONS.has(String(condition.dependsOnCondition))
       ) ||
       conditionIds.has(String(condition.condition))
     ) return false
@@ -203,9 +564,17 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     }
   }
 
-  // A source-linked grapple always has one independent grappled root. Any
-  // additional condition must form an acyclic chain rooted in that grapple.
-  if (!conditionIds.has('grappled') || dependencyByCondition.has('grappled')) return false
+  const requiredRoot = relation.kind === 'swallowed'
+    ? 'restrained'
+    : relation.kind === 'attachment'
+      ? undefined
+      : 'grappled'
+  if (
+    requiredRoot == null
+      ? conditionIds.size !== 0
+      : !conditionIds.has(requiredRoot) ||
+        dependencyByCondition.has(requiredRoot)
+  ) return false
   for (const [condition, dependency] of dependencyByCondition) {
     if (condition === dependency || !conditionIds.has(dependency)) return false
   }
@@ -217,10 +586,20 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
       dependencyPath.add(current)
       current = dependencyByCondition.get(current)
     }
-    if (!dependencyPath.has('grappled')) return false
+    if (requiredRoot && !dependencyPath.has(requiredRoot)) return false
   }
-  return conditionIds.size === 1 ||
-    dependencyByCondition.get('restrained') === 'grappled'
+  const conditional = raw.conditionsWhenAttackHasAdvantage
+  if (conditional != null && (
+    relation.kind !== 'attachment' ||
+    !Array.isArray(conditional) ||
+    conditional.length < 1 ||
+    conditional.length > 8 ||
+    conditional.some((entry) =>
+      !isRecord(entry) ||
+      !Object.keys(entry).every((key) => key === 'condition') ||
+      !STANDARD_CONDITIONS.has(String(entry.condition)))
+  )) return false
+  return true
 }
 
 function onHitEffectIsValid(raw: unknown): boolean {
@@ -232,36 +611,303 @@ function onHitEffectIsValid(raw: unknown): boolean {
   if (raw.kind === 'source-linked-condition') {
     return sourceLinkedConditionEffectIsValid(raw)
   }
+  if (raw.kind === 'forced-movement') {
+    const allowedKeys = new Set([
+      'id',
+      'kind',
+      'resistance',
+      'direction',
+      'maximumDistanceFeet',
+      'targetMaxSizeRank',
+      'conditionOnFailedResistance',
+    ])
+    if (
+      !Object.keys(raw).every((key) => allowedKeys.has(key)) ||
+      !isRecord(raw.resistance) ||
+      (
+        raw.direction !== 'away-from-source' &&
+        raw.direction !== 'toward-source'
+      ) ||
+      !finiteInteger(raw.maximumDistanceFeet, 1, 1_000) ||
+      (
+        raw.targetMaxSizeRank != null &&
+        !finiteInteger(raw.targetMaxSizeRank, 0, 5)
+      ) ||
+      (
+        raw.conditionOnFailedResistance != null &&
+        !STANDARD_CONDITIONS.has(String(raw.conditionOnFailedResistance))
+      )
+    ) return false
+    if (raw.resistance.kind === 'saving-throw') {
+      return Object.keys(raw.resistance).every((key) =>
+        key === 'kind' ||
+        key === 'ability' ||
+        key === 'dc' ||
+        key === 'magical') &&
+        ABILITY_KEYS.includes(
+          raw.resistance.ability as typeof ABILITY_KEYS[number],
+        ) &&
+        finiteInteger(raw.resistance.dc, 1, 100) &&
+        (
+          raw.resistance.magical == null ||
+          typeof raw.resistance.magical === 'boolean'
+        )
+    }
+    return raw.resistance.kind === 'opposed-ability-check' &&
+      Object.keys(raw.resistance).every((key) =>
+        key === 'kind' ||
+        key === 'sourceAbility' ||
+        key === 'targetAbility') &&
+      ABILITY_KEYS.includes(
+        raw.resistance.sourceAbility as typeof ABILITY_KEYS[number],
+      ) &&
+      ABILITY_KEYS.includes(
+        raw.resistance.targetAbility as typeof ABILITY_KEYS[number],
+      )
+  }
+  if (raw.kind === 'persistent-effect') {
+    const allowedKeys = new Set([
+      'id',
+      'kind',
+      'magical',
+      'savingThrow',
+      'targetCreatureTypeExclusions',
+      'targetCreatureTypeRequirements',
+      'definitionId',
+      'label',
+      'ailment',
+      'durationRounds',
+      'standardCondition',
+      'periodicDamage',
+      'campaignPeriodicHitPointMaximumReduction',
+      'repeatSave',
+      'modifiers',
+      'removal',
+      'stacking',
+    ])
+    if (
+      !Object.keys(raw).every((key) => allowedKeys.has(key)) ||
+      !requiredText(raw.definitionId, 240) ||
+      !requiredText(raw.label, 240) ||
+      (
+        raw.periodicDamage != null &&
+        !periodicDamageIsValid(raw.periodicDamage)
+      ) ||
+      (
+        raw.campaignPeriodicHitPointMaximumReduction != null &&
+        !campaignPeriodicHitPointMaximumReductionIsValid(
+          raw.campaignPeriodicHitPointMaximumReduction,
+        )
+      ) ||
+      (
+        raw.ailment != null &&
+        raw.ailment !== 'disease' &&
+        raw.ailment !== 'curse'
+      ) ||
+      (
+        raw.ailment === 'disease' &&
+        raw.standardCondition !== 'poisoned'
+      ) ||
+      (
+        raw.periodicDamage == null &&
+        raw.standardCondition == null &&
+        raw.modifiers == null &&
+        raw.ailment == null
+      ) ||
+      (
+        raw.magical != null &&
+        typeof raw.magical !== 'boolean'
+      ) ||
+      (
+        raw.durationRounds != null &&
+        !finiteInteger(raw.durationRounds, 1, 1_000_000)
+      ) ||
+      (
+        raw.stacking === 'increase-periodic-dice' &&
+        raw.periodicDamage == null
+      ) ||
+      (
+        raw.stacking !== 'refresh' &&
+        raw.stacking !== 'increase-periodic-dice'
+      ) ||
+      (
+        raw.standardCondition != null &&
+        !STANDARD_CONDITIONS.has(String(raw.standardCondition))
+      ) ||
+      (
+        raw.repeatSave != null &&
+        !repeatSaveIsValid(raw.repeatSave)
+      ) ||
+      (
+        raw.removal != null &&
+        !activeEffectRemovalIsValid(raw.removal)
+      ) ||
+      (
+        raw.modifiers != null &&
+        (
+          !isRecord(raw.modifiers) ||
+          !Object.keys(raw.modifiers).every((key) =>
+            key === 'preventHealing' ||
+            key === 'abilityCheckDisadvantages' ||
+            key === 'savingThrowDisadvantages') ||
+          (
+            raw.modifiers.preventHealing != null &&
+            typeof raw.modifiers.preventHealing !== 'boolean'
+          ) ||
+          (
+            raw.modifiers.abilityCheckDisadvantages != null &&
+            (
+              !Array.isArray(raw.modifiers.abilityCheckDisadvantages) ||
+              raw.modifiers.abilityCheckDisadvantages.length < 1 ||
+              raw.modifiers.abilityCheckDisadvantages.length > ABILITY_KEYS.length ||
+              new Set(raw.modifiers.abilityCheckDisadvantages).size !==
+                raw.modifiers.abilityCheckDisadvantages.length ||
+              raw.modifiers.abilityCheckDisadvantages.some((entry) =>
+                !ABILITY_KEYS.includes(entry as typeof ABILITY_KEYS[number]))
+            )
+          ) ||
+          (
+            raw.modifiers.savingThrowDisadvantages != null &&
+            (
+              !Array.isArray(raw.modifiers.savingThrowDisadvantages) ||
+              raw.modifiers.savingThrowDisadvantages.length < 1 ||
+              raw.modifiers.savingThrowDisadvantages.length > ABILITY_KEYS.length ||
+              new Set(raw.modifiers.savingThrowDisadvantages).size !==
+                raw.modifiers.savingThrowDisadvantages.length ||
+              raw.modifiers.savingThrowDisadvantages.some((entry) =>
+                !ABILITY_KEYS.includes(entry as typeof ABILITY_KEYS[number]))
+            )
+          )
+        )
+      ) ||
+      (
+        raw.targetCreatureTypeExclusions != null &&
+        (
+          !Array.isArray(raw.targetCreatureTypeExclusions) ||
+          raw.targetCreatureTypeExclusions.length < 1 ||
+          raw.targetCreatureTypeExclusions.length > 2 ||
+          new Set(raw.targetCreatureTypeExclusions).size !==
+            raw.targetCreatureTypeExclusions.length ||
+          raw.targetCreatureTypeExclusions.some((entry) =>
+            entry !== 'construct' && entry !== 'undead')
+        )
+      ) ||
+      (
+        raw.targetCreatureTypeRequirements != null &&
+        (
+          !Array.isArray(raw.targetCreatureTypeRequirements) ||
+          raw.targetCreatureTypeRequirements.length !== 1 ||
+          raw.targetCreatureTypeRequirements[0] !== 'humanoid'
+        )
+      )
+    ) return false
+    if (raw.savingThrow == null) return true
+    return isRecord(raw.savingThrow) &&
+      Object.keys(raw.savingThrow).every((key) =>
+        key === 'ability' || key === 'dc' || key === 'magical') &&
+      ABILITY_KEYS.includes(
+        raw.savingThrow.ability as typeof ABILITY_KEYS[number],
+      ) &&
+      finiteInteger(raw.savingThrow.dc, 1, 100) &&
+      (
+        raw.savingThrow.magical == null ||
+        typeof raw.savingThrow.magical === 'boolean'
+      )
+  }
+  if (raw.kind === 'hit-point-maximum-reduction') {
+    const allowedKeys = new Set([
+      'id',
+      'kind',
+      'damageBasis',
+      'savingThrow',
+      'recovery',
+      'healSourceByAmount',
+    ])
+    if (
+      !Object.keys(raw).every((key) => allowedKeys.has(key)) ||
+      !isRecord(raw.damageBasis) ||
+      (
+        raw.recovery !== 'long-rest' &&
+        raw.recovery !== 'greater-restoration-or-other-magic'
+      ) ||
+      (
+        raw.healSourceByAmount != null &&
+        typeof raw.healSourceByAmount !== 'boolean'
+      )
+    ) return false
+    const damageBasisKeys = Object.keys(raw.damageBasis)
+    const damageBasisIsValid =
+      (
+        raw.damageBasis.kind === 'all-attack-damage' &&
+        damageBasisKeys.length === 1
+      ) ||
+      (
+        raw.damageBasis.kind === 'damage-type' &&
+        damageBasisKeys.length === 2 &&
+        damageBasisKeys.every((key) => key === 'kind' || key === 'damageType') &&
+        typeof raw.damageBasis.damageType === 'string' &&
+        DAMAGE_TYPE_VALUES.has(raw.damageBasis.damageType)
+      )
+    if (!damageBasisIsValid) return false
+    if (raw.savingThrow == null) return true
+    return isRecord(raw.savingThrow) &&
+      Object.keys(raw.savingThrow).every((key) =>
+        key === 'ability' || key === 'dc' || key === 'magical') &&
+      ABILITY_KEYS.includes(
+        raw.savingThrow.ability as typeof ABILITY_KEYS[number],
+      ) &&
+      finiteInteger(raw.savingThrow.dc, 1, 100) &&
+      (
+        raw.savingThrow.magical == null ||
+        typeof raw.savingThrow.magical === 'boolean'
+      )
+  }
   if (raw.kind === 'saving-throw-condition') {
     const allowedKeys = new Set([
       'id',
       'kind',
       'ability',
       'dc',
+      'magical',
       'conditionOnFailedSave',
+      'additionalConditionsOnFailedSave',
     ])
     return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
       ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
       finiteInteger(raw.dc, 1, 100) &&
-      failedSaveConditionIsValid(raw.conditionOnFailedSave)
+      (raw.magical == null || typeof raw.magical === 'boolean') &&
+      failedSaveConditionSetIsValid(
+        raw.conditionOnFailedSave,
+        raw.additionalConditionsOnFailedSave,
+      )
   }
   const allowedKeys = new Set([
     'id',
     'kind',
     'ability',
     'dc',
+    'magical',
     'damage',
     'damageOnSuccessfulSave',
     'conditionOnFailedSave',
+    'additionalConditionsOnFailedSave',
     'onEffectDamageReducesTargetToZero',
   ])
   return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
     raw.kind === 'saving-throw-damage' &&
     ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
     finiteInteger(raw.dc, 1, 100) &&
+    (raw.magical == null || typeof raw.magical === 'boolean') &&
     validateDamageList(raw.damage) &&
     (raw.damageOnSuccessfulSave === 'none' || raw.damageOnSuccessfulSave === 'half') &&
-    (raw.conditionOnFailedSave == null || failedSaveConditionIsValid(raw.conditionOnFailedSave)) &&
+    (
+      raw.conditionOnFailedSave == null
+        ? raw.additionalConditionsOnFailedSave == null
+        : failedSaveConditionSetIsValid(
+            raw.conditionOnFailedSave,
+            raw.additionalConditionsOnFailedSave,
+          )
+    ) &&
     (raw.onEffectDamageReducesTargetToZero == null ||
       zeroHitPointOutcomeIsValid(raw.onEffectDamageReducesTargetToZero))
 }
@@ -354,10 +1000,26 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
     (raw.target === 'hostile' || raw.target === 'all-creatures-except-self') &&
     ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
     finiteInteger(raw.dc, 1, 100) &&
+    (raw.magical == null || typeof raw.magical === 'boolean') &&
+    (
+      raw.requiresSourceCanSeeTarget == null ||
+      typeof raw.requiresSourceCanSeeTarget === 'boolean'
+    ) &&
+    (
+      raw.requiresTargetCanSeeSource == null ||
+      typeof raw.requiresTargetCanSeeSource === 'boolean'
+    ) &&
     (raw.damage == null || validateDamage(raw.damage)) &&
     !(raw.damage == null && raw.damageOnSuccessfulSave != null) &&
     !(raw.damage != null && !['none', 'half'].includes(String(raw.damageOnSuccessfulSave ?? 'none'))) &&
-    (raw.conditionOnFailedSave == null || failedSaveConditionIsValid(raw.conditionOnFailedSave)) &&
+    (
+      raw.conditionOnFailedSave == null
+        ? raw.additionalConditionsOnFailedSave == null
+        : failedSaveConditionSetIsValid(
+            raw.conditionOnFailedSave,
+            raw.additionalConditionsOnFailedSave,
+          )
+    ) &&
     forcedMovementIsValid &&
     activeEffectIsValid &&
     !(
@@ -367,7 +1029,71 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       raw.activeEffectOnFailedSave == null
     ) &&
     (raw.frightfulPresenceImmunityRounds == null ||
-      finiteInteger(raw.frightfulPresenceImmunityRounds, 1, 14_400))
+      finiteInteger(raw.frightfulPresenceImmunityRounds, 1, 14_400)) &&
+    (
+      raw.immunityOnSuccessfulSaveOrEffectEnd == null ||
+      monsterActionImmunityRuleIsValid(raw.immunityOnSuccessfulSaveOrEffectEnd)
+    )
+}
+
+function monsterTargetEligibilityIsValid(raw: unknown): boolean {
+  if (
+    !isRecord(raw) ||
+    !Object.keys(raw).every((key) =>
+      key === 'kind' ||
+      key === 'predicates' ||
+      key === 'dmAdjudicationAlternatives') ||
+    raw.kind !== 'any-of' ||
+    !Array.isArray(raw.predicates) ||
+    raw.predicates.length < 1 ||
+    raw.predicates.length > 8
+  ) return false
+  for (const predicate of raw.predicates) {
+    if (!isRecord(predicate) || typeof predicate.kind !== 'string') return false
+    if (predicate.kind === 'source-linked-relation') {
+      if (
+        !Object.keys(predicate).every((key) =>
+          key === 'kind' ||
+          key === 'relationKind' ||
+          key === 'slotGroup') ||
+        !['grapple', 'attachment', 'swallowed', 'engulfed'].includes(
+          String(predicate.relationKind),
+        ) ||
+        (
+          predicate.slotGroup != null &&
+          (
+            !requiredText(predicate.slotGroup, 96) ||
+            !/^[a-z][a-z0-9-]*$/.test(String(predicate.slotGroup))
+          )
+        )
+      ) return false
+      continue
+    }
+    if (predicate.kind === 'incapacitated') {
+      if (!Object.keys(predicate).every((key) => key === 'kind')) return false
+      continue
+    }
+    if (
+      predicate.kind !== 'standard-condition' ||
+      !Object.keys(predicate).every((key) =>
+        key === 'kind' || key === 'condition') ||
+      !STANDARD_CONDITIONS.has(String(predicate.condition))
+    ) return false
+  }
+  const adjudication = raw.dmAdjudicationAlternatives
+  return adjudication == null ||
+    (
+      Array.isArray(adjudication) &&
+      adjudication.length >= 1 &&
+      adjudication.length <= 8 &&
+      adjudication.every((alternative) =>
+        isRecord(alternative) &&
+        Object.keys(alternative).every((key) => key === 'kind') &&
+        alternative.kind === 'willing-target') &&
+      new Set(adjudication.map((alternative) =>
+        isRecord(alternative) ? alternative.kind : undefined)).size ===
+        adjudication.length
+    )
 }
 
 function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
@@ -375,6 +1101,30 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     !requiredText(action.description) || typeof action.kind !== 'string' || !ACTION_KINDS.has(action.kind)) return false
   if (action.automation != null && action.automation !== 'headless' && action.automation !== 'dm-adjudication') return false
   if (action.sequence != null && (!Array.isArray(action.sequence) || action.sequence.some((entry) => !requiredText(entry, 120)))) return false
+  if (action.randomRepeat != null) {
+    if (
+      action.kind !== 'multiattack' ||
+      action.sequence != null ||
+      !isRecord(action.randomRepeat) ||
+      !Object.keys(action.randomRepeat).every((key) =>
+        key === 'actionId' ||
+        key === 'dieSides' ||
+        key === 'minimum' ||
+        key === 'maximum') ||
+      !requiredText(action.randomRepeat.actionId, 120) ||
+      !finiteInteger(action.randomRepeat.dieSides, 2, 100) ||
+      !finiteInteger(
+        action.randomRepeat.minimum,
+        1,
+        Number(action.randomRepeat.dieSides),
+      ) ||
+      !finiteInteger(
+        action.randomRepeat.maximum,
+        Number(action.randomRepeat.minimum),
+        Number(action.randomRepeat.dieSides),
+      )
+    ) return false
+  }
   if (
     action.sequenceAttackMode != null &&
     (
@@ -398,11 +1148,18 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
       !isRecord(action.relationRequirement) ||
       !Object.keys(action.relationRequirement).every((key) =>
         key === 'kind' || key === 'slotGroup') ||
-      action.relationRequirement.kind !== 'none-from-source' ||
+      (
+        action.relationRequirement.kind !== 'none-from-source' &&
+        action.relationRequirement.kind !== 'target-linked-to-source'
+      ) ||
       !requiredText(action.relationRequirement.slotGroup, 96) ||
       !/^[a-z][a-z0-9-]*$/.test(String(action.relationRequirement.slotGroup))
     ) return false
   }
+  if (
+    action.targetEligibility != null &&
+    !monsterTargetEligibilityIsValid(action.targetEligibility)
+  ) return false
   if (action.rule != null) {
     if (!isRecord(action.rule) || typeof action.rule.kind !== 'string') return false
     if (action.rule.kind === 'ability-check') {
@@ -416,6 +1173,56 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
         !finiteInteger(action.rule.dc, 1, 100) ||
         !STANDARD_CONDITIONS.has(String(action.rule.condition)) ||
+        (action.rule.magical != null && typeof action.rule.magical !== 'boolean') ||
+        (
+          action.rule.requiresSourceCanSeeTarget != null &&
+          typeof action.rule.requiresSourceCanSeeTarget !== 'boolean'
+        ) ||
+        (
+          action.rule.requiresTargetCanSeeSource != null &&
+          typeof action.rule.requiresTargetCanSeeSource !== 'boolean'
+        ) ||
+        (
+          action.rule.durationRounds != null &&
+          !finiteInteger(action.rule.durationRounds, 1, 1_000_000)
+        ) ||
+        (
+          action.rule.expiresAtSourceTurnEnd != null &&
+          typeof action.rule.expiresAtSourceTurnEnd !== 'boolean'
+        ) ||
+        (
+          action.rule.repeatSaveAtEndOfTargetTurn != null &&
+          typeof action.rule.repeatSaveAtEndOfTargetTurn !== 'boolean'
+        ) ||
+        (
+          action.rule.repeatSaveDisadvantageWhenSourceVisible != null &&
+          typeof action.rule.repeatSaveDisadvantageWhenSourceVisible !== 'boolean'
+        ) ||
+        (
+          action.rule.repeatSaveDisadvantageWhenSourceVisible === true &&
+          action.rule.repeatSaveAtEndOfTargetTurn !== true
+        ) ||
+        (
+          action.rule.additionalConditionsOnFailedSave != null &&
+          !failedSaveConditionSetIsValid(
+            {
+              condition: action.rule.condition,
+              durationRounds: action.rule.durationRounds ?? 14_400,
+              repeatSaveAtEndOfTargetTurn:
+                action.rule.repeatSaveAtEndOfTargetTurn === true,
+              expiresAtSourceTurnEnd: action.rule.expiresAtSourceTurnEnd,
+              repeatSaveDisadvantageWhenSourceVisible:
+                action.rule.repeatSaveDisadvantageWhenSourceVisible,
+            },
+            action.rule.additionalConditionsOnFailedSave,
+          )
+        ) ||
+        (
+          action.rule.immunityOnSuccessfulSaveOrEffectEnd != null &&
+          !monsterActionImmunityRuleIsValid(
+            action.rule.immunityOnSuccessfulSaveOrEffectEnd,
+          )
+        ) ||
         (action.rule.preventReactions != null && typeof action.rule.preventReactions !== 'boolean') ||
         (action.rule.repeatSaveOnDamage != null && typeof action.rule.repeatSaveOnDamage !== 'boolean')
       ) return false
@@ -424,6 +1231,59 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         !STANDARD_CONDITIONS.has(String(action.rule.requiredCondition)) ||
         typeof action.rule.requireSameSource !== 'boolean' ||
         !validateDamage(action.rule.damage)
+      ) return false
+    } else if (action.rule.kind === 'source-linked-reel') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'slotGroup' ||
+          key === 'maximumDistanceFeet') ||
+        !requiredText(action.rule.slotGroup, 96) ||
+        !/^[a-z][a-z0-9-]*$/.test(String(action.rule.slotGroup)) ||
+        !finiteInteger(action.rule.maximumDistanceFeet, 1, 1_000)
+      ) return false
+    } else if (action.rule.kind === 'source-linked-engulf') {
+      const effect = isRecord(action.rule.effect)
+        ? action.rule.effect
+        : undefined
+      const relation = effect && isRecord(effect.relation)
+        ? effect.relation
+        : undefined
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'targetMaxSizeRank' ||
+          key === 'effect') ||
+        !finiteInteger(action.rule.targetMaxSizeRank, 0, 5) ||
+        !effect ||
+        !sourceLinkedConditionEffectIsValid(effect) ||
+        !relation ||
+        relation.kind !== 'engulfed' ||
+        Number(relation.targetMaxSizeRank) !==
+          Number(action.rule.targetMaxSizeRank) ||
+        relation.movement !== 'carry-target' ||
+        relation.capacity !== 1
+      ) return false
+    } else if (action.rule.kind === 'throw-linked-target') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'slotGroup' ||
+          key === 'maximumDistanceFeet' ||
+          key === 'targetMaxSizeRank' ||
+          key === 'collisionDamage' ||
+          key === 'conditionAfterThrow') ||
+        !requiredText(action.rule.slotGroup, 96) ||
+        !/^[a-z][a-z0-9-]*$/.test(String(action.rule.slotGroup)) ||
+        !finiteInteger(action.rule.maximumDistanceFeet, 1, 1_000) ||
+        !finiteInteger(action.rule.targetMaxSizeRank, 0, 5) ||
+        !isRecord(action.rule.collisionDamage) ||
+        !Object.keys(action.rule.collisionDamage).every((key) =>
+          key === 'distanceFeetPerDie' || key === 'sides' || key === 'type') ||
+        !finiteInteger(action.rule.collisionDamage.distanceFeetPerDie, 1, 1_000) ||
+        !finiteInteger(action.rule.collisionDamage.sides, 2, 100) ||
+        !DAMAGE_TYPE_VALUES.has(String(action.rule.collisionDamage.type)) ||
+        !STANDARD_CONDITIONS.has(String(action.rule.conditionAfterThrow))
       ) return false
     } else if (action.rule.kind === 'parry') {
       if (
@@ -490,7 +1350,10 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   const attack = action.attack
   if (!isRecord(attack) || typeof attack.mode !== 'string' || !ATTACK_MODES.has(attack.mode) ||
     !finiteInteger(attack.toHit, -100, 100) || !requiredText(attack.target, 500) ||
-    !validateDamageList(attack.damage)) return false
+    !validateDamageList(
+      attack.damage,
+      Array.isArray(attack.onHitEffects) && attack.onHitEffects.length > 0,
+    )) return false
   if (
     attack.attackAbility != null &&
     attack.attackAbility !== 'str' &&
@@ -857,9 +1720,20 @@ function mechanicShapeIsValid(raw: unknown): boolean {
 
 export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eMonsterActionAutomation {
   if (action.automation === 'dm-adjudication') return 'dm-adjudication'
+  if (action.referencedActionId) {
+    return action.automation === 'headless' ? 'headless' : 'dm-adjudication'
+  }
   if (action.kind === 'other') return action.automation === 'headless' && action.rule ? 'headless' : action.automation === 'headless' ? 'invalid' : 'dm-adjudication'
-  if (action.kind === 'multiattack') return action.sequence?.length ? 'headless' : 'invalid'
-  if (!action.attack || action.attack.damage.length < 1) return 'invalid'
+  if (action.kind === 'multiattack') {
+    return action.sequence?.length || action.randomRepeat ? 'headless' : 'invalid'
+  }
+  if (
+    !action.attack ||
+    (
+      action.attack.damage.length < 1 &&
+      !action.attack.onHitEffects?.length
+    )
+  ) return 'invalid'
   if (
     action.attack.onHit &&
     !action.attack.onHitRule &&
@@ -909,13 +1783,16 @@ function validateActionList(
   }
   for (const action of actions) {
     if (!actionShapeIsValid(action) || action.kind !== 'multiattack' || dnd5eMonsterActionAutomation(action) !== 'headless') continue
-    for (const childId of action.sequence ?? []) {
+    const childIds = action.randomRepeat
+      ? [action.randomRepeat.actionId]
+      : action.sequence ?? []
+    for (const childId of childIds) {
       const child = actions.find((candidate) => candidate.id === childId)
-      const optionalStructuredSpecial = child?.kind === 'other' &&
-        dnd5eMonsterActionAutomation(child) === 'headless' && !!child.rule
-      if (!optionalStructuredSpecial && (
-        !child || child.kind !== 'weapon-attack' || dnd5eMonsterActionAutomation(child) !== 'headless'
-      )) {
+      if (
+        !child ||
+        dnd5eMonsterActionAutomation(child) !== 'headless' ||
+        !dnd5eMonsterMultiattackChildIsCompositeSupported(child)
+      ) {
         issues.push({
           monsterId: monster.id,
           actionId: action.id,
@@ -924,7 +1801,8 @@ function validateActionList(
         })
       } else if (
         action.sequenceAttackMode &&
-        child?.attack &&
+        child.kind === 'weapon-attack' &&
+        child.attack &&
         child.attack.mode !== 'melee-or-ranged' &&
         child.attack.mode !== action.sequenceAttackMode
       ) {
@@ -1134,6 +2012,7 @@ export function validateDnd5eMonsterSchema(monster: Dnd5eMonsterStatBlock): Dnd5
         whenCapacityFull: relation.whenCapacityFull,
         attackAdvantageAgainstLinkedTarget:
           relation.attackAdvantageAgainstLinkedTarget === true,
+        modifiers: effect.modifiers,
       })
       const existing = sourceLinkedRelationSignatures.get(relation.slotGroup)
       if (existing != null && existing !== signature) {
@@ -1161,14 +2040,43 @@ export function validateDnd5eMonsterSchema(monster: Dnd5eMonsterStatBlock): Dnd5
         message: `动作引用了未声明的关系槽位：${requirement.slotGroup}`,
       })
     }
+    for (const predicate of action.targetEligibility?.predicates ?? []) {
+      if (
+        predicate.kind !== 'source-linked-relation' ||
+        predicate.slotGroup == null ||
+        sourceLinkedRelationSignatures.has(predicate.slotGroup)
+      ) continue
+      issues.push({
+        monsterId: monster.id,
+        actionId: action.id,
+        code: 'invalid-stat-block',
+        message:
+          `鍔ㄤ綔鐩爣璧勬牸寮曠敤浜嗘湭澹版槑鐨勫叧绯绘Ы浣嶏細${predicate.slotGroup}`,
+      })
+    }
   }
   for (const action of monster.legendaryActions ?? []) {
-    if (action.referencedActionId && !monster.actions.some((candidate) => candidate.id === action.referencedActionId)) {
+    const referencedAction = action.referencedActionId
+      ? monster.actions.find((candidate) => candidate.id === action.referencedActionId)
+      : undefined
+    if (action.referencedActionId && !referencedAction) {
       issues.push({
         monsterId: monster.id,
         actionId: action.id,
         code: 'invalid-stat-block',
         message: `传奇动作引用了不存在的普通动作：${action.referencedActionId}`,
+      })
+    } else if (
+      action.referencedActionId &&
+      dnd5eMonsterActionAutomation(action) === 'headless' &&
+      referencedAction &&
+      dnd5eMonsterActionAutomation(referencedAction) !== 'headless'
+    ) {
+      issues.push({
+        monsterId: monster.id,
+        actionId: action.id,
+        code: 'invalid-stat-block',
+        message: `Headless 传奇动作引用了未完整接入的普通动作：${action.referencedActionId}`,
       })
     }
   }

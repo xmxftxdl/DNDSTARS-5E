@@ -7,21 +7,15 @@ import {
 } from './monsters'
 
 const ACTION_BASELINE = {
-  total: 954,
-  headlessMinimum: 637,
-  // Two legacy legendary wrappers moved from unstructured to explicit DM
-  // adjudication. Twelve metallic composite breaths moved from unstructured
-  // to Headless without changing the total action count. The Barbed Devil's
-  // two legal Multiattack sequences add one action and automate the original
-  // prose parent; its Hurl Flame child was already a complete Headless attack.
-  // Bone Devil's Sting and Multiattack now resolve their condition save, and
-  // Centaur's melee/ranged alternatives add one action while automating the
-  // original parent.
-  dmAdjudicationMaximum: 97,
-  // Six formerly prose-only Parry reactions now use an authoritative
-  // one-attack AC rule.
-  unstructuredMaximum: 194,
-  blockedByChildMaximum: 26,
+  total: 1055,
+  headlessMinimum: 877,
+  dmAdjudicationMaximum: 32,
+  unstructuredMaximum: 146,
+  blockedByChildMaximum: 0,
+  multiattackTotal: 240,
+  multiattackHeadlessMinimum: 240,
+  multiattackIncompleteMaximum: 0,
+  unparsedMultiattackMaximum: 0,
 } as const
 
 const SPELL_OCCURRENCE_BASELINE = {
@@ -66,6 +60,12 @@ describe('D&D 5e monster Headless coverage audit', () => {
       .filter((row) => row.effectiveAutomation === 'headless')
       .every((row) => row.blockedChildIds.length === 0 && row.reasonCodes.length === 0))
       .toBe(true)
+    expect(report.actions.summary.multiattack).toEqual({
+      total: ACTION_BASELINE.multiattackTotal,
+      headless: ACTION_BASELINE.multiattackHeadlessMinimum,
+      incomplete: ACTION_BASELINE.multiattackIncompleteMaximum,
+      unparsed: ACTION_BASELINE.unparsedMultiattackMaximum,
+    })
 
     expect(spells.total).toBe(SPELL_OCCURRENCE_BASELINE.total)
     expect(spells.full + spells.manual + spells.missing).toBe(spells.total)
@@ -130,6 +130,31 @@ describe('D&D 5e monster Headless coverage audit', () => {
         .map((variant) => variant.id), slug).toEqual(expectedVariantIds(slug))
       expect(reportRows.get(`${slug}:breath-weapons`), slug).toMatchObject({
         effectiveAutomation: 'headless',
+        reasonCodes: [],
+      })
+    }
+  })
+
+  it('counts reviewed composite special children through the composite transaction', () => {
+    const dragonSlugs = DND5E_SRD_MONSTERS
+      .filter((monster) =>
+        /^(?:adult|ancient)-.+-dragon$/.test(monster.slug))
+      .map((monster) => monster.slug)
+    const rows = new Map(
+      auditDnd5eMonsterHeadlessCoverage().actions.rows
+        .map((row) => [`${row.slug}:${row.actionId}`, row]),
+    )
+
+    expect(dragonSlugs).toHaveLength(20)
+    for (const slug of dragonSlugs) {
+      expect(rows.get(`${slug}:multiattack`), slug).toMatchObject({
+        effectiveAutomation: 'headless',
+        blockedChildIds: [],
+        reasonCodes: [],
+      })
+      expect(rows.get(`${slug}:multiattack-weapons-only`), slug).toMatchObject({
+        effectiveAutomation: 'headless',
+        blockedChildIds: [],
         reasonCodes: [],
       })
     }
@@ -243,6 +268,26 @@ describe('D&D 5e monster Headless coverage audit', () => {
         effectiveAutomation: 'headless-with-rule',
       })
     }
+  })
+
+  it('attributes Assassin Sneak Attack coverage to the canonical trait, not Evasion', () => {
+    const rows = auditDnd5eMonsterHeadlessCoverage().traits.rows
+      .filter((row) => row.slug === 'assassin')
+    const sneakAttack = rows.find((row) => row.traitName === '偷袭（每回合 1 次）')
+    const evasion = rows.find((row) => row.traitName === '闪避')
+
+    expect(sneakAttack).toMatchObject({
+      traitIndex: 2,
+      declaredAutomation: 'headless',
+      hasRule: true,
+      effectiveAutomation: 'headless-with-rule',
+    })
+    expect(evasion).toMatchObject({
+      traitIndex: 1,
+      declaredAutomation: 'dm-adjudication',
+      hasRule: false,
+      effectiveAutomation: 'dm-adjudication',
+    })
   })
 
   it('separates explicit DM actions, missing rules, invalid claims and child-blocked Multiattack', () => {

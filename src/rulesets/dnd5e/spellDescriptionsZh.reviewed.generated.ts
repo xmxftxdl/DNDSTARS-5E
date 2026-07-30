@@ -3266,7 +3266,7 @@ export const DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED:
     "components": "言语、姿势、材料（一件微型斗篷）",
     "duration": "专注，至多 1 分钟",
     "description": "你触碰一个自愿生物。在法术结束前，目标可以掷一次 d4，并将所掷数值加到自己选择的一次豁免结果中。它可以在进行豁免之前或之后掷这枚骰子。随后法术结束。",
-    "sourceName": "提升抗性",
+    "sourceName": "抗力术",
     "sourceEnglishName": "Resistance",
     "sourcePage": 175
   },

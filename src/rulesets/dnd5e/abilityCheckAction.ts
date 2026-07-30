@@ -10,10 +10,12 @@ import {
   type Dnd5eCombatEvent,
   type Dnd5eCuttingWordsUse,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eOptionalBonusDieUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
 import { resolveDnd5eRollMode } from './rollMode'
+import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
 
 export type Dnd5eAbilityCheckRejectReason =
   | 'invalid-action'
@@ -46,7 +48,12 @@ export function prepareDnd5eAbilityCheck(input: {
   const skill = payload.skill ? SKILLS.find((candidate) => candidate.key === payload.skill) : undefined
   if (
     !Number.isInteger(payload.dc) || payload.dc < 0 || payload.dc > 100 ||
-    (payload.skill && (!skill || skill.ability !== payload.ability))
+    (payload.skill && (!skill || skill.ability !== payload.ability)) ||
+    (payload.context != null && (
+      payload.context !== 'push-pull-lift-break' ||
+      payload.ability !== 'str' ||
+      payload.skill != null
+    ))
   ) return { ok: false, reason: 'invalid-action' }
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
@@ -94,6 +101,14 @@ export function prepareDnd5eAbilityCheck(input: {
             reason: 'rage-strength-check',
           },
           {
+            active: payload.context === 'push-pull-lift-break' &&
+              !!dnd5eTotemWarriorFeatureForCombatant(
+                actorCombatant,
+                'aspect-of-the-beast-bear',
+              ),
+            reason: 'totem-warrior-bear-aspect',
+          },
+          {
             active: actorCombatant.classState.helpedAbilityCheckSourceId != null,
             reason: 'help',
           },
@@ -127,6 +142,7 @@ function headlessAbilityCheckAction(
     peerlessSkillRoll?: number
     darkOnesOwnLuckRoll?: number
     cuttingWords?: Dnd5eCuttingWordsUse
+    optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
     strokeOfLuck?: boolean
   },
 ) {
@@ -135,6 +151,7 @@ function headlessAbilityCheckAction(
     actorId: prepared.actorToken.id,
     ability: prepared.payload.ability,
     skill: prepared.payload.skill,
+    context: prepared.payload.context,
     mode: prepared.payload.mode,
     dc: prepared.payload.dc,
     spendAction: prepared.payload.spendAction,
@@ -162,6 +179,7 @@ export function resolvePreparedDnd5eAbilityCheck(input: {
   peerlessSkillRoll?: number
   darkOnesOwnLuckRoll?: number
   cuttingWords?: Dnd5eCuttingWordsUse
+  optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
   strokeOfLuck?: boolean
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const result = resolveDnd5eHeadlessAction(input.prepared.state, headlessAbilityCheckAction(input.prepared, input))
