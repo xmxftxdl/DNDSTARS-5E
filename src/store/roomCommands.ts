@@ -8,6 +8,7 @@ import { useCharacterStore } from './characters'
 import { useMapStore } from './maps'
 
 type SpellChoicePatch = Pick<Character, 'dnd5eClassChoices'>
+const ROOM_SHARED_STATE_AGGREGATE_ID = 'room:shared-state'
 
 export type AppRoomCommand =
   | (RoomCommandEnvelope & {
@@ -189,7 +190,7 @@ export function setRoomCharacterHitPoints(input: {
     ...input,
     id: commandId('hp'),
     type: 'character.hit-points.set',
-    aggregateId: `hp:${input.characterId ?? input.tokenId ?? 'missing'}`,
+    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
     issuedAt: Date.now(),
   })
 }
@@ -205,7 +206,7 @@ export function moveRoomToken(input: {
     ...input,
     id: commandId('move'),
     type: 'map.token.move',
-    aggregateId: `map:${input.mapId}:token:${input.tokenId}`,
+    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
     issuedAt: Date.now(),
   })
 }
@@ -217,7 +218,7 @@ export function replaceRoomCharacterSpellSelections(
   return appRoomCommandBus.dispatch({
     id: commandId('spells'),
     type: 'character.spell-selections.replace',
-    aggregateId: `character:${characterId}:spells`,
+    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
     issuedAt: Date.now(),
     characterId,
     patch,
@@ -230,7 +231,7 @@ export function mutateRoomCharacterInventory(
   return appRoomCommandBus.dispatch({
     id: commandId('inventory'),
     type: 'character.inventory.mutate',
-    aggregateId: `character:${mutation.characterId}:inventory`,
+    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
     issuedAt: Date.now(),
     mutation,
   })
