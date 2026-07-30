@@ -90,6 +90,7 @@ import { sceneInteractionReceiptId, type SceneInteractionOutcomeEffect } from '.
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
+import { moveRoomToken, setRoomCharacterHitPoints } from '../store/roomCommands'
 import { useSpellbookStore } from '../store/spellbook'
 import { getRoomSession } from '../lib/roomSession'
 import { loadRoomRoster } from '../lib/roomApi'
@@ -3615,7 +3616,14 @@ export default function MapsPage() {
         maxHp: character.maxHp,
         temporaryHp: character.tempHp,
       }, operation, amount)
-      updateChar(character.id, { currentHp: next.currentHp, tempHp: next.temporaryHp })
+      void setRoomCharacterHitPoints({
+        characterId: character.id,
+        mapId: activeMap.id,
+        tokenId: token.id,
+        currentHp: next.currentHp,
+        maxHp: next.maxHp,
+        temporaryHp: next.temporaryHp,
+      })
       pushCombatLog(
         `DM 手动结算：${character.name} ${operationLabel} ${Math.max(0, Math.floor(amount))}；当前 HP ${next.currentHp}/${next.maxHp}${next.temporaryHp > 0 ? `，临时 HP ${next.temporaryHp}` : ''}。`,
         operation === 'damage' ? 'damage' : 'system',
@@ -3635,7 +3643,12 @@ export default function MapsPage() {
       maxHp,
       temporaryHp: 0,
     }, operation, amount)
-    updateToken(activeMap.id, token.id, { hp: next.currentHp, maxHp: next.maxHp })
+    void setRoomCharacterHitPoints({
+      mapId: activeMap.id,
+      tokenId: token.id,
+      currentHp: next.currentHp,
+      maxHp: next.maxHp,
+    })
     pushCombatLog(
       `DM 手动结算：${token.label} ${operationLabel} ${Math.max(0, Math.floor(amount))}；当前 HP ${next.currentHp}/${next.maxHp}。`,
       operation === 'damage' ? 'damage' : 'system',
@@ -4240,7 +4253,13 @@ export default function MapsPage() {
         cell.row >= rows ||
         blocked.has(cellKey(cell))
       )) return
-      updateToken(activeMap.id, selectedToken.id, pos)
+      void moveRoomToken({
+        mapId: activeMap.id,
+        tokenId: selectedToken.id,
+        x: pos.x,
+        y: pos.y,
+        elevationFeet: selectedToken.elevationFeet,
+      })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -22101,7 +22120,9 @@ export default function MapsPage() {
                   })()
                   return 'pending'
                 }
-                updateToken(activeMap.id, token.id, {
+                void moveRoomToken({
+                  mapId: activeMap.id,
+                  tokenId: token.id,
                   x: position.x,
                   y: position.y,
                   elevationFeet: targetElevationFeet,
@@ -22111,6 +22132,15 @@ export default function MapsPage() {
                   'system',
                 )
                 return true
+              }}
+              onTokenMoveCommit={(token, position, targetElevationFeet) => {
+                void moveRoomToken({
+                  mapId: activeMap.id,
+                  tokenId: token.id,
+                  x: position.x,
+                  y: position.y,
+                  elevationFeet: targetElevationFeet,
+                })
               }}
               onBlankContextMenu={() => {
                 setDnd5eWeaponTargeting(null)
@@ -23517,7 +23547,16 @@ export default function MapsPage() {
               characters={characters}
               tokens={activeMap.tokens}
               updateToken={updateToken}
-              updateChar={updateChar}
+              onSetHitPoints={({ currentHp, maxHp, manuallySetMaximum }) => {
+                void setRoomCharacterHitPoints({
+                  characterId: selectedToken.characterId,
+                  mapId: activeMap.id,
+                  tokenId: selectedToken.id,
+                  currentHp,
+                  maxHp,
+                  manuallySetMaximum,
+                })
+              }}
               removeToken={removeToken}
               canManageConditions={canDmManageConditions}
               conditionSourceOptions={conditionSourceOptions}
@@ -23554,9 +23593,17 @@ export default function MapsPage() {
             <CharacterDetailPanel
               token={selectedCharacterToken}
               character={selectedCharacter}
-              mapId={activeMap.id}
-              updateToken={updateToken}
-              updateChar={updateChar}
+              onSetHitPoints={({ currentHp, maxHp, temporaryHp, manuallySetMaximum }) => {
+                void setRoomCharacterHitPoints({
+                  characterId: selectedCharacter.id,
+                  mapId: activeMap.id,
+                  tokenId: selectedCharacterToken.id,
+                  currentHp,
+                  maxHp,
+                  temporaryHp,
+                  manuallySetMaximum,
+                })
+              }}
               isDM={isDM}
               canManageConditions={canDmManageConditions}
               conditionSourceOptions={conditionSourceOptions}

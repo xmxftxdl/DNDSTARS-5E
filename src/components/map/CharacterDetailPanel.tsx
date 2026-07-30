@@ -12,9 +12,12 @@ import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 interface CharacterDetailPanelProps {
   token: Token
   character: Character
-  mapId: string
-  updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
-  updateChar: (charId: string, patch: Partial<Character>) => void
+  onSetHitPoints: (input: {
+    currentHp: number
+    maxHp: number
+    temporaryHp: number
+    manuallySetMaximum: boolean
+  }) => void
   isDM?: boolean
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
@@ -25,9 +28,7 @@ interface CharacterDetailPanelProps {
 export default function CharacterDetailPanel({
   token,
   character,
-  mapId,
-  updateToken,
-  updateChar,
+  onSetHitPoints,
   isDM = false,
   canManageConditions = false,
   onConditionsChange,
@@ -46,14 +47,12 @@ export default function CharacterDetailPanel({
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
     const nextHp = Math.max(0, Math.min(maxHp, hp))
-    updateChar(character.id, {
+    onSetHitPoints({
       currentHp: nextHp,
       maxHp,
-      ...(manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
-        ? { hitPointMaximumMode: 'manual' as const, hitPointRolls: undefined }
-        : {}),
+      temporaryHp: character.tempHp,
+      manuallySetMaximum,
     })
-    updateToken(mapId, token.id, { hp: nextHp, maxHp })
   }
 
   const commitCurrentHp = () => {

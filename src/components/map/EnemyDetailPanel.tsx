@@ -83,7 +83,7 @@ export default function EnemyDetailPanel({
   characters = [],
   tokens = [],
   updateToken,
-  updateChar,
+  onSetHitPoints,
   removeToken,
   canManageConditions = false,
   onConditionsChange,
@@ -100,7 +100,11 @@ export default function EnemyDetailPanel({
   characters?: Character[]
   tokens?: readonly Token[]
   updateToken?: (mapId: string, tokenId: string, patch: Partial<Token>) => void
-  updateChar?: (charId: string, patch: Partial<Character>) => void
+  onSetHitPoints?: (input: {
+    currentHp: number
+    maxHp: number
+    manuallySetMaximum: boolean
+  }) => void
   removeToken?: (mapId: string, tokenId: string) => void
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
@@ -293,12 +297,11 @@ export default function EnemyDetailPanel({
                   value={linked?.currentHp ?? curHp}
                   onChange={(e) => {
                     const nextHp = Math.max(0, Number(e.target.value) || 0)
-                    if (linked && updateChar) {
-                      updateChar(linked.id, { currentHp: Math.min(linked.maxHp, nextHp) })
-                      updateToken!(mapId!, token.id, { hp: Math.min(linked.maxHp, nextHp), maxHp: linked.maxHp })
-                    } else {
-                      updateToken!(mapId!, token.id, { hp: Math.min(maxHp, nextHp) })
-                    }
+                    onSetHitPoints?.({
+                      currentHp: Math.min(linked?.maxHp ?? maxHp, nextHp),
+                      maxHp: linked?.maxHp ?? maxHp,
+                      manuallySetMaximum: false,
+                    })
                   }}
                   className="w-16 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
@@ -310,18 +313,11 @@ export default function EnemyDetailPanel({
                   value={linked?.maxHp ?? maxHp}
                   onChange={(e) => {
                     const nextMax = Math.max(1, Number(e.target.value) || 1)
-                    if (linked && updateChar) {
-                      updateChar(linked.id, {
-                        maxHp: nextMax,
-                        currentHp: Math.min(linked.currentHp, nextMax),
-                        ...(linked.rulesetId === 'dnd5e-2014-srd-5.1'
-                          ? { hitPointMaximumMode: 'manual' as const, hitPointRolls: undefined }
-                          : {}),
-                      })
-                      updateToken!(mapId!, token.id, { hp: Math.min(linked.currentHp, nextMax), maxHp: nextMax })
-                    } else {
-                      updateToken!(mapId!, token.id, { maxHp: nextMax, hp: Math.min(curHp, nextMax) })
-                    }
+                    onSetHitPoints?.({
+                      currentHp: Math.min(linked?.currentHp ?? curHp, nextMax),
+                      maxHp: nextMax,
+                      manuallySetMaximum: true,
+                    })
                   }}
                   className="w-16 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />

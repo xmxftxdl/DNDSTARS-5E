@@ -49,9 +49,7 @@ describe('CharacterDetailPanel', () => {
     const markup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
       token,
       character,
-      mapId: 'map-1',
-      updateToken: () => undefined,
-      updateChar: () => undefined,
+      onSetHitPoints: () => undefined,
       onClose: () => undefined,
       isDM: true,
     }))
@@ -65,9 +63,7 @@ describe('CharacterDetailPanel', () => {
     const markup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
       token,
       character,
-      mapId: 'map-1',
-      updateToken: () => undefined,
-      updateChar: () => undefined,
+      onSetHitPoints: () => undefined,
       onClose: () => undefined,
       isDM: true,
     }))

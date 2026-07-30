@@ -376,7 +376,6 @@ function usePrefersReducedMotion() {
   return reduced
 }
 
-import { useMapStore } from '../../store/maps'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
 import type { Dnd5eTraversalMode } from '../../rulesets/dnd5e/traversal'
@@ -634,6 +633,12 @@ interface MapCanvasProps {
     position: { x: number; y: number },
     targetElevationFeet: number,
   ) => boolean | 'pending'
+  /** Commits an already validated direct move through the room command layer. */
+  onTokenMoveCommit?: (
+    token: Token,
+    position: { x: number; y: number },
+    targetElevationFeet: number,
+  ) => void
   /** Token IDs whose authority requests are still waiting for DM settlement. */
   optimisticTokenMoveIds?: readonly string[]
   /** Player Tokens that the current non-DM client may request to move. */
@@ -2454,6 +2459,7 @@ export default function MapCanvas({
   onGeometryEditCancel,
   onTokenMoveBlocked,
   onTokenMoveRequest,
+  onTokenMoveCommit,
   optimisticTokenMoveIds = [],
   playerMovableTokenIds = [],
   tabletopTool = 'none',
@@ -2531,7 +2537,6 @@ export default function MapCanvas({
   const [pending, setPending] = useState<Point | null>(null)
   const [cursor, setCursor] = useState<Point | null>(null)
 
-  const updateToken = useMapStore((s) => s.updateToken)
   const worldMinute = useCampaignTimeStore((state) => state.state.worldMinute)
 
   useEffect(() => {
@@ -2649,7 +2654,7 @@ export default function MapCanvas({
       return
     }
     previewTokenDrag(token, pos.x, pos.y)
-    updateToken(map.id, token.id, { ...pos, elevationFeet: toElevationFeet })
+    onTokenMoveCommit?.(token, pos, toElevationFeet)
     window.requestAnimationFrame(() => clearTokenDragPreview(token.id))
   }
 
