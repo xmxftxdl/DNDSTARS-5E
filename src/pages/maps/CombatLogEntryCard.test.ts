@@ -51,6 +51,7 @@ describe('CombatLogEntryCard identity border', () => {
 
   it('defines an animated edge-only highlight with a reduced-motion fallback', () => {
     const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
+      .replace(/\r\n?/g, '\n')
     const flowRuleStart = css.indexOf('.combat-log-entry-card::before')
     const reducedMotionStart = css.indexOf(
       '@media (prefers-reduced-motion: reduce)',
