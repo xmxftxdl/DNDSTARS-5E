@@ -72,6 +72,10 @@ import {
   recordMarketplaceDailyMetric,
   updateMarketplaceInstallation,
 } from '../shared/marketplace-analytics.mjs'
+import {
+  sharedAuthenticatedSystemRoute,
+  sharedPublicSystemRoute,
+} from './shared-server-system-routes.mjs'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
@@ -10191,26 +10195,18 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 
-  if (parsed.pathname === '/api/meta' && req.method === 'GET') {
-    writeJson(res, 200, {
-      service: 'dndstars-5e-shared',
-      rulesetId: DND5E_2014_RULESET_ID,
-      protocolVersion: SHARED_PROTOCOL_VERSION,
-      minimumClientProtocol: SHARED_MIN_CLIENT_PROTOCOL,
-      buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
-      startedAt: ctx.serverStartedAt ?? PROCESS_STARTED_AT,
-    })
-    return true
-  }
-
-  if (parsed.pathname === '/api/healthz' && req.method === 'GET') {
-    writeJson(res, 200, {
-      status: 'ok',
-      service: 'dndstars-5e-shared',
-      protocolVersion: SHARED_PROTOCOL_VERSION,
-      buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
-      uptimeMs: Math.max(0, Date.now() - (ctx.serverStartedAt ?? PROCESS_STARTED_AT)),
-    })
+  const publicSystemRoute = sharedPublicSystemRoute({
+    pathname: parsed.pathname,
+    method: req.method,
+    rulesetId: DND5E_2014_RULESET_ID,
+    protocolVersion: SHARED_PROTOCOL_VERSION,
+    minimumClientProtocol: SHARED_MIN_CLIENT_PROTOCOL,
+    buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
+    startedAt: ctx.serverStartedAt ?? PROCESS_STARTED_AT,
+    now: Date.now(),
+  })
+  if (publicSystemRoute) {
+    writeJson(res, publicSystemRoute.status, publicSystemRoute.body)
     return true
   }
 
@@ -10342,8 +10338,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   try {
     if (await handleCampaignApi(req, res, parsed, ctx)) return true
 
-    if (parsed.pathname === '/api/time' && req.method === 'GET') {
-      writeJson(res, 200, { serverNow: Date.now() })
+    const authenticatedSystemRoute = sharedAuthenticatedSystemRoute({
+      pathname: parsed.pathname,
+      method: req.method,
+      now: Date.now(),
+    })
+    if (authenticatedSystemRoute) {
+      writeJson(res, authenticatedSystemRoute.status, authenticatedSystemRoute.body)
       return true
     }
 
