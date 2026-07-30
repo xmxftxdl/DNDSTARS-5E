@@ -233,6 +233,14 @@ export class LockTimeoutError extends Error {
 
 export function withWriteLock<T>(filePath: string, fn: () => Promise<T>): Promise<T>
 export function atomicWriteLocked(filePath: string, body: Buffer | Uint8Array | string): Promise<void>
+export function retryTransientWindowsRename<T>(
+  operation: () => Promise<T>,
+  options?: {
+    platform?: string
+    delays?: readonly number[]
+    wait?: (delayMs: number) => Promise<void>
+  },
+): Promise<T>
 export function atomicWriteJsonStateFreshLocked(
   filePath: string,
   body: Buffer | Uint8Array | string,

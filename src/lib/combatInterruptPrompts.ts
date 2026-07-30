@@ -150,7 +150,9 @@ export interface SharedBardicInspirationPromptView {
   rollType: CombatInterruptByKind<'bardic-inspiration'>['payload']['rollType']
   total: number
   targetNumber: number
-  source?: 'held-inspiration' | 'peerless-skill'
+  source?: 'held-inspiration' | 'peerless-skill' | 'active-effect'
+  sourceLabel?: string
+  effectId?: string
   expiresAt?: number
 }
 
@@ -556,6 +558,8 @@ export function buildCombatInterruptPromptViews(
           total: bardicInspiration.interrupt.payload.total,
           targetNumber: bardicInspiration.interrupt.payload.targetNumber,
           source: bardicInspiration.interrupt.payload.source,
+          sourceLabel: bardicInspiration.interrupt.payload.sourceLabel,
+          effectId: bardicInspiration.interrupt.payload.effectId,
           expiresAt: bardicInspiration.interrupt.expiresAt,
         }
       : undefined,

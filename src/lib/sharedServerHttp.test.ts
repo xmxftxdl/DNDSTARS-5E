@@ -2507,6 +2507,103 @@ describe('AC5/AC3/AC1 — 404 / 413 / 锁', () => {
     expect(data.maps[0].id).toBe('new')
   })
 
+  it('atomically appends concurrent Headless logs and invalidates both DM/player subscribers', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: 'Combat log sync',
+        displayName: 'DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'combat-log-dm',
+        activePlugins: [],
+      }),
+    })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Player', clientId: 'combat-log-player' }),
+    })
+    expect(joinedResponse.status).toBe(200)
+    const joined = await joinedResponse.json() as {
+      member: { memberId: string; roomToken: string }
+    }
+    const query = `?room=${created.roomId}`
+    const headersFor = (member: { memberId: string; roomToken: string }) => ({
+      'Content-Type': 'application/json',
+      'X-Stars-Protocol': '5',
+      'X-Stars-Member': member.memberId,
+      'X-Stars-Room-Token': member.roomToken,
+    })
+    const dmHeaders = headersFor(created.member)
+    const playerHeaders = headersFor(joined.member)
+    const eventStream = await fetch(`${offServer.base}/api/events/_all${query}`, {
+      headers: playerHeaders,
+    })
+    const eventReader = eventStream.body?.getReader()
+    expect(eventReader).toBeDefined()
+    expect(new TextDecoder().decode((await eventReader!.read()).value)).toContain('event: ready')
+
+    const append = (
+      headers: Record<string, string>,
+      entry: Record<string, unknown>,
+    ) => fetch(`${offServer.base}/api/state/combat-log/entry${query}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ operation: 'append', mapId: 'combat-log-map', entry }),
+    })
+    const [dmAppend, playerAppend] = await Promise.all([
+      append(dmHeaders, {
+        id: 9001,
+        round: 2,
+        text: 'DM Headless settlement',
+        kind: 'attack',
+        time: '10:01',
+        actorTokenId: 'monster-token',
+        details: ['attack hits'],
+      }),
+      append(playerHeaders, {
+        id: 9002,
+        round: 2,
+        text: 'Player Headless settlement',
+        kind: 'damage',
+        time: '10:01',
+        actorTokenId: 'player-token',
+        details: ['damage applied'],
+      }),
+    ])
+    expect([dmAppend.status, playerAppend.status]).toEqual([200, 200])
+    const invalidation = await Promise.race([
+      eventReader!.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('combat-log-invalidation-timeout')), 2_000).unref()
+      }),
+    ])
+    expect(new TextDecoder().decode(invalidation.value)).toContain('"name":"combat-log"')
+    await eventReader!.cancel()
+
+    const [dmState, playerState] = await Promise.all([
+      fetch(`${offServer.base}/api/state/combat-log${query}`, { headers: dmHeaders }).then((response) => response.json()),
+      fetch(`${offServer.base}/api/state/combat-log${query}`, { headers: playerHeaders }).then((response) => response.json()),
+    ]) as Array<{ entries: Array<{ id: number; actorTokenId?: string; details?: string[] }> }>
+    for (const state of [dmState, playerState]) {
+      expect(state.entries.map((entry) => entry.id).sort()).toEqual([9001, 9002])
+      expect(state.entries.find((entry) => entry.id === 9001)).toMatchObject({
+        actorTokenId: 'monster-token',
+        details: ['attack hits'],
+      })
+      expect(state.entries.find((entry) => entry.id === 9002)).toMatchObject({
+        actorTokenId: 'player-token',
+        details: ['damage applied'],
+      })
+    }
+  })
+
   it('shared boundary rejects retired AP state and log wording from stale clients', async () => {
     await putState(offServer.base, 'combat', {
       active: true,

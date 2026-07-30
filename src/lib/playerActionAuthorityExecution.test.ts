@@ -115,4 +115,18 @@ describe('player action authority execution plan', () => {
     expect(first).toEqual({ status: 'accepted', route: 'dnd5e-weapon-attack' })
     expect(second).toEqual({ status: 'ignored' })
   })
+
+  it('routes an owned movement request through DM authority outside combat', () => {
+    expect(planPlayerActionAuthorityExecution({
+      action: { ...action('move-token'), combatId: undefined },
+      preflight: {
+        ...preflight(),
+        combatId: undefined,
+        combatActive: false,
+        currentTokenId: undefined,
+      },
+      recentActionKeys: new Map<string, number>(),
+      now: 1000,
+    })).toEqual({ status: 'accepted', route: 'move-token' })
+  })
 })

@@ -56,6 +56,7 @@ import {
   stateResourceWriteAllowedForRole,
   pushBacklog,
   replaySlice,
+  retryTransientWindowsRename,
   safeName,
   roomPluginReadiness,
   roomPlayerPresence,
@@ -306,6 +307,9 @@ describe('member-specific shared state projections', () => {
         { id: 'dm', kind: 'dm-adjudication', actorCharId: 'own', payload: {} },
         { id: 'legendary', kind: 'legendary-resistance', targetCharId: 'own', payload: {} },
         { id: 'plugin-dm', kind: 'plugin-choice', actorCharId: 'own', payload: { audience: 'dm' } },
+        { id: 'plugin-actor-own', kind: 'plugin-choice', actorCharId: 'own', targetCharId: 'party', payload: { audience: 'actor' } },
+        { id: 'plugin-target-party', kind: 'plugin-choice', actorCharId: 'own', targetCharId: 'party', payload: { audience: 'target' } },
+        { id: 'plugin-target-own', kind: 'plugin-choice', actorCharId: 'party', targetCharId: 'own', payload: { audience: 'target' } },
         { id: 'public-roll', kind: 'roll-confirmation', payload: { visibility: 'public' } },
         { id: 'dark-roll', kind: 'roll-confirmation', payload: { visibility: 'dm-only' } },
         { id: 'own', kind: 'shield-spell', targetCharId: 'own', payload: {} },
@@ -313,7 +317,7 @@ describe('member-specific shared state projections', () => {
       ],
     }
     expect(projectCombatInterruptsForRoomMember(queue, member, characters).interrupts.map((entry) => entry.id))
-      .toEqual(['public-roll', 'own'])
+      .toEqual(['plugin-actor-own', 'plugin-target-own', 'public-roll', 'own'])
     expect(projectCombatInterruptsForRoomMember(queue, member, characters, true).interrupts).toEqual([])
   })
 
@@ -2380,6 +2384,35 @@ const mutateCombatInterruptQueue = (
 ).mutateCombatInterruptQueue
 
 describe('combat interrupt atomic mutation', () => {
+  it('allows only the declared plugin-choice audience owner to answer', () => {
+    const targetChoice = {
+      mapId: 'map-1',
+      revision: 1,
+      updatedAt: 100,
+      interrupts: [{
+        id: 'choice',
+        mapId: 'map-1',
+        kind: 'plugin-choice',
+        actorCharId: 'actor',
+        targetCharId: 'target',
+        status: 'pending',
+        payload: { audience: 'target' },
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }
+    const mutation = {
+      operation: 'answer',
+      mapId: 'map-1',
+      id: 'choice',
+      response: { optionId: 'accept' },
+    }
+    expect(mutateCombatInterruptQueue(targetChoice, mutation, 200, 'player', ['actor']))
+      .toMatchObject({ ok: false, status: 403, error: 'character-ownership-required' })
+    expect(mutateCombatInterruptQueue(targetChoice, mutation, 200, 'player', ['target']))
+      .toMatchObject({ ok: true, changed: true })
+  })
+
   it('updates different interrupt ids without replacing the queue', () => {
     const queue = {
       mapId: 'map-1',
@@ -2466,9 +2499,16 @@ describe('combat interrupt atomic mutation', () => {
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         label: '黑暗术', createdRound: 1, expiresAfterRound: 2,
+        expiresAtSourceTurnEndAfterRound: 2,
         lighting: { kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2 },
       }] }],
     })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        label: '冰风暴', createdRound: 1, expiresAfterRound: 2,
+        expiresAtSourceTurnEndAfterRound: 3,
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         label: '非法光照', createdRound: 1, expiresAfterRound: 2,
@@ -2980,6 +3020,45 @@ describe('withWriteLock / atomicWriteLocked — AC1 锁', () => {
     )
     expect(accepted).toBe(false)
     expect(JSON.parse(await readFile(file, 'utf8')).value).toBe('new')
+  })
+
+  it('retries only transient Windows rename failures', async () => {
+    const waits: number[] = []
+    let attempts = 0
+    const result = await retryTransientWindowsRename(
+      async () => {
+        attempts += 1
+        if (attempts < 3) {
+          throw Object.assign(new Error('temporarily locked'), { code: 'EPERM' })
+        }
+        return 'renamed'
+      },
+      {
+        platform: 'win32',
+        delays: [1, 2],
+        wait: async (delayMs: number) => {
+          waits.push(delayMs)
+        },
+      },
+    )
+
+    expect(result).toBe('renamed')
+    expect(attempts).toBe(3)
+    expect(waits).toEqual([1, 2])
+
+    const nonWindowsError = Object.assign(new Error('not retryable here'), { code: 'EPERM' })
+    await expect(
+      retryTransientWindowsRename(
+        async () => {
+          throw nonWindowsError
+        },
+        {
+          platform: 'linux',
+          delays: [1],
+          wait: async () => {},
+        },
+      ),
+    ).rejects.toBe(nonWindowsError)
   })
 
   // 抢锁超时 ⇒ fail-closed：抛 LockTimeoutError(503)，fn 绝不无锁运行。

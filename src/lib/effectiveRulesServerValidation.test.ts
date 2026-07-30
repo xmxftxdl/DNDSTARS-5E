@@ -15,4 +15,27 @@ describe('server combat rules boundary', () => {
       effectiveRules: { schemaVersion: 1, revision: 0, hash: '', houseRules: {}, requiredPlugins: [] },
     })).toEqual({ ok: false, reason: 'invalid-effective-rules' })
   })
+
+  it('rejects a forged or malformed monster takeover state', () => {
+    expect(validateSharedStateShape('combat', {
+      ...combat,
+      monsterControl: {
+        schemaVersion: 1,
+        mode: 'automatic',
+        pauseRequested: true,
+        controlledTokenId: 'goblin-1',
+        requestedAt: 2,
+        updatedAt: 2,
+      },
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat', {
+      ...combat,
+      monsterControl: {
+        schemaVersion: 1,
+        mode: 'root',
+        pauseRequested: 'yes',
+        updatedAt: -1,
+      },
+    })).toEqual({ ok: false, reason: 'invalid-monster-control' })
+  })
 })

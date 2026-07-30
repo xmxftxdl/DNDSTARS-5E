@@ -30,6 +30,7 @@ import {
   compileDnd5eEffectiveVisionProfile,
 } from '../../shared/dnd5e-vision-profile.mjs'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
 import type {
   Dnd5eDamageType,
   Dnd5eMonsterBehaviorPreferenceV1,
@@ -558,6 +559,8 @@ export interface Token {
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
+    /** Recoverable maximum-HP reductions for this unlinked creature. */
+    hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
@@ -579,6 +582,7 @@ export interface Token {
     holyNimbusRoundsRemaining?: number
     draconicPresenceImmunityRoundsBySource?: Record<string, number>
     monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
+    monsterActionImmunityRoundsByKey?: Record<string, number>
     conditions?: string[]
     stunnedByActorId?: string
     stunnedAppliedTurnKey?: string
@@ -587,6 +591,13 @@ export interface Token {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    /** 奥法打击：按来源战士记录标记及其来源回合失效边界。 */
+    eldritchStrikeBySource?: Record<string, {
+      appliedTurnKey: string
+      sourceTurnsRemaining: number
+    }>
+    totemWarriorWolfAttunementTargetIds?: string[]
+    totemWarriorWolfAttunementTurnKey?: string
     monsterMechanicRollModifiers?: Array<{
       id: string
       mechanicOwnerId: string
@@ -620,6 +631,12 @@ export interface Token {
     monsterShapechangeFormId?: string
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
+    monsterHydraHeadCount?: number
+    monsterHydraHeadsLostSinceLastTurn?: number
+    monsterHydraDamageTurnKey?: string
+    monsterHydraDamageTakenThisTurn?: number
+    monsterHydraHeadSeveredTurnKey?: string
+    monsterHydraFireDamageSinceLastTurn?: boolean
     /** 由 Headless 按有效承伤累计；DM 可在怪物面板中调整。 */
     monsterThreatByTargetId?: Record<string, number>
     hurlThroughHellSourceId?: string
@@ -736,6 +753,8 @@ export interface Dnd5ePluginArea {
   cells: Array<{ col: number; row: number }>
   createdRound: number
   expiresAfterRound: number
+  /** 到达指定轮次后，在来源 Token 的回合结束边界移除。 */
+  expiresAtSourceTurnEndAfterRound?: number
   concentrationId?: string
   /** fixed 保持落点；source-token 跟随施法者；effect-token 跟随独立法术实体。 */
   anchorMode?: Dnd5ePersistentAreaAnchorMode
@@ -1064,6 +1083,12 @@ function normalizeMap(raw: unknown): BattleMap {
           cells,
           createdRound: area.createdRound!,
           expiresAfterRound: area.expiresAfterRound!,
+          expiresAtSourceTurnEndAfterRound:
+            Number.isInteger(area.expiresAtSourceTurnEndAfterRound) &&
+            Number(area.expiresAtSourceTurnEndAfterRound) >= area.createdRound! &&
+            Number(area.expiresAtSourceTurnEndAfterRound) <= area.expiresAfterRound!
+              ? Number(area.expiresAtSourceTurnEndAfterRound)
+              : undefined,
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
           anchorMode,
           anchorTokenId: typeof area.anchorTokenId === 'string' && area.anchorTokenId

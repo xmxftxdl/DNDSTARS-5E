@@ -118,6 +118,22 @@ describe('player action authority router', () => {
     )).toEqual({ status: 'rejected', reason: 'stale-turn' })
   })
 
+  it('allows an owned Token to move outside combat but rejects a delayed combat move', () => {
+    const exploration = preflightPlayerActionAuthority(
+      makeAction({ combatId: undefined }),
+      makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+    )
+    expect(exploration.status).toBe('accepted')
+    if (exploration.status === 'accepted') {
+      expect(exploration.currentToken.id).toBe('hero-token')
+    }
+
+    expect(preflightPlayerActionAuthority(
+      makeAction({ combatId: 'ended-combat' }),
+      makeContext({ combatActive: false, combatId: 'ended-combat', currentTokenId: undefined }),
+    )).toEqual({ status: 'rejected', reason: 'stale-combat' })
+  })
+
   it('rejects actions that do not match the current initiative actor', () => {
     const result = preflightPlayerActionAuthority(
       makeAction({ round: 2 }),

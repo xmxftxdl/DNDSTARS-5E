@@ -1,6 +1,10 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { Dnd5eTurnEconomyByToken, SharedCombatState } from './sharedCombatTypes'
 import { normalizeCombatSettlementMode, type CombatSettlementMode } from './combatSettlementMode'
+import {
+  normalizeDnd5eMonsterControlState,
+  type Dnd5eMonsterControlStateV1,
+} from './monsterControlState'
 
 export interface SharedCombatStateMigration {
   state: SharedCombatState
@@ -58,6 +62,7 @@ export type SharedCombatStateApplyDecision =
       initiativeIndex: number
       dnd5eTurnEconomyByToken: Dnd5eTurnEconomyByToken
       settlementMode: CombatSettlementMode
+      monsterControl: Dnd5eMonsterControlStateV1
       incomingCombatId: string
       incomingUpdatedAt: number
       snapshot: string
@@ -108,6 +113,7 @@ export function resolveSharedCombatStateApply(input: {
   )
   const incomingCombatId = state.combatId ?? ''
   const incomingUpdatedAt = state.updatedAt ?? 0
+  const settlementMode = normalizeCombatSettlementMode(state.settlementMode)
 
   if (
     incomingCombatId === input.lastAppliedCombatId &&
@@ -127,7 +133,12 @@ export function resolveSharedCombatStateApply(input: {
     initiativeOrder,
     initiativeIndex,
     dnd5eTurnEconomyByToken,
-    settlementMode: normalizeCombatSettlementMode(state.settlementMode),
+    settlementMode,
+    monsterControl: normalizeDnd5eMonsterControlState(
+      state.monsterControl,
+      settlementMode,
+      incomingUpdatedAt,
+    ),
     incomingCombatId,
     incomingUpdatedAt,
     snapshot,

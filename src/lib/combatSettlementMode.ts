@@ -28,10 +28,12 @@ export function usesAutomatedPlayerSettlement(mode: CombatSettlementMode): boole
 export function allowsPlayerActionInSettlementMode(
   mode: CombatSettlementMode,
   actionType: string,
+  combatActive = true,
 ): boolean {
   return usesAutomatedPlayerSettlement(mode) ||
     actionType === 'end-turn' ||
-    actionType === 'dnd5e-map-interaction'
+    actionType === 'dnd5e-map-interaction' ||
+    (!combatActive && actionType === 'move-token')
 }
 
 export function usesAutomatedMonsterSettlement(mode: CombatSettlementMode): boolean {

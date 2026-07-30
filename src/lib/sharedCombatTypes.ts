@@ -4,6 +4,7 @@ import type { AbilityKey } from './dnd'
 import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 import type { CombatSettlementMode } from './combatSettlementMode'
+import type { Dnd5eMonsterControlStateV1 } from './monsterControlState'
 import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
 import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
@@ -38,6 +39,8 @@ export type Dnd5eTurnEconomyByToken = Record<string, Dnd5eTurnEconomyCounts>
 
 export type Dnd5eClassFeaturePayload =
   | { feature: 'barbarian-rage'; frenzy?: boolean; end?: boolean }
+  | { feature: 'barbarian-totem-eagle-dash' }
+  | { feature: 'barbarian-totem-wolf-knockdown'; targetTokenId: string }
   | { feature: 'barbarian-intimidating-presence'; targetTokenId: string }
   | { feature: 'rogue-cunning-action'; option: 'dash' | 'disengage' | 'hide' }
   | { feature: 'rogue-fast-hands'; option: 'sleight-of-hand' | 'thieves-tools' | 'use-object' }
@@ -81,10 +84,14 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'druid-wild-shape'; formId: string }
   | { feature: 'druid-end-wild-shape' }
   | { feature: 'warlock-hurl-through-hell-ready'; active: boolean }
+  | { feature: 'eldritch-knight-summon-bonded-weapon'; weaponId: string }
+  | { feature: 'eldritch-knight-arcane-charge'; targetCell: GridCell }
 
 export interface Dnd5eAbilityCheckPayload {
   ability: AbilityKey
   skill?: string
+  /** Explicit non-skill Strength task eligible for Totem Warrior Bear Aspect. */
+  context?: 'push-pull-lift-break'
   mode?: 'normal' | 'advantage' | 'disadvantage'
   dc: number
   /** 部分检定由 DM 判定为一个动作；关闭时只进行检定，不消耗行动经济。 */
@@ -130,6 +137,8 @@ export interface Dnd5eWeaponAttackOptions {
   frenzyAttack?: boolean
   /** 2014 双武器战斗：完成轻型近战武器的攻击动作后，以附赠动作用另一把轻型近战武器攻击。 */
   offHandAttack?: boolean
+  /** Audited Eldritch Knight War Magic/Improved War Magic bonus-action attack. */
+  eldritchKnightWarMagicAttack?: boolean
   /** 猎人“灭群者”在同回合对原目标 5 尺内另一生物进行的免费攻击。 */
   hordeBreakerAttack?: boolean
   /** 猎人 11 级多重攻击；点击的 Token 作为万箭齐发中心或旋风攻击的目标确认点。 */
@@ -242,6 +251,8 @@ export interface SharedCombatState {
   initiativeOrder: InitiativeEntry[]
   /** DM 权威的结算策略；旧快照缺失时按 automatic 处理。 */
   settlementMode?: CombatSettlementMode
+  /** DM-authoritative automatic/manual monster control and safe takeover state. */
+  monsterControl?: Dnd5eMonsterControlStateV1
   dnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   /** DM-pinned rules and exact plugin set; active room combat rejects plugin actions when absent. */
   effectiveRules?: Dnd5eEffectiveRulesContextV1
@@ -416,6 +427,8 @@ export interface CombatLogEntry {
   text: string
   kind: 'system' | 'turn' | 'attack' | 'damage'
   time: string
+  /** Stable map Token that owns the event; absent on legacy or actor-less rows. */
+  actorTokenId?: string
   /** 由 Headless 结算事件生成的可读过程；旧日志可不包含。 */
   details?: string[]
 }

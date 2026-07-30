@@ -40,6 +40,8 @@ describe('combat settlement modes', () => {
   it('allows ending a turn without enabling automated actions in manual mode', () => {
     expect(allowsPlayerActionInSettlementMode('manual', 'end-turn')).toBe(true)
     expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-map-interaction')).toBe(true)
+    expect(allowsPlayerActionInSettlementMode('manual', 'move-token', false)).toBe(true)
+    expect(allowsPlayerActionInSettlementMode('manual', 'move-token', true)).toBe(false)
     expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-weapon-attack')).toBe(false)
     expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-spell')).toBe(false)
     expect(allowsPlayerActionInSettlementMode('automatic', 'dnd5e-weapon-attack')).toBe(true)

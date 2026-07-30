@@ -230,6 +230,7 @@ describe('T10/AC3 — maps store version + migrate', () => {
             ...base, id: 'valid', coreSpellId: 'test', slotLevel: 3,
             anchorMode: 'source-token', anchorTokenId: 'hero-token', anchorCell: { col: 1, row: 1 },
             movement: { economy: 'bonus-action', maximumFeet: 30 }, movementCostMultiplier: 2,
+            expiresAtSourceTurnEndAfterRound: 2,
           },
           { ...base, id: 'missing-spell-id' },
         ],
@@ -240,6 +241,7 @@ describe('T10/AC3 — maps store version + migrate', () => {
       sourceKind: 'core-spell', coreSpellId: 'test', slotLevel: 3,
       anchorMode: 'source-token', anchorCell: { col: 1, row: 1 },
       movement: { economy: 'bonus-action', maximumFeet: 30 }, movementCostMultiplier: 2,
+      expiresAtSourceTurnEndAfterRound: 2,
     })
   })
 

@@ -407,9 +407,7 @@ export async function withWriteLock(filePath, fn) {
  */
 export async function atomicWriteLocked(filePath, body) {
   await withWriteLock(filePath, async () => {
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-    await writeFile(tmpPath, body)
-    await rename(tmpPath, filePath)
+    await atomicRename(filePath, body)
   })
 }
 
@@ -438,9 +436,7 @@ export async function atomicWriteJsonStateFreshLocked(filePath, body) {
         // No existing state yet; accept the write.
       }
     }
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-    await writeFile(tmpPath, body)
-    await rename(tmpPath, filePath)
+    await atomicRename(filePath, body)
     return true
   })
 }
@@ -448,10 +444,38 @@ export async function atomicWriteJsonStateFreshLocked(filePath, body) {
 // 图片 PUT 走与 state 同一把锁 + temp+rename：blob 与 meta 在同一把锁内各自
 // 原子落盘，使 GET 永远看不到半写的 blob 或 blob/meta 不匹配；两个并发 PUT 在 imagePath 锁上串行，
 // 胜者的 blob 与 meta 必来自同一次 PUT（不交叉配对）。图片按 id 寻址，无 freshness 比较。
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [8, 16, 32, 64, 128, 256, 512]
+const WINDOWS_TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
+
+export async function retryTransientWindowsRename(operation, options = {}) {
+  const platform = options.platform ?? process.platform
+  const delays = options.delays ?? WINDOWS_RENAME_RETRY_DELAYS_MS
+  const wait = options.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)))
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : ''
+      if (
+        platform !== 'win32'
+        || !WINDOWS_TRANSIENT_RENAME_CODES.has(code)
+        || attempt >= delays.length
+      ) {
+        throw error
+      }
+      await wait(delays[attempt])
+    }
+  }
+}
+
 async function atomicRename(filePath, body) {
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
   await writeFile(tmpPath, body)
-  await rename(tmpPath, filePath)
+  try {
+    await retryTransientWindowsRename(() => rename(tmpPath, filePath))
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {})
+  }
 }
 
 export async function atomicWriteImageLocked(imagePath, metaPath, blob, metaBody) {
@@ -1174,11 +1198,70 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
     if (Buffer.byteLength(body, 'utf8') > STATE_MAX_BYTES) {
       return { ok: false, changed: false, status: 413, error: 'state-too-large', next: current }
     }
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-    await writeFile(tmpPath, body)
-    await rename(tmpPath, filePath)
+    await atomicRename(filePath, body)
     return { ...result, next, previous: current }
   })
+}
+
+function mutateCombatLogState(current, mutation, now = Date.now()) {
+  if (mutation?.operation !== 'append') {
+    return { ok: false, changed: false, status: 400, error: 'invalid-operation' }
+  }
+  const mapId = boundedText(mutation?.mapId, 160).trim()
+  const submitted = mutation?.entry
+  if (
+    !mapId ||
+    !plainObject(submitted) ||
+    !Number.isFinite(submitted.id) ||
+    submitted.id < 0 ||
+    !Number.isInteger(submitted.round) ||
+    submitted.round < 0 ||
+    typeof submitted.text !== 'string' ||
+    !submitted.text.trim() ||
+    submitted.text.length > 20_000 ||
+    !['system', 'turn', 'attack', 'damage'].includes(submitted.kind) ||
+    typeof submitted.time !== 'string' ||
+    submitted.time.length > 80 ||
+    (
+      submitted.actorTokenId != null &&
+      (
+        typeof submitted.actorTokenId !== 'string' ||
+        !submitted.actorTokenId.trim() ||
+        submitted.actorTokenId.length > 180
+      )
+    ) ||
+    (
+      submitted.details != null &&
+      (
+        !Array.isArray(submitted.details) ||
+        submitted.details.length > 200 ||
+        submitted.details.some((detail) => typeof detail !== 'string' || detail.length > 2_000)
+      )
+    )
+  ) {
+    return { ok: false, changed: false, status: 400, error: 'invalid-combat-log-entry' }
+  }
+  const entry = {
+    id: submitted.id,
+    round: submitted.round,
+    text: migrateLegacyApCombatLogText(submitted.text),
+    kind: submitted.kind,
+    time: submitted.time,
+    ...(submitted.actorTokenId != null ? { actorTokenId: submitted.actorTokenId } : {}),
+    ...(submitted.details?.length > 0 ? { details: [...submitted.details] } : {}),
+  }
+  const entries = current?.mapId === mapId && Array.isArray(current.entries)
+    ? current.entries
+    : []
+  return {
+    ok: true,
+    changed: true,
+    next: {
+      mapId,
+      entries: [entry, ...entries.filter((candidate) => candidate?.id !== entry.id)].slice(0, 200),
+      updatedAt: now,
+    },
+  }
 }
 
 export function mutateCombatInterruptQueue(
@@ -1258,6 +1341,20 @@ export function mutateCombatInterruptQueue(
   const current = base.interrupts[index]
   if (current.kind === 'roll-confirmation' && authorityRole === 'player' && operation !== 'contribute') {
     return { ok: false, status: 403, error: 'dm-authority-required' }
+  }
+  if (current.kind === 'plugin-choice' && authorityRole === 'player') {
+    const audienceCharacterId = current.payload?.audience === 'target'
+      ? current.targetCharId
+      : current.payload?.audience === 'actor'
+        ? current.actorCharId
+        : undefined
+    if (
+      !audienceCharacterId ||
+      !Array.isArray(authorityCharacterIds) ||
+      !authorityCharacterIds.includes(audienceCharacterId)
+    ) {
+      return { ok: false, status: 403, error: 'character-ownership-required' }
+    }
   }
   if (current.kind === 'roll-confirmation' && (operation === 'answer' || (operation === 'finish' && mutation?.response != null))) {
     const response = mutation?.response
@@ -2221,7 +2318,13 @@ export function projectCombatInterruptsForRoomMember(value, member, characterSta
   const visible = (Array.isArray(value?.interrupts) ? value.interrupts : []).filter((interrupt) => {
     if (spectator || !plainObject(interrupt)) return false
     if (interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance') return false
-    if (interrupt.kind === 'plugin-choice' && interrupt.payload?.audience === 'dm') return false
+    if (interrupt.kind === 'plugin-choice') {
+      if (interrupt.payload?.audience === 'dm') return false
+      const audienceCharacterId = interrupt.payload?.audience === 'target'
+        ? interrupt.targetCharId
+        : interrupt.actorCharId
+      return ownedCharacterIds.has(audienceCharacterId)
+    }
     if (interrupt.kind === 'roll-confirmation') return interrupt.payload?.visibility === 'public'
     return ownedCharacterIds.has(interrupt.actorCharId) || ownedCharacterIds.has(interrupt.targetCharId)
   })
@@ -3084,7 +3187,12 @@ export function mutateGroupAbilityChecksState(current, mutation, now, member, co
 function validDnd5eRoundLifecycle(value) {
   return plainObject(value) && Number.isInteger(value.createdRound) && value.createdRound >= 0 &&
     Number.isInteger(value.expiresAfterRound) && value.expiresAfterRound >= value.createdRound &&
-    value.expiresAfterRound - value.createdRound + 1 <= 14_400
+    value.expiresAfterRound - value.createdRound + 1 <= 14_400 &&
+    (value.expiresAtSourceTurnEndAfterRound == null || (
+      Number.isInteger(value.expiresAtSourceTurnEndAfterRound) &&
+      value.expiresAtSourceTurnEndAfterRound >= value.createdRound &&
+      value.expiresAtSourceTurnEndAfterRound <= value.expiresAfterRound
+    ))
 }
 
 function validDnd5ePersistentAreaLighting(value) {
@@ -4500,6 +4608,39 @@ export function validateSharedStateShape(name, value) {
   }
   if (name === 'combat' && value.effectiveRules != null && !validDnd5eEffectiveRulesContext(value.effectiveRules)) {
     return { ok: false, reason: 'invalid-effective-rules' }
+  }
+  if (name === 'combat' && value.monsterControl != null) {
+    const control = value.monsterControl
+    if (
+      !plainObject(control) ||
+      control.schemaVersion !== 1 ||
+      (control.mode !== 'automatic' && control.mode !== 'manual') ||
+      typeof control.pauseRequested !== 'boolean' ||
+      !Number.isFinite(control.updatedAt) ||
+      control.updatedAt < 0 ||
+      (
+        control.controlledTokenId != null &&
+        (
+          typeof control.controlledTokenId !== 'string' ||
+          !control.controlledTokenId.trim() ||
+          control.controlledTokenId.length > 180
+        )
+      ) ||
+      (
+        control.requestedAt != null &&
+        (!Number.isFinite(control.requestedAt) || control.requestedAt < 0)
+      ) ||
+      (
+        control.pauseRequested &&
+        (
+          control.mode !== 'automatic' ||
+          typeof control.controlledTokenId !== 'string' ||
+          control.requestedAt == null
+        )
+      )
+    ) {
+      return { ok: false, reason: 'invalid-monster-control' }
+    }
   }
   if (name === 'dm-authority-ready' && typeof value.ready !== 'boolean') {
     return { ok: false, reason: 'invalid-ready-state' }
@@ -10326,6 +10467,37 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         res.end('{"ok":true}')
         return true
       }
+    }
+
+    if (parsed.pathname === '/api/state/combat-log/entry' && req.method === 'PATCH') {
+      await mkdir(ctx.stateRoot, { recursive: true })
+      let mutation
+      try {
+        mutation = JSON.parse((await readBody(req)).toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const now = Date.now()
+      const result = await atomicMutateJsonStateLocked(
+        path.join(ctx.stateRoot, 'combat-log.json'),
+        (state) => mutateCombatLogState(state, mutation, now),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+        id: `combat-log:${now}:${Math.random().toString(36).slice(2)}`,
+        name: 'combat-log',
+        updatedAt: now,
+      })
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(result.next))
+      return true
     }
 
     if (parsed.pathname === '/api/state/room-chat/message' && req.method === 'PATCH') {

@@ -41,6 +41,16 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('spellbook', { spells: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('custom-monsters', { monsters: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('combat', {
+      active: true,
+      monsterControl: {
+        schemaVersion: 1,
+        mode: 'manual',
+        pauseRequested: true,
+        controlledTokenId: '',
+        updatedAt: 1,
+      },
+    }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-journal', { handouts: [], campaignEntries: 'broken', sharedNotes: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-journal', {
@@ -163,7 +173,15 @@ describe('shared resource runtime validation', () => {
       concentrationId: 'plugin-area:action-1',
     }
     expect(validateAndMigrateSharedResource('maps', {
-      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'toxic-cloud', intensity: 'normal' } }] }],
+      maps: [{
+        id: 'map',
+        tokens: [],
+        dnd5ePluginAreas: [{
+          ...validArea,
+          expiresAtSourceTurnEndAfterRound: 2,
+          visual: { preset: 'toxic-cloud', intensity: 'normal' },
+        }],
+      }],
     }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
@@ -190,6 +208,13 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, expiresAfterRound: 14_401 }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [],
+        dnd5ePluginAreas: [{ ...validArea, expiresAtSourceTurnEndAfterRound: 4 }],
+      }],
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'remote-script' } }] }],
