@@ -385,6 +385,10 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:dwarven-thrower': '/assets/icons/dwarven-thrower-item-action.png',
   'srd-5.1:magic-item:efficient-quiver': '/assets/icons/efficient-quiver-item-action.png',
   'srd-5.1:magic-item:efreeti-bottle': '/assets/icons/efreeti-bottle-item-action.png',
+  'srd-5.1:magic-item:elemental-gem': '/assets/icons/elemental-gem-item-action.png',
+  'srd-5.1:magic-item:elven-chain': '/assets/icons/elven-chain-item-action.png',
+  'srd-5.1:magic-item:eversmoking-bottle': '/assets/icons/eversmoking-bottle-item-action.png',
+  'srd-5.1:magic-item:eyes-of-charming': '/assets/icons/eyes-of-charming-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [

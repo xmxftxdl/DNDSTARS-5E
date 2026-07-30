@@ -2,21 +2,24 @@ import { Clock3, Crosshair, Footprints, HeartPulse, PackageOpen, RotateCcw, Shie
 import {
   FIGHTER_RESOURCE_KEYS,
   dnd5eArmorClass,
+  dnd5eEldritchKnightFeatureForCharacter,
+  dnd5eEldritchKnightWarMagicAvailable,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eWeaponAttackProfile,
   fighterAttacksPerAttackAction,
   fighterResourceState,
 } from '../../rulesets/dnd5e'
 import type { Dnd5eFighterFeatureId } from '../../rulesets/dnd5e'
-import type { Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
+import type { Dnd5eClassFeaturePayload, Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import Dnd5eBasicActionsPanel, { type Dnd5eBasicActionTarget } from './Dnd5eBasicActionsPanel'
 import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 
-export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, turnEconomy, basicActionTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
+export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, arcaneChargeTargeting, pending, turnEconomy, basicActionTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature, onClassFeature, onArcaneCharge }: {
   character: Character
   canAct: boolean
   targeting: boolean
+  arcaneChargeTargeting: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
   basicActionTargets: readonly Dnd5eBasicActionTarget[]
@@ -25,6 +28,8 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
   onDodge: () => void
   onBasicAction: (payload: Dnd5eBasicActionPayload) => void
   onFeature: (feature: Dnd5eFighterFeatureId) => void
+  onClassFeature: (payload: Dnd5eClassFeaturePayload) => void
+  onArcaneCharge: () => void
 }) {
   const profile = dnd5eWeaponAttackProfile(character)
   const offHandProfile = dnd5eOffHandWeaponAttackProfile(character)
@@ -33,8 +38,21 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
   const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
   const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (turnEconomy.action.current > 0 || canContinueAttackAction)
   const offHandAttackAvailable = !!offHandProfile && turnEconomy.attacksUsed > 0 && turnEconomy.bonusAction.current > 0
+  const warMagicAttackAvailable =
+    !!profile &&
+    turnEconomy.bonusAction.current > 0 &&
+    dnd5eEldritchKnightWarMagicAvailable(character, turnEconomy.turnKey)
   const secondWind = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.secondWind)
   const actionSurge = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.actionSurge)
+  const mainWeaponId = character.equipment?.mainWeapon?.id
+  const bondedMainWeaponAvailable =
+    !!mainWeaponId &&
+    !!dnd5eEldritchKnightFeatureForCharacter(character, 'weapon-bond') &&
+    character.dnd5eCombatState?.eldritchKnightBondedWeaponIds?.includes(mainWeaponId) === true
+  const arcaneChargeAvailable =
+    !!dnd5eEldritchKnightFeatureForCharacter(character, 'arcane-charge') &&
+    character.dnd5eCombatState?.eldritchKnightArcaneChargeTurnKey === turnEconomy.turnKey &&
+    character.dnd5eCombatState?.eldritchKnightArcaneChargeUsedTurnKey !== turnEconomy.turnKey
   return (
     <div className="grid gap-3 md:grid-cols-[1fr_220px]">
       <section className="rounded-xl border border-white/10 bg-void-900/45 p-3 md:col-span-2" aria-label="本回合行动经济">
@@ -90,6 +108,14 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         >
           <Sword className="h-4 w-4" />副手附赠攻击（{offHandProfile.damage.count}d{offHandProfile.damage.sides}{offHandProfile.damage.bonus >= 0 ? '+' : ''}{offHandProfile.damage.bonus}）
         </button> : null}
+        {warMagicAttackAvailable ? <button
+          type="button"
+          onClick={() => onAttack({ eldritchKnightWarMagicAttack: true })}
+          disabled={!canAct || pending}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Sparkles className="h-4 w-4" />战争魔法：附赠动作武器攻击
+        </button> : null}
         <div className="mt-2 grid grid-cols-2 gap-2">
           <button type="button" onClick={onDisengage} disabled={!canAct || pending || turnEconomy.action.current < 1} className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
             <Footprints className="h-4 w-4" />撤离
@@ -125,6 +151,23 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
             disabled={!canAct || pending || character.level < 2 || actionSurge.current < 1}
             onClick={() => onFeature('action-surge')}
           />
+          {bondedMainWeaponAvailable ? <FeatureButton
+            icon={Sparkles}
+            name="召回联结武器"
+            detail={`附赠动作 · 将${character.equipment?.mainWeapon?.name ?? '当前主武器'}召回手中`}
+            disabled={!canAct || pending || turnEconomy.bonusAction.current < 1}
+            onClick={() => onClassFeature({
+              feature: 'eldritch-knight-summon-bonded-weapon',
+              weaponId: mainWeaponId,
+            })}
+          /> : null}
+          {arcaneChargeAvailable ? <FeatureButton
+            icon={Zap}
+            name={arcaneChargeTargeting ? '选择传送落点…' : '奥术冲锋'}
+            detail="行动如潮已开启 · 选择 30 尺内未占据格"
+            disabled={!canAct || pending}
+            onClick={onArcaneCharge}
+          /> : null}
         </div>
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>

@@ -90,6 +90,41 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('<strong class="text-[10px]">0</strong>/3')
   })
 
+  it('渲染由 MapsPage 共享的固定环位，并按该环位显示法术伤害', () => {
+    const wizard: Character = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      charClass: '法师',
+      level: 5,
+      dnd5eClassLevels: { wizard: 5 },
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            selections: { 'spell-prepared': ['magic-missile'] },
+          },
+        },
+      },
+      classResources: {
+        'dnd5e-spell-slot-1': { current: 2, max: 4 },
+        'dnd5e-spell-slot-3': { current: 1, max: 2 },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: wizard,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      selectedSpellSlotLevels: { 'spell:wizard:magic-missile': 3 },
+      onSelectedSpellSlotLevelChange: () => undefined,
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('aria-label="魔法飞弹"')
+    expect(html).toContain('data-spell-slot-level="3"')
+    expect(html).toContain('data-spell-slot-locked="true"')
+    expect(html).toContain('5枚飞弹，每枚1d4+1力场伤害；合计5d4+5')
+  })
+
   it('从角色实际选择生成可分页的通用施法修正图标', () => {
     const sorcerer: Character = {
       ...character(),

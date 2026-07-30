@@ -34,6 +34,7 @@ export interface PlayerActionRejectionNotice {
 }
 
 const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejectionNotice>> = {
+  'component-unavailable': { title: '施法成分不可用', message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术需要尚未结构化管理的贵重／消耗材料。' },
   'target-out-of-range': { title: '距离不足', message: '目标已经超出该行动的有效距离，本次行动未消耗。' },
   'ammunition-unavailable': { title: '弹药不足', message: '当前武器没有可用弹药，本次攻击未结算。' },
   'action-unavailable': { title: '动作已用尽', message: '本回合已没有可用动作，本次行动未结算。' },
@@ -47,6 +48,7 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'spell-definition-unavailable': { title: '法术尚未接入', message: '该法术没有可用的 Headless 定义，或当前房间规则包未提供它，本次施法未结算。' },
   'spell-not-known-or-prepared': { title: '尚未学习或准备', message: '当前角色未学习该戏法，或该法术未被当前施法职业学习并准备，本次施法未结算。' },
   'spellcasting-class-unavailable': { title: '施法职业不可用', message: '当前角色没有可用于施放该法术的有效施法职业等级或施法属性，本次施法未结算。' },
+  'effect-line-blocked': { title: '效果线被阻挡', message: '施法者与目标点之间存在全身掩护或阻挡效果线的墙体，本次施法未结算。' },
   'innate-spell-unavailable': { title: '天生施法不可用', message: '该法术不是当前角色可用的种族天生施法，或对应免费使用次数不可用，本次施法未结算。' },
   'sustained-spell-unavailable': { title: '持续法术已失效', message: '对应的持续法术、专注或效果 Token 已不存在或已经过期，不能再次发动。' },
   'wild-shape-spellcasting-unavailable': { title: '荒野形态无法施法', message: '当前角色处于荒野形态，且尚未达到 18 级德鲁伊的兽形施法条件，本次施法未结算。' },

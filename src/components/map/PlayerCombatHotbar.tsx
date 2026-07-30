@@ -6,8 +6,12 @@ import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 import { useSpellbookStore } from '../../store/spellbook'
 import { getClassResource } from '../../lib/classResources'
 import {
-  DND5E_SRD_CLASS_DEFINITIONS,
   dnd5eAvailableSpellModifierIntents,
+  dnd5eEldritchKnightFeatureForCharacter,
+  dnd5eEldritchKnightWarMagicAvailable,
+  dnd5eTotemWarriorFeatureForCharacter,
+  dnd5eEffectiveSpellcastingSources,
+  dnd5eEffectiveSpellSelections,
   dnd5eFreeSpellCastSource,
   dnd5ePactSlotLevel,
   dnd5eSelectedSpellIdsForClass,
@@ -16,11 +20,11 @@ import {
   dnd5eSpellbookEntryCastingTime,
   dnd5eSpellbookEntryDescription,
   getDnd5eSrdCombatSpell,
-  normalizeDnd5eClassLevels,
   normalizeDnd5eInventory,
   registeredDnd5ePluginSpells,
   resolveDnd5eSpellModifierIntents,
   toggleDnd5eSpellModifierIntent,
+  dnd5eWeaponAttackProfile,
 } from '../../rulesets/dnd5e'
 import { dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
 import {
@@ -32,6 +36,7 @@ import {
   type Dnd5eCombatActionCommand,
   type Dnd5eCombatActionDescriptorV1,
   type Dnd5eCombatActionEconomy,
+  type Dnd5eCombatActionFeatureSource,
   type Dnd5eCombatSpellModifier,
   type Dnd5eCombatActionSpellSource,
   type Dnd5eCombatActionTargeting,
@@ -47,6 +52,7 @@ import {
   reconcileCombatItemQuickbarPreference,
   type CombatItemQuickbarPreferenceV1,
 } from './combatItemQuickbar'
+import { dnd5eCombatSpellDamagePreview } from './combatSpellDamagePresentation'
 
 const STORAGE_PREFIX = 'dndstars5e:combat-hotbar:v1:'
 const ITEM_QUICKBAR_STORAGE_PREFIX = 'dndstars5e:combat-item-quickbar:v1:'
@@ -78,11 +84,14 @@ interface PlayerCombatHotbarProps {
   canAct: boolean
   pending: boolean
   turnEconomy: {
+    turnKey?: string
     action: { current: number }
     bonusAction: { current: number }
     movement: { current: number }
   }
   activeActionId?: string
+  selectedSpellSlotLevels?: Readonly<Record<string, number>>
+  onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
   onCommand: (command: Dnd5eCombatActionCommand, descriptor: Dnd5eCombatActionDescriptorV1) => void
   onUnavailable?: (descriptor: Dnd5eCombatActionDescriptorV1) => void
 }
@@ -165,6 +174,8 @@ export default function PlayerCombatHotbar({
   pending,
   turnEconomy,
   activeActionId,
+  selectedSpellSlotLevels,
+  onSelectedSpellSlotLevelChange,
   onCommand,
   onUnavailable,
 }: PlayerCombatHotbarProps) {
@@ -187,19 +198,19 @@ export default function PlayerCombatHotbar({
     ? armedSpellModifierState.ids
     : EMPTY_ARMED_SPELL_MODIFIERS
   const descriptors = useMemo(() => {
-    const classLevels = normalizeDnd5eClassLevels(character)
     const spellbookById = new Map(dnd5eSpellbookEntriesWithPlugins(importedSpells, registeredDnd5ePluginSpells()).map((spell) => [spell.id, spell]))
     const spellSources: Dnd5eCombatActionSpellSource[] = []
-    for (const definition of DND5E_SRD_CLASS_DEFINITIONS) {
-      if (!definition.spellcasting || (classLevels[definition.id] ?? 0) <= 0) continue
-      for (const spellId of dnd5eSelectedSpellIdsForClass(character, definition.id)) {
+    for (const source of dnd5eEffectiveSpellcastingSources(character)) {
+      const definition = source.definition
+      if (!definition.spellcasting) continue
+      for (const spellId of dnd5eSelectedSpellIdsForClass(character, source.classId)) {
         const entry = spellbookById.get(spellId)
         if (!entry) continue
         const combat = getDnd5eSrdCombatSpell(spellId)
         const imported = entry.imported
         const baseCastingTime = spellEconomy(dnd5eSpellbookEntryCastingTime(entry))
-        const classLevel = classLevels[definition.id] ?? 0
-        const classSelections = character.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
+        const classLevel = source.classLevel
+        const classSelections = dnd5eEffectiveSpellSelections(character, source)
         const freeBaseCast = entry.level > 0
           ? dnd5eFreeSpellCastSource({
               classId: definition.id,
@@ -268,7 +279,12 @@ export default function PlayerCombatHotbar({
         })
       }
     }
-    const featureSources = spellModifierIntents.map(({ definition, available, unavailableReason, resource }) => ({
+    const featureSources: Dnd5eCombatActionFeatureSource[] = spellModifierIntents.map(({
+      definition,
+      available,
+      unavailableReason,
+      resource,
+    }) => ({
       id: definition.id,
       label: definition.label,
       description: definition.description,
@@ -278,6 +294,108 @@ export default function PlayerCombatHotbar({
       available,
       unavailableReason,
     }))
+    const turnKey = turnEconomy.turnKey ?? ''
+    const mainWeaponId = character.equipment?.mainWeapon?.id
+    if (
+      dnd5eWeaponAttackProfile(character) &&
+      dnd5eEldritchKnightWarMagicAvailable(character, turnKey)
+    ) {
+      featureSources.push({
+        id: 'eldritch-knight-war-magic-attack',
+        label: '战争魔法：附赠动作武器攻击',
+        description: '施法已开启本回合的一次附赠动作武器攻击；目标、距离和命中仍由 Host 校验。',
+        icon: dnd5eSystemActionIcon('eldritch-knight-war-magic', 'melee-attack'),
+        economy: 'bonus-action',
+        targeting: 'creature',
+        command: {
+          kind: 'select-weapon-target',
+          options: { eldritchKnightWarMagicAttack: true },
+        },
+      })
+    }
+    if (
+      mainWeaponId &&
+      dnd5eEldritchKnightFeatureForCharacter(character, 'weapon-bond') &&
+      character.dnd5eCombatState?.eldritchKnightBondedWeaponIds?.includes(mainWeaponId)
+    ) {
+      featureSources.push({
+        id: 'eldritch-knight-summon-bonded-weapon',
+        label: '召回联结武器',
+        description: `以附赠动作召回${character.equipment?.mainWeapon?.name ?? '当前主武器'}。`,
+        icon: dnd5eSystemActionIcon('eldritch-knight-weapon-bond', 'summon'),
+        economy: 'bonus-action',
+        targeting: 'self',
+        command: {
+          kind: 'use-class-feature',
+          payload: {
+            feature: 'eldritch-knight-summon-bonded-weapon',
+            weaponId: mainWeaponId,
+          },
+        },
+      })
+    }
+    if (
+      dnd5eEldritchKnightFeatureForCharacter(character, 'arcane-charge') &&
+      character.dnd5eCombatState?.eldritchKnightArcaneChargeTurnKey === turnKey &&
+      character.dnd5eCombatState?.eldritchKnightArcaneChargeUsedTurnKey !== turnKey
+    ) {
+      featureSources.push({
+        id: 'eldritch-knight-arcane-charge',
+        label: '奥术冲锋',
+        description: '动作如潮已开启；在地图选择 30 尺内未占据落点。',
+        icon: dnd5eSystemActionIcon('eldritch-knight-arcane-charge', 'arcane'),
+        economy: 'none',
+        targeting: 'map-position',
+        command: { kind: 'select-arcane-charge-destination' },
+      })
+    }
+    const wearingHeavyArmor =
+      character.equipment?.armor?.dnd5e?.kind === 'armor' &&
+      character.equipment.armor.dnd5e.category === 'heavy'
+    if (dnd5eTotemWarriorFeatureForCharacter(character, 'totem-spirit-eagle')) {
+      featureSources.push({
+        id: 'totem-warrior-eagle-dash',
+        label: '鹰图腾疾走',
+        description: '狂暴期间以附赠动作获得一份等同步行速度的本回合移动。',
+        icon: dnd5eSystemActionIcon('totem-warrior-eagle-dash', 'dash'),
+        economy: 'bonus-action',
+        targeting: 'self',
+        available: character.dnd5eCombatState?.raging === true && !wearingHeavyArmor,
+        unavailableReason: wearingHeavyArmor
+          ? '穿着重甲时不能使用。'
+          : '需要先进入狂暴。',
+        command: {
+          kind: 'use-class-feature',
+          payload: { feature: 'barbarian-totem-eagle-dash' },
+        },
+      })
+    }
+    const wolfTargets =
+      character.dnd5eCombatState?.totemWarriorWolfAttunementTargetIds ?? []
+    if (
+      dnd5eTotemWarriorFeatureForCharacter(character, 'totemic-attunement-wolf') &&
+      wolfTargets.length > 0
+    ) {
+      featureSources.push({
+        id: 'totem-warrior-wolf-knockdown',
+        label: '狼图腾击倒',
+        description: wolfTargets.length === 1
+          ? '以附赠动作击倒本回合已被近战命中的合格目标。'
+          : '本回合有多个合格目标；打开职业特性面板选择其中一个。',
+        icon: dnd5eSystemActionIcon('totem-warrior-wolf-knockdown', 'control'),
+        economy: 'bonus-action',
+        targeting: wolfTargets.length === 1 ? 'creature' : 'configure',
+        command: wolfTargets.length === 1
+          ? {
+              kind: 'use-class-feature',
+              payload: {
+                feature: 'barbarian-totem-wolf-knockdown',
+                targetTokenId: wolfTargets[0],
+              },
+            }
+          : { kind: 'open-panel', panel: 'features' },
+      })
+    }
     const itemSources = inventory.entries.flatMap((entry) => {
       if (!entry.item.use) return []
       const resource = Object.values(entry.resources ?? {})[0]
@@ -321,6 +439,7 @@ export default function PlayerCombatHotbar({
     movementRemaining,
     pending,
     spellModifierIntents,
+    turnEconomy.turnKey,
   ])
 
   const [storedPreference, setPreference] = useState<Dnd5eCombatHotbarPreferenceV1>(() =>
@@ -355,6 +474,11 @@ export default function PlayerCombatHotbar({
     entry: Dnd5eCombatActionDescriptorV1
     slotLevel: number
   } | null>(null)
+  const [localSelectedSpellSlotLevels, setLocalSelectedSpellSlotLevels] = useState<
+    Record<string, number>
+  >({})
+  const effectiveSelectedSpellSlotLevels =
+    selectedSpellSlotLevels ?? localSelectedSpellSlotLevels
   const [tooltip, setTooltip] = useState<{
     entry: Dnd5eCombatActionDescriptorV1
     left: number
@@ -408,6 +532,18 @@ export default function PlayerCombatHotbar({
     (activeFeaturePage + 1) * FEATURE_PAGE_SIZE,
   )
   const activate = useCallback((entry: Dnd5eCombatActionDescriptorV1, configuredSlotLevel?: number) => {
+    if (
+      entry.command.kind === 'cast-spell' &&
+      configuredSlotLevel != null &&
+      !(entry.availableSlotLevels ?? []).includes(configuredSlotLevel)
+    ) {
+      onUnavailable?.({
+        ...entry,
+        enabled: false,
+        disabledReason: `${configuredSlotLevel} 环位已耗尽或当前不可用；请右键重新固定施法环位。`,
+      })
+      return
+    }
     if (!entry.enabled) {
       onUnavailable?.(entry)
       return
@@ -464,6 +600,15 @@ export default function PlayerCombatHotbar({
     onCommand(entry.command, entry)
   }, [armedSpellModifiers, character, onCommand, onUnavailable])
 
+  const pinSpellSlotLevel = useCallback((actionId: string, slotLevel: number) => {
+    if (onSelectedSpellSlotLevelChange) {
+      onSelectedSpellSlotLevelChange(actionId, slotLevel)
+    } else {
+      setLocalSelectedSpellSlotLevels((current) => ({ ...current, [actionId]: slotLevel }))
+    }
+    setSpellConfiguration(null)
+  }, [onSelectedSpellSlotLevelChange])
+
   useEffect(() => {
     if (!spellConfiguration && !backpackOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -515,7 +660,20 @@ export default function PlayerCombatHotbar({
       : entry.resource
         ? entry.resource.maximum != null ? `${entry.resource.current}/${entry.resource.maximum}` : entry.resource.current
         : undefined
-    const spellLevel = entry.sourceKind === 'spell' ? entry.resource?.current : undefined
+    const pinnedSpellSlotLevel = entry.command.kind === 'cast-spell'
+      ? effectiveSelectedSpellSlotLevels[entry.id]
+      : undefined
+    const spellLevel = entry.sourceKind === 'spell'
+      ? pinnedSpellSlotLevel ?? entry.resource?.current
+      : undefined
+    const damagePreview = entry.command.kind === 'cast-spell'
+      ? dnd5eCombatSpellDamagePreview(
+          character,
+          entry.command.castingClassId,
+          entry.command.spellId,
+          pinnedSpellSlotLevel ?? entry.command.slotLevel,
+        )
+      : undefined
     const modifierActive = entry.command.kind === 'toggle-spell-modifier' &&
       armedSpellModifiers.has(entry.command.modifier)
     return <button
@@ -536,7 +694,7 @@ export default function PlayerCombatHotbar({
         setDraggedActionId(null)
       }}
       onClick={() => {
-        if (!suppressClickAfterDragRef.current) activate(entry)
+        if (!suppressClickAfterDragRef.current) activate(entry, pinnedSpellSlotLevel)
       }}
       onContextMenu={(event) => {
         if (entry.command.kind !== 'cast-spell') return
@@ -548,13 +706,33 @@ export default function PlayerCombatHotbar({
           return
         }
         setTooltip(null)
-        setSpellConfiguration({ entry, slotLevel: availableLevels[0] })
+        setSpellConfiguration({
+          entry,
+          slotLevel: pinnedSpellSlotLevel != null && availableLevels.includes(pinnedSpellSlotLevel)
+            ? pinnedSpellSlotLevel
+            : availableLevels[0],
+        })
       }}
       onMouseEnter={(event) => showTooltip(entry, event.currentTarget)}
       onMouseLeave={() => hideTooltip(entry.id)}
       onFocus={(event) => showTooltip(entry, event.currentTarget)}
       onBlur={() => hideTooltip(entry.id)}
       aria-label={entry.label}
+      title={entry.command.kind === 'cast-spell'
+        ? [
+            entry.label,
+            pinnedSpellSlotLevel == null
+              ? `${entry.command.slotLevel === 0 ? '戏法' : `${entry.command.slotLevel}环`}（默认）`
+              : `${pinnedSpellSlotLevel === 0 ? '戏法' : `${pinnedSpellSlotLevel}环`}（已固定）`,
+            damagePreview?.summary,
+          ].filter(Boolean).join('\n')
+        : undefined}
+      data-spell-slot-level={entry.command.kind === 'cast-spell'
+        ? pinnedSpellSlotLevel ?? entry.command.slotLevel
+        : undefined}
+      data-spell-slot-locked={entry.command.kind === 'cast-spell' && pinnedSpellSlotLevel != null
+        ? 'true'
+        : undefined}
       aria-describedby={tooltip?.entry.id === entry.id ? 'combat-hotbar-action-tooltip' : undefined}
       className={`group relative h-12 w-12 shrink-0 rounded-lg border p-px transition ${entry.id === 'system:end-turn' ? 'border-amber-300/35 bg-amber-400/10' : activeActionId === entry.id || modifierActive ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]' : entry.enabled ? 'border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-violet-500/10' : 'cursor-not-allowed border-white/[0.045] bg-black/20'}`}
     >
@@ -686,6 +864,20 @@ export default function PlayerCombatHotbar({
     )
   }
 
+  const tooltipSpellSlotLevel = tooltip?.entry.command.kind === 'cast-spell'
+    ? effectiveSelectedSpellSlotLevels[tooltip.entry.id] ?? tooltip.entry.command.slotLevel
+    : undefined
+  const tooltipSpellDamage = tooltip?.entry.command.kind === 'cast-spell' &&
+    tooltipSpellSlotLevel != null
+    ? dnd5eCombatSpellDamagePreview(
+        character,
+        tooltip.entry.command.castingClassId,
+        tooltip.entry.command.spellId,
+        tooltipSpellSlotLevel,
+      )
+    : undefined
+  const tooltipSpellSlotLocked = tooltip?.entry.command.kind === 'cast-spell' &&
+    effectiveSelectedSpellSlotLevels[tooltip.entry.id] != null
   const portrait = resolveMapTokenPortrait(character)
   const hpPercentage = Math.max(0, Math.min(100, character.maxHp > 0 ? character.currentHp / character.maxHp * 100 : 0))
 
@@ -867,7 +1059,22 @@ export default function PlayerCombatHotbar({
             ? `${ECONOMY_LABELS[tooltip.entry.economy]} · ${TARGETING_LABELS[tooltip.entry.targeting]}`
             : tooltip.entry.disabledReason}
         </span>
-        {tooltip.entry.sourceKind === 'spell' ? <span className="mt-1 block text-[9px] text-violet-300">左键直接施放 · 右键选择升环与配置</span> : null}
+        {tooltip.entry.sourceKind === 'spell' ? <>
+          <span className="mt-1 block text-[10px] font-semibold text-violet-200">
+            {tooltipSpellSlotLevel === 0
+              ? '戏法'
+              : `${tooltipSpellSlotLevel} 环施放${tooltipSpellSlotLocked ? '（已固定）' : '（默认）'}`}
+          </span>
+          {tooltipSpellDamage ? <span className="mt-1 block rounded-md border border-rose-300/15 bg-rose-500/[0.06] px-2 py-1.5 text-[10px] leading-4 text-rose-100">
+            <strong>伤害：</strong>{tooltipSpellDamage.summary}
+            {tooltipSpellDamage.featureBonuses.length > 0
+              ? <span className="mt-0.5 block text-amber-200">
+                  {tooltipSpellDamage.featureBonuses.join('；')}
+                </span>
+              : null}
+          </span> : null}
+          <span className="mt-1 block text-[9px] text-violet-300">左键按当前环位施放 · 右键重新固定环位</span>
+        </> : null}
       </div>,
       document.body,
     ) : null}
@@ -888,7 +1095,7 @@ export default function PlayerCombatHotbar({
             <Dnd5eActionIcon spec={spellConfiguration.entry.icon} level={spellConfiguration.entry.resource?.current} className="w-14 shrink-0" />
             <div className="min-w-0 flex-1">
               <h3 id="combat-hotbar-spell-config-title" className="text-base font-bold text-white">{spellConfiguration.entry.label}</h3>
-              <p className="mt-1 text-xs leading-5 text-slate-400">选择本次施法使用的法术位。确认后回到地图点选目标或范围。</p>
+              <p className="mt-1 text-xs leading-5 text-slate-400">选择并固定施法环位。保存后左键点击法术图标，才会进入目标或范围选择。</p>
             </div>
             <button type="button" onClick={() => setSpellConfiguration(null)} aria-label="关闭施法配置" className="rounded-lg border border-white/10 p-1.5 text-slate-400 hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
           </div>
@@ -920,10 +1127,10 @@ export default function PlayerCombatHotbar({
           <button
             type="button"
             disabled={spellConfigurationResolution?.ok === false}
-            onClick={() => activate(spellConfiguration.entry, spellConfiguration.slotLevel)}
+            onClick={() => pinSpellSlotLevel(spellConfiguration.entry.id, spellConfiguration.slotLevel)}
             className="mt-5 w-full rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {spellConfiguration.slotLevel === 0 ? '施放戏法' : `以 ${spellConfiguration.slotLevel} 环施放`}
+            {spellConfiguration.slotLevel === 0 ? '固定为戏法' : `固定为 ${spellConfiguration.slotLevel} 环`}
           </button>
         </section>
       </div>,

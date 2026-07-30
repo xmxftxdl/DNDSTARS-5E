@@ -1,6 +1,8 @@
 import type { AbilityKey } from './dnd'
 import { dnd5eConditionLabel } from '../rulesets/dnd5e/conditions'
+import { DND5E_DAMAGE_TYPE_LABELS } from '../rulesets/dnd5e/damageTypes'
 import type { Dnd5eCombatEvent } from '../rulesets/dnd5e/headlessCombatEngine'
+import { getDnd5eSrdCombatSpell } from '../rulesets/dnd5e/spells'
 
 const ABILITY_LABELS: Record<AbilityKey, string> = {
   str: '力量',
@@ -134,6 +136,76 @@ function eventDetails(
       return [
         `${resolveName(event.targetId)}｜${ABILITY_LABELS[event.ability]}豁免 d20 ${event.d20} ${signed(event.modifier)} = ${event.total} vs DC ${event.dc}｜${event.success ? '成功' : '失败'}`,
       ]
+    case 'spell-damage-feature-bonus-applied': {
+      const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      const application = event.application === 'first-projectile'
+        ? '第一枚飞弹的伤害掷骰'
+        : '一次法术伤害掷骰'
+      return [
+        `${resolveName(event.actorId)}｜法师特性「强化塑能」｜${ABILITY_LABELS[event.ability]}调整值 ${signed(event.amount)} 加入${spellName}的${application}`,
+      ]
+    }
+    case 'magic-missile-damage-resolved': {
+      const projectileDetails = event.projectiles.map((projectile, index) => {
+        const targetName = resolveName(projectile.targetId)
+        const rollExpression = [
+          `d${event.dieSides}(${projectile.dieRoll})`,
+          `${signed(event.baseBonusPerProjectile)}`,
+          ...(projectile.featureBonus > 0
+            ? [`强化塑能（智力）${signed(projectile.featureBonus)}`]
+            : []),
+        ].join(' ')
+        if (projectile.outcome === 'shielded') {
+          return `#${index + 1} → ${targetName}：${rollExpression}，被护盾术免疫`
+        }
+        if (projectile.outcome === 'limited-magic-immunity') {
+          return `#${index + 1} → ${targetName}：${rollExpression}，被有限魔法免疫抵消`
+        }
+        const reduction = projectile.cuttingWordsReduction > 0
+          ? ` - 斩词${projectile.cuttingWordsReduction}`
+          : ''
+        const defenses = projectile.finalDamage !== projectile.damageBeforeDefenses
+          ? ` → 防御调整后 ${projectile.finalDamage}`
+          : ''
+        return `#${index + 1} → ${targetName}：${rollExpression}${reduction} = ${projectile.damageBeforeDefenses}${defenses}`
+      })
+      const effectiveProjectiles = event.projectiles.filter(
+        (projectile) => projectile.outcome === 'damage',
+      ).length
+      return [
+        `${resolveName(event.actorId)}｜魔法飞弹（${event.slotLevel}环）｜共 ${event.projectiles.length} 枚｜每枚 1d${event.dieSides}${signed(event.baseBonusPerProjectile)} 力场伤害`,
+        `逐枚结算｜${projectileDetails.join('；')}`,
+        `魔法飞弹总伤害｜${event.totalDamage} 点｜实际生效 ${effectiveProjectiles}/${event.projectiles.length} 枚`,
+      ]
+    }
+    case 'spell-saving-throw-damage-resolved': {
+      const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      const saveResult = event.saveSucceeded
+        ? event.successfulSave === 'half'
+          ? `豁免成功减半为 ${event.damageAfterSavingThrow}`
+          : `豁免成功，伤害降为 ${event.damageAfterSavingThrow}`
+        : `豁免失败，伤害为 ${event.damageAfterSavingThrow}`
+      const defenses = event.components.flatMap((component) =>
+        component.defenses.map((defense) => {
+          const damageType = component.damageType
+            ? DND5E_DAMAGE_TYPE_LABELS[component.damageType]
+            : '伤害'
+          return `${damageType}${
+            defense.kind === 'immune'
+              ? '免疫'
+              : defense.kind === 'resistant'
+                ? '抗性'
+                : '易伤'
+          }`
+        }),
+      )
+      const defenseResult = defenses.length > 0
+        ? `${resolveName(event.targetId)}${[...new Set(defenses)].join('、')}，最终 ${event.finalDamage}`
+        : `最终 ${event.finalDamage}`
+      return [
+        `${spellName}伤害 ${event.damageBeforeSavingThrow}；${saveResult}；${defenseResult}`,
+      ]
+    }
     case 'ability-check-resolved':
       return [
         `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.skill ? `（${event.skill}）` : ''}检定 d20 ${event.d20} ${signed(event.modifier)} = ${event.total}${event.dc === undefined ? '' : ` vs DC ${event.dc}`}｜${event.success === undefined ? event.mode === 'advantage' ? '优势' : event.mode === 'disadvantage' ? '劣势' : '普通' : event.success ? '成功' : '失败'}`,

@@ -65,7 +65,7 @@ describe('mapSpellTargetIdsForAuthoritySubmission', () => {
   it('preserves explicitly selected targets for selective spells', () => {
     expect(mapSpellTargetIdsForAuthoritySubmission({
       hasArea: true,
-      targetKind: 'ally',
+      targetKind: 'creature',
       selectedTargetIds: ['cleric', 'fighter', 'fighter'],
     })).toEqual(['cleric', 'fighter'])
   })

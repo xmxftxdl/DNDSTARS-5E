@@ -1,6 +1,10 @@
 import type { Dnd5eActionIconSpec } from './dnd5eActionIcons'
 import { dnd5eSystemActionIcon } from './dnd5eActionIcons'
-import type { Dnd5eSpellMetamagicPayload } from './sharedCombatTypes'
+import type {
+  Dnd5eClassFeaturePayload,
+  Dnd5eSpellMetamagicPayload,
+  Dnd5eWeaponAttackOptions,
+} from './sharedCombatTypes'
 import type { Dnd5eSpellModifierIntentId } from '../rulesets/dnd5e/spellModifierIntents'
 
 export const DND5E_COMBAT_ACTION_DESCRIPTOR_SCHEMA_VERSION = 1 as const
@@ -26,7 +30,7 @@ export type Dnd5eCombatSpellModifier = Dnd5eSpellModifierIntentId
 
 export type Dnd5eCombatActionCommand =
   | { kind: 'select-move' }
-  | { kind: 'select-weapon-target' }
+  | { kind: 'select-weapon-target'; options?: Dnd5eWeaponAttackOptions }
   | { kind: 'basic-action'; action: 'dash' | 'hide' }
   | { kind: 'dodge' }
   | { kind: 'disengage' }
@@ -38,6 +42,8 @@ export type Dnd5eCombatActionCommand =
       options?: Dnd5eCombatSpellOptions
     }
   | { kind: 'toggle-spell-modifier'; modifier: Dnd5eCombatSpellModifier }
+  | { kind: 'use-class-feature'; payload: Dnd5eClassFeaturePayload }
+  | { kind: 'select-arcane-charge-destination' }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
   | { kind: 'use-item'; instanceId: string }
   | { kind: 'end-turn' }
@@ -71,6 +77,13 @@ export interface Dnd5eCombatActionDescriptorV1 {
 export type Dnd5eCombatSpellSlotSelection =
   | { ok: true; slotLevel: number; explicitlyConfigured: boolean }
   | { ok: false; reason: string }
+
+export function dnd5eCombatSpellActionId(
+  castingClassId: string,
+  spellId: string,
+): string {
+  return `spell:${castingClassId}:${spellId}`
+}
 
 /**
  * 左键不能把“某个更高环位可用”解释成升环意图；右键配置才可以覆盖默认环位。
@@ -118,16 +131,28 @@ export interface Dnd5eCombatActionSpellSource {
   unavailableReason?: string
 }
 
-export interface Dnd5eCombatActionFeatureSource {
+interface Dnd5eCombatActionFeatureSourceBase {
   id: string
   label: string
   description: string
   icon: Dnd5eActionIconSpec
-  modifier: Dnd5eCombatSpellModifier
+  economy?: Dnd5eCombatActionEconomy
+  targeting?: Dnd5eCombatActionTargeting
   resource?: Dnd5eCombatActionResourceBadge
   available?: boolean
   unavailableReason?: string
 }
+
+export type Dnd5eCombatActionFeatureSource = Dnd5eCombatActionFeatureSourceBase & (
+  | {
+      modifier: Dnd5eCombatSpellModifier
+      command?: never
+    }
+  | {
+      command: Dnd5eCombatActionCommand
+      modifier?: never
+    }
+)
 
 export interface Dnd5eCombatActionItemSource {
   instanceId: string
@@ -216,7 +241,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
 
   for (const spell of input.spells ?? []) {
     actions.push(descriptor({
-      id: `spell:${spell.castingClassId}:${spell.id}`,
+      id: dnd5eCombatSpellActionId(spell.castingClassId, spell.id),
       sourceKind: 'spell',
       label: spell.label,
       description: spell.description,
@@ -235,17 +260,18 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
   }
 
   for (const feature of input.features ?? []) {
+    const economy = feature.economy ?? 'none'
     actions.push(descriptor({
       id: `feature:${feature.id}`,
       sourceKind: 'feature',
       label: feature.label,
       description: feature.description,
       icon: feature.icon,
-      economy: 'none',
-      targeting: 'none',
+      economy,
+      targeting: feature.targeting ?? 'none',
       resource: feature.resource,
-      command: { kind: 'toggle-spell-modifier', modifier: feature.modifier },
-    }, availability(input, 'none', feature.available ?? true, feature.unavailableReason)))
+      command: feature.command ?? { kind: 'toggle-spell-modifier', modifier: feature.modifier },
+    }, availability(input, economy, feature.available ?? true, feature.unavailableReason)))
   }
 
   for (const item of input.items ?? []) {

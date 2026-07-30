@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
+const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
+const PLAYER = `http://127.0.0.1:${E2E_PORT_BASE + 1}`
 
 type ResourceCharacter = {
   id: string
@@ -68,18 +69,18 @@ async function loadPlayerState<T>(page: Page, name: string): Promise<T> {
 }
 
 async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
+  await page.evaluate(async ({ payload, dmBase }) => {
     const protocolHeaders = {
       'X-Stars-Protocol': '5',
       'X-Stars-Writer': 'e2e-spell-client',
     }
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const queueResponse = await fetch('http://127.0.0.1:6173/api/state/player-action-requests')
+      const queueResponse = await fetch(`${dmBase}/api/state/player-action-requests`)
       const queue = queueResponse.ok
         ? await queueResponse.json() as { requests?: Record<string, unknown>[]; _sync?: { revision?: number } }
         : { requests: [] }
       const revision = Number(queueResponse.headers.get('X-Stars-State-Revision') ?? queue._sync?.revision ?? 0)
-      const putResponse = await fetch('http://127.0.0.1:6173/api/state/player-action-requests', {
+      const putResponse = await fetch(`${dmBase}/api/state/player-action-requests`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -98,13 +99,13 @@ async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
         throw new Error(`player-action queue PUT failed: ${putResponse.status}`)
       }
     }
-    const eventResponse = await fetch('http://127.0.0.1:6173/api/events/player-action-player-to-dm', {
+    const eventResponse = await fetch(`${dmBase}/api/events/player-action-player-to-dm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...protocolHeaders },
       body: JSON.stringify(payload),
     })
     if (!eventResponse.ok) throw new Error(`player-action event failed: ${eventResponse.status}`)
-  }, action)
+  }, { payload: action, dmBase: DM })
 }
 
 function spellcaster(
@@ -147,6 +148,26 @@ function spellcaster(
     dmNotes: '',
     visibleToPlayers: true,
     equipment: {},
+    dnd5eInventory: {
+      schemaVersion: 3,
+      entries: [{
+        instanceId: `${id}:component-pouch`,
+        templateId: 'srd-5.1:item:component-pouch',
+        item: {
+          id: 'srd-5.1:item:component-pouch',
+          name: '材料包',
+          category: 'container',
+          icon: 'generic',
+          description: '跨端法术测试用材料包。',
+          rulesText: '',
+          stackable: false,
+          source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+        },
+        quantity: 1,
+        acquiredAt: Date.now(),
+      }],
+      currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+    },
     dnd5eClassChoices: {
       classes: {
         [classId]: {
@@ -380,9 +401,9 @@ test('普通法术攻击只结算一次：并发重复请求不会重复扣法�
   await Promise.all([submitPlayerAction(player, action), submitPlayerAction(player, action)])
 
   await expect.poll(async () => {
-    const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
-    return ack.actionId === action.id ? ack.status : ''
-  }, { timeout: 30_000 }).toBe('accepted')
+    const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
+  }, { timeout: 30_000 }).toBe('accepted:')
   await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
   await expect.poll(async () => {
     const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
@@ -660,8 +681,136 @@ test('DM 控制角色施放护盾术后重新判定命中，消耗反应与最�
     }))
   }).toEqual([
     { id: seeded.character.id, hp: 32, slot1: 4, slot2: 1, acidArrowDelayedEffects: 0 },
+    // Shield turns Acid Arrow into a miss, but Acid Arrow still deals half of
+    // its 4d4 initial damage on a miss. With the deterministic dice this is 4
+    // damage from the target's initial 32 HP; delayed damage is not created.
     { id: reactor.id, hp: 28, slot1: 0, slot2: 0, acidArrowDelayedEffects: 0 },
   ])
+  await context.close()
+})
+
+test('火球术在骰子动画结束或超时后仍完成 8d6 权威伤害并跨端同步', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-fireball-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['fireball'])
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  // d20=11; the Ogre's Dexterity modifier makes the save fail. Every d6=4.
+  await dm.evaluate(() => { Math.random = () => 0.5 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:fireball:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.actorToken.id,
+    targetTokenIds: [],
+    dnd5eSpellCast: {
+      spellId: 'fireball',
+      castingClassId: 'wizard',
+      slotLevel: 3,
+      targetTokenId: seeded.actorToken.id,
+      targetTokenIds: [],
+      areaTargetCell: { col: 8, row: 2 },
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await submitPlayerAction(player, action)
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
+  }, { timeout: 45_000 }).toBe('accepted:')
+  await expect.poll(async () => {
+    const state = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+    return state.maps.find((map) => map.id === mapId)?.tokens
+      .find((token) => token.id === seeded.enemyToken.id)?.hp
+  }).toBe(8)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters[0].classResources?.['dnd5e-spell-slot-3']?.current
+  }).toBe(1)
+  const playerMaps = await loadPlayerState<{ maps: ResourceMap[] }>(player, 'maps')
+  expect(playerMaps.maps.find((map) => map.id === mapId)?.tokens
+    .find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(8)
+  await context.close()
+})
+
+test('魔法飞弹逐枚接受目标分配并只执行一次权威事务', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-magic-missile-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['magic-missile'])
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  // Every d4=3, then each dart adds +1: three darts deal 12 total damage.
+  await dm.evaluate(() => { Math.random = () => 0.5 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:magic-missile:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    targetTokenIds: [seeded.enemyToken.id],
+    dnd5eSpellCast: {
+      spellId: 'magic-missile',
+      castingClassId: 'wizard',
+      slotLevel: 1,
+      targetTokenId: seeded.enemyToken.id,
+      targetTokenIds: [seeded.enemyToken.id],
+      projectileTargetIds: [
+        seeded.enemyToken.id,
+        seeded.enemyToken.id,
+        seeded.enemyToken.id,
+      ],
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await Promise.all([submitPlayerAction(player, action), submitPlayerAction(player, action)])
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
+  }, { timeout: 45_000 }).toBe('accepted:')
+  await expect.poll(async () => {
+    const state = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+    return state.maps.find((map) => map.id === mapId)?.tokens
+      .find((token) => token.id === seeded.enemyToken.id)?.hp
+  }).toBe(28)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters[0].classResources?.['dnd5e-spell-slot-1']?.current
+  }).toBe(3)
+  const processed = await getState<{ actionIds: string[] }>(request, 'player-action-processed')
+  expect(processed.actionIds.filter((id) => id === action.id)).toHaveLength(1)
   await context.close()
 })
 

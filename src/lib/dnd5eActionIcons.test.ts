@@ -565,4 +565,24 @@ describe('D&D 5e combat action icon registry', () => {
       })
     }
   })
+
+  it('binds painted icons for the elemental gem, elven chain, smoke bottle, and charming eyes', () => {
+    const cases = [
+      ['elemental-gem', 'elemental-gem-item-action.png', 'uncommon', '#237A4A'],
+      ['elven-chain', 'elven-chain-item-action.png', 'rare', '#2563A8'],
+      ['eversmoking-bottle', 'eversmoking-bottle-item-action.png', 'uncommon', '#237A4A'],
+      ['eyes-of-charming', 'eyes-of-charming-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
 })

@@ -10,6 +10,7 @@ import {
   dnd5eOffHandWeaponAttackProfile,
   dnd5eWalkingSpeed,
   dnd5eWeaponAttackProfile,
+  dnd5eTotemWarriorFeatureForCharacter,
   getDnd5eSrdMonster,
   DND5E_SRD_CLASS_DEFINITIONS,
   normalizeDnd5eClassLevels,
@@ -352,6 +353,22 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
     const canFrenzy = subclassId === 'berserker' && character.level >= 3
     const raging = character.dnd5eCombatState?.raging === true
     const frenzying = character.dnd5eCombatState?.frenzying === true
+    const eagleTotem = !!dnd5eTotemWarriorFeatureForCharacter(
+      character,
+      'totem-spirit-eagle',
+    )
+    const wolfAttunement = !!dnd5eTotemWarriorFeatureForCharacter(
+      character,
+      'totemic-attunement-wolf',
+    )
+    const wolfTargetIds = new Set(
+      character.dnd5eCombatState?.totemWarriorWolfAttunementTargetIds ?? [],
+    )
+    const wolfTargets = livingTargets.filter((target) =>
+      target.tokenType === 'enemy' && wolfTargetIds.has(target.tokenId),
+    )
+    const wolfTarget = wolfTargets.find((entry) => entry.tokenId === selectedTargetId) ??
+      wolfTargets[0]
     const intimidatingTargets = livingTargets.filter((target) => target.tokenType === 'enemy' && target.distanceFeet <= 30)
     const intimidatingTarget = intimidatingTargets.find((entry) => entry.tokenId === selectedTargetId) ?? intimidatingTargets[0]
     controls = <div className="grid gap-2">
@@ -369,6 +386,24 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
           ? { feature: 'barbarian-rage', end: true }
           : { feature: 'barbarian-rage', frenzy: canFrenzy && enterFrenzy })}
       />
+      {eagleTotem ? <FeatureButton
+        label="鹰图腾疾走"
+        detail="附赠动作 · 狂暴期间增加一份当前步行速度的本回合移动"
+        disabled={disabled || !bonusAvailable || !raging || heavyArmor}
+        onClick={() => onFeature({ feature: 'barbarian-totem-eagle-dash' })}
+      /> : null}
+      {wolfAttunement && wolfTargets.length > 0 ? <TargetFeatureControl
+        label="狼图腾击倒"
+        detail="附赠动作 · 选择本回合已被你近战命中的大型或更小目标"
+        targets={wolfTargets}
+        selectedId={wolfTarget?.tokenId ?? ''}
+        onSelected={setSelectedTargetId}
+        disabled={disabled || !bonusAvailable || !raging || !wolfTarget}
+        onUse={() => wolfTarget && onFeature({
+          feature: 'barbarian-totem-wolf-knockdown',
+          targetTokenId: wolfTarget.tokenId,
+        })}
+      /> : null}
       {subclassId === 'berserker' && character.level >= 10 ? <TargetFeatureControl
         label="威吓气势"
         detail="动作 · 30 尺 · 目标进行感知豁免；后续回合可用动作延长"

@@ -27,6 +27,11 @@ import {
   type TokenMovementAnimation,
 } from '../../lib/tokenMovementAnimation'
 import {
+  canDragMapToken,
+  shouldReleaseOptimisticTokenMovePreview,
+  shouldValidateMapTokenMoveLocally,
+} from '../../lib/mapTokenDragPolicy'
+import {
   THUNDERWAVE_ANIMATION_DURATION_MS,
   combatPresentationSavingThrowAbilityLabel,
   type CombatPresentationSavingThrowAbility,
@@ -36,6 +41,7 @@ import {
   dnd5eSpellActionIcon,
   type Dnd5eActionIconSpec,
 } from '../../lib/dnd5eActionIcons'
+import { dnd5eActionIconBackdropImage } from './dnd5eActionIconBackdropImage'
 
 const TOKEN_MOVE_DURATION = TOKEN_MOVE_DURATION_S
 // Treat tiny drags as click jitter; do not submit movement or broadcast.
@@ -563,6 +569,12 @@ interface MapCanvasProps {
   currentTurnTokenId?: string
   /** 战斗中禁止拖动的 token */
   lockDragTokenIds?: string[]
+  /**
+   * Token whose drag is settled by an upper authoritative movement
+   * transaction. The canvas must not reject its straight line before the
+   * Headless pathfinder gets a chance to route around walls or open a door.
+   */
+  authoritativeMovementTokenIds?: readonly string[]
   /** 底图自带网格，token 尺寸贴合格子 */
   builtinGrid?: boolean
   /** DM grid offset drag mode. */
@@ -613,14 +625,19 @@ interface MapCanvasProps {
   onGeometryEditCancel?: () => void
   onTokenMoveBlocked?: (entityId?: string) => void
   /**
-   * 返回 true 表示由上层权威事务接管本次拖动，MapCanvas 不直接写坐标。
+   * 返回 true 表示由上层权威事务接管本次拖动，MapCanvas 不直接写坐标；
+   * 返回 pending 时保留目标位置预览，直至权威坐标同步或请求结束。
    * 用于战斗中的怪物移动力、借机攻击和危险区域结算。
    */
   onTokenMoveRequest?: (
     token: Token,
     position: { x: number; y: number },
     targetElevationFeet: number,
-  ) => boolean
+  ) => boolean | 'pending'
+  /** Token IDs whose authority requests are still waiting for DM settlement. */
+  optimisticTokenMoveIds?: readonly string[]
+  /** Player Tokens that the current non-DM client may request to move. */
+  playerMovableTokenIds?: readonly string[]
   tabletopTool?: MapTabletopTool
   tabletopPings?: readonly MapTabletopPing[]
   tabletopAnnotations?: readonly MapTabletopAnnotation[]
@@ -1674,7 +1691,25 @@ function SpellStatusTokenBadge(input: {
   const scale = tokenScale(input.radius)
   const spec = MAP_SPELL_STATUS_ICONS[input.mark.statusId]
   const image = useTokenBadgeImage(spec.asset)
-  const backdropLines = [-0.28, -0.14, 0, 0.14, 0.28]
+  const backdropAsset = useMemo(
+    () => input.mark.classId
+      ? dnd5eActionIconBackdropImage({
+          classId: input.mark.classId,
+          background: input.mark.backgroundHighlightColor,
+          backgroundDeep: input.mark.backgroundColor,
+          accent: input.mark.borderColor,
+          glow: input.mark.glowColor,
+        })
+      : undefined,
+    [
+      input.mark.backgroundColor,
+      input.mark.backgroundHighlightColor,
+      input.mark.borderColor,
+      input.mark.classId,
+      input.mark.glowColor,
+    ],
+  )
+  const backdropImage = useTokenBadgeImage(backdropAsset)
 
   return (
     <Group
@@ -1702,89 +1737,25 @@ function SpellStatusTokenBadge(input: {
         shadowBlur={6 * scale}
         shadowColor={input.mark.glowColor}
       />
-      <Group
-        clipFunc={(context) => {
-          context.beginPath()
-          context.arc(0, 0, size * 0.47, 0, Math.PI * 2)
-          context.closePath()
-        }}
-        opacity={0.34}
-        listening={false}
-      >
-        {input.mark.classId === 'bard' ? (
-          <>
-            {backdropLines.map((offset, index) => (
-              <Line
-                key={`bard-wave-${index}`}
-                points={[
-                  -size * 0.58,
-                  size * offset,
-                  -size * 0.25,
-                  size * (offset - 0.09),
-                  size * 0.08,
-                  size * (offset + 0.06),
-                  size * 0.55,
-                  size * (offset - 0.03),
-                ]}
-                stroke={input.mark.borderColor}
-                strokeWidth={Math.max(0.55, size * 0.025)}
-                tension={0.45}
-                opacity={0.62}
-                listening={false}
-              />
-            ))}
-            <Text
-              text="♪"
-              x={-size * 0.38}
-              y={-size * 0.4}
-              width={size * 0.32}
-              height={size * 0.32}
-              fontSize={Math.max(7, size * 0.27)}
-              fontStyle="bold"
-              fill={input.mark.glowColor}
-              align="center"
-              verticalAlign="middle"
-              listening={false}
-            />
-          </>
-        ) : (
-          <Group rotation={spec.textureRotation} listening={false}>
-            {backdropLines.map((offset, index) => (
-              <Line
-                key={`spell-bg-horizontal-${index}`}
-                points={[-size * 0.7, size * offset, size * 0.7, size * offset]}
-                stroke={input.mark.borderColor}
-                strokeWidth={Math.max(0.45, size * 0.018)}
-                opacity={0.48}
-                listening={false}
-              />
-            ))}
-            {backdropLines.map((offset, index) => (
-              <Line
-                key={`spell-bg-vertical-${index}`}
-                points={[size * offset, -size * 0.7, size * offset, size * 0.7]}
-                stroke={input.mark.borderColor}
-                strokeWidth={Math.max(0.45, size * 0.018)}
-                opacity={0.48}
-                listening={false}
-              />
-            ))}
-          </Group>
-        )}
-        <Circle
-          radius={size * 0.35}
-          stroke={input.mark.glowColor}
-          strokeWidth={Math.max(0.5, size * 0.022)}
-          opacity={0.52}
+      {backdropImage ? (
+        <Group
+          clipFunc={(context) => {
+            context.beginPath()
+            context.arc(0, 0, size * 0.47, 0, Math.PI * 2)
+            context.closePath()
+          }}
           listening={false}
-        />
-        <Circle
-          radius={size * 0.44}
-          fill={input.mark.glowColor}
-          opacity={0.08}
-          listening={false}
-        />
-      </Group>
+        >
+          <KonvaImage
+            image={backdropImage}
+            x={-size * 0.5}
+            y={-size * 0.5}
+            width={size}
+            height={size}
+            listening={false}
+          />
+        </Group>
+      ) : null}
       {image ? (
         <Group
           clipFunc={(context) => {
@@ -2435,6 +2406,7 @@ export default function MapCanvas({
   savingThrowAbility,
   currentTurnTokenId,
   lockDragTokenIds = [],
+  authoritativeMovementTokenIds = [],
   builtinGrid = false,
   gridAdjustMode = false,
   onGridOffsetChange,
@@ -2482,6 +2454,8 @@ export default function MapCanvas({
   onGeometryEditCancel,
   onTokenMoveBlocked,
   onTokenMoveRequest,
+  optimisticTokenMoveIds = [],
+  playerMovableTokenIds = [],
   tabletopTool = 'none',
   tabletopPings = [],
   tabletopAnnotations = [],
@@ -2584,13 +2558,17 @@ export default function MapCanvas({
   }
 
   const canDragToken = (token: Token): boolean =>
-    isDM &&
-    !measureMode &&
-    !deleteSelectMode &&
-    !gridAdjustMode &&
-    !fogEditMode &&
-    !geometryEditMode &&
-    !lockDragTokenIds.includes(token.id)
+    canDragMapToken({
+      isDm: isDM,
+      token,
+      playerMovableTokenIds,
+      measureMode,
+      deleteSelectMode,
+      gridAdjustMode,
+      fogEditMode,
+      geometryEditMode,
+      lockDragTokenIds,
+    })
 
   const previewTokenDrag = (token: Token, x: number, y: number) => {
     setDragPreviewPositions((prev) => ({
@@ -2608,6 +2586,28 @@ export default function MapCanvas({
     })
   }
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDragPreviewPositions((current) => {
+        let changed = false
+        const next = { ...current }
+        for (const [tokenId, preview] of Object.entries(current)) {
+          const authoritative = map.tokens.find((token) => token.id === tokenId)
+          if (shouldReleaseOptimisticTokenMovePreview({
+            requestPending: optimisticTokenMoveIds.includes(tokenId),
+            authoritative,
+            preview,
+          })) {
+            delete next[tokenId]
+            changed = true
+          }
+        }
+        return changed ? next : current
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [map.tokens, optimisticTokenMoveIds])
+
   const commitTokenDrag = (token: Token, x: number, y: number) => {
     const snapped = resolveTokenDropPosition(x, y, token, map)
     const pos = shouldSnapTokenOnDrop(token, map)
@@ -2620,21 +2620,32 @@ export default function MapCanvas({
       mapGeometryTokenElevation(geometry, token) - fromTerrainElevation,
     )
     const toElevationFeet = toTerrainElevation + heightAboveGround
-    const blocker = mapGeometryMovementBlocked({
-      geometry,
-      map,
+    if (shouldValidateMapTokenMoveLocally({
+      isDm: isDM,
       token,
-      to: pos,
-      fromElevationFeet: mapGeometryTokenElevation(geometry, token),
-      toElevationFeet,
-    })
-    if (blocker.blocked) {
-      clearTokenDragPreview(token.id)
-      onTokenMoveBlocked?.(blocker.entityId)
-      return
+      authoritativeMovementTokenIds,
+    })) {
+      const blocker = mapGeometryMovementBlocked({
+        geometry,
+        map,
+        token,
+        to: pos,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, token),
+        toElevationFeet,
+      })
+      if (blocker.blocked) {
+        clearTokenDragPreview(token.id)
+        onTokenMoveBlocked?.(blocker.entityId)
+        return
+      }
     }
-    if (onTokenMoveRequest?.(token, pos, toElevationFeet)) {
-      clearTokenDragPreview(token.id)
+    const requestResult = onTokenMoveRequest?.(token, pos, toElevationFeet)
+    if (requestResult) {
+      if (requestResult === 'pending') {
+        previewTokenDrag(token, pos.x, pos.y)
+      } else {
+        clearTokenDragPreview(token.id)
+      }
       return
     }
     previewTokenDrag(token, pos.x, pos.y)
@@ -4597,22 +4608,31 @@ function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile }) {
 
 function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
-  const fluidRef = useRef<Konva.Group>(null)
+  const trailRef = useRef<Konva.Group>(null)
+  const frontRef = useRef<Konva.Group>(null)
+  const impactRef = useRef<Konva.Group>(null)
+  const impactRingRef = useRef<Konva.Circle>(null)
+  const dropletRefs = useRef<Array<Konva.Circle | null>>([])
   const fluidImage = useTokenBadgeImage('/assets/vfx/acid-splash-fluid.png')
   const glow = projectile.glowColor ?? '#bef264'
+  const accent = projectile.accentColor ?? '#84cc16'
   const distance = Math.max(
     1,
     Math.hypot(projectile.to.x - projectile.from.x, projectile.to.y - projectile.from.y),
   )
-  const fluidWidth = distance * 1.13
-  const fluidHeight = Math.min(150, Math.max(76, distance * 0.34))
-  const fluidX = -distance * 0.045
+  const fluidWidth = distance * 1.16
+  const fluidHeight = Math.min(160, Math.max(82, distance * 0.36))
+  const fluidX = -distance * 0.055
+  const impactSize = Math.min(132, Math.max(72, fluidHeight * 0.92))
 
   useEffect(() => {
     const effect = effectRef.current
-    const fluid = fluidRef.current
+    const trail = trailRef.current
+    const front = frontRef.current
+    const impact = impactRef.current
+    const impactRing = impactRingRef.current
     const layer = effect?.getLayer()
-    if (!effect || !fluid || !fluidImage || !layer) return
+    if (!effect || !trail || !front || !impact || !impactRing || !fluidImage || !layer) return
     const duration = Math.max(1, projectile.durationMs ?? 1_050)
     const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
     const dx = projectile.to.x - projectile.from.x
@@ -4622,29 +4642,68 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
     const animation = new Konva.Animation((frame) => {
       const elapsed = initialElapsed + (frame?.time ?? 0)
       const raw = Math.min(1, elapsed / duration)
-      const revealRaw = Math.min(1, raw / 0.58)
-      const reveal = 1 - Math.pow(1 - revealRaw, 2.4)
-      const fade = raw < 0.72 ? 1 : Math.max(0, (1 - raw) / 0.28)
-      fluid.clipWidth(fluidWidth * reveal)
-      fluid.opacity(Math.min(1, raw / 0.08) * fade)
-      fluid.scaleY(0.96 + Math.sin(elapsed * 0.017) * 0.055)
-      effect.y(projectile.from.y + Math.sin(elapsed * 0.012) * 2)
+      const travelRaw = Math.min(1, raw / 0.64)
+      const travel = 1 - Math.pow(1 - travelRaw, 2.7)
+      const frontX = distance * travel
+      const impactRaw = Math.max(0, Math.min(1, (raw - 0.48) / 0.24))
+      const fade = raw < 0.82 ? 1 : Math.max(0, (1 - raw) / 0.18)
+      const pulse = Math.sin(elapsed * 0.021)
+
+      trail.clipWidth(Math.max(fluidHeight * 0.14, frontX + fluidHeight * 0.22))
+      trail.opacity(Math.min(1, raw / 0.075) * fade * 0.9)
+      trail.scaleY(0.94 + pulse * 0.065)
+      trail.y(Math.sin(elapsed * 0.013) * fluidHeight * 0.035)
+
+      front.x(frontX)
+      front.y(Math.sin(elapsed * 0.016) * fluidHeight * 0.075)
+      front.scale({
+        x: 0.7 + travelRaw * 0.32 + pulse * 0.045,
+        y: 0.82 + travelRaw * 0.22 - pulse * 0.06,
+      })
+      front.opacity((raw < 0.06 ? raw / 0.06 : 1) * (1 - impactRaw * 0.72) * fade)
+
+      impact.opacity(Math.sin(impactRaw * Math.PI * 0.82) * fade)
+      impact.scale({
+        x: 0.36 + impactRaw * 0.88,
+        y: 0.46 + impactRaw * 0.78,
+      })
+      impactRing.radius(impactSize * (0.18 + impactRaw * 0.62))
+      impactRing.opacity((1 - impactRaw) * 0.78)
+      dropletRefs.current.forEach((droplet, index) => {
+        if (!droplet) return
+        const angle = -1.35 + index * 0.47
+        const spread = impactSize * (0.16 + impactRaw * (0.35 + (index % 4) * 0.11))
+        droplet.position({
+          x: Math.cos(angle) * spread - impactSize * 0.08,
+          y: Math.sin(angle) * spread,
+        })
+        droplet.scaleY(1.2 + impactRaw * 1.1)
+        droplet.rotation(angle * 180 / Math.PI)
+        droplet.opacity(Math.sin(impactRaw * Math.PI) * (0.72 + (index % 3) * 0.08))
+      })
+      effect.y(projectile.from.y + Math.sin(elapsed * 0.011) * 1.8)
       if (raw >= 1) animation.stop()
     }, layer)
+    effect.opacity(1)
+    trail.opacity(0.01)
+    front.opacity(0.01)
+    impact.opacity(0)
+    layer.batchDraw()
     animation.start()
     return () => {
       animation.stop()
     }
-  }, [fluidImage, fluidWidth, projectile])
+  }, [distance, fluidHeight, fluidImage, fluidWidth, impactSize, projectile])
 
   return (
     <Group ref={effectRef} x={projectile.from.x} y={projectile.from.y} listening={false}>
       <Group
-        ref={fluidRef}
+        ref={trailRef}
         clipX={fluidX}
         clipY={-fluidHeight * 0.58}
         clipWidth={0}
         clipHeight={fluidHeight * 1.16}
+        listening={false}
       >
         {fluidImage && (
           <KonvaImage
@@ -4658,6 +4717,70 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
             perfectDrawEnabled={false}
           />
         )}
+      </Group>
+      {fluidImage ? (
+        <Group ref={frontRef} listening={false}>
+          <KonvaImage
+            image={fluidImage}
+            crop={{ x: 760, y: 80, width: 760, height: 870 }}
+            x={-impactSize * 0.6}
+            y={-impactSize * 0.52}
+            width={impactSize * 1.05}
+            height={impactSize * 1.04}
+            shadowColor={glow}
+            shadowBlur={22}
+            perfectDrawEnabled={false}
+          />
+          <Circle
+            x={-impactSize * 0.08}
+            radius={impactSize * 0.11}
+            fill="#d9f99d"
+            opacity={0.46}
+            shadowColor={accent}
+            shadowBlur={14}
+            perfectDrawEnabled={false}
+          />
+        </Group>
+      ) : null}
+      <Group
+        ref={impactRef}
+        x={distance}
+        listening={false}
+      >
+        {fluidImage ? (
+          <KonvaImage
+            image={fluidImage}
+            crop={{ x: 690, y: 20, width: 830, height: 970 }}
+            x={-impactSize * 0.64}
+            y={-impactSize * 0.57}
+            width={impactSize * 1.22}
+            height={impactSize * 1.14}
+            shadowColor={glow}
+            shadowBlur={28}
+            perfectDrawEnabled={false}
+          />
+        ) : null}
+        <Circle
+          ref={impactRingRef}
+          radius={impactSize * 0.18}
+          stroke="#d9f99d"
+          strokeWidth={Math.max(1.5, impactSize * 0.028)}
+          shadowColor={glow}
+          shadowBlur={15}
+          perfectDrawEnabled={false}
+        />
+        {Array.from({ length: 12 }, (_, index) => (
+          <Circle
+            key={`acid-impact-droplet:${index}`}
+            ref={(node) => { dropletRefs.current[index] = node }}
+            radius={Math.max(1.4, impactSize * (0.024 + (index % 3) * 0.008))}
+            fill={index % 4 === 0 ? glow : index % 2 === 0 ? '#d9f99d' : '#84cc16'}
+            shadowColor={index % 4 === 0 ? glow : accent}
+            shadowBlur={7}
+            opacity={0}
+            perfectDrawEnabled={false}
+          />
+        ))}
       </Group>
     </Group>
   )

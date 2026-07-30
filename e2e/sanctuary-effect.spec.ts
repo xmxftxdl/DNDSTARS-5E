@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
+const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
+const PLAYER = `http://127.0.0.1:${E2E_PORT_BASE + 1}`
 
 async function putState(request: APIRequestContext, name: string, payload: unknown) {
   const response = await request.put(`${DM}/api/state/${name}`, { data: payload })

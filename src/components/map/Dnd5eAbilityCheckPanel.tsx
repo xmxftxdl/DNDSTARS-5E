@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Dices } from 'lucide-react'
 import { ABILITIES, SKILLS } from '../../lib/dnd'
 import type { Dnd5eAbilityCheckPayload, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
-import { dnd5eAbilityCheckModifier, dnd5eSkillCheckModifier, dnd5eSkillCheckProficiencyRank } from '../../rulesets/dnd5e'
+import { dnd5eAbilityCheckModifier, dnd5eSkillCheckModifier, dnd5eSkillCheckProficiencyRank, dnd5eTotemWarriorFeatureForCharacter } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 
 export default function Dnd5eAbilityCheckPanel({ character, canAct, pending, turnEconomy, onCheck }: {
@@ -16,6 +16,7 @@ export default function Dnd5eAbilityCheckPanel({ character, canAct, pending, tur
   const [dc, setDc] = useState(10)
   const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
   const [spendAction, setSpendAction] = useState(false)
+  const [bearAspectTask, setBearAspectTask] = useState(false)
   const selected = useMemo(() => {
     const [kind, key] = selection.split(':')
     if (kind === 'skill') {
@@ -38,6 +39,13 @@ export default function Dnd5eAbilityCheckPanel({ character, canAct, pending, tur
   }, [character, selection])
   const modifierText = `${selected.modifier >= 0 ? '+' : ''}${selected.modifier}`
   const disabled = !canAct || pending || (spendAction && turnEconomy.action.current < 1)
+  const bearAspectAvailable =
+    selected.ability === 'str' &&
+    selected.skill == null &&
+    !!dnd5eTotemWarriorFeatureForCharacter(
+      character,
+      'aspect-of-the-beast-bear',
+    )
 
   return <section className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.04] p-4 md:col-span-2">
     <div className="flex items-center gap-2 text-sm font-semibold text-cyan-100"><Dices className="h-4 w-4" />属性与技能检定</div>
@@ -70,10 +78,27 @@ export default function Dnd5eAbilityCheckPanel({ character, canAct, pending, tur
       <input type="checkbox" checked={spendAction} onChange={(event) => setSpendAction(event.target.checked)} />
       DM 将本次检定判定为一个主动动作
     </label>
+    {bearAspectAvailable ? <label className="mt-2 flex items-center gap-2 text-xs text-amber-200">
+      <input
+        type="checkbox"
+        checked={bearAspectTask}
+        onChange={(event) => setBearAspectTask(event.target.checked)}
+      />
+      熊之形：本次力量检定用于推、拉、举起或破坏物体
+    </label> : null}
     <button
       type="button"
       disabled={disabled}
-      onClick={() => onCheck({ ability: selected.ability, skill: selected.skill, dc, mode, spendAction: spendAction || undefined })}
+      onClick={() => onCheck({
+        ability: selected.ability,
+        skill: selected.skill,
+        context: bearAspectAvailable && bearAspectTask
+          ? 'push-pull-lift-break'
+          : undefined,
+        dc,
+        mode,
+        spendAction: spendAction || undefined,
+      })}
       className="mt-3 w-full rounded-xl bg-cyan-500/20 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35 disabled:cursor-not-allowed disabled:opacity-40"
     >
       {pending ? '等待 DM 结算…' : `进行${selected.label}（${modifierText}）`}

@@ -55,5 +55,7 @@ describe('职业与插件中断面板', () => {
     expect(html).toContain('重掷')
     expect(html).toContain('超时将采用“保留结果”')
     expect(html).toContain('5s')
+    expect(html).toContain('data-testid="shared-plugin-choice-options"')
+    expect(html).toContain('overflow-y-auto')
   })
 })

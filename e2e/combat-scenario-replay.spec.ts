@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
+const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
+const PLAYER = `http://127.0.0.1:${E2E_PORT_BASE + 1}`
 
 /**
  * A replay is intentionally data-first: stable coordinates, an eight-digit
@@ -69,19 +70,19 @@ async function installSeededRandom(page: Page, seed: number) {
 }
 
 async function submitReplayAction(page: Page, action: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
+  await page.evaluate(async ({ payload, dmBase }) => {
     const headers = {
       'Content-Type': 'application/json',
       'X-Stars-Protocol': '5',
       'X-Stars-Writer': 'combat-scenario-replay',
     }
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const queueResponse = await fetch('http://127.0.0.1:6173/api/state/player-action-requests')
+      const queueResponse = await fetch(`${dmBase}/api/state/player-action-requests`)
       const queue = queueResponse.ok
         ? await queueResponse.json() as { requests?: Record<string, unknown>[]; _sync?: { revision?: number } }
         : { requests: [] }
       const revision = Number(queueResponse.headers.get('X-Stars-State-Revision') ?? queue._sync?.revision ?? 0)
-      const response = await fetch('http://127.0.0.1:6173/api/state/player-action-requests', {
+      const response = await fetch(`${dmBase}/api/state/player-action-requests`, {
         method: 'PUT',
         headers: { ...headers, 'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0) },
         body: JSON.stringify({
@@ -94,13 +95,13 @@ async function submitReplayAction(page: Page, action: Record<string, unknown>) {
       if (response.ok) break
       if (response.status !== 409 || attempt === 4) throw new Error(`action queue failed: ${response.status}`)
     }
-    const eventResponse = await fetch('http://127.0.0.1:6173/api/events/player-action-player-to-dm', {
+    const eventResponse = await fetch(`${dmBase}/api/events/player-action-player-to-dm`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
     })
     if (!eventResponse.ok) throw new Error(`action event failed: ${eventResponse.status}`)
-  }, action)
+  }, { payload: action, dmBase: DM })
 }
 
 test('replays Thunderwave through the player action protocol and synchronizes a cliff fall', async ({

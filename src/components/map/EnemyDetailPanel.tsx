@@ -635,7 +635,11 @@ export default function EnemyDetailPanel({
                     <li key={`${a.name}:${actionIndex}`} className="rounded-xl bg-rose-500/10 px-3 py-2">
                       <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-rose-200">{a.name}</p>{a.automation && <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${a.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{a.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{a.description}</p>
-                      {canUseMonsterActions && a.automation === 'headless' && (a.kind === 'melee' || a.kind === 'ranged') ? (
+                      {canUseMonsterActions && a.automation === 'headless' && (
+                        a.kind === 'melee' ||
+                        a.kind === 'ranged' ||
+                        a.kind === 'multiattack'
+                      ) ? (
                         <button
                           type="button"
                           disabled={monsterActionUsed}
