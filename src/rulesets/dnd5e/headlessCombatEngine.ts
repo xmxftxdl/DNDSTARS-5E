@@ -98,6 +98,18 @@ import {
   parseDnd5eLegendaryWingAttack,
 } from './monsterAdvancedAbilities'
 import { dnd5eBardicInspirationDie, dnd5eMonkMartialArtsDie, dnd5ePactSlotLevel, dnd5eRogueSneakAttackDice, type Dnd5eClassId } from './classes'
+import {
+  dnd5eCombatantClassLevel,
+  dnd5eCombatantHasSubclass,
+  dnd5eCombatantPairKey,
+  dnd5eDirectedCombatantPairKey,
+} from './headlessCombatPrimitives'
+export {
+  dnd5eCombatantClassLevel,
+  dnd5eCombatantHasSubclass,
+  dnd5eCombatantPairKey,
+  dnd5eDirectedCombatantPairKey,
+} from './headlessCombatPrimitives'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eCharmPersonEligibleCreatureType, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellAttackDelivery, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell } from './spells'
 import { getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
 import {
@@ -501,24 +513,6 @@ export interface Dnd5eCombatant {
   conditions: readonly string[]
 }
 
-/** 职业特性读取对应职业等级；旧快照仍回退到主职业。 */
-export function dnd5eCombatantClassLevel(
-  combatant: { classId?: Dnd5eClassId; level: number; classLevels?: Partial<Record<Dnd5eClassId, number>> },
-  classId: Dnd5eClassId,
-): number {
-  const stored = combatant.classLevels?.[classId]
-  if (stored != null) return Math.max(0, Math.min(20, Math.floor(stored)))
-  return combatant.classId === classId ? Math.max(1, Math.min(20, Math.floor(combatant.level))) : 0
-}
-
-export function dnd5eCombatantHasSubclass(
-  combatant: { classId?: Dnd5eClassId; subclassId?: string; subclassIds?: Partial<Record<Dnd5eClassId, string>> },
-  classId: Dnd5eClassId,
-  subclassId: string,
-): boolean {
-  return (combatant.subclassIds?.[classId] ?? (combatant.classId === classId ? combatant.subclassId : undefined)) === subclassId
-}
-
 export interface Dnd5eHeadlessCombatState {
   rulesetId: typeof rules.id
   combatId: string
@@ -670,14 +664,6 @@ export function dnd5ePendingMonsterMechanicResolutions(
         }),
       }]
     })
-}
-
-export function dnd5eCombatantPairKey(leftId: string, rightId: string): string {
-  return leftId < rightId ? `${leftId}\u0000${rightId}` : `${rightId}\u0000${leftId}`
-}
-
-export function dnd5eDirectedCombatantPairKey(actorId: string, targetId: string): string {
-  return `${actorId}\u0000${targetId}`
 }
 
 export const DND5E_AVERTED_GAZE_DEFINITION_ID = 'monster:turn-start-gaze:averted-eyes'
