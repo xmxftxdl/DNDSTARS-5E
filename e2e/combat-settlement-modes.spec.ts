@@ -164,6 +164,7 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
     const state = await getState<{ entries: Array<{ details?: string[] }> }>(request, 'combat-log')
     return state.entries.some((entry) => entry.details?.includes('结算来源：DM 手动调整'))
   }).toBe(true)
+  await dm.getByTitle('隐藏战斗 Log').click()
 
   await playerDice.getByRole('button', { name: 'd6', exact: true }).click()
   await playerDice.getByLabel('掷骰名称').fill('玩家公开检定')

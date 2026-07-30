@@ -3612,13 +3612,15 @@ export default function MapsPage() {
       amount,
     })
     if (!plan) return
-    void setRoomCharacterHitPoints(plan.hitPoints)
-    pushCombatLog(
-      plan.log.message,
-      plan.log.kind,
-      roundRef.current,
-      plan.log.details,
-    )
+    void setRoomCharacterHitPoints(plan.hitPoints).then((result) => {
+      if (result.status !== 'applied') return
+      pushCombatLog(
+        plan.log.message,
+        plan.log.kind,
+        roundRef.current,
+        plan.log.details,
+      )
+    })
   }
 
   const myPlayerToken =

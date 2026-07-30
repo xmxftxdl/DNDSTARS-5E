@@ -61,7 +61,6 @@ function characterMutationAllowed(character: Character): boolean {
 }
 
 async function persistRoomStores(resources: readonly ('characters' | 'maps')[]): Promise<void> {
-  if (!getRoomSession()) return
   await Promise.all(resources.map((resource) =>
     resource === 'characters'
       ? useCharacterStore.getState().saveSharedNow()
