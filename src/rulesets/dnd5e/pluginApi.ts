@@ -35,7 +35,8 @@ import type { Dnd5eClassId } from './classes'
 import type { Dnd5eMonsterStatBlock } from './monsters'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import { registerDnd5ePluginMonsterCatalogEntry } from './roomMonsterCatalog'
-import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './classLevels'
+import { dnd5ePluginSubclassRegistry as pluginSubclasses } from './pluginSubclassRegistry'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
@@ -615,7 +616,6 @@ const headlessActions = new Map<string, OwnedHeadlessAction>()
 const pluginFeatures = new Map<string, RegisteredDnd5ePluginFeature>()
 const pluginFeats = new Map<string, RegisteredDnd5ePluginFeat>()
 const pluginResources = new Map<string, RegisteredDnd5ePluginResource>()
-const pluginSubclasses = new Map<string, RegisteredDnd5ePluginSubclass>()
 const pluginRaces = new Map<string, RegisteredDnd5ePluginRace>()
 const pluginBackgrounds = new Map<string, RegisteredDnd5ePluginBackground>()
 const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()

@@ -7,11 +7,9 @@ import {
 import type {
   DeclarativeSubclassSpellcastingV1,
 } from './declarativeSubclassAbility'
-import { dnd5eCharacterClassLevel } from './multiclass'
-import {
-  dnd5ePluginSubclassDefinition,
-  type RegisteredDnd5ePluginSubclass,
-} from './pluginApi'
+import { dnd5eCharacterClassLevel } from './classLevels'
+import type { RegisteredDnd5ePluginSubclass } from './pluginApi'
+import { dnd5ePluginSubclassRegistryEntry } from './pluginSubclassRegistry'
 import type {
   Dnd5eSpellbookEntry,
   Dnd5eSpellbookSchoolId,
@@ -54,7 +52,7 @@ export function dnd5eEffectiveSpellcastingSourceForClassSnapshot(
           : 'spell-prepared',
     }
   }
-  const subclass = subclassId ? dnd5ePluginSubclassDefinition(subclassId) : undefined
+  const subclass = subclassId ? dnd5ePluginSubclassRegistryEntry(subclassId) : undefined
   const spellcasting = subclass?.classId === classId ? subclass.declarativeSpellcasting : undefined
   if (!subclass || !spellcasting || classLevel < classDefinition.subclassLevel) return undefined
   return {

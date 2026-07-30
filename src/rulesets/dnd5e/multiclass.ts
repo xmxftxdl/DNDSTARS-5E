@@ -6,9 +6,19 @@ import {
   dnd5ePactSlotLevel,
   type Dnd5eClassId,
 } from './classes'
+import {
+  dnd5eCharacterClassLevel,
+  dnd5eTotalCharacterLevel,
+  normalizeDnd5eClassLevels,
+} from './classLevels'
 import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
 
-export type Dnd5eClassLevels = Partial<Record<Dnd5eClassId, number>>
+export {
+  dnd5eCharacterClassLevel,
+  dnd5eTotalCharacterLevel,
+  normalizeDnd5eClassLevels,
+}
+export type { Dnd5eClassLevels } from './classLevels'
 
 const MULTICLASS_PREREQUISITES: Readonly<Record<Dnd5eClassId, readonly (readonly AbilityKey[])[]>> = {
   barbarian: [['str']],
@@ -27,35 +37,6 @@ const MULTICLASS_PREREQUISITES: Readonly<Record<Dnd5eClassId, readonly (readonly
 
 const FULL_CASTERS = new Set<Dnd5eClassId>(['bard', 'cleric', 'druid', 'sorcerer', 'wizard'])
 const HALF_CASTERS = new Set<Dnd5eClassId>(['paladin', 'ranger'])
-
-export function normalizeDnd5eClassLevels(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
-): Dnd5eClassLevels {
-  const normalized: Dnd5eClassLevels = {}
-  for (const [classId, rawLevel] of Object.entries(character.dnd5eClassLevels ?? {}) as Array<[Dnd5eClassId, number]>) {
-    if (!dnd5eClassDefinition(classId) || !Number.isFinite(rawLevel)) continue
-    const level = Math.max(0, Math.min(20, Math.floor(rawLevel)))
-    if (level > 0) normalized[classId] = level
-  }
-  if (Object.keys(normalized).length > 0) return normalized
-  const primary = dnd5eClassDefinition(character.charClass)
-  return primary ? { [primary.id]: Math.max(1, Math.min(20, Math.floor(character.level || 1))) } : {}
-}
-
-export function dnd5eTotalCharacterLevel(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
-): number {
-  const levels = normalizeDnd5eClassLevels(character)
-  const total = Object.values(levels).reduce((sum, level) => sum + (level ?? 0), 0)
-  return Math.max(1, Math.min(20, total || Math.floor(character.level || 1)))
-}
-
-export function dnd5eCharacterClassLevel(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
-  classId: Dnd5eClassId,
-): number {
-  return normalizeDnd5eClassLevels(character)[classId] ?? 0
-}
 
 export function dnd5eMeetsMulticlassPrerequisite(
   character: Pick<Character, 'abilities'>,
