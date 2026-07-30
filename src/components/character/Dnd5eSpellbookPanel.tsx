@@ -29,10 +29,11 @@ import { DND5E_SRD_5_1_LICENSE_URL, DND5E_SRD_5_1_SOURCE_URL } from '../../rules
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import { dnd5eWizardSpellPreparationDisabled } from './dnd5eSpellbookPanelRules'
+import { replaceRoomCharacterSpellSelections } from '../../store/roomCommands'
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
-export default function Dnd5eSpellbookPanel({ character, onChange }: { character: Character; onChange: (patch: Partial<Character>) => void }) {
+export default function Dnd5eSpellbookPanel({ character }: { character: Character }) {
   const imported = useSpellbookStore((state) => state.spells)
   const pluginRevision = useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -104,7 +105,10 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     const mutableSelections = Object.fromEntries(
       Object.entries(next).map(([key, values]) => [key, [...values]]),
     )
-    onChange(dnd5ePatchEffectiveSpellSelections(character, source, mutableSelections))
+    void replaceRoomCharacterSpellSelections(
+      character.id,
+      dnd5ePatchEffectiveSpellSelections(character, source, mutableSelections),
+    )
   }
 
   const toggleCantrip = (id: string) => {

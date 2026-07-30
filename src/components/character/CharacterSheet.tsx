@@ -529,7 +529,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
       {activeTab === 'class' && activeClassDefinition?.id === 'fighter' && <FighterProgressionPanel character={classCharacter} onChange={updateCharacter} />}
       {activeTab === 'class' && activeClassDefinition && activeClassDefinition.id !== 'fighter' && <Dnd5eClassProgressionPanel character={classCharacter} totalCharacterLevel={c.level} isStartingClass={activeClassDefinition.name === c.charClass} onChange={updateCharacter} />}
       {activeTab === 'inventory' && <EquipmentTab charId={c.id} editable={!readOnly} />}
-      {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} onChange={updateCharacter} />}
+      {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} />}
       {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={updateCharacter} />}
     </div>
   )

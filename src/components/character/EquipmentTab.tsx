@@ -29,7 +29,7 @@ import { formatEquipmentStatLine } from '../../lib/combatStats'
 import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
 import { getRoomSession } from '../../lib/roomSession'
-import { submitDnd5eInventoryMutation } from '../../lib/inventoryAuthority'
+import { mutateRoomCharacterInventory } from '../../store/roomCommands'
 import {
   dnd5eAttunementRequirementDecision,
   dnd5eInventoryLoad,
@@ -219,13 +219,16 @@ export default function EquipmentTab({
     setNotice(alreadyBonded ? `已解除“${weaponName}”的武器联结。` : `已登记“${weaponName}”为联结武器。`)
   }
 
-  const run = (mutation: Parameters<typeof submitDnd5eInventoryMutation>[0]) => {
-    const result = submitDnd5eInventoryMutation(mutation)
-    setNotice(result.message)
-    if (result.status !== 'rejected') {
-      setQuantity(1)
-      if (mutation.type === 'discard' || mutation.type === 'transfer' || mutation.type === 'use') setSelectedId(null)
-    }
+  const run = (mutation: Parameters<typeof mutateRoomCharacterInventory>[0]) => {
+    void mutateRoomCharacterInventory(mutation).then((result) => {
+      setNotice(result.message ?? (result.status === 'rejected' ? '物品操作未能完成。' : '物品变更已完成。'))
+      if (result.status !== 'rejected') {
+        setQuantity(1)
+        if (mutation.type === 'discard' || mutation.type === 'transfer' || mutation.type === 'use') setSelectedId(null)
+      }
+    }).catch((error) => {
+      setNotice(error instanceof Error ? error.message : '物品操作未能完成。')
+    })
   }
 
   const activateEntry = (entry: Dnd5eInventoryEntry) => {
