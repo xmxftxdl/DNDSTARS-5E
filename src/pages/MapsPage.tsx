@@ -841,7 +841,6 @@ import {
 import {
   allowsPlayerActionInSettlementMode,
   COMBAT_SETTLEMENT_MODE_OPTIONS,
-  applyManualHitPointOperation,
   normalizeCombatSettlementMode,
   supportsDmBattlefieldAdjustment,
   supportsManualDice,
@@ -850,6 +849,7 @@ import {
   type CombatSettlementMode,
   type ManualSettlementOperation,
 } from '../lib/combatSettlementMode'
+import { planMapsManualSettlement } from './maps/manualSettlementTransaction'
 import {
   completeDnd5eMonsterTakeoverAtSafePoint,
   createDnd5eMonsterControlState,
@@ -3604,59 +3604,20 @@ export default function MapsPage() {
       !supportsDmBattlefieldAdjustment(settlementModeRef.current, isDM ? 'dm' : 'player')
     ) return
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const token = latestMap.tokens.find((candidate) => candidate.id === targetId)
-    if (!token || token.type === 'obstacle') return
-    const character = token.characterId
-      ? useCharacterStore.getState().characters.find((candidate) => candidate.id === token.characterId)
-      : undefined
-    const operationLabel = operation === 'damage' ? '伤害' : operation === 'healing' ? '治疗' : '临时生命值'
-    if (character) {
-      const next = applyManualHitPointOperation({
-        currentHp: character.currentHp,
-        maxHp: character.maxHp,
-        temporaryHp: character.tempHp,
-      }, operation, amount)
-      void setRoomCharacterHitPoints({
-        characterId: character.id,
-        mapId: activeMap.id,
-        tokenId: token.id,
-        currentHp: next.currentHp,
-        maxHp: next.maxHp,
-        temporaryHp: next.temporaryHp,
-      })
-      pushCombatLog(
-        `DM 手动结算：${character.name} ${operationLabel} ${Math.max(0, Math.floor(amount))}；当前 HP ${next.currentHp}/${next.maxHp}${next.temporaryHp > 0 ? `，临时 HP ${next.temporaryHp}` : ''}。`,
-        operation === 'damage' ? 'damage' : 'system',
-        roundRef.current,
-        [
-          `HP ${character.currentHp} → ${next.currentHp}（上限 ${next.maxHp}）`,
-          `临时 HP ${character.tempHp} → ${next.temporaryHp}`,
-          '结算来源：DM 手动调整',
-        ],
-      )
-      return
-    }
-    if (operation === 'temporary-hit-points') return
-    const maxHp = Math.max(1, token.maxHp ?? token.hp ?? 1)
-    const next = applyManualHitPointOperation({
-      currentHp: token.hp ?? maxHp,
-      maxHp,
-      temporaryHp: 0,
-    }, operation, amount)
-    void setRoomCharacterHitPoints({
-      mapId: activeMap.id,
-      tokenId: token.id,
-      currentHp: next.currentHp,
-      maxHp: next.maxHp,
+    const plan = planMapsManualSettlement({
+      map: latestMap,
+      characters: useCharacterStore.getState().characters,
+      targetId,
+      operation,
+      amount,
     })
+    if (!plan) return
+    void setRoomCharacterHitPoints(plan.hitPoints)
     pushCombatLog(
-      `DM 手动结算：${token.label} ${operationLabel} ${Math.max(0, Math.floor(amount))}；当前 HP ${next.currentHp}/${next.maxHp}。`,
-      operation === 'damage' ? 'damage' : 'system',
+      plan.log.message,
+      plan.log.kind,
       roundRef.current,
-      [
-        `HP ${token.hp ?? maxHp} → ${next.currentHp}（上限 ${next.maxHp}）`,
-        '结算来源：DM 手动调整',
-      ],
+      plan.log.details,
     )
   }
 
