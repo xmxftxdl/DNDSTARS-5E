@@ -19,6 +19,7 @@ export const DND5E_LOCAL_COLLECTION_TEXT_FILE_MAX_BYTES = 8 * 1024 * 1024
 export const DND5E_LOCAL_COLLECTION_MAX_FILES = 2048
 
 type CollectionKey = keyof Dnd5eContentPackageContributionsV2
+type LocalCollectionFileReference = string | readonly string[]
 type ImageTargetCategory = 'race' | 'feature' | 'feat' | 'spell' | 'item' | 'monster'
 type ImageTargetSlot = 'icon' | 'portrait' | 'tokenPortrait' | 'initiativePortrait'
 
@@ -52,9 +53,12 @@ interface LocalContentCollection {
     sourceFingerprint?: string
   }
   content?: Partial<Dnd5eContentPackageContributionsV2>
-  /** Each referenced JSON file is an array of entries for its collection key. */
-  json?: Partial<Record<CollectionKey, string>>
-  csv?: Partial<Record<CollectionKey, string>>
+  /**
+   * Each referenced JSON file is an array of entries for its collection key.
+   * Multiple files keep private collections split into manageable local tables.
+   */
+  json?: Partial<Record<CollectionKey, LocalCollectionFileReference>>
+  csv?: Partial<Record<CollectionKey, LocalCollectionFileReference>>
   expected?: Partial<Record<CollectionKey, {
     count?: number
     ids?: readonly string[]
@@ -272,6 +276,25 @@ function collectionFromJson(value: unknown): LocalContentCollection {
   return value as unknown as LocalContentCollection
 }
 
+function collectionFileReferences(
+  value: unknown,
+  kind: 'JSON' | 'CSV',
+  key: string,
+): readonly string[] {
+  const references = typeof value === 'string'
+    ? [value]
+    : Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+      ? value
+      : undefined
+  if (!references || references.length < 1) {
+    throw new Error(`collection.json 的 ${kind} 分类 ${key} 必须引用一个文件或非空文件数组`)
+  }
+  if (new Set(references.map(normalizedPath)).size !== references.length) {
+    throw new Error(`collection.json 的 ${kind} 分类 ${key} 包含重复文件`)
+  }
+  return references
+}
+
 function mutableContent(
   collection: LocalContentCollection,
 ): Record<CollectionKey, Record<string, unknown>[]> {
@@ -452,31 +475,35 @@ export async function compileDnd5eLocalContentCollection(
   const baseDirectory = directoryName(collectionPath)
 
   for (const [key, reference] of Object.entries(collection.json ?? {})) {
-    if (!COLLECTION_KEY_SET.has(key) || typeof reference !== 'string') {
+    if (!COLLECTION_KEY_SET.has(key)) {
       throw new Error(`collection.json 包含不支持的 JSON 分类：${key}`)
     }
-    const path = resolveCollectionPath(baseDirectory, reference)
-    const file = files.get(path)
-    if (!file) throw new Error(`找不到 JSON 文件：${reference}`)
-    content[key as CollectionKey].push(
-      ...parseCollectionJsonEntries(
-        await readCollectionTextFile(file, reference),
-        key as CollectionKey,
-        reference,
-      ),
-    )
+    for (const fileReference of collectionFileReferences(reference, 'JSON', key)) {
+      const path = resolveCollectionPath(baseDirectory, fileReference)
+      const file = files.get(path)
+      if (!file) throw new Error(`找不到 JSON 文件：${fileReference}`)
+      content[key as CollectionKey].push(
+        ...parseCollectionJsonEntries(
+          await readCollectionTextFile(file, fileReference),
+          key as CollectionKey,
+          fileReference,
+        ),
+      )
+    }
   }
 
   for (const [key, reference] of Object.entries(collection.csv ?? {})) {
-    if (!COLLECTION_KEY_SET.has(key) || typeof reference !== 'string') {
+    if (!COLLECTION_KEY_SET.has(key)) {
       throw new Error(`collection.json 包含不支持的 CSV 分类：${key}`)
     }
-    const path = resolveCollectionPath(baseDirectory, reference)
-    const file = files.get(path)
-    if (!file) throw new Error(`找不到 CSV 文件：${reference}`)
-    content[key as CollectionKey].push(
-      ...parseCollectionCsv(await readCollectionTextFile(file, reference), reference),
-    )
+    for (const fileReference of collectionFileReferences(reference, 'CSV', key)) {
+      const path = resolveCollectionPath(baseDirectory, fileReference)
+      const file = files.get(path)
+      if (!file) throw new Error(`找不到 CSV 文件：${fileReference}`)
+      content[key as CollectionKey].push(
+        ...parseCollectionCsv(await readCollectionTextFile(file, fileReference), fileReference),
+      )
+    }
   }
 
   const assets: Dnd5ePluginImageAssetDefinition[] = []

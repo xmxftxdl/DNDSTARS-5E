@@ -13,3 +13,4 @@ backups
 *.log
 docs
 e2e
+local-content

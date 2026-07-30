@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
   DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION,
@@ -9,37 +11,104 @@ import { parseDnd5eContentPackageV2 } from './contentPackageV2'
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const LOCAL_PHB_COLLECTION_DIRECTORY = fileURLToPath(new URL(
+  '../../../local-content/phb-2014/',
+  import.meta.url,
+))
+
+function localCollectionFiles(directory: string, base = directory): File[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) return localCollectionFiles(fullPath, base)
+    const relativePath = path.relative(base, fullPath).replace(/\\/g, '/')
+    return [new File([readFileSync(fullPath)], relativePath)]
+  })
+}
 
 describe('本地房间内容合集', () => {
-  it('compiles the checked-in rights-safe Battle Master collection', async () => {
-    const collection = readFileSync(new URL(
-      '../../../examples/battle-master-local-collection/collection.json',
-      import.meta.url,
-    ))
-    const subclasses = readFileSync(new URL(
-      '../../../examples/battle-master-local-collection/subclasses.json',
-      import.meta.url,
-    ))
+  it('merges multiple local JSON tables for the same content category', async () => {
+    const collection = {
+      format: DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
+      schemaVersion: DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION,
+      manifest: {
+        id: 'local.example.split-subclasses',
+        name: 'Split Subclass Collection',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Local test',
+        license: 'Private local use',
+        contentCategory: 'subclasses',
+      },
+      json: {
+        subclasses: [
+          'subclasses/vanguard.json',
+          'subclasses/warden.json',
+        ],
+      },
+      expected: {
+        subclasses: {
+          count: 2,
+          ids: ['vanguard', 'warden'],
+        },
+      },
+    }
+    const subclass = (id: string, name: string) => [{
+      schemaVersion: 1,
+      id,
+      classId: 'fighter',
+      name,
+      summary: 'Synthetic local test fixture.',
+      abilities: [{
+        schemaVersion: 1,
+        id: 'local-note',
+        name: 'Local note',
+        description: 'Synthetic local test fixture.',
+        level: 3,
+        trigger: { kind: 'active-use' },
+        targeting: { kind: 'self' },
+        effects: [{
+          kind: 'temporary-hit-points',
+          target: 'actor',
+          amount: { kind: 'fixed', value: 0 },
+        }],
+        automation: 'manual',
+      }],
+    }]
     const result = await compileDnd5eLocalContentCollection([
-      new File([collection], 'collection.json', { type: 'application/json' }),
-      new File([subclasses], 'subclasses.json', { type: 'application/json' }),
+      new File([JSON.stringify(collection)], 'collection.json', { type: 'application/json' }),
+      new File([JSON.stringify(subclass('vanguard', 'Vanguard'))], 'subclasses/vanguard.json', { type: 'application/json' }),
+      new File([JSON.stringify(subclass('warden', 'Warden'))], 'subclasses/warden.json', { type: 'application/json' }),
     ])
     const parsed = parseDnd5eContentPackageV2(result.bytes)
     expect(result.audit.complete).toBe(true)
-    expect(parsed?.manifest.id).toBe('local.doco.battle-master-2014')
-    expect(parsed?.content.subclasses[0]).toMatchObject({
-      id: 'battle-master-2014',
-      classId: 'fighter',
-      resources: [{
-        id: 'superiority-dice',
-        maximumByClassLevel: [
-          { level: 7, maximum: 5 },
-          { level: 15, maximum: 6 },
-        ],
-      }],
-    })
-    expect(parsed?.content.subclasses[0].choiceGroups?.[0].options).toHaveLength(16)
+    expect(parsed?.manifest.id).toBe('local.example.split-subclasses')
+    expect(parsed?.content.subclasses.map((entry) => entry.id)).toEqual(['vanguard', 'warden'])
   })
+
+  it.runIf(existsSync(LOCAL_PHB_COLLECTION_DIRECTORY))(
+    'compiles the ignored private PHB directory through its single root manifest',
+    async () => {
+      const result = await compileDnd5eLocalContentCollection(
+        localCollectionFiles(LOCAL_PHB_COLLECTION_DIRECTORY),
+      )
+      const parsed = parseDnd5eContentPackageV2(result.bytes)
+      expect(result.audit.complete).toBe(true)
+      expect(parsed?.manifest).toMatchObject({
+        id: 'local.doco.phb-2014-room',
+        distributionPolicy: 'room-ephemeral',
+      })
+      expect(parsed?.content).toMatchObject({
+        races: expect.arrayContaining([expect.objectContaining({ id: 'hill-dwarf' })]),
+        backgrounds: expect.arrayContaining([expect.objectContaining({ id: 'soldier' })]),
+        subclasses: expect.arrayContaining([
+          expect.objectContaining({ id: 'battle-master-2014' }),
+          expect.objectContaining({ id: 'eldritch-knight-2014' }),
+          expect.objectContaining({ id: 'totem-warrior-2014' }),
+        ]),
+      })
+    },
+  )
 
   it('在浏览器内合并 CSV 并将 AI 图片绑定到稳定条目 ID', async () => {
     const collection = {

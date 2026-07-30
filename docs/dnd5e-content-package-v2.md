@@ -142,11 +142,14 @@ Temporary-hit-point effects may use a validated `rollId`, allowing active
 resource-die abilities to combine a Host roll with a declarative ability
 modifier.
 
-The importable, rights-safe Battle Master collection is:
+The private Battle Master table used by a local checkout is:
 
-`examples/battle-master-local-collection/`
+`local-content/phb-2014/subclasses/battle-master/subclasses.json`
 
-It contains structured values and original short summaries only. Supported
+It is intentionally Git-ignored and is not part of production builds. The
+single browser import entry is `local-content/phb-2014/collection.json`, which
+can reference multiple JSON tables for the same category. The local files
+contain structured values and original short summaries only. Supported
 Battle Master mechanics use the audited `battle-master-2014` mechanic tag.
 Headless now settles all sixteen maneuver choices: Host resource-die rolls,
 attack timing, resources and action economy, saving throws, conditions,
