@@ -131,7 +131,11 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       elevationFeet: command.elevationFeet,
     })
     try {
-      await persistRoomStores(['maps'])
+      await state.saveAuthorityTokenPatch(map.id, token.id, {
+        x: command.x,
+        y: command.y,
+        elevationFeet: command.elevationFeet,
+      })
       return { status: 'applied' }
     } catch (error) {
       state.applyAuthorityTokenUpdate(map.id, token.id, previous)

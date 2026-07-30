@@ -34,6 +34,7 @@ import {
   mergePlayerTokenCombatFields,
   resetPendingLocalTokenHitPointEditMemoryForTest,
   saveMapsStateWithPendingHitPointRetry,
+  saveMapsStateWithTokenPatchRetry,
   type BattleMap,
   type Token,
 } from './maps'
@@ -655,6 +656,84 @@ describe('地图 Token HP 本地写入竞争保护', () => {
     expect(save).toHaveBeenCalledTimes(2)
     expect(load).toHaveBeenCalledTimes(1)
     expect(writes[1].maps[0].tokens[0]).toMatchObject({ x: 275, hp: 4, maxHp: 12 })
+  })
+})
+
+describe('地图 Token 权威补丁重试', () => {
+  it('CAS 冲突后保留服务端其它 Token 的移动并重放当前移动', async () => {
+    const writes: Array<{ maps: BattleMap[]; selectedId: string | null; updatedAt?: number }> = []
+    const save = vi.fn(async (payload) => {
+      writes.push(payload)
+      return writes.length === 1
+        ? { status: 'conflict' as const, expectedRevision: 7, currentRevision: 8 }
+        : { status: 'saved' as const, revision: 9 }
+    })
+    const load = vi.fn(async () => ({
+      maps: [map({
+        id: 'map-1',
+        tokens: [
+          token({ id: 'player', type: 'player', x: 425, y: 325 }),
+          token({ id: 'monster', type: 'enemy', x: 500, y: 300 }),
+        ],
+      })],
+      selectedId: 'map-1',
+      updatedAt: 1_050,
+    }))
+
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [
+            token({ id: 'player', type: 'player', x: 350, y: 300 }),
+            token({ id: 'monster', type: 'enemy', x: 575, y: 325 }),
+          ],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_001,
+      },
+      mapId: 'map-1',
+      tokenId: 'monster',
+      patch: { x: 575, y: 325 },
+      save,
+      load,
+      now: () => 1_051,
+    })
+
+    expect(outcome.result).toMatchObject({ status: 'saved', revision: 9 })
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(writes[1].maps[0].tokens).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'player', x: 425, y: 325 }),
+      expect.objectContaining({ id: 'monster', x: 575, y: 325 }),
+    ]))
+  })
+
+  it('目标已被服务端删除时 fail closed，不会重新创建 Token', async () => {
+    const save = vi.fn(async () => (
+      { status: 'conflict' as const, expectedRevision: 2, currentRevision: 3 }
+    ))
+    const load = vi.fn(async () => ({
+      maps: [map({ id: 'map-1', tokens: [] })],
+      selectedId: 'map-1',
+      updatedAt: 2_000,
+    }))
+
+    await expect(saveMapsStateWithTokenPatchRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [token({ id: 'monster', x: 500, y: 300 })],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_000,
+      },
+      mapId: 'map-1',
+      tokenId: 'monster',
+      patch: { x: 575, y: 325 },
+      save,
+      load,
+    })).rejects.toThrow('map-token-patch-target-missing-after-conflict')
   })
 })
 

@@ -382,6 +382,97 @@ export async function saveMapsStateWithPendingHitPointRetry(input: {
   return { result, payload }
 }
 
+function applyTokenPatchToSharedMaps(
+  maps: BattleMap[],
+  mapId: string,
+  tokenId: string,
+  patch: Partial<Token>,
+): BattleMap[] | null {
+  let matched = false
+  const nextMaps = maps.map((map) => {
+    if (map.id !== mapId) return map
+    return {
+      ...map,
+      tokens: map.tokens.map((token) => {
+        if (token.id !== tokenId) return token
+        matched = true
+        const next = { ...token, ...patch }
+        return {
+          ...next,
+          ...clampTokenPositionToMap(next, next, map),
+        }
+      }),
+    }
+  })
+  return matched ? nextMaps : null
+}
+
+/**
+ * Persists one authoritative Token patch without replacing unrelated remote
+ * map changes. On a CAS conflict the command is rebased onto the newest server
+ * snapshot and retried, so two rapid DM moves cannot make either Token jump
+ * back merely because another map write landed between them.
+ */
+export async function saveMapsStateWithTokenPatchRetry(input: {
+  payload: SharedMapsState
+  mapId: string
+  tokenId: string
+  patch: Partial<Token>
+  save: (payload: SharedMapsState) => Promise<SharedResourceSaveResult>
+  load: () => Promise<SharedMapsState | null>
+  now?: () => number
+  maximumAttempts?: number
+}): Promise<{ result: SharedResourceSaveResult; payload: SharedMapsState }> {
+  const maximumAttempts = Math.max(1, Math.min(5, Math.floor(input.maximumAttempts ?? 4)))
+  const now = input.now ?? Date.now
+  const initialMaps = applyTokenPatchToSharedMaps(
+    input.payload.maps,
+    input.mapId,
+    input.tokenId,
+    input.patch,
+  )
+  if (!initialMaps) throw new Error('map-token-patch-target-missing')
+  let payload: SharedMapsState = {
+    ...input.payload,
+    maps: initialMaps.map((map) => ({
+      ...map,
+      tokens: map.tokens.map(stripViewerControlProjection),
+    })),
+  }
+  let result: SharedResourceSaveResult = { status: 'failed' }
+
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    result = await input.save(payload)
+    if (result.status === 'saved') return { result, payload }
+    if (result.status !== 'conflict' || attempt >= maximumAttempts - 1) {
+      return { result, payload }
+    }
+
+    const shared = await input.load()
+    if (!shared?.maps) return { result, payload }
+    const rebasedMaps = applyTokenPatchToSharedMaps(
+      shared.maps,
+      input.mapId,
+      input.tokenId,
+      input.patch,
+    )
+    if (!rebasedMaps) throw new Error('map-token-patch-target-missing-after-conflict')
+    payload = {
+      maps: rebasedMaps.map((map) => ({
+        ...map,
+        tokens: map.tokens.map(stripViewerControlProjection),
+      })),
+      selectedId: shared.selectedId ?? payload.selectedId,
+      updatedAt: Math.max(
+        now(),
+        (payload.updatedAt ?? 0) + 1,
+        (shared.updatedAt ?? 0) + 1,
+      ),
+    }
+  }
+  return { result, payload }
+}
+
 export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps: BattleMap[]): BattleMap[] {
   const sharedMapById = new Map(sharedMaps.map((map) => [map.id, map]))
   return localMaps.map((map) => {
@@ -1268,6 +1359,11 @@ interface MapState {
   selectedId: string | null
   loadShared: () => Promise<void>
   saveSharedNow: () => Promise<void>
+  saveAuthorityTokenPatch: (
+    mapId: string,
+    tokenId: string,
+    patch: Partial<Token>,
+  ) => Promise<void>
   select: (id: string | null) => void
   addMap: (meta: {
     name: string
@@ -1324,6 +1420,29 @@ export const useMapStore = create<MapState>()(
         ]))
       },
       saveSharedNow: () => publishMapsState(get(), { requireSaved: true }),
+      saveAuthorityTokenPatch: async (mapId, tokenId, patch) => {
+        const state = get()
+        const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
+        const saved = await saveMapsStateWithTokenPatchRetry({
+          payload: {
+            maps: state.maps,
+            selectedId: state.selectedId,
+            updatedAt,
+          },
+          mapId,
+          tokenId,
+          patch,
+          save: (payload) => saveSharedResourceWithResult('maps', payload),
+          load: () => loadSharedResource<SharedMapsState>('maps'),
+        })
+        if (saved.result.status !== 'saved') {
+          lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
+          throw new Error(`maps-token-patch-save-rejected:${saved.result.status}`)
+        }
+        lastLocalMapsWriteAt = saved.payload.updatedAt ?? updatedAt
+        lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? updatedAt
+        lastSharedMapsSnapshot = JSON.stringify(saved.payload)
+      },
       select: (id) => set({ selectedId: id }),
 
       addMap: async ({ name, width, height, blob, gridDetect }) => {
