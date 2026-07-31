@@ -22,7 +22,6 @@ export const DND5E_2014_RULESET_ID: 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION: number
 export const SHARED_MIN_CLIENT_PROTOCOL: number
 export const SHARED_STATE_SCHEMA_VERSION: number
-export const ACCOUNT_CHARACTER_SCHEMA_VERSION: number
 export const ACCOUNT_SESSION_LIMIT: number
 export const ACCOUNT_CHARACTER_LIMIT: number
 export const ACCOUNT_AUTH_SCHEMA_VERSION: number
@@ -173,18 +172,6 @@ export function projectCombatInterruptsForRoomMember(
 export function projectCustomMonstersForRoomMember(
   value: Record<string, unknown>,
 ): Record<string, unknown> & { monsters: Array<Record<string, unknown>> }
-export function mutateGroupAbilityChecksState(
-  current: unknown,
-  mutation: Record<string, unknown>,
-  now: number,
-  member: Record<string, unknown>,
-  context?: Record<string, unknown>,
-): RoomCommunicationMutationResult
-export function projectGroupAbilityChecksForMember(
-  value: Record<string, unknown>,
-  memberId: string,
-  isDm?: boolean,
-): Record<string, unknown> & { checks: Array<Record<string, unknown>> }
 export function projectSceneOrchestrationForPlayer(value: unknown): {
   schemaVersion: 1
   scenes: []

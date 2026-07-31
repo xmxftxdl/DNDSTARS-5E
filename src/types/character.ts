@@ -7,6 +7,91 @@ import type { Dnd5eInventory } from './inventory'
 
 export type Abilities = Record<AbilityKey, number>
 
+export type Dnd5eAdvancementHitPointMethod = 'fixed' | 'rolled'
+
+export interface Dnd5eAdvancementAbilityScoreChoice {
+  kind: 'ability-score'
+  increases: Partial<Record<AbilityKey, number>>
+}
+
+export interface Dnd5eAdvancementFeatChoice {
+  kind: 'feat'
+  featId: string
+}
+
+export type Dnd5eAdvancementAsiChoice =
+  | Dnd5eAdvancementAbilityScoreChoice
+  | Dnd5eAdvancementFeatChoice
+
+export interface Dnd5eAdvancementSpellSelectionsV1 {
+  /** 本职业升级确认后的完整戏法列表。 */
+  cantrips: string[]
+  /** “已知法术”职业升级确认后的完整已知法术列表。 */
+  knownSpells?: string[]
+  /** 法师升级确认后的完整法术书；冒险中抄录的既有法术必须保留。 */
+  wizardSpellbook?: string[]
+}
+
+export interface Dnd5eLevelAdvancementDecisionV1 {
+  schemaVersion: 1
+  classId:
+    | 'barbarian' | 'bard' | 'cleric' | 'druid' | 'fighter' | 'monk'
+    | 'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard'
+  levelsGained: number
+  hitPointMethod: Dnd5eAdvancementHitPointMethod
+  hitPointRolls: number[]
+  subclassId?: string
+  asiChoices: Array<{
+    classLevel: number
+    choice: Dnd5eAdvancementAsiChoice
+  }>
+  classChoiceSelections?: Record<string, string[]>
+  fighterFightingStyles?: Array<
+    'archery' | 'defense' | 'dueling' | 'great-weapon-fighting' | 'protection' | 'two-weapon-fighting'
+  >
+  fighterSubclassSelections?: Record<string, string[]>
+  spellSelections?: Dnd5eAdvancementSpellSelectionsV1
+}
+
+export interface Dnd5eLevelAdvancementSnapshotV1 {
+  level: number
+  dnd5eClassLevels?: Character['dnd5eClassLevels']
+  abilities: Abilities
+  skills: string[]
+  dnd5eClassChoices?: Character['dnd5eClassChoices']
+  dnd5eFeatIds?: string[]
+  hitPointMaximumMode?: 'fixed' | 'manual'
+  hitPointRolls?: number[]
+  hitPointDice?: Array<{ sides: number; current: number; max: number }>
+  maxHp: number
+  currentHp: number
+}
+
+export interface Dnd5eLevelAdvancementRevisionV1 {
+  revisedAt: number
+  revisedBy: 'dm'
+  /** 旧记录可能保留修订说明；新修订不再要求 DM 填写。 */
+  reason?: string
+  previousDecision: Dnd5eLevelAdvancementDecisionV1
+}
+
+export interface Dnd5eLevelAdvancementRecordV1 {
+  schemaVersion: 1
+  id: string
+  fromLevel: number
+  toLevel: number
+  classId: Dnd5eLevelAdvancementDecisionV1['classId']
+  fromClassLevel: number
+  toClassLevel: number
+  completedAt: number
+  completedBy: 'player' | 'dm'
+  decision: Dnd5eLevelAdvancementDecisionV1
+  grantedFeatureIds: string[]
+  before: Dnd5eLevelAdvancementSnapshotV1
+  after: Dnd5eLevelAdvancementSnapshotV1
+  revisions?: Dnd5eLevelAdvancementRevisionV1[]
+}
+
 export interface Character {
   /** 5.2.1 仅用于识别并迁移旧存档；新数据统一写入 2014 / SRD 5.1。 */
   rulesetId?: 'dnd5e-2014-srd-5.1'
@@ -91,6 +176,8 @@ export interface Character {
     recommendedRaces: string[]
     reasons: string[]
   }
+  /** 仅在首次建立高等级角色时存在；逐级结算完成后清除。 */
+  dnd5eCreationTargetLevel?: number
   savingThrows: AbilityKey[] // 熟练的豁免
   skills: string[] // 熟练的技能 key
 
@@ -134,6 +221,10 @@ export interface Character {
   dnd5ePluginFeatureIds?: string[]
   /** Namespaced feats supplied by installed rules packages. */
   dnd5eFeatIds?: string[]
+  /**
+   * 已确认的逐级升级事务。玩家不能改写既有记录；DM 可修订任意一次升级并重放后续记录。
+   */
+  dnd5eLevelAdvancements?: Dnd5eLevelAdvancementRecordV1[]
   /** 仅由 5e Headless 权威事务写入的战斗中职业状态。 */
   dnd5eCombatState?: {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
@@ -250,6 +341,12 @@ export interface Character {
     hiddenCheckTotal?: number
     /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */
     hideInPlainSightPrepared?: boolean
+    /** Host-owned current-turn advantage marker sourced from a movable utility projection. */
+    utilityProjectionAttackAdvantage?: {
+      featureId: string
+      targetId: string
+      turnKey: string
+    }
     bonusActionSpellTurnKey?: string
     leveledSpellTurnKey?: string
     concentrationSpellId?: string

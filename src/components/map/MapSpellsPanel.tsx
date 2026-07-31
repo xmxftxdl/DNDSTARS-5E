@@ -14,6 +14,43 @@ const DAMAGE_TYPE_LABELS: Record<string, string> = {
   acid: '强酸', cold: '冷冻', fire: '火焰', lightning: '闪电', poison: '毒素',
 }
 
+export const MAP_SPELL_BASE_SLOT_UNAVAILABLE_MESSAGE = '基础环不可用，请选择/固定其他环位'
+
+interface MapSpellSlotSelectionInput {
+  spellLevel: number
+  availableLevels: readonly number[]
+  pinnedSlotLevel?: number
+  pactSlotLevel?: number
+  hasFreeBaseCast?: boolean
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function mapSpellDefaultSlotLevel({
+  spellLevel,
+  pactSlotLevel,
+  hasFreeBaseCast = false,
+}: Pick<MapSpellSlotSelectionInput, 'spellLevel' | 'pactSlotLevel' | 'hasFreeBaseCast'>): number {
+  if (spellLevel === 0 || hasFreeBaseCast) return spellLevel
+  return pactSlotLevel ?? spellLevel
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveMapSpellSlotSelection(input: MapSpellSlotSelectionInput): {
+  selectedSlot: number
+  selectedSlotAvailable: boolean
+  unavailableMessage?: string
+} {
+  const selectedSlot = input.pinnedSlotLevel ?? mapSpellDefaultSlotLevel(input)
+  const selectedSlotAvailable = input.availableLevels.includes(selectedSlot)
+  return {
+    selectedSlot,
+    selectedSlotAvailable,
+    unavailableMessage: input.pinnedSlotLevel == null && !selectedSlotAvailable
+      ? MAP_SPELL_BASE_SLOT_UNAVAILABLE_MESSAGE
+      : undefined,
+  }
+}
+
 interface MapSpellsPanelProps {
   charId: string
   canAct?: boolean
@@ -394,9 +431,15 @@ export default function MapSpellsPanel({
             ])].sort((left, right) => left - right)
             const actionId = dnd5eCombatSpellActionId(definition.id, spell.id)
             const pinnedSlotLevel = effectiveSelectedSpellSlotLevels[actionId]
-            const selectedSlot = pinnedSlotLevel ?? availableLevels[0]
-            const selectedSlotAvailable = selectedSlot != null && availableLevels.includes(selectedSlot)
-            const canOverchannel = selectedSlot != null && dnd5eCanOverchannelSpell({
+            const slotSelection = resolveMapSpellSlotSelection({
+              spellLevel: spell.level,
+              availableLevels,
+              pinnedSlotLevel,
+              pactSlotLevel: pactLevel,
+              hasFreeBaseCast: freeBaseCast != null,
+            })
+            const { selectedSlot, selectedSlotAvailable } = slotSelection
+            const canOverchannel = dnd5eCanOverchannelSpell({
               classId: definition.id,
               subclassId: effectiveSubclassId,
               level: classLevel,
@@ -454,14 +497,17 @@ export default function MapSpellsPanel({
                   onChange={(event) => selectSpellSlotLevel(definition.id, spell.id, Number(event.target.value))}
                   className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-200"
                 >
-                  {pinnedSlotLevel != null && !availableLevels.includes(pinnedSlotLevel)
-                    ? <option value={pinnedSlotLevel} disabled>{pinnedSlotLevel}环（已固定但不可用）</option>
+                  {!selectedSlotAvailable
+                    ? <option value={selectedSlot} disabled>{selectedSlot}环（{pinnedSlotLevel != null ? '已固定但不可用' : '基础环不可用'}）</option>
                     : null}
                   {availableLevels.length === 0 ? <option value="">无法术位</option> : availableLevels.map((level) => <option key={level} value={level}>
                     {level}环{level === spell.level && freeBaseCast ? `（${freeBaseCast.kind === 'spell-mastery' ? '法术精通' : freeBaseCast.kind === 'mystic-arcanum' ? '秘法奥秘' : '招牌免费施放'}）` : '位'}
                   </option>)}
                 </select> : null}
               </div>
+              {slotSelection.unavailableMessage ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">
+                {slotSelection.unavailableMessage}
+              </p> : null}
               {areaLabel ? <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${targetingSpellId === spell.id ? 'border-amber-300/40 bg-amber-400/10 text-amber-100' : 'border-violet-300/15 bg-violet-400/[0.05] text-violet-200'}`}>
                 <span className="font-semibold">攻击范围：</span>{areaLabel}
                 {targetingSpellId === spell.id ? <span className="ml-1 text-amber-200/80">· 地图已显示模板，点击可重新定位</span> : null}
@@ -581,7 +627,7 @@ export default function MapSpellsPanel({
                     : targetingMaximumTargets > 1
                       ? targetingAllowsDuplicateTargets
                         ? targetingTargetCount < targetingMaximumTargets
-                          ? `选择第 ${targetingTargetCount + 1}/${targetingMaximumTargets} ${projectileUnit}的目标`
+                          ? `已分配 ${targetingTargetCount}/${targetingMaximumTargets} ${projectileUnit}；选择第 ${targetingTargetCount + 1} 发的目标`
                           : `释放已分配的 ${targetingMaximumTargets} ${projectileUnit}`
                         : spell.area
                           ? `已框选 ${targetingTargetCount} 个生物（在地图移动并点击范围）`
@@ -676,27 +722,48 @@ export default function MapSpellsPanel({
           {pluginHeadlessSpells.filter((entry) => entry.id === currentFocusedSpellId).map((entry) => {
             const spell = entry.imported!
             const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
-            const availableLevels = spell.level === 0 ? [0] : pactLevel != null && spell.level <= 5
+            const freeBaseCast = spell.level > 0 ? dnd5eFreeSpellCastSource({
+              classId: definition.id,
+              level: classLevel,
+              classSelections: effectiveSelections,
+              classResources: c.classResources ?? {},
+            }, { id: entry.id, level: spell.level }, spell.level) : undefined
+            const slotLevels = spell.level === 0 ? [0] : pactLevel != null && spell.level <= 5
               ? ((getClassResource(c, 'dnd5e-pact-slot')?.current ?? 0) > 0 && pactLevel >= spell.level ? [pactLevel] : [])
               : Array.from({ length: 9 - spell.level + 1 }, (_, index) => spell.level + index)
                 .filter((level) => (getClassResource(c, `dnd5e-spell-slot-${level}`)?.current ?? 0) > 0)
+            const availableLevels = [...new Set([
+              ...(freeBaseCast ? [spell.level] : []),
+              ...slotLevels,
+            ])].sort((left, right) => left - right)
             const actionId = dnd5eCombatSpellActionId(definition.id, entry.id)
             const pinnedSlotLevel = effectiveSelectedSpellSlotLevels[actionId]
-            const selectedSlot = pinnedSlotLevel ?? availableLevels[0]
-            const selectedSlotAvailable = selectedSlot != null && availableLevels.includes(selectedSlot)
+            const slotSelection = resolveMapSpellSlotSelection({
+              spellLevel: spell.level,
+              availableLevels,
+              pinnedSlotLevel,
+              pactSlotLevel: pactLevel,
+              hasFreeBaseCast: freeBaseCast != null,
+            })
+            const { selectedSlot, selectedSlotAvailable } = slotSelection
             const components = [spell.components.verbal ? 'V' : '', spell.components.somatic ? 'S' : '', spell.components.material ? 'M' : ''].filter(Boolean).join('、') || '无'
             return <div key={entry.id} className="rounded-xl border border-cyan-300/15 bg-black/10 p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div><div className="text-sm font-semibold text-cyan-100">{entry.name}</div><div className="text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level}环`} · 成分 {components}{spell.duration.concentration ? ' · 专注' : ''} · Headless</div></div>
                 {spell.level > 0 ? <select value={selectedSlot ?? ''} onChange={(event) => selectSpellSlotLevel(definition.id, entry.id, Number(event.target.value))} className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-200">
-                  {pinnedSlotLevel != null && !availableLevels.includes(pinnedSlotLevel)
-                    ? <option value={pinnedSlotLevel} disabled>{pinnedSlotLevel}环（已固定但不可用）</option>
+                  {!selectedSlotAvailable
+                    ? <option value={selectedSlot} disabled>{selectedSlot}环（{pinnedSlotLevel != null ? '已固定但不可用' : '基础环不可用'}）</option>
                     : null}
-                  {availableLevels.length === 0 ? <option value="">无法术位</option> : availableLevels.map((level) => <option key={level} value={level}>{level}环位</option>)}
+                  {availableLevels.length === 0 ? <option value="">无法术位</option> : availableLevels.map((level) => <option key={level} value={level}>
+                    {level}环{level === spell.level && freeBaseCast ? '（可免费施放）' : '位'}
+                  </option>)}
                 </select> : null}
               </div>
+              {slotSelection.unavailableMessage ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">
+                {slotSelection.unavailableMessage}
+              </p> : null}
               <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-500">{spell.description}</p>
-              <button type="button" disabled={!canAct || pending || !selectedSlotAvailable || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => selectedSlot != null && onCastSpell?.(entry.id, selectedSlot, definition.id)} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
+              <button type="button" disabled={!canAct || pending || !selectedSlotAvailable || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => onCastSpell?.(entry.id, selectedSlot, definition.id)} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
                 {targetingSpellId === entry.id ? '请点击地图目标' : spell.castingTime.unit === 'reaction' ? '反应法术暂不支持主动施放' : '选择目标并施放'}
               </button>
             </div>
@@ -727,8 +794,14 @@ export default function MapSpellsPanel({
                 .sort((left, right) => left - right)
               const actionId = dnd5eCombatSpellActionId(definition.id, spell.id)
               const pinnedSlotLevel = effectiveSelectedSpellSlotLevels[actionId]
-              const selectedSlot = pinnedSlotLevel ?? availableLevels[0]
-              const selectedSlotAvailable = selectedSlot != null && availableLevels.includes(selectedSlot)
+              const slotSelection = resolveMapSpellSlotSelection({
+                spellLevel: spell.level,
+                availableLevels,
+                pinnedSlotLevel,
+                pactSlotLevel: pactLevel,
+                hasFreeBaseCast: freeBaseCast != null,
+              })
+              const { selectedSlot, selectedSlotAvailable } = slotSelection
               const unsupported = castingTime === 'reaction' || castingTime === 'unsupported'
               return <div key={spell.id} className="rounded-xl border border-amber-300/15 bg-black/10 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -745,21 +818,24 @@ export default function MapSpellsPanel({
                     onChange={(event) => selectSpellSlotLevel(definition.id, spell.id, Number(event.target.value))}
                     className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-200"
                   >
-                    {pinnedSlotLevel != null && !availableLevels.includes(pinnedSlotLevel)
-                      ? <option value={pinnedSlotLevel} disabled>{pinnedSlotLevel}环（已固定但不可用）</option>
+                    {!selectedSlotAvailable
+                      ? <option value={selectedSlot} disabled>{selectedSlot}环（{pinnedSlotLevel != null ? '已固定但不可用' : '基础环不可用'}）</option>
                       : null}
                     {availableLevels.length === 0 ? <option value="">无法术位</option> : availableLevels.map((level) => <option key={level} value={level}>
                       {level}环{level === spell.level && freeBaseCast ? '（可免费施放）' : '位'}
                     </option>)}
                   </select> : null}
                 </div>
+                {slotSelection.unavailableMessage ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">
+                  {slotSelection.unavailableMessage}
+                </p> : null}
                 <p className="mt-2 line-clamp-4 whitespace-pre-line text-xs leading-5 text-slate-500">
                   {dnd5eSpellbookEntryDescription(spell) || '该房间法术没有规则正文，请 DM 根据已获授权的资料裁定。'}
                 </p>
                 <button
                   type="button"
                   disabled={!canAct || pending || !selectedSlotAvailable || wildShapeBlocksSpellcasting || unsupported}
-                  onClick={() => selectedSlot != null && onRequestAdjudication?.(spell.id, selectedSlot, definition.id)}
+                  onClick={() => onRequestAdjudication?.(spell.id, selectedSlot, definition.id)}
                   className="mt-2 w-full rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {castingTime === 'reaction'

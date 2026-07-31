@@ -18,7 +18,6 @@ import {
   type CombatStatisticsSession,
 } from '../lib/combatStatistics'
 import { useCombatStatisticsStore } from '../store/combatStatistics'
-import { useGroupAbilityChecksStore } from '../store/groupAbilityChecks'
 import { useMapStore } from '../store/maps'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 
@@ -107,7 +106,6 @@ function aggregateCombatStatistics(
 
 function nonCombatD20FaceCounts(input: {
   entry: AnalyticsEntry
-  checks: ReturnType<typeof useGroupAbilityChecksStore.getState>['state']['checks']
   messages: ReturnType<typeof useRoomCommunicationsStore.getState>['chat']['messages']
   startedAt?: number
   endedAt?: number
@@ -118,19 +116,6 @@ function nonCombatD20FaceCounts(input: {
   const inWindow = (timestamp: number) =>
     (input.startedAt == null || timestamp >= input.startedAt) &&
     (input.endedAt == null || timestamp <= input.endedAt)
-  for (const check of input.checks) {
-    for (const result of check.results) {
-      if (
-        result.characterId !== characterId ||
-        result.source === 'passive-only' ||
-        !inWindow(result.rolledAt) ||
-        !Number.isInteger(result.d20) ||
-        result.d20 < 1 ||
-        result.d20 > 20
-      ) continue
-      counts[result.d20 - 1] += 1
-    }
-  }
   for (const message of input.messages) {
     const roll = message.roll
     if (
@@ -292,7 +277,6 @@ function D20Distribution({
 export default function CampaignAdvancedAnalyticsPanel() {
   const sessions = useCombatStatisticsStore((state) => state.sessions)
   const maps = useMapStore((state) => state.maps)
-  const checks = useGroupAbilityChecksStore((state) => state.state.checks)
   const messages = useRoomCommunicationsStore((state) => state.chat.messages)
   const [selected, setSelected] = useState(CAMPAIGN_TOTAL)
   const [selectedCombatantKey, setSelectedCombatantKey] = useState<string>()
@@ -363,13 +347,12 @@ export default function CampaignAdvancedAnalyticsPanel() {
     if (rollScope === 'combat') return counts
     const additional = nonCombatD20FaceCounts({
       entry: selectedEntry,
-      checks,
       messages,
       startedAt: selectedSession?.startedAt,
       endedAt: selectedSession?.updatedAt,
     })
     return counts.map((count, index) => count + additional[index])
-  }, [checks, messages, rollScope, selectedEntry, selectedSession])
+  }, [messages, rollScope, selectedEntry, selectedSession])
 
   return (
     <Card>
@@ -459,7 +442,7 @@ export default function CampaignAdvancedAnalyticsPanel() {
           </>
         )}
         <p className="px-1 text-xs leading-relaxed text-slate-500">
-          进攻与防御/支援指数表示角色在同阵营有效伤害、命中、控制、击倒/击杀，以及治疗、临时生命、减伤、救援和成功豁免中的相对占比；同队合计约为 100%，不是 D&amp;D 5e 规则数值。非战斗骰点目前来自群体检定与带角色身份的聊天 /roll，手动实体骰不会被推测记录。
+          进攻与防御/支援指数表示角色在同阵营有效伤害、命中、控制、击倒/击杀，以及治疗、临时生命、减伤、救援和成功豁免中的相对占比；同队合计约为 100%，不是 D&amp;D 5e 规则数值。非战斗骰点目前仅来自带角色身份的聊天 /roll，手动实体骰不会被推测记录。
         </p>
       </div>
     </Card>

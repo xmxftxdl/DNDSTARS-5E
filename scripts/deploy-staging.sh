@@ -49,6 +49,8 @@ port="$(env_value STARS_PORT)"
 backup_path="$(env_value STARS_BACKUP_HOST_PATH)"
 password="$(env_value STARS_POSTGRES_PASSWORD)"
 metrics_token="$(env_value STARS_METRICS_TOKEN)"
+art_asset_path="$(env_value STARS_ART_ASSET_HOST_PATH)"
+require_art_asset_pack="$(env_value STARS_REQUIRE_ART_ASSET_PACK)"
 
 if [[ "$project" != 'astraltrace-staging' ]]; then
   printf 'COMPOSE_PROJECT_NAME 必须是 astraltrace-staging，避免覆盖生产卷。\n' >&2
@@ -68,6 +70,14 @@ if [[ ${#password} -lt 24 || "$password" == *'replace-with'* ]]; then
 fi
 if [[ ${#metrics_token} -lt 24 || "$metrics_token" == *'replace-with'* ]]; then
   printf '请配置至少 24 字符的独立 staging 指标令牌。\n' >&2
+  exit 2
+fi
+if [[ "$require_art_asset_pack" != 'true' ]]; then
+  printf 'staging 必须设置 STARS_REQUIRE_ART_ASSET_PACK=true。\n' >&2
+  exit 2
+fi
+if [[ "$art_asset_path" != /* || ! -d "$art_asset_path/assets" ]]; then
+  printf 'STARS_ART_ASSET_HOST_PATH 必须是包含 assets/ 的绝对 public 目录：%s\n' "$art_asset_path" >&2
   exit 2
 fi
 
@@ -92,6 +102,8 @@ if grep -q 'filter=lfs' .gitattributes; then
   fi
 fi
 
+node scripts/generate-art-asset-manifest.mjs --check
+
 build_id="$(git rev-parse --short=12 HEAD)"
 STARS_BUILD_ID="$build_id" docker compose --env-file "$ENV_FILE" build dndstars
 STARS_BUILD_ID="$build_id" docker compose --env-file "$ENV_FILE" \
@@ -114,6 +126,16 @@ fi
 local_health="$(curl -fsS "http://127.0.0.1:${port}/api/healthz")"
 local_ready="$(curl -fsS "http://127.0.0.1:${port}/api/readyz")"
 public_ready="$(curl -fsS "${origin}/api/readyz")"
+local_art_headers="$(curl -fsSI "http://127.0.0.1:${port}/assets/portraits/goblin-forest-scout-token.png")"
+public_art_headers="$(curl -fsSI "${origin}/assets/portraits/goblin-forest-scout-token.png")"
+if ! grep -qi '^content-type: image/' <<<"$local_art_headers"; then
+  printf 'staging 本机美术资源没有返回图片 MIME。\n' >&2
+  exit 3
+fi
+if ! grep -qi '^content-type: image/' <<<"$public_art_headers"; then
+  printf 'staging 公网美术资源没有返回图片 MIME。\n' >&2
+  exit 3
+fi
 printf '%s\n' "$local_health"
 printf '%s\n' "$local_ready"
 printf '%s\n' "$public_ready"

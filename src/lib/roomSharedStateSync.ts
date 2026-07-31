@@ -13,8 +13,6 @@ import { MAP_EXPLORATION_RESOURCE } from './mapExploration'
 import { COMBAT_STATISTICS_RESOURCE } from './combatStatistics'
 import { ROOM_CHAT_RESOURCE, ROOM_JOURNAL_RESOURCE } from './roomCommunications'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
-import { GROUP_ABILITY_CHECK_RESOURCE } from './groupAbilityChecks'
-import { useGroupAbilityChecksStore } from '../store/groupAbilityChecks'
 import { CAMPAIGN_TIME_RESOURCE } from './campaignTime'
 import { useCampaignTimeStore } from '../store/campaignTime'
 import { SCENE_ORCHESTRATION_RESOURCE } from './sceneOrchestration'
@@ -38,7 +36,6 @@ export function startRoomSharedStateSync(): () => void {
   const loadSharedCustomMonsters = useCustomMonsterStore.getState().loadShared
   const loadSharedRoomChat = useRoomCommunicationsStore.getState().loadChat
   const loadSharedRoomJournal = useRoomCommunicationsStore.getState().loadJournal
-  const loadSharedGroupAbilityChecks = useGroupAbilityChecksStore.getState().loadShared
   const loadSharedCampaignTime = useCampaignTimeStore.getState().loadShared
   const loadSharedSceneOrchestration = useSceneOrchestrationStore.getState().loadShared
   const loadSharedSceneAudioLibrary = useSceneAudioStore.getState().loadLibrary
@@ -55,7 +52,6 @@ export function startRoomSharedStateSync(): () => void {
     loadSharedCombatStatistics(),
     loadSharedRoomChat(),
     loadSharedRoomJournal(),
-    loadSharedGroupAbilityChecks(),
     loadSharedCampaignTime(),
     loadSharedSceneOrchestration(),
     loadSharedSceneAudioLibrary(),
@@ -75,7 +71,6 @@ export function startRoomSharedStateSync(): () => void {
   const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics)
   const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat)
   const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal)
-  const stopGroupAbilityChecks = subscribeSharedResourceInvalidation(GROUP_ABILITY_CHECK_RESOURCE, loadSharedGroupAbilityChecks)
   const stopCampaignTime = subscribeSharedResourceInvalidation(CAMPAIGN_TIME_RESOURCE, loadSharedCampaignTime)
   const stopSceneOrchestration = subscribeSharedResourceInvalidation(SCENE_ORCHESTRATION_RESOURCE, loadSharedSceneOrchestration)
   const stopSceneAudioLibrary = subscribeSharedResourceInvalidation(SCENE_AUDIO_LIBRARY_RESOURCE, loadSharedSceneAudioLibrary)
@@ -92,7 +87,6 @@ export function startRoomSharedStateSync(): () => void {
     stopCombatStatistics()
     stopRoomChat()
     stopRoomJournal()
-    stopGroupAbilityChecks()
     stopCampaignTime()
     stopSceneOrchestration()
     stopSceneAudioLibrary()

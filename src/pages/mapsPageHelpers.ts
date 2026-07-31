@@ -83,12 +83,22 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         : [normal, {
             ...normal,
             slotId: `${token.id}:thief-reflexes`,
+            firstRoundOnly: true,
             turnKind: 'thief-reflexes' as const,
             roll: reflexesInitiative,
           }]
     })
     .flat()
     .sort((a, b) => b.roll - a.roll)
+}
+
+export function initiativeOrderForRound(
+  order: readonly InitiativeEntry[],
+  round: number,
+): InitiativeEntry[] {
+  return round <= 1
+    ? [...order]
+    : order.filter((entry) => entry.firstRoundOnly !== true)
 }
 
 export function insertInitiativeEntriesPreservingActive(

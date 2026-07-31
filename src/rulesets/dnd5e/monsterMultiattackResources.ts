@@ -25,6 +25,7 @@ export function dnd5eMonsterMultiattackChildUsageCounts(
   action: Pick<Dnd5eMonsterAction, 'id' | 'kind' | 'sequence' | 'randomRepeat'>,
   randomRepeatCount?: number,
   actor?: Dnd5eMonsterRuntimeMultiattackActor,
+  maximumOccurrences?: number,
 ): ReadonlyMap<string, number> {
   const counts = new Map<string, number>()
   if (action.kind !== 'multiattack') return counts
@@ -35,7 +36,10 @@ export function dnd5eMonsterMultiattackChildUsageCounts(
     randomRepeatCount,
     unresolvedRandomRepeat: 'maximum',
   }) ?? []
-  for (const actionId of actionIds) {
+  const settledActionIds = maximumOccurrences == null
+    ? actionIds
+    : actionIds.slice(0, Math.max(0, Math.floor(maximumOccurrences)))
+  for (const actionId of settledActionIds) {
     const child = monster.actions.find((candidate) => candidate.id === actionId)
     if (!child?.usage) continue
     counts.set(actionId, (counts.get(actionId) ?? 0) + 1)

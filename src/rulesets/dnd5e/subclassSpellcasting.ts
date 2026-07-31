@@ -136,10 +136,21 @@ export function dnd5eEffectiveSpellSelections(
   character: Character,
   source: Dnd5eEffectiveSpellcastingSource,
 ): Readonly<Record<string, readonly string[]>> {
-  if (source.subclass && source.classId === 'fighter') {
-    return character.dnd5eClassChoices?.fighter?.extensionChoices ?? {}
-  }
-  return character.dnd5eClassChoices?.classes?.[source.classId]?.selections ?? {}
+  const stored = source.subclass && source.classId === 'fighter'
+    ? character.dnd5eClassChoices?.fighter?.extensionChoices ?? {}
+    : character.dnd5eClassChoices?.classes?.[source.classId]?.selections ?? {}
+  const requiredCantripIds = source.declarative?.requiredCantripIds ?? []
+  return requiredCantripIds.length > 0
+    ? {
+        ...stored,
+        [source.cantripSelectionKey]: [
+          ...new Set([
+            ...requiredCantripIds,
+            ...(stored[source.cantripSelectionKey] ?? []),
+          ]),
+        ],
+      }
+    : stored
 }
 
 export function dnd5ePatchEffectiveSpellSelections(

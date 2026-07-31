@@ -283,6 +283,13 @@ export interface Dnd5eMonsterSimulationRuntimeCache {
 export interface Dnd5eMonsterTurnPlannerOptions {
   decisionProvider?: MonsterDecisionProvider
   turnEconomy?: Dnd5eTurnEconomyCounts
+  /**
+   * Restricts planning to one exact monster action. Used after a committed
+   * Multiattack occurrence to plan only the next Headless-authorized strike.
+   */
+  requiredActionId?: string
+  /** Remaining movement in the current turn, after any earlier movement. */
+  movementBudgetFeet?: number
   /** Current authoritative combat identity used by surprise-dependent traits. */
   combatId?: string
   round?: number
@@ -2744,6 +2751,8 @@ function createTacticalCandidates(input: {
   combatId?: string
   round?: number
   preferredTargetId?: string
+  requiredActionId?: string
+  movementBudgetFeet?: number
   simulationOptimization?: Dnd5eMonsterTurnPlannerOptions['simulationOptimization']
   reconciledActiveEffects?: PlannerReconciledActiveEffects
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
@@ -2802,12 +2811,27 @@ function createTacticalCandidates(input: {
   const standFromProne = enemy.dnd5eCombatState?.conditions?.some((condition) =>
     ['prone', '倒地'].includes(condition.toLowerCase())) === true
   const standCostFeet = standFromProne ? Math.floor(movementSpeed / 2) : 0
+  const baseMovementFeet = shouldFly ? flySpeed : movementSpeed
+  const normalMovementBudgetFeet = Math.max(
+    0,
+    input.movementBudgetFeet ?? baseMovementFeet,
+  )
+  const dashMovementBudgetFeet = Math.max(
+    0,
+    input.movementBudgetFeet ?? baseMovementFeet * 2,
+  )
   const normalHorizontalFeet = canMove
-    ? Math.max(0, (shouldFly ? flySpeed : movementSpeed) / dragMovementDivisor -
+    ? Math.max(0, Math.min(
+        baseMovementFeet,
+        normalMovementBudgetFeet,
+      ) / dragMovementDivisor -
       verticalCostFeet - standCostFeet)
     : 0
   const dashHorizontalFeet = canMove
-    ? Math.max(0, (shouldFly ? flySpeed : movementSpeed) * 2 / dragMovementDivisor -
+    ? Math.max(0, Math.min(
+        baseMovementFeet * 2,
+        dashMovementBudgetFeet,
+      ) / dragMovementDivisor -
       verticalCostFeet - standCostFeet)
     : 0
   const role = monsterTacticalRole(monster)
@@ -2895,6 +2919,8 @@ function createTacticalCandidates(input: {
   }
   const legalActions = (input.canUseAction ? monster.actions : [])
     .map((action, index) => ({ action, index }))
+    .filter(({ action }) =>
+      input.requiredActionId == null || action.id === input.requiredActionId)
     .filter(({ action }) =>
       maximumAttacksPerTurn == null ||
       actionSequence(monster, action, enemy)
@@ -3833,10 +3859,14 @@ export function planDnd5eMonsterTurn(
     combatId: options.combatId,
     round: options.round,
     preferredTargetId: preferredTarget.id,
+    requiredActionId: options.requiredActionId,
+    movementBudgetFeet: options.movementBudgetFeet,
     simulationOptimization: options.simulationOptimization,
     reconciledActiveEffects,
   }))
-  const candidates = [
+  const candidates = options.requiredActionId
+    ? tacticalCandidates
+    : [
     ...createMonsterEscapeCandidates({
       map,
       enemy,

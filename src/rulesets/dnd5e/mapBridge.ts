@@ -4,7 +4,13 @@ import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import type { Character } from '../../types/character'
 import type { Dnd5eAttackCoverOverride } from '../../lib/sharedCombatTypes'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
-import { DND_FEET_PER_CELL, tokenFootprintCells, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import {
+  cellDistance,
+  DND_FEET_PER_CELL,
+  tokenFootprintCells,
+  tokenFootprintDistanceCells,
+  tokenOccupiedCellsAt,
+} from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import {
   DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
@@ -43,6 +49,7 @@ import {
 import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
 import { dnd5eWeaponDamageSource } from './equipment'
 import type { Dnd5eMoralAlignment } from './damageDefenses'
+import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -523,6 +530,12 @@ export function createDnd5eMapCombatSnapshot(input: {
   if (authoritativeSlots.length > 0) {
     state.initiativeOrder = authoritativeSlots.map((entry) => entry.tokenId)
     state.initiativeSlotIds = authoritativeSlots.map((entry) => entry.slotId ?? entry.tokenId)
+    const firstRoundOnlyInitiativeSlotIds = authoritativeSlots.flatMap((entry) =>
+      entry.firstRoundOnly ? [entry.slotId ?? entry.tokenId] : [],
+    )
+    state.firstRoundOnlyInitiativeSlotIds = firstRoundOnlyInitiativeSlotIds.length > 0
+      ? firstRoundOnlyInitiativeSlotIds
+      : undefined
   }
   state.mapId = input.map.id
   state.coordinateUnitsPerFoot = input.map.gridSize /
@@ -546,11 +559,44 @@ export function createDnd5eMapCombatSnapshot(input: {
     ),
   }
   state.distanceFeetByCombatantPair = {}
+  state.utilityProjectionDistanceFeetByPair = {}
   state.coverBonusByCombatantPair = {}
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
   state.physicalLineOfSightBlockedByCombatantPair = {}
   state.magicalDarknessByCombatantPair = {}
+  const snapshotRound = Math.max(1, Math.floor(input.round ?? 1))
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (
+      area.sourceKind !== 'core-spell' ||
+      !area.coreSpellId ||
+      !state.combatants[area.sourceTokenId] ||
+      area.expiresAfterRound < snapshotRound
+    ) continue
+    for (const targetToken of combatantTokens) {
+      const targetCells = tokenOccupiedCellsAt(targetToken, input.map, targetToken)
+      let minimumCells = Number.POSITIVE_INFINITY
+      for (const projectionCell of area.cells) {
+        for (const targetCell of targetCells) {
+          minimumCells = Math.min(
+            minimumCells,
+            cellDistance(projectionCell, targetCell),
+          )
+        }
+      }
+      if (!Number.isFinite(minimumCells)) continue
+      const key = dnd5eUtilityProjectionDistanceKey(
+        area.sourceTokenId,
+        area.coreSpellId,
+        targetToken.id,
+      )
+      state.utilityProjectionDistanceFeetByPair[key] = Math.min(
+        state.utilityProjectionDistanceFeetByPair[key] ??
+          Number.POSITIVE_INFINITY,
+        minimumCells * feetPerCell,
+      )
+    }
+  }
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
       const left = combatantTokens[leftIndex]
@@ -601,7 +647,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       }
     }
   }
-  state.round = Math.max(1, Math.floor(input.round ?? 1))
+  state.round = snapshotRound
   state.turnSlotId = input.turnSlotId ??
     state.initiativeSlotIds?.[state.initiativeIndex] ??
     state.initiativeOrder[state.initiativeIndex]
@@ -799,6 +845,7 @@ export function planDnd5eMapResultApplication(input: {
             monsterActionUsesByActionId: combatant.classState.monsterActionUsesByActionId,
             monsterSpellSlots: combatant.classState.monsterSpellSlots,
             monsterSpellUsesBySpellId: combatant.classState.monsterSpellUsesBySpellId,
+            monsterMultiattackContinuation: combatant.classState.monsterMultiattackContinuation,
             monsterShapechangeOriginalStatBlockId: combatant.classState.monsterShapechangeOriginalStatBlockId,
             monsterShapechangeFormId: combatant.classState.monsterShapechangeFormId,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,

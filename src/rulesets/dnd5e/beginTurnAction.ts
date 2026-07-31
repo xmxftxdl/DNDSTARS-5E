@@ -125,6 +125,9 @@ export function prepareDnd5eBeginTurn(
 ): { ok: true; prepared: PreparedDnd5eBeginTurn } |
   { ok: false; reason: Dnd5eBeginTurnRejectReason } {
   const slot = input.initiativeOrder[input.initiativeIndex]
+  if (slot?.firstRoundOnly && input.round > 1) {
+    return { ok: false, reason: 'invalid-action' }
+  }
   const actorToken = slot
     ? input.map.tokens.find((token) => token.id === slot.tokenId)
     : undefined

@@ -35,7 +35,7 @@ export const DICE_THEME: DiceColorset = {
 
 export const DICE_ASSET_PATH = '/assets/dice-threejs/'
 export const DICE_BASE_SCALE = 76
-export const DICE_D4_BASE_SCALE = 78
+export const DICE_D4_BASE_SCALE = DICE_BASE_SCALE
 export const DICE_D4_LABEL_SCALE = 1.25
 export const DICE_D4_THEME: DiceColorset = {
   ...DICE_THEME,

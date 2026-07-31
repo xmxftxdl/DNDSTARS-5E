@@ -45,6 +45,9 @@ services:
       STARS_ALLOWED_ORIGINS: "${STARS_ALLOWED_ORIGINS:-}"
       STARS_BUILD_ID: "${STARS_BUILD_ID:-docker-local}"
       STARS_SHARED_ROOT: /data
+      STARS_ART_ASSET_ROOT: /art-assets
+      STARS_REQUIRE_ART_ASSET_PACK: "${STARS_REQUIRE_ART_ASSET_PACK:-false}"
+      STARS_ART_ASSET_MANIFEST_SHA256: "${STARS_ART_ASSET_MANIFEST_SHA256:-}"
       STARS_ACCOUNT_STORAGE: "${STARS_ACCOUNT_STORAGE:-postgres}"
       STARS_DATABASE_PATH: "${STARS_DATABASE_PATH:-/data/astraltrace.sqlite}"
       STARS_DATABASE_URL: "postgresql://${STARS_POSTGRES_USER:-astraltrace}:${STARS_POSTGRES_PASSWORD:-development-only-change-me}@postgres:5432/${STARS_POSTGRES_DB:-astraltrace}"
@@ -82,6 +85,9 @@ services:
         condition: service_healthy
     volumes:
       - dndstars-data:/data
+      # 挂载完整 public 根目录，让清单和 /assets/... 共用同一只读边界；
+      # 大体积美术资源不会再复制进核心 dist/镜像。
+      - "${STARS_ART_ASSET_HOST_PATH:-./public}:/art-assets:ro"
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

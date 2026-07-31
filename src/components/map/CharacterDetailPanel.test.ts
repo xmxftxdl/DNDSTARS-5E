@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import CharacterDetailPanel from './CharacterDetailPanel'
-import { parseLiveHitPointDraft } from './characterHitPoints'
+import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
 
 const token: Token = {
   id: 'hero-token',
@@ -37,6 +37,35 @@ const character = {
 } as unknown as Character
 
 describe('CharacterDetailPanel', () => {
+  it('生命值输入与权威确认之间始终使用同一份乐观快照绘制血条', () => {
+    expect(resolveHitPointDisplay({
+      currentHp: 40,
+      maxHp: 80,
+      currentHpDraft: '80',
+      maxHpDraft: '80',
+      editingCurrentHp: true,
+      editingMaxHp: false,
+    })).toEqual({
+      currentHp: 80,
+      maxHp: 80,
+      percentage: 100,
+    })
+
+    expect(resolveHitPointDisplay({
+      currentHp: 40,
+      maxHp: 80,
+      currentHpDraft: '80',
+      maxHpDraft: '80',
+      editingCurrentHp: false,
+      editingMaxHp: false,
+      pending: { currentHp: 80, maxHp: 80 },
+    })).toEqual({
+      currentHp: 80,
+      maxHp: 80,
+      percentage: 100,
+    })
+  })
+
   it('生命值输入时立即解析有效数值，并允许暂时清空输入框', () => {
     expect(parseLiveHitPointDraft('79', 94)).toBe(79)
     expect(parseLiveHitPointDraft('120', 94)).toBe(94)

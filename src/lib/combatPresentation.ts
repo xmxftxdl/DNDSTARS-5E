@@ -23,7 +23,8 @@ export const SPARE_THE_DYING_ANIMATION_DURATION_MS = 1_100
 export const ACID_SPLASH_ANIMATION_DURATION_MS = 1_050
 export const POISON_SPRAY_ANIMATION_DURATION_MS = 1_150
 export const VICIOUS_MOCKERY_ANIMATION_DURATION_MS = 1_100
-export const MAGIC_MISSILE_ANIMATION_DURATION_MS = 1_000
+export const MAGIC_MISSILE_ANIMATION_DURATION_MS = 300
+export const MAGIC_MISSILE_SEQUENCE_GAP_MS = 300
 export const SCORCHING_RAY_ANIMATION_DURATION_MS = 1_000
 export const GUIDING_BOLT_ANIMATION_DURATION_MS = 1_050
 export const ACID_ARROW_ANIMATION_DURATION_MS = 1_050
@@ -1271,6 +1272,10 @@ type MaterialProjectilePresentationInput = {
   targetTokenId: string
 }
 
+type MagicMissilePresentationInput = MaterialProjectilePresentationInput & {
+  sequenceIndex?: number
+}
+
 async function publishMaterialProjectile(
   spellId:
     | 'magic-missile'
@@ -1296,9 +1301,29 @@ async function publishMaterialProjectile(
 }
 
 export function publishMagicMissilePresentation(
-  input: MaterialProjectilePresentationInput,
+  input: MagicMissilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  return publishMaterialProjectile('magic-missile', MAGIC_MISSILE_ANIMATION_DURATION_MS, input)
+  const sequenceIndex = Math.max(0, Math.min(30, Math.floor(input.sequenceIndex ?? 0)))
+  const delayMs = sequenceIndex * MAGIC_MISSILE_SEQUENCE_GAP_MS
+  return refreshCombatPresentationClock().then(async () => {
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs))
+    }
+    const createdAt = combatPresentationServerNow()
+    await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+      schemaVersion: 1,
+      type: 'spell-projectile',
+      spellId: 'magic-missile',
+      id: input.id,
+      mapId: input.mapId,
+      transactionId: input.transactionId,
+      sourceTokenId: input.sourceTokenId,
+      targetTokenId: input.targetTokenId,
+      createdAt,
+      expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+    })
+    return { completesAt: createdAt + MAGIC_MISSILE_ANIMATION_DURATION_MS }
+  })
 }
 
 export function publishScorchingRayPresentation(

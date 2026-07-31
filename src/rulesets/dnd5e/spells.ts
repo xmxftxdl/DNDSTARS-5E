@@ -185,6 +185,14 @@ export interface Dnd5eSrdSpellDefinition {
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
+    id: 'mage-hand', name: '法师之手', englishName: 'Mage Hand', level: 0, school: '咒法',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 30,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    effectDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 30 },
+    description: '在射程内创建一个可移动的非生物工具投影，持续1分钟。战斗地图自动处理其位置与移动；具体物件交互由DM裁定。',
+  },
+  {
     id: 'dancing-lights', name: '舞光术', englishName: 'Dancing Lights', level: 0, school: '塑能',
     classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0,
     target: 'ally', effect: 'narrative-effect', dice: { count: 0, sides: 4, bonus: 0 },

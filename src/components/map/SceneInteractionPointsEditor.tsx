@@ -282,6 +282,7 @@ export default function SceneInteractionPointsEditor({
   const selected = scene.interactionPoints.find((point) => point.id === selectedId) ??
     scene.interactionPoints[0]
   const allItems = useMemo(() => {
+    void pluginRegistryRevision
     const byId = new Map(
       [...DND5E_SRD_ITEM_TEMPLATES, ...registeredDnd5ePluginItems()]
         .map((item) => [item.id, item] as const),

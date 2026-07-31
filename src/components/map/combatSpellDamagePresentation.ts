@@ -4,8 +4,10 @@ import {
   dnd5eEffectiveSpellcastingSources,
   dnd5eSpellDamageDiceCounts,
   dnd5eSpellDelayedDamageDiceCount,
+  dnd5eSpellHigherSlotDamageChoices,
   dnd5eSpellProjectileCount,
   dnd5eSpellUsesSequencedAttacks,
+  dnd5eSustainedSpellAttackDiceCount,
   getDnd5eSrdCombatSpell,
   type Dnd5eSrdSpellDefinition,
 } from '../../rulesets/dnd5e'
@@ -25,6 +27,15 @@ function signedBonus(value: number): string {
 
 function diceFormula(count: number, sides: number, bonus = 0): string {
   return `${count}d${sides}${signedBonus(bonus)}`
+}
+
+function damagePoolSummary(
+  count: number,
+  sides: number,
+  bonus: number,
+  damageType: keyof typeof DND5E_DAMAGE_TYPE_LABELS,
+): string {
+  return `${diceFormula(count, sides, bonus)}${DND5E_DAMAGE_TYPE_LABELS[damageType]}伤害`
 }
 
 function spellcastingModifier(
@@ -106,16 +117,17 @@ export function dnd5eCombatSpellDamagePreview(
     character.level,
     slotLevel,
   )
-  const primaryDiceCount = damageDiceCounts[0] ?? 0
+  const sustainedDiceCount = dnd5eSustainedSpellAttackDiceCount(spell, slotLevel)
+  const immediateSustainedAttack = spell.sustainedAttack?.immediateAttack === true
+  const primaryDiceCount = immediateSustainedAttack
+    ? sustainedDiceCount
+    : damageDiceCounts[0] ?? 0
+  const primaryDiceSides = immediateSustainedAttack
+    ? spell.sustainedAttack!.dice.sides
+    : spell.dice.sides
   const hasPrimaryDamage = spell.damageType != null && primaryDiceCount > 0
   const hasAdditionalDamage = (spell.additionalDamageComponents?.length ?? 0) > 0
   const delayedDiceCount = dnd5eSpellDelayedDamageDiceCount(spell, slotLevel)
-  const sustainedDiceCount = spell.sustainedAttack
-    ? spell.sustainedAttack.dice.count + Math.floor(
-        Math.max(0, slotLevel - spell.level) /
-        Math.max(1, spell.sustainedAttack.dice.additionalDieEverySlotLevels ?? 1),
-      )
-    : 0
   if (!hasPrimaryDamage && !hasAdditionalDamage && delayedDiceCount < 1 && sustainedDiceCount < 1) {
     return undefined
   }
@@ -139,22 +151,57 @@ export function dnd5eCombatSpellDamagePreview(
     const projectileCount = dnd5eSpellProjectileCount(spell, character.level, slotLevel) ?? 1
     const perProjectileDice = spell.id === 'eldritch-blast' ? 1 : primaryDiceCount
     summaries.push(
-      `${projectileCount}道攻击，每道${diceFormula(perProjectileDice, spell.dice.sides, standardBonus)}${typeLabel}伤害`,
+      `${projectileCount}道攻击，每道${diceFormula(perProjectileDice, primaryDiceSides, standardBonus)}${typeLabel}伤害`,
     )
     if (features.once > 0) summaries.push(`首次造成伤害时额外+${features.once}`)
+  } else if (hasPrimaryDamage && hasAdditionalDamage) {
+    const higherSlotDamageChoices = dnd5eSpellHigherSlotDamageChoices(spell, slotLevel)
+    const damageOptions = higherSlotDamageChoices.length > 0
+      ? higherSlotDamageChoices.map((choice) =>
+          dnd5eSpellDamageDiceCounts(spell, character.level, slotLevel, choice),
+        )
+      : [damageDiceCounts]
+    const optionSummaries = damageOptions.map((counts) => {
+      const primaryCount = counts[0] ?? 0
+      const pools = spell.damageType
+        ? [damagePoolSummary(
+            primaryCount,
+            primaryDiceSides,
+            spell.dice.bonus +
+              (spell.bonusPerDie ? primaryCount : 0) +
+              (spell.addSpellcastingModifier ? castingModifier : 0) +
+              features.perDamageRoll +
+              features.once,
+            spell.damageType,
+          )]
+        : []
+      for (let index = 0; index < (spell.additionalDamageComponents?.length ?? 0); index += 1) {
+        const component = spell.additionalDamageComponents![index]
+        pools.push(damagePoolSummary(
+          counts[index + 1] ?? component.dice.count,
+          component.dice.sides,
+          component.dice.bonus,
+          component.damageType,
+        ))
+      }
+      return pools.join('＋')
+    })
+    summaries.push(optionSummaries.join('，或'))
   } else if (hasPrimaryDamage) {
     summaries.push(
-      `${diceFormula(primaryDiceCount, spell.dice.sides, standardBonus + features.once)}${typeLabel}伤害`,
+      `${diceFormula(primaryDiceCount, primaryDiceSides, standardBonus + features.once)}${typeLabel}伤害`,
     )
-  }
-
-  for (let index = 0; index < (spell.additionalDamageComponents?.length ?? 0); index += 1) {
-    const component = spell.additionalDamageComponents![index]
-    const count = damageDiceCounts[index + 1] ?? component.dice.count
-    summaries.push(
-      `${diceFormula(count, component.dice.sides, component.dice.bonus)}` +
-      `${DND5E_DAMAGE_TYPE_LABELS[component.damageType]}伤害`,
-    )
+  } else {
+    for (let index = 0; index < (spell.additionalDamageComponents?.length ?? 0); index += 1) {
+      const component = spell.additionalDamageComponents![index]
+      const count = damageDiceCounts[index + 1] ?? component.dice.count
+      summaries.push(damagePoolSummary(
+        count,
+        component.dice.sides,
+        component.dice.bonus,
+        component.damageType,
+      ))
+    }
   }
 
   if (spell.delayedDamage && delayedDiceCount > 0) {

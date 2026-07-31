@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -28,7 +29,7 @@ function fixture(actor: Character) {
     id: 'end', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'end-turn',
     actorTokenId: actorToken.id, characterId: actor.id, round: 3, initiativeIndex: 0, seq: 1, updatedAt: 1,
   }
-  const initiativeOrder = [
+  const initiativeOrder: InitiativeEntry[] = [
     { tokenId: actorToken.id, label: actorToken.label, emoji: '', color: '', roll: 20 },
     { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 10 },
   ]
@@ -37,6 +38,18 @@ function fixture(actor: Character) {
 
 describe('D&D 5e map end-turn authority bridge', () => {
   afterEach(() => setDnd5eRoomMonsterCatalog([]))
+
+  it('rejects ending a forged first-round-only slot after round one', () => {
+    const input = fixture(barbarian(false))
+    input.initiativeOrder[0] = {
+      ...input.initiativeOrder[0],
+      firstRoundOnly: true,
+    }
+    expect(prepareDnd5ePlayerEndTurn(input)).toEqual({
+      ok: false,
+      reason: 'invalid-action',
+    })
+  })
 
   it('persists a sustained Rage countdown through the map application', () => {
     const resolved = resolveDnd5ePlayerEndTurn(fixture(barbarian(true)))

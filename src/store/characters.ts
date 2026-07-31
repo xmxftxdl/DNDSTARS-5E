@@ -37,7 +37,7 @@ import { applyDnd5eLongRestBenefits, reconcileDnd5eCharacterCampaignTime } from 
 import { canBenefitFromLongRest } from '../lib/campaignTime'
 import { useCampaignTimeStore } from './campaignTime'
 
-import type { Character } from '../types/character'
+import type { Character, Dnd5eLevelAdvancementRecordV1 } from '../types/character'
 import type { LegacyCharacterSave } from '../types/legacyCharacter'
 
 function uid(): string {
@@ -674,6 +674,157 @@ export function mergePendingLocalPluginFeatures(
   })
 }
 
+const PENDING_LOCAL_ADVANCEMENTS_TTL_MS = 30000
+const PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY = 'stars-character-advancements-v1'
+const pendingLocalAdvancements = new Map<string, {
+  records: Dnd5eLevelAdvancementRecordV1[]
+  updatedAt: number
+}>()
+let pendingLocalAdvancementsHydrated = false
+
+function advancementRecordsSnapshot(records: readonly Dnd5eLevelAdvancementRecordV1[] | undefined): string {
+  return JSON.stringify(records ?? [])
+}
+
+function pendingAdvancementAcknowledged(
+  character: Character,
+  records: readonly Dnd5eLevelAdvancementRecordV1[],
+): boolean {
+  const after = records.at(-1)?.after
+  return advancementRecordsSnapshot(character.dnd5eLevelAdvancements) === advancementRecordsSnapshot(records) &&
+    (!after || (
+      JSON.stringify(character.abilities) === JSON.stringify(after.abilities) &&
+      JSON.stringify([...(character.skills ?? [])].sort()) === JSON.stringify([...(after.skills ?? [])].sort()) &&
+      JSON.stringify([...(character.dnd5eFeatIds ?? [])].sort()) === JSON.stringify([...(after.dnd5eFeatIds ?? [])].sort())
+    ))
+}
+
+function advancementProjectionSnapshot(character: Character | undefined): string {
+  if (!character) return ''
+  return JSON.stringify({
+    records: character.dnd5eLevelAdvancements ?? [],
+    abilities: character.abilities,
+    skills: [...(character.skills ?? [])].sort(),
+    featIds: [...(character.dnd5eFeatIds ?? [])].sort(),
+  })
+}
+
+function persistPendingLocalAdvancements(): void {
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalAdvancements.size === 0) {
+      storage.removeItem(PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalAdvancements)),
+    )
+  } catch {
+    // The in-memory guard remains useful when localStorage is unavailable.
+  }
+}
+
+function hydratePendingLocalAdvancements(): void {
+  if (pendingLocalAdvancementsHydrated) return
+  pendingLocalAdvancementsHydrated = true
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, {
+      records?: unknown
+      updatedAt?: unknown
+    }>
+    for (const [id, pending] of Object.entries(parsed)) {
+      const updatedAt = Number(pending.updatedAt)
+      if (
+        !id ||
+        !Array.isArray(pending.records) ||
+        !pending.records.every((record) =>
+          record && typeof record === 'object' &&
+          (record as { schemaVersion?: unknown }).schemaVersion === 1) ||
+        !Number.isFinite(updatedAt)
+      ) continue
+      pendingLocalAdvancements.set(id, {
+        records: structuredClone(pending.records) as Dnd5eLevelAdvancementRecordV1[],
+        updatedAt,
+      })
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject both reads and writes.
+    }
+  }
+}
+
+function gcPendingLocalAdvancements(now: number = Date.now()): void {
+  hydratePendingLocalAdvancements()
+  let changed = false
+  for (const [id, pending] of pendingLocalAdvancements) {
+    if (now - pending.updatedAt > PENDING_LOCAL_ADVANCEMENTS_TTL_MS) {
+      pendingLocalAdvancements.delete(id)
+      changed = true
+    }
+  }
+  if (changed) persistPendingLocalAdvancements()
+}
+
+export function markPendingLocalAdvancements(
+  id: string,
+  records: readonly Dnd5eLevelAdvancementRecordV1[],
+  now: number = Date.now(),
+): void {
+  hydratePendingLocalAdvancements()
+  pendingLocalAdvancements.set(id, {
+    records: records.map((record) => structuredClone(record)),
+    updatedAt: now,
+  })
+  persistPendingLocalAdvancements()
+}
+
+export function clearPendingLocalAdvancementsForTest(): void {
+  pendingLocalAdvancements.clear()
+  pendingLocalAdvancementsHydrated = true
+  persistPendingLocalAdvancements()
+}
+
+export function resetPendingLocalAdvancementsMemoryForTest(): void {
+  pendingLocalAdvancements.clear()
+  pendingLocalAdvancementsHydrated = false
+}
+
+export function mergePendingLocalAdvancements(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingLocalAdvancements(now)
+  if (pendingLocalAdvancements.size === 0) return sharedCharacters
+  return sharedCharacters.map((character) => {
+    const pending = pendingLocalAdvancements.get(character.id)
+    if (!pending) return character
+    if (pendingAdvancementAcknowledged(character, pending.records)) {
+      pendingLocalAdvancements.delete(character.id)
+      persistPendingLocalAdvancements()
+      return character
+    }
+    const after = pending.records.at(-1)?.after
+    return {
+      ...character,
+      dnd5eLevelAdvancements: structuredClone(pending.records),
+      ...(after ? {
+        abilities: { ...after.abilities },
+        skills: [...after.skills],
+        dnd5eFeatIds: after.dnd5eFeatIds ? [...after.dnd5eFeatIds] : undefined,
+      } : {}),
+    }
+  })
+}
+
 /**
  * 删除墓碑：id ⇒ 删除时间戳。
  * 没有墓碑时，一次本地删除若落在 `setTimeout(saveCharacters,0)` 窗口内、或对端尚未看到该删除，
@@ -1191,6 +1342,10 @@ export const useCharacterStore = create<CharacterState>()(
             sharedCharactersWithPendingPluginFeatures,
             Date.now(),
           )
+          const sharedCharactersWithPendingAdvancements = mergePendingLocalAdvancements(
+            sharedCharactersWithPendingHitPoints,
+            Date.now(),
+          )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
             (character, index) => character.level !== filteredSharedCharacters[index]?.level,
           )
@@ -1218,10 +1373,15 @@ export const useCharacterStore = create<CharacterState>()(
               )
             },
           )
+          const pendingAdvancementsMustBeRepublished = sharedCharactersWithPendingAdvancements.some(
+            (character, index) =>
+              advancementProjectionSnapshot(character) !==
+              advancementProjectionSnapshot(sharedCharactersWithPendingHitPoints[index]),
+          )
           const pendingCharacterEditMustBeRepublished =
             pendingLevelMustBeRepublished || pendingFighterChoicesMustBeRepublished ||
             pendingClassChoicesMustBeRepublished || pendingPluginFeaturesMustBeRepublished ||
-            pendingHitPointsMustBeRepublished
+            pendingHitPointsMustBeRepublished || pendingAdvancementsMustBeRepublished
           const snapshot = JSON.stringify(shared)
           // 普通重复快照可短路；若它仍落后于持久化的本地编辑，则必须重新应用并重试保存。
           if (snapshot === lastSharedCharactersSnapshot && !pendingCharacterEditMustBeRepublished) {
@@ -1243,7 +1403,7 @@ export const useCharacterStore = create<CharacterState>()(
           const currentRoomSession = getRoomSession()
           const currentAccount = getAccountSession()
           let accountOwnershipMustBeRepublished = false
-          const sharedCharacters = sharedCharactersWithPendingHitPoints.map(finalizeCharacter).map((character) => {
+          const sharedCharacters = sharedCharactersWithPendingAdvancements.map(finalizeCharacter).map((character) => {
             if (
               currentRoomSession?.role === 'player' && currentAccount &&
               character.roomId === currentRoomSession.roomId &&
@@ -1385,6 +1545,9 @@ export const useCharacterStore = create<CharacterState>()(
           }
           if (patch.dnd5ePluginFeatureIds) {
             markPendingLocalPluginFeatures(id, patch.dnd5ePluginFeatureIds)
+          }
+          if (patch.dnd5eLevelAdvancements) {
+            markPendingLocalAdvancements(id, patch.dnd5eLevelAdvancements)
           }
           const current = get().characters.find((character) => character.id === id)
           if (!current) return

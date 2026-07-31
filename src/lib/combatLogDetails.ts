@@ -104,10 +104,176 @@ function classStateLabel(stateKey: string): string {
   return CLASS_STATE_LABELS[stateKey] ?? stateKey
 }
 
+type DamageAppliedEvent = Extract<Dnd5eCombatEvent, { type: 'damage-applied' }>
+type MagicMissileDamageEvent = Extract<
+  Dnd5eCombatEvent,
+  { type: 'magic-missile-damage-resolved' }
+>
+
+const MAGIC_MISSILE_PROJECTILES_PER_DETAIL = 5
+const COMBAT_LOG_ENTITY_NAME_MAX_LENGTH = 120
+
+function compactCombatLogName(name: string): string {
+  if (name.length <= COMBAT_LOG_ENTITY_NAME_MAX_LENGTH) return name
+  return `${name.slice(0, COMBAT_LOG_ENTITY_NAME_MAX_LENGTH - 1)}…`
+}
+
+function magicMissileHpDetails(
+  damageEvents: readonly DamageAppliedEvent[],
+  resolveName: (id: string) => string,
+): string[] {
+  const byTarget = new Map<string, {
+    hpBefore: number
+    hpAfter: number
+    temporaryHpBefore: number
+    temporaryHpAfter: number
+  }>()
+  for (const event of damageEvents) {
+    const current = byTarget.get(event.targetId)
+    if (current) {
+      current.hpAfter = event.hpAfter
+      current.temporaryHpAfter = event.temporaryHpAfter
+    } else {
+      byTarget.set(event.targetId, {
+        hpBefore: event.hpBefore,
+        hpAfter: event.hpAfter,
+        temporaryHpBefore: event.temporaryHpBefore,
+        temporaryHpAfter: event.temporaryHpAfter,
+      })
+    }
+  }
+  const targetDetails = [...byTarget].map(([targetId, hp]) => {
+    const temporaryHp = hp.temporaryHpBefore !== hp.temporaryHpAfter
+      ? `，临时 HP ${hp.temporaryHpBefore} → ${hp.temporaryHpAfter}`
+      : ''
+    return `${compactCombatLogName(resolveName(targetId))}：HP ${hp.hpBefore} → ${hp.hpAfter}${temporaryHp}`
+  })
+  const lines: string[] = []
+  for (let index = 0; index < targetDetails.length; index += 4) {
+    lines.push(`生命值结算｜${targetDetails.slice(index, index + 4).join('；')}`)
+  }
+  return lines
+}
+
+function magicMissileDetails(
+  event: MagicMissileDamageEvent,
+  resolveName: (id: string) => string,
+  damageEvents: readonly DamageAppliedEvent[],
+): string[] {
+  const projectileDetails = event.projectiles.map((projectile, index) => {
+    const targetName = compactCombatLogName(resolveName(projectile.targetId))
+    const rollExpression = [
+      `d${event.dieSides}(${projectile.dieRoll})`,
+      `${signed(event.baseBonusPerProjectile)}`,
+      ...(projectile.featureBonus > 0
+        ? [`强化塑能（智力）${signed(projectile.featureBonus)}`]
+        : []),
+    ].join(' ')
+    if (projectile.outcome === 'shielded') {
+      return `#${index + 1} → ${targetName}：${rollExpression}，被护盾术免疫`
+    }
+    if (projectile.outcome === 'limited-magic-immunity') {
+      return `#${index + 1} → ${targetName}：${rollExpression}，被有限魔法免疫抵消`
+    }
+    const reduction = projectile.cuttingWordsReduction > 0
+      ? ` - 斩词${projectile.cuttingWordsReduction}`
+      : ''
+    const defenses = projectile.finalDamage !== projectile.damageBeforeDefenses
+      ? ` → 防御调整后 ${projectile.finalDamage}`
+      : ''
+    return `#${index + 1} → ${targetName}：${rollExpression}${reduction} = ${projectile.damageBeforeDefenses}${defenses}`
+  })
+  const projectileLines: string[] = []
+  for (
+    let index = 0;
+    index < projectileDetails.length;
+    index += MAGIC_MISSILE_PROJECTILES_PER_DETAIL
+  ) {
+    const end = Math.min(
+      projectileDetails.length,
+      index + MAGIC_MISSILE_PROJECTILES_PER_DETAIL,
+    )
+    const range = projectileDetails.length > MAGIC_MISSILE_PROJECTILES_PER_DETAIL
+      ? `（#${index + 1}–#${end}）`
+      : ''
+    projectileLines.push(
+      `逐枚结算${range}｜${projectileDetails.slice(index, end).join('；')}`,
+    )
+  }
+  const effectiveProjectiles = event.projectiles.filter(
+    (projectile) => projectile.outcome === 'damage',
+  ).length
+  return [
+    `${compactCombatLogName(resolveName(event.actorId))}｜魔法飞弹（${event.slotLevel}环）｜共 ${event.projectiles.length} 枚｜每枚 1d${event.dieSides}${signed(event.baseBonusPerProjectile)} 力场伤害`,
+    ...projectileLines,
+    `魔法飞弹总伤害｜${event.totalDamage} 点｜实际生效 ${effectiveProjectiles}/${event.projectiles.length} 枚`,
+    ...magicMissileHpDetails(damageEvents, resolveName),
+  ]
+}
+
+function correlateMagicMissileDamageEvents(events: readonly Dnd5eCombatEvent[]): {
+  matchedBySummaryIndex: ReadonlyMap<number, readonly DamageAppliedEvent[]>
+  suppressedDamageIndexes: ReadonlySet<number>
+} {
+  const matchedBySummaryIndex = new Map<number, readonly DamageAppliedEvent[]>()
+  const suppressedDamageIndexes = new Set<number>()
+
+  events.forEach((event, summaryIndex) => {
+    if (event.type !== 'magic-missile-damage-resolved') return
+    let castIndex = -1
+    for (let index = summaryIndex - 1; index >= 0; index -= 1) {
+      const candidate = events[index]
+      if (
+        candidate.type === 'spell-cast' &&
+        candidate.actorId === event.actorId &&
+        candidate.spellId === event.spellId
+      ) {
+        castIndex = index
+        break
+      }
+    }
+    if (castIndex < 0) return
+
+    const expectedProjectiles = event.projectiles.filter(
+      (projectile) => projectile.outcome === 'damage',
+    )
+    if (expectedProjectiles.length === 0) return
+    const candidateIndexes: number[] = []
+    for (let index = castIndex + 1; index < summaryIndex; index += 1) {
+      const candidate = events[index]
+      if (
+        candidate.type === 'damage-applied' &&
+        candidate.sourceId === event.actorId &&
+        candidate.damageTypes?.includes('force') &&
+        !suppressedDamageIndexes.has(index)
+      ) candidateIndexes.push(index)
+    }
+    // Suppress only an exact one-to-one sequence. If another same-source force
+    // effect appears in the interval, retaining every generic line is safer.
+    if (candidateIndexes.length !== expectedProjectiles.length) return
+    const matched: DamageAppliedEvent[] = []
+    for (let index = 0; index < expectedProjectiles.length; index += 1) {
+      const projectile = expectedProjectiles[index]
+      const candidate = events[candidateIndexes[index]]
+      if (
+        candidate.type !== 'damage-applied' ||
+        candidate.targetId !== projectile.targetId ||
+        candidate.amount !== projectile.finalDamage
+      ) return
+      matched.push(candidate)
+    }
+    for (const index of candidateIndexes) suppressedDamageIndexes.add(index)
+    matchedBySummaryIndex.set(summaryIndex, matched)
+  })
+
+  return { matchedBySummaryIndex, suppressedDamageIndexes }
+}
+
 function eventDetails(
   event: Dnd5eCombatEvent,
   resolveName: (id: string) => string,
   formatPosition: (position: { x: number; y: number }) => string,
+  correlatedDamageEvents: readonly DamageAppliedEvent[] = [],
 ): string[] {
   switch (event.type) {
     case 'attack-resolved':
@@ -145,39 +311,8 @@ function eventDetails(
         `${resolveName(event.actorId)}｜法师特性「强化塑能」｜${ABILITY_LABELS[event.ability]}调整值 ${signed(event.amount)} 加入${spellName}的${application}`,
       ]
     }
-    case 'magic-missile-damage-resolved': {
-      const projectileDetails = event.projectiles.map((projectile, index) => {
-        const targetName = resolveName(projectile.targetId)
-        const rollExpression = [
-          `d${event.dieSides}(${projectile.dieRoll})`,
-          `${signed(event.baseBonusPerProjectile)}`,
-          ...(projectile.featureBonus > 0
-            ? [`强化塑能（智力）${signed(projectile.featureBonus)}`]
-            : []),
-        ].join(' ')
-        if (projectile.outcome === 'shielded') {
-          return `#${index + 1} → ${targetName}：${rollExpression}，被护盾术免疫`
-        }
-        if (projectile.outcome === 'limited-magic-immunity') {
-          return `#${index + 1} → ${targetName}：${rollExpression}，被有限魔法免疫抵消`
-        }
-        const reduction = projectile.cuttingWordsReduction > 0
-          ? ` - 斩词${projectile.cuttingWordsReduction}`
-          : ''
-        const defenses = projectile.finalDamage !== projectile.damageBeforeDefenses
-          ? ` → 防御调整后 ${projectile.finalDamage}`
-          : ''
-        return `#${index + 1} → ${targetName}：${rollExpression}${reduction} = ${projectile.damageBeforeDefenses}${defenses}`
-      })
-      const effectiveProjectiles = event.projectiles.filter(
-        (projectile) => projectile.outcome === 'damage',
-      ).length
-      return [
-        `${resolveName(event.actorId)}｜魔法飞弹（${event.slotLevel}环）｜共 ${event.projectiles.length} 枚｜每枚 1d${event.dieSides}${signed(event.baseBonusPerProjectile)} 力场伤害`,
-        `逐枚结算｜${projectileDetails.join('；')}`,
-        `魔法飞弹总伤害｜${event.totalDamage} 点｜实际生效 ${effectiveProjectiles}/${event.projectiles.length} 枚`,
-      ]
-    }
+    case 'magic-missile-damage-resolved':
+      return magicMissileDetails(event, resolveName, correlatedDamageEvents)
     case 'spell-saving-throw-damage-resolved': {
       const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
       const saveResult = event.saveSucceeded
@@ -298,9 +433,27 @@ export function formatDnd5eCombatLogDetails(
 ): string[] {
   const resolveName = options.resolveName ?? ((id: string) => id)
   const formatPosition = options.formatPosition ?? ((position) => `(${position.x}, ${position.y})`)
+  const correlation = correlateMagicMissileDamageEvents(events)
+  const semanticSummaryLines: string[] = []
+  const regularEventLines: string[] = []
+  events.forEach((event, index) => {
+    if (correlation.suppressedDamageIndexes.has(index)) return
+    const lines = eventDetails(
+      event,
+      resolveName,
+      formatPosition,
+      correlation.matchedBySummaryIndex.get(index),
+    )
+    if (
+      event.type === 'spell-damage-feature-bonus-applied' ||
+      event.type === 'magic-missile-damage-resolved'
+    ) semanticSummaryLines.push(...lines)
+    else regularEventLines.push(...lines)
+  })
   const all = [
     ...(options.extra ?? []).filter((line) => line.trim().length > 0),
-    ...events.flatMap((event) => eventDetails(event, resolveName, formatPosition)),
+    ...semanticSummaryLines,
+    ...regularEventLines,
   ]
   const unique = all.filter((line, index) => all.indexOf(line) === index)
   const limit = Math.max(1, options.limit ?? 14)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -6,7 +6,7 @@ import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import { getAc } from '../../lib/combatStats'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
-import { parseLiveHitPointDraft } from './characterHitPoints'
+import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
 import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 
 interface CharacterDetailPanelProps {
@@ -17,7 +17,7 @@ interface CharacterDetailPanelProps {
     maxHp: number
     temporaryHp: number
     manuallySetMaximum: boolean
-  }) => void
+  }) => void | Promise<unknown>
   isDM?: boolean
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
@@ -36,23 +36,45 @@ export default function CharacterDetailPanel({
   onClose,
 }: CharacterDetailPanelProps) {
   const portrait = resolveMapTokenPortrait(character, token)
-  const hpPct =
-    character.maxHp > 0 ? Math.max(0, Math.min(100, (character.currentHp / character.maxHp) * 100)) : 0
   const tempHp = character.tempHp ?? 0
   const [currentHpDraft, setCurrentHpDraft] = useState(String(character.currentHp))
   const [maxHpDraft, setMaxHpDraft] = useState(String(character.maxHp))
   const [editingCurrentHp, setEditingCurrentHp] = useState(false)
   const [editingMaxHp, setEditingMaxHp] = useState(false)
+  const [pendingHitPoints, setPendingHitPoints] = useState<{
+    currentHp: number
+    maxHp: number
+  } | null>(null)
+  const hitPointRequestIdRef = useRef(0)
+  const displayedHitPoints = resolveHitPointDisplay({
+    currentHp: character.currentHp,
+    maxHp: character.maxHp,
+    currentHpDraft,
+    maxHpDraft,
+    editingCurrentHp,
+    editingMaxHp,
+    pending: pendingHitPoints,
+  })
 
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
     const nextHp = Math.max(0, Math.min(maxHp, hp))
-    onSetHitPoints({
+    const requestId = ++hitPointRequestIdRef.current
+    setPendingHitPoints({ currentHp: nextHp, maxHp })
+    const result = onSetHitPoints({
       currentHp: nextHp,
       maxHp,
       temporaryHp: character.tempHp,
       manuallySetMaximum,
     })
+    if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+      return
+    }
+    const clearPendingRequest = () => {
+      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+    }
+    void Promise.resolve(result).then(clearPendingRequest, clearPendingRequest)
   }
 
   const commitCurrentHp = () => {
@@ -141,8 +163,8 @@ export default function CharacterDetailPanel({
                   type="number"
                   aria-label="当前生命值"
                   min={0}
-                  max={character.maxHp}
-                  value={editingCurrentHp ? currentHpDraft : String(character.currentHp)}
+                  max={displayedHitPoints.maxHp}
+                  value={editingCurrentHp ? currentHpDraft : String(displayedHitPoints.currentHp)}
                   onFocus={(event) => {
                     setCurrentHpDraft(String(character.currentHp))
                     setEditingCurrentHp(true)
@@ -160,7 +182,7 @@ export default function CharacterDetailPanel({
                   type="number"
                   aria-label="最大生命值"
                   min={1}
-                  value={editingMaxHp ? maxHpDraft : String(character.maxHp)}
+                  value={editingMaxHp ? maxHpDraft : String(displayedHitPoints.maxHp)}
                   onFocus={(event) => {
                     setMaxHpDraft(String(character.maxHp))
                     setEditingMaxHp(true)
@@ -188,7 +210,7 @@ export default function CharacterDetailPanel({
           <div className="h-2 overflow-hidden rounded-full bg-void-900/80">
             <div
               className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all"
-              style={{ width: `${hpPct}%` }}
+              style={{ width: `${displayedHitPoints.percentage}%` }}
             />
           </div>
         </section>

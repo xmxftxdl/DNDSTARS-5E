@@ -17,6 +17,7 @@ import {
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
+import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 
 function character(): Character {
   return { id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 40, currentHp: 40, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -972,6 +973,72 @@ describe('SRD monster map action adapter', () => {
     expect(prepared.prepared.action.id).toBe('multiattack')
     expect(prepared.prepared.attacks.map((entry) => entry.id)).toEqual(['beak', 'claws'])
     expect(previewDnd5eMonsterAttack(prepared.prepared, 0, 10).hit).toBe(true)
+
+    const firstOccurrence = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [
+        { d20: 10, damageRolls: [[5]] },
+      ],
+      settleAttackCount: 1,
+    })
+    expect(
+      firstOccurrence.result.ok,
+      firstOccurrence.result.ok ? undefined : firstOccurrence.result.reason,
+    ).toBe(true)
+    expect(firstOccurrence.application?.characters[0].currentHp).toBe(30)
+    expect(firstOccurrence.result.events.filter((event) =>
+      event.type === 'attack-resolved')).toHaveLength(1)
+    expect(firstOccurrence.application?.map.tokens.find((entry) =>
+      entry.id === owlbear.id)?.dnd5eCombatState?.monsterMultiattackContinuation)
+      .toMatchObject({
+        parentActionId: 'multiattack',
+        nextOccurrenceIndex: 1,
+        sequenceActionIds: ['beak', 'claws'],
+      })
+
+    const spentEconomy = spendDnd5eTurnResource(
+      createDnd5eTurnEconomyCounts('combat:1:owlbear'),
+      'action',
+    ).economy
+    const clawsIndex = getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+      .findIndex((action) => action.id === 'claws')
+    const continued = prepareDnd5eMonsterAttack({
+      combatId: 'combat',
+      map: firstOccurrence.application!.map,
+      characters: firstOccurrence.application!.characters,
+      initiativeOrder: [
+        { tokenId: owlbear.id, label: owlbear.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: owlbear.id,
+      targetTokenId: heroToken.id,
+      actionIndex: clawsIndex,
+      multiattackContinuation: {
+        schemaVersion: 1,
+        parentActionId: 'multiattack',
+        occurrenceIndex: 1,
+      },
+      turnEconomy: spentEconomy,
+    })
+    expect(continued.ok, continued.ok ? undefined : continued.reason).toBe(true)
+    if (!continued.ok) return
+    const continuedResult = resolvePreparedDnd5eMonsterAttack({
+      prepared: continued.prepared,
+      rolls: [{ d20: 10, damageRolls: [[4, 4]] }],
+      multiattackContinuation: {
+        schemaVersion: 1,
+        parentActionId: 'multiattack',
+        occurrenceIndex: 1,
+      },
+    })
+    expect(
+      continuedResult.result.ok,
+      continuedResult.result.ok ? undefined : continuedResult.result.reason,
+    ).toBe(true)
+    expect(continuedResult.application?.characters[0].currentHp).toBe(17)
+    expect(continuedResult.application?.map.tokens.find((entry) =>
+      entry.id === owlbear.id)?.dnd5eCombatState?.monsterMultiattackContinuation)
+      .toBeUndefined()
 
     const resolved = resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,

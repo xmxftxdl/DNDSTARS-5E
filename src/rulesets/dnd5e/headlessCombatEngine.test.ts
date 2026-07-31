@@ -2543,6 +2543,45 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }).some((definition) => definition.source === 'sneak-attack')).toBe(true)
   })
 
+  it('removes first-round-only turn slots when the first round wraps', () => {
+    const state = startDnd5eHeadlessCombat('first-round-slots', [
+      fighter('rogue', 20, { classId: 'rogue', subclassId: 'thief', level: 17 }),
+      fighter('enemy', 10, { controller: 'dm' }),
+    ])
+    state.initiativeOrder = ['rogue', 'enemy', 'rogue']
+    state.initiativeSlotIds = ['rogue:normal', 'enemy:normal', 'rogue:extra']
+    state.firstRoundOnlyInitiativeSlotIds = ['rogue:extra']
+    state.turnSlotId = 'rogue:normal'
+
+    const normalEnded = resolveDnd5eHeadlessAction(state, {
+      type: 'end-turn',
+      actorId: 'rogue',
+    })
+    expect(normalEnded.ok).toBe(true)
+    if (!normalEnded.ok) return
+    const enemyEnded = resolveDnd5eHeadlessAction(normalEnded.state, {
+      type: 'end-turn',
+      actorId: 'enemy',
+    })
+    expect(enemyEnded.ok).toBe(true)
+    if (!enemyEnded.ok) return
+    const extraEnded = resolveDnd5eHeadlessAction(enemyEnded.state, {
+      type: 'end-turn',
+      actorId: 'rogue',
+    })
+    expect(extraEnded.ok).toBe(true)
+    if (!extraEnded.ok) return
+
+    expect(extraEnded.state).toMatchObject({
+      round: 2,
+      initiativeIndex: 0,
+      initiativeOrder: ['rogue', 'enemy'],
+      initiativeSlotIds: ['rogue:normal', 'enemy:normal'],
+      turnSlotId: 'rogue:normal',
+    })
+    expect(extraEnded.state.firstRoundOnlyInitiativeSlotIds).toBeUndefined()
+  })
+
   it('only turns a Champion natural 19 into a critical when the attack also hits', () => {
     const missed = resolveDnd5eHeadlessAction(
       startDnd5eHeadlessCombat('champion-miss', [fighter('a', 20), fighter('b', 10, { armorClass: 30 })]),
@@ -6498,6 +6537,161 @@ describe('D&D 5e 2014 headless combat engine', () => {
       expect(ledgerIds).toContain('assassin:monster-action:monster:0:on-hit:poison-save-damage:damage:0')
       expect(ledgerIds).toContain('assassin:monster-action:monster:1:on-hit:poison-save-damage:save')
       expect(ledgerIds).toContain('assassin:monster-action:monster:1:on-hit:poison-save-damage:damage:0')
+    })
+
+    it('settles a stable Multiattack prefix as one committed attack before the next roll', () => {
+      const { state, target } = assassinCombat()
+      const result = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: 'assassin',
+        actionId: 'multiattack',
+        settleAttackCount: 1,
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[4]],
+          onHitEffectRolls: [poisonEffect(10)],
+        }],
+      }, {
+        transactionId: 'assassin-first-multiattack-occurrence',
+        now: 1,
+      })
+
+      expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+      if (!result.ok) return
+      expect(result.transaction?.status).toBe('committed')
+      expect(result.state.combatants[target.id].currentHp).toBe(65)
+      expect(result.state.combatants.assassin.turn.actionAvailable).toBe(false)
+      expect(result.events.filter((event) =>
+        event.type === 'attack-resolved')).toHaveLength(1)
+      expect(result.events.filter((event) =>
+        event.type === 'damage-applied')).toHaveLength(1)
+      expect(result.state.combatants.assassin.classState.monsterMultiattackContinuation)
+        .toMatchObject({
+          schemaVersion: 1,
+          combatId: result.state.combatId,
+          parentActionId: 'multiattack',
+          nextOccurrenceIndex: 1,
+          sequenceActionIds: ['shortsword', 'shortsword'],
+          targetIds: [target.id],
+          hitByOccurrence: [true],
+        })
+    })
+
+    it('authorizes the next Multiattack occurrence against a new target without spending a second action', () => {
+      const { state, target } = assassinCombat({
+        currentHp: 30,
+        maxHp: 30,
+      })
+      const nextTarget = fighter('next-target', 5, {
+        armorClass: 16,
+        currentHp: 100,
+        maxHp: 100,
+        savingThrowBonuses: { con: 2 },
+      })
+      state.combatants[nextTarget.id] = nextTarget
+      state.combatants[nextTarget.id].classState.turnStartResolvedTurnKey =
+        `${state.combatId}:prior-next-target-turn`
+
+      const first = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: 'assassin',
+        actionId: 'multiattack',
+        settleAttackCount: 1,
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[4]],
+          onHitEffectRolls: [poisonEffect(1)],
+        }],
+      })
+      expect(first.ok, first.ok ? undefined : first.reason).toBe(true)
+      if (!first.ok) return
+      expect(first.state.combatants[target.id].currentHp).toBe(0)
+      expect(first.state.combatants.assassin.turn.actionAvailable).toBe(false)
+
+      const continued = resolveDnd5eHeadlessAction(first.state, {
+        type: 'monster-action',
+        actorId: 'assassin',
+        actionId: 'shortsword',
+        multiattackContinuation: {
+          schemaVersion: 1,
+          parentActionId: 'multiattack',
+          occurrenceIndex: 1,
+        },
+        rolls: [{
+          targetId: nextTarget.id,
+          d20: 10,
+          damageRolls: [[5]],
+          onHitEffectRolls: [poisonEffect(13)],
+        }],
+      })
+      expect(continued.ok, continued.ok ? undefined : continued.reason).toBe(true)
+      if (!continued.ok) return
+      expect(continued.state.combatants[nextTarget.id].currentHp).toBe(78)
+      expect(continued.state.combatants.assassin.turn.actionAvailable).toBe(false)
+      expect(continued.state.combatants.assassin.classState.monsterMultiattackContinuation)
+        .toBeUndefined()
+      expect(continued.events.filter((event) =>
+        event.type === 'turn-resource-spent' && event.resource === 'action',
+      )).toHaveLength(0)
+    })
+
+    it('rejects forged or out-of-order Multiattack continuation attacks', () => {
+      const { state, target } = assassinCombat()
+      const first = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: 'assassin',
+        actionId: 'multiattack',
+        settleAttackCount: 1,
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[4]],
+          onHitEffectRolls: [poisonEffect(10)],
+        }],
+      })
+      expect(first.ok).toBe(true)
+      if (!first.ok) return
+
+      expect(resolveDnd5eHeadlessAction(first.state, {
+        type: 'monster-action',
+        actorId: 'assassin',
+        actionId: 'shortsword',
+        multiattackContinuation: {
+          schemaVersion: 1,
+          parentActionId: 'multiattack',
+          occurrenceIndex: 0,
+        },
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[5]],
+          onHitEffectRolls: [poisonEffect(13)],
+        }],
+      })).toMatchObject({
+        ok: false,
+        reason: 'invalid-monster-action',
+      })
+    })
+
+    it('rejects a forged Multiattack prefix count that does not match its rolls', () => {
+      const { state, target } = assassinCombat()
+      expect(resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: 'assassin',
+        actionId: 'multiattack',
+        settleAttackCount: 2,
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[4]],
+          onHitEffectRolls: [poisonEffect(10)],
+        }],
+      })).toMatchObject({
+        ok: false,
+        reason: 'invalid-monster-action',
+      })
     })
 
     it('commits the first attack and stops prepared follow-up attacks after defeating a monster', () => {

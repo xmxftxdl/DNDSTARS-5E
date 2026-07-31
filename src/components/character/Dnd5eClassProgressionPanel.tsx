@@ -52,6 +52,7 @@ interface Dnd5eClassProgressionPanelProps {
   onChange: (patch: Partial<Character>) => void
   isStartingClass?: boolean
   totalCharacterLevel?: number
+  lockedChoiceKeys?: ReadonlySet<string>
 }
 
 const SPELLCASTING_KIND_LABELS = {
@@ -88,7 +89,13 @@ function resetLabel(reset: 'combat' | 'short-rest' | 'long-rest'): string {
   return '战斗开始时恢复'
 }
 
-export default function Dnd5eClassProgressionPanel({ character, onChange, isStartingClass = true, totalCharacterLevel = character.level }: Dnd5eClassProgressionPanelProps) {
+export default function Dnd5eClassProgressionPanel({
+  character,
+  onChange,
+  isStartingClass = true,
+  totalCharacterLevel = character.level,
+  lockedChoiceKeys = new Set<string>(),
+}: Dnd5eClassProgressionPanelProps) {
   const definition = dnd5eClassDefinitionForCharacter(character)
   if (!definition || definition.id === 'fighter') return null
 
@@ -132,6 +139,8 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
       group === classSkillGroup || pluginChoiceGroups.includes(group) ||
       definition.choiceGroups?.includes(group) || selectedSubclass === definition.subclass.id,
     )
+  const subclassLocked = lockedChoiceKeys.has(`${definition.id}:subclass`)
+  const choiceLocked = (key: string) => lockedChoiceKeys.has(`${definition.id}:class:${key}`)
   const resources = classResourceDefinitions(character)
     .map((resourceDefinition) => ({
       definition: resourceDefinition,
@@ -158,10 +167,12 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
   }
 
   const setSubclass = (subclass?: string) => {
+    if (subclassLocked) return
     setClassChoices({ ...stored, subclass })
   }
 
   const toggleChoice = (group: Dnd5eClassChoiceGroup, optionId: string) => {
+    if (choiceLocked(group.id)) return
     const allowed = new Set(group.options.map((option) => option.id))
     const current = [...new Set(stored.selections?.[group.id] ?? [])].filter((id) => allowed.has(id))
     const selected = current.includes(optionId)
@@ -189,6 +200,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
   }
 
   const toggleKnownWildShapeForm = (formId: string) => {
+    if (choiceLocked(DND5E_WILD_SHAPE_KNOWN_FORMS_KEY)) return
     const current = [...new Set(stored.selections?.[DND5E_WILD_SHAPE_KNOWN_FORMS_KEY] ?? [])]
     const selected = current.includes(formId)
     setClassChoices({
@@ -203,6 +215,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
   }
 
   const setFeatureSpellSelection = (key: string, spellIds: readonly string[]) => {
+    if (choiceLocked(key)) return
     setClassChoices({
       ...stored,
       selections: {
@@ -228,7 +241,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
           <span className="text-xs font-semibold text-slate-500">{subclassLabel(definition.name)}（{definition.subclassLevel}级）</span>
           <select
             value={selectedSubclass ?? ''}
-            disabled={!subclassUnlocked}
+            disabled={!subclassUnlocked || subclassLocked}
             onChange={(event) => setSubclass(event.target.value || undefined)}
             className="rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -331,7 +344,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
             {availableWildShapeForms.map((form) => {
               const selected = stored.selections?.[DND5E_WILD_SHAPE_KNOWN_FORMS_KEY]?.includes(form.id) === true
               return <label key={form.id} className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 ${selected ? 'border-emerald-300/35 bg-emerald-400/10' : 'border-white/8 bg-black/10'}`}>
-                <input type="checkbox" checked={selected} onChange={() => toggleKnownWildShapeForm(form.id)} className="mt-1" />
+                <input type="checkbox" checked={selected} disabled={choiceLocked(DND5E_WILD_SHAPE_KNOWN_FORMS_KEY)} onChange={() => toggleKnownWildShapeForm(form.id)} className="mt-1" />
                 <span>
                   <strong className="text-xs text-slate-200">{form.name}</strong>
                   <span className="ml-1 text-[10px] text-slate-500">CR {form.challenge.rating} · AC {form.armorClass.value} · HP {form.hitPoints.average}</span>
@@ -570,9 +583,9 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
                   name={option.name}
                   summary={option.summary}
                   selected={selected.includes(option.id)}
-                  disabled={!selected.includes(option.id) && (
+                  disabled={choiceLocked(group.id) || (!selected.includes(option.id) && (
                     selected.length >= limit || !dnd5eClassChoiceOptionAvailable(character, definition.id, option)
-                  )}
+                  ))}
                   onClick={() => toggleChoice(group, option.id)}
                 />
               ))}

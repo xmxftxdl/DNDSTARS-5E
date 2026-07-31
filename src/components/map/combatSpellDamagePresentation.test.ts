@@ -56,6 +56,38 @@ describe('combat spell damage presentation', () => {
       .toBe('6d6火焰伤害')
   })
 
+  it('uses sustained immediate-attack scaling and the casting modifier for Spiritual Weapon', () => {
+    const cleric = wizard({
+      id: 'cleric',
+      name: '牧师',
+      charClass: '牧师',
+      level: 7,
+      abilities: { str: 12, dex: 10, con: 14, int: 8, wis: 18, cha: 12 },
+      dnd5eClassLevels: { cleric: 7 },
+    })
+
+    expect(dnd5eCombatSpellDamagePreview(cleric, 'cleric', 'spiritual-weapon', 2)?.summary)
+      .toBe('1d8+4力场伤害')
+    expect(dnd5eCombatSpellDamagePreview(cleric, 'cleric', 'spiritual-weapon', 4)?.summary)
+      .toBe('2d8+4力场伤害')
+  })
+
+  it('shows each legal higher-slot damage allocation for Flame Strike', () => {
+    const cleric = wizard({
+      id: 'cleric',
+      name: '牧师',
+      charClass: '牧师',
+      level: 11,
+      abilities: { str: 12, dex: 10, con: 14, int: 8, wis: 18, cha: 12 },
+      dnd5eClassLevels: { cleric: 11 },
+    })
+
+    expect(dnd5eCombatSpellDamagePreview(cleric, 'cleric', 'flame-strike', 5)?.summary)
+      .toBe('4d6火焰伤害＋4d6光耀伤害')
+    expect(dnd5eCombatSpellDamagePreview(cleric, 'cleric', 'flame-strike', 6)?.summary)
+      .toBe('5d6火焰伤害＋4d6光耀伤害，或4d6火焰伤害＋5d6光耀伤害')
+  })
+
   it('includes automatic subclass damage bonuses without multiplying them per missile', () => {
     const evoker = wizard({
       level: 10,

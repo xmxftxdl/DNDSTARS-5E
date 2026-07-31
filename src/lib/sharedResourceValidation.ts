@@ -27,7 +27,6 @@ import {
   type CombatInterruptPhase,
   type CombatInterruptStatus,
 } from './combatInterruptQueue'
-import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
 import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
 import { isDnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
 import { isDnd5eMonsterControlStateV1 } from './monsterControlState'
@@ -69,7 +68,6 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   'combat-log': 'entries',
   'room-chat': 'messages',
   'room-journal': 'handouts',
-  'group-ability-checks': 'checks',
   'dice-events': 'events',
   'combat-interrupts': 'interrupts',
   'player-action-requests': 'requests',
@@ -489,9 +487,6 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === COMBAT_STATISTICS_RESOURCE && !normalizeSharedCombatStatistics(input)) {
     reasons.push('进阶数据资源结构损坏')
-  }
-  if (name === GROUP_ABILITY_CHECK_RESOURCE && !validateSharedGroupAbilityChecks(input)) {
-    reasons.push('群体检定资源结构损坏')
   }
   if (name === CAMPAIGN_TIME_RESOURCE && !validateSharedCampaignTime(input)) {
     reasons.push('战役时间资源结构损坏')

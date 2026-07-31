@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
-COPY index.html dice-box-frame.html tsconfig*.json vite.config.ts eslint.config.js ./
+COPY index.html dice-box-frame.html tsconfig*.json vite.config.ts eslint.config.js .gitignore .dockerignore ./
 COPY public ./public
 COPY shared ./shared
 COPY scripts ./scripts
@@ -27,6 +27,8 @@ ARG STARS_BUILD_ID=docker
 ENV NODE_ENV=production \
     STARS_SECURITY_MODE=production \
     STARS_SHARED_ROOT=/data \
+    STARS_ART_ASSET_ROOT=/art-assets \
+    STARS_ART_ASSET_MANIFEST_PATH=/app/dist/runtime-assets/art-asset-pack.json \
     STARS_BUILD_ID=${STARS_BUILD_ID} \
     PORT=8080
 
@@ -38,6 +40,7 @@ LABEL org.opencontainers.image.title="DNDSTARS-5E" \
 
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/scripts/static-server.mjs ./scripts/static-server.mjs
+COPY --from=build --chown=node:node /app/scripts/art-asset-server.mjs ./scripts/art-asset-server.mjs
 COPY --from=build --chown=node:node /app/scripts/server-observability.mjs ./scripts/server-observability.mjs
 COPY --from=build --chown=node:node /app/scripts/shared-server-core.mjs ./scripts/shared-server-core.mjs
 COPY --from=build --chown=node:node /app/scripts/account-storage-sqlite.mjs ./scripts/account-storage-sqlite.mjs
@@ -48,7 +51,7 @@ COPY --from=build --chown=node:node /app/scripts/tencent-verification-provider.m
 COPY --from=build --chown=node:node /app/shared ./shared
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 
-RUN mkdir -p /data && chown -R node:node /data
+RUN mkdir -p /data /art-assets && chown -R node:node /data /art-assets
 
 USER node
 EXPOSE 8080

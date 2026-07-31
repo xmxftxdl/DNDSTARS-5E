@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DICE_BASE_SCALE, DICE_D4_BASE_SCALE } from './diceEngine'
 import { diceFrameLayout, settledDiceGrid } from './diceFrameLayout'
 
 describe('dice frame layout', () => {
@@ -11,10 +12,12 @@ describe('dice frame layout', () => {
       .toBeCloseTo(normal.visualScaleMultiplier / normal.tableMultiplier, 8)
   })
 
-  it('keeps the existing dedicated d4 sizing path', () => {
-    const d4 = diceFrameLayout(1, 4)
-    expect(d4.tableMultiplier).toBe(1)
-    expect(d4.visualScaleMultiplier).toBeCloseTo(0.828, 8)
+  it('keeps d4 the same apparent size as d6 and d8 for single and multi-die rolls', () => {
+    expect(DICE_D4_BASE_SCALE).toBe(DICE_BASE_SCALE)
+    expect(diceFrameLayout(1, 4)).toEqual(diceFrameLayout(1, 6))
+    expect(diceFrameLayout(1, 4)).toEqual(diceFrameLayout(1, 8))
+    expect(diceFrameLayout(9, 4)).toEqual(diceFrameLayout(9, 6))
+    expect(diceFrameLayout(9, 4)).toEqual(diceFrameLayout(9, 8))
   })
 
   it('clamps excessive quantities to the supported twelve-die frame', () => {

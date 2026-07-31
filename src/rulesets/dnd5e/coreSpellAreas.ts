@@ -69,6 +69,21 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
   {
+    spellId: 'mage-hand',
+    label: '法师之手',
+    minimumSlotLevel: 0,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 30 },
+    durationRounds: 10,
+    concentration: false,
+    anchorMode: 'fixed',
+    movement: { economy: 'action', maximumFeet: 30 },
+    relation: 'any',
+    includeSelf: true,
+    color: '#a78bfa',
+    visual: { preset: 'arcane', intensity: 'subtle' },
+    triggers: [],
+  },
+  {
     spellId: 'darkness',
     label: '黑暗术',
     minimumSlotLevel: 2,

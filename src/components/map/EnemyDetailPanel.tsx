@@ -32,6 +32,7 @@ import {
   DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS,
   DND5E_MONSTER_TARGET_PRIORITY_OPTIONS,
 } from '../../rulesets/dnd5e/monsterAutomation'
+import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
 
 function SharedMonsterPortrait({
   imageId,
@@ -104,7 +105,7 @@ export default function EnemyDetailPanel({
     currentHp: number
     maxHp: number
     manuallySetMaximum: boolean
-  }) => void
+  }) => void | Promise<unknown>
   removeToken?: (mapId: string, tokenId: string) => void
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
@@ -121,7 +122,6 @@ export default function EnemyDetailPanel({
   const isStructured5eMonster = stats?.source === 'SRD 5.1' || stats?.source === 'DM 自定义'
   const maxHp = token.maxHp ?? derived?.maxHp ?? template?.maxHp ?? 20
   const curHp = token.hp ?? maxHp
-  const hpPct = maxHp > 0 ? Math.max(0, Math.min(100, (curHp / maxHp) * 100)) : 0
 
   const name = token.label || template?.name || '敌人'
   const emoji = token.emoji || template?.emoji || '👹'
@@ -139,6 +139,47 @@ export default function EnemyDetailPanel({
   ]
   const description = template?.description
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
+  const authoritativeCurrentHp = linked?.currentHp ?? curHp
+  const authoritativeMaxHp = linked?.maxHp ?? maxHp
+  const [currentHpDraft, setCurrentHpDraft] = useState(String(authoritativeCurrentHp))
+  const [maxHpDraft, setMaxHpDraft] = useState(String(authoritativeMaxHp))
+  const [editingCurrentHp, setEditingCurrentHp] = useState(false)
+  const [editingMaxHp, setEditingMaxHp] = useState(false)
+  const [pendingHitPoints, setPendingHitPoints] = useState<{
+    currentHp: number
+    maxHp: number
+  } | null>(null)
+  const hitPointRequestIdRef = useRef(0)
+  const displayedHitPoints = resolveHitPointDisplay({
+    currentHp: authoritativeCurrentHp,
+    maxHp: authoritativeMaxHp,
+    currentHpDraft,
+    maxHpDraft,
+    editingCurrentHp,
+    editingMaxHp,
+    pending: pendingHitPoints,
+  })
+
+  const setHitPoints = (currentHp: number, maximumHp: number, manuallySetMaximum: boolean) => {
+    if (!onSetHitPoints) return
+    const nextMaxHp = Math.max(1, Math.floor(maximumHp))
+    const nextCurrentHp = Math.max(0, Math.min(nextMaxHp, Math.floor(currentHp)))
+    const requestId = ++hitPointRequestIdRef.current
+    setPendingHitPoints({ currentHp: nextCurrentHp, maxHp: nextMaxHp })
+    const result = onSetHitPoints({
+      currentHp: nextCurrentHp,
+      maxHp: nextMaxHp,
+      manuallySetMaximum,
+    })
+    if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+      return
+    }
+    const clearPendingRequest = () => {
+      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+    }
+    void Promise.resolve(result).then(clearPendingRequest, clearPendingRequest)
+  }
   const canEdit = isDM && !!mapId && !!updateToken
   const standardConditions = linked?.conditions ?? token.dnd5eCombatState?.conditions ?? []
   const monsterDefinition = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
@@ -294,14 +335,23 @@ export default function EnemyDetailPanel({
                   type="number"
                   aria-label="怪物当前生命值"
                   min={0}
-                  value={linked?.currentHp ?? curHp}
-                  onChange={(e) => {
-                    const nextHp = Math.max(0, Number(e.target.value) || 0)
-                    onSetHitPoints?.({
-                      currentHp: Math.min(linked?.maxHp ?? maxHp, nextHp),
-                      maxHp: linked?.maxHp ?? maxHp,
-                      manuallySetMaximum: false,
-                    })
+                  max={displayedHitPoints.maxHp}
+                  value={editingCurrentHp ? currentHpDraft : displayedHitPoints.currentHp}
+                  onFocus={(event) => {
+                    setCurrentHpDraft(String(displayedHitPoints.currentHp))
+                    setEditingCurrentHp(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => {
+                    const draft = event.target.value
+                    setCurrentHpDraft(draft)
+                    const nextHp = parseLiveHitPointDraft(draft, displayedHitPoints.maxHp)
+                    if (nextHp == null) return
+                    setHitPoints(nextHp, displayedHitPoints.maxHp, false)
+                  }}
+                  onBlur={() => setEditingCurrentHp(false)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
                   }}
                   className="w-16 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
@@ -310,14 +360,24 @@ export default function EnemyDetailPanel({
                   type="number"
                   aria-label="怪物最大生命值"
                   min={1}
-                  value={linked?.maxHp ?? maxHp}
-                  onChange={(e) => {
-                    const nextMax = Math.max(1, Number(e.target.value) || 1)
-                    onSetHitPoints?.({
-                      currentHp: Math.min(linked?.currentHp ?? curHp, nextMax),
-                      maxHp: nextMax,
-                      manuallySetMaximum: true,
-                    })
+                  value={editingMaxHp ? maxHpDraft : displayedHitPoints.maxHp}
+                  onFocus={(event) => {
+                    setMaxHpDraft(String(displayedHitPoints.maxHp))
+                    setEditingMaxHp(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => {
+                    const draft = event.target.value
+                    setMaxHpDraft(draft)
+                    if (draft.trim() === '') return
+                    const parsed = Number(draft)
+                    if (!Number.isFinite(parsed)) return
+                    const nextMaxHp = Math.max(1, Math.floor(parsed))
+                    setHitPoints(Math.min(displayedHitPoints.currentHp, nextMaxHp), nextMaxHp, true)
+                  }}
+                  onBlur={() => setEditingMaxHp(false)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
                   }}
                   className="w-16 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
@@ -461,13 +521,13 @@ export default function EnemyDetailPanel({
           <div className="mb-1 flex items-center justify-between text-xs">
             <span className="font-medium text-rose-300">生命值</span>
             <span className="tabular-nums text-slate-300">
-              {curHp} / {maxHp}
+              {displayedHitPoints.currentHp} / {displayedHitPoints.maxHp}
             </span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-void-900/80">
             <div
               className="h-full rounded-full bg-gradient-to-r from-rose-600 to-rose-400 transition-all"
-              style={{ width: `${hpPct}%` }}
+              style={{ width: `${displayedHitPoints.percentage}%` }}
             />
           </div>
         </div>

@@ -37,6 +37,7 @@ import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import { registerDnd5ePluginMonsterCatalogEntry } from './roomMonsterCatalog'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './classLevels'
 import { dnd5ePluginSubclassRegistry as pluginSubclasses } from './pluginSubclassRegistry'
+import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
@@ -1394,6 +1395,17 @@ function declarativeFeatureResolver(input: {
     const turnKey = `${state.combatId}:${state.round}:${state.turnSlotId ?? actor.id}`
     const oncePerTurn = predicates?.oncePerTurn === true || ability.limits?.oncePerTurn === true
     if (oncePerTurn && actor.classState.declarativeUsedTurnKeys?.[input.featureId] === turnKey) return context.fail('feature-already-used')
+    if (ability.mechanic?.kind === 'utility-projection-attack-advantage') {
+      if (!primaryTarget) return context.fail('invalid-target')
+      const projectionDistance = state.utilityProjectionDistanceFeetByPair?.[
+        dnd5eUtilityProjectionDistanceKey(actor.id, ability.mechanic.projectionId, primaryTarget.id)
+      ]
+      if (
+        projectionDistance == null ||
+        !Number.isFinite(projectionDistance) ||
+        projectionDistance > ability.mechanic.maximumDistanceFeet
+      ) return context.fail('invalid-target')
+    }
     const costs = [
       ...(ability.cost?.resources ?? []).map((cost) => ({ resourceId: namespacedId(input.pluginId, cost.resourceId), amount: cost.amount })),
       ...(input.usesResourceId && (ability.cost?.uses ?? 1) > 0 ? [{ resourceId: input.usesResourceId, amount: ability.cost?.uses ?? 1 }] : []),
@@ -1485,6 +1497,20 @@ function declarativeFeatureResolver(input: {
           if (duration) context.applyStandardCondition(target.id, effect.condition, duration)
         }
       }
+    }
+    if (ability.mechanic?.kind === 'utility-projection-attack-advantage' && primaryTarget) {
+      actor.classState.utilityProjectionAttackAdvantage = {
+        featureId: input.featureId,
+        targetId: primaryTarget.id,
+        turnKey,
+      }
+      context.events.push({
+        type: 'class-state-changed',
+        actorId: actor.id,
+        targetId: primaryTarget.id,
+        stateKey: 'utility-projection-attack-advantage',
+        active: true,
+      })
     }
     if (oncePerTurn) {
       actor.classState.declarativeUsedTurnKeys = { ...actor.classState.declarativeUsedTurnKeys, [input.featureId]: turnKey }
@@ -1947,7 +1973,10 @@ export function registerDnd5eRulesPlugin(
         }
         const hostManagedClosedSubclass =
           ability.mechanic?.kind === 'eldritch-knight-2014' ||
-          ability.mechanic?.kind === 'totem-warrior-2014'
+          ability.mechanic?.kind === 'totem-warrior-2014' ||
+          ability.mechanic?.kind === 'opening-attack' ||
+          ability.mechanic?.kind === 'hidden-spell-save-disadvantage' ||
+          ability.mechanic?.kind === 'utility-projection-control'
         const action = compatibility.effective === 'manual' || hostManagedClosedSubclass ? undefined : {
           id: actionLocalId,
           label: ability.name,

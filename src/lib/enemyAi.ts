@@ -68,6 +68,12 @@ export interface EnemyTurnResult {
    */
   attackTargetTokenIds?: readonly string[]
   actionIndex?: number
+  /** Internal Host orchestration for one committed occurrence of a Multiattack. */
+  multiattackStep?: {
+    mode: 'start' | 'continue'
+    parentActionId: string
+    occurrenceIndex: number
+  }
   attack?: EnemyAttackRoll
   /** 物理攻击默认命中；范围法术需敏捷豁免 */
   damageType?: 'physical' | 'aoe'

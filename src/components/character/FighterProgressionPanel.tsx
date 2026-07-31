@@ -30,9 +30,14 @@ import type { Character } from '../../types/character'
 interface FighterProgressionPanelProps {
   character: Character
   onChange: (patch: Partial<Character>) => void
+  lockedChoiceKeys?: ReadonlySet<string>
 }
 
-export default function FighterProgressionPanel({ character, onChange }: FighterProgressionPanelProps) {
+export default function FighterProgressionPanel({
+  character,
+  onChange,
+  lockedChoiceKeys = new Set<string>(),
+}: FighterProgressionPanelProps) {
   useSyncExternalStore(subscribeFighterSubclassRegistry, fighterSubclassRegistrySnapshot, fighterSubclassRegistrySnapshot)
   const fighter = character.dnd5eClassChoices?.fighter ?? {}
   const subclass = fighter.subclass
@@ -45,6 +50,8 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
   const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
   const progression = fighterProgression(subclass)
   const weapon = dnd5eWeaponAttackProfile(character)
+  const subclassLocked = lockedChoiceKeys.has('fighter:subclass')
+  const fightingStylesLocked = lockedChoiceKeys.has('fighter:fighting-styles')
   const setFighterChoices = (patch: NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>) => {
     onChange({
       dnd5eClassChoices: {
@@ -54,6 +61,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     })
   }
   const setSubclass = (next: FighterSubclassId | undefined) => {
+    if (subclassLocked) return
     const nextCharacter: Character = {
       ...character,
       dnd5eClassChoices: {
@@ -68,6 +76,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     })
   }
   const toggleFightingStyle = (style: FighterFightingStyleId) => {
+    if (fightingStylesLocked) return
     const selected = fightingStyles.includes(style)
     if (!selected && fightingStyles.length >= fightingStyleLimit) return
     setFighterChoices({ fightingStyles: selected ? fightingStyles.filter((item) => item !== style) : [...fightingStyles, style] })
@@ -81,6 +90,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     const limit = fighterSubclassChoiceLimit(group, character)
     if (!isSelected && selected.length >= limit) return
     const key = fighterSubclassChoiceKey(subclassOption.id, group.id)
+    if (lockedChoiceKeys.has(`fighter:subclass:${key}`)) return
     setFighterChoices({
       extensionChoices: {
         ...fighter.extensionChoices,
@@ -106,7 +116,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
             value={subclass ?? ''}
             placeholder={character.level >= 3 ? '选择子职' : '3级解锁'}
             options={subclassOptions}
-            disabled={character.level < 3}
+            disabled={character.level < 3 || subclassLocked}
             onChange={(value) => setSubclass(value as FighterSubclassId || undefined)}
           />
         </div>
@@ -127,7 +137,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
               name={option.name}
               summary={option.summary}
               selected={fightingStyles.includes(option.id)}
-              disabled={!fightingStyles.includes(option.id) && fightingStyles.length >= fightingStyleLimit}
+              disabled={fightingStylesLocked || (!fightingStyles.includes(option.id) && fightingStyles.length >= fightingStyleLimit)}
               onClick={() => toggleFightingStyle(option.id)}
             />
           ))}
@@ -188,7 +198,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
                   name={option.name}
                   summary={option.summary}
                   selected={selected.includes(option.id)}
-                  disabled={!selected.includes(option.id) && selected.length >= limit}
+                  disabled={lockedChoiceKeys.has(`fighter:subclass:${fighterSubclassChoiceKey(subclassOption.id, group.id)}`) || (!selected.includes(option.id) && selected.length >= limit)}
                   onClick={() => toggleSubclassChoice(group.id, option.id)}
                 />
               ))}

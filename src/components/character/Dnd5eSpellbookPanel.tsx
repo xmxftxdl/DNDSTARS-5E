@@ -33,7 +33,13 @@ import { replaceRoomCharacterSpellSelections } from '../../store/roomCommands'
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
-export default function Dnd5eSpellbookPanel({ character }: { character: Character }) {
+export default function Dnd5eSpellbookPanel({
+  character,
+  lockedChoiceKeys = new Set<string>(),
+}: {
+  character: Character
+  lockedChoiceKeys?: ReadonlySet<string>
+}) {
   const imported = useSpellbookStore((state) => state.spells)
   const pluginRevision = useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -69,6 +75,7 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
   const selections = dnd5eEffectiveSpellSelections(character, source)
   const selectionKey = source.spellSelectionKey ?? dnd5eSpellSelectionKey(classCharacter)
   const selectedCantrips = [...new Set(selections[source.cantripSelectionKey] ?? [])]
+  const requiredCantripIds = source.declarative?.requiredCantripIds ?? []
   const selectedSpells = [...new Set(selectionKey ? selections[selectionKey] ?? [] : [])]
   const wizardBook = [...new Set([
     ...(selections[WIZARD_SPELLBOOK_KEY] ?? []),
@@ -100,6 +107,15 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
   const detailSpell = detailSpellId ? entriesById.get(detailSpellId) : undefined
   const previewSpell = previewSpellId ? entriesById.get(previewSpellId) : undefined
   const preparationMode = definition.id === 'wizard' || selectionKey === 'spell-prepared'
+  const cantripChoicesLocked = lockedChoiceKeys.has(
+    `${source.classId}:class:${source.cantripSelectionKey}`,
+  )
+  const spellChoicesLocked = selectionKey
+    ? lockedChoiceKeys.has(`${source.classId}:class:${selectionKey}`)
+    : false
+  const wizardSpellbookLocked = lockedChoiceKeys.has(
+    `${source.classId}:class:${WIZARD_SPELLBOOK_KEY}`,
+  )
 
   const setSelections = (next: Readonly<Record<string, readonly string[]>>) => {
     const mutableSelections = Object.fromEntries(
@@ -112,6 +128,8 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
   }
 
   const toggleCantrip = (id: string) => {
+    if (cantripChoicesLocked) return
+    if (requiredCantripIds.includes(id)) return
     const selected = selectedCantrips.includes(id)
     if (!selected && selectedCantrips.length >= limits.cantrips) return
     setSelections({
@@ -122,6 +140,7 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
 
   const toggleKnownOrPrepared = (id: string) => {
     if (!selectionKey) return
+    if (spellChoicesLocked) return
     const selected = selectedSpells.includes(id)
     if (!selected && selectedSpells.length >= limits.spells) return
     const entry = entriesById.get(id)
@@ -140,6 +159,7 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
 
   const toggleWizardBook = (id: string) => {
     const selected = wizardBook.includes(id)
+    if (selected && wizardSpellbookLocked) return
     const nextBook = selected ? wizardBook.filter((spellId) => spellId !== id) : [...wizardBook, id]
     setSelections({
       ...selections,
@@ -166,12 +186,23 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
     inWizardBook={wizardBook.includes(spell.id)}
     selected={spell.level === 0 ? selectedCantrips.includes(spell.id) : selectedSpells.includes(spell.id)}
     disabled={spell.level === 0
-      ? !selectedCantrips.includes(spell.id) && selectedCantrips.length >= limits.cantrips
-      : definition.id !== 'wizard' && !selectedSpells.includes(spell.id) && (
-          selectedSpells.length >= limits.spells ||
-          (!dnd5eSubclassSpellSchoolAllowed(source, spell) &&
-            selectedUnrestrictedSpellCount >= unrestrictedSpellLimit)
+      ? cantripChoicesLocked ||
+        (!selectedCantrips.includes(spell.id) && selectedCantrips.length >= limits.cantrips)
+      : (
+          (
+            definition.id !== 'wizard' &&
+            !selectedSpells.includes(spell.id) &&
+            (
+              selectedSpells.length >= limits.spells ||
+              (
+                !dnd5eSubclassSpellSchoolAllowed(source, spell) &&
+                selectedUnrestrictedSpellCount >= unrestrictedSpellLimit
+              )
+            )
+          ) ||
+          spellChoicesLocked
         )}
+    bookDisabled={wizardSpellbookLocked && wizardBook.includes(spell.id)}
     preparationDisabled={definition.id === 'wizard' && dnd5eWizardSpellPreparationDisabled(
       spell.level,
       wizardBook.includes(spell.id),
@@ -207,6 +238,13 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
           ? `长休后可从本职业当前可用法术表中准备至多 ${limits.spells} 个法术。`
           : `当前等级可选择至多 ${limits.spells} 个已知法术；升级时的替换仍由玩家与 DM 按 2014 职业规则确认。`}
     </div>
+    {(cantripChoicesLocked || spellChoicesLocked || wizardSpellbookLocked) ? (
+      <div className="mt-3 rounded-xl border border-amber-300/15 bg-amber-500/[0.045] px-4 py-3 text-xs leading-5 text-amber-100/75">
+        升级记录中的戏法与已知法术只能在后续升级中替换，或由 DM 修订对应升级。
+        {wizardSpellbookLocked ? ' 法师仍可抄录新法术，但升级记录中已有的法术书条目不能删除。' : ''}
+        今日准备法术不受此限制。
+      </div>
+    ) : null}
 
     <div className="mt-5 space-y-4">
       {definition.id === 'wizard' ? <section className="rounded-2xl border border-white/8 bg-black/10 p-4">
@@ -281,13 +319,14 @@ export default function Dnd5eSpellbookPanel({ character }: { character: Characte
   </section>
 }
 
-function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, disabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onPreview, onToggleBook, onToggle }: {
+function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, disabled, bookDisabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onPreview, onToggleBook, onToggle }: {
   spell: Dnd5eSpellbookEntry
   castingClassId: Dnd5eClassId
   wizard: boolean
   inWizardBook: boolean
   selected: boolean
   disabled: boolean
+  bookDisabled: boolean
   preparationDisabled: boolean
   selectionMode: 'known' | 'prepared'
   showPreparedCheck: boolean
@@ -327,7 +366,7 @@ function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, di
       <span className="mt-2 flex items-center gap-1 text-[10px] font-semibold text-violet-300"><BookOpen className="h-3 w-3" />点击法术查看详情</span>
     </button>
     <div className="mt-3 flex flex-wrap gap-2">
-      {wizard && spell.level > 0 ? <ToggleButton active={inWizardBook} onClick={onToggleBook} label={inWizardBook ? '移出法术书' : '加入法术书'} /> : null}
+      {wizard && spell.level > 0 ? <ToggleButton active={inWizardBook} disabled={bookDisabled} onClick={onToggleBook} label={inWizardBook ? '移出法术书' : '加入法术书'} /> : null}
       {(!wizard || spell.level === 0 || inWizardBook) ? <ToggleButton
         active={selected}
         disabled={disabled || preparationDisabled}

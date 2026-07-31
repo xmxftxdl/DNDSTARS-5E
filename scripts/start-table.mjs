@@ -10,7 +10,16 @@ const servers = [
 const children = servers.map((server) => {
   const child = spawn(
     process.execPath,
-    ['scripts/vite-server.mjs', '--host', '127.0.0.1', '--port', String(server.port), '--strictPort'],
+    [
+      'scripts/vite-server.mjs',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(server.port),
+      '--strictPort',
+      '--art-asset-root',
+      'public',
+    ],
     {
       stdio: 'inherit',
       env: {

@@ -6,6 +6,7 @@ import {
   clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterHitPointEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
+  clearPendingLocalAdvancementsForTest,
   filterLegacySampleCharacters,
   mergeCharactersForSharedSave,
   mergePendingLocalFighterChoices,
@@ -13,17 +14,20 @@ import {
   mergePendingLocalPluginFeatures,
   mergePendingLocalCharacterLevelEdits,
   mergePendingLocalCharacterHitPointEdits,
+  mergePendingLocalAdvancements,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
   markPendingLocalCharacterHitPointEdit,
   markPendingLocalFighterChoices,
   markPendingLocalClassChoices,
   markPendingLocalPluginFeatures,
+  markPendingLocalAdvancements,
   resetPendingLocalFighterChoicesMemoryForTest,
   resetPendingLocalClassChoicesMemoryForTest,
   resetPendingLocalPluginFeaturesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
   resetPendingLocalCharacterHitPointEditMemoryForTest,
+  resetPendingLocalAdvancementsMemoryForTest,
   shouldApplySharedCharactersSnapshot,
 } from './characters'
 import {
@@ -465,6 +469,85 @@ describe('pending local plugin feature choices', () => {
     expect(mergePendingLocalPluginFeatures([
       char({ id: 'hero', dnd5ePluginFeatureIds: featureIds }),
     ], 1_002)[0].dnd5ePluginFeatureIds).toEqual(featureIds)
+    expect(values.size).toBe(0)
+  })
+})
+
+describe('pending local level advancement receipts', () => {
+  afterEach(() => {
+    clearPendingLocalAdvancementsForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps an immutable advancement receipt until the shared snapshot acknowledges it', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('window', { localStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } })
+    clearPendingLocalAdvancementsForTest()
+
+    const base = char({ id: 'hero' })
+    const record = {
+      schemaVersion: 1 as const,
+      id: 'adv-1',
+      fromLevel: 1,
+      toLevel: 2,
+      classId: 'fighter' as const,
+      fromClassLevel: 1,
+      toClassLevel: 2,
+      completedAt: 1_000,
+      completedBy: 'player' as const,
+      decision: {
+        schemaVersion: 1 as const,
+        classId: 'fighter' as const,
+        levelsGained: 1,
+        hitPointMethod: 'fixed' as const,
+        hitPointRolls: [],
+        asiChoices: [],
+        fighterFightingStyles: ['archery' as const],
+      },
+      grantedFeatureIds: ['action-surge-1'],
+      before: {
+        level: 1,
+        dnd5eClassLevels: { fighter: 1 },
+        abilities: { ...base.abilities },
+        skills: [...(base.skills ?? [])],
+        maxHp: base.maxHp,
+        currentHp: base.currentHp,
+      },
+      after: {
+        level: 2,
+        dnd5eClassLevels: { fighter: 2 },
+        abilities: { ...base.abilities, str: 18 },
+        skills: [...(base.skills ?? []), 'perception'],
+        dnd5eFeatIds: ['srd5.1:grappler'],
+        maxHp: base.maxHp + 6,
+        currentHp: base.currentHp + 6,
+      },
+    }
+    markPendingLocalAdvancements('hero', [record], 1_000)
+    resetPendingLocalAdvancementsMemoryForTest()
+
+    const merged = mergePendingLocalAdvancements([
+      char({ id: 'hero', dnd5eLevelAdvancements: [] }),
+    ], 1_001)[0]
+    expect(merged.dnd5eLevelAdvancements).toEqual([record])
+    expect(merged.abilities.str).toBe(18)
+    expect(merged.skills).toContain('perception')
+    expect(merged.dnd5eFeatIds).toEqual(['srd5.1:grappler'])
+    expect(values.size).toBe(1)
+
+    expect(mergePendingLocalAdvancements([
+      char({
+        id: 'hero',
+        abilities: { ...record.after.abilities },
+        skills: [...record.after.skills],
+        dnd5eFeatIds: [...(record.after.dnd5eFeatIds ?? [])],
+        dnd5eLevelAdvancements: [record],
+      }),
+    ], 1_002)[0].dnd5eLevelAdvancements).toEqual([record])
     expect(values.size).toBe(0)
   })
 })

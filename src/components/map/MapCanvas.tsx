@@ -5006,8 +5006,9 @@ function CombatProjectileEffect({
                               ? <PoisonSprayEffect projectile={projectile} />
                               : projectile.kind === 'vicious-mockery'
                                 ? <ViciousMockeryEffect projectile={projectile} />
-                                : projectile.kind === 'magic-missile' ||
-                                    projectile.kind === 'scorching-ray' ||
+                                : projectile.kind === 'magic-missile'
+                                  ? <MagicMissileProjectile projectile={projectile} />
+                                  : projectile.kind === 'scorching-ray' ||
                                     projectile.kind === 'guiding-bolt' ||
                                     projectile.kind === 'acid-arrow' ||
                                     projectile.kind === 'healing-word' ||
@@ -5121,18 +5122,430 @@ function DirectionalTextureEffect({
   )
 }
 
-function MaterialSpellProjectile({ projectile }: { projectile: MapProjectile }) {
-  const config = projectile.kind === 'magic-missile'
-    ? {
-        asset: '/assets/vfx/magic-missile-fluid.png',
-        heightRatio: 0.22,
-        minHeight: 52,
-        maxHeight: 92,
-        revealEnd: 0.4,
-        fadeStart: 0.72,
-        shadowColor: '#a78bfa',
+function MagicMissileProjectile({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const missileRef = useRef<Konva.Group>(null)
+  const trailGlowRef = useRef<Konva.Line>(null)
+  const trailRef = useRef<Konva.Line>(null)
+  const spiralTrailRefs = useRef<Array<Konva.Line | null>>([])
+  const launchRef = useRef<Konva.Circle>(null)
+  const launchSigilRef = useRef<Konva.Group>(null)
+  const impactRef = useRef<Konva.Group>(null)
+  const impactRingRef = useRef<Konva.Circle>(null)
+  const impactSigilRef = useRef<Konva.Group>(null)
+  const ribbonRefs = useRef<Array<Konva.Line | null>>([])
+  const auraRefs = useRef<Array<Konva.Circle | null>>([])
+  const wispRefs = useRef<Array<Konva.Circle | null>>([])
+  const sparkRefs = useRef<Array<Konva.Circle | null>>([])
+  const image = useTokenBadgeImage('/assets/vfx/magic-missile-fluid.png')
+  const dx = projectile.to.x - projectile.from.x
+  const dy = projectile.to.y - projectile.from.y
+  const distance = Math.max(1, Math.hypot(dx, dy))
+  const sequenceMatch = projectile.id.match(/:(\d+)$/)
+  const sequenceIndex = sequenceMatch ? Number(sequenceMatch[1]) : 0
+  const curveDirection = sequenceIndex % 2 === 0 ? -1 : 1
+  const curveStrength = Math.min(
+    54,
+    Math.max(18, distance * (0.09 + (sequenceIndex % 3) * 0.022)),
+  ) * curveDirection
+  const normalX = -dy / distance
+  const normalY = dx / distance
+  const control = {
+    x: (projectile.from.x + projectile.to.x) / 2 + normalX * curveStrength,
+    y: (projectile.from.y + projectile.to.y) / 2 + normalY * curveStrength,
+  }
+  const missileWidth = Math.min(44, Math.max(30, distance * 0.105))
+  const missileHeight = missileWidth * 0.56
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const missile = missileRef.current
+    const trailGlow = trailGlowRef.current
+    const trail = trailRef.current
+    const launch = launchRef.current
+    const launchSigil = launchSigilRef.current
+    const impact = impactRef.current
+    const impactRing = impactRingRef.current
+    const impactSigil = impactSigilRef.current
+    const layer = effect?.getLayer()
+    if (
+      !effect || !missile || !trailGlow || !trail || !launch || !launchSigil ||
+      !impact || !impactRing || !impactSigil || !image || !layer
+    ) return
+    const duration = Math.max(1, projectile.durationMs ?? 300)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const pointAt = (time: number) => {
+      const inverse = 1 - time
+      return {
+        x: inverse * inverse * projectile.from.x +
+          2 * inverse * time * control.x +
+          time * time * projectile.to.x,
+        y: inverse * inverse * projectile.from.y +
+          2 * inverse * time * control.y +
+          time * time * projectile.to.y,
       }
-    : projectile.kind === 'scorching-ray'
+    }
+    const drawFrame = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      const travelRaw = Math.min(1, raw / 0.72)
+      const travel = 1 - Math.pow(1 - travelRaw, 2.15)
+      const impactRaw = Math.max(0, Math.min(1, (raw - 0.66) / 0.24))
+      const point = pointAt(travel)
+      const tangentTime = Math.min(1, travel + 0.018)
+      const tangent = pointAt(tangentTime)
+      missile.position(point)
+      missile.rotation(Math.atan2(tangent.y - point.y, tangent.x - point.x) * 180 / Math.PI)
+      missile.scale({
+        x: 0.82 + Math.sin(elapsed * 0.035) * 0.08,
+        y: 0.88 + Math.cos(elapsed * 0.031) * 0.07,
+      })
+      missile.opacity((raw < 0.045 ? raw / 0.045 : 1) * (1 - impactRaw))
+
+      const trailStart = Math.max(0, travel - 0.115)
+      const trailPoints: number[] = []
+      for (let index = 0; index < 9; index += 1) {
+        const sample = pointAt(trailStart + (travel - trailStart) * index / 8)
+        trailPoints.push(sample.x, sample.y)
+      }
+      trailGlow.points(trailPoints)
+      trailGlow.opacity(Math.min(0.5, travelRaw * 2.4) * (1 - impactRaw))
+      trail.points(trailPoints)
+      trail.opacity(Math.min(0.9, travelRaw * 3.5) * (1 - impactRaw * 0.72))
+      trail.dashOffset(-elapsed * 0.17)
+      spiralTrailRefs.current.forEach((spiral, spiralIndex) => {
+        if (!spiral) return
+        const spiralPoints: number[] = []
+        for (let index = 0; index < 13; index += 1) {
+          const sampleTime = trailStart + (travel - trailStart) * index / 12
+          const sample = pointAt(sampleTime)
+          const next = pointAt(Math.min(1, sampleTime + 0.012))
+          const tangentLength = Math.max(0.001, Math.hypot(next.x - sample.x, next.y - sample.y))
+          const sampleNormal = {
+            x: -(next.y - sample.y) / tangentLength,
+            y: (next.x - sample.x) / tangentLength,
+          }
+          const phase = elapsed * 0.055 + index * 0.92 + spiralIndex * Math.PI
+          const orbit = Math.sin(phase) * missileHeight * 0.34
+          spiralPoints.push(
+            sample.x + sampleNormal.x * orbit,
+            sample.y + sampleNormal.y * orbit,
+          )
+        }
+        spiral.points(spiralPoints)
+        spiral.opacity(Math.min(0.76, travelRaw * 2.8) * (1 - impactRaw))
+        spiral.dashOffset((spiralIndex === 0 ? -1 : 1) * elapsed * 0.09)
+      })
+      launch.radius(missileWidth * (0.14 + travelRaw * 0.36))
+      launch.opacity(Math.max(0, 1 - travelRaw * 1.5) * 0.88)
+      launchSigil.rotation(sequenceIndex * 29 + elapsed * 0.32)
+      launchSigil.scale({
+        x: 0.72 + travelRaw * 0.5,
+        y: 0.72 + travelRaw * 0.5,
+      })
+      launchSigil.opacity(Math.max(0, 1 - travelRaw * 1.7) * 0.82)
+
+      ribbonRefs.current.forEach((ribbon, index) => {
+        if (!ribbon) return
+        const phase = elapsed * (0.058 + index * 0.004) + index * Math.PI / 2
+        const spread = 0.24 + index * 0.035
+        ribbon.points([
+          -missileWidth * 0.42, Math.sin(phase) * missileHeight * spread,
+          -missileWidth * 0.18, Math.sin(phase + 1.25) * missileHeight * (spread + 0.13),
+          missileWidth * 0.08, Math.sin(phase + 2.5) * missileHeight * (spread + 0.08),
+          missileWidth * 0.34, Math.sin(phase + 3.75) * missileHeight * 0.18,
+        ])
+        ribbon.opacity((0.7 - index * 0.065) * (1 - impactRaw))
+      })
+      auraRefs.current.forEach((aura, index) => {
+        if (!aura) return
+        const phase = elapsed * (0.045 + index * 0.002) + index * 1.47
+        aura.position({
+          x: -missileWidth * 0.05 + Math.cos(phase) * missileWidth * (0.24 + (index % 2) * 0.06),
+          y: Math.sin(phase) * missileHeight * (0.4 + (index % 3) * 0.08),
+        })
+        aura.radius(Math.max(0.8, missileHeight * (0.045 + (index % 2) * 0.02)))
+        aura.opacity((0.48 + Math.sin(phase) * 0.28) * (1 - impactRaw))
+      })
+      wispRefs.current.forEach((wisp, index) => {
+        if (!wisp) return
+        const lag = 0.012 + index * 0.009
+        const sampleTime = Math.max(0, travel - lag)
+        const sample = pointAt(sampleTime)
+        const next = pointAt(Math.min(1, sampleTime + 0.012))
+        const tangentLength = Math.max(0.001, Math.hypot(next.x - sample.x, next.y - sample.y))
+        const sampleNormal = {
+          x: -(next.y - sample.y) / tangentLength,
+          y: (next.x - sample.x) / tangentLength,
+        }
+        const phase = elapsed * 0.052 + index * 1.26
+        const orbit = Math.sin(phase) * missileHeight * (0.44 + (index % 3) * 0.15)
+        wisp.position({
+          x: sample.x + sampleNormal.x * orbit,
+          y: sample.y + sampleNormal.y * orbit,
+        })
+        wisp.radius(Math.max(0.75, missileHeight * (0.035 + (index % 3) * 0.014)))
+        wisp.opacity(
+          Math.max(0, Math.min(1, travelRaw * 5 - index * 0.08)) *
+          (0.42 + Math.cos(phase) * 0.28) *
+          (1 - impactRaw),
+        )
+      })
+
+      impact.opacity(Math.sin(impactRaw * Math.PI) * 0.95)
+      impactRing.radius(missileWidth * (0.15 + impactRaw * 0.68))
+      impactRing.opacity((1 - impactRaw) * 0.86)
+      impactSigil.rotation(elapsed * -0.38 + sequenceIndex * 17)
+      impactSigil.scale({
+        x: 0.42 + impactRaw * 0.76,
+        y: 0.42 + impactRaw * 0.76,
+      })
+      impactSigil.opacity(Math.sin(impactRaw * Math.PI) * 0.78)
+      sparkRefs.current.forEach((spark, index) => {
+        if (!spark) return
+        const angle = index * Math.PI / 3 + sequenceIndex * 0.31
+        const spread = missileWidth * impactRaw * (0.46 + (index % 2) * 0.22)
+        spark.position({
+          x: Math.cos(angle) * spread,
+          y: Math.sin(angle) * spread,
+        })
+        spark.opacity(Math.sin(impactRaw * Math.PI) * 0.9)
+      })
+      effect.opacity(raw < 0.94 ? 1 : Math.max(0, (1 - raw) / 0.06))
+      return raw
+    }
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    const animation = new Konva.Animation((frame) => {
+      if (drawFrame(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [
+    control.x,
+    control.y,
+    image,
+    missileHeight,
+    missileWidth,
+    projectile.durationMs,
+    projectile.from.x,
+    projectile.from.y,
+    projectile.issuedAt,
+    projectile.to.x,
+    projectile.to.y,
+    sequenceIndex,
+  ])
+
+  return (
+    <Group ref={effectRef} listening={false}>
+      <Circle
+        ref={launchRef}
+        x={projectile.from.x}
+        y={projectile.from.y}
+        radius={missileWidth * 0.14}
+        stroke="#ede9fe"
+        strokeWidth={Math.max(1.2, missileHeight * 0.08)}
+        shadowColor="#8b5cf6"
+        shadowBlur={15}
+        perfectDrawEnabled={false}
+        listening={false}
+      />
+      <Group
+        ref={launchSigilRef}
+        x={projectile.from.x}
+        y={projectile.from.y}
+        listening={false}
+      >
+        <Circle
+          radius={missileWidth * 0.42}
+          stroke="#67e8f9"
+          strokeWidth={Math.max(0.8, missileHeight * 0.045)}
+          dash={[missileWidth * 0.12, missileWidth * 0.08]}
+          shadowColor="#8b5cf6"
+          shadowBlur={10}
+          perfectDrawEnabled={false}
+        />
+        <Line
+          points={[
+            0, -missileWidth * 0.32,
+            missileWidth * 0.25, 0,
+            0, missileWidth * 0.32,
+            -missileWidth * 0.25, 0,
+          ]}
+          closed
+          stroke="#c4b5fd"
+          strokeWidth={Math.max(0.7, missileHeight * 0.04)}
+          perfectDrawEnabled={false}
+        />
+      </Group>
+      <Line
+        ref={trailGlowRef}
+        points={[projectile.from.x, projectile.from.y]}
+        stroke="#38bdf8"
+        strokeWidth={Math.max(5, missileHeight * 0.38)}
+        lineCap="round"
+        lineJoin="round"
+        tension={0.46}
+        shadowColor="#c084fc"
+        shadowBlur={20}
+        opacity={0}
+        perfectDrawEnabled={false}
+        listening={false}
+      />
+      <Line
+        ref={trailRef}
+        points={[projectile.from.x, projectile.from.y]}
+        stroke="#f0abfc"
+        strokeWidth={Math.max(2.2, missileHeight * 0.15)}
+        lineCap="round"
+        lineJoin="round"
+        tension={0.46}
+        dash={[missileWidth * 0.28, missileWidth * 0.12]}
+        shadowColor="#8b5cf6"
+        shadowBlur={13}
+        perfectDrawEnabled={false}
+        listening={false}
+      />
+      {[0, 1].map((index) => (
+        <Line
+          key={`magic-missile-spiral-trail:${index}`}
+          ref={(node) => { spiralTrailRefs.current[index] = node }}
+          points={[projectile.from.x, projectile.from.y]}
+          stroke={index === 0 ? '#67e8f9' : '#f0abfc'}
+          strokeWidth={Math.max(0.9, missileHeight * 0.065)}
+          lineCap="round"
+          lineJoin="round"
+          tension={0.5}
+          dash={[missileWidth * 0.14, missileWidth * 0.09]}
+          shadowColor={index === 0 ? '#22d3ee' : '#8b5cf6'}
+          shadowBlur={8}
+          opacity={0}
+          perfectDrawEnabled={false}
+          listening={false}
+        />
+      ))}
+      {Array.from({ length: 9 }, (_, index) => (
+        <Circle
+          key={`magic-missile-wisp:${index}`}
+          ref={(node) => { wispRefs.current[index] = node }}
+          radius={1}
+          fill={index % 3 === 0 ? '#ffffff' : index % 3 === 1 ? '#67e8f9' : '#c4b5fd'}
+          shadowColor={index % 2 === 0 ? '#8b5cf6' : '#22d3ee'}
+          shadowBlur={8}
+          opacity={0}
+          perfectDrawEnabled={false}
+          listening={false}
+        />
+      ))}
+      <Group ref={missileRef} listening={false}>
+      {[0, 1, 2, 3].map((index) => (
+        <Line
+            key={`magic-missile-ribbon:${index}`}
+            ref={(node) => { ribbonRefs.current[index] = node }}
+            points={[-missileWidth * 0.42, 0, missileWidth * 0.34, 0]}
+            stroke={['#67e8f9', '#f0abfc', '#fde68a', '#a5b4fc'][index]}
+            strokeWidth={Math.max(0.8, missileHeight * (0.048 + (index % 2) * 0.012))}
+            lineCap="round"
+            lineJoin="round"
+            tension={0.58}
+            shadowColor={['#22d3ee', '#ec4899', '#f59e0b', '#8b5cf6'][index]}
+            shadowBlur={10}
+            perfectDrawEnabled={false}
+          />
+        ))}
+        {image ? (
+          <KonvaImage
+            image={image}
+            x={-missileWidth * 0.58}
+            y={-missileHeight / 2}
+            width={missileWidth}
+            height={missileHeight}
+            shadowColor="#a78bfa"
+            shadowBlur={16}
+            perfectDrawEnabled={false}
+          />
+        ) : null}
+        <Line
+          points={[
+            missileWidth * 0.05, -missileHeight * 0.18,
+            missileWidth * 0.48, 0,
+            missileWidth * 0.05, missileHeight * 0.18,
+            -missileWidth * 0.08, 0,
+          ]}
+          closed
+          tension={0.18}
+          fill="#ffffff"
+          stroke="#ede9fe"
+          strokeWidth={Math.max(0.8, missileHeight * 0.055)}
+          lineJoin="round"
+          shadowColor="#ddd6fe"
+          shadowBlur={12}
+          perfectDrawEnabled={false}
+        />
+        {Array.from({ length: 10 }, (_, index) => (
+          <Circle
+            key={`magic-missile-aura:${index}`}
+            ref={(node) => { auraRefs.current[index] = node }}
+            radius={1}
+            fill={['#ffffff', '#67e8f9', '#f0abfc', '#fde68a', '#a5b4fc'][index % 5]}
+            shadowColor={['#22d3ee', '#ec4899', '#f59e0b', '#8b5cf6'][index % 4]}
+            shadowBlur={9}
+            perfectDrawEnabled={false}
+          />
+        ))}
+      </Group>
+      <Group ref={impactRef} x={projectile.to.x} y={projectile.to.y} opacity={0} listening={false}>
+        <Circle
+          ref={impactRingRef}
+          radius={missileWidth * 0.15}
+          stroke="#ede9fe"
+          strokeWidth={Math.max(1.4, missileHeight * 0.09)}
+          shadowColor="#8b5cf6"
+          shadowBlur={14}
+          perfectDrawEnabled={false}
+        />
+        <Group ref={impactSigilRef} listening={false}>
+          <Circle
+            radius={missileWidth * 0.43}
+            stroke="#67e8f9"
+            strokeWidth={Math.max(0.8, missileHeight * 0.045)}
+            dash={[missileWidth * 0.09, missileWidth * 0.07]}
+            perfectDrawEnabled={false}
+          />
+          <Line
+            points={[
+              0, -missileWidth * 0.34,
+              missileWidth * 0.24, 0,
+              0, missileWidth * 0.34,
+              -missileWidth * 0.24, 0,
+            ]}
+            closed
+            stroke="#c4b5fd"
+            strokeWidth={Math.max(0.8, missileHeight * 0.05)}
+            shadowColor="#8b5cf6"
+            shadowBlur={8}
+            perfectDrawEnabled={false}
+          />
+        </Group>
+        {Array.from({ length: 6 }, (_, index) => (
+          <Circle
+            key={`magic-missile-impact:${index}`}
+            ref={(node) => { sparkRefs.current[index] = node }}
+            radius={Math.max(1.1, missileHeight * (0.07 + (index % 2) * 0.025))}
+            fill={index % 2 === 0 ? '#ffffff' : '#c4b5fd'}
+            shadowColor="#8b5cf6"
+            shadowBlur={7}
+            perfectDrawEnabled={false}
+          />
+        ))}
+      </Group>
+    </Group>
+  )
+}
+
+function MaterialSpellProjectile({ projectile }: { projectile: MapProjectile }) {
+  const config = projectile.kind === 'scorching-ray'
       ? {
           asset: '/assets/vfx/scorching-ray-fluid.png',
           heightRatio: 0.3,

@@ -10,6 +10,9 @@ playwright-report
 test-results
 coverage
 backups
+public/assets/icons
+public/assets/portraits
+public/assets/vfx
 *.log
 docs
 e2e

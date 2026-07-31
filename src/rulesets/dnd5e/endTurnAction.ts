@@ -143,6 +143,9 @@ export function prepareDnd5ePlayerEndTurn(input: {
     initiativeOrder: input.initiativeOrder,
   })
   const requestedSlot = input.initiativeOrder[input.action.initiativeIndex]
+  if (requestedSlot?.firstRoundOnly && input.action.round > 1) {
+    return { ok: false, reason: 'invalid-action' }
+  }
   const actorIndex = requestedSlot?.tokenId === actorToken.id
     ? input.action.initiativeIndex
     : snapshot.state.initiativeOrder.indexOf(actorToken.id)

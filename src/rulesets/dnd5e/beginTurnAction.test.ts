@@ -111,6 +111,19 @@ function fixture(order: 'hero-first' | 'basilisk-first' = 'hero-first') {
 describe('D&D 5e authoritative begin-turn bridge', () => {
   afterEach(() => setDnd5eRoomMonsterCatalog([]))
 
+  it('rejects a forged first-round-only slot after round one', () => {
+    const input = fixture()
+    input.round = 2
+    input.initiativeOrder[0] = {
+      ...input.initiativeOrder[0],
+      firstRoundOnly: true,
+    }
+    expect(prepareDnd5eBeginTurn(input)).toEqual({
+      ok: false,
+      reason: 'invalid-action',
+    })
+  })
+
   it('forces a surprised first-slot target to face gaze and keeps the slot stationary', () => {
     const input = fixture()
     const prepared = prepareDnd5eBeginTurn(input)

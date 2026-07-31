@@ -470,6 +470,111 @@ test('next ranged spell VFX render from texture assets', async ({ browser, reque
   await context.close()
 })
 
+test('Magic Missile launches fast staggered darts toward different targets', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const now = Date.now()
+  const mapId = `magic-missile-multi-target-${now}`
+  const sourceToken = {
+    id: 'magic-missile-caster',
+    label: 'Magic Missile Caster',
+    x: 110,
+    y: 300,
+    color: '#8b5cf6',
+    emoji: '🧙',
+    size: 1,
+    type: 'player',
+  }
+  const targetTokens = [
+    { id: 'magic-missile-target-a', label: 'Target A', x: 530, y: 145, color: '#ef4444', emoji: '👹', size: 1, type: 'enemy' },
+    { id: 'magic-missile-target-b', label: 'Target B', x: 610, y: 300, color: '#f97316', emoji: '👺', size: 1, type: 'enemy' },
+    { id: 'magic-missile-target-c', label: 'Target C', x: 530, y: 455, color: '#dc2626', emoji: '👿', size: 1, type: 'enemy' },
+  ]
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Magic Missile Multi Target E2E',
+      width: 760,
+      height: 600,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [sourceToken, ...targetTokens],
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_100, height: 860 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await player.waitForTimeout(1_000)
+
+  await player.evaluate(async ({ activeMapId, sourceTokenId, targetTokenIds }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
+    const transactionId = `e2e-magic-missile-multi-${Date.now()}`
+    void Promise.all(targetTokenIds.map((targetTokenId, sequenceIndex) =>
+      presentation.publishMagicMissilePresentation({
+        id: `${transactionId}:magic-missile:${sequenceIndex}`,
+        mapId: activeMapId,
+        transactionId,
+        sourceTokenId,
+        targetTokenId,
+        sequenceIndex,
+      }),
+    ))
+  }, {
+    activeMapId: mapId,
+    sourceTokenId: sourceToken.id,
+    targetTokenIds: targetTokens.map((target) => target.id),
+  })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return kinds.filter((kind) => kind === 'magic-missile').length
+  }).toBeGreaterThanOrEqual(1)
+
+  const observedSequence: number[] = []
+  let maximumConcurrentMissiles = 0
+  const recordVisibleMissiles = async () => {
+    const ids = (await canvas.getAttribute('data-combat-projectile-ids') ?? '')
+      .split(',')
+      .filter(Boolean)
+    maximumConcurrentMissiles = Math.max(maximumConcurrentMissiles, ids.length)
+    for (const id of ids) {
+      const sequence = Number(id.match(/:(\d+)$/)?.[1])
+      if (Number.isInteger(sequence) && !observedSequence.includes(sequence)) {
+        observedSequence.push(sequence)
+      }
+    }
+  }
+  await recordVisibleMissiles()
+  await canvas.screenshot({
+    path: process.env.MAGIC_MISSILE_SCREENSHOT_PATH ??
+      testInfo.outputPath('magic-missile-multi-target.png'),
+  })
+  for (let sampleIndex = 0; sampleIndex < 20; sampleIndex += 1) {
+    await recordVisibleMissiles()
+    await player.waitForTimeout(70)
+  }
+  expect(maximumConcurrentMissiles).toBe(1)
+  expect(observedSequence).toEqual([0, 1, 2])
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
 test('healing and necrotic spell VFX render from texture assets', async ({ browser, request }, testInfo) => {
   const now = Date.now()
   const mapId = `healing-necrotic-spell-vfx-${now}`

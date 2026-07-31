@@ -178,6 +178,95 @@ describe('DeclarativeSubclassAbilityV1', () => {
     })).buffer)).toThrow('敌方 d20 修改声明无效')
   })
 
+  it('allows effect-free manual metadata but keeps executable declarations fail-closed', () => {
+    const manual = ability({
+      rolls: undefined,
+      effects: [],
+      automation: 'manual',
+    })
+    const packageFor = (entry: DeclarativeSubclassAbilityV1) =>
+      new TextEncoder().encode(JSON.stringify({
+        format: 'dndstars5e-declarative',
+        schemaVersion: 1,
+        manifest: {
+          id: 'com.example.manual-metadata',
+          name: 'Manual Metadata',
+          version: '1.0.0',
+          publisher: 'Test',
+          license: 'CC0-1.0',
+          apiVersion: 2,
+          rulesetId: 'dnd5e-2014-srd-5.1',
+        },
+        subclasses: [subclass([entry])],
+      })).buffer
+
+    expect(() => parseDnd5eDeclarativeRulesPackageV1(packageFor(manual))).not.toThrow()
+    expect(() => parseDnd5eDeclarativeRulesPackageV1(packageFor({
+      ...manual,
+      automation: 'full',
+    }))).toThrow('效果无效')
+  })
+
+  it('accepts audited opening-attack declarations and rejects unsafe save multipliers', () => {
+    const openingAttack = ability({
+      rolls: undefined,
+      effects: [],
+      trigger: { kind: 'before-attack-roll' },
+      mechanic: {
+        kind: 'opening-attack',
+        advantageBeforeTargetFirstTurn: true,
+        automaticCriticalAgainstSurprised: true,
+        surprisedHitSavingThrow: {
+          ability: 'con',
+          dcAbility: 'dex',
+          failureDamageMultiplier: 2,
+        },
+      },
+      automation: 'full',
+    })
+    expect(declarativeAbilityCompatibilityV1(openingAttack)).toMatchObject({
+      effective: 'full',
+      reasons: [],
+    })
+    expect(declarativeAbilityCompatibilityV1(ability({
+      rolls: undefined,
+      effects: [],
+      mechanic: { kind: 'hidden-spell-save-disadvantage' },
+      automation: 'full',
+    }))).toMatchObject({
+      effective: 'full',
+      reasons: [],
+    })
+
+    const invalid = {
+      ...openingAttack,
+      mechanic: {
+        ...openingAttack.mechanic,
+        surprisedHitSavingThrow: {
+          ability: 'con',
+          dcAbility: 'dex',
+          failureDamageMultiplier: 1,
+        },
+      },
+    } as unknown as DeclarativeSubclassAbilityV1
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      format: 'dndstars5e-declarative',
+      schemaVersion: 1,
+      manifest: {
+        id: 'com.example.invalid-opening',
+        name: 'Invalid Opening',
+        version: '1.0.0',
+        publisher: 'Test',
+        license: 'CC0-1.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+      },
+      subclasses: [subclass([invalid])],
+    })).buffer
+    expect(() => parseDnd5eDeclarativeRulesPackageV1(bytes))
+      .toThrow('opening-attack saving throw is invalid')
+  })
+
   it('resolves active damage through the authoritative generic Headless action', () => {
     const pluginId = 'com.example.damage'
     const { dispose, featureId } = register(pluginId)
@@ -267,6 +356,7 @@ describe('DeclarativeSubclassAbilityV1', () => {
       cantripChoiceGroupId: 'spell-cantrips',
       spellChoiceGroupId: 'spell-known',
       cantripsKnownByClassLevel: Array.from({ length: 20 }, (_, index) => index < 2 ? 0 : index < 9 ? 2 : 3),
+      requiredCantripIds: ['light'],
       spellsKnownByClassLevel: Array.from({ length: 20 }, (_, index) => index < 2 ? 0 : 3 + Math.floor((index - 2) / 2)),
       allowedSchools: ['abjuration', 'evocation'],
       unrestrictedSpellsKnownByClassLevel: Array.from({ length: 20 }, (_, index) => index < 2 ? 0 : 1 + Math.floor((index - 2) / 6)),
@@ -305,6 +395,7 @@ describe('DeclarativeSubclassAbilityV1', () => {
         progression: 'one-third',
         ability: 'int',
         spellListClassId: 'wizard',
+        requiredCantripIds: ['light'],
       })
       expect(registered?.declarativeCombatHooks?.[0]).toMatchObject({
         timing: 'after-attack-hit',

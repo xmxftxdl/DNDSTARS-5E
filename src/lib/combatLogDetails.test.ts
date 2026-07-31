@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import {
+  createDnd5eCombatant,
+  resolveDnd5eHeadlessAction,
+  startDnd5eHeadlessCombat,
+} from '../rulesets/dnd5e/headlessCombatEngine'
 import { formatDnd5eCombatLogDetails } from './combatLogDetails'
 
 describe('formatDnd5eCombatLogDetails', () => {
@@ -131,6 +136,137 @@ describe('formatDnd5eCombatLogDetails', () => {
       '逐枚结算｜#1 → 针刺魔：d4(4) +1 强化塑能（智力）+4 = 9；#2 → 针刺魔：d4(3) +1 = 4；#3 → 针刺魔：d4(2) +1 = 3；#4 → 针刺魔：d4(1) +1 = 2；#5 → 针刺魔：d4(4) +1 = 5',
     )
     expect(details).toContain('魔法飞弹总伤害｜23 点｜实际生效 5/5 枚')
+  })
+
+  it('默认明细上限仍保留真实 9 环魔法飞弹的公式、逐枚结果和总伤害', () => {
+    const abilities = {
+      str: 10, dex: 14, con: 14, int: 18, wis: 12, cha: 10,
+    } as const
+    const wizard = createDnd5eCombatant({
+      id: 'wizard',
+      name: '新冒险者',
+      controller: 'player',
+      initiative: 20,
+      abilities,
+      proficiencyBonus: 4,
+      armorClass: 13,
+      currentHp: 50,
+      maxHp: 50,
+      temporaryHp: 0,
+      speed: 30,
+      position: { x: 0, y: 0 },
+      concentrating: false,
+      classId: 'wizard',
+      subclassId: 'evocation',
+      level: 10,
+      classSelections: { 'spell-prepared': ['magic-missile'] },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const target = createDnd5eCombatant({
+      id: 'target',
+      name: '针刺魔',
+      controller: 'dm',
+      initiative: 10,
+      abilities,
+      proficiencyBonus: 4,
+      armorClass: 15,
+      currentHp: 200,
+      maxHp: 200,
+      temporaryHp: 0,
+      speed: 30,
+      position: { x: 5, y: 0 },
+      concentrating: false,
+    })
+    const projectileTargetIds = Array.from({ length: 11 }, () => target.id)
+    const resolved = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('magic-missile-default-log-limit', [wizard, target]),
+      {
+        type: 'cast-spell',
+        actorId: wizard.id,
+        targetId: target.id,
+        targetIds: [target.id],
+        projectileTargetIds,
+        spellId: 'magic-missile',
+        slotLevel: 9,
+        effectRolls: Array.from({ length: 11 }, () => 1),
+      },
+    )
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    const details = formatDnd5eCombatLogDetails(resolved.events, {
+      resolveName,
+      extra: ['法术：魔法飞弹｜9 环法术位｜目标 针刺魔'],
+    })
+
+    expect(details).toContain(
+      '新冒险者｜法师特性「强化塑能」｜智力调整值 +4 加入魔法飞弹的第一枚飞弹的伤害掷骰',
+    )
+    expect(details).toContain(
+      '新冒险者｜魔法飞弹（9环）｜共 11 枚｜每枚 1d4+1 力场伤害',
+    )
+    expect(details.some((line) => line.startsWith('逐枚结算（#1–#5）｜'))).toBe(true)
+    expect(details.some((line) => line.startsWith('逐枚结算（#11–#11）｜'))).toBe(true)
+    expect(details).toContain('魔法飞弹总伤害｜26 点｜实际生效 11/11 枚')
+    expect(details).toContain('生命值结算｜针刺魔：HP 200 → 174')
+    expect(details.some((line) => line.includes('针刺魔｜受到'))).toBe(false)
+    expect(Math.max(...details.map((line) => line.length))).toBeLessThan(1_000)
+  })
+
+  it('仅压缩已关联的魔法飞弹直伤，并保留其他来源的二次伤害', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'spell-cast',
+        actorId: 'wizard',
+        targetId: 'target',
+        spellId: 'magic-missile',
+        slotLevel: 1,
+      },
+      {
+        type: 'damage-applied',
+        sourceId: 'wizard',
+        targetId: 'target',
+        amount: 2,
+        hpBefore: 50,
+        hpAfter: 48,
+        temporaryHpBefore: 0,
+        temporaryHpAfter: 0,
+        damageTypes: ['force'],
+      },
+      {
+        type: 'damage-applied',
+        sourceId: 'trap',
+        targetId: 'wizard',
+        amount: 3,
+        hpBefore: 20,
+        hpAfter: 17,
+        temporaryHpBefore: 0,
+        temporaryHpAfter: 0,
+        damageTypes: ['fire'],
+      },
+      {
+        type: 'magic-missile-damage-resolved',
+        actorId: 'wizard',
+        spellId: 'magic-missile',
+        slotLevel: 1,
+        dieSides: 4,
+        baseBonusPerProjectile: 1,
+        projectiles: [{
+          targetId: 'target',
+          dieRoll: 1,
+          featureBonus: 0,
+          cuttingWordsReduction: 0,
+          damageBeforeDefenses: 2,
+          finalDamage: 2,
+          outcome: 'damage',
+        }],
+        totalDamage: 2,
+      },
+    ], { resolveName })
+
+    expect(details).toContain('生命值结算｜针刺魔：HP 50 → 48')
+    expect(details).not.toContain('针刺魔｜受到 2 点伤害｜HP 50 → 48')
+    expect(details).toContain('新冒险者｜受到 3 点伤害｜HP 20 → 17')
   })
 
   it('显示资源消耗，并限制过长的明细', () => {

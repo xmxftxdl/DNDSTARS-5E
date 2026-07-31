@@ -43,6 +43,7 @@ import {
   type Dnd5eTargetTranquilitySaveRoll,
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eStandAgainstTideUse,
+  type Dnd5eOpeningAttackSavingThrowRoll,
 } from './headlessCombatEngine'
 import { applyDnd5eAttackCoverOverride, createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellAttackDelivery, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
@@ -77,6 +78,11 @@ import {
   dnd5eRacialRulesForCharacter,
   type Dnd5eRacialInnateSpellGrant,
 } from './racialAutomation'
+import {
+  dnd5eOpeningAttackHasAdvantage,
+  dnd5eOpeningAttackSavingThrowRequirement,
+} from './openingAttack'
+import { dnd5eHiddenSpellSaveDisadvantageApplies } from './spellSavePressure'
 
 export type Dnd5eSpellCastRejectReason =
   | 'invalid-action'
@@ -126,7 +132,9 @@ export interface PreparedDnd5eSpellCast {
     targetToken: Token
     mode: 'normal' | 'advantage' | 'disadvantage'
     armorClass: number
+    openingAttackSavingThrow?: PreparedDnd5eOpeningAttackSavingThrow
   }[]
+  openingAttackSavingThrow?: PreparedDnd5eOpeningAttackSavingThrow
   attackBlessed: boolean
   attackBaned: boolean
   savingThrow?: { modifier: number; dc: number; mode: 'normal' | 'advantage' | 'disadvantage' }
@@ -166,6 +174,17 @@ export interface PreparedDnd5eSpellCast {
   /** 当前事务是在使用既有持续法术效果，而不是再次施法。 */
   sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
   sustainedEffectAreaId?: string
+}
+
+export interface PreparedDnd5eOpeningAttackSavingThrow {
+  featureId: string
+  ability: keyof Character['abilities']
+  dc: number
+  modifier: number
+  mode: 'normal' | 'advantage' | 'disadvantage'
+  blessed: boolean
+  baned: boolean
+  failureDamageMultiplier: number
 }
 
 /**
@@ -1103,6 +1122,34 @@ export function prepareDnd5eSpellCast(input: {
   const usesSpellAttackRoll = spell.effect === 'spell-attack' ||
     sustainedAttack?.resolution === 'spell-attack' ||
     (sustainedAttack != null && sustainedAttack.resolution == null)
+  const openingAttackSavingThrowFor = (
+    currentTarget: typeof targetCombatant,
+  ): PreparedDnd5eOpeningAttackSavingThrow | undefined => {
+    const requirement = dnd5eOpeningAttackSavingThrowRequirement(
+      snapshot.state,
+      actorCombatant,
+      currentTarget,
+    )
+    return requirement ? {
+      featureId: requirement.featureId,
+      ability: requirement.ability,
+      dc: requirement.dc,
+      modifier: currentTarget.savingThrowBonuses[requirement.ability] ??
+        rules.abilityModifier(currentTarget.abilities[requirement.ability]),
+      mode: dnd5eSavingThrowMode(currentTarget, requirement.ability),
+      blessed: dnd5eCombatantHasConcentrationEffect(
+        snapshot.state,
+        currentTarget.id,
+        'bless',
+      ),
+      baned: dnd5eCombatantHasConcentrationEffect(
+        snapshot.state,
+        currentTarget.id,
+        'bane',
+      ),
+      failureDamageMultiplier: requirement.failureDamageMultiplier,
+    } : undefined
+  }
   const spellAttackDelivery = dnd5eSpellAttackDelivery(spell, sustainedAttack)
   const rangedSpellThreatened = usesSpellAttackRoll && spellAttackDelivery === 'ranged' && input.map.tokens.some((candidate) => {
     const candidateCombatant = snapshot.state.combatants[candidate.id]
@@ -1121,6 +1168,11 @@ export function prepareDnd5eSpellCast(input: {
         actorCombatant,
         targetCombatant,
         spellAttackDelivery === 'melee',
+      ) ||
+      dnd5eOpeningAttackHasAdvantage(
+        snapshot.state,
+        actorCombatant,
+        targetCombatant,
       ))
   const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
     dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
@@ -1155,6 +1207,11 @@ export function prepareDnd5eSpellCast(input: {
               actorCombatant,
               currentTarget,
               spellAttackDelivery === 'melee',
+            ) ||
+            dnd5eOpeningAttackHasAdvantage(
+              snapshot.state,
+              actorCombatant,
+              currentTarget,
             ))
         const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(currentTarget) ||
           dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, currentTarget.id) ||
@@ -1169,6 +1226,8 @@ export function prepareDnd5eSpellCast(input: {
             disadvantage: [{ active: currentDisadvantage, reason: 'spell-target-attack-disadvantage' }],
           }).mode,
           armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, currentTargetToken.id),
+          openingAttackSavingThrow:
+            openingAttackSavingThrowFor(currentTarget),
         }
       })
     : undefined
@@ -1176,6 +1235,9 @@ export function prepareDnd5eSpellCast(input: {
   const unwillingTargetTokens = spell.unwillingSaveAbility
     ? validTargetTokens.filter((candidate) => areOpposedCombatTokens(actorToken, candidate))
     : []
+  const hiddenSpellSaveDisadvantage =
+    sustainedAttack == null &&
+    dnd5eHiddenSpellSaveDisadvantageApplies(actorCombatant)
   const spellSavingThrowMode = (combatant: typeof targetCombatant, targetId: string) => {
     let mode = dnd5eHeightenedSavingThrowMode(
       dnd5eSavingThrowMode(combatant, savingThrowAbility!, {
@@ -1183,7 +1245,7 @@ export function prepareDnd5eSpellCast(input: {
         sourceCreatureType: actorCombatant.creatureType,
         sourceIsSpell: true,
       }),
-      heightenedTargetId === targetId,
+      heightenedTargetId === targetId || hiddenSpellSaveDisadvantage,
     )
     mode = dnd5eSpellSpecificSavingThrowMode({
       spellId: spell.id,
@@ -1285,6 +1347,9 @@ export function prepareDnd5eSpellCast(input: {
         (spell.id === 'eldritch-blast' && invocations.includes('agonizing-blast') ? abilityModifier : 0),
       attackMode,
       targetSpellAttacks,
+      openingAttackSavingThrow: attackMode
+        ? openingAttackSavingThrowFor(targetCombatant)
+        : undefined,
       attackBlessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
       attackBaned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
       savingThrow,
@@ -1416,6 +1481,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   d20Second?: number
   halflingLuckyD20?: number
   halflingLuckyD20Second?: number
+  openingAttackSavingThrow?: Dnd5eOpeningAttackSavingThrowRoll
   attackBlessRoll?: number
   attackBaneRoll?: number
   cuttingWords?: Dnd5eCuttingWordsUse
@@ -1480,6 +1546,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     d20Second: input.d20Second,
     halflingLuckyD20: input.halflingLuckyD20,
     halflingLuckyD20Second: input.halflingLuckyD20Second,
+    openingAttackSavingThrow: input.openingAttackSavingThrow,
     attackBlessRoll: input.attackBlessRoll,
     attackBaneRoll: input.attackBaneRoll,
     cuttingWords: input.cuttingWords,

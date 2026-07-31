@@ -33,7 +33,6 @@ const PluginCatalogDetailPage = lazy(() => import('./pages/PluginCatalogDetailPa
 const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
-const GroupAbilityCheckSystem = lazy(() => import('./components/GroupAbilityCheckSystem'))
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
 const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
 
@@ -337,7 +336,6 @@ export default function App() {
       <SharedSyncRecoveryBanner />
       <Suspense fallback={null}>
         {!isSpectator && <RoomHandoutNotification />}
-        {!isSpectator && <GroupAbilityCheckSystem />}
         <CampaignTimeSystem isDm={endpointMode !== 'player'} />
         <SceneAudioPlaybackSystem />
       </Suspense>

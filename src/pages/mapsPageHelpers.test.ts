@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Character } from '../types/character'
 import {
   buildInitiativeOrder,
+  initiativeOrderForRound,
   insertInitiativeEntriesPreservingActive,
   migrateLegacyApCombatLogText,
   placeableRoomCharacters,
@@ -83,12 +84,48 @@ describe('D&D 5e map helpers', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.45) // d20 10 + DEX 4
     expect(buildInitiativeOrder([token], [thief])).toMatchObject([
       { tokenId: 'thief-token', slotId: 'thief-token:normal', label: '盗贼', emoji: '🗡️', roll: 14 },
-      { tokenId: 'thief-token', slotId: 'thief-token:thief-reflexes', turnKind: 'thief-reflexes', label: '盗贼', emoji: '🗡️', roll: 4 },
+      {
+        tokenId: 'thief-token',
+        slotId: 'thief-token:thief-reflexes',
+        firstRoundOnly: true,
+        turnKind: 'thief-reflexes',
+        label: '盗贼',
+        emoji: '🗡️',
+        roll: 4,
+      },
     ])
     expect(buildInitiativeOrder([token], [{
       ...thief,
       dnd5eCombatState: { surprisedCombatId: 'combat-1', surpriseResolvedCombatId: undefined },
     }])).toHaveLength(1)
+  })
+
+  it('removes first-round-only initiative slots after round one', () => {
+    const order = [
+      { tokenId: 'rogue', slotId: 'rogue:normal', label: 'Rogue', emoji: '', color: '', roll: 18 },
+      {
+        tokenId: 'enemy',
+        slotId: 'enemy:normal',
+        label: 'Enemy',
+        emoji: '',
+        color: '',
+        roll: 12,
+      },
+      {
+        tokenId: 'rogue',
+        slotId: 'rogue:extra',
+        firstRoundOnly: true,
+        label: 'Rogue',
+        emoji: '',
+        color: '',
+        roll: 8,
+      },
+    ]
+    expect(initiativeOrderForRound(order, 1)).toHaveLength(3)
+    expect(initiativeOrderForRound(order, 2).map((entry) => entry.slotId)).toEqual([
+      'rogue:normal',
+      'enemy:normal',
+    ])
   })
 
   it('uses the cropped initiative portrait and falls back to the full portrait', () => {

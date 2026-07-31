@@ -229,6 +229,52 @@ export interface DeclarativeTotemWarriorMechanicV1 {
 }
 
 /**
+ * Generic opening-attack semantics. Local data may combine the independent
+ * clauses, while the Host remains authoritative for turn order, surprise,
+ * saving throws and damage settlement.
+ */
+export interface DeclarativeOpeningAttackMechanicV1 {
+  kind: 'opening-attack'
+  advantageBeforeTargetFirstTurn?: boolean
+  automaticCriticalAgainstSurprised?: boolean
+  surprisedHitSavingThrow?: {
+    ability: AbilityKey
+    dcAbility: AbilityKey
+    failureDamageMultiplier: number
+  }
+}
+
+/**
+ * Generic passive spell pressure applied when a registered feature owner
+ * starts a spell cast while hidden. The Host remains authoritative for the
+ * hidden snapshot and every saving-throw mode in that cast transaction.
+ */
+export interface DeclarativeHiddenSpellSaveDisadvantageMechanicV1 {
+  kind: 'hidden-spell-save-disadvantage'
+}
+
+/**
+ * Generic control override for a movable, non-creature spell projection.
+ * Imported data identifies the projection and an audited action economy;
+ * position and movement remain Host-owned map state.
+ */
+export interface DeclarativeUtilityProjectionControlMechanicV1 {
+  kind: 'utility-projection-control'
+  projectionId: string
+  economy: 'action' | 'bonusAction'
+}
+
+/**
+ * Generic current-turn attack pressure against a creature near an owned
+ * utility projection. Projection-to-creature distance is captured by the Host.
+ */
+export interface DeclarativeUtilityProjectionAttackAdvantageMechanicV1 {
+  kind: 'utility-projection-attack-advantage'
+  projectionId: string
+  maximumDistanceFeet: number
+}
+
+/**
  * Pure-data subclass ability protocol. Imported packages never supply a resolver;
  * the Host compiles supported declarations into its whitelisted Headless executor.
  */
@@ -250,6 +296,10 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeBattleMasterMechanicV1
     | DeclarativeEldritchKnightMechanicV1
     | DeclarativeTotemWarriorMechanicV1
+    | DeclarativeOpeningAttackMechanicV1
+    | DeclarativeHiddenSpellSaveDisadvantageMechanicV1
+    | DeclarativeUtilityProjectionControlMechanicV1
+    | DeclarativeUtilityProjectionAttackAdvantageMechanicV1
   /**
    * Opens the post-result reaction window when an enemy succeeds on a d20.
    * This is only an eligibility declaration; the Host and DM still validate
@@ -300,6 +350,8 @@ export interface DeclarativeSubclassSpellcastingV1 {
   cantripChoiceGroupId: string
   spellChoiceGroupId: string
   cantripsKnownByClassLevel: readonly number[]
+  /** Cantrips granted by the subclass and counted against the known total. */
+  requiredCantripIds?: readonly string[]
   spellsKnownByClassLevel: readonly number[]
   allowedSchools?: readonly Dnd5eSpellbookSchoolId[]
   unrestrictedSpellsKnownByClassLevel?: readonly number[]
@@ -585,6 +637,75 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       if (!DND5E_2014_TOTEM_WARRIOR_FEATURES.includes(
         value.mechanic.feature as Dnd5e2014TotemWarriorFeatureId,
       )) throw new Error(`${path}图腾武者特性协议无效`)
+    } else if (value.mechanic.kind === 'opening-attack') {
+      assertKeys(
+        value.mechanic,
+        [
+          'kind',
+          'advantageBeforeTargetFirstTurn',
+          'automaticCriticalAgainstSurprised',
+          'surprisedHitSavingThrow',
+        ],
+        `${path} opening-attack mechanic`,
+      )
+      if (
+        value.mechanic.advantageBeforeTargetFirstTurn != null &&
+        typeof value.mechanic.advantageBeforeTargetFirstTurn !== 'boolean'
+      ) throw new Error(`${path} opening-attack advantage declaration is invalid`)
+      if (
+        value.mechanic.automaticCriticalAgainstSurprised != null &&
+        typeof value.mechanic.automaticCriticalAgainstSurprised !== 'boolean'
+      ) throw new Error(`${path} opening-attack critical declaration is invalid`)
+      if (value.mechanic.surprisedHitSavingThrow != null) {
+        if (!record(value.mechanic.surprisedHitSavingThrow)) {
+          throw new Error(`${path} opening-attack saving throw is invalid`)
+        }
+        assertKeys(
+          value.mechanic.surprisedHitSavingThrow,
+          ['ability', 'dcAbility', 'failureDamageMultiplier'],
+          `${path} opening-attack saving throw`,
+        )
+        if (
+          !ABILITIES.has(value.mechanic.surprisedHitSavingThrow.ability as AbilityKey) ||
+          !ABILITIES.has(value.mechanic.surprisedHitSavingThrow.dcAbility as AbilityKey) ||
+          !finiteInteger(
+            value.mechanic.surprisedHitSavingThrow.failureDamageMultiplier,
+            2,
+            4,
+          )
+        ) throw new Error(`${path} opening-attack saving throw is invalid`)
+      }
+      if (
+        value.mechanic.advantageBeforeTargetFirstTurn !== true &&
+        value.mechanic.automaticCriticalAgainstSurprised !== true &&
+        value.mechanic.surprisedHitSavingThrow == null
+      ) throw new Error(`${path} opening-attack mechanic has no effect`)
+    } else if (value.mechanic.kind === 'hidden-spell-save-disadvantage') {
+      assertKeys(
+        value.mechanic,
+        ['kind'],
+        `${path} hidden-spell-save-disadvantage mechanic`,
+      )
+    } else if (value.mechanic.kind === 'utility-projection-control') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'projectionId', 'economy'],
+        `${path} utility-projection-control mechanic`,
+      )
+      assertId(value.mechanic.projectionId, `${path} utility projection`)
+      if (!['action', 'bonusAction'].includes(String(value.mechanic.economy))) {
+        throw new Error(`${path} utility projection economy is invalid`)
+      }
+    } else if (value.mechanic.kind === 'utility-projection-attack-advantage') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'projectionId', 'maximumDistanceFeet'],
+        `${path} utility-projection-attack-advantage mechanic`,
+      )
+      assertId(value.mechanic.projectionId, `${path} utility projection`)
+      if (!finiteInteger(value.mechanic.maximumDistanceFeet, 0, 10_000)) {
+        throw new Error(`${path} utility projection distance is invalid`)
+      }
     } else {
       throw new Error(`${path}机械协议无效`)
     }
@@ -667,7 +788,11 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
 
   if (
     !Array.isArray(value.effects) ||
-    (value.effects.length < 1 && value.mechanic == null) ||
+    (
+      value.effects.length < 1 &&
+      value.mechanic == null &&
+      value.automation !== 'manual'
+    ) ||
     value.effects.length > 64
   ) throw new Error(`${path}效果无效`)
   for (const effect of value.effects) validateEffect(effect, rollIds, `${path}效果`)
@@ -832,6 +957,7 @@ export function validateDeclarativeSubclassSpellcastingV1(
     'progression', 'learning', 'ability', 'spellListClassId',
     'cantripChoiceGroupId', 'spellChoiceGroupId',
     'cantripsKnownByClassLevel', 'spellsKnownByClassLevel',
+    'requiredCantripIds',
     'allowedSchools', 'unrestrictedSpellsKnownByClassLevel',
     'ritualCasting', 'focus',
   ], path)
@@ -847,6 +973,22 @@ export function validateDeclarativeSubclassSpellcastingV1(
   if (value.cantripChoiceGroupId === value.spellChoiceGroupId) throw new Error(`${path}选择组 ID 不能相同`)
   validateKnownCountTable(value.cantripsKnownByClassLevel, `${path}戏法已知表`)
   validateKnownCountTable(value.spellsKnownByClassLevel, `${path}法术已知表`)
+  if (value.requiredCantripIds != null) {
+    if (
+      !Array.isArray(value.requiredCantripIds) ||
+      value.requiredCantripIds.length < 1 ||
+      value.requiredCantripIds.length > 32 ||
+      value.requiredCantripIds.some((id) => typeof id !== 'string' || !ID.test(id)) ||
+      new Set(value.requiredCantripIds).size !== value.requiredCantripIds.length
+    ) throw new Error(`${path}固定戏法无效`)
+    const positiveKnownCounts = value.cantripsKnownByClassLevel
+      .map(Number)
+      .filter((count) => count > 0)
+    if (
+      positiveKnownCounts.length < 1 ||
+      value.requiredCantripIds.length > Math.min(...positiveKnownCounts)
+    ) throw new Error(`${path}固定戏法数不能超过已知戏法上限`)
+  }
   if (value.allowedSchools != null) {
     if (
       !Array.isArray(value.allowedSchools) ||
@@ -1046,7 +1188,15 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   const auditedBattleMaster = ability.mechanic?.kind === 'battle-master-2014'
   const auditedEldritchKnight = ability.mechanic?.kind === 'eldritch-knight-2014'
   const auditedTotemWarrior = ability.mechanic?.kind === 'totem-warrior-2014'
-  const auditedMechanic = auditedBattleMaster || auditedEldritchKnight || auditedTotemWarrior
+  const auditedOpeningAttack = ability.mechanic?.kind === 'opening-attack'
+  const auditedHiddenSpellSave =
+    ability.mechanic?.kind === 'hidden-spell-save-disadvantage'
+  const auditedUtilityProjection =
+    ability.mechanic?.kind === 'utility-projection-control' ||
+    ability.mechanic?.kind === 'utility-projection-attack-advantage'
+  const auditedMechanic = auditedBattleMaster || auditedEldritchKnight ||
+    auditedTotemWarrior || auditedOpeningAttack || auditedHiddenSpellSave ||
+    auditedUtilityProjection
   if (ability.canModifyEnemyD20) {
     reasons.push('改变敌方 d20 需要玩家声明并由 DM 在投掷后 Interrupt 窗口确认')
   }
@@ -1070,7 +1220,11 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   if (ability.duration?.kind === 'concentration' || ability.effects.some((effect) => effect.kind === 'standard-condition' && effect.duration.kind === 'concentration')) reasons.push('声明式专注来源尚未开放安全绑定')
   if (ability.duration?.kind === 'permanent' || ability.effects.some((effect) => effect.kind === 'standard-condition' && effect.duration.kind === 'permanent')) reasons.push('永久效果必须由 DM 审核并写入长期角色数据')
   if (ability.effects.some((effect) => effect.kind === 'standard-condition' && effect.duration.kind === 'until-source-turn-end')) reasons.push('来源回合结束边界尚未开放为插件状态 capability')
-  if (ability.duration && ability.duration.kind !== 'instantaneous') reasons.push('能力级持续时间尚未绑定具体状态或区域实例')
+  if (
+    ability.duration &&
+    ability.duration.kind !== 'instantaneous' &&
+    ability.mechanic?.kind !== 'utility-projection-attack-advantage'
+  ) reasons.push('能力级持续时间尚未绑定具体状态或区域实例')
 
   const safeTurnStartResourceRestore = ability.trigger.kind === 'turn-start' &&
     (ability.cost?.economy ?? 'none') === 'none' &&

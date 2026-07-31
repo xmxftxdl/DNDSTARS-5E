@@ -22,13 +22,11 @@ import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useRoomCommunicationsStore } from '../../store/roomCommunications'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
 import { useSceneAudioStore } from '../../store/sceneAudio'
-import { ABILITIES, SKILLS } from '../../lib/dnd'
 import { searchEnemyPool } from '../../lib/enemyPool'
 import {
   sceneActionSummary,
   type SceneAction,
   type SceneAudioCue,
-  type SceneRollSelection,
 } from '../../lib/sceneOrchestration'
 import type { SceneDrawTarget } from './SceneOrchestrationSystem'
 import type { SceneAudioAsset, SceneAudioKind } from '../../lib/sceneAudioLibrary'
@@ -49,12 +47,11 @@ interface SceneOrchestrationPanelProps {
   onStopAudio: () => void
 }
 
-type ActionKind = SceneAction['kind']
+type ActionKind = Exclude<SceneAction['kind'], 'group-roll'>
 
 const ACTION_LABELS: Readonly<Record<ActionKind, string>> = {
   'reveal-handout': '展示讲义',
   whisper: '发送密语',
-  'group-roll': '群体检定/豁免',
   door: '切换门状态',
   light: '改变环境光',
   fog: '改变迷雾',
@@ -112,10 +109,6 @@ export default function SceneOrchestrationPanel({
   const [actionKind, setActionKind] = useState<ActionKind>('whisper')
   const [primary, setPrimary] = useState('')
   const [secondary, setSecondary] = useState('')
-  const [selection, setSelection] = useState('skill:perception')
-  const [dc, setDc] = useState(12)
-  const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
-  const [passive, setPassive] = useState(true)
   const [doorState, setDoorState] = useState<'open' | 'closed' | 'locked'>('open')
   const [ambientLight, setAmbientLight] = useState<'bright' | 'dim' | 'darkness'>('dim')
   const [fogOperation, setFogOperation] = useState<'fill' | 'clear'>('clear')
@@ -140,10 +133,6 @@ export default function SceneOrchestrationPanel({
     const base = { id: crypto.randomUUID(), enabled: true }
     if (actionKind === 'reveal-handout') return primary ? { ...base, kind: actionKind, handoutId: primary, audience: secondary === 'triggering-player' ? 'triggering-player' : 'all' } : null
     if (actionKind === 'whisper') return primary.trim() ? { ...base, kind: actionKind, text: primary.trim() } : null
-    if (actionKind === 'group-roll') return {
-      ...base, kind: actionKind, label: primary.trim() || '场景群体检定', selection: selection as SceneRollSelection,
-      dc, mode, allowPassiveFallback: !selection.startsWith('save:') && passive,
-    }
     if (actionKind === 'door') return primary ? { ...base, kind: actionKind, doorId: primary, state: doorState } : null
     if (actionKind === 'light') return { ...base, kind: actionKind, ambientLight }
     if (actionKind === 'fog') return { ...base, kind: actionKind, operation: fogOperation }
@@ -240,7 +229,6 @@ export default function SceneOrchestrationPanel({
 
                 <ActionBuilder
                   kind={actionKind} setKind={setActionKind} primary={primary} setPrimary={setPrimary} secondary={secondary} setSecondary={setSecondary}
-                  selection={selection} setSelection={(value) => { setSelection(value); if (value.startsWith('save:')) setPassive(false) }} dc={dc} setDc={setDc} mode={mode} setMode={setMode} passive={passive} setPassive={setPassive}
                   handouts={journal.handouts.filter((handout) => scene.boundHandoutIds.length === 0 || scene.boundHandoutIds.includes(handout.id))}
                   doors={geometry?.doors ?? []} doorState={doorState} setDoorState={setDoorState} ambientLight={ambientLight} setAmbientLight={setAmbientLight}
                   fogOperation={fogOperation} setFogOperation={setFogOperation} cue={cue} setCue={setCue}
@@ -265,9 +253,6 @@ export default function SceneOrchestrationPanel({
 interface ActionBuilderProps {
   kind: ActionKind; setKind: (value: ActionKind) => void
   primary: string; setPrimary: (value: string) => void; secondary: string; setSecondary: (value: string) => void
-  selection: string; setSelection: (value: string) => void; dc: number; setDc: (value: number) => void
-  mode: 'normal' | 'advantage' | 'disadvantage'; setMode: (value: 'normal' | 'advantage' | 'disadvantage') => void
-  passive: boolean; setPassive: (value: boolean) => void
   handouts: Array<{ id: string; title: string }>
   doors: Array<{ id: string; label: string }>; doorState: 'open' | 'closed' | 'locked'; setDoorState: (value: 'open' | 'closed' | 'locked') => void
   ambientLight: 'bright' | 'dim' | 'darkness'; setAmbientLight: (value: 'bright' | 'dim' | 'darkness') => void
@@ -286,7 +271,6 @@ function ActionBuilder(props: ActionBuilderProps) {
   return <div className="mt-4 rounded-xl border border-violet-300/12 bg-violet-500/[0.035] p-3"><div className="flex items-center gap-2"><select value={props.kind} onChange={(event) => { props.setKind(event.target.value as ActionKind); props.setPrimary(''); props.setSecondary('') }} className={`${input} flex-1`}>{Object.entries(ACTION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" onClick={props.onAdd} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-500 px-3 py-2 text-xs font-bold text-white"><Plus className="h-3.5 w-3.5" />加入</button></div><div className="mt-2 space-y-2">
     {props.kind === 'reveal-handout' && <><select value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} className={input}><option value="">选择已绑定讲义…</option>{props.handouts.map((handout) => <option key={handout.id} value={handout.id}>{handout.title}</option>)}</select><select value={props.secondary || 'all'} onChange={(event) => props.setSecondary(event.target.value)} className={input}><option value="all">展示给全体</option><option value="triggering-player">只展示给触发玩家</option></select></>}
     {props.kind === 'whisper' && <textarea rows={2} value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} placeholder="只发送给触发 Token 所属玩家" className={input} />}
-    {props.kind === 'group-roll' && <><input value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} placeholder="检定名称" className={input} /><div className="grid grid-cols-[1fr_64px_88px] gap-2"><select value={props.selection} onChange={(event) => props.setSelection(event.target.value)} className={input}><optgroup label="技能">{SKILLS.map((skill) => <option key={skill.key} value={`skill:${skill.key}`}>{skill.label}</option>)}</optgroup><optgroup label="属性">{ABILITIES.map((ability) => <option key={ability.key} value={`ability:${ability.key}`}>{ability.label}检定</option>)}</optgroup><optgroup label="豁免">{ABILITIES.map((ability) => <option key={`save-${ability.key}`} value={`save:${ability.key}`}>{ability.label}豁免</option>)}</optgroup></select><input type="number" value={props.dc} min={0} max={100} onChange={(event) => props.setDc(Math.max(0, Math.min(100, Number(event.target.value) || 0)))} className={input} /><select value={props.mode} onChange={(event) => props.setMode(event.target.value as typeof props.mode)} className={input}><option value="normal">正常</option><option value="advantage">优势</option><option value="disadvantage">劣势</option></select></div><label className="flex items-center gap-2 text-[11px] text-slate-400"><input type="checkbox" disabled={props.selection.startsWith('save:')} checked={!props.selection.startsWith('save:') && props.passive} onChange={(event) => props.setPassive(event.target.checked)} />允许被动值兜底</label></>}
     {props.kind === 'door' && <div className="grid grid-cols-2 gap-2"><select value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} className={input}><option value="">选择门…</option>{props.doors.map((door) => <option key={door.id} value={door.id}>{door.label}</option>)}</select><select value={props.doorState} onChange={(event) => props.setDoorState(event.target.value as typeof props.doorState)} className={input}><option value="open">开启</option><option value="closed">关闭</option><option value="locked">上锁</option></select></div>}
     {props.kind === 'light' && <select value={props.ambientLight} onChange={(event) => props.setAmbientLight(event.target.value as typeof props.ambientLight)} className={input}><option value="bright">明亮</option><option value="dim">昏暗</option><option value="darkness">黑暗</option></select>}
     {props.kind === 'fog' && <select value={props.fogOperation} onChange={(event) => props.setFogOperation(event.target.value as typeof props.fogOperation)} className={input}><option value="clear">清除全部迷雾</option><option value="fill">完全遮蔽地图</option></select>}

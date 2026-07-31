@@ -12,6 +12,7 @@ import {
   dnd5eCharacterHasPluginFeature,
   dnd5eDeclarativeAttackIntentsForCharacter,
   dnd5eDeclarativeBattleMasterManeuverDefinition,
+  dnd5eUtilityProjectionTargetDistanceFeet,
   registeredDnd5ePluginFeatures,
   dnd5eRulesPluginRegistrySnapshot,
   subscribeDnd5eRulesPluginRegistry,
@@ -172,6 +173,10 @@ export default function Dnd5ePluginCombatPanel({
           const battleMasterManeuver = dnd5eDeclarativeBattleMasterManeuverDefinition(feature.id)
             ?.mechanic.maneuver
           const isCommandersStrike = battleMasterManeuver === 'commanders-strike'
+          const projectionAttackMechanic =
+            feature.declarativeAbility?.mechanic?.kind === 'utility-projection-attack-advantage'
+              ? feature.declarativeAbility.mechanic
+              : undefined
           const targetOptions = targeting.kind === 'self'
             ? [actorToken]
             : targeting.kind === 'area'
@@ -182,6 +187,16 @@ export default function Dnd5ePluginCombatPanel({
                 const opposed = areOpposedCombatTokens(actorToken, token)
                 if (targeting.relation === 'ally' && opposed) return false
                 if (targeting.relation === 'enemy' && !opposed) return false
+                if (projectionAttackMechanic) {
+                  const projectionDistance = dnd5eUtilityProjectionTargetDistanceFeet({
+                    character,
+                    featureId: feature.id,
+                    map,
+                    targetToken: token,
+                  })
+                  return projectionDistance != null &&
+                    projectionDistance <= projectionAttackMechanic.maximumDistanceFeet
+                }
                 const distanceFeet = tokenFootprintDistanceCells(actorToken, token, map) *
                   Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
                 return targeting.rangeFeet == null || distanceFeet <= targeting.rangeFeet
@@ -245,8 +260,15 @@ export default function Dnd5ePluginCombatPanel({
                   >
                     {targetOptions.length === 0 && <option value="">没有符合条件的目标</option>}
                     {targetOptions.map((token) => {
-                      const distanceFeet = tokenFootprintDistanceCells(actorToken, token, map) *
-                        Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+                      const distanceFeet = projectionAttackMechanic
+                        ? dnd5eUtilityProjectionTargetDistanceFeet({
+                            character,
+                            featureId: feature.id,
+                            map,
+                            targetToken: token,
+                          }) ?? Number.POSITIVE_INFINITY
+                        : tokenFootprintDistanceCells(actorToken, token, map) *
+                          Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
                       return <option key={token.id} value={token.id}>{token.label} · {distanceFeet}尺</option>
                     })}
                   </select>

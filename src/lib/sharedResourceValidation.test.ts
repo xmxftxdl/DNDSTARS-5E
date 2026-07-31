@@ -13,7 +13,6 @@ describe('shared resource runtime validation', () => {
       'combat-log': { entries: [], updatedAt: 1 },
       'room-chat': { schemaVersion: 1, messages: [], updatedAt: 1 },
       'room-journal': { schemaVersion: 1, handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 1 },
-      'group-ability-checks': { schemaVersion: 1, checks: [], updatedAt: 1 },
       'campaign-time': { schemaVersion: 2, worldMinute: 480, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], advances: [], updatedAt: 1 },
       'scene-orchestration': { schemaVersion: 1, scenes: [], runtime: { paused: false, pendingRuns: [], receipts: [], history: [] }, updatedAt: 1 },
       'scene-audio-library': { schemaVersion: 1, assets: [], updatedAt: 1 },
@@ -59,7 +58,6 @@ describe('shared resource runtime validation', () => {
       sharedNotes: [],
       authorityMutationReceipts: [''],
     }).status).toBe('invalid')
-    expect(validateAndMigrateSharedResource('group-ability-checks', { schemaVersion: 1, checks: [{ id: 'broken' }] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('campaign-time', { schemaVersion: 1, worldMinute: -1, timers: [], advances: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('scene-orchestration', { schemaVersion: 1, scenes: 'hidden', runtime: {} }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('scene-audio-library', { schemaVersion: 1, assets: [{ id: '../escape' }] }).status).toBe('invalid')

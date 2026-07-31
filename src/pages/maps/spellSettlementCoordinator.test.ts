@@ -143,6 +143,26 @@ describe('SpellSettlementCoordinator', () => {
       }),
     ])
     expect(spellPresentationsBeforeRoll({
+      spellId: 'magic-missile',
+      transactionId: 'missile-tx',
+      mapId: 'map',
+      actorTokenId: 'wizard',
+      targetTokenIds: ['goblin', 'ogre', 'goblin'],
+    })).toEqual([
+      expect.objectContaining({
+        id: 'missile-tx:magic-missile:0',
+        targetTokenId: 'goblin',
+      }),
+      expect.objectContaining({
+        id: 'missile-tx:magic-missile:1',
+        targetTokenId: 'ogre',
+      }),
+      expect.objectContaining({
+        id: 'missile-tx:magic-missile:2',
+        targetTokenId: 'goblin',
+      }),
+    ])
+    expect(spellPresentationsBeforeRoll({
       spellId: 'fire-bolt',
       transactionId: 'twinned-tx',
       mapId: 'map',

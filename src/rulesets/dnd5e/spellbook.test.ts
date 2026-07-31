@@ -91,8 +91,8 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference?.sourcePage).toBe(118)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
       .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(101)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(85)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(102)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(86)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(16)
     expect(entries.find((entry) => entry.id === 'produce-flame')).toMatchObject({
       headless: true,

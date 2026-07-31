@@ -15,6 +15,8 @@ import {
   GUIDANCE_ORBIT_RADIUS_FACTOR,
   KILL_STREAK_BANNER_START_DELAY_MS,
   KILL_STREAK_PRESENTATION_EVENT_TTL_MS,
+  MAGIC_MISSILE_ANIMATION_DURATION_MS,
+  MAGIC_MISSILE_SEQUENCE_GAP_MS,
   PRODUCE_FLAME_ANIMATION_DURATION_MS,
   POISON_SPRAY_ANIMATION_DURATION_MS,
   RAY_OF_FROST_ANIMATION_DURATION_MS,
@@ -46,6 +48,7 @@ import {
   publishFireballPresentation,
   publishGuidancePresentation,
   publishKillStreakPresentation,
+  publishMagicMissilePresentation,
   publishProduceFlamePresentation,
   publishPoisonSprayPresentation,
   publishRayOfFrostPresentation,
@@ -755,6 +758,54 @@ describe('combat presentation events', () => {
       ACID_SPLASH_ANIMATION_DURATION_MS,
       POISON_SPRAY_ANIMATION_DURATION_MS,
       VICIOUS_MOCKERY_ANIMATION_DURATION_MS,
+    ])
+    vi.useRealTimers()
+  })
+
+  it('staggers fast Magic Missile events one dart at a time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(13_000)
+    await refreshCombatPresentationClock(true)
+    const schedulePromises = [
+      publishMagicMissilePresentation({
+        id: 'missile-tx:magic-missile:0',
+        transactionId: 'missile-tx',
+        mapId: 'map-a',
+        sourceTokenId: 'wizard',
+        targetTokenId: 'goblin',
+        sequenceIndex: 0,
+      }),
+      publishMagicMissilePresentation({
+        id: 'missile-tx:magic-missile:1',
+        transactionId: 'missile-tx',
+        mapId: 'map-a',
+        sourceTokenId: 'wizard',
+        targetTokenId: 'ogre',
+        sequenceIndex: 1,
+      }),
+      publishMagicMissilePresentation({
+        id: 'missile-tx:magic-missile:2',
+        transactionId: 'missile-tx',
+        mapId: 'map-a',
+        sourceTokenId: 'wizard',
+        targetTokenId: 'goblin',
+        sequenceIndex: 2,
+      }),
+    ]
+    await vi.advanceTimersByTimeAsync(MAGIC_MISSILE_SEQUENCE_GAP_MS * 2)
+    const schedules = await Promise.all(schedulePromises)
+    const events = vi.mocked(publishSharedEvent).mock.calls.map((call) => call[1])
+    expect(events.map((event) => (event as { targetTokenId?: string }).targetTokenId))
+      .toEqual(['goblin', 'ogre', 'goblin'])
+    expect(events.map((event) => (event as { createdAt: number }).createdAt)).toEqual([
+      13_500,
+      13_500 + MAGIC_MISSILE_SEQUENCE_GAP_MS,
+      13_500 + MAGIC_MISSILE_SEQUENCE_GAP_MS * 2,
+    ])
+    expect(schedules.map((schedule) => schedule.completesAt)).toEqual([
+      13_500 + MAGIC_MISSILE_ANIMATION_DURATION_MS,
+      13_500 + MAGIC_MISSILE_SEQUENCE_GAP_MS + MAGIC_MISSILE_ANIMATION_DURATION_MS,
+      13_500 + MAGIC_MISSILE_SEQUENCE_GAP_MS * 2 + MAGIC_MISSILE_ANIMATION_DURATION_MS,
     ])
     vi.useRealTimers()
   })

@@ -42,6 +42,7 @@ import {
   dnd5eWeaponClassDamageDefinitions,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
+  type Dnd5eCombatant,
   type Dnd5eBattleMasterAttackIntentPayload,
   type Dnd5eBattleMasterTargetReaction,
   type Dnd5eClassDamageDefinition,
@@ -51,6 +52,7 @@ import {
   type Dnd5eHeadlessCombatState,
   type Dnd5eWeaponClassDamageContext,
   type Dnd5eTranquilitySaveRoll,
+  type Dnd5eOpeningAttackSavingThrowRoll,
 } from './headlessCombatEngine'
 import {
   applyDnd5eAttackCoverOverride,
@@ -61,13 +63,18 @@ import {
   type Dnd5eAttackCoverSnapshot,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { consumeDnd5eWeaponAmmunition } from './items'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 import { dnd5eEldritchKnightWarMagicAvailable } from './eldritchKnight'
 import { dnd5eActiveMagicWeaponBonus } from './activeEffects'
 import type { Dnd5ePluginDiceRollResult } from './pluginApi'
+import {
+  dnd5eOpeningAttackHasAdvantage,
+  dnd5eOpeningAttackIsAutomaticCritical,
+  dnd5eOpeningAttackSavingThrowRequirement,
+} from './openingAttack'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -116,6 +123,16 @@ export interface PreparedDnd5eEquipmentAttack {
     saveMode: 'normal' | 'disadvantage'
     blessed: boolean
     baned: boolean
+  }
+  openingAttackSavingThrow?: {
+    featureId: string
+    ability: keyof Dnd5eCombatant['abilities']
+    dc: number
+    saveModifier: number
+    saveMode: 'normal' | 'advantage' | 'disadvantage'
+    blessed: boolean
+    baned: boolean
+    failureDamageMultiplier: number
   }
   tranquilityWard?: ReturnType<typeof dnd5eTranquilityWardCheck>
   foeSlayerAttackBonus: number
@@ -381,7 +398,8 @@ export function prepareDnd5eEquipmentAttack(input: {
         actorCombatant,
         target,
         profile.mode === 'melee',
-      ))
+      ) ||
+      dnd5eOpeningAttackHasAdvantage(snapshot.state, actorCombatant, target))
   const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
     dnd5eWearingUnproficientArmor(actor) ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
@@ -412,6 +430,12 @@ export function prepareDnd5eEquipmentAttack(input: {
         saveMode: target.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const,
       }
     : undefined
+  const openingAttackRequirement =
+    dnd5eOpeningAttackSavingThrowRequirement(
+      snapshot.state,
+      actorCombatant,
+      target,
+    )
   return {
     ok: true,
     prepared: {
@@ -440,6 +464,29 @@ export function prepareDnd5eEquipmentAttack(input: {
         ...stunningStrikeResolution,
         blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bless'),
         baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bane'),
+      } : undefined,
+      openingAttackSavingThrow: openingAttackRequirement ? {
+        featureId: openingAttackRequirement.featureId,
+        ability: openingAttackRequirement.ability,
+        dc: openingAttackRequirement.dc,
+        saveModifier: target.savingThrowBonuses[openingAttackRequirement.ability] ??
+          rules.abilityModifier(target.abilities[openingAttackRequirement.ability]),
+        saveMode: dnd5eSavingThrowMode(
+          target,
+          openingAttackRequirement.ability,
+        ),
+        blessed: dnd5eCombatantHasConcentrationEffect(
+          snapshot.state,
+          target.id,
+          'bless',
+        ),
+        baned: dnd5eCombatantHasConcentrationEffect(
+          snapshot.state,
+          target.id,
+          'bane',
+        ),
+        failureDamageMultiplier:
+          openingAttackRequirement.failureDamageMultiplier,
       } : undefined,
       tranquilityWard: dnd5eTranquilityWardCheck(actorCombatant, target, snapshot.state),
       foeSlayerAttackBonus: foeSlayer === 'attack' ? foeSlayerAttackBonus : 0,
@@ -505,7 +552,11 @@ export function previewDnd5eEquipmentAttack(
     automaticCritical: dnd5eConditionHitIsAutomaticCritical({
       target: prepared.state.combatants[prepared.targetToken.id],
       distanceFeet: prepared.distanceFeet,
-    }),
+    }) || dnd5eOpeningAttackIsAutomaticCritical(
+      prepared.state,
+      prepared.state.combatants[prepared.actorToken.id],
+      prepared.state.combatants[prepared.targetToken.id],
+    ),
   })
 }
 
@@ -552,6 +603,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   stunningStrikeSaveRerollD20Second?: number
   stunningStrikeBardicInspirationRoll?: number
   stunningStrikeDarkOnesOwnLuckRoll?: number
+  openingAttackSavingThrow?: Dnd5eOpeningAttackSavingThrowRoll
   hurlThroughHellDamageRolls?: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
   declarativeIntentRolls?: Readonly<Record<string, Readonly<Record<string, Dnd5ePluginDiceRollResult>>>>
@@ -598,6 +650,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     stunningStrikeSaveRerollD20Second: input.stunningStrikeSaveRerollD20Second,
     stunningStrikeBardicInspirationRoll: input.stunningStrikeBardicInspirationRoll,
     stunningStrikeDarkOnesOwnLuckRoll: input.stunningStrikeDarkOnesOwnLuckRoll,
+    openingAttackSavingThrow: input.openingAttackSavingThrow,
     hurlThroughHellDamageRolls: input.hurlThroughHellDamageRolls,
     standAgainstTide: input.standAgainstTide,
     declarativeIntentFeatureIds: prepared.declarativeIntentFeatureIds,

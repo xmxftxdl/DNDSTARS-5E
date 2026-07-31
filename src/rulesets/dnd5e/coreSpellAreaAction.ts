@@ -6,6 +6,7 @@ import type { Character } from '../../types/character'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { moveDnd5eCoreSpellArea } from './coreSpellAreas'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { dnd5eUtilityProjectionMovementEconomy } from './utilityProjection'
 
 export interface PreparedDnd5eCoreSpellAreaMove {
   action: SharedPlayerActionState
@@ -48,6 +49,9 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
   ) {
     return { ok: false, reason: 'concentration-ended' }
   }
+  const movementEconomy = area.coreSpellId
+    ? dnd5eUtilityProjectionMovementEconomy(actor, area.coreSpellId, area.movement.economy)
+    : area.movement.economy
   const moved = moveDnd5eCoreSpellArea({
     map: input.map, geometry: input.geometry,
     areaId: area.id, sourceTokenId: actorToken.id, targetCell: payload.targetCell,
@@ -81,7 +85,7 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       areaId: area.id,
       targetCell: { ...payload.targetCell },
-      economy: area.movement.economy === 'action' ? 'action' : 'bonusAction',
+      economy: movementEconomy === 'action' ? 'action' : 'bonusAction',
       geometry: input.geometry,
       impactTargetId: moved.impactTargetId,
     },

@@ -192,6 +192,11 @@ export function prepareDnd5eMonsterAttack(input: {
   /** Exact target for each concrete runtime occurrence; one entry is legacy. */
   targetTokenIds?: readonly string[]
   actionIndex?: number
+  multiattackContinuation?: {
+    schemaVersion: 1
+    parentActionId: string
+    occurrenceIndex: number
+  }
   turnEconomy?: Dnd5eTurnEconomyCounts
   targetTurnEconomy?: Dnd5eTurnEconomyCounts
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
@@ -228,6 +233,27 @@ export function prepareDnd5eMonsterAttack(input: {
   const indexedAction = monster.actions[input.actionIndex ?? 0]
     ?? monster.actions.find((action) => action.kind === 'weapon-attack')
   if (!indexedAction) return { ok: false, reason: 'invalid-action' }
+  if (input.multiattackContinuation) {
+    const receipt =
+      actorCombatant.classState.monsterMultiattackContinuation
+    const turnSlotId =
+      snapshot.state.initiativeSlotIds?.[actorIndex] ??
+      snapshot.state.turnSlotId ??
+      actorCombatant.id
+    if (
+      !receipt ||
+      receipt.schemaVersion !== 1 ||
+      receipt.combatId !== snapshot.state.combatId ||
+      receipt.round !== snapshot.state.round ||
+      receipt.turnKey !==
+        `${snapshot.state.combatId}:${snapshot.state.round}:${turnSlotId}` ||
+      receipt.parentActionId !== input.multiattackContinuation.parentActionId ||
+      receipt.nextOccurrenceIndex !==
+        input.multiattackContinuation.occurrenceIndex ||
+      receipt.sequenceActionIds[receipt.nextOccurrenceIndex] !==
+        indexedAction.id
+    ) return { ok: false, reason: 'invalid-action' }
+  }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const distanceFeet = Math.max(
     tokenFootprintDistanceCells(actorToken, targetToken, input.map) *
@@ -237,7 +263,8 @@ export function prepareDnd5eMonsterAttack(input: {
         mapGeometryTokenElevation(geometry, targetToken),
     ),
   )
-  const multiattack = indexedAction.kind === 'weapon-attack'
+  const multiattack = !input.multiattackContinuation &&
+    indexedAction.kind === 'weapon-attack'
     ? monster.actions.find((action) => {
         if (
           action.kind !== 'multiattack' ||
@@ -982,6 +1009,12 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
   rolls: readonly Omit<Dnd5eMonsterActionRoll, 'targetId'>[]
   mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   compositeSteps?: readonly Dnd5eMonsterMultiattackStepResolutionV1[]
+  settleAttackCount?: number
+  multiattackContinuation?: {
+    schemaVersion: 1
+    parentActionId: string
+    occurrenceIndex: number
+  }
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
   const weaponRolls = input.rolls.map((roll, attackIndex) => ({
@@ -1006,6 +1039,8 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
           actorId: prepared.actorToken.id,
           actionId: prepared.action.id,
           randomRepeatRoll: prepared.randomRepeatRoll,
+          settleAttackCount: input.settleAttackCount,
+          multiattackContinuation: input.multiattackContinuation,
           mechanicRolls: input.mechanicRolls,
           rolls: weaponRolls,
         },

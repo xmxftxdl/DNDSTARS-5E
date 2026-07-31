@@ -541,7 +541,8 @@ function normalizeTrigger(value: unknown): SceneTrigger | null {
     tokenFilter: value.tokenFilter === 'player' || value.tokenFilter === 'enemy' ? value.tokenFilter : 'any',
     repeat: value.repeat === 'always' || value.repeat === 'once' ? value.repeat : 'per-token',
     actions: (Array.isArray(value.actions) ? value.actions : []).map(normalizeAction)
-      .filter((entry): entry is SceneAction => entry !== null).slice(0, SCENE_MAX_ACTIONS),
+      .filter((entry): entry is SceneAction => entry !== null && entry.kind !== 'group-roll')
+      .slice(0, SCENE_MAX_ACTIONS),
   }
 }
 
@@ -662,13 +663,28 @@ function normalizeRuntime(value: unknown): SceneRuntimeState {
   }
 }
 
+function containsLegacyGroupRoll(value: Record<string, unknown>): boolean {
+  return Array.isArray(value.scenes) && value.scenes.some((scene) =>
+    object(scene) &&
+    Array.isArray(scene.triggers) &&
+    scene.triggers.some((trigger) =>
+      object(trigger) &&
+      Array.isArray(trigger.actions) &&
+      trigger.actions.some((action) => object(action) && action.kind === 'group-roll'),
+    ),
+  )
+}
+
 export function normalizeSharedSceneOrchestration(value: unknown): SharedSceneOrchestrationState {
   const source = object(value) ? value : {}
+  const runtime = normalizeRuntime(source.runtime)
   return {
     schemaVersion: SCENE_ORCHESTRATION_SCHEMA_VERSION,
     scenes: (Array.isArray(source.scenes) ? source.scenes : []).map(normalizeScene)
       .filter((entry): entry is OrchestratedScene => entry !== null).slice(-SCENE_MAX_SCENES),
-    runtime: normalizeRuntime(source.runtime),
+    runtime: containsLegacyGroupRoll(source)
+      ? { ...runtime, pendingRuns: [] }
+      : runtime,
     updatedAt: timestamp(source.updatedAt),
   }
 }
@@ -677,9 +693,10 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
   if (!object(value) || value.schemaVersion !== SCENE_ORCHESTRATION_SCHEMA_VERSION || !Array.isArray(value.scenes) || !object(value.runtime)) return false
   if (!Array.isArray(value.runtime.pendingRuns) || !Array.isArray(value.runtime.receipts) || !Array.isArray(value.runtime.history)) return false
   const rawScenes = value.scenes
+  const rawRuntime = normalizeRuntime(value.runtime)
   const normalized = normalizeSharedSceneOrchestration(value)
   if (normalized.scenes.length !== rawScenes.length || rawScenes.length > SCENE_MAX_SCENES) return false
-  if (normalized.runtime.pendingRuns.length !== value.runtime.pendingRuns.length || value.runtime.pendingRuns.length > 50) return false
+  if (rawRuntime.pendingRuns.length !== value.runtime.pendingRuns.length || value.runtime.pendingRuns.length > 50) return false
   if (normalized.runtime.receipts.length !== value.runtime.receipts.length || value.runtime.receipts.length > 2_000) return false
   if (normalized.runtime.history.length !== value.runtime.history.length || value.runtime.history.length > SCENE_MAX_HISTORY) return false
   const sceneIds = new Set<string>()
@@ -756,7 +773,17 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
     const triggerIds = new Set<string>()
     return raw.triggers.every((trigger, triggerIndex) => {
       const normalizedTrigger = scene.triggers[triggerIndex]
-      if (!object(trigger) || !normalizedTrigger || triggerIds.has(normalizedTrigger.id) || !Array.isArray(trigger.actions) || trigger.actions.length !== normalizedTrigger.actions.length) return false
+      if (
+        !object(trigger) ||
+        !normalizedTrigger ||
+        triggerIds.has(normalizedTrigger.id) ||
+        !Array.isArray(trigger.actions) ||
+        trigger.actions.length > SCENE_MAX_ACTIONS
+      ) return false
+      const retainedRawActions = trigger.actions.filter(
+        (action) => !object(action) || action.kind !== 'group-roll',
+      )
+      if (retainedRawActions.length !== normalizedTrigger.actions.length) return false
       triggerIds.add(normalizedTrigger.id)
       const actionIds = new Set<string>()
       return normalizedTrigger.actions.every((action) => {
@@ -847,7 +874,7 @@ export function sceneActionSummary(action: SceneAction): string {
   switch (action.kind) {
     case 'reveal-handout': return `展示讲义 ${action.handoutId}`
     case 'whisper': return `发送密语：${action.text.slice(0, 40)}`
-    case 'group-roll': return `发起 ${action.label}（DC ${action.dc}）`
+    case 'group-roll': return '已移除的群体检定动作'
     case 'door': return `将门 ${action.doorId} 设为${action.state === 'open' ? '开启' : action.state === 'locked' ? '上锁' : '关闭'}`
     case 'light': return `环境光改为${action.ambientLight === 'bright' ? '明亮' : action.ambientLight === 'dim' ? '昏暗' : '黑暗'}`
     case 'fog': return action.operation === 'fill' ? '完全遮蔽地图' : '清除地图迷雾'
@@ -860,12 +887,13 @@ export function sceneActionSummary(action: SceneAction): string {
   }
 }
 
-export function createSceneAction(kind: SceneAction['kind']): SceneAction {
+export function createSceneAction(
+  kind: Exclude<SceneAction['kind'], 'group-roll'>,
+): Exclude<SceneAction, { kind: 'group-roll' }> {
   const base = { id: crypto.randomUUID(), enabled: true }
   switch (kind) {
     case 'reveal-handout': return { ...base, kind, handoutId: '', audience: 'all' }
     case 'whisper': return { ...base, kind, text: '你察觉到了一些异常。' }
-    case 'group-roll': return { ...base, kind, label: '全队察觉检定', selection: 'skill:perception', dc: 12, mode: 'normal', allowPassiveFallback: true }
     case 'door': return { ...base, kind, doorId: '', state: 'open' }
     case 'light': return { ...base, kind, ambientLight: 'dim' }
     case 'fog': return { ...base, kind, operation: 'clear' }

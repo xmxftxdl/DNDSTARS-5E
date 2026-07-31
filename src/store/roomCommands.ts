@@ -129,12 +129,14 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       x: command.x,
       y: command.y,
       elevationFeet: command.elevationFeet,
+      movementAnimation: undefined,
     })
     try {
       await state.saveAuthorityTokenPatch(map.id, token.id, {
         x: command.x,
         y: command.y,
         elevationFeet: command.elevationFeet,
+        movementAnimation: undefined,
       })
       return { status: 'applied' }
     } catch (error) {

@@ -701,6 +701,11 @@ export interface Token {
     monsterMechanicTriggerSequence?: number
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
+    utilityProjectionAttackAdvantage?: {
+      featureId: string
+      targetId: string
+      turnKey: string
+    }
     concentrationSpellId?: string
     concentrationSpellLevel?: number
     concentrationTargetIds?: string[]
@@ -718,6 +723,17 @@ export interface Token {
     monsterActionUsesByActionId?: Record<string, { current: number; max: number }>
     monsterSpellSlots?: Record<string, { current: number; max: number }>
     monsterSpellUsesBySpellId?: Record<string, { current: number; max: number }>
+    monsterMultiattackContinuation?: {
+      schemaVersion: 1
+      combatId: string
+      round: number
+      turnKey: string
+      parentActionId: string
+      nextOccurrenceIndex: number
+      sequenceActionIds: string[]
+      targetIds: string[]
+      hitByOccurrence: boolean[]
+    }
     monsterShapechangeOriginalStatBlockId?: string
     monsterShapechangeFormId?: string
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]

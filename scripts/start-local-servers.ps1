@@ -35,8 +35,9 @@ Start-Sleep -Milliseconds 500
 
 $serverScript = Join-Path $root 'scripts\static-server.mjs'
 $distRoot = Join-Path $root 'dist'
-$dmCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5273 --root `"$distRoot`""
-$playerCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5274 --root `"$distRoot`""
+$artRoot = Join-Path $root 'public'
+$dmCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5273 --root `"$distRoot`" --art-asset-root `"$artRoot`""
+$playerCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5274 --root `"$distRoot`" --art-asset-root `"$artRoot`""
 
 $dm = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine = $dmCommand

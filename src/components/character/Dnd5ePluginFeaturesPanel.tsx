@@ -8,6 +8,7 @@ import {
   registeredDnd5ePluginFeatures,
   registeredDnd5ePluginRaces,
   subscribeDnd5eRulesPluginRegistry,
+  DND5E_SRD_FEATS,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 import {
@@ -57,7 +58,7 @@ export default function Dnd5ePluginFeaturesPanel({
   const selected = new Set(character.dnd5ePluginFeatureIds ?? [])
   const selectedFeats = new Set(character.dnd5eFeatIds ?? [])
   const registeredIds = new Set(registeredFeatures.map((feature) => feature.id))
-  const registeredFeatIds = new Set(feats.map((feat) => feat.id))
+  const registeredFeatIds = new Set([...feats.map((feat) => feat.id), ...DND5E_SRD_FEATS.map((feat) => feat.id)])
   const missingIds = [...selected].filter((featureId) => !registeredIds.has(featureId))
   const missingFeatIds = [...selectedFeats].filter((featId) => !registeredFeatIds.has(featId))
 
@@ -66,13 +67,6 @@ export default function Dnd5ePluginFeaturesPanel({
       ? [...selected].filter((id) => id !== featureId)
       : [...selected, featureId]
     onChange({ dnd5ePluginFeatureIds: next })
-  }
-
-  const toggleFeat = (featId: string) => {
-    const next = selectedFeats.has(featId)
-      ? [...selectedFeats].filter((id) => id !== featId)
-      : [...selectedFeats, featId]
-    onChange({ dnd5eFeatIds: next })
   }
 
   return (
@@ -99,7 +93,6 @@ export default function Dnd5ePluginFeaturesPanel({
             const available = dnd5ePluginFeatAvailableForCharacter(feat, character)
             const active = selectedFeats.has(feat.id)
             const allowedForRoom = roomAllowsPlugin(feat.ownerPluginId, roomRules)
-            const selectable = available && (allowedForRoom || active)
             const prerequisite = [
               feat.prerequisite?.minimumLevel ? `等级 ${feat.prerequisite.minimumLevel}+` : '',
               ...Object.entries(feat.prerequisite?.abilityScores ?? {}).map(([ability, score]) =>
@@ -133,18 +126,15 @@ export default function Dnd5ePluginFeaturesPanel({
                   </div>
                   <button
                     type="button"
-                    disabled={!selectable}
-                    onClick={() => toggleFeat(feat.id)}
-                    className={`flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
-                      !selectable
-                        ? 'cursor-not-allowed border-white/5 text-slate-600'
-                        : active
-                          ? 'border-amber-400/30 bg-amber-500/15 text-amber-100'
-                          : 'border-white/10 bg-white/5 text-slate-300 hover:border-amber-400/30 hover:text-amber-100'
+                    disabled
+                    className={`flex shrink-0 cursor-not-allowed items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${
+                      active
+                        ? 'border-amber-400/30 bg-amber-500/15 text-amber-100'
+                        : 'border-white/5 text-slate-600'
                     }`}
                   >
-                    {selectable ? <Check className={`h-4 w-4 ${active ? 'opacity-100' : 'opacity-30'}`} /> : <LockKeyhole className="h-4 w-4" />}
-                    {!allowedForRoom && !active ? '房间未启用' : available ? active ? '已选择' : '选择' : '不满足条件'}
+                    {active ? <Check className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
+                    {!allowedForRoom && !active ? '房间未启用' : active ? '已由创建／升级获得' : available ? '升级时可选' : '不满足条件'}
                   </button>
                 </div>
               </article>
@@ -239,13 +229,9 @@ export default function Dnd5ePluginFeaturesPanel({
                   <h4 className="text-sm font-semibold text-amber-100">专长插件未安装，已保留选择</h4>
                   <p className="mt-1 break-all font-mono text-xs text-amber-100/55">{featId}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => toggleFeat(featId)}
-                  className="rounded-xl border border-amber-400/15 px-3 py-2 text-xs text-amber-100/75 hover:bg-amber-500/10"
-                >
-                  从角色移除
-                </button>
+                <span className="rounded-xl border border-amber-400/15 px-3 py-2 text-xs text-amber-100/55">
+                  只能由 DM 修订升级记录
+                </span>
               </div>
             </article>
           ))}

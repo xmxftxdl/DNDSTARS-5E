@@ -84,6 +84,7 @@ describe('D&D 5e map bridge', () => {
         roll: 18,
       }, {
         slotId: 'hero-token:thief-reflexes',
+        firstRoundOnly: true,
         turnKind: 'thief-reflexes',
         tokenId: heroToken.id,
         label: heroToken.label,
@@ -96,6 +97,9 @@ describe('D&D 5e map bridge', () => {
     expect(snapshot.state.initiativeOrder).toEqual([heroToken.id, heroToken.id])
     expect(snapshot.state.initiativeSlotIds).toEqual([
       'hero-token:normal',
+      'hero-token:thief-reflexes',
+    ])
+    expect(snapshot.state.firstRoundOnlyInitiativeSlotIds).toEqual([
       'hero-token:thief-reflexes',
     ])
     expect(snapshot.state.turnSlotId).toBe('hero-token:normal')

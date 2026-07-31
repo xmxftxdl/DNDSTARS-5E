@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { Award, Dices, Footprints, HeartPulse, Shield, Sparkles, Swords } from 'lucide-react'
+import { Award, Dices, Footprints, GraduationCap, HeartPulse, LockKeyhole, Shield, Sparkles, Swords } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '../../lib/dnd'
 import {
@@ -31,6 +31,7 @@ import {
   subscribeDnd5eRulesPluginRegistry,
   normalizeDnd5eClassLevels,
   dnd5eCharacterClassLevel,
+  dnd5eAdvancementLockedChoiceKeys,
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
@@ -42,24 +43,36 @@ import Dnd5eSpellbookPanel from './Dnd5eSpellbookPanel'
 import EquipmentTab from './EquipmentTab'
 import CharacterPortraitEditor from './CharacterPortraitEditor'
 import Dnd5eMulticlassPanel from './Dnd5eMulticlassPanel'
+import CharacterLevelUpDialog from './CharacterLevelUpDialog'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
   id: string
   isDM: boolean
   readOnly?: boolean
+  allowAdvancementRevision?: boolean
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.floor(value)))
 }
 
-export default function CharacterSheet({ id, isDM, readOnly = false }: CharacterSheetProps) {
+export default function CharacterSheet({
+  id,
+  isDM,
+  readOnly = false,
+  allowAdvancementRevision = false,
+}: CharacterSheetProps) {
   const [selectedTab, setSelectedTab] = useState<'sheet' | 'class' | 'inventory' | 'spellbook' | 'plugins'>('sheet')
   const [shortRestHitDice, setShortRestHitDice] = useState<Record<number, number>>({})
   const [useSongOfRest, setUseSongOfRest] = useState(false)
   const [shortRestResult, setShortRestResult] = useState('')
   const [selectedClassId, setSelectedClassId] = useState<Dnd5eClassId | undefined>()
+  const [advancementRequest, setAdvancementRequest] = useState<{
+    classId: Dnd5eClassId
+    levelsGained: number
+    revisionRecordId?: string
+  }>()
   const characters = useCharacterStore((state) => state.characters)
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
@@ -122,6 +135,8 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
   const classCharacter = activeClassDefinition
     ? { ...c, charClass: activeClassDefinition.name, level: Math.max(1, activeClassLevel) }
     : c
+  const advancementRecords = c.dnd5eLevelAdvancements ?? []
+  const lockedAdvancementChoices = dnd5eAdvancementLockedChoiceKeys(c)
   const hasSpellbookTab = Object.keys(classLevels).some((classId) => !!dnd5eClassDefinition(classId)?.spellcasting)
   const hasPluginTab = registeredDnd5ePluginFeatures().length > 0 || (c.dnd5ePluginFeatureIds?.length ?? 0) > 0
   const activeTab = selectedTab === 'class' && !classDefinition
@@ -202,7 +217,9 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
     <div className="space-y-5">
       {readOnly && (
         <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-100">
-          DM 只读检视：这里展示玩家同步到房间的角色快照，任何字段都不能从此窗口修改。
+          {allowAdvancementRevision
+            ? 'DM 检视：普通角色字段保持只读；可修订任意一次升级记录，系统会重新推演后续等级。'
+            : 'DM 只读检视：这里展示玩家同步到房间的角色快照，任何字段都不能从此窗口修改。'}
         </div>
       )}
       <fieldset disabled={readOnly} className="contents">
@@ -237,7 +254,17 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                 })
               }}
             />
-            <NumberField label="等级" value={c.level} min={1} max={20} disabled={Object.keys(classLevels).length > 1} onChange={(value) => updateCharacter({ level: value })} />
+            <LevelUpField
+              level={c.level}
+              disabled={readOnly || Object.keys(classLevels).length > 1 || !classDefinition}
+              onRequest={() => {
+                if (!classDefinition || c.level >= 20) return
+                setAdvancementRequest({
+                  classId: classDefinition.id,
+                  levelsGained: 1,
+                })
+              }}
+            />
             <SelectField
               label="种族"
               value={c.race}
@@ -286,6 +313,68 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
           {hasPluginTab && <CharacterTab active={activeTab === 'plugins'} onClick={() => setSelectedTab('plugins')}>扩展规则</CharacterTab>}
       </nav>
 
+      {activeTab === 'class' && (
+        <section className="glass rounded-2xl border border-violet-300/15 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <LockKeyhole className="h-4 w-4 text-violet-300" />
+                <h3 className="text-sm font-semibold text-slate-100">升级记录</h3>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                每次升级会同时保存生命值、属性／专长、子职和职业选择；玩家确认后不能自行更改。
+              </p>
+            </div>
+            {!readOnly && c.level < 20 && activeClassId && (
+              <button
+                type="button"
+                onClick={() => setAdvancementRequest({ classId: activeClassId, levelsGained: 1 })}
+                className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white"
+              >
+                <GraduationCap className="h-4 w-4" /> 提升一级
+              </button>
+            )}
+          </div>
+          {advancementRecords.length === 0 ? (
+            <p className="mt-3 rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-slate-600">
+              尚无升级事务记录；旧角色现有等级会保留，下一次升级开始记录。
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {[...advancementRecords].reverse().map((record) => (
+                <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-200">
+                      {dnd5eClassDefinition(record.classId)?.name ?? record.classId}
+                      {' '}{record.fromClassLevel} → {record.toClassLevel}级
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      总等级 {record.fromLevel} → {record.toLevel} ·
+                      {' '}{record.decision.hitPointMethod === 'rolled' ? `生命骰 ${record.decision.hitPointRolls.join('、')}` : '固定生命值'} ·
+                      {' '}{record.completedBy === 'dm' ? 'DM 修订' : '玩家确认'}
+                      {(record.revisions?.length ?? 0) > 0 ? ` · 已修订 ${record.revisions!.length} 次` : ''}
+                    </p>
+                  </div>
+                  {allowAdvancementRevision && (
+                    <button
+                      type="button"
+                      onClick={() => setAdvancementRequest({
+                        classId: record.classId,
+                        levelsGained: record.decision.levelsGained,
+                        revisionRecordId: record.id,
+                      })}
+                      className="rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100"
+                    >
+                      修订这次升级
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       <fieldset disabled={readOnly} className="contents">
       {activeTab === 'sheet' && <>
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
@@ -325,6 +414,8 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                 savingThrowAdditionalBonus={savingThrowAuraBonus}
                 skillProficiencyRank={(skillKey) => dnd5eSkillCheckProficiencyRank(c, skillKey)}
                 skillCheckModifier={(skillKey) => dnd5eSkillCheckModifier(c, skillKey)}
+                scoreLocked={advancementRecords.length > 0}
+                proficiencyLocked={advancementRecords.length > 0}
                 onScoreChange={(score) => updateCharacter({ abilities: { ...c.abilities, [ability.key]: score } })}
                 onToggleSavingThrow={() => toggleSavingThrow(ability.key)}
                 onToggleSkill={toggleSkill}
@@ -349,6 +440,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                 <select
                   id={`hp-mode-${id}`}
                   value={hitPointMaximumMode}
+                  disabled={advancementRecords.length > 0}
                   onChange={(event) => {
                     const mode = event.target.value as 'fixed' | 'manual'
                     updateCharacter({
@@ -356,7 +448,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                       ...(mode === 'manual' ? { hitPointRolls: dnd5eManualHitPointRolls(c) } : {}),
                     })
                   }}
-                  className="rounded-lg border border-white/10 bg-void-900/80 px-2 py-1 text-slate-200 outline-none focus:border-arcane-500"
+                  className="rounded-lg border border-white/10 bg-void-900/80 px-2 py-1 text-slate-200 outline-none focus:border-arcane-500 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <option value="fixed">固定值（自动）</option>
                   <option value="manual">逐级掷骰（手动）</option>
@@ -395,13 +487,14 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                                 min={1}
                                 max={hitPointRule.hitDieSides}
                                 value={roll}
+                                disabled={advancementRecords.length > 0}
                                 aria-label={`${levelIndex + 1} 级生命骰结果`}
                                 onChange={(event) => {
                                   const nextRolls = [...manualHitPointRolls]
                                   nextRolls[levelIndex] = clamp(Number(event.target.value) || 1, 1, hitPointRule.hitDieSides)
                                   updateCharacter({ hitPointRolls: nextRolls })
                                 }}
-                                className="w-full rounded-md border border-white/10 bg-void-900/70 px-2 py-1.5 text-center text-xs font-semibold text-slate-100 outline-none focus:border-rose-400/50"
+                                className="w-full rounded-md border border-white/10 bg-void-900/70 px-2 py-1.5 text-center text-xs font-semibold text-slate-100 outline-none focus:border-rose-400/50 disabled:cursor-not-allowed disabled:opacity-45"
                               />
                             </label>
                           )
@@ -525,12 +618,48 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
       </>}
       </fieldset>
 
-      {activeTab === 'class' && <Dnd5eMulticlassPanel character={c} selectedClassId={activeClassId} onSelectClass={setSelectedClassId} onChange={updateCharacter} />}
-      {activeTab === 'class' && activeClassDefinition?.id === 'fighter' && <FighterProgressionPanel character={classCharacter} onChange={updateCharacter} />}
-      {activeTab === 'class' && activeClassDefinition && activeClassDefinition.id !== 'fighter' && <Dnd5eClassProgressionPanel character={classCharacter} totalCharacterLevel={c.level} isStartingClass={activeClassDefinition.name === c.charClass} onChange={updateCharacter} />}
+      {activeTab === 'class' && <Dnd5eMulticlassPanel
+        character={c}
+        selectedClassId={activeClassId}
+        onSelectClass={setSelectedClassId}
+        onRequestLevelUp={(classId) => setAdvancementRequest({ classId, levelsGained: 1 })}
+        readOnly={readOnly}
+      />}
+      {activeTab === 'class' && activeClassDefinition?.id === 'fighter' && <FighterProgressionPanel
+        character={classCharacter}
+        onChange={updateCharacter}
+        lockedChoiceKeys={lockedAdvancementChoices}
+      />}
+      {activeTab === 'class' && activeClassDefinition && activeClassDefinition.id !== 'fighter' && <Dnd5eClassProgressionPanel
+        character={classCharacter}
+        totalCharacterLevel={c.level}
+        isStartingClass={activeClassDefinition.name === c.charClass}
+        onChange={updateCharacter}
+        lockedChoiceKeys={lockedAdvancementChoices}
+      />}
       {activeTab === 'inventory' && <EquipmentTab charId={c.id} editable={!readOnly} />}
-      {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} />}
+      {activeTab === 'spellbook' && (
+        <Dnd5eSpellbookPanel
+          character={c}
+          lockedChoiceKeys={lockedAdvancementChoices}
+        />
+      )}
       {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={updateCharacter} />}
+      {advancementRequest && (
+        <CharacterLevelUpDialog
+          character={c}
+          classId={advancementRequest.classId}
+          levelsGained={advancementRequest.levelsGained}
+          revisionRecord={advancementRequest.revisionRecordId
+            ? advancementRecords.find((record) => record.id === advancementRequest.revisionRecordId)
+            : undefined}
+          onCancel={() => setAdvancementRequest(undefined)}
+          onConfirm={(nextCharacter) => {
+            if (!readOnly || allowAdvancementRevision) update(id, nextCharacter)
+            setAdvancementRequest(undefined)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -547,6 +676,35 @@ function CharacterTab({ active, onClick, children }: { active: boolean; onClick:
   )
 }
 
+function LevelUpField({
+  level,
+  disabled,
+  onRequest,
+}: {
+  level: number
+  disabled: boolean
+  onRequest: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold tracking-wider text-slate-500">等级</span>
+      <div className="flex gap-1.5">
+        <div className="flex min-w-12 items-center justify-center rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm font-bold text-slate-100">
+          {level}
+        </div>
+        <button
+          type="button"
+          disabled={disabled || level >= 20}
+          onClick={onRequest}
+          className="min-w-0 flex-1 rounded-lg bg-violet-500 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          {level >= 20 ? '已达 20 级' : `提升至 ${level + 1} 级`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function AbilitySection({
   abilityKey,
   label,
@@ -557,6 +715,8 @@ function AbilitySection({
   savingThrowAdditionalBonus,
   skillProficiencyRank,
   skillCheckModifier,
+  scoreLocked,
+  proficiencyLocked,
   onScoreChange,
   onToggleSavingThrow,
   onToggleSkill,
@@ -570,6 +730,8 @@ function AbilitySection({
   savingThrowAdditionalBonus: number
   skillProficiencyRank: (skillKey: string) => 0 | 1 | 2
   skillCheckModifier: (skillKey: string) => number
+  scoreLocked: boolean
+  proficiencyLocked: boolean
   onScoreChange: (score: number) => void
   onToggleSavingThrow: () => void
   onToggleSkill: (key: string) => void
@@ -589,14 +751,20 @@ function AbilitySection({
             min={1}
             max={30}
             value={score}
+            disabled={scoreLocked}
             aria-label={`${label}属性值`}
             onChange={(event) => onScoreChange(clamp(Number(event.target.value) || 1, 1, 30))}
-            className="w-14 rounded-md border border-white/10 bg-void-950/70 px-1 py-1 text-center text-sm text-slate-100"
+            className="w-14 rounded-md border border-white/10 bg-void-950/70 px-1 py-1 text-center text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-55"
           />
           <span className="w-10 text-right text-xl font-bold text-arcane-200">{formatMod(modifier)}</span>
         </div>
         <div className="min-w-0">
-          <button type="button" onClick={onToggleSavingThrow} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5">
+          <button
+            type="button"
+            disabled={proficiencyLocked}
+            onClick={onToggleSavingThrow}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-55"
+          >
             <Dot active={savingThrowProficient} />
             <span className="min-w-0 flex-1 text-slate-300">{label}豁免</span>
             <span className="font-semibold text-arcane-200">{formatMod(saveBonus)}</span>
@@ -609,7 +777,13 @@ function AbilitySection({
               const expertise = proficiencyRank === 2
               const bonus = skillCheckModifier(skill.key)
               return (
-                <button key={skill.key} type="button" onClick={() => onToggleSkill(skill.key)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5">
+                <button
+                  key={skill.key}
+                  type="button"
+                  disabled={proficiencyLocked}
+                  onClick={() => onToggleSkill(skill.key)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-55"
+                >
                   <Dot active={proficient} />
                   <span className="min-w-0 flex-1 text-slate-300">{skill.label}{expertise && <span className="ml-1.5 text-[10px] text-amber-300">专精</span>}</span>
                   <span className="font-semibold text-arcane-200">{formatMod(bonus)}</span>
