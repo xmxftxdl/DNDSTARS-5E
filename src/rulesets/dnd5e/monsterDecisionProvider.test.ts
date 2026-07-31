@@ -170,4 +170,23 @@ describe('MonsterDecisionProvider', () => {
     expect(ranked[0].reasons.join(' ')).toContain('专注')
     expect(ranked.at(-1)?.candidate.id).toBe('unsafe-route')
   })
+
+  it('treats signed control utility as a benefit for enemies and a penalty for allies', () => {
+    const ranked = rankMonsterDecisionCandidates(
+      DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
+      context,
+      [
+        candidate('friendly-control', { controlValue: -12 }),
+        candidate('neutral-control', { controlValue: 0 }),
+        candidate('hostile-control', { controlValue: 12 }),
+      ],
+    )
+
+    expect(ranked.map((entry) => entry.candidate.id)).toEqual([
+      'hostile-control',
+      'neutral-control',
+      'friendly-control',
+    ])
+    expect(ranked.at(-1)?.reasons.join(' ')).toContain('友方')
+  })
 })

@@ -3,13 +3,25 @@
 // import 同一份纯逻辑，避免双份漂移；纯函数集中在此以便 src/ 下的 vitest 直接 import .mjs。
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
-import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import {
+  createHmac,
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  scryptSync,
+  sign as signBytes,
+  timingSafeEqual,
+  verify as verifyBytes,
+} from 'node:crypto'
 import path from 'node:path'
 import {
   deliverTencentVerification,
   tencentVerificationCapabilities,
 } from './tencent-verification-provider.mjs'
 import { openSqliteAccountStore } from './account-storage-sqlite.mjs'
+import { openPostgresStorage } from './postgres-storage.mjs'
 import {
   compileGeometryCached,
   doorOpenState,
@@ -17,10 +29,60 @@ import {
   validateGeometryRelationships,
   validateGeometryStructure,
 } from '../shared/map-geometry-kernel.mjs'
+import {
+  applyDnd5eEffectiveVisionProfile,
+  compileDnd5eEffectiveVisionProfile,
+} from '../shared/dnd5e-vision-profile.mjs'
+import {
+  analyzeMarketplaceDeclarativePackage,
+  MARKETPLACE_CREATOR_NOTICE_VERSION,
+  MARKETPLACE_CREATOR_POLICY_VERSION,
+  normalizeMarketplacePublication,
+} from '../shared/marketplace-publication.mjs'
+import {
+  activeMarketplaceEntitlement,
+  canonicalMarketplaceJson,
+  MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
+  MARKETPLACE_PRODUCT_MANIFEST_SCHEMA_VERSION,
+} from '../shared/marketplace-entitlement.mjs'
+import {
+  MARKETPLACE_ORDER_SCHEMA_VERSION,
+  MARKETPLACE_ORDER_TTL_MS,
+  marketplaceOrderAmounts,
+  marketplaceOrderIsPayable,
+  marketplaceOrderPublicRecord,
+} from '../shared/marketplace-order.mjs'
+import {
+  MARKETPLACE_LEDGER_SCHEMA_VERSION,
+  MARKETPLACE_SETTLEMENT_HOLD_MS,
+  marketplaceLedgerBalance,
+  marketplaceRevenueSplit,
+} from '../shared/marketplace-ledger.mjs'
+import {
+  MARKETPLACE_PAYOUT_SCHEMA_VERSION,
+  marketplacePayoutMinimum,
+  marketplacePayoutPublicRecord,
+  marketplacePayoutRecordValid,
+  marketplacePayoutTransitionAllowed,
+} from '../shared/marketplace-payout.mjs'
+import {
+  buildMarketplaceCreatorAnalytics,
+  normalizeMarketplaceAnalyticsDaily,
+  normalizeMarketplaceInstallation,
+  recordMarketplaceDailyMetric,
+  updateMarketplaceInstallation,
+} from '../shared/marketplace-analytics.mjs'
+import {
+  sharedAuthenticatedSystemRoute,
+  sharedPublicSystemRoute,
+} from './shared-server-system-routes.mjs'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
 export const STATE_MAX_BYTES = 8 * 1024 * 1024
+export const ROOM_EPHEMERAL_PLUGIN_MAX_BYTES = 40 * 1024 * 1024
+export const ROOM_RUNTIME_PROJECTION = 'room-runtime-mechanics'
+export const ROOM_RUNTIME_PROSE_PLACEHOLDER = '房间临时机械数据；原始规则正文未传输。'
 export const CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH = 600_000
 export const CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH = 4_000_000
 // 单张图片上限（24 MiB）。
@@ -63,11 +125,12 @@ export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
 export const FIREBALL_PRESENTATION_LIFETIME_MS = 3_500
 export const KILL_STREAK_BANNER_START_DELAY_MS = 650
 export const KILL_STREAK_PRESENTATION_LIFETIME_MS = 5_800
+export const SAVING_THROW_PENDING_LIFETIME_MS = 300_000
+export const SAVING_THROW_RESULT_LIFETIME_MS = 3_000
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION = 5
 export const SHARED_MIN_CLIENT_PROTOCOL = 5
 export const SHARED_STATE_SCHEMA_VERSION = 1
-export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 export const ACCOUNT_SESSION_LIMIT = 12
 export const ACCOUNT_CHARACTER_LIMIT = 100
 export const ACCOUNT_CAMPAIGN_SCHEMA_VERSION = 1
@@ -133,6 +196,23 @@ export function validateProductionSecurityConfig(env = process.env) {
   if (configuredOrigins.includes('*')) errors.push('STARS_ALLOWED_ORIGINS cannot contain * in production')
   for (const origin of configuredOrigins) {
     if (!normalizedHttpOrigin(origin)) errors.push(`invalid STARS_ALLOWED_ORIGINS entry: ${origin}`)
+  }
+  if (String(env.STARS_ACCOUNT_STORAGE ?? '').trim().toLowerCase() === 'postgres') {
+    try {
+      const databaseUrl = new URL(String(env.STARS_DATABASE_URL ?? ''))
+      if (!['postgres:', 'postgresql:'].includes(databaseUrl.protocol)) {
+        errors.push('STARS_DATABASE_URL must use postgresql://')
+      }
+      if (
+        !databaseUrl.password ||
+        databaseUrl.password.length < 16 ||
+        databaseUrl.password === 'development-only-change-me'
+      ) {
+        errors.push('PostgreSQL password must be a non-default secret of at least 16 characters')
+      }
+    } catch {
+      errors.push('STARS_DATABASE_URL must be a valid PostgreSQL connection URL')
+    }
   }
   return {
     ok: errors.length === 0,
@@ -330,9 +410,7 @@ export async function withWriteLock(filePath, fn) {
  */
 export async function atomicWriteLocked(filePath, body) {
   await withWriteLock(filePath, async () => {
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-    await writeFile(tmpPath, body)
-    await rename(tmpPath, filePath)
+    await atomicRename(filePath, body)
   })
 }
 
@@ -361,9 +439,7 @@ export async function atomicWriteJsonStateFreshLocked(filePath, body) {
         // No existing state yet; accept the write.
       }
     }
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-    await writeFile(tmpPath, body)
-    await rename(tmpPath, filePath)
+    await atomicRename(filePath, body)
     return true
   })
 }
@@ -371,10 +447,38 @@ export async function atomicWriteJsonStateFreshLocked(filePath, body) {
 // 图片 PUT 走与 state 同一把锁 + temp+rename：blob 与 meta 在同一把锁内各自
 // 原子落盘，使 GET 永远看不到半写的 blob 或 blob/meta 不匹配；两个并发 PUT 在 imagePath 锁上串行，
 // 胜者的 blob 与 meta 必来自同一次 PUT（不交叉配对）。图片按 id 寻址，无 freshness 比较。
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [8, 16, 32, 64, 128, 256, 512]
+const WINDOWS_TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
+
+export async function retryTransientWindowsRename(operation, options = {}) {
+  const platform = options.platform ?? process.platform
+  const delays = options.delays ?? WINDOWS_RENAME_RETRY_DELAYS_MS
+  const wait = options.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)))
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : ''
+      if (
+        platform !== 'win32'
+        || !WINDOWS_TRANSIENT_RENAME_CODES.has(code)
+        || attempt >= delays.length
+      ) {
+        throw error
+      }
+      await wait(delays[attempt])
+    }
+  }
+}
+
 async function atomicRename(filePath, body) {
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
   await writeFile(tmpPath, body)
-  await rename(tmpPath, filePath)
+  try {
+    await retryTransientWindowsRename(() => rename(tmpPath, filePath))
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {})
+  }
 }
 
 export async function atomicWriteImageLocked(imagePath, metaPath, blob, metaBody) {
@@ -490,7 +594,7 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
       },
     }
     await atomicRename(filePath, JSON.stringify(next))
-    return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
+    return { ok: true, revision: currentRevision + 1, value: next, writtenAt, currentRevision, current }
   })
 }
 
@@ -517,9 +621,176 @@ const PLAYER_COMBAT_SERVER_AUTHORITY_CHARACTER_FIELDS = Object.freeze([
   'equipment',
 ])
 
+const PLAYER_ADVANCEMENT_CONTROLLED_CHARACTER_FIELDS = Object.freeze([
+  'level',
+  'charClass',
+  'dnd5eClassLevels',
+  'abilities',
+  'savingThrows',
+  'skills',
+  'dnd5eFeatIds',
+  'hitDice',
+  'hitPointMaximumMode',
+  'hitPointRolls',
+  'maxHp',
+  'dnd5eLevelAdvancements',
+])
+
 function preserveCharacterFields(target, source, fields) {
   for (const field of fields) target[field] = source?.[field]
   return target
+}
+
+function preserveAcknowledgedAdvancementChoices(target, source) {
+  const records = Array.isArray(source?.dnd5eLevelAdvancements)
+    ? source.dnd5eLevelAdvancements
+    : []
+  if (records.length === 0) return target
+  const nextChoices = structuredClone(plainObject(target?.dnd5eClassChoices)
+    ? target.dnd5eClassChoices
+    : {})
+  const sourceChoices = plainObject(source?.dnd5eClassChoices)
+    ? source.dnd5eClassChoices
+    : {}
+
+  for (const record of records) {
+    if (!plainObject(record) || !plainObject(record.decision)) continue
+    const classId = String(record.classId ?? '')
+    const decision = record.decision
+    const declaredSpellLists = plainObject(decision.spellSelections)
+      ? [
+          decision.spellSelections.cantrips,
+          decision.spellSelections.knownSpells,
+          decision.spellSelections.wizardSpellbook,
+        ].filter((value) => Array.isArray(value) && value.length > 0)
+      : []
+    const spellSelectionKeys = (selections) => Object.entries(
+      plainObject(selections) ? selections : {},
+    ).filter(([, value]) => declaredSpellLists.some((list) => sameJsonValue(list, value)))
+      .map(([key]) => key)
+    if (classId === 'fighter') {
+      nextChoices.fighter = plainObject(nextChoices.fighter) ? nextChoices.fighter : {}
+      const sourceFighter = plainObject(sourceChoices.fighter) ? sourceChoices.fighter : {}
+      if (decision.subclassId) nextChoices.fighter.subclass = sourceFighter.subclass
+      if (Array.isArray(decision.fighterFightingStyles)) {
+        nextChoices.fighter.fightingStyles = sourceFighter.fightingStyles
+      }
+      const receiptFighter = plainObject(record.after?.dnd5eClassChoices?.fighter)
+        ? record.after.dnd5eClassChoices.fighter
+        : {}
+      const extensionKeys = [...new Set([
+        ...Object.keys(plainObject(decision.fighterSubclassSelections)
+          ? decision.fighterSubclassSelections
+          : {}),
+        ...spellSelectionKeys(receiptFighter.extensionChoices),
+      ])]
+      if (extensionKeys.length > 0) {
+        nextChoices.fighter.extensionChoices = plainObject(nextChoices.fighter.extensionChoices)
+          ? nextChoices.fighter.extensionChoices
+          : {}
+        const sourceExtensions = plainObject(sourceFighter.extensionChoices)
+          ? sourceFighter.extensionChoices
+          : {}
+        for (const key of extensionKeys) {
+          nextChoices.fighter.extensionChoices[key] = sourceExtensions[key]
+        }
+      }
+      continue
+    }
+
+    if (!classId) continue
+    nextChoices.classes = plainObject(nextChoices.classes) ? nextChoices.classes : {}
+    nextChoices.classes[classId] = plainObject(nextChoices.classes[classId])
+      ? nextChoices.classes[classId]
+      : {}
+    const sourceClasses = plainObject(sourceChoices.classes) ? sourceChoices.classes : {}
+    const sourceClass = plainObject(sourceClasses[classId]) ? sourceClasses[classId] : {}
+    if (decision.subclassId) nextChoices.classes[classId].subclass = sourceClass.subclass
+    const receiptClasses = plainObject(record.after?.dnd5eClassChoices?.classes)
+      ? record.after.dnd5eClassChoices.classes
+      : {}
+    const receiptClass = plainObject(receiptClasses[classId]) ? receiptClasses[classId] : {}
+    const selectionKeys = [...new Set([
+      ...Object.keys(plainObject(decision.classChoiceSelections)
+        ? decision.classChoiceSelections
+        : {}),
+      ...spellSelectionKeys(receiptClass.selections),
+    ])]
+    if (selectionKeys.length > 0) {
+      nextChoices.classes[classId].selections = plainObject(nextChoices.classes[classId].selections)
+        ? nextChoices.classes[classId].selections
+        : {}
+      const sourceSelections = plainObject(sourceClass.selections) ? sourceClass.selections : {}
+      for (const key of selectionKeys) {
+        nextChoices.classes[classId].selections[key] = sourceSelections[key]
+      }
+    }
+  }
+  target.dnd5eClassChoices = nextChoices
+  return target
+}
+
+function sameJsonValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function advancementSnapshotMatchesCharacter(snapshot, character) {
+  return plainObject(snapshot) &&
+    snapshot.level === character?.level &&
+    sameJsonValue(snapshot.dnd5eClassLevels, character?.dnd5eClassLevels) &&
+    sameJsonValue(snapshot.abilities, character?.abilities) &&
+    sameJsonValue(snapshot.skills, character?.skills) &&
+    sameJsonValue(snapshot.dnd5eClassChoices, character?.dnd5eClassChoices) &&
+    sameJsonValue(snapshot.dnd5eFeatIds, character?.dnd5eFeatIds) &&
+    snapshot.hitPointMaximumMode === character?.hitPointMaximumMode &&
+    sameJsonValue(snapshot.hitPointRolls, character?.hitPointRolls) &&
+    snapshot.maxHp === character?.maxHp
+}
+
+/**
+ * Players may append one host-shaped advancement receipt, but never rewrite
+ * or remove an acknowledged receipt. DM writes bypass this projection and can
+ * revise a receipt through the audited character inspector.
+ */
+function playerAdvancementTransition(current, incoming) {
+  const currentRecords = Array.isArray(current?.dnd5eLevelAdvancements)
+    ? current.dnd5eLevelAdvancements
+    : []
+  const incomingRecords = Array.isArray(incoming?.dnd5eLevelAdvancements)
+    ? incoming.dnd5eLevelAdvancements
+    : []
+  if (currentRecords.length === 0 && incomingRecords.length === 0) {
+    return current?.level === incoming?.level &&
+      sameJsonValue(current?.dnd5eClassLevels, incoming?.dnd5eClassLevels)
+      ? 'legacy'
+      : 'invalid'
+  }
+  if (sameJsonValue(currentRecords, incomingRecords)) return 'unchanged'
+  if (incomingRecords.length !== currentRecords.length + 1) return 'invalid'
+  if (!sameJsonValue(incomingRecords.slice(0, currentRecords.length), currentRecords)) return 'invalid'
+
+  const receipt = incomingRecords.at(-1)
+  if (
+    !plainObject(receipt) ||
+    receipt.schemaVersion !== 1 ||
+    typeof receipt.id !== 'string' ||
+    !receipt.id ||
+    currentRecords.some((record) => record?.id === receipt.id) ||
+    receipt.completedBy !== 'player' ||
+    !Number.isSafeInteger(receipt.fromLevel) ||
+    !Number.isSafeInteger(receipt.toLevel) ||
+    receipt.fromLevel !== current?.level ||
+    receipt.toLevel !== incoming?.level ||
+    receipt.toLevel <= receipt.fromLevel ||
+    !plainObject(receipt.decision) ||
+    receipt.decision.schemaVersion !== 1 ||
+    receipt.decision.classId !== receipt.classId ||
+    receipt.decision.levelsGained !== 1 ||
+    receipt.toLevel !== receipt.fromLevel + 1 ||
+    !advancementSnapshotMatchesCharacter(receipt.before, current) ||
+    !advancementSnapshotMatchesCharacter(receipt.after, incoming)
+  ) return 'invalid'
+  return 'append'
 }
 
 /**
@@ -555,6 +826,11 @@ export function mergePlayerCharactersStateForAuthority(
     const next = { ...incoming, roomId: current.roomId, roomMemberId: current.roomMemberId }
     if (current.ownerAccountId) next.ownerAccountId = current.ownerAccountId
     preserveCharacterFields(next, current, PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS)
+    const advancementTransition = playerAdvancementTransition(current, incoming)
+    if (advancementTransition === 'unchanged' || advancementTransition === 'invalid') {
+      preserveCharacterFields(next, current, PLAYER_ADVANCEMENT_CONTROLLED_CHARACTER_FIELDS)
+      preserveAcknowledgedAdvancementChoices(next, current)
+    }
     if (options.combatActive === true) {
       preserveCharacterFields(next, current, PLAYER_COMBAT_SERVER_AUTHORITY_CHARACTER_FIELDS)
     }
@@ -625,7 +901,7 @@ export async function atomicDeleteJsonStateCasLocked(filePath, options = {}) {
       },
     }
     await atomicRename(filePath, JSON.stringify(next))
-    return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
+    return { ok: true, revision: currentRevision + 1, value: next, writtenAt, currentRevision, current }
   })
 }
 
@@ -992,8 +1268,8 @@ export function applyCors(req, res, env = process.env) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
-  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   return true
 }
 
@@ -1097,11 +1373,70 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
     if (Buffer.byteLength(body, 'utf8') > STATE_MAX_BYTES) {
       return { ok: false, changed: false, status: 413, error: 'state-too-large', next: current }
     }
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-    await writeFile(tmpPath, body)
-    await rename(tmpPath, filePath)
-    return { ...result, next }
+    await atomicRename(filePath, body)
+    return { ...result, next, previous: current }
   })
+}
+
+function mutateCombatLogState(current, mutation, now = Date.now()) {
+  if (mutation?.operation !== 'append') {
+    return { ok: false, changed: false, status: 400, error: 'invalid-operation' }
+  }
+  const mapId = boundedText(mutation?.mapId, 160).trim()
+  const submitted = mutation?.entry
+  if (
+    !mapId ||
+    !plainObject(submitted) ||
+    !Number.isFinite(submitted.id) ||
+    submitted.id < 0 ||
+    !Number.isInteger(submitted.round) ||
+    submitted.round < 0 ||
+    typeof submitted.text !== 'string' ||
+    !submitted.text.trim() ||
+    submitted.text.length > 20_000 ||
+    !['system', 'turn', 'attack', 'damage'].includes(submitted.kind) ||
+    typeof submitted.time !== 'string' ||
+    submitted.time.length > 80 ||
+    (
+      submitted.actorTokenId != null &&
+      (
+        typeof submitted.actorTokenId !== 'string' ||
+        !submitted.actorTokenId.trim() ||
+        submitted.actorTokenId.length > 180
+      )
+    ) ||
+    (
+      submitted.details != null &&
+      (
+        !Array.isArray(submitted.details) ||
+        submitted.details.length > 200 ||
+        submitted.details.some((detail) => typeof detail !== 'string' || detail.length > 2_000)
+      )
+    )
+  ) {
+    return { ok: false, changed: false, status: 400, error: 'invalid-combat-log-entry' }
+  }
+  const entry = {
+    id: submitted.id,
+    round: submitted.round,
+    text: migrateLegacyApCombatLogText(submitted.text),
+    kind: submitted.kind,
+    time: submitted.time,
+    ...(submitted.actorTokenId != null ? { actorTokenId: submitted.actorTokenId } : {}),
+    ...(submitted.details?.length > 0 ? { details: [...submitted.details] } : {}),
+  }
+  const entries = current?.mapId === mapId && Array.isArray(current.entries)
+    ? current.entries
+    : []
+  return {
+    ok: true,
+    changed: true,
+    next: {
+      mapId,
+      entries: [entry, ...entries.filter((candidate) => candidate?.id !== entry.id)].slice(0, 200),
+      updatedAt: now,
+    },
+  }
 }
 
 export function mutateCombatInterruptQueue(
@@ -1181,6 +1516,20 @@ export function mutateCombatInterruptQueue(
   const current = base.interrupts[index]
   if (current.kind === 'roll-confirmation' && authorityRole === 'player' && operation !== 'contribute') {
     return { ok: false, status: 403, error: 'dm-authority-required' }
+  }
+  if (current.kind === 'plugin-choice' && authorityRole === 'player') {
+    const audienceCharacterId = current.payload?.audience === 'target'
+      ? current.targetCharId
+      : current.payload?.audience === 'actor'
+        ? current.actorCharId
+        : undefined
+    if (
+      !audienceCharacterId ||
+      !Array.isArray(authorityCharacterIds) ||
+      !authorityCharacterIds.includes(audienceCharacterId)
+    ) {
+      return { ok: false, status: 403, error: 'character-ownership-required' }
+    }
   }
   if (current.kind === 'roll-confirmation' && (operation === 'answer' || (operation === 'finish' && mutation?.response != null))) {
     const response = mutation?.response
@@ -1606,13 +1955,136 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
 
   if (
     common.type === 'spell-projectile' &&
-    ['fire-bolt', 'ray-of-frost', 'eldritch-blast', 'produce-flame'].includes(common.spellId)
+    [
+      'fire-bolt',
+      'ray-of-frost',
+      'eldritch-blast',
+      'produce-flame',
+      'acid-splash',
+      'poison-spray',
+      'vicious-mockery',
+      'magic-missile',
+      'scorching-ray',
+      'guiding-bolt',
+      'acid-arrow',
+      'healing-word',
+      'inflict-wounds',
+    ].includes(common.spellId)
   ) {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const outcome = payload?.outcome
-    if (!targetTokenId || (outcome != null && outcome !== 'hit' && outcome !== 'miss')) {
+    const accentColor = payload?.accentColor
+    const glowColor = payload?.glowColor
+    if (
+      !targetTokenId ||
+      (outcome != null && outcome !== 'hit' && outcome !== 'miss') ||
+      (accentColor != null && (typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor))) ||
+      (glowColor != null && (typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)))
+    ) {
       return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        ...(outcome ? { outcome } : {}),
+        ...(accentColor ? { accentColor } : {}),
+        ...(glowColor ? { glowColor } : {}),
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (
+    common.type === 'spell-target-effect' &&
+    [
+      'shocking-grasp',
+      'guidance',
+      'resistance',
+      'sanctuary',
+      'spare-the-dying',
+      'cure-wounds',
+      'hellish-rebuke',
+      'bless',
+      'bane',
+      'shield-of-faith',
+      'mage-armor',
+      'jump',
+      'darkvision',
+      'see-invisibility',
+      'warding-bond',
+      'fly',
+      'heroism',
+      'enlarge-reduce',
+      'enhance-ability',
+      'divine-favor',
+      'hunters-mark',
+      'magic-weapon',
+      'flame-blade',
+      'invisibility',
+      'blur',
+      'barkskin',
+      'protection-from-poison',
+      'longstrider',
+      'protection-from-energy',
+      'death-ward',
+      'greater-invisibility',
+      'charm-person',
+      'hideous-laughter',
+      'hold-person',
+      'blindness-deafness',
+    ].includes(common.spellId)
+  ) {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const accentColor = payload?.accentColor
+    const glowColor = payload?.glowColor
+    if (
+      !targetTokenId ||
+      ['resistance', 'spare-the-dying'].includes(common.spellId) && (
+        typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor) ||
+        typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)
+      ) ||
+      (accentColor != null && (typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor))) ||
+      (glowColor != null && (typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)))
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        ...(accentColor ? { accentColor } : {}),
+        ...(glowColor ? { glowColor } : {}),
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'spell-persistent-target-effect' && common.spellId === 'chill-touch') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    if (!targetTokenId) {
+      return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'spell-save-target-effect' && common.spellId === 'sacred-flame') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const outcome = payload?.outcome
+    if (
+      !targetTokenId ||
+      (outcome != null && outcome !== 'failed-save' && outcome !== 'successful-save')
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     return {
       ok: true,
       event: {
@@ -1625,33 +2097,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     }
   }
 
-  if (
-    common.type === 'spell-target-effect' &&
-    ['shocking-grasp', 'guidance', 'resistance', 'sanctuary'].includes(common.spellId)
-  ) {
-    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
-    const accentColor = payload?.accentColor
-    const glowColor = payload?.glowColor
-    if (
-      !targetTokenId ||
-      common.spellId === 'resistance' && (
-        typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor) ||
-        typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)
-      )
-    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
-    return {
-      ok: true,
-      event: {
-        ...common,
-        targetTokenId,
-        ...(common.spellId === 'resistance' ? { accentColor, glowColor } : {}),
-        createdAt: now,
-        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
-      },
-    }
-  }
-
-  if (common.type === 'spell-banner' && common.spellId === 'shatter') {
+  if (common.type === 'spell-banner') {
     const casterName = normalizedLabel(payload?.casterName, 80)
     const spellName = normalizedLabel(payload?.spellName, 80)
     const castingClassId = normalizedLabel(payload?.castingClassId, 40)
@@ -1665,6 +2111,32 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         casterName,
         spellName,
         castingClassId,
+        createdAt: now,
+        expiresAt: now + SPELL_BANNER_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'attack-banner') {
+    const actorName = normalizedLabel(payload?.actorName, 80)
+    const attackName = normalizedLabel(payload?.attackName, 80)
+    const attackKind = payload?.attackKind
+    const classId = normalizedLabel(payload?.classId, 40)
+    if (
+      !actorName ||
+      !attackName ||
+      (attackKind !== 'melee' && attackKind !== 'ranged') ||
+      !classId
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    const { spellId: _unusedSpellId, ...attackCommon } = common
+    return {
+      ok: true,
+      event: {
+        ...attackCommon,
+        actorName,
+        attackName,
+        attackKind,
+        classId,
         createdAt: now,
         expiresAt: now + SPELL_BANNER_PRESENTATION_LIFETIME_MS,
       },
@@ -1696,6 +2168,86 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         createdAt: now,
         animationStartsAt: now + FIREBALL_ANIMATION_START_DELAY_MS,
         expiresAt: now + FIREBALL_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (
+    common.type === 'spell-area-effect' &&
+    ['burning-hands', 'thunderwave', 'shatter', 'lightning-bolt'].includes(common.spellId)
+  ) {
+    const expected = {
+      'burning-hands': { shape: 'cone', lengthFeet: 15, widthFeet: 15 },
+      thunderwave: { shape: 'line', lengthFeet: 15, widthFeet: 15 },
+      shatter: { shape: 'circle', radiusFeet: 10 },
+      'lightning-bolt': { shape: 'line', lengthFeet: 100, widthFeet: 5 },
+    }[common.spellId]
+    const col = payload?.targetCell?.col
+    const row = payload?.targetCell?.row
+    if (
+      !expected ||
+      payload?.shape !== expected.shape ||
+      payload?.lengthFeet !== expected.lengthFeet ||
+      payload?.widthFeet !== expected.widthFeet ||
+      payload?.radiusFeet !== expected.radiusFeet ||
+      !Number.isInteger(col) || col < 0 || col > 10_000 ||
+      !Number.isInteger(row) || row < 0 || row > 10_000
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetCell: { col, row },
+        shape: expected.shape,
+        ...(expected.lengthFeet != null ? { lengthFeet: expected.lengthFeet } : {}),
+        ...(expected.widthFeet != null ? { widthFeet: expected.widthFeet } : {}),
+        ...(expected.radiusFeet != null ? { radiusFeet: expected.radiusFeet } : {}),
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'saving-throw-status') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const targetName = normalizedLabel(payload?.targetName, 80)
+    const phase = payload?.phase
+    const dc = payload?.dc
+    const total = payload?.total
+    const success = payload?.success
+    if (
+      !targetTokenId ||
+      !targetName ||
+      !['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(payload?.ability) ||
+      (phase !== 'rolling' && phase !== 'result') ||
+      !Number.isInteger(dc) ||
+      dc < 0 ||
+      dc > 100 ||
+      (phase === 'rolling' && (total != null || success != null)) ||
+      (phase === 'result' && (
+        !Number.isInteger(total) ||
+        total < -100 ||
+        total > 200 ||
+        typeof success !== 'boolean'
+      ))
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    const { spellId: _unusedSpellId, ...savingThrowCommon } = common
+    return {
+      ok: true,
+      event: {
+        ...savingThrowCommon,
+        targetTokenId,
+        targetName,
+        ability: payload.ability,
+        phase,
+        dc,
+        ...(phase === 'result' ? { total, success } : {}),
+        createdAt: now,
+        expiresAt: now + (
+          phase === 'rolling'
+            ? SAVING_THROW_PENDING_LIFETIME_MS
+            : SAVING_THROW_RESULT_LIFETIME_MS
+        ),
       },
     }
   }
@@ -1941,7 +2493,13 @@ export function projectCombatInterruptsForRoomMember(value, member, characterSta
   const visible = (Array.isArray(value?.interrupts) ? value.interrupts : []).filter((interrupt) => {
     if (spectator || !plainObject(interrupt)) return false
     if (interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance') return false
-    if (interrupt.kind === 'plugin-choice' && interrupt.payload?.audience === 'dm') return false
+    if (interrupt.kind === 'plugin-choice') {
+      if (interrupt.payload?.audience === 'dm') return false
+      const audienceCharacterId = interrupt.payload?.audience === 'target'
+        ? interrupt.targetCharId
+        : interrupt.actorCharId
+      return ownedCharacterIds.has(audienceCharacterId)
+    }
     if (interrupt.kind === 'roll-confirmation') return interrupt.payload?.visibility === 'public'
     return ownedCharacterIds.has(interrupt.actorCharId) || ownedCharacterIds.has(interrupt.targetCharId)
   })
@@ -2159,226 +2717,6 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
     return { ok: true, changed: true, next: { ...base, sharedNotes: base.sharedNotes.filter((entry) => entry?.id !== id) } }
   }
   return { ok: false, status: 400, error: 'invalid-journal-operation' }
-}
-
-const GROUP_ABILITY_CHECK_LIMIT = 40
-const GROUP_ABILITY_CHECK_SKILLS = Object.freeze({
-  acrobatics: 'dex', animalHandling: 'wis', arcana: 'int', athletics: 'str', deception: 'cha',
-  history: 'int', insight: 'wis', intimidation: 'cha', investigation: 'int', medicine: 'wis',
-  nature: 'int', perception: 'wis', performance: 'cha', persuasion: 'cha', religion: 'int',
-  sleightOfHand: 'dex', stealth: 'dex', survival: 'wis',
-})
-const GROUP_ABILITY_KEYS = new Set(['str', 'dex', 'con', 'int', 'wis', 'cha'])
-const CLASS_NAME_TO_ID = Object.freeze({
-  barbarian: 'barbarian', '野蛮人': 'barbarian', bard: 'bard', '吟游诗人': 'bard',
-  cleric: 'cleric', '牧师': 'cleric', druid: 'druid', '德鲁伊': 'druid',
-  fighter: 'fighter', '战士': 'fighter', monk: 'monk', '武僧': 'monk',
-  paladin: 'paladin', '圣武士': 'paladin', ranger: 'ranger', '游侠': 'ranger',
-  rogue: 'rogue', '游荡者': 'rogue', sorcerer: 'sorcerer', '术士': 'sorcerer',
-  warlock: 'warlock', '邪术师': 'warlock', wizard: 'wizard', '法师': 'wizard',
-})
-
-function groupCheckClassLevel(character, classId) {
-  const explicit = Number(character?.dnd5eClassLevels?.[classId])
-  if (Number.isFinite(explicit) && explicit > 0) return Math.min(20, Math.floor(explicit))
-  const primary = CLASS_NAME_TO_ID[String(character?.charClass ?? '').trim().toLowerCase()] ??
-    CLASS_NAME_TO_ID[String(character?.charClass ?? '').trim()]
-  return primary === classId ? Math.min(20, Math.max(1, Math.floor(Number(character?.level) || 1))) : 0
-}
-
-function groupCheckProficiencyRank(character, skill) {
-  if (!skill) return 0
-  const choices = character?.dnd5eClassChoices?.classes ?? {}
-  const bard = choices?.bard?.selections ?? {}
-  const rogue = choices?.rogue?.selections ?? {}
-  const warlock = choices?.warlock?.selections ?? {}
-  const beguilingInfluence = groupCheckClassLevel(character, 'warlock') >= 2 &&
-    (warlock['eldritch-invocations'] ?? []).includes('beguiling-influence') &&
-    (skill === 'deception' || skill === 'persuasion')
-  const proficient = (Array.isArray(character?.skills) && character.skills.includes(skill)) ||
-    (groupCheckClassLevel(character, 'bard') >= 3 && (bard['lore-bonus-skills'] ?? []).includes(skill)) ||
-    beguilingInfluence
-  if (!proficient) return 0
-  return [...(bard.expertise ?? []), ...(rogue.expertise ?? [])].includes(skill) ? 2 : 1
-}
-
-function groupCheckModifier(character, ability, skill, rollKind = 'ability-check') {
-  const level = Math.min(20, Math.max(1, Math.floor(Number(character?.level) || 1)))
-  const score = Math.min(30, Math.max(1, Math.floor(Number(character?.abilities?.[ability]) || 10)))
-  const abilityModifier = Math.floor((score - 10) / 2)
-  const proficiencyBonus = 2 + Math.floor((level - 1) / 4)
-  if (rollKind === 'saving-throw') {
-    const classLevels = character?.dnd5eClassLevels ?? {}
-    const allSavingThrows = Number(classLevels.monk) >= 14
-    const slipperyMind = ability === 'wis' && Number(classLevels.rogue) >= 15
-    const proficient = allSavingThrows || slipperyMind || (Array.isArray(character?.savingThrows) && character.savingThrows.includes(ability))
-    return { modifier: abilityModifier + (proficient ? proficiencyBonus : 0), rank: proficient ? 1 : 0, score }
-  }
-  const rank = groupCheckProficiencyRank(character, skill)
-  if (rank > 0) return { modifier: abilityModifier + proficiencyBonus * rank, rank, score }
-  const bardBonus = groupCheckClassLevel(character, 'bard') >= 2 ? Math.floor(proficiencyBonus / 2) : 0
-  const championBonus = groupCheckClassLevel(character, 'fighter') >= 7 &&
-    character?.dnd5eClassChoices?.fighter?.subclass === 'champion' && ['str', 'dex', 'con'].includes(ability)
-    ? Math.ceil(proficiencyBonus / 2)
-    : 0
-  return { modifier: abilityModifier + Math.max(bardBonus, championBonus), rank: 0, score }
-}
-
-function groupCheckEffectiveMode(requestedMode, character, rollKind = 'ability-check') {
-  const requestedAdvantage = requestedMode === 'advantage'
-  const requestedDisadvantage = requestedMode === 'disadvantage'
-  const exhaustionDisadvantage = Number(character?.exhaustionLevel) >= (rollKind === 'saving-throw' ? 3 : 1)
-  const disadvantage = requestedDisadvantage || exhaustionDisadvantage
-  if (requestedAdvantage && disadvantage) return 'normal'
-  if (requestedAdvantage) return 'advantage'
-  if (disadvantage) return 'disadvantage'
-  return 'normal'
-}
-
-function groupCheckResult(character, check, now, options = {}) {
-  const rollKind = check.rollKind === 'saving-throw' ? 'saving-throw' : 'ability-check'
-  const { modifier, rank, score } = groupCheckModifier(character, check.ability, check.skill, rollKind)
-  const mode = groupCheckEffectiveMode(check.requestedMode, character, rollKind)
-  const passiveTotal = 10 + modifier + (mode === 'advantage' ? 5 : mode === 'disadvantage' ? -5 : 0)
-  if (options.passiveOnly) {
-    return {
-      memberId: options.memberId,
-      characterId: character.id,
-      rolls: [], effectiveRolls: [], d20: 0, modifier,
-      rolledTotal: passiveTotal, passiveTotal, finalTotal: passiveTotal,
-      success: passiveTotal >= check.dc, mode, proficiencyRank: rank,
-      reliableTalentApplied: false, indomitableMightApplied: false,
-      source: 'passive-only', rolledAt: now,
-    }
-  }
-  const rollDie = options.rollDie ?? (() => randomInt(1, 21))
-  const rolls = Array.from({ length: mode === 'normal' ? 1 : 2 }, () => rollDie())
-  const reliableTalent = rollKind === 'ability-check' && groupCheckClassLevel(character, 'rogue') >= 11 && rank > 0
-  const effectiveRolls = reliableTalent ? rolls.map((roll) => Math.max(10, roll)) : [...rolls]
-  const d20 = mode === 'advantage' ? Math.max(...effectiveRolls) : mode === 'disadvantage' ? Math.min(...effectiveRolls) : effectiveRolls[0]
-  const rawTotal = d20 + modifier
-  const indomitableMight = rollKind === 'ability-check' && groupCheckClassLevel(character, 'barbarian') >= 18 && check.ability === 'str' && rawTotal < score
-  const rolledTotal = indomitableMight ? score : rawTotal
-  const usePassive = check.allowPassiveFallback && passiveTotal > rolledTotal
-  const finalTotal = usePassive ? passiveTotal : rolledTotal
-  return {
-    memberId: options.memberId,
-    characterId: character.id,
-    rolls,
-    effectiveRolls,
-    d20,
-    modifier,
-    rolledTotal,
-    passiveTotal,
-    finalTotal,
-    success: finalTotal >= check.dc,
-    mode,
-    proficiencyRank: rank,
-    reliableTalentApplied: reliableTalent && rolls.some((roll) => roll < 10),
-    indomitableMightApplied: indomitableMight,
-    source: usePassive ? 'roll-passive-fallback' : 'roll',
-    rolledAt: now,
-  }
-}
-
-function groupCheckAggregate(check) {
-  const participantCount = check.participants.length
-  const resolvedCount = check.results.length
-  const successCount = check.results.filter((result) => result.success).length
-  const requiredSuccesses = Math.ceil(participantCount / 2)
-  return {
-    participantCount,
-    resolvedCount,
-    successCount,
-    failureCount: resolvedCount - successCount,
-    requiredSuccesses,
-    groupSuccess: resolvedCount === participantCount && successCount >= requiredSuccesses,
-  }
-}
-
-function validateGroupAbilityCheckState(value) {
-  if (value.schemaVersion !== 1 || !Array.isArray(value.checks) || value.checks.length > GROUP_ABILITY_CHECK_LIMIT) {
-    return 'invalid-group-check-envelope'
-  }
-  const checkIds = new Set()
-  for (const check of value.checks) {
-    if (
-      !plainObject(check) || typeof check.id !== 'string' || !check.id || checkIds.has(check.id) ||
-      !['open', 'completed', 'cancelled'].includes(check.status) ||
-      typeof check.label !== 'string' || !check.label.trim() || check.label.length > 160 ||
-      !GROUP_ABILITY_KEYS.has(check.ability) ||
-      !['ability-check', 'saving-throw'].includes(check.rollKind ?? 'ability-check') ||
-      (check.rollKind === 'saving-throw' && check.skill != null) ||
-      (check.skill != null && GROUP_ABILITY_CHECK_SKILLS[check.skill] !== check.ability) ||
-      !Number.isInteger(check.dc) || check.dc < 0 || check.dc > 100 ||
-      !['normal', 'advantage', 'disadvantage'].includes(check.requestedMode) ||
-      typeof check.allowPassiveFallback !== 'boolean' ||
-      !Array.isArray(check.participants) || check.participants.length < 1 || check.participants.length > 8 ||
-      !Array.isArray(check.results) || check.results.length > check.participants.length ||
-      !Number.isFinite(check.createdAt) || !Number.isFinite(check.expiresAt) || check.expiresAt < check.createdAt ||
-      !Number.isFinite(check.updatedAt)
-    ) return 'invalid-group-check'
-    const participants = new Map()
-    for (const participant of check.participants) {
-      if (
-        !plainObject(participant) || typeof participant.memberId !== 'string' || !participant.memberId || participants.has(participant.memberId) ||
-        typeof participant.memberName !== 'string' || !participant.memberName ||
-        typeof participant.characterId !== 'string' || !participant.characterId ||
-        typeof participant.characterName !== 'string' || !participant.characterName ||
-        typeof participant.avatar !== 'string'
-      ) return 'invalid-group-check-participant'
-      participants.set(participant.memberId, participant)
-    }
-    const resultMembers = new Set()
-    for (const result of check.results) {
-      const participant = participants.get(result?.memberId)
-      const expectedRolls = result?.mode === 'normal' ? 1 : 2
-      if (
-        !plainObject(result) || !participant || participant.characterId !== result.characterId || resultMembers.has(result.memberId) ||
-        !['normal', 'advantage', 'disadvantage'].includes(result.mode) ||
-        !['roll', 'roll-passive-fallback', 'passive-only'].includes(result.source) ||
-        !Array.isArray(result.rolls) || !Array.isArray(result.effectiveRolls) ||
-        !result.rolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= 20) ||
-        !result.effectiveRolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= 20) ||
-        ![result.d20, result.modifier, result.rolledTotal, result.passiveTotal, result.finalTotal, result.rolledAt].every(Number.isFinite) ||
-        ![0, 1, 2].includes(result.proficiencyRank) || typeof result.success !== 'boolean' ||
-        typeof result.reliableTalentApplied !== 'boolean' || typeof result.indomitableMightApplied !== 'boolean' ||
-        (result.source === 'passive-only'
-          ? result.rolls.length !== 0 || result.effectiveRolls.length !== 0 || result.d20 !== 0
-          : result.rolls.length !== expectedRolls || result.effectiveRolls.length !== expectedRolls)
-      ) return 'invalid-group-check-result'
-      resultMembers.add(result.memberId)
-    }
-    if (check.status === 'completed') {
-      const expected = groupCheckAggregate(check)
-      if (
-        !plainObject(check.aggregate) || check.results.length !== check.participants.length ||
-        Object.entries(expected).some(([key, expectedValue]) => check.aggregate[key] !== expectedValue)
-      ) return 'invalid-group-check-aggregate'
-    }
-    checkIds.add(check.id)
-  }
-  return null
-}
-
-export function projectGroupAbilityChecksForMember(value, memberId, isDm = false) {
-  const checks = Array.isArray(value?.checks) ? value.checks : []
-  return {
-    schemaVersion: 1,
-    checks: isDm ? checks : checks.flatMap((check) => {
-      const participant = (Array.isArray(check?.participants) ? check.participants : [])
-        .find((entry) => entry?.memberId === memberId)
-      if (!participant) return []
-      return [{
-        ...check,
-        participants: [participant],
-        results: (Array.isArray(check.results) ? check.results : []).filter((entry) => entry?.memberId === memberId),
-        aggregate: check.status === 'completed' ? check.aggregate : undefined,
-      }]
-    }),
-    updatedAt: Number(value?.updatedAt) || 0,
-    ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
-  }
 }
 
 /**
@@ -2675,136 +3013,15 @@ export function mutateCampaignTimeState(current, mutation, now, member, context 
   return { ok: false, status: 400, error: 'invalid-campaign-time-operation' }
 }
 
-export function mutateGroupAbilityChecksState(current, mutation, now, member, context = {}) {
-  const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
-  const checks = Array.isArray(current?.checks) ? current.checks : []
-  const base = { schemaVersion: 1, checks, updatedAt: now }
-  const characters = Array.isArray(context?.characters?.characters) ? context.characters.characters : []
-  const players = Array.isArray(context?.players) ? context.players : []
-  if (mutation?.operation === 'create') {
-    if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
-    if (checks.some((check) => check?.status === 'open')) return { ok: false, status: 409, error: 'group-check-already-open' }
-    const selection = boundedText(mutation?.selection, 100)
-    const abilityMatch = selection.match(/^ability:(str|dex|con|int|wis|cha)$/)
-    const saveMatch = selection.match(/^save:(str|dex|con|int|wis|cha)$/)
-    const skillMatch = selection.match(/^skill:([a-zA-Z]+)$/)
-    const skill = skillMatch?.[1]
-    const ability = abilityMatch?.[1] ?? saveMatch?.[1] ?? GROUP_ABILITY_CHECK_SKILLS[skill]
-    if (!GROUP_ABILITY_KEYS.has(ability) || (skill && !GROUP_ABILITY_CHECK_SKILLS[skill])) {
-      return { ok: false, status: 400, error: 'invalid-group-check-selection' }
-    }
-    const dc = Number(mutation?.dc)
-    const mode = mutation?.mode
-    const characterIds = Array.isArray(mutation?.participantCharacterIds)
-      ? [...new Set(mutation.participantCharacterIds.map((id) => boundedText(id, 160)).filter(Boolean))]
-      : []
-    if (!Number.isInteger(dc) || dc < 0 || dc > 100 || !['normal', 'advantage', 'disadvantage'].includes(mode) || characterIds.length < 1 || characterIds.length > 8) {
-      return { ok: false, status: 400, error: 'invalid-group-check' }
-    }
-    const participants = []
-    for (const characterId of characterIds) {
-      const character = characters.find((entry) => entry?.id === characterId)
-      const player = players.find((entry) => {
-        if (entry?.memberId !== character?.roomMemberId || entry?.removedAt || entry?.leftAt) return false
-        const explicitlyActive = entry?.activeCharacterId === characterId ||
-          (!entry?.activeCharacterId && entry?.activeCharacterName === character?.name)
-        const ownedCharacters = characters.filter((candidate) => candidate?.roomMemberId === entry.memberId)
-        const unambiguousFallback = !entry?.activeCharacterId && !entry?.activeCharacterName &&
-          ownedCharacters.length === 1 && ownedCharacters[0]?.id === characterId
-        return explicitlyActive || unambiguousFallback
-      })
-      if (!character || !player || participants.some((entry) => entry.memberId === player.memberId)) {
-        return { ok: false, status: 409, error: 'invalid-group-check-participant' }
-      }
-      participants.push({
-        memberId: player.memberId,
-        memberName: boundedText(player.displayName, 80) || '玩家',
-        characterId: character.id,
-        characterName: boundedText(character.name, 80) || '未命名角色',
-        avatar: boundedText(character.avatar, 12) || '🎲',
-      })
-    }
-    const label = boundedText(mutation?.label, 160) || '群体检定'
-    const check = {
-      id: `group-check-${randomUUID()}`,
-      status: 'open',
-      label,
-      ability,
-      rollKind: saveMatch ? 'saving-throw' : 'ability-check',
-      ...(skill ? { skill } : {}),
-      dc,
-      requestedMode: mode,
-      allowPassiveFallback: !saveMatch && mutation?.allowPassiveFallback === true,
-      ...(boundedText(mutation?.mapId, 160) ? { mapId: boundedText(mutation.mapId, 160) } : {}),
-      participants,
-      results: [],
-      createdByMemberId: member.memberId,
-      createdByName: boundedText(member.displayName, 80) || 'DM',
-      createdAt: now,
-      expiresAt: now + 10 * 60 * 1_000,
-      updatedAt: now,
-    }
-    return { ok: true, changed: true, next: { ...base, checks: [...checks, check].slice(-GROUP_ABILITY_CHECK_LIMIT) }, check }
-  }
-  const checkId = boundedText(mutation?.checkId, 160)
-  const index = checks.findIndex((check) => check?.id === checkId)
-  if (index < 0) return { ok: false, status: 404, error: 'group-check-not-found' }
-  const currentCheck = checks[index]
-  if (mutation?.operation === 'roll') {
-    if (isDm) return { ok: false, status: 403, error: 'player-response-required' }
-    if (currentCheck.status !== 'open') return { ok: false, status: 409, error: 'group-check-closed' }
-    if (now >= currentCheck.expiresAt) return { ok: false, status: 409, error: 'group-check-expired' }
-    const participant = currentCheck.participants.find((entry) => entry?.memberId === member?.memberId)
-    if (!participant) return { ok: false, status: 403, error: 'not-a-group-check-participant' }
-    if (currentCheck.results.some((entry) => entry?.memberId === member.memberId)) {
-      return { ok: true, changed: false, next: base }
-    }
-    const character = characters.find((entry) =>
-      entry?.id === participant.characterId && entry?.roomMemberId === member.memberId)
-    if (!character) return { ok: false, status: 409, error: 'participant-character-missing' }
-    const result = groupCheckResult(character, currentCheck, now, { memberId: member.memberId, rollDie: context.rollDie })
-    const updated = { ...currentCheck, results: [...currentCheck.results, result], updatedAt: now }
-    const nextChecks = [...checks]
-    nextChecks[index] = updated
-    return { ok: true, changed: true, next: { ...base, checks: nextChecks }, result }
-  }
-  if (mutation?.operation === 'finalize') {
-    if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
-    if (currentCheck.status !== 'open') return { ok: true, changed: false, next: base }
-    let results = [...currentCheck.results]
-    const missing = currentCheck.participants.filter((participant) => !results.some((entry) => entry.memberId === participant.memberId))
-    if (missing.length > 0 && mutation?.usePassiveForPending !== true) {
-      return { ok: false, status: 409, error: 'group-check-responses-pending' }
-    }
-    if (missing.length > 0 && !currentCheck.allowPassiveFallback) {
-      return { ok: false, status: 409, error: 'passive-fallback-disabled' }
-    }
-    for (const participant of missing) {
-      const character = characters.find((entry) => entry?.id === participant.characterId && entry?.roomMemberId === participant.memberId)
-      if (!character) return { ok: false, status: 409, error: 'participant-character-missing' }
-      results.push(groupCheckResult(character, currentCheck, now, { memberId: participant.memberId, passiveOnly: true }))
-    }
-    const complete = { ...currentCheck, status: 'completed', results, completedAt: now, updatedAt: now }
-    complete.aggregate = groupCheckAggregate(complete)
-    const nextChecks = [...checks]
-    nextChecks[index] = complete
-    return { ok: true, changed: true, next: { ...base, checks: nextChecks }, check: complete }
-  }
-  if (mutation?.operation === 'cancel') {
-    if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
-    if (currentCheck.status !== 'open') return { ok: true, changed: false, next: base }
-    const cancelled = { ...currentCheck, status: 'cancelled', cancelledAt: now, updatedAt: now }
-    const nextChecks = [...checks]
-    nextChecks[index] = cancelled
-    return { ok: true, changed: true, next: { ...base, checks: nextChecks } }
-  }
-  return { ok: false, status: 400, error: 'invalid-group-check-operation' }
-}
-
 function validDnd5eRoundLifecycle(value) {
   return plainObject(value) && Number.isInteger(value.createdRound) && value.createdRound >= 0 &&
     Number.isInteger(value.expiresAfterRound) && value.expiresAfterRound >= value.createdRound &&
-    value.expiresAfterRound - value.createdRound + 1 <= 14_400
+    value.expiresAfterRound - value.createdRound + 1 <= 14_400 &&
+    (value.expiresAtSourceTurnEndAfterRound == null || (
+      Number.isInteger(value.expiresAtSourceTurnEndAfterRound) &&
+      value.expiresAtSourceTurnEndAfterRound >= value.createdRound &&
+      value.expiresAtSourceTurnEndAfterRound <= value.expiresAfterRound
+    ))
 }
 
 function validDnd5ePersistentAreaLighting(value) {
@@ -3180,7 +3397,6 @@ export function mutateSceneAudioPlaybackState(current, mutation, now, member, co
 
 function validateDnd5eResourceStates(name, value) {
   if (name === 'custom-monsters') return validateCustomMonsterState(value)
-  if (name === 'group-ability-checks') return validateGroupAbilityCheckState(value)
   if (name === 'scene-orchestration') return validateSceneOrchestrationState(value)
   if (name === 'scene-audio-library') return validateSceneAudioLibraryState(value)
   if (name === 'scene-audio-playback') return validateSceneAudioPlaybackState(value)
@@ -3649,11 +3865,17 @@ function spellLightingRadius(source) {
     : source.radiusFeet
 }
 
-function spellLightingAffectsPoint(source, point, map) {
+function spellLightingAffectsPoint(source, point, map, elevationFeet = 0) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
-  const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
-    gridSize * feetPerCell
+  const horizontalDistanceFeet = Math.hypot(
+    point.x - source.point.x,
+    point.y - source.point.y,
+  ) / gridSize * feetPerCell
+  const distanceFeet = Math.hypot(
+    horizontalDistanceFeet,
+    elevationFeet - (Number(source.elevationFeet) || 0),
+  )
   return distanceFeet <= spellLightingRadius(source)
 }
 
@@ -3753,7 +3975,8 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
     geometryObstacleAffectsElevation(obstacle, elevationFeet) &&
     !magicalDarknessObstacleSuppressed(obstacle, map, spellLighting),
   ) || spellLighting.some((source) =>
-    source.kind === 'magical-darkness' && spellLightingAffectsPoint(source, point, map),
+    source.kind === 'magical-darkness' &&
+      spellLightingAffectsPoint(source, point, map, elevationFeet),
   )
   if (magicalDarkness) return 'magical-darkness'
 
@@ -3791,7 +4014,7 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
   for (const source of spellLighting) {
     if (
       source.kind !== 'light' ||
-      !spellLightingAffectsPoint(source, point, map) ||
+      !spellLightingAffectsPoint(source, point, map, elevationFeet) ||
       lineBlocked(source.point, point, source.elevationFeet + 2.5, elevationFeet + 2.5)
     ) continue
     const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
@@ -3805,20 +4028,26 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
 function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
-  const normalRangeFeet = Number.isFinite(viewer.visionRangeFeet)
-    ? Math.max(0, viewer.visionRangeFeet)
-    : Number.isFinite(fallbackRangeFeet)
-      ? Math.max(0, fallbackRangeFeet)
+  const profile = compileDnd5eEffectiveVisionProfile({
+    token: viewer,
+    fallbackRangeFeet: Number.isFinite(fallbackRangeFeet)
+      ? fallbackRangeFeet
       : Number.isFinite(geometry?.vision?.defaultRangeFeet)
-        ? Math.max(0, geometry.vision.defaultRangeFeet)
-        : DEFAULT_PLAYER_VISION_RANGE_FEET
-  const darkvisionRangeFeet = Number.isFinite(viewer.darkvisionRangeFeet) ? Math.max(0, viewer.darkvisionRangeFeet) : 0
-  const blindsightRangeFeet = Number.isFinite(viewer.blindsightRangeFeet) ? Math.max(0, viewer.blindsightRangeFeet) : 0
-  const truesightRangeFeet = Number.isFinite(viewer.truesightRangeFeet) ? Math.max(0, viewer.truesightRangeFeet) : 0
+        ? geometry.vision.defaultRangeFeet
+        : DEFAULT_PLAYER_VISION_RANGE_FEET,
+  })
   const carriedLightRangeFeet = viewer.lightSource?.enabled === true
     ? Math.max(0, Number(viewer.lightSource.brightRadiusFeet) || 0) + Math.max(0, Number(viewer.lightSource.dimRadiusFeet) || 0)
     : 0
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
+  const rangeFeet = Math.max(
+    profile.normalRangeFeet,
+    profile.darkvisionRangeFeet,
+    profile.darknessSightRangeFeet,
+    profile.magicalDarknessSightRangeFeet,
+    profile.blindsightRangeFeet,
+    profile.truesightRangeFeet,
+    carriedLightRangeFeet,
+  )
   const rangePx = rangeFeet / feetPerCell * gridSize
   const targetRadiusPx = Math.max(0, gridSize * Math.max(1, Number(target.size) || 1) * 0.4)
   const distancePx = Math.max(0, Math.hypot(target.x - viewer.x, target.y - viewer.y) - targetRadiusPx)
@@ -3844,11 +4073,19 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
     : 'bright'
   const distanceFeet = distancePx / gridSize * feetPerCell
   if (illumination === 'magical-darkness') {
-    const magicalRangeFeet = viewer.canSeeMagicalDarkness === true ? normalRangeFeet : 0
-    if (distanceFeet > Math.max(magicalRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
+    if (distanceFeet > Math.max(
+      profile.magicalDarknessSightRangeFeet,
+      profile.blindsightRangeFeet,
+      profile.truesightRangeFeet,
+    )) return false
   } else if (
     illumination === 'darkness' &&
-    distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)
+    distanceFeet > Math.max(
+      profile.darkvisionRangeFeet,
+      profile.darknessSightRangeFeet,
+      profile.blindsightRangeFeet,
+      profile.truesightRangeFeet,
+    )
   ) {
     return false
   }
@@ -3987,15 +4224,30 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const manualFallbackRangeFeet = Number.isFinite(geometry?.vision?.defaultRangeFeet)
         ? geometry.vision.defaultRangeFeet
         : DEFAULT_PLAYER_VISION_RANGE_FEET
-      const players = effectiveMap.tokens.filter((token) => plainObject(token) && token.type === 'player')
+      const players = effectiveMap.tokens
+        .filter((token) => plainObject(token) && token.type === 'player')
+        .map((token) => applyDnd5eEffectiveVisionProfile(
+          token,
+          compileDnd5eEffectiveVisionProfile({
+            token,
+            character: typeof token.characterId === 'string'
+              ? characterById.get(token.characterId)
+              : undefined,
+            fallbackRangeFeet: dynamicVision
+              ? geometry?.vision?.defaultRangeFeet
+              : manualFallbackRangeFeet,
+          }),
+        ))
+      const projectedPlayerById = new Map(players.map((token) => [token.id, token]))
       const viewers = geometry?.vision?.sharePartyVision === false
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players
       const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
         if (token.type === 'player') {
+          const projectedPlayer = projectedPlayerById.get(token.id) ?? token
           return [{
-            ...token,
+            ...projectedPlayer,
             viewerControlled: resolvedActiveCharacterId != null && token.characterId === resolvedActiveCharacterId,
           }]
         }
@@ -4145,7 +4397,6 @@ export function validateSharedStateShape(name, value) {
     'combat-log': 'entries',
     'room-chat': 'messages',
     'room-journal': 'handouts',
-    'group-ability-checks': 'checks',
     'dice-events': 'events',
     'combat-interrupts': 'interrupts',
     'player-action-requests': 'requests',
@@ -4184,6 +4435,39 @@ export function validateSharedStateShape(name, value) {
   }
   if (name === 'combat' && value.effectiveRules != null && !validDnd5eEffectiveRulesContext(value.effectiveRules)) {
     return { ok: false, reason: 'invalid-effective-rules' }
+  }
+  if (name === 'combat' && value.monsterControl != null) {
+    const control = value.monsterControl
+    if (
+      !plainObject(control) ||
+      control.schemaVersion !== 1 ||
+      (control.mode !== 'automatic' && control.mode !== 'manual') ||
+      typeof control.pauseRequested !== 'boolean' ||
+      !Number.isFinite(control.updatedAt) ||
+      control.updatedAt < 0 ||
+      (
+        control.controlledTokenId != null &&
+        (
+          typeof control.controlledTokenId !== 'string' ||
+          !control.controlledTokenId.trim() ||
+          control.controlledTokenId.length > 180
+        )
+      ) ||
+      (
+        control.requestedAt != null &&
+        (!Number.isFinite(control.requestedAt) || control.requestedAt < 0)
+      ) ||
+      (
+        control.pauseRequested &&
+        (
+          control.mode !== 'automatic' ||
+          typeof control.controlledTokenId !== 'string' ||
+          control.requestedAt == null
+        )
+      )
+    ) {
+      return { ok: false, reason: 'invalid-monster-control' }
+    }
   }
   if (name === 'dm-authority-ready' && typeof value.ready !== 'boolean') {
     return { ok: false, reason: 'invalid-ready-state' }
@@ -4244,6 +4528,280 @@ async function rotateJsonDirectory(root, limit) {
   for (const entry of files.slice(0, Math.max(0, files.length - limit))) {
     await rm(path.join(root, entry.name), { force: true }).catch(() => {})
   }
+}
+
+const DM_UNDO_SCHEMA_VERSION = 1
+const DM_UNDO_HISTORY_LIMIT = 100
+const DM_UNDOABLE_STATE = new Set([
+  'maps',
+  'characters',
+  'combat',
+  'combat-interrupts',
+  'combat-log',
+  'map-geometry',
+  'map-fog',
+  'map-exploration',
+  'campaign-time',
+  'scene-orchestration',
+  'scene-audio-playback',
+])
+
+function dmUndoJournalFile(ctx) {
+  return path.join(snapshotRoot(ctx), 'dm-undo-journal.json')
+}
+
+function normalizeDmUndoJournal(value) {
+  return {
+    schemaVersion: DM_UNDO_SCHEMA_VERSION,
+    revision: Number.isSafeInteger(value?.revision) ? Math.max(0, value.revision) : 0,
+    transactions: Array.isArray(value?.transactions)
+      ? value.transactions.filter((transaction) =>
+          plainObject(transaction) &&
+          typeof transaction.transactionId === 'string' &&
+          Array.isArray(transaction.changes),
+        ).slice(-DM_UNDO_HISTORY_LIMIT)
+      : [],
+    updatedAt: Number.isFinite(value?.updatedAt) ? value.updatedAt : 0,
+  }
+}
+
+function dmUndoTransactionId(req) {
+  const supplied = normalizedLabel(req?.headers?.['x-stars-undo-group'], 160)
+  return supplied && /^[a-zA-Z0-9:_-]+$/.test(supplied)
+    ? supplied
+    : `request:${Date.now()}:${randomUUID()}`
+}
+
+function dmUndoLabel(req, fallback) {
+  const supplied = String(req?.headers?.['x-stars-undo-label'] ?? '')
+  if (!supplied) return fallback
+  try {
+    return normalizedLabel(decodeURIComponent(supplied), 120) || fallback
+  } catch {
+    return fallback
+  }
+}
+
+async function appendDmUndoChange(ctx, input) {
+  if (!DM_UNDOABLE_STATE.has(input.resource)) return null
+  const filePath = dmUndoJournalFile(ctx)
+  await mkdir(path.dirname(filePath), { recursive: true })
+  return withWriteLock(filePath, async () => {
+    let journal
+    try {
+      journal = normalizeDmUndoJournal(JSON.parse(await readFile(filePath, 'utf8')))
+    } catch {
+      journal = normalizeDmUndoJournal(null)
+    }
+    const index = journal.transactions.findIndex((candidate) =>
+      candidate.transactionId === input.transactionId &&
+      candidate.status === 'applied')
+    const transaction = index >= 0
+      ? journal.transactions[index]
+      : {
+          schemaVersion: DM_UNDO_SCHEMA_VERSION,
+          transactionId: input.transactionId,
+          label: input.label,
+          actorMemberId: input.actorMemberId,
+          status: 'applied',
+          changes: [],
+          createdAt: input.changedAt,
+          updatedAt: input.changedAt,
+        }
+    const existingChangeIndex = transaction.changes.findIndex((change) =>
+      change.resource === input.resource)
+    const change = {
+      resource: input.resource,
+      before: input.before ?? null,
+      beforeRevision: input.beforeRevision,
+      afterRevision: input.afterRevision,
+    }
+    const changes = existingChangeIndex >= 0
+      ? transaction.changes.map((candidate, changeIndex) =>
+          changeIndex === existingChangeIndex
+            ? { ...change, before: candidate.before, beforeRevision: candidate.beforeRevision }
+            : candidate)
+      : [...transaction.changes, change]
+    const updatedTransaction = {
+      ...transaction,
+      label: transaction.label || input.label,
+      changes,
+      updatedAt: input.changedAt,
+    }
+    const transactions = index >= 0
+      ? journal.transactions.map((candidate, transactionIndex) =>
+          transactionIndex === index ? updatedTransaction : candidate)
+      : [...journal.transactions, updatedTransaction]
+    const next = {
+      ...journal,
+      revision: journal.revision + 1,
+      transactions: transactions.slice(-DM_UNDO_HISTORY_LIMIT),
+      updatedAt: input.changedAt,
+    }
+    await atomicRename(filePath, JSON.stringify(next))
+    return updatedTransaction
+  })
+}
+
+async function recordDmUndoMutation(req, ctx, member, resource, result, label) {
+  if (
+    ctx.accessRole !== 'dm' ||
+    !member ||
+    !result?.changed ||
+    !DM_UNDOABLE_STATE.has(resource)
+  ) return
+  await appendDmUndoChange(ctx, {
+    transactionId: dmUndoTransactionId(req),
+    label: dmUndoLabel(req, label),
+    actorMemberId: member.memberId,
+    resource,
+    before: result.previous,
+    beforeRevision: sharedStateRevision(result.previous),
+    afterRevision: sharedStateRevision(result.next),
+    changedAt: Number(result.next?._sync?.writtenAt) || Date.now(),
+  })
+}
+
+function dmUndoPublicTransaction(transaction) {
+  return {
+    transactionId: transaction.transactionId,
+    label: transaction.label,
+    status: transaction.status,
+    resources: transaction.changes.map((change) => change.resource),
+    createdAt: transaction.createdAt,
+    updatedAt: transaction.updatedAt,
+    ...(Number.isFinite(transaction.undoneAt) ? { undoneAt: transaction.undoneAt } : {}),
+  }
+}
+
+async function readDmUndoJournal(ctx) {
+  try {
+    return normalizeDmUndoJournal(JSON.parse(await readFile(dmUndoJournalFile(ctx), 'utf8')))
+  } catch {
+    return normalizeDmUndoJournal(null)
+  }
+}
+
+async function applyDmAuthoritativeUndo(ctx, requestedTransactionId, actorMemberId) {
+  const journalPath = dmUndoJournalFile(ctx)
+  await mkdir(path.dirname(journalPath), { recursive: true })
+  return withWriteLock(journalPath, async () => {
+    let journal
+    try {
+      journal = normalizeDmUndoJournal(JSON.parse(await readFile(journalPath, 'utf8')))
+    } catch {
+      journal = normalizeDmUndoJournal(null)
+    }
+    const transaction = [...journal.transactions].reverse().find((candidate) =>
+      candidate.status === 'applied' &&
+      (!requestedTransactionId || candidate.transactionId === requestedTransactionId))
+    if (!transaction) throw new RoomProtocolError(404, 'dm-undo-transaction-not-found')
+
+    const currentValues = new Map()
+    for (const change of transaction.changes) {
+      const resourcePath = path.join(ctx.stateRoot, `${safeName(change.resource)}.json`)
+      let current = null
+      try {
+        current = JSON.parse(await readFile(resourcePath, 'utf8'))
+      } catch {}
+      const currentRevision = sharedStateRevision(current)
+      if (currentRevision !== change.afterRevision) {
+        throw new RoomProtocolError(409, 'dm-undo-state-changed')
+      }
+      currentValues.set(change.resource, current)
+    }
+
+    const restored = []
+    try {
+      for (const change of transaction.changes) {
+        const resourcePath = path.join(ctx.stateRoot, `${safeName(change.resource)}.json`)
+        const current = currentValues.get(change.resource)
+        const result = change.before == null
+          ? await atomicDeleteJsonStateCasLocked(resourcePath, {
+              expectedRevision: change.afterRevision,
+              writerId: `dm-undo:${transaction.transactionId}`,
+            })
+          : await atomicWriteJsonStateCasLocked(resourcePath, change.before, {
+              expectedRevision: change.afterRevision,
+              writerId: `dm-undo:${transaction.transactionId}`,
+              validateIncoming: (candidate) => validateSharedStateShape(change.resource, candidate),
+            })
+        if (!result.ok) throw new RoomProtocolError(409, 'dm-undo-state-changed')
+        restored.push({ change, result, current })
+      }
+    } catch (error) {
+      for (const entry of restored.reverse()) {
+        const rollbackPath = path.join(ctx.stateRoot, `${safeName(entry.change.resource)}.json`)
+        const rollbackOptions = {
+          expectedRevision: entry.result.revision,
+          writerId: `dm-undo-rollback:${transaction.transactionId}`,
+        }
+        if (entry.current == null) {
+          await atomicDeleteJsonStateCasLocked(rollbackPath, rollbackOptions).catch(() => {})
+        } else {
+          await atomicWriteJsonStateCasLocked(rollbackPath, entry.current, {
+            ...rollbackOptions,
+            validateIncoming: (candidate) => validateSharedStateShape(entry.change.resource, candidate),
+          }).catch(() => {})
+        }
+      }
+      throw error
+    }
+
+    const now = Date.now()
+    const restoredByResource = new Map(restored.map((entry) => [
+      entry.change.resource,
+      entry,
+    ]))
+    const undoneChangesByResource = new Map(transaction.changes.map((change) => [
+      change.resource,
+      change,
+    ]))
+    const next = {
+      ...journal,
+      revision: journal.revision + 1,
+      transactions: journal.transactions.map((candidate) => {
+        if (candidate.transactionId === transaction.transactionId) {
+          return {
+              ...candidate,
+              status: 'undone',
+              undoneAt: now,
+              undoneByMemberId: actorMemberId,
+              updatedAt: now,
+            }
+        }
+        if (candidate.status !== 'applied') return candidate
+        let changed = false
+        const changes = candidate.changes.map((change) => {
+          const undoneChange = undoneChangesByResource.get(change.resource)
+          const restoredEntry = restoredByResource.get(change.resource)
+          if (
+            undoneChange &&
+            restoredEntry &&
+            change.afterRevision === undoneChange.beforeRevision
+          ) {
+            changed = true
+            return {
+              ...change,
+              afterRevision: restoredEntry.result.revision,
+            }
+          }
+          return change
+        })
+        return changed ? { ...candidate, changes, updatedAt: now } : candidate
+      }),
+      updatedAt: now,
+    }
+    await atomicRename(journalPath, JSON.stringify(next))
+    return {
+      transaction: next.transactions.find((candidate) =>
+        candidate.transactionId === transaction.transactionId),
+      restored: restored.map((entry) => ({
+        resource: entry.change.resource,
+        revision: entry.result.revision,
+      })),
+    }
+  })
 }
 
 async function quarantineSharedState(ctx, name, payload, reason) {
@@ -4373,13 +4931,14 @@ function campaignRoomManifest(room) {
     pluginFiles: {},
     pluginRuntimeState: {},
   }
+  const persistentRoom = withoutRoomEphemeralPlugins(room)
   return {
-    id: room.id,
-    name: room.name,
-    rulesetId: room.rulesetId,
-    requiredPlugins: Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [],
-    pluginFiles: plainObject(room.pluginFiles) ? room.pluginFiles : {},
-    pluginRuntimeState: plainObject(room.pluginRuntimeState) ? room.pluginRuntimeState : {},
+    id: persistentRoom.id,
+    name: persistentRoom.name,
+    rulesetId: persistentRoom.rulesetId,
+    requiredPlugins: Array.isArray(persistentRoom.requiredPlugins) ? persistentRoom.requiredPlugins : [],
+    pluginFiles: plainObject(persistentRoom.pluginFiles) ? persistentRoom.pluginFiles : {},
+    pluginRuntimeState: plainObject(persistentRoom.pluginRuntimeState) ? persistentRoom.pluginRuntimeState : {},
   }
 }
 
@@ -4404,7 +4963,7 @@ async function collectCampaignPlugins(ctx, room) {
   const plugins = []
   for (const requirement of Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []) {
     const hosted = room.pluginFiles?.[requirement.id]
-    if (!hosted) continue
+    if (!hosted || hosted.distributionPolicy === 'room-ephemeral') continue
     const bytes = await readFile(roomHostedPluginFile(ctx, room.id, requirement.id, hosted))
     plugins.push({ ...hosted, ...requirement, data: bytes.toString('base64') })
   }
@@ -4621,7 +5180,7 @@ function accountStorageBackend(ctx) {
     process.env.STARS_ACCOUNT_STORAGE ??
     'json',
   ).trim().toLowerCase()
-  if (configured !== 'json' && configured !== 'sqlite') {
+  if (!['json', 'sqlite', 'postgres'].includes(configured)) {
     throw new Error(`Unsupported STARS_ACCOUNT_STORAGE: ${configured}`)
   }
   return configured
@@ -4635,32 +5194,57 @@ function accountDatabaseFile(ctx) {
   )
 }
 
-async function accountSqliteStore(ctx) {
-  if (accountStorageBackend(ctx) !== 'sqlite') return null
-  if (!ctx.accountSqliteStorePromise) {
-    ctx.accountSqliteStorePromise = openSqliteAccountStore(accountDatabaseFile(ctx))
+async function accountPersistentStore(ctx) {
+  const backend = accountStorageBackend(ctx)
+  if (backend === 'json') return null
+  if (!ctx.accountPersistentStorePromise) {
+    ctx.accountPersistentStorePromise = backend === 'postgres'
+      ? openPostgresStorage(
+          ctx.databaseUrl ?? process.env.STARS_DATABASE_URL ?? '',
+          {
+            maxConnections: Number.parseInt(
+              String(process.env.STARS_DATABASE_POOL_SIZE ?? '10'),
+              10,
+            ),
+          },
+        )
+      : openSqliteAccountStore(accountDatabaseFile(ctx))
   }
-  return ctx.accountSqliteStorePromise
+  return ctx.accountPersistentStorePromise
 }
 
 export async function initializeAccountStorage(ctx) {
-  const store = await accountSqliteStore(ctx)
+  const backend = accountStorageBackend(ctx)
+  const store = await accountPersistentStore(ctx)
   if (!store) return { backend: 'json' }
-  return { backend: 'sqlite', ...store.diagnostics() }
+  return { backend, ...await store.diagnostics() }
 }
 
 export async function closeAccountStorage(ctx) {
-  if (!ctx.accountSqliteStorePromise) return
-  const store = await ctx.accountSqliteStorePromise
-  store.close()
-  ctx.accountSqliteStorePromise = null
+  if (!ctx.accountPersistentStorePromise) return
+  const store = await ctx.accountPersistentStorePromise
+  await store.close()
+  ctx.accountPersistentStorePromise = null
 }
 
-async function syncAccountToSqlite(ctx, account, options = {}) {
-  const store = await accountSqliteStore(ctx)
+export async function accountStorageDiagnostics(ctx) {
+  const store = await accountPersistentStore(ctx)
+  if (!store) {
+    await mkdir(accountDirectory(ctx), { recursive: true })
+    await stat(accountDirectory(ctx))
+    return { backend: 'json', integrity: 'ok' }
+  }
+  return {
+    backend: accountStorageBackend(ctx),
+    ...await store.diagnostics(),
+  }
+}
+
+async function syncAccountToPersistentStore(ctx, account, options = {}) {
+  const store = await accountPersistentStore(ctx)
   if (!store) return
-  if (options.createOnly) store.createAccount(account, options)
-  else store.writeAccount(account, options)
+  if (options.createOnly) await store.createAccount(account, options)
+  else await store.writeAccount(account, options)
 }
 
 function accountIdentityDirectory(ctx) {
@@ -4684,8 +5268,74 @@ function pluginRegistryFile(ctx) {
   return path.join(lobbyRoot(ctx), 'plugin-registry.json')
 }
 
+function marketplaceSigningKeyFile(ctx) {
+  return path.join(lobbyRoot(ctx), '.marketplace-signing-key.json')
+}
+
+async function marketplaceSigningKey(ctx) {
+  const filePath = marketplaceSigningKeyFile(ctx)
+  try {
+    const stored = JSON.parse(await readFile(filePath, 'utf8'))
+    if (
+      stored?.schemaVersion === 1 &&
+      typeof stored.privateKeyPem === 'string' &&
+      typeof stored.publicKeyPem === 'string' &&
+      typeof stored.keyId === 'string'
+    ) return stored
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  const generated = {
+    schemaVersion: 1,
+    algorithm: 'Ed25519',
+    keyId: createHash('sha256').update(publicKeyPem).digest('base64url').slice(0, 24),
+    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    publicKeyPem,
+    createdAt: Date.now(),
+  }
+  await mkdir(lobbyRoot(ctx), { recursive: true })
+  try {
+    await writeFile(filePath, `${JSON.stringify(generated)}\n`, { flag: 'wx', mode: 0o600 })
+    return generated
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+    const stored = JSON.parse(await readFile(filePath, 'utf8'))
+    if (stored?.schemaVersion !== 1 || typeof stored.privateKeyPem !== 'string') throw error
+    return stored
+  }
+}
+
+async function signMarketplaceProduct(ctx, manifest) {
+  const key = await marketplaceSigningKey(ctx)
+  const payload = Buffer.from(canonicalMarketplaceJson(manifest), 'utf8')
+  const signature = signBytes(null, payload, key.privateKeyPem).toString('base64url')
+  if (!verifyBytes(null, payload, key.publicKeyPem, Buffer.from(signature, 'base64url'))) {
+    throw new RoomProtocolError(500, 'marketplace-signature-verification-failed')
+  }
+  return {
+    schemaVersion: 1,
+    algorithm: 'Ed25519',
+    keyId: key.keyId,
+    signature,
+  }
+}
+
 function emptyPluginRegistry() {
-  return { schemaVersion: 1, entries: [], reports: [] }
+  return {
+    schemaVersion: 1,
+    entries: [],
+    reports: [],
+    creators: [],
+    entitlements: [],
+    orders: [],
+    paymentEvents: [],
+    ledgerEntries: [],
+    payouts: [],
+    analyticsDaily: [],
+    installations: [],
+  }
 }
 
 function normalizePluginRegistry(value) {
@@ -4694,10 +5344,60 @@ function normalizePluginRegistry(value) {
     schemaVersion: 1,
     entries: Array.isArray(value.entries) ? value.entries.filter(plainObject).slice(0, 5_000) : [],
     reports: Array.isArray(value.reports) ? value.reports.filter(plainObject).slice(-10_000) : [],
+    creators: Array.isArray(value.creators) ? value.creators.filter(plainObject).slice(0, 100_000) : [],
+    entitlements: Array.isArray(value.entitlements)
+      ? value.entitlements.filter(plainObject).slice(0, 1_000_000)
+      : [],
+    orders: Array.isArray(value.orders) ? value.orders.filter(plainObject).slice(-1_000_000) : [],
+    paymentEvents: Array.isArray(value.paymentEvents)
+      ? value.paymentEvents.filter(plainObject).slice(-1_000_000)
+      : [],
+    ledgerEntries: Array.isArray(value.ledgerEntries)
+      ? value.ledgerEntries.filter(plainObject).slice(-2_000_000)
+      : [],
+    payouts: Array.isArray(value.payouts)
+      ? value.payouts.filter(marketplacePayoutRecordValid).slice(-1_000_000)
+      : [],
+    analyticsDaily: Array.isArray(value.analyticsDaily)
+      ? value.analyticsDaily.map(normalizeMarketplaceAnalyticsDaily).filter(Boolean).slice(-500_000)
+      : [],
+    installations: Array.isArray(value.installations)
+      ? value.installations.map(normalizeMarketplaceInstallation).filter(Boolean).slice(-1_000_000)
+      : [],
+  }
+}
+
+function marketplaceCreatorPublicRecord(account, creator) {
+  return {
+    schemaVersion: 1,
+    accountId: account.accountId,
+    displayName: account.auth?.username ?? account.displayName,
+    status: creator?.status ?? 'unregistered',
+    ...(creator?.countryOrRegion ? { countryOrRegion: creator.countryOrRegion } : {}),
+    ...(creator?.verificationReference ? { verificationReference: creator.verificationReference } : {}),
+    ...(creator?.policyVersion ? { policyVersion: creator.policyVersion } : {}),
+    ...(creator?.noticeVersion ? { noticeVersion: creator.noticeVersion } : {}),
+    ...(Number.isFinite(creator?.appliedAt) ? { appliedAt: creator.appliedAt } : {}),
+    ...(Number.isFinite(creator?.verifiedAt) ? { verifiedAt: creator.verifiedAt } : {}),
+    ...(creator?.moderationNote ? { moderationNote: creator.moderationNote } : {}),
   }
 }
 
 async function readPluginRegistry(ctx) {
+  const store = await accountPersistentStore(ctx)
+  if (accountStorageBackend(ctx) === 'postgres' && store?.readMarketplaceRegistry) {
+    const persisted = await store.readMarketplaceRegistry(normalizePluginRegistry)
+    if (persisted) return persisted
+    let legacy = null
+    try {
+      legacy = normalizePluginRegistry(JSON.parse(await readFile(pluginRegistryFile(ctx), 'utf8')))
+    } catch {}
+    return store.mutateMarketplaceRegistry(
+      normalizePluginRegistry,
+      emptyPluginRegistry,
+      () => legacy ?? emptyPluginRegistry(),
+    )
+  }
   try {
     return normalizePluginRegistry(JSON.parse(await readFile(pluginRegistryFile(ctx), 'utf8')))
   } catch {
@@ -4705,7 +5405,39 @@ async function readPluginRegistry(ctx) {
   }
 }
 
+async function assertMarketplacePackageEntitlement(ctx, accountId, integrity) {
+  const registry = await readPluginRegistry(ctx)
+  const publishedMatch = registry.entries.flatMap((entry) =>
+    (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
+    .find(({ version }) =>
+      version.integrity === integrity &&
+      version.status === 'published')
+  if (!publishedMatch) return null
+  if (publishedMatch.version.marketplace?.pricing?.kind !== 'paid') {
+    return { productId: publishedMatch.entry.id, version: publishedMatch.version.version, entitlement: null }
+  }
+  const entitled = accountId
+    ? activeMarketplaceEntitlement(registry.entitlements, {
+        accountId,
+        productId: publishedMatch.entry.id,
+        version: publishedMatch.version.version,
+      })
+    : null
+  if (!entitled && publishedMatch.entry.publisher?.accountId !== accountId) {
+    throw new RoomProtocolError(403, 'marketplace-entitlement-required')
+  }
+  return { productId: publishedMatch.entry.id, version: publishedMatch.version.version, entitlement: entitled }
+}
+
 async function mutatePluginRegistry(ctx, updater) {
+  const store = await accountPersistentStore(ctx)
+  if (accountStorageBackend(ctx) === 'postgres' && store?.mutateMarketplaceRegistry) {
+    return store.mutateMarketplaceRegistry(
+      normalizePluginRegistry,
+      emptyPluginRegistry,
+      updater,
+    )
+  }
   await mkdir(lobbyRoot(ctx), { recursive: true })
   const result = await atomicMutateJsonStateLocked(pluginRegistryFile(ctx), (current) => {
     const registry = normalizePluginRegistry(current)
@@ -4714,6 +5446,39 @@ async function mutatePluginRegistry(ctx, updater) {
   })
   if (!result?.ok) throw new RoomProtocolError(result?.status ?? 500, result?.error ?? 'plugin-registry-write-failed')
   return normalizePluginRegistry(result.next)
+}
+
+async function syncMarketplaceAccountInstallation(ctx, input) {
+  const now = Number.isFinite(input?.timestamp) ? Number(input.timestamp) : Date.now()
+  return mutatePluginRegistry(ctx, (current) => {
+    const match = current.entries.flatMap((entry) =>
+      (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
+      .find(({ version }) =>
+        version.integrity === input.integrity &&
+        version.status === 'published')
+    if (!match) return current
+    const updated = updateMarketplaceInstallation(current.installations, {
+      accountId: input.accountId,
+      productId: match.entry.id,
+      version: match.version.version,
+      publisherAccountId: match.entry.publisher?.accountId,
+      active: input.active === true,
+      timestamp: now,
+    })
+    return {
+      ...current,
+      installations: updated.installations,
+      analyticsDaily: updated.transition
+        ? recordMarketplaceDailyMetric(current.analyticsDaily, {
+            metric: updated.transition === 'installed' ? 'installs' : 'uninstalls',
+            productId: match.entry.id,
+            version: match.version.version,
+            publisherAccountId: match.entry.publisher?.accountId,
+            timestamp: now,
+          })
+        : current.analyticsDaily,
+    }
+  })
 }
 
 function pluginRegistryAdministrator(account, env = process.env) {
@@ -4727,7 +5492,866 @@ function pluginCatalogReviewRequired(env = process.env) {
   return productionSecurityEnabled(env) || env.STARS_PLUGIN_REVIEW_REQUIRED === 'true'
 }
 
+export function marketplacePaidPublishingEnabled(env = process.env) {
+  if (!productionSecurityEnabled(env)) return true
+  return env.STARS_MARKETPLACE_PAID_PUBLISHING_ENABLED === 'true' &&
+    env.STARS_MARKETPLACE_KYC_PROVIDER_READY === 'true' &&
+    Boolean(env.STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET) &&
+    Boolean(marketplaceCheckoutAdapter(env))
+}
+
+export function marketplaceCapabilities(env = process.env) {
+  const checkout = marketplaceCheckoutAdapter(env)
+  const paidPublishingEnabled = marketplacePaidPublishingEnabled(env)
+  const configuredAdministrators = String(env.STARS_PLUGIN_ADMIN_ACCOUNT_IDS ?? '')
+    .split(',').map((value) => value.trim()).filter((value) => value && value !== '*')
+  return {
+    schemaVersion: 1,
+    marketMode: paidPublishingEnabled ? 'live' : 'free-beta',
+    freePublishingEnabled: true,
+    paidPublishingEnabled,
+    checkoutAvailable: paidPublishingEnabled && Boolean(checkout),
+    creatorVerificationMode: env.STARS_MARKETPLACE_KYC_PROVIDER_READY === 'true'
+      ? 'provider'
+      : 'manual-review',
+    moderationConfigured: configuredAdministrators.length > 0,
+  }
+}
+
+function marketplaceOrderProduct(registry, productId, version) {
+  const entry = registry.entries.find((candidate) => candidate.id === productId)
+  const productVersion = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+    candidate.version === version &&
+    candidate.status === 'published' &&
+    candidate.marketplace?.pricing?.kind === 'paid')
+  return entry && productVersion ? { entry, version: productVersion } : null
+}
+
+function marketplaceOrderPaymentMatches(order, payload) {
+  return payload.currency === order.currency &&
+    Number(payload.amountMinor) === order.amountMinor
+}
+
+function fulfillMarketplaceOrder(registry, orderId, input) {
+  const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+  if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+  if (!marketplaceOrderPaymentMatches(order, input)) {
+    throw new RoomProtocolError(409, 'marketplace-payment-amount-mismatch')
+  }
+  if (order.status === 'fulfilled') {
+    if (order.providerOrderId !== input.providerOrderId) {
+      throw new RoomProtocolError(409, 'marketplace-provider-order-mismatch')
+    }
+    return registry
+  }
+  if (!marketplaceOrderIsPayable(order, input.now)) {
+    throw new RoomProtocolError(409, 'marketplace-order-not-payable')
+  }
+  const netReceiptsMinor = input.netReceiptsMinor ?? order.amountMinor
+  if (
+    !Number.isSafeInteger(netReceiptsMinor) ||
+    netReceiptsMinor < 0 ||
+    netReceiptsMinor > order.amountMinor
+  ) throw new RoomProtocolError(409, 'invalid-marketplace-net-receipts')
+  const revenue = marketplaceRevenueSplit(
+    netReceiptsMinor,
+    order.creatorShareBps,
+    order.platformShareBps,
+  )
+  if (!revenue) throw new RoomProtocolError(409, 'invalid-marketplace-settlement')
+  const existing = activeMarketplaceEntitlement(registry.entitlements, {
+    accountId: order.accountId,
+    productId: order.productId,
+    version: order.version,
+  }, input.now)
+  const entitlementId = existing?.entitlementId ?? randomUUID()
+  const entitlement = existing ?? {
+    schemaVersion: MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
+    entitlementId,
+    accountId: order.accountId,
+    productId: order.productId,
+    version: order.version,
+    licenseType: 'personal',
+    source: 'purchase',
+    status: 'active',
+    grantedAt: input.now,
+    grantedBy: `payment:${input.provider}`,
+  }
+  const availableAt = input.provider === 'sandbox'
+    ? input.now
+    : input.now + MARKETPLACE_SETTLEMENT_HOLD_MS
+  const sourceEventId = input.sourceEventId ?? input.providerOrderId
+  const ledgerEntries = [
+    {
+      schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+      entryId: randomUUID(),
+      orderId: order.orderId,
+      productId: order.productId,
+      version: order.version,
+      beneficiaryAccountId: order.publisherAccountId,
+      beneficiaryRole: 'creator',
+      kind: 'sale',
+      currency: order.currency,
+      amountMinor: revenue.creatorAmountMinor,
+      sourceEventId,
+      createdAt: input.now,
+      availableAt,
+    },
+    {
+      schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+      entryId: randomUUID(),
+      orderId: order.orderId,
+      productId: order.productId,
+      version: order.version,
+      beneficiaryAccountId: 'astraltrace-platform',
+      beneficiaryRole: 'platform',
+      kind: 'sale',
+      currency: order.currency,
+      amountMinor: revenue.platformAmountMinor,
+      sourceEventId,
+      createdAt: input.now,
+      availableAt,
+    },
+  ]
+  return {
+    ...registry,
+    entitlements: existing ? registry.entitlements : [...registry.entitlements, entitlement],
+    ledgerEntries: [...registry.ledgerEntries, ...ledgerEntries],
+    orders: registry.orders.map((candidate) => candidate.orderId === orderId
+      ? {
+          ...candidate,
+          status: 'fulfilled',
+          provider: input.provider,
+          providerOrderId: input.providerOrderId,
+          paidAt: input.now,
+          fulfilledAt: input.now,
+          updatedAt: input.now,
+          entitlementId,
+          netReceiptsMinor: revenue.netReceiptsMinor,
+          creatorNetAmountMinor: revenue.creatorAmountMinor,
+          platformNetAmountMinor: revenue.platformAmountMinor,
+        }
+      : candidate),
+  }
+}
+
+function updateMarketplaceOrderAfterPaymentReversal(registry, orderId, input) {
+  const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+  if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+  if (!marketplaceOrderPaymentMatches(order, input)) {
+    throw new RoomProtocolError(409, 'marketplace-payment-amount-mismatch')
+  }
+  if (order.providerOrderId !== input.providerOrderId) {
+    throw new RoomProtocolError(409, 'marketplace-provider-order-mismatch')
+  }
+  if (!['fulfilled', 'refunded', 'disputed'].includes(order.status)) {
+    throw new RoomProtocolError(409, 'marketplace-order-not-reversible')
+  }
+  const reversalExists = registry.ledgerEntries.some((entry) =>
+    entry.orderId === orderId && ['refund', 'dispute'].includes(entry.kind))
+  const reversalEntries = reversalExists
+    ? []
+    : registry.ledgerEntries
+        .filter((entry) => entry.orderId === orderId && entry.kind === 'sale')
+        .map((entry) => ({
+          ...entry,
+          entryId: randomUUID(),
+          kind: input.status === 'refunded' ? 'refund' : 'dispute',
+          amountMinor: -entry.amountMinor,
+          sourceEventId: input.sourceEventId ?? input.providerOrderId,
+          createdAt: input.now,
+        }))
+  return {
+    ...registry,
+    ledgerEntries: [...registry.ledgerEntries, ...reversalEntries],
+    orders: registry.orders.map((candidate) => candidate.orderId === orderId
+      ? { ...candidate, status: input.status, updatedAt: input.now }
+      : candidate),
+    entitlements: registry.entitlements.map((entitlement) =>
+      entitlement.entitlementId === order.entitlementId
+        ? {
+            ...entitlement,
+            status: input.status,
+            updatedAt: input.now,
+            updatedBy: `payment:${input.provider}`,
+            statusReason: input.status === 'refunded' ? 'payment-refunded' : 'payment-disputed',
+          }
+        : entitlement),
+  }
+}
+
+function marketplacePaymentWebhookValid(bytes, suppliedSignature, secret) {
+  if (!secret || !suppliedSignature) return false
+  const expected = createHmac('sha256', secret).update(bytes).digest('hex')
+  const actual = String(suppliedSignature).trim().toLowerCase()
+  return actual.length === expected.length &&
+    timingSafeEqual(Buffer.from(actual), Buffer.from(expected))
+}
+
+export function marketplaceCheckoutAdapter(env = process.env) {
+  const endpoint = normalizedLabel(env.STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL, 1_000)
+  const secret = String(env.STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET ?? '')
+  const provider = normalizedLabel(env.STARS_MARKETPLACE_CHECKOUT_PROVIDER, 40) || 'external'
+  if (!endpoint || !secret) return null
+  let url
+  try {
+    url = new URL(endpoint)
+  } catch {
+    return null
+  }
+  if (productionSecurityEnabled(env) && url.protocol !== 'https:') return null
+  if (!['http:', 'https:'].includes(url.protocol)) return null
+  return { endpoint: url.toString(), secret, provider }
+}
+
+export async function createMarketplaceCheckout(order, env = process.env) {
+  const adapter = marketplaceCheckoutAdapter(env)
+  if (!adapter) throw new RoomProtocolError(503, 'marketplace-checkout-unavailable')
+  const body = JSON.stringify({
+    schemaVersion: 1,
+    orderId: order.orderId,
+    productId: order.productId,
+    version: order.version,
+    amountMinor: order.amountMinor,
+    currency: order.currency,
+    accountId: order.accountId,
+    returnUrl: `${normalizedHttpOrigin(env.STARS_PUBLIC_ORIGIN) ?? 'http://localhost:8080'}/app/extensions?section=orders`,
+  })
+  const signature = createHmac('sha256', adapter.secret).update(body).digest('hex')
+  let response
+  try {
+    response = await fetch(adapter.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': order.orderId,
+        'X-Stars-Checkout-Signature': signature,
+      },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch {
+    throw new RoomProtocolError(502, 'marketplace-checkout-provider-unavailable')
+  }
+  const result = await response.json().catch(() => null)
+  if (!response.ok || !plainObject(result)) {
+    throw new RoomProtocolError(502, 'marketplace-checkout-provider-rejected')
+  }
+  const providerOrderId = normalizedLabel(result.providerOrderId, 160)
+  const checkoutUrl = normalizedLabel(result.checkoutUrl, 2_000)
+  let parsedCheckoutUrl
+  try {
+    parsedCheckoutUrl = new URL(checkoutUrl)
+  } catch {
+    throw new RoomProtocolError(502, 'invalid-marketplace-checkout-response')
+  }
+  if (
+    !providerOrderId ||
+    !['http:', 'https:'].includes(parsedCheckoutUrl.protocol) ||
+    (productionSecurityEnabled(env) && parsedCheckoutUrl.protocol !== 'https:')
+  ) throw new RoomProtocolError(502, 'invalid-marketplace-checkout-response')
+  return {
+    provider: adapter.provider,
+    providerOrderId,
+    checkoutUrl: parsedCheckoutUrl.toString(),
+    expiresAt: Number.isFinite(result.expiresAt)
+      ? Math.min(Number(result.expiresAt), order.expiresAt)
+      : order.expiresAt,
+  }
+}
+
+async function handleMarketplaceCommerceApi(req, res, parsed, ctx) {
+  if (!parsed.pathname.startsWith('/api/marketplace/')) return false
+  if (!applyLobbyRateLimit(req, res, ctx)) return true
+
+  if (parsed.pathname === '/api/marketplace/capabilities' && req.method === 'GET') {
+    writeJson(res, 200, marketplaceCapabilities())
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/payment-methods' && req.method === 'GET') {
+    const adapter = marketplacePaidPublishingEnabled() ? marketplaceCheckoutAdapter() : null
+    writeJson(res, 200, {
+      methods: [
+        ...(!productionSecurityEnabled()
+          ? [{ id: 'sandbox', label: '沙盒支付', mode: 'sandbox' }]
+          : []),
+        ...(adapter
+          ? [{ id: adapter.provider, label: adapter.provider, mode: 'redirect' }]
+          : []),
+      ],
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/ledger' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    const creator = registry.creators.find((candidate) =>
+      candidate.accountId === account.accountId)
+    const publishedOwnProduct = registry.entries.some((entry) =>
+      entry.publisher?.accountId === account.accountId)
+    if (!creator && !publishedOwnProduct) {
+      throw new RoomProtocolError(403, 'marketplace-creator-required')
+    }
+    const entries = registry.ledgerEntries
+      .filter((entry) => entry.beneficiaryAccountId === account.accountId)
+      .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+      .slice(0, 1_000)
+    const now = Date.now()
+    writeJson(res, 200, {
+      balances: [
+        marketplaceLedgerBalance(registry.ledgerEntries, account.accountId, 'CNY', now),
+        marketplaceLedgerBalance(registry.ledgerEntries, account.accountId, 'USD', now),
+      ],
+      entries,
+      settlementHoldDays: Math.round(MARKETPLACE_SETTLEMENT_HOLD_MS / 86_400_000),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/analytics' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    const creator = registry.creators.find((candidate) =>
+      candidate.accountId === account.accountId)
+    const ownsPublication = registry.entries.some((entry) =>
+      entry.publisher?.accountId === account.accountId)
+    if (!creator && !ownsPublication) {
+      throw new RoomProtocolError(403, 'marketplace-creator-required')
+    }
+    writeJson(res, 200, buildMarketplaceCreatorAnalytics({
+      publisherAccountId: account.accountId,
+      periodDays: Number(parsed.searchParams.get('days')) || 30,
+      entries: registry.entries,
+      daily: registry.analyticsDaily,
+      installations: registry.installations,
+      orders: registry.orders,
+      ledgerEntries: registry.ledgerEntries,
+    }))
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/publications' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      publications: registry.entries
+        .filter((entry) => entry.publisher?.accountId === account.accountId)
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          versions: (Array.isArray(entry.versions) ? entry.versions : [])
+            .map((version) => ({
+              version: version.version,
+              status: version.status,
+              visibility: version.visibility,
+              submittedAt: version.submittedAt,
+              ...(Number.isFinite(version.publishedAt) ? { publishedAt: version.publishedAt } : {}),
+              ...(version.moderationNote ? { moderationNote: version.moderationNote } : {}),
+            }))
+            .sort((left, right) => Number(right.submittedAt ?? 0) - Number(left.submittedAt ?? 0)),
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/payouts' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      payouts: registry.payouts
+        .filter((payout) => payout.creatorAccountId === account.accountId)
+        .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+        .map(marketplacePayoutPublicRecord),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/payouts' && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const currency = normalizedLabel(payload?.currency, 3)
+    const amountMinor = Number(payload?.amountMinor)
+    const idempotencyKey = normalizedLabel(
+      req.headers['idempotency-key'] ?? payload?.idempotencyKey,
+      128,
+    )
+    const minimum = marketplacePayoutMinimum(currency)
+    if (
+      !minimum ||
+      !Number.isSafeInteger(amountMinor) ||
+      amountMinor < minimum ||
+      !idempotencyKey
+    ) throw new RoomProtocolError(400, 'invalid-marketplace-payout')
+    const now = Date.now()
+    let created = false
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const creator = current.creators.find((candidate) =>
+        candidate.accountId === account.accountId)
+      if (creator?.status !== 'verified' || !creator.verificationReference) {
+        throw new RoomProtocolError(403, 'verified-creator-required')
+      }
+      const existing = current.payouts.find((candidate) =>
+        candidate.creatorAccountId === account.accountId &&
+        candidate.idempotencyKey === idempotencyKey)
+      if (existing) {
+        if (existing.currency !== currency || existing.amountMinor !== amountMinor) {
+          throw new RoomProtocolError(409, 'marketplace-idempotency-conflict')
+        }
+        return current
+      }
+      const balance = marketplaceLedgerBalance(
+        current.ledgerEntries,
+        account.accountId,
+        currency,
+        now,
+      )
+      if (balance.availableMinor < amountMinor) {
+        throw new RoomProtocolError(409, 'marketplace-payout-insufficient-balance')
+      }
+      const payoutId = randomUUID()
+      created = true
+      return {
+        ...current,
+        payouts: [...current.payouts, {
+          schemaVersion: MARKETPLACE_PAYOUT_SCHEMA_VERSION,
+          payoutId,
+          creatorAccountId: account.accountId,
+          currency,
+          amountMinor,
+          status: 'pending',
+          idempotencyKey,
+          payoutDestinationReference: creator.verificationReference,
+          createdAt: now,
+        }],
+        ledgerEntries: [...current.ledgerEntries, {
+          schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+          entryId: randomUUID(),
+          orderId: payoutId,
+          productId: 'creator-payout',
+          version: '1',
+          beneficiaryAccountId: account.accountId,
+          beneficiaryRole: 'creator',
+          kind: 'payout',
+          currency,
+          amountMinor: -amountMinor,
+          sourceEventId: payoutId,
+          createdAt: now,
+          availableAt: now,
+        }],
+      }
+    })
+    const payout = registry.payouts.find((candidate) =>
+      candidate.creatorAccountId === account.accountId &&
+      candidate.idempotencyKey === idempotencyKey)
+    writeJson(res, created ? 201 : 200, { payout: marketplacePayoutPublicRecord(payout) })
+    return true
+  }
+
+  const payoutModerationMatch = parsed.pathname.match(
+    /^\/api\/marketplace\/payouts\/([^/]+)\/moderate$/,
+  )
+  if (payoutModerationMatch && req.method === 'POST') {
+    const administrator = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(administrator)) {
+      throw new RoomProtocolError(403, 'plugin-admin-required')
+    }
+    const payoutId = decodeURIComponent(payoutModerationMatch[1] ?? '')
+    const payload = await readJsonRequest(req)
+    const action = normalizedLabel(payload?.action, 24)
+    const note = normalizedLabel(payload?.note, 2_000)
+    const externalTransferReference = normalizedLabel(
+      payload?.externalTransferReference,
+      200,
+    )
+    if (!['approve', 'reject', 'mark-paid'].includes(action)) {
+      throw new RoomProtocolError(400, 'invalid-payout-moderation')
+    }
+    if (action === 'reject' && !note) {
+      throw new RoomProtocolError(400, 'payout-moderation-note-required')
+    }
+    if (action === 'mark-paid' && !externalTransferReference) {
+      throw new RoomProtocolError(400, 'payout-transfer-reference-required')
+    }
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const payout = current.payouts.find((candidate) => candidate.payoutId === payoutId)
+      if (!payout) throw new RoomProtocolError(404, 'marketplace-payout-not-found')
+      const targetStatus = action === 'approve'
+        ? 'approved'
+        : action === 'reject'
+          ? 'rejected'
+          : 'paid'
+      if (payout.status === targetStatus) return current
+      if (!marketplacePayoutTransitionAllowed(payout.status, action)) {
+        throw new RoomProtocolError(409, 'invalid-payout-status-transition')
+      }
+      const releaseEntry = action === 'reject'
+        ? {
+            schemaVersion: MARKETPLACE_LEDGER_SCHEMA_VERSION,
+            entryId: randomUUID(),
+            orderId: payout.payoutId,
+            productId: 'creator-payout',
+            version: '1',
+            beneficiaryAccountId: payout.creatorAccountId,
+            beneficiaryRole: 'creator',
+            kind: 'payout-release',
+            currency: payout.currency,
+            amountMinor: payout.amountMinor,
+            sourceEventId: `payout-rejected:${payout.payoutId}`,
+            createdAt: now,
+            availableAt: now,
+          }
+        : null
+      return {
+        ...current,
+        payouts: current.payouts.map((candidate) => candidate.payoutId === payoutId
+          ? {
+              ...candidate,
+              status: targetStatus,
+              updatedAt: now,
+              moderatedBy: administrator.accountId,
+              ...(note ? { moderationNote: note } : {}),
+              ...(action === 'mark-paid'
+                ? { externalTransferReference, paidAt: now }
+                : {}),
+            }
+          : candidate),
+        ledgerEntries: releaseEntry
+          ? [...current.ledgerEntries, releaseEntry]
+          : current.ledgerEntries,
+      }
+    })
+    writeJson(res, 200, {
+      payout: marketplacePayoutPublicRecord(
+        registry.payouts.find((candidate) => candidate.payoutId === payoutId),
+      ),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/orders' && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    if (!marketplacePaidPublishingEnabled()) {
+      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
+    }
+    const payload = await readJsonRequest(req)
+    const productId = normalizedLabel(payload?.productId, 160)
+    const version = normalizedLabel(payload?.version, 64)
+    const idempotencyKey = normalizedLabel(
+      req.headers['idempotency-key'] ?? payload?.idempotencyKey,
+      128,
+    )
+    if (!productId || !version || !idempotencyKey) {
+      throw new RoomProtocolError(400, 'invalid-marketplace-order')
+    }
+    const now = Date.now()
+    let created = false
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existingOrder = current.orders.find((candidate) =>
+        candidate.accountId === account.accountId &&
+        candidate.idempotencyKey === idempotencyKey)
+      if (existingOrder) {
+        if (existingOrder.productId !== productId || existingOrder.version !== version) {
+          throw new RoomProtocolError(409, 'marketplace-idempotency-conflict')
+        }
+        return current
+      }
+      const product = marketplaceOrderProduct(current, productId, version)
+      if (!product) throw new RoomProtocolError(404, 'paid-marketplace-product-not-found')
+      if (product.entry.publisher?.accountId === account.accountId) {
+        throw new RoomProtocolError(409, 'marketplace-product-owned-by-account')
+      }
+      if (activeMarketplaceEntitlement(current.entitlements, {
+        accountId: account.accountId,
+        productId,
+        version,
+      }, now)) throw new RoomProtocolError(409, 'marketplace-product-already-owned')
+      const livePendingOrders = current.orders.filter((candidate) =>
+        candidate.accountId === account.accountId &&
+        marketplaceOrderIsPayable(candidate, now))
+      if (livePendingOrders.length >= 20) {
+        throw new RoomProtocolError(429, 'marketplace-pending-order-limit')
+      }
+      const pricing = product.version.marketplace.pricing
+      const amounts = marketplaceOrderAmounts(
+        pricing.amountMinor,
+        pricing.creatorShareBps,
+        pricing.platformShareBps,
+      )
+      if (!amounts) throw new RoomProtocolError(409, 'invalid-marketplace-settlement')
+      created = true
+      return {
+        ...current,
+        orders: [...current.orders, {
+          schemaVersion: MARKETPLACE_ORDER_SCHEMA_VERSION,
+          orderId: randomUUID(),
+          accountId: account.accountId,
+          productId,
+          version,
+          publisherAccountId: product.entry.publisher.accountId,
+          integrity: product.version.integrity,
+          currency: pricing.currency,
+          ...amounts,
+          creatorShareBps: pricing.creatorShareBps,
+          platformShareBps: pricing.platformShareBps,
+          settlementBasis: pricing.settlementBasis,
+          status: 'pending',
+          provider: productionSecurityEnabled() ? 'external' : 'sandbox',
+          idempotencyKey,
+          createdAt: now,
+          expiresAt: now + MARKETPLACE_ORDER_TTL_MS,
+        }],
+      }
+    })
+    const order = registry.orders.find((candidate) =>
+      candidate.accountId === account.accountId && candidate.idempotencyKey === idempotencyKey)
+    writeJson(res, created ? 201 : 200, {
+      order: marketplaceOrderPublicRecord(order),
+      sandboxAvailable: !productionSecurityEnabled(),
+      checkoutAvailable: Boolean(marketplaceCheckoutAdapter()),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/orders' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      orders: registry.orders
+        .filter((order) => order.accountId === account.accountId)
+        .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+        .map(marketplaceOrderPublicRecord),
+    })
+    return true
+  }
+
+  const orderMatch = parsed.pathname.match(/^\/api\/marketplace\/orders\/([^/]+)$/)
+  if (orderMatch && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(orderMatch[1] ?? '')
+    const registry = await readPluginRegistry(ctx)
+    const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+    if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+    if (order.accountId !== account.accountId && !pluginRegistryAdministrator(account)) {
+      throw new RoomProtocolError(403, 'forbidden')
+    }
+    writeJson(res, 200, { order: marketplaceOrderPublicRecord(order) })
+    return true
+  }
+
+  const checkoutMatch = parsed.pathname.match(
+    /^\/api\/marketplace\/orders\/([^/]+)\/checkout$/,
+  )
+  if (checkoutMatch && req.method === 'POST') {
+    if (!marketplacePaidPublishingEnabled()) {
+      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
+    }
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(checkoutMatch[1] ?? '')
+    const current = await readPluginRegistry(ctx)
+    const order = current.orders.find((candidate) => candidate.orderId === orderId)
+    if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+    if (order.accountId !== account.accountId) throw new RoomProtocolError(403, 'forbidden')
+    if (!marketplaceOrderIsPayable(order)) {
+      throw new RoomProtocolError(409, 'marketplace-order-not-payable')
+    }
+    if (order.checkoutUrl && order.providerOrderId) {
+      writeJson(res, 200, {
+        order: marketplaceOrderPublicRecord(order),
+        checkout: {
+          provider: order.provider,
+          providerOrderId: order.providerOrderId,
+          checkoutUrl: order.checkoutUrl,
+          expiresAt: order.checkoutExpiresAt ?? order.expiresAt,
+        },
+      })
+      return true
+    }
+    const checkout = await createMarketplaceCheckout(order)
+    const registry = await mutatePluginRegistry(ctx, (latest) => {
+      const latestOrder = latest.orders.find((candidate) => candidate.orderId === orderId)
+      if (!latestOrder || latestOrder.accountId !== account.accountId) {
+        throw new RoomProtocolError(409, 'marketplace-order-changed')
+      }
+      if (!marketplaceOrderIsPayable(latestOrder)) {
+        throw new RoomProtocolError(409, 'marketplace-order-not-payable')
+      }
+      if (latestOrder.checkoutUrl && latestOrder.providerOrderId) return latest
+      return {
+        ...latest,
+        orders: latest.orders.map((candidate) => candidate.orderId === orderId
+          ? {
+              ...candidate,
+              provider: checkout.provider,
+              providerOrderId: checkout.providerOrderId,
+              checkoutUrl: checkout.checkoutUrl,
+              checkoutExpiresAt: checkout.expiresAt,
+              updatedAt: Date.now(),
+            }
+          : candidate),
+      }
+    })
+    const updatedOrder = registry.orders.find((candidate) => candidate.orderId === orderId)
+    writeJson(res, 201, {
+      order: marketplaceOrderPublicRecord(updatedOrder),
+      checkout: {
+        provider: updatedOrder.provider,
+        providerOrderId: updatedOrder.providerOrderId,
+        checkoutUrl: updatedOrder.checkoutUrl,
+        expiresAt: updatedOrder.checkoutExpiresAt ?? updatedOrder.expiresAt,
+      },
+    })
+    return true
+  }
+
+  const sandboxPaymentMatch = parsed.pathname.match(
+    /^\/api\/marketplace\/orders\/([^/]+)\/sandbox-payment$/,
+  )
+  if (sandboxPaymentMatch && req.method === 'POST') {
+    if (productionSecurityEnabled()) throw new RoomProtocolError(404, 'not-found')
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(sandboxPaymentMatch[1] ?? '')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const order = current.orders.find((candidate) => candidate.orderId === orderId)
+      if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+      if (order.accountId !== account.accountId && !pluginRegistryAdministrator(account)) {
+        throw new RoomProtocolError(403, 'forbidden')
+      }
+      return fulfillMarketplaceOrder(current, orderId, {
+        provider: 'sandbox',
+        providerOrderId: `sandbox:${orderId}`,
+        amountMinor: order.amountMinor,
+        currency: order.currency,
+        now,
+      })
+    })
+    const order = registry.orders.find((candidate) => candidate.orderId === orderId)
+    writeJson(res, 200, { order: marketplaceOrderPublicRecord(order) })
+    return true
+  }
+
+  const cancelMatch = parsed.pathname.match(/^\/api\/marketplace\/orders\/([^/]+)\/cancel$/)
+  if (cancelMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const orderId = decodeURIComponent(cancelMatch[1] ?? '')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const order = current.orders.find((candidate) => candidate.orderId === orderId)
+      if (!order) throw new RoomProtocolError(404, 'marketplace-order-not-found')
+      if (order.accountId !== account.accountId) throw new RoomProtocolError(403, 'forbidden')
+      if (order.status === 'canceled') return current
+      if (order.status !== 'pending') throw new RoomProtocolError(409, 'marketplace-order-not-cancelable')
+      return {
+        ...current,
+        orders: current.orders.map((candidate) => candidate.orderId === orderId
+          ? { ...candidate, status: 'canceled', updatedAt: now }
+          : candidate),
+      }
+    })
+    writeJson(res, 200, {
+      order: marketplaceOrderPublicRecord(
+        registry.orders.find((candidate) => candidate.orderId === orderId),
+      ),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/payments/webhook' && req.method === 'POST') {
+    const bytes = await readBody(req, 128 * 1024)
+    const secret = String(process.env.STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET ?? '')
+    if (!marketplacePaymentWebhookValid(
+      bytes,
+      req.headers['x-stars-payment-signature'],
+      secret,
+    )) throw new RoomProtocolError(401, 'invalid-payment-webhook-signature')
+    let payload
+    try {
+      payload = JSON.parse(bytes.toString('utf8'))
+    } catch {
+      throw new RoomProtocolError(400, 'invalid-json')
+    }
+    const provider = normalizedLabel(payload?.provider, 40)
+    const providerEventId = normalizedLabel(payload?.providerEventId, 160)
+    const providerOrderId = normalizedLabel(payload?.providerOrderId, 160)
+    const orderId = normalizedLabel(payload?.orderId, 160)
+    const status = normalizedLabel(payload?.status, 24)
+    const currency = normalizedLabel(payload?.currency, 3)
+    const amountMinor = Number(payload?.amountMinor)
+    const netReceiptsMinor = payload?.netReceiptsMinor == null
+      ? amountMinor
+      : Number(payload.netReceiptsMinor)
+    if (
+      !provider ||
+      !providerEventId ||
+      !providerOrderId ||
+      !orderId ||
+      !['paid', 'refunded', 'disputed'].includes(status) ||
+      !['CNY', 'USD'].includes(currency) ||
+      !Number.isSafeInteger(amountMinor) ||
+      !Number.isSafeInteger(netReceiptsMinor)
+    ) throw new RoomProtocolError(400, 'invalid-payment-webhook')
+    const now = Date.now()
+    await mutatePluginRegistry(ctx, (current) => {
+      if (current.paymentEvents.some((event) =>
+        event.provider === provider && event.providerEventId === providerEventId)) return current
+      const updated = status === 'paid'
+        ? fulfillMarketplaceOrder(current, orderId, {
+            provider,
+            providerOrderId,
+            amountMinor,
+            netReceiptsMinor,
+            currency,
+            now,
+            sourceEventId: providerEventId,
+          })
+        : updateMarketplaceOrderAfterPaymentReversal(current, orderId, {
+            provider,
+            providerOrderId,
+            status,
+            amountMinor,
+            currency,
+            now,
+            sourceEventId: providerEventId,
+          })
+      return {
+        ...updated,
+        paymentEvents: [...updated.paymentEvents, {
+          provider,
+          providerEventId,
+          providerOrderId,
+          orderId,
+          status,
+          receivedAt: now,
+        }],
+      }
+    })
+    writeJson(res, 200, { ok: true })
+    return true
+  }
+
+  throw new RoomProtocolError(405, 'method-not-allowed')
+}
+
 function pluginRegistryPublicVersion(version) {
+  const marketplace = plainObject(version.marketplace)
+    ? {
+        ...version.marketplace,
+        ...(plainObject(version.marketplace.rightsManifest)
+          ? {
+              rightsManifest: {
+                ...version.marketplace.rightsManifest,
+                assets: (Array.isArray(version.marketplace.rightsManifest.assets)
+                  ? version.marketplace.rightsManifest.assets
+                  : []).map(({ evidenceReference: _privateEvidence, ...asset }) => asset),
+              },
+            }
+          : {}),
+      }
+    : undefined
   return {
     version: version.version,
     integrity: version.integrity,
@@ -4743,9 +6367,14 @@ function pluginRegistryPublicVersion(version) {
     fileName: version.fileName,
     sizeBytes: version.sizeBytes,
     changelog: version.changelog,
+    ...(version.storeDescription ? { storeDescription: version.storeDescription } : {}),
     visibility: version.visibility,
     status: version.status,
     submittedAt: version.submittedAt,
+    ...(marketplace ? { marketplace } : {}),
+    ...(plainObject(version.automatedAnalysis) ? { automatedAnalysis: version.automatedAnalysis } : {}),
+    ...(plainObject(version.productManifest) ? { productManifest: version.productManifest } : {}),
+    ...(plainObject(version.productSignature) ? { productSignature: version.productSignature } : {}),
     ...(version.publishedAt ? { publishedAt: version.publishedAt } : {}),
     ...(version.moderationNote ? { moderationNote: version.moderationNote } : {}),
   }
@@ -4793,8 +6422,7 @@ function validateDeclarativePackageForPublication(bytes, plugin) {
     parsed.manifest.license !== plugin.license ||
     parsed.manifest.apiVersion !== 2 ||
     parsed.manifest.rulesetId !== DND5E_2014_RULESET_ID ||
-    parsed.manifest.distributionPolicy === 'local-only' ||
-    parsed.manifest.distributionPolicy === 'account-entitled'
+    parsed.manifest.distributionPolicy !== 'room-distributable'
   ) throw new RoomProtocolError(400, 'invalid-public-plugin-package')
   if (!Array.isArray(parsed.subclasses) || !plainObject(parsed.legacy)) {
     throw new RoomProtocolError(400, 'invalid-public-plugin-package')
@@ -5034,6 +6662,7 @@ function accountPublicProfile(account) {
   return {
     accountId: account.accountId,
     displayName: account.displayName,
+    ...(typeof account.avatar === 'string' && account.avatar ? { avatar: account.avatar } : {}),
     ...(account.auth?.username ? { username: account.auth.username } : {}),
     ...(account.auth?.channel && account.auth?.destination
       ? {
@@ -5121,6 +6750,7 @@ function accountSessionResponse(account, token) {
   return {
     accountId: account.accountId,
     displayName: account.displayName,
+    ...(typeof account.avatar === 'string' && account.avatar ? { avatar: account.avatar } : {}),
     ...(account.auth?.username ? { username: account.auth.username } : {}),
     ...(account.auth?.channel && account.auth?.destination
       ? {
@@ -5133,15 +6763,21 @@ function accountSessionResponse(account, token) {
   }
 }
 
+function normalizeAccountAvatar(value) {
+  if (value == null || value === '') return ''
+  if (typeof value !== 'string' || value.length > 400_000) return null
+  return /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value) ? value : null
+}
+
 async function readAccount(ctx, accountId) {
   const normalized = normalizeAccountId(accountId)
   if (normalized !== accountId || normalized.length !== 12) throw new RoomProtocolError(401, 'invalid-account-session')
-  const store = await accountSqliteStore(ctx)
+  const store = await accountPersistentStore(ctx)
   if (store) {
-    const persisted = store.readAccount(normalized)
+    const persisted = await store.readAccount(normalized)
     if (persisted) {
       if (!plainObject(persisted) || persisted.accountId !== normalized) {
-        throw new Error('invalid SQLite account record')
+        throw new Error('invalid persistent account record')
       }
       return persisted
     }
@@ -5149,10 +6785,10 @@ async function readAccount(ctx, accountId) {
   try {
     const account = JSON.parse(await readFile(accountFile(ctx, normalized), 'utf8'))
     if (!plainObject(account) || account.accountId !== normalized) throw new Error('invalid account record')
-    // SQLite rollout is deliberately lazy-compatible: an account not present in
+    // Persistent-storage rollout is deliberately lazy-compatible: an account not present in
     // the new index is imported from the untouched JSON rollback source once.
     if (store) {
-      store.writeAccount(account, { sourcePath: accountFile(ctx, normalized) })
+      await store.writeAccount(account, { sourcePath: accountFile(ctx, normalized) })
     }
     return account
   } catch (error) {
@@ -5182,8 +6818,8 @@ async function mutateAccount(ctx, accountId, updater) {
   const filePath = accountFile(ctx, accountId)
   return withWriteLock(filePath, async () => {
     let account
-    const store = await accountSqliteStore(ctx)
-    if (store) account = store.readAccount(accountId)
+    const store = await accountPersistentStore(ctx)
+    if (store) account = await store.readAccount(accountId)
     if (!account) {
       try {
         account = JSON.parse(await readFile(filePath, 'utf8'))
@@ -5194,7 +6830,7 @@ async function mutateAccount(ctx, accountId, updater) {
     }
     const next = await updater(account)
     if (!plainObject(next) || next.accountId !== accountId) throw new RoomProtocolError(400, 'account-operation-failed')
-    if (store) store.writeAccount(next)
+    if (store) await store.writeAccount(next)
     await atomicRename(filePath, JSON.stringify(next))
     return next
   })
@@ -5225,7 +6861,7 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
     try {
       await writeFile(accountFile(ctx, accountId), JSON.stringify(account), { flag: 'wx' })
       try {
-        await syncAccountToSqlite(ctx, account, { createOnly: true })
+        await syncAccountToPersistentStore(ctx, account, { createOnly: true })
       } catch (error) {
         await rm(accountFile(ctx, accountId), { force: true })
         if (error?.code === 'ACCOUNT_EXISTS') continue
@@ -5240,9 +6876,9 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
 }
 
 async function readAccountIdentity(ctx, kind, key) {
-  const store = await accountSqliteStore(ctx)
+  const store = await accountPersistentStore(ctx)
   if (store) {
-    const accountId = store.findIdentity(kind, accountIdentityDigest(kind, key))
+    const accountId = await store.findIdentity(kind, accountIdentityDigest(kind, key))
     if (accountId) return accountId
   }
   try {
@@ -5407,7 +7043,7 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
       [challenge.channel, challenge.destination],
     ]
     const writtenIndexes = []
-    let sqliteCreated = false
+    let persistentCreated = false
     try {
       for (const [kind, key] of indexRecords) {
         const filePath = accountIdentityFile(ctx, kind, key)
@@ -5417,15 +7053,15 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
         })
         writtenIndexes.push(filePath)
       }
-      await syncAccountToSqlite(ctx, account, { createOnly: true })
-      sqliteCreated = accountStorageBackend(ctx) === 'sqlite'
+      await syncAccountToPersistentStore(ctx, account, { createOnly: true })
+      persistentCreated = accountStorageBackend(ctx) !== 'json'
       const consumed = { ...challenge, consumedAt: now, updatedAt: now }
       delete consumed.code
       await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify(consumed))
     } catch (error) {
-      if (sqliteCreated) {
-        const store = await accountSqliteStore(ctx).catch(() => null)
-        store?.deleteAccount(account.accountId)
+      if (persistentCreated) {
+        const store = await accountPersistentStore(ctx).catch(() => null)
+        await store?.deleteAccount(account.accountId)
       }
       await Promise.allSettled([
         rm(accountFile(ctx, account.accountId), { force: true }),
@@ -5628,7 +7264,9 @@ function normalizePluginCapabilities(value) {
 
 function normalizePluginDistributionPolicy(value) {
   if (value == null) return 'room-distributable'
-  return ['room-distributable', 'account-entitled', 'local-only'].includes(value) ? value : null
+  return ['room-distributable', 'room-ephemeral', 'account-entitled', 'local-only'].includes(value)
+    ? value
+    : null
 }
 
 function normalizePluginContentCategory(value) {
@@ -5728,6 +7366,50 @@ function roomHostedPluginFile(ctx, roomId, pluginId, hosted) {
   return roomPluginFile(ctx, roomId, pluginId)
 }
 
+function roomEphemeralPluginStoragePaths(ctx, roomId, room, onlyPluginId = null) {
+  const paths = new Set()
+  for (const collection of [room?.pluginFiles, room?.stagedPluginFiles]) {
+    if (!plainObject(collection)) continue
+    for (const [pluginId, hosted] of Object.entries(collection)) {
+      if (onlyPluginId && pluginId !== onlyPluginId) continue
+      if (hosted?.distributionPolicy !== 'room-ephemeral') continue
+      paths.add(roomHostedPluginFile(ctx, roomId, pluginId, hosted))
+    }
+  }
+  return [...paths]
+}
+
+function withoutRoomEphemeralPlugins(room) {
+  const ephemeralIds = new Set()
+  for (const collection of [room?.pluginFiles, room?.stagedPluginFiles]) {
+    if (!plainObject(collection)) continue
+    for (const [pluginId, hosted] of Object.entries(collection)) {
+      if (hosted?.distributionPolicy === 'room-ephemeral') ephemeralIds.add(pluginId)
+    }
+  }
+  if (ephemeralIds.size === 0) return room
+  const pluginFiles = { ...(room.pluginFiles ?? {}) }
+  const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
+  const pluginRuntimeState = { ...(room.pluginRuntimeState ?? {}) }
+  for (const pluginId of ephemeralIds) {
+    delete pluginFiles[pluginId]
+    delete stagedPluginFiles[pluginId]
+    delete pluginRuntimeState[pluginId]
+  }
+  return {
+    ...room,
+    requiredPlugins: (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
+      .filter((requirement) => !ephemeralIds.has(requirement.id)),
+    pluginFiles,
+    stagedPluginFiles,
+    pluginRuntimeState,
+  }
+}
+
+async function removeRoomEphemeralPluginStorage(paths) {
+  await Promise.all(paths.map((filePath) => rm(filePath, { force: true }).catch(() => {})))
+}
+
 function lobbyRoomMember(room, memberId) {
   if (room?.host?.memberId === memberId) return room.host
   return (Array.isArray(room?.players) ? room.players : []).find((player) => player.memberId === memberId)
@@ -5821,6 +7503,8 @@ function roomRulesResponse(room, member) {
         name: normalizedLabel(hosted.name, 100) || requirement.id,
         publisher: normalizedLabel(hosted.publisher, 100) || '未知发布者',
         license: normalizedLabel(hosted.license, 120) || '未声明',
+        distributionPolicy: normalizePluginDistributionPolicy(hosted.distributionPolicy) ??
+          'room-distributable',
       }
     }),
     member: roomPluginReadiness(requiredPlugins, member?.activePlugins),
@@ -5834,6 +7518,113 @@ function decodedPluginHeader(req, headerName, maxLength) {
     return normalizedLabel(decodeURIComponent(value), maxLength)
   } catch {
     throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+  }
+}
+
+function roomPluginDistributionPolicy(req) {
+  const value = req?.headers?.['x-stars-plugin-distribution-policy']
+  if (!['room-distributable', 'room-ephemeral'].includes(value)) {
+    throw new RoomProtocolError(403, 'plugin-not-room-distributable')
+  }
+  return value
+}
+
+const ROOM_RUNTIME_PROSE_KEYS = new Set([
+  'description',
+  'summary',
+  'sourceLabel',
+  'rulesText',
+  'higherLevels',
+  'materialText',
+  'reactionTrigger',
+  'text',
+  'prompt',
+  'adjudication',
+  'note',
+  'automationReasons',
+  'reasons',
+])
+
+function assertRoomRuntimeProjectionValue(value, key = '', depth = 0) {
+  if (depth > 64) throw new RoomProtocolError(400, 'invalid-room-runtime-projection')
+  if (typeof value === 'string') {
+    if (ROOM_RUNTIME_PROSE_KEYS.has(key) && value !== ROOM_RUNTIME_PROSE_PLACEHOLDER) {
+      throw new RoomProtocolError(403, 'room-runtime-prose-not-reduced')
+    }
+    if (
+      !['dataBase64', 'tokenPortrait', 'initiativePortrait'].includes(key) &&
+      (value.length > 240 || /https?:\/\//i.test(value))
+    ) throw new RoomProtocolError(403, 'room-runtime-prose-not-reduced')
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) assertRoomRuntimeProjectionValue(entry, key, depth + 1)
+    return
+  }
+  if (!plainObject(value)) return
+  for (const [childKey, entry] of Object.entries(value)) {
+    assertRoomRuntimeProjectionValue(entry, childKey, depth + 1)
+  }
+}
+
+function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy) {
+  const source = bytes.toString('utf8').trimStart()
+  if (!source.startsWith('{')) {
+    if (distributionPolicy === 'room-ephemeral') {
+      throw new RoomProtocolError(403, 'room-ephemeral-must-be-content-v2')
+    }
+    return
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+  }
+  if (!['dndstars5e-content', 'dndstars5e-declarative'].includes(parsed?.format)) {
+    if (distributionPolicy === 'room-ephemeral') {
+      throw new RoomProtocolError(403, 'room-ephemeral-must-be-content-v2')
+    }
+    return
+  }
+  if (
+    parsed?.manifest?.id !== pluginId ||
+    parsed?.manifest?.version !== version ||
+    parsed?.manifest?.distributionPolicy !== distributionPolicy
+  ) throw new RoomProtocolError(403, 'plugin-not-room-distributable')
+  if (distributionPolicy === 'room-ephemeral') {
+    if (
+      parsed.format !== 'dndstars5e-content' ||
+      parsed.schemaVersion !== 2 ||
+      parsed?.provenance?.projection !== ROOM_RUNTIME_PROJECTION ||
+      parsed?.provenance?.sourceFingerprint != null ||
+      parsed?.manifest?.description !== ROOM_RUNTIME_PROSE_PLACEHOLDER ||
+      parsed?.provenance?.sourceTitle !== ROOM_RUNTIME_PROSE_PLACEHOLDER
+    ) throw new RoomProtocolError(403, 'invalid-room-runtime-projection')
+    assertRoomRuntimeProjectionValue(parsed)
+  }
+}
+
+function assertAccountPluginPackagePolicy(bytes, pluginId, version, distributionPolicy) {
+  const source = bytes.toString('utf8').trimStart()
+  if (!source.startsWith('{')) return
+  let parsed
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-account-plugin')
+  }
+  if (!['dndstars5e-content', 'dndstars5e-declarative'].includes(parsed?.format)) return
+  if (
+    parsed?.manifest?.id !== pluginId ||
+    parsed?.manifest?.version !== version ||
+    parsed?.manifest?.distributionPolicy !== distributionPolicy
+  ) throw new RoomProtocolError(409, 'account-plugin-metadata-mismatch')
+  if (parsed.manifest.distributionPolicy === 'local-only') {
+    throw new RoomProtocolError(409, 'plugin-local-only')
+  }
+  if (parsed.manifest.distributionPolicy === 'room-ephemeral') {
+    throw new RoomProtocolError(409, 'plugin-ephemeral-room-only')
   }
 }
 
@@ -5991,6 +7782,17 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/plugins')) return false
   if (!applyLobbyRateLimit(req, res, ctx)) return true
 
+  if (parsed.pathname === '/api/plugins/signing-key' && req.method === 'GET') {
+    const key = await marketplaceSigningKey(ctx)
+    writeJson(res, 200, {
+      schemaVersion: 1,
+      algorithm: key.algorithm,
+      keyId: key.keyId,
+      publicKeyPem: key.publicKeyPem,
+    })
+    return true
+  }
+
   if (parsed.pathname === '/api/plugins/catalog' && req.method === 'GET') {
     const query = normalizedLabel(parsed.searchParams.get('q'), 100).toLocaleLowerCase()
     const category = normalizedLabel(parsed.searchParams.get('category'), 40)
@@ -6018,7 +7820,59 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       (Array.isArray(entry.versions) ? entry.versions : [])
         .filter((version) => version.status === 'pending')
         .map((version) => ({ plugin: { id: entry.id, name: entry.name, publisher: entry.publisher }, version })))
-    writeJson(res, 200, { pending, reports: registry.reports.slice(-500).reverse() })
+    writeJson(res, 200, {
+      pending,
+      reports: registry.reports.slice(-500).reverse(),
+      creatorApplications: registry.creators
+        .filter((creator) => creator.status === 'pending')
+        .sort((left, right) => Number(left.appliedAt ?? 0) - Number(right.appliedAt ?? 0)),
+      payouts: registry.payouts
+        .filter((payout) => ['pending', 'approved'].includes(payout.status))
+        .sort((left, right) => Number(left.createdAt ?? 0) - Number(right.createdAt ?? 0))
+        .map((payout) => ({
+          ...marketplacePayoutPublicRecord(payout),
+          verifiedRecipientReference: payout.payoutDestinationReference,
+        })),
+    })
+    return true
+  }
+
+  const creatorModerationMatch = parsed.pathname.match(/^\/api\/plugins\/creators\/([^/]+)\/moderate$/)
+  if (creatorModerationMatch && req.method === 'POST') {
+    const administrator = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(administrator)) throw new RoomProtocolError(403, 'plugin-admin-required')
+    const accountId = decodeURIComponent(creatorModerationMatch[1] ?? '')
+    const account = await readAccount(ctx, accountId).catch(() => null)
+    if (!account) throw new RoomProtocolError(404, 'account-not-found')
+    const payload = await readJsonRequest(req)
+    const action = payload?.action
+    if (!['approve', 'reject', 'suspend'].includes(action)) {
+      throw new RoomProtocolError(400, 'invalid-creator-moderation')
+    }
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existing = current.creators.find((creator) => creator.accountId === accountId)
+      if (!existing) throw new RoomProtocolError(404, 'creator-application-not-found')
+      const nextCreator = {
+        ...existing,
+        displayName: account.auth?.username ?? account.displayName,
+        status: action === 'approve' ? 'verified' : action === 'reject' ? 'rejected' : 'suspended',
+        moderatedAt: now,
+        moderatedBy: administrator.accountId,
+        moderationNote: normalizedLabel(payload?.note, 2_000),
+        ...(action === 'approve' ? { verifiedAt: now } : {}),
+      }
+      return {
+        ...current,
+        creators: [...current.creators.filter((creator) => creator.accountId !== accountId), nextCreator],
+        entries: current.entries.map((entry) => entry.publisher?.accountId === accountId
+          ? { ...entry, publisher: { ...entry.publisher, creatorVerified: action === 'approve' } }
+          : entry),
+      }
+    })
+    writeJson(res, 200, {
+      creator: registry.creators.find((creator) => creator.accountId === accountId),
+    })
     return true
   }
 
@@ -6048,13 +7902,37 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       candidate.version === pluginVersion && candidate.status === 'published' &&
       ['public', 'unlisted'].includes(candidate.visibility))
     if (!entry || !version) throw new RoomProtocolError(404, 'public-plugin-not-found')
+    const paid = version.marketplace?.pricing?.kind === 'paid'
+    const account = paid ? await authenticateAccount(req, ctx, true) : null
+    if (paid) {
+      const entitlement = account
+        ? activeMarketplaceEntitlement(registry.entitlements, {
+            accountId: account.accountId,
+            productId: pluginId,
+            version: pluginVersion,
+          })
+        : null
+      const publisherOwnsProduct = account?.accountId === entry.publisher?.accountId
+      if (!entitlement && !publisherOwnsProduct) {
+        throw new RoomProtocolError(account ? 403 : 401, 'marketplace-entitlement-required')
+      }
+    }
     const bytes = await readFile(accountPluginBlobFile(ctx, version.integrity))
     const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
     if (actualIntegrity !== version.integrity) throw new RoomProtocolError(409, 'public-plugin-integrity-mismatch')
+    await mutatePluginRegistry(ctx, (current) => ({
+      ...current,
+      analyticsDaily: recordMarketplaceDailyMetric(current.analyticsDaily, {
+        metric: 'downloads',
+        productId: entry.id,
+        version: version.version,
+        publisherAccountId: entry.publisher?.accountId,
+      }),
+    }))
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(bytes.length),
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': paid ? 'private, no-store' : 'public, max-age=31536000, immutable',
       'X-Stars-Plugin-Version': version.version,
       'X-Stars-Plugin-Integrity': version.integrity,
       'X-Stars-Plugin-Filename': encodeURIComponent(version.fileName),
@@ -6066,6 +7944,162 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       'X-Stars-Plugin-Ruleset': DND5E_2014_RULESET_ID,
     })
     res.end(bytes)
+    return true
+  }
+
+  const installationMatch = parsed.pathname.match(
+    /^\/api\/plugins\/catalog\/([^/]+)\/versions\/([^/]+)\/installation$/,
+  )
+  if (installationMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const pluginId = decodeURIComponent(installationMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(installationMatch[2] ?? '')
+    const payload = await readJsonRequest(req)
+    if (typeof payload?.active !== 'boolean') {
+      throw new RoomProtocolError(400, 'invalid-marketplace-installation')
+    }
+    const now = Date.now()
+    let transition = null
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entry = current.entries.find((candidate) => candidate.id === pluginId)
+      const version = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+        candidate.version === pluginVersion &&
+        candidate.status === 'published' &&
+        ['public', 'unlisted'].includes(candidate.visibility))
+      if (!entry || !version) throw new RoomProtocolError(404, 'public-plugin-not-found')
+      if (version.marketplace?.pricing?.kind === 'paid') {
+        const entitlement = activeMarketplaceEntitlement(current.entitlements, {
+          accountId: account.accountId,
+          productId: pluginId,
+          version: pluginVersion,
+        }, now)
+        if (!entitlement && entry.publisher?.accountId !== account.accountId) {
+          throw new RoomProtocolError(403, 'marketplace-entitlement-required')
+        }
+      }
+      const updated = updateMarketplaceInstallation(current.installations, {
+        accountId: account.accountId,
+        productId: pluginId,
+        version: pluginVersion,
+        publisherAccountId: entry.publisher?.accountId,
+        active: payload.active,
+        timestamp: now,
+      })
+      transition = updated.transition
+      return {
+        ...current,
+        installations: updated.installations,
+        analyticsDaily: transition
+          ? recordMarketplaceDailyMetric(current.analyticsDaily, {
+              metric: transition === 'installed' ? 'installs' : 'uninstalls',
+              productId: pluginId,
+              version: pluginVersion,
+              publisherAccountId: entry.publisher?.accountId,
+              timestamp: now,
+            })
+          : current.analyticsDaily,
+      }
+    })
+    const installation = registry.installations.find((candidate) =>
+      candidate.accountId === account.accountId && candidate.productId === pluginId)
+    writeJson(res, 200, { installation, transition })
+    return true
+  }
+
+  const entitlementGrantMatch = parsed.pathname.match(
+    /^\/api\/plugins\/catalog\/([^/]+)\/versions\/([^/]+)\/entitlements$/,
+  )
+  if (entitlementGrantMatch && req.method === 'POST') {
+    const actor = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const administrator = pluginRegistryAdministrator(actor)
+    if (productionSecurityEnabled() && !administrator) {
+      throw new RoomProtocolError(403, 'plugin-admin-required')
+    }
+    const pluginId = decodeURIComponent(entitlementGrantMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(entitlementGrantMatch[2] ?? '')
+    const targetAccountId = administrator && normalizedLabel(payload?.accountId, 64)
+      ? normalizedLabel(payload.accountId, 64)
+      : actor.accountId
+    const target = await readAccount(ctx, targetAccountId).catch(() => null)
+    if (!target) throw new RoomProtocolError(404, 'account-not-found')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entry = current.entries.find((candidate) => candidate.id === pluginId)
+      const version = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+        candidate.version === pluginVersion && candidate.status === 'published')
+      if (!entry || !version || version.marketplace?.pricing?.kind !== 'paid') {
+        throw new RoomProtocolError(404, 'paid-marketplace-product-not-found')
+      }
+      const existing = activeMarketplaceEntitlement(current.entitlements, {
+        accountId: targetAccountId,
+        productId: pluginId,
+        version: pluginVersion,
+      }, now)
+      if (existing) return current
+      return {
+        ...current,
+        entitlements: [...current.entitlements, {
+          schemaVersion: MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
+          entitlementId: randomUUID(),
+          accountId: targetAccountId,
+          productId: pluginId,
+          version: pluginVersion,
+          licenseType: 'complimentary',
+          source: administrator ? 'admin' : 'sandbox',
+          status: 'active',
+          grantedAt: now,
+          grantedBy: actor.accountId,
+        }],
+      }
+    })
+    const entitlement = activeMarketplaceEntitlement(registry.entitlements, {
+      accountId: targetAccountId,
+      productId: pluginId,
+      version: pluginVersion,
+    }, now)
+    writeJson(res, 201, { entitlement })
+    return true
+  }
+
+  const entitlementStatusMatch = parsed.pathname.match(
+    /^\/api\/plugins\/entitlements\/([^/]+)\/status$/,
+  )
+  if (entitlementStatusMatch && req.method === 'POST') {
+    const administrator = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(administrator)) {
+      throw new RoomProtocolError(403, 'plugin-admin-required')
+    }
+    const entitlementId = decodeURIComponent(entitlementStatusMatch[1] ?? '')
+    const payload = await readJsonRequest(req)
+    const status = normalizedLabel(payload?.status, 24)
+    if (!['active', 'refunded', 'revoked', 'disputed'].includes(status)) {
+      throw new RoomProtocolError(400, 'invalid-entitlement-status')
+    }
+    const statusReason = normalizedLabel(payload?.reason, 1_000)
+    const updatedAt = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entitlement = current.entitlements.find((candidate) =>
+        candidate.entitlementId === entitlementId)
+      if (!entitlement) throw new RoomProtocolError(404, 'marketplace-entitlement-not-found')
+      return {
+        ...current,
+        entitlements: current.entitlements.map((candidate) =>
+          candidate.entitlementId === entitlementId
+            ? {
+                ...candidate,
+                status,
+                updatedAt,
+                updatedBy: administrator.accountId,
+                ...(statusReason ? { statusReason } : {}),
+              }
+            : candidate),
+      }
+    })
+    writeJson(res, 200, {
+      entitlement: registry.entitlements.find((candidate) =>
+        candidate.entitlementId === entitlementId) ?? null,
+    })
     return true
   }
 
@@ -6156,6 +8190,32 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       true,
     )
     if (!entry) throw new RoomProtocolError(404, 'public-plugin-not-found')
+    const latest = entry.versions?.[0]
+    if (latest) {
+      const ip = req.socket?.remoteAddress ?? 'local'
+      const viewer = await authenticateAccount(req, ctx, true).catch(() => null)
+      const day = new Date().toISOString().slice(0, 10)
+      const viewKey = createHash('sha256')
+        .update(`${day}:${pluginId}:${viewer?.accountId ?? ip}`)
+        .digest('base64url')
+      if (!ctx.marketplaceViewDedupe) ctx.marketplaceViewDedupe = new Map()
+      if (!ctx.marketplaceViewDedupe.has(viewKey)) {
+        ctx.marketplaceViewDedupe.set(viewKey, Date.now())
+        if (ctx.marketplaceViewDedupe.size > 100_000) {
+          const oldest = ctx.marketplaceViewDedupe.keys().next().value
+          if (oldest) ctx.marketplaceViewDedupe.delete(oldest)
+        }
+        await mutatePluginRegistry(ctx, (current) => ({
+          ...current,
+          analyticsDaily: recordMarketplaceDailyMetric(current.analyticsDaily, {
+            metric: 'views',
+            productId: entry.id,
+            version: latest.version,
+            publisherAccountId: entry.publisher?.accountId,
+          }),
+        }))
+      }
+    }
     writeJson(res, 200, { plugin: entry })
     return true
   }
@@ -6235,6 +8295,54 @@ async function handleAccountApi(req, res, parsed, ctx) {
   if (parsed.pathname === '/api/accounts/me' && req.method === 'GET') {
     const account = await authenticateAccount(req, ctx)
     writeJson(res, 200, accountPublicProfile(account))
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me' && req.method === 'PATCH') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req, 512 * 1024)
+    const displayName = normalizedLabel(payload?.displayName, 24)
+    const avatar = normalizeAccountAvatar(payload?.avatar)
+    if (!displayName) throw new RoomProtocolError(400, 'invalid-account-name')
+    if (avatar == null) throw new RoomProtocolError(400, 'invalid-account-avatar')
+    const now = Date.now()
+    const next = await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      displayName,
+      ...(avatar ? { avatar } : { avatar: undefined }),
+      updatedAt: now,
+    }))
+    writeJson(res, 200, accountPublicProfile(next))
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/password' && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const currentPassword = normalizeAccountPassword(payload?.currentPassword)
+    const newPassword = normalizeAccountPassword(payload?.newPassword)
+    if (!plainObject(account.auth) || !plainObject(account.auth.password)) {
+      throw new RoomProtocolError(409, 'registered-account-required')
+    }
+    if (!currentPassword || !secretMatches(account.auth.password, currentPassword)) {
+      throw new RoomProtocolError(401, 'invalid-account-current-password')
+    }
+    if (!newPassword) throw new RoomProtocolError(400, 'invalid-account-password')
+    const presentedToken = req.headers['x-stars-account-token']
+    const presentedHash = tokenHash(presentedToken)
+    const now = Date.now()
+    await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      auth: {
+        ...current.auth,
+        password: secretRecord(newPassword),
+      },
+      sessions: (Array.isArray(current.sessions) ? current.sessions : []).filter(
+        (session) => session?.tokenHash === presentedHash,
+      ),
+      updatedAt: now,
+    }))
+    writeJson(res, 200, { ok: true })
     return true
   }
 
@@ -6378,15 +8486,21 @@ async function handleAccountApi(req, res, parsed, ctx) {
           if (roomHostIsOnline(previousRoom, now)) {
             throw new RoomProtocolError(409, 'campaign-room-active')
           }
-          await mutateLobbyRoom(ctx, previousRoom.id, (room) => ({
-            ok: true,
-            next: {
-              ...room,
-              closedAt: now,
-              updatedAt: now,
-              host: { ...room.host, lastSeenAt: 0 },
-            },
-          }))
+          const closed = await mutateLobbyRoom(ctx, previousRoom.id, (room) => {
+            const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, previousRoom.id, room)
+            const withoutEphemeral = withoutRoomEphemeralPlugins(room)
+            return {
+              ok: true,
+              ephemeralStoragePaths,
+              next: {
+                ...withoutEphemeral,
+                closedAt: now,
+                updatedAt: now,
+                host: { ...room.host, lastSeenAt: 0 },
+              },
+            }
+          })
+          await removeRoomEphemeralPluginStorage(closed.ephemeralStoragePaths ?? [])
         }
         const roomNumber = (Array.isArray(campaign.roomHistory) ? campaign.roomHistory.length : 0) + 1
         const roomPayload = {
@@ -6494,6 +8608,64 @@ async function handleAccountApi(req, res, parsed, ctx) {
     return true
   }
 
+  if (parsed.pathname === '/api/accounts/me/creator') {
+    const account = await authenticateAccount(req, ctx)
+    if (req.method === 'GET') {
+      const registry = await readPluginRegistry(ctx)
+      const creator = registry.creators.find((candidate) => candidate.accountId === account.accountId)
+      writeJson(res, 200, { creator: marketplaceCreatorPublicRecord(account, creator) })
+      return true
+    }
+    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+    const payload = await readJsonRequest(req)
+    const countryOrRegion = normalizedLabel(payload?.countryOrRegion, 80)
+    const verificationReference = normalizedLabel(payload?.verificationReference, 200)
+    if (
+      !countryOrRegion ||
+      verificationReference.length < 6 ||
+      payload?.acceptedPolicyVersion !== MARKETPLACE_CREATOR_POLICY_VERSION ||
+      payload?.acceptedNoticeVersion !== MARKETPLACE_CREATOR_NOTICE_VERSION
+    ) throw new RoomProtocolError(400, 'invalid-creator-application')
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existing = current.creators.find((candidate) => candidate.accountId === account.accountId)
+      if (existing?.status === 'verified' || existing?.status === 'suspended') {
+        throw new RoomProtocolError(409, existing.status === 'verified'
+          ? 'creator-already-verified'
+          : 'creator-account-suspended')
+      }
+      const creator = {
+        schemaVersion: 1,
+        accountId: account.accountId,
+        displayName: account.auth?.username ?? account.displayName,
+        status: 'pending',
+        countryOrRegion,
+        verificationReference,
+        policyVersion: MARKETPLACE_CREATOR_POLICY_VERSION,
+        noticeVersion: MARKETPLACE_CREATOR_NOTICE_VERSION,
+        appliedAt: now,
+      }
+      return {
+        ...current,
+        creators: [...current.creators.filter((candidate) => candidate.accountId !== account.accountId), creator],
+      }
+    })
+    const creator = registry.creators.find((candidate) => candidate.accountId === account.accountId)
+    writeJson(res, 202, { creator: marketplaceCreatorPublicRecord(account, creator) })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/entitlements' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      entitlements: registry.entitlements
+        .filter((entitlement) => entitlement.accountId === account.accountId)
+        .sort((left, right) => Number(right.grantedAt ?? 0) - Number(left.grantedAt ?? 0)),
+    })
+    return true
+  }
+
   const accountPluginPublicationMatch = parsed.pathname.match(
     /^\/api\/accounts\/me\/plugins\/([^/]+)\/versions\/([^/]+)\/publication$/,
   )
@@ -6533,13 +8705,52 @@ async function handleAccountApi(req, res, parsed, ctx) {
       throw new RoomProtocolError(409, 'plugin-not-publicly-distributable')
     }
     const bytes = await readFile(accountPluginBlobFile(ctx, plugin.integrity))
-    validateDeclarativePackageForPublication(bytes, plugin)
+    const parsedPackage = validateDeclarativePackageForPublication(bytes, plugin)
+    const marketplaceResult = normalizeMarketplacePublication(payload, { allowLegacyFree: true })
+    if (!marketplaceResult.ok) throw new RoomProtocolError(400, marketplaceResult.error)
+    const creatorRegistry = await readPluginRegistry(ctx)
+    const creator = creatorRegistry.creators.find((candidate) => candidate.accountId === account.accountId)
+    if (marketplaceResult.value.pricing.kind === 'paid' && !marketplacePaidPublishingEnabled()) {
+      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
+    }
+    if (marketplaceResult.value.pricing.kind === 'paid' && creator?.status !== 'verified') {
+      throw new RoomProtocolError(403, 'verified-creator-required')
+    }
+    const automatedAnalysis = analyzeMarketplaceDeclarativePackage(parsedPackage)
+    if (automatedAnalysis.riskLevel === 'blocked') {
+      throw new RoomProtocolError(400, 'marketplace-automated-analysis-blocked')
+    }
     const changelog = normalizedLabel(payload?.changelog, 4_000)
+    const storeDescription = normalizedLabel(payload?.storeDescription, 20_000)
+    if (payload?.commerce && storeDescription.length < 20) {
+      throw new RoomProtocolError(400, 'marketplace-store-description-required')
+    }
     const tags = Array.isArray(payload?.tags)
       ? [...new Set(payload.tags.map((tag) => normalizedLabel(tag, 32)).filter(Boolean))].slice(0, 12)
       : []
+    const productManifest = {
+      schemaVersion: MARKETPLACE_PRODUCT_MANIFEST_SCHEMA_VERSION,
+      productId: plugin.id,
+      listingId: plugin.id,
+      version: plugin.version,
+      publisherAccountId: account.accountId,
+      integrity: plugin.integrity,
+      rulesetId: plugin.rulesetId,
+      contentCategory: plugin.contentCategory,
+      pricing: {
+        kind: marketplaceResult.value.pricing.kind,
+        currency: marketplaceResult.value.pricing.currency,
+        amountMinor: marketplaceResult.value.pricing.amountMinor,
+      },
+      issuedAt: now,
+    }
+    const productSignature = await signMarketplaceProduct(ctx, productManifest)
     const status = pluginCatalogReviewRequired() ? 'pending' : 'published'
     const registry = await mutatePluginRegistry(ctx, (current) => {
+      const currentCreator = current.creators.find((candidate) => candidate.accountId === account.accountId)
+      if (marketplaceResult.value.pricing.kind === 'paid' && currentCreator?.status !== 'verified') {
+        throw new RoomProtocolError(403, 'verified-creator-required')
+      }
       const existing = current.entries.find((entry) => entry.id === pluginId)
       if (existing && existing.publisher?.accountId !== account.accountId) {
         throw new RoomProtocolError(409, 'plugin-id-owned-by-other-publisher')
@@ -6549,6 +8760,11 @@ async function handleAccountApi(req, res, parsed, ctx) {
         visibility,
         status,
         changelog,
+        storeDescription: storeDescription || plugin.description || '',
+        marketplace: marketplaceResult.value,
+        automatedAnalysis,
+        productManifest,
+        productSignature,
         submittedAt: now,
         ...(status === 'published' ? { publishedAt: now } : {}),
       }
@@ -6560,6 +8776,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
         publisher: {
           accountId: account.accountId,
           displayName: account.auth?.username ?? account.displayName,
+          creatorVerified: currentCreator?.status === 'verified',
         },
         contentCategory: plugin.contentCategory,
         tags,
@@ -6598,17 +8815,44 @@ async function handleAccountApi(req, res, parsed, ctx) {
       candidate.id === pluginId && candidate.version === pluginVersion)
 
     if (req.method === 'PUT') {
+      const uploadMetadata = decodedPluginMetadataHeader(req)
+      const uploadDistributionPolicy = normalizePluginDistributionPolicy(uploadMetadata.distributionPolicy)
+      if (uploadDistributionPolicy === 'local-only') {
+        throw new RoomProtocolError(409, 'plugin-local-only')
+      }
+      if (uploadDistributionPolicy === 'room-ephemeral') {
+        throw new RoomProtocolError(409, 'plugin-ephemeral-room-only')
+      }
       const bytes = await readBody(req, STATE_MAX_BYTES)
       if (bytes.length < 1) throw new RoomProtocolError(400, 'account-plugin-file-empty')
+      assertAccountPluginPackagePolicy(
+        bytes,
+        pluginId,
+        pluginVersion,
+        uploadDistributionPolicy ?? 'room-distributable',
+      )
       const now = Date.now()
       const record = accountPluginVersionFromUpload(req, pluginId, pluginVersion, bytes.length, now)
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== record.integrity) {
         throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
       }
+      const marketplaceProduct = await assertMarketplacePackageEntitlement(
+        ctx,
+        account.accountId,
+        record.integrity,
+      )
       if (current) {
         if (current.integrity !== record.integrity) {
           throw new RoomProtocolError(409, 'account-plugin-version-conflict')
+        }
+        if (marketplaceProduct) {
+          await syncMarketplaceAccountInstallation(ctx, {
+            accountId: account.accountId,
+            integrity: record.integrity,
+            active: true,
+            timestamp: now,
+          })
         }
         writeJson(res, 200, current)
         return true
@@ -6653,6 +8897,14 @@ async function handleAccountApi(req, res, parsed, ctx) {
           updatedAt: now,
         }
       })
+      if (marketplaceProduct) {
+        await syncMarketplaceAccountInstallation(ctx, {
+          accountId: account.accountId,
+          integrity: record.integrity,
+          active: true,
+          timestamp: now,
+        })
+      }
       writeJson(res, 201, record)
       return true
     }
@@ -6707,6 +8959,11 @@ async function handleAccountApi(req, res, parsed, ctx) {
           requirement?.integrity === current.integrity))
       if (usedByCharacter) throw new RoomProtocolError(409, 'account-plugin-in-use')
       const registry = await readPluginRegistry(ctx)
+      const marketplaceProduct = registry.entries.flatMap((entry) =>
+        (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
+        .find(({ version }) =>
+          version.integrity === current.integrity &&
+          version.status === 'published')
       const usedByPublication = registry.entries.some((entry) =>
         entry.publisher?.accountId === account.accountId &&
         entry.id === current.id &&
@@ -6722,6 +8979,23 @@ async function handleAccountApi(req, res, parsed, ctx) {
           candidate.id !== pluginId || candidate.version !== pluginVersion),
         updatedAt: now,
       }))
+      if (marketplaceProduct) {
+        const remainingMarketplaceVersion = currentVersions
+          .filter((candidate) =>
+            candidate.id !== pluginId || candidate.version !== pluginVersion)
+          .find((candidate) =>
+            registry.entries.some((entry) =>
+              entry.id === marketplaceProduct.entry.id &&
+              (Array.isArray(entry.versions) ? entry.versions : []).some((version) =>
+                version.integrity === candidate.integrity &&
+                version.status === 'published')))
+        await syncMarketplaceAccountInstallation(ctx, {
+          accountId: account.accountId,
+          integrity: remainingMarketplaceVersion?.integrity ?? current.integrity,
+          active: Boolean(remainingMarketplaceVersion),
+          timestamp: now,
+        })
+      }
       writeJson(res, 200, { ok: true })
       return true
     }
@@ -6904,6 +9178,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
       const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
       const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+      const distributionPolicy = roomPluginDistributionPolicy(req)
       if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
       let fileName = `${pluginId}.dndstars5e`
       try {
@@ -6919,15 +9194,24 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         stateSchemaVersion,
       }])?.[0]
       if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      await mutateLobbyRoom(ctx, roomId, (room) => {
+      const authorizedStageRoom = await mutateLobbyRoom(ctx, roomId, (room) => {
         if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
         return { ok: true }
       })
-      const bytes = await readBody(req, STATE_MAX_BYTES)
+      const bytes = await readBody(
+        req,
+        distributionPolicy === 'room-ephemeral' ? ROOM_EPHEMERAL_PLUGIN_MAX_BYTES : STATE_MAX_BYTES,
+      )
       if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
+      assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy)
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      await assertMarketplacePackageEntitlement(
+        ctx,
+        authorizedStageRoom.room.host?.accountId,
+        requirement.integrity,
+      )
       await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
       const storagePath = roomPluginVersionFile(ctx, roomId, pluginId, requirement.integrity)
       await withWriteLock(storagePath, () => atomicRename(storagePath, bytes))
@@ -6947,6 +9231,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
                 name: pluginName,
                 publisher,
                 license,
+                distributionPolicy,
                 fileName,
                 storageFile: path.basename(storagePath),
                 size: bytes.length,
@@ -7091,6 +9376,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         'X-Stars-Plugin-Name': encodeURIComponent(result.hosted.name ?? pluginId),
         'X-Stars-Plugin-Publisher': encodeURIComponent(result.hosted.publisher ?? '未知发布者'),
         'X-Stars-Plugin-License': encodeURIComponent(result.hosted.license ?? '未声明'),
+        'X-Stars-Plugin-Distribution-Policy': result.hosted.distributionPolicy ?? 'room-distributable',
       })
       res.end(bytes)
       return true
@@ -7110,6 +9396,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
       const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
       const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+      const distributionPolicy = roomPluginDistributionPolicy(req)
       if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
       let fileName = `${pluginId}.dndstars5e`
       try {
@@ -7125,15 +9412,24 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         stateSchemaVersion: Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1),
       }])?.[0]
       if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      await mutateLobbyRoom(ctx, roomId, (room) => {
+      const authorizedLegacyRoom = await mutateLobbyRoom(ctx, roomId, (room) => {
         if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
         return { ok: true, member: room.host }
       })
-      const bytes = await readBody(req, STATE_MAX_BYTES)
+      const bytes = await readBody(
+        req,
+        distributionPolicy === 'room-ephemeral' ? ROOM_EPHEMERAL_PLUGIN_MAX_BYTES : STATE_MAX_BYTES,
+      )
       if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
+      assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy)
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      await assertMarketplacePackageEntitlement(
+        ctx,
+        authorizedLegacyRoom.room.host?.accountId,
+        requirement.integrity,
+      )
       await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
       await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
       await withWriteLock(roomPluginFile(ctx, roomId, pluginId), () =>
@@ -7159,6 +9455,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
                 name: pluginName,
                 publisher,
                 license,
+                distributionPolicy,
                 fileName,
                 size: bytes.length,
                 uploadedAt: now,
@@ -7186,25 +9483,31 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       const result = await mutateLobbyRoom(ctx, roomId, (room) => {
         if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room, pluginId)
         const pluginFiles = { ...(room.pluginFiles ?? {}) }
         delete pluginFiles[pluginId]
         const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
         delete stagedPluginFiles[pluginId]
+        const pluginRuntimeState = { ...(room.pluginRuntimeState ?? {}) }
+        delete pluginRuntimeState[pluginId]
         return {
           ok: true,
           member: room.host,
+          ephemeralStoragePaths,
           next: {
             ...room,
             requiredPlugins: (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
               .filter((plugin) => plugin.id !== pluginId),
             pluginFiles,
             stagedPluginFiles,
+            pluginRuntimeState,
             rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
             rulesUpdatedAt: now,
             updatedAt: now,
           },
         }
       })
+      await removeRoomEphemeralPluginStorage(result.ephemeralStoragePaths ?? [])
       writeJson(res, 200, roomRulesResponse(result.room, result.member))
       return true
     }
@@ -7511,13 +9814,21 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     return true
   }
 
-  await mutateLobbyRoom(ctx, roomId, (room) => {
+  const leaveResult = await mutateLobbyRoom(ctx, roomId, (room) => {
     const now = Date.now()
     if (room.host?.memberId === memberId) {
       if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
+      const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room)
+      const withoutEphemeral = withoutRoomEphemeralPlugins(room)
       return {
         ok: true,
-        next: { ...room, closedAt: now, updatedAt: now, host: { ...room.host, lastSeenAt: 0 } },
+        ephemeralStoragePaths,
+        next: {
+          ...withoutEphemeral,
+          closedAt: now,
+          updatedAt: now,
+          host: { ...room.host, lastSeenAt: 0 },
+        },
       }
     }
     const players = Array.isArray(room.players) ? room.players : []
@@ -7539,6 +9850,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       },
     }
   })
+  await removeRoomEphemeralPluginStorage(leaveResult.ephemeralStoragePaths ?? [])
   writeJson(res, 200, { ok: true })
   return true
 }
@@ -7551,9 +9863,13 @@ function addEventClient(ctx, channel, res, viewer) {
   ctx.eventClients.set(storageKey, clients)
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-store',
+    // no-transform + X-Accel-Buffering keep room invalidations streaming through
+    // reverse proxies instead of being released in a delayed batch.
+    'Cache-Control': 'no-store, no-transform',
     Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   })
+  res.flushHeaders?.()
   res.write(`event: ready\ndata: ${JSON.stringify({
     channel,
     streamId: ctx.serverInstanceId ?? 'legacy-stream',
@@ -7565,7 +9881,16 @@ function addEventClient(ctx, channel, res, viewer) {
     const projected = projectEventPayloadForViewer(channel, payload, viewer)
     if (projected !== undefined) res.write(`event: message\ndata: ${JSON.stringify(projected)}\n\n`)
   }
+  const heartbeat = setInterval(() => {
+    if (res.destroyed || res.writableEnded) return
+    res.write(`: heartbeat ${Date.now()}\n\n`)
+  }, 15_000)
+  heartbeat.unref?.()
+  let removed = false
   return () => {
+    if (removed) return
+    removed = true
+    clearInterval(heartbeat)
     delete res._starsEventViewer
     clients.delete(res)
     if (clients.size === 0) ctx.eventClients.delete(storageKey)
@@ -7693,30 +10018,23 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 
-  if (parsed.pathname === '/api/meta' && req.method === 'GET') {
-    writeJson(res, 200, {
-      service: 'dndstars-5e-shared',
-      rulesetId: DND5E_2014_RULESET_ID,
-      protocolVersion: SHARED_PROTOCOL_VERSION,
-      minimumClientProtocol: SHARED_MIN_CLIENT_PROTOCOL,
-      buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
-      startedAt: ctx.serverStartedAt ?? PROCESS_STARTED_AT,
-    })
-    return true
-  }
-
-  if (parsed.pathname === '/api/healthz' && req.method === 'GET') {
-    writeJson(res, 200, {
-      status: 'ok',
-      service: 'dndstars-5e-shared',
-      protocolVersion: SHARED_PROTOCOL_VERSION,
-      buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
-      uptimeMs: Math.max(0, Date.now() - (ctx.serverStartedAt ?? PROCESS_STARTED_AT)),
-    })
+  const publicSystemRoute = sharedPublicSystemRoute({
+    pathname: parsed.pathname,
+    method: req.method,
+    rulesetId: DND5E_2014_RULESET_ID,
+    protocolVersion: SHARED_PROTOCOL_VERSION,
+    minimumClientProtocol: SHARED_MIN_CLIENT_PROTOCOL,
+    buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
+    startedAt: ctx.serverStartedAt ?? PROCESS_STARTED_AT,
+    now: Date.now(),
+  })
+  if (publicSystemRoute) {
+    writeJson(res, publicSystemRoute.status, publicSystemRoute.body)
     return true
   }
 
   try {
+    if (await handleMarketplaceCommerceApi(req, res, parsed, ctx)) return true
     if (await handlePluginCatalogApi(req, res, parsed, ctx)) return true
     if (await handleAccountApi(req, res, parsed, ctx)) return true
     if (await handleRoomLobbyApi(req, res, parsed, ctx)) return true
@@ -7843,8 +10161,65 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   try {
     if (await handleCampaignApi(req, res, parsed, ctx)) return true
 
-    if (parsed.pathname === '/api/time' && req.method === 'GET') {
-      writeJson(res, 200, { serverNow: Date.now() })
+    const authenticatedSystemRoute = sharedAuthenticatedSystemRoute({
+      pathname: parsed.pathname,
+      method: req.method,
+      now: Date.now(),
+    })
+    if (authenticatedSystemRoute) {
+      writeJson(res, authenticatedSystemRoute.status, authenticatedSystemRoute.body)
+      return true
+    }
+
+    if (parsed.pathname === '/api/dm/undo') {
+      if (!authenticatedRoomMember || ctx.accessRole !== 'dm') {
+        writeJson(res, 403, { error: 'dm-authority-required' })
+        return true
+      }
+      if (req.method === 'GET') {
+        const journal = await readDmUndoJournal(ctx)
+        writeJson(res, 200, {
+          schemaVersion: DM_UNDO_SCHEMA_VERSION,
+          transactions: journal.transactions
+            .slice(-30)
+            .reverse()
+            .map(dmUndoPublicTransaction),
+        })
+        return true
+      }
+      if (req.method === 'POST') {
+        const payload = await readJsonRequest(req)
+        const requestedTransactionId = payload?.transactionId == null
+          ? ''
+          : normalizedLabel(payload.transactionId, 160)
+        if (
+          payload?.transactionId != null &&
+          (!requestedTransactionId || !/^[a-zA-Z0-9:_-]+$/.test(requestedTransactionId))
+        ) {
+          writeJson(res, 400, { error: 'invalid-dm-undo-transaction' })
+          return true
+        }
+        const result = await applyDmAuthoritativeUndo(
+          ctx,
+          requestedTransactionId,
+          authenticatedRoomMember.memberId,
+        )
+        const now = Date.now()
+        for (const restored of result.restored) {
+          publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `dm-undo:${result.transaction.transactionId}:${restored.resource}:${now}`,
+            name: restored.resource,
+            updatedAt: now,
+          })
+        }
+        writeJson(res, 200, {
+          ok: true,
+          transaction: dmUndoPublicTransaction(result.transaction),
+          restored: result.restored,
+        })
+        return true
+      }
+      writeJson(res, 405, { error: 'method-not-allowed' })
       return true
     }
 
@@ -7916,6 +10291,37 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         res.end('{"ok":true}')
         return true
       }
+    }
+
+    if (parsed.pathname === '/api/state/combat-log/entry' && req.method === 'PATCH') {
+      await mkdir(ctx.stateRoot, { recursive: true })
+      let mutation
+      try {
+        mutation = JSON.parse((await readBody(req)).toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const now = Date.now()
+      const result = await atomicMutateJsonStateLocked(
+        path.join(ctx.stateRoot, 'combat-log.json'),
+        (state) => mutateCombatLogState(state, mutation, now),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+        id: `combat-log:${now}:${Math.random().toString(36).slice(2)}`,
+        name: 'combat-log',
+        updatedAt: now,
+      })
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(result.next))
+      return true
     }
 
     if (parsed.pathname === '/api/state/room-chat/message' && req.method === 'PATCH') {
@@ -8068,54 +10474,6 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       return true
     }
 
-    if (parsed.pathname === '/api/state/group-ability-checks/mutation' && req.method === 'PATCH') {
-      if (!authenticatedRoomMember) {
-        writeJson(res, 403, { error: 'forbidden' })
-        return true
-      }
-      await mkdir(ctx.stateRoot, { recursive: true })
-      const body = await readBody(req)
-      const mutation = JSON.parse(body.toString('utf8'))
-      const room = await readRoomForCampaign(ctx)
-      let characters = null
-      try {
-        characters = JSON.parse(await readFile(path.join(ctx.stateRoot, 'characters.json'), 'utf8'))
-      } catch {
-        // Participant validation fails closed when the authoritative character state is unavailable.
-      }
-      const now = Date.now()
-      const filePath = path.join(ctx.stateRoot, 'group-ability-checks.json')
-      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
-        mutateGroupAbilityChecksState(state, mutation, now, authenticatedRoomMember, {
-          host: room.host,
-          players: Array.isArray(room.players) ? room.players : [],
-          characters,
-        }),
-      )
-      if (!result?.ok) {
-        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
-        return true
-      }
-      if (result.changed) {
-        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
-          id: `group-ability-checks:${now}:${Math.random().toString(36).slice(2)}`,
-          name: 'group-ability-checks',
-          updatedAt: now,
-        })
-      }
-      const projected = projectGroupAbilityChecksForMember(
-        result.next,
-        authenticatedRoomMember.memberId,
-        authenticatedRoomMember.memberId === room.host?.memberId,
-      )
-      res.writeHead(200, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
-      })
-      res.end(JSON.stringify(projected))
-      return true
-    }
-
     if (parsed.pathname === '/api/state/campaign-time/mutation' && req.method === 'PATCH') {
       if (!authenticatedRoomMember) {
         writeJson(res, 403, { error: 'forbidden' })
@@ -8140,6 +10498,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'campaign-time',
+        result,
+        '调整战役时间',
+      )
       if (result.changed) {
         for (const name of ['campaign-time', 'maps', 'map-geometry']) {
           publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
@@ -8188,6 +10554,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'scene-audio-playback',
+        result,
+        '调整场景音频',
+      )
       if (result.changed) {
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `scene-audio-playback:${now}:${Math.random().toString(36).slice(2)}`,
@@ -8234,6 +10608,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         res.end(JSON.stringify({ error: result?.error ?? 'mutation-failed' }))
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'combat-interrupts',
+        result,
+        '处理战斗中断',
+      )
       if (result.changed) {
         const updatedAt = result.next.updatedAt
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
@@ -8253,6 +10635,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     const stateMatch = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)
     if (stateMatch) {
       const name = safeName(stateMatch[1])
+      if (name === 'group-ability-checks' && ['GET', 'PUT', 'PATCH'].includes(req.method ?? '')) {
+        writeJson(res, 410, { error: 'resource-retired', name })
+        return true
+      }
       const filePath = path.join(ctx.stateRoot, `${name}.json`)
       if (req.method === 'GET') {
         let sourcePath = filePath
@@ -8310,7 +10696,6 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
-        if (playerRead && name === 'group-ability-checks') value = projectGroupAbilityChecksForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'scene-orchestration') value = projectSceneOrchestrationForPlayer(value)
         if (playerRead && name === 'characters') value = projectCharactersForRoomMember(value, roomMember)
         if (playerRead && name === 'dice') value = projectDiceForRoomMember(value)
@@ -8494,6 +10879,22 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 422, { error: 'invalid-state', name, reason: writeResult.reason })
           return true
         }
+        if (
+          ctx.accessRole === 'dm' &&
+          authenticatedRoomMember &&
+          DM_UNDOABLE_STATE.has(name)
+        ) {
+          await appendDmUndoChange(ctx, {
+            transactionId: dmUndoTransactionId(req),
+            label: dmUndoLabel(req, `更新 ${name}`),
+            actorMemberId: authenticatedRoomMember.memberId,
+            resource: name,
+            before: writeResult.current,
+            beforeRevision: writeResult.currentRevision,
+            afterRevision: writeResult.revision,
+            changedAt: writeResult.writtenAt,
+          })
+        }
         const updatedAt = Number(parsedBody?.updatedAt)
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `${name}:${Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now()}:${Math.random().toString(36).slice(2)}`,
@@ -8542,6 +10943,22 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             currentRevision: deleteResult.currentRevision,
           }))
           return true
+        }
+        if (
+          ctx.accessRole === 'dm' &&
+          authenticatedRoomMember &&
+          DM_UNDOABLE_STATE.has(name)
+        ) {
+          await appendDmUndoChange(ctx, {
+            transactionId: dmUndoTransactionId(req),
+            label: dmUndoLabel(req, `删除 ${name}`),
+            actorMemberId: authenticatedRoomMember.memberId,
+            resource: name,
+            before: deleteResult.current,
+            beforeRevision: deleteResult.currentRevision,
+            afterRevision: deleteResult.revision,
+            changedAt: deleteResult.writtenAt,
+          })
         }
         await rm(path.join(ctx.legacyStateRoot, `${name}.json`), { force: true })
         const updatedAt = deleteResult.writtenAt

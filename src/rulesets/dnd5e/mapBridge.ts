@@ -4,9 +4,16 @@ import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import type { Character } from '../../types/character'
 import type { Dnd5eAttackCoverOverride } from '../../lib/sharedCombatTypes'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
-import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import {
+  cellDistance,
+  DND_FEET_PER_CELL,
+  tokenFootprintCells,
+  tokenFootprintDistanceCells,
+  tokenOccupiedCellsAt,
+} from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import {
+  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
@@ -16,12 +23,16 @@ import {
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, reconcileDnd5eSourceLinkedRelations, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eCombatEvent, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
 import { dnd5eChallengeRatingValue } from './wildShape'
 import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
+import {
+  dnd5eEffectiveHitPointMaximum,
+  normalizeDnd5eHitPointMaximumReductionLedger,
+} from './hitPointMaximumReductions'
 import { normalizeDnd5eSpecialSenses, type Dnd5eSpecialSense } from './specialSenses'
 import { getRoomRulesSnapshot } from '../../lib/roomRulesState'
 import { getRoomSession } from '../../lib/roomSession'
@@ -31,7 +42,14 @@ import {
   type Dnd5eEffectiveRulesContextV1,
 } from './effectiveRulesContext'
 import { dnd5eMonsterHasStructuredShapechange } from './monsterAdvancedAbilities'
-import { dnd5eMonsterHasMagicResistance } from './monsterGenericAbilities'
+import {
+  dnd5eMonsterHasMagicResistance,
+  dnd5eMonsterLimitedMagicImmunityRule,
+} from './monsterGenericAbilities'
+import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
+import { dnd5eWeaponDamageSource } from './equipment'
+import type { Dnd5eMoralAlignment } from './damageDefenses'
+import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -103,21 +121,77 @@ function tokenSpecialSenses(token: Token): Dnd5eSpecialSense[] {
   ].filter((sense): sense is Dnd5eSpecialSense => !!sense && sense.rangeFeet > 0)
 }
 
-function monsterDarkvisionRangeFeet(monster: Dnd5eMonsterStatBlock | undefined): number {
-  return Math.max(0, ...(monster?.senses ?? []).flatMap((sense) => {
-    const name = sense.name.trim().toLowerCase()
-    return name.includes('darkvision') || name.includes('黑暗视觉')
-      ? [Math.max(0, sense.distanceFeet ?? 0)]
-      : []
-  }))
-}
-
 function mergeSpecialSenses(...groups: readonly Dnd5eSpecialSense[][]): Dnd5eSpecialSense[] {
   const maximumByKind = new Map<Dnd5eSpecialSense['kind'], number>()
   for (const sense of groups.flat()) {
     maximumByKind.set(sense.kind, Math.max(maximumByKind.get(sense.kind) ?? 0, sense.rangeFeet))
   }
   return [...maximumByKind].map(([kind, rangeFeet]) => ({ kind, rangeFeet }))
+}
+
+function normalizeDnd5eMoralAlignment(alignment: unknown): Dnd5eMoralAlignment | undefined {
+  if (typeof alignment !== 'string') return undefined
+  const normalized = alignment.trim().toLowerCase()
+  if (
+    !normalized ||
+    /(?:任意|无阵营|any alignment|unaligned|non-|非善良|非邪恶|非中立)/.test(normalized)
+  ) return undefined
+  if (normalized.includes('善良') || /\bgood\b/.test(normalized)) return 'good'
+  if (normalized.includes('邪恶') || /\bevil\b/.test(normalized)) return 'evil'
+  if (normalized.includes('中立') || /\bneutral\b/.test(normalized)) return 'neutral'
+  const abbreviation = normalized.replace(/[\s_-]+/g, '').toUpperCase()
+  if (['LG', 'NG', 'CG'].includes(abbreviation)) return 'good'
+  if (['LE', 'NE', 'CE'].includes(abbreviation)) return 'evil'
+  return ['LN', 'N', 'TN', 'CN'].includes(abbreviation) ? 'neutral' : undefined
+}
+
+function characterWeaponDamageSources(
+  character: Character,
+): Record<string, { magical: boolean; specialMaterial?: 'silvered' | 'adamantine' }> | undefined {
+  const sources = [
+    dnd5eWeaponDamageSource(character.equipment?.mainWeapon),
+    dnd5eWeaponDamageSource(character.equipment?.offHand),
+  ].filter((source): source is NonNullable<typeof source> => source != null)
+  if (sources.length === 0) return undefined
+  return Object.fromEntries(sources.map(({ weaponId, ...source }) => [weaponId, source]))
+}
+
+function characterGrappleFreeHandCapacity(character: Character): number {
+  const occupiedHands = Number(character.equipment?.mainWeapon != null) +
+    Number(character.equipment?.offHand != null)
+  return Math.max(0, 2 - occupiedHands)
+}
+
+const DND5E_SKILL_ABILITY: Readonly<Record<string, keyof typeof DEFAULT_ABILITIES>> = {
+  athletics: 'str',
+  acrobatics: 'dex',
+  sleightOfHand: 'dex',
+  stealth: 'dex',
+  arcana: 'int',
+  history: 'int',
+  investigation: 'int',
+  nature: 'int',
+  religion: 'int',
+  animalHandling: 'wis',
+  insight: 'wis',
+  medicine: 'wis',
+  perception: 'wis',
+  survival: 'wis',
+  deception: 'cha',
+  intimidation: 'cha',
+  performance: 'cha',
+  persuasion: 'cha',
+}
+
+function dnd5eMonsterExpertiseSkills(monster: Dnd5eMonsterStatBlock | undefined): string[] {
+  if (!monster) return []
+  const proficiencyBonus = dnd5eMonsterProficiencyBonus(monster.challenge.rating)
+  return monster.skills?.flatMap((skill) => {
+    const ability = DND5E_SKILL_ABILITY[skill.key]
+    if (!ability) return []
+    const proficiencyContribution = skill.bonus - rules.abilityModifier(monster.abilities[ability])
+    return proficiencyContribution >= proficiencyBonus * 1.5 ? [skill.key] : []
+  }) ?? []
 }
 
 export function dnd5eMapTokenCanThreatenRangedAttacker(
@@ -285,6 +359,12 @@ export function createDnd5eMapCombatSnapshot(input: {
     const character = token.characterId ? charactersById.get(token.characterId) : undefined
     if (character) {
       const migrated = migrateCharacterToDnd5e(character)
+      const visionProfile = compileDnd5eEffectiveVisionProfile({
+        token,
+        character: migrated,
+        fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
+          DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+      })
       characterIdByCombatantId[token.id] = character.id
       const combatant = createCombatantFromDnd5eCharacter({
         character: migrated,
@@ -292,13 +372,15 @@ export function createDnd5eMapCombatSnapshot(input: {
         initiativeD20: Math.max(1, Math.min(20, initiative - migrated.initiativeBonus)),
         position: { x: token.x, y: token.y },
       })
+      const weaponDamageSources = characterWeaponDamageSources(character)
+      const mainWeaponId = character.equipment?.mainWeapon?.id
       return [{
         ...combatant,
-        mainWeaponId: character.equipment?.mainWeapon?.id,
-        mainWeaponMagical: !!character.equipment?.mainWeapon && (
-          character.equipment.mainWeapon.baseEquipmentId != null ||
-          character.equipment.mainWeapon.effects != null
-        ),
+        mainWeaponId,
+        mainWeaponMagical: !!mainWeaponId && weaponDamageSources?.[mainWeaponId]?.magical === true,
+        weaponDamageSources,
+        grappleFreeHandCapacity: characterGrappleFreeHandCapacity(character),
+        moralAlignment: normalizeDnd5eMoralAlignment(character.alignment),
         id: token.id,
         name: token.label,
         initiative,
@@ -306,18 +388,37 @@ export function createDnd5eMapCombatSnapshot(input: {
         elevationFeet: mapGeometryTokenElevation(geometry, token),
         airborne: mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
-        darkvisionRangeFeet: token.darkvisionRangeFeet,
+        darkvisionRangeFeet: visionProfile.darkvisionRangeFeet || undefined,
+        darknessSightRangeFeet: visionProfile.darknessSightRangeFeet || undefined,
+        magicalDarknessSightRangeFeet:
+          visionProfile.magicalDarknessSightRangeFeet || undefined,
         specialSenses: tokenSpecialSenses(token),
       }]
     }
     const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
-    const maxHp = Math.max(1, token.maxHp ?? monster?.hitPoints.average ?? token.hp ?? 1)
+    const visionProfile = compileDnd5eEffectiveVisionProfile({
+      token,
+      monster,
+      fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
+        DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+    })
+    const maximumReductionLedger =
+      normalizeDnd5eHitPointMaximumReductionLedger(
+        token.dnd5eCombatState?.hitPointMaximumReductionLedger,
+      )
+    const maxHp = maximumReductionLedger
+      ? dnd5eEffectiveHitPointMaximum(
+          maximumReductionLedger.baseMaximum,
+          maximumReductionLedger,
+        )
+      : Math.max(1, token.maxHp ?? monster?.hitPoints.average ?? token.hp ?? 1)
     const {
       conditions: tokenConditions,
       temporaryHp: tokenTemporaryHp,
+      stableAtZero: tokenStableAtZero,
       ...tokenClassState
     } = token.dnd5eCombatState ?? {}
-    return [createDnd5eCombatant({
+    const combatant = createDnd5eCombatant({
       id: token.id,
       name: token.label,
       controller: dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
@@ -325,6 +426,9 @@ export function createDnd5eMapCombatSnapshot(input: {
       abilities: monster ? { ...monster.abilities } : { ...DEFAULT_ABILITIES },
       savingThrowBonuses: monster?.savingThrows,
       skillProficiencies: monster?.skills?.map((skill) => skill.key),
+      classSelections: {
+        expertise: dnd5eMonsterExpertiseSkills(monster),
+      },
       passivePerception: 10 + (monster?.skills?.find((skill) => skill.key === 'perception')?.bonus ??
         rules.abilityModifier(monster?.abilities.wis ?? DEFAULT_ABILITIES.wis)),
       proficiencyBonus: monster ? dnd5eMonsterProficiencyBonus(monster.challenge.rating) : 2,
@@ -347,11 +451,18 @@ export function createDnd5eMapCombatSnapshot(input: {
       airborne: !!monster?.speed.fly &&
         mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
-      darkvisionRangeFeet: Math.max(token.darkvisionRangeFeet ?? 0, monsterDarkvisionRangeFeet(monster)) || undefined,
+      darkvisionRangeFeet: visionProfile.darkvisionRangeFeet || undefined,
+      darknessSightRangeFeet: visionProfile.darknessSightRangeFeet || undefined,
+      magicalDarknessSightRangeFeet:
+        visionProfile.magicalDarknessSightRangeFeet || undefined,
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
       magicResistance: dnd5eMonsterHasMagicResistance(monster),
+      limitedMagicImmunity: dnd5eMonsterLimitedMagicImmunityRule(monster),
       shapechanger: monster?.capabilities?.shapechanger === true ||
         (!!monster && dnd5eMonsterHasStructuredShapechange(monster.id)),
+      weaponAttacksMagical: monster?.traits.some((trait) =>
+        trait.rule?.kind === 'magic-weapons' && trait.rule.weaponAttacksMagical
+      ),
       mainWeaponId: monster?.actions.find((action) => action.kind === 'weapon-attack')?.id,
       concentrating: !!tokenClassState.concentrationSpellId,
       classState: {
@@ -393,8 +504,19 @@ export function createDnd5eMapCombatSnapshot(input: {
       damageVulnerabilities: monster?.damageVulnerabilities,
       damageResistances: monster?.damageResistances,
       damageImmunities: monster?.damageImmunities,
+      damageDefenseRules: monster?.damageDefenseRules,
+      moralAlignment: normalizeDnd5eMoralAlignment(monster?.alignment),
       conditionImmunities: dnd5eMonsterConditionImmunities(monster),
-    })]
+    })
+    if (!token.characterId && combatant.currentHp === 0 && tokenStableAtZero === true) {
+      combatant.deathSaves = {
+        successes: 0,
+        failures: 0,
+        stable: true,
+        dead: false,
+      }
+    }
+    return [combatant]
   })
   applyClassPassiveDefenses(combatants)
   applyPaladinAuras(input.map, combatants)
@@ -402,7 +524,23 @@ export function createDnd5eMapCombatSnapshot(input: {
   applyHolyNimbusSources(input.map, combatants)
   applyDraconicPresenceSources(input.map, combatants)
   const state = startDnd5eHeadlessCombat(input.combatId, combatants)
+  const authoritativeSlots = input.initiativeOrder.filter((entry) =>
+    state.combatants[entry.tokenId] != null,
+  )
+  if (authoritativeSlots.length > 0) {
+    state.initiativeOrder = authoritativeSlots.map((entry) => entry.tokenId)
+    state.initiativeSlotIds = authoritativeSlots.map((entry) => entry.slotId ?? entry.tokenId)
+    const firstRoundOnlyInitiativeSlotIds = authoritativeSlots.flatMap((entry) =>
+      entry.firstRoundOnly ? [entry.slotId ?? entry.tokenId] : [],
+    )
+    state.firstRoundOnlyInitiativeSlotIds = firstRoundOnlyInitiativeSlotIds.length > 0
+      ? firstRoundOnlyInitiativeSlotIds
+      : undefined
+  }
   state.mapId = input.map.id
+  state.coordinateUnitsPerFoot = input.map.gridSize /
+    Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+  state.environment = geometry?.environment
   const roomRules = getRoomRulesSnapshot()
   state.effectiveRules = input.effectiveRules
     ? restoreDnd5eEffectiveRulesContextForCombat(input.combatId, input.effectiveRules) ?? undefined
@@ -411,18 +549,65 @@ export function createDnd5eMapCombatSnapshot(input: {
       : dnd5eEffectiveRulesContextForCombat(input.combatId, roomRules)
   const combatantTokens = input.map.tokens.filter((token) => state.combatants[token.id])
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+  state.gridDistance = {
+    cellUnits: Math.max(1, input.map.gridSize),
+    feetPerCell,
+    offsetX: input.map.gridOffsetX,
+    offsetY: input.map.gridOffsetY,
+    footprintCellsByCombatantId: Object.fromEntries(
+      combatantTokens.map((token) => [token.id, tokenFootprintCells(token)]),
+    ),
+  }
   state.distanceFeetByCombatantPair = {}
+  state.utilityProjectionDistanceFeetByPair = {}
   state.coverBonusByCombatantPair = {}
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
   state.physicalLineOfSightBlockedByCombatantPair = {}
   state.magicalDarknessByCombatantPair = {}
+  const snapshotRound = Math.max(1, Math.floor(input.round ?? 1))
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (
+      area.sourceKind !== 'core-spell' ||
+      !area.coreSpellId ||
+      !state.combatants[area.sourceTokenId] ||
+      area.expiresAfterRound < snapshotRound
+    ) continue
+    for (const targetToken of combatantTokens) {
+      const targetCells = tokenOccupiedCellsAt(targetToken, input.map, targetToken)
+      let minimumCells = Number.POSITIVE_INFINITY
+      for (const projectionCell of area.cells) {
+        for (const targetCell of targetCells) {
+          minimumCells = Math.min(
+            minimumCells,
+            cellDistance(projectionCell, targetCell),
+          )
+        }
+      }
+      if (!Number.isFinite(minimumCells)) continue
+      const key = dnd5eUtilityProjectionDistanceKey(
+        area.sourceTokenId,
+        area.coreSpellId,
+        targetToken.id,
+      )
+      state.utilityProjectionDistanceFeetByPair[key] = Math.min(
+        state.utilityProjectionDistanceFeetByPair[key] ??
+          Number.POSITIVE_INFINITY,
+        minimumCells * feetPerCell,
+      )
+    }
+  }
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
       const left = combatantTokens[leftIndex]
       const right = combatantTokens[rightIndex]
-      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] =
-        tokenFootprintDistanceCells(left, right, input.map) * feetPerCell
+      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] = Math.max(
+        tokenFootprintDistanceCells(left, right, input.map) * feetPerCell,
+        Math.abs(
+          mapGeometryTokenElevation(geometry, left) -
+            mapGeometryTokenElevation(geometry, right),
+        ),
+      )
       for (const [attacker, target] of [[left, right], [right, left]] as const) {
         const cover = mapGeometryCoverBetween(geometry, attacker, target, input.map)
         const directedKey = dnd5eDirectedCombatantPairKey(attacker.id, target.id)
@@ -436,6 +621,10 @@ export function createDnd5eMapCombatSnapshot(input: {
             attacker.darkvisionRangeFeet ?? 0,
             dnd5eEffectiveDarkvisionRangeFeet(state.combatants[attacker.id]),
           ),
+          darknessSightRangeFeet:
+            state.combatants[attacker.id]?.darknessSightRangeFeet,
+          magicalDarknessSightRangeFeet:
+            state.combatants[attacker.id]?.magicalDarknessSightRangeFeet,
         }
         const physicalLineOfSightBlocked = mapGeometryLineOfSightBlocked({
           geometry,
@@ -458,8 +647,11 @@ export function createDnd5eMapCombatSnapshot(input: {
       }
     }
   }
-  state.round = Math.max(1, Math.floor(input.round ?? 1))
-  state.turnSlotId = input.turnSlotId
+  state.round = snapshotRound
+  state.turnSlotId = input.turnSlotId ??
+    state.initiativeSlotIds?.[state.initiativeIndex] ??
+    state.initiativeOrder[state.initiativeIndex]
+  reconcileDnd5eSourceLinkedRelations(state)
   return { state, characterIdByCombatantId }
 }
 
@@ -470,12 +662,92 @@ export interface Dnd5eMapResultPlan {
   changedCharacterIds: readonly string[]
 }
 
+/**
+ * Rebuilds spatial facts after a Headless transaction has changed positions.
+ * Snapshot geometry describes the pre-transaction map, so source-linked
+ * relations must not reuse its old LoE/cover pairs when the result is mapped.
+ */
+export function refreshDnd5eMapSpatialRelations(
+  state: Dnd5eHeadlessCombatState,
+  map: BattleMap,
+  events: Dnd5eCombatEvent[] = [],
+  options: { openedDoorIds?: readonly string[] } = {},
+): void {
+  const runtimeGeometry = mapGeometryRuntimeForMap(map.id)
+  const openedDoorIds = new Set(options.openedDoorIds ?? [])
+  const geometry = runtimeGeometry && openedDoorIds.size > 0
+    ? {
+        ...runtimeGeometry,
+        doors: runtimeGeometry.doors.map((door) => openedDoorIds.has(door.id)
+          ? { ...door, state: 'open' as const, openState: 'open' as const }
+          : door),
+      }
+    : runtimeGeometry
+  const positionedTokens = map.tokens.flatMap((token) => {
+    const combatant = state.combatants[token.id]
+    return combatant
+      ? [{
+          ...token,
+          x: combatant.position.x,
+          y: combatant.position.y,
+          elevationFeet: combatant.elevationFeet,
+        }]
+      : []
+  })
+  const positionedById = new Map(positionedTokens.map((token) => [token.id, token]))
+  const spatialMap: BattleMap = {
+    ...map,
+    tokens: map.tokens.map((token) => positionedById.get(token.id) ?? token),
+  }
+  const feetPerCell = Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+  state.gridDistance = {
+    cellUnits: Math.max(1, map.gridSize),
+    feetPerCell,
+    offsetX: map.gridOffsetX,
+    offsetY: map.gridOffsetY,
+    footprintCellsByCombatantId: Object.fromEntries(
+      positionedTokens.map((token) => [token.id, tokenFootprintCells(token)]),
+    ),
+  }
+  state.distanceFeetByCombatantPair = {}
+  state.coverBonusByCombatantPair = {}
+  state.lineOfEffectBlockedByCombatantPair = {}
+  for (let leftIndex = 0; leftIndex < positionedTokens.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < positionedTokens.length; rightIndex += 1) {
+      const left = positionedTokens[leftIndex]
+      const right = positionedTokens[rightIndex]
+      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] = Math.max(
+        tokenFootprintDistanceCells(left, right, spatialMap) * feetPerCell,
+        Math.abs(
+          mapGeometryTokenElevation(geometry, left) -
+            mapGeometryTokenElevation(geometry, right),
+        ),
+      )
+      for (const [source, target] of [[left, right], [right, left]] as const) {
+        const cover = mapGeometryCoverBetween(geometry, source, target, spatialMap)
+        const directedKey = dnd5eDirectedCombatantPairKey(source.id, target.id)
+        if (cover.blocksLineOfEffect) {
+          state.lineOfEffectBlockedByCombatantPair[directedKey] = true
+        } else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
+          state.coverBonusByCombatantPair[directedKey] = cover.armorClassBonus
+        }
+      }
+    }
+  }
+  reconcileDnd5eSourceLinkedRelations(state, events)
+}
+
 export function planDnd5eMapResultApplication(input: {
   state: Dnd5eHeadlessCombatState
   map: BattleMap
   characters: readonly Character[]
   characterIdByCombatantId: Readonly<Record<string, string>>
+  openedDoorIds?: readonly string[]
+  events?: Dnd5eCombatEvent[]
 }): Dnd5eMapResultPlan {
+  refreshDnd5eMapSpatialRelations(input.state, input.map, input.events, {
+    openedDoorIds: input.openedDoorIds,
+  })
   const changedTokenIds: string[] = []
   const changedCharacterIds: string[] = []
   const tokenById = new Map(input.map.tokens.map((token) => [token.id, token]))
@@ -487,7 +759,21 @@ export function planDnd5eMapResultApplication(input: {
       const nextTokenClassState = !token.characterId
           ? compactOptionalRecord({
             schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+            stableAtZero: combatant.currentHp === 0 &&
+              combatant.deathSaves.stable &&
+              !combatant.deathSaves.dead
+                ? true as const
+                : undefined,
             temporaryHp: combatant.temporaryHp > 0 ? combatant.temporaryHp : undefined,
+            hitPointMaximumReductionLedger:
+              combatant.classState.hitPointMaximumReductionLedger
+                ? {
+                    ...combatant.classState.hitPointMaximumReductionLedger,
+                    entries:
+                      combatant.classState.hitPointMaximumReductionLedger.entries
+                        .map((entry) => ({ ...entry })),
+                  }
+                : undefined,
             undeadFortitudePending: combatant.classState.undeadFortitudePending
               ? { ...combatant.classState.undeadFortitudePending }
               : undefined,
@@ -505,6 +791,12 @@ export function planDnd5eMapResultApplication(input: {
               breakOn: effect.breakOn ? [...effect.breakOn] : undefined,
             })),
             caltropsSpeedPenaltyFeet: combatant.classState.caltropsSpeedPenaltyFeet,
+            attacksMadeTurnKey: combatant.classState.attacksMadeTurnKey,
+            attacksMadeThisTurn: combatant.classState.attacksMadeThisTurn,
+            turnStartResolvedTurnKey: combatant.classState.turnStartResolvedTurnKey,
+            recklessAttackTurnKey: combatant.classState.recklessAttackTurnKey,
+            monsterReactiveAvailableTurnKey: combatant.classState.monsterReactiveAvailableTurnKey,
+            monsterReactiveUsedTurnKey: combatant.classState.monsterReactiveUsedTurnKey,
             bardicInspirationDie: combatant.classState.bardicInspirationDie,
             bardicInspirationSourceId: combatant.classState.bardicInspirationSourceId,
             bardicInspirationRoundsRemaining: combatant.classState.bardicInspirationRoundsRemaining,
@@ -516,6 +808,8 @@ export function planDnd5eMapResultApplication(input: {
             intimidatingPresenceImmunityRoundsBySource: combatant.classState.intimidatingPresenceImmunityRoundsBySource,
             natureSanctuaryImmunityRoundsByTarget: combatant.classState.natureSanctuaryImmunityRoundsByTarget,
             draconicPresenceImmunityRoundsBySource: combatant.classState.draconicPresenceImmunityRoundsBySource,
+            monsterFrightfulPresenceImmunityRoundsBySource: combatant.classState.monsterFrightfulPresenceImmunityRoundsBySource,
+            monsterActionImmunityRoundsByKey: combatant.classState.monsterActionImmunityRoundsByKey,
             turnedByClericId: combatant.classState.turnedByClericId,
             turnedRoundsRemaining: combatant.classState.turnedRoundsRemaining,
             holyNimbusRoundsRemaining: combatant.classState.holyNimbusRoundsRemaining,
@@ -525,6 +819,12 @@ export function planDnd5eMapResultApplication(input: {
             openHandNoReactionsAppliedTurnKeysBySource: combatant.classState.openHandNoReactionsAppliedTurnKeysBySource,
             declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
             declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
+            battleMasterDroppedWeaponIds: combatant.classState.battleMasterDroppedWeaponIds,
+            eldritchStrikeBySource: combatant.classState.eldritchStrikeBySource,
+            totemWarriorWolfAttunementTargetIds:
+              combatant.classState.totemWarriorWolfAttunementTargetIds,
+            totemWarriorWolfAttunementTurnKey:
+              combatant.classState.totemWarriorWolfAttunementTurnKey,
             monsterMechanicRollModifiers: combatant.classState.monsterMechanicRollModifiers,
             pendingMonsterMechanicTriggers: combatant.classState.pendingMonsterMechanicTriggers,
             monsterMechanicTriggerSequence: combatant.classState.monsterMechanicTriggerSequence,
@@ -545,10 +845,17 @@ export function planDnd5eMapResultApplication(input: {
             monsterActionUsesByActionId: combatant.classState.monsterActionUsesByActionId,
             monsterSpellSlots: combatant.classState.monsterSpellSlots,
             monsterSpellUsesBySpellId: combatant.classState.monsterSpellUsesBySpellId,
+            monsterMultiattackContinuation: combatant.classState.monsterMultiattackContinuation,
             monsterShapechangeOriginalStatBlockId: combatant.classState.monsterShapechangeOriginalStatBlockId,
             monsterShapechangeFormId: combatant.classState.monsterShapechangeFormId,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
             monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
+            monsterHydraHeadCount: combatant.classState.monsterHydraHeadCount,
+            monsterHydraHeadsLostSinceLastTurn: combatant.classState.monsterHydraHeadsLostSinceLastTurn,
+            monsterHydraDamageTurnKey: combatant.classState.monsterHydraDamageTurnKey,
+            monsterHydraDamageTakenThisTurn: combatant.classState.monsterHydraDamageTakenThisTurn,
+            monsterHydraHeadSeveredTurnKey: combatant.classState.monsterHydraHeadSeveredTurnKey,
+            monsterHydraFireDamageSinceLastTurn: combatant.classState.monsterHydraFireDamageSinceLastTurn,
             monsterThreatByTargetId: combatant.classState.monsterThreatByTargetId,
             hurlThroughHellSourceId: combatant.classState.hurlThroughHellSourceId,
             hurlThroughHellDamage: combatant.classState.hurlThroughHellDamage,
@@ -588,7 +895,18 @@ export function planDnd5eMapResultApplication(input: {
     const nextClassResources = Object.keys(combatant.classResources).length > 0
       ? Object.fromEntries(Object.entries(combatant.classResources).map(([key, resource]) => [key, { ...resource }]))
       : undefined
-    const nextClassState = compactOptionalRecord(combatant.classState)
+    const nextClassState = compactOptionalRecord({
+      ...combatant.classState,
+      hitPointMaximumReductionLedger:
+        combatant.classState.hitPointMaximumReductionLedger
+          ? {
+              ...combatant.classState.hitPointMaximumReductionLedger,
+              entries:
+                combatant.classState.hitPointMaximumReductionLedger.entries
+                  .map((entry) => ({ ...entry })),
+            }
+          : undefined,
+    })
     const nextCharacterCurrentHp = combatant.classState.wildShapeFormId
       ? combatant.classState.wildShapeOriginalCurrentHp ?? character.currentHp
       : combatant.currentHp
@@ -597,6 +915,7 @@ export function planDnd5eMapResultApplication(input: {
     const conditionsUnchanged = JSON.stringify(character.conditions) === JSON.stringify(combatant.conditions)
     if (
       character.currentHp === nextCharacterCurrentHp &&
+      character.maxHp === combatant.maxHp &&
       character.tempHp === combatant.temporaryHp &&
       (character.exhaustionLevel ?? 0) === combatant.exhaustionLevel &&
       (character.deathSaveSuccesses ?? 0) === combatant.deathSaves.successes &&
@@ -611,6 +930,7 @@ export function planDnd5eMapResultApplication(input: {
     return {
       ...character,
       currentHp: nextCharacterCurrentHp,
+      maxHp: combatant.maxHp,
       tempHp: combatant.temporaryHp,
       exhaustionLevel: combatant.exhaustionLevel,
       deathSaveSuccesses: combatant.deathSaves.successes,

@@ -6,6 +6,7 @@ import {
 } from './customMonsterWorkshop'
 import {
   createDnd5eCombatant,
+  dnd5eCombatantCanSee,
   dnd5eCombatantPairKey,
   dnd5eMonsterMechanicSavingThrowKindForAction,
   dnd5ePendingMonsterMechanicResolutions,
@@ -13,7 +14,8 @@ import {
   startDnd5eHeadlessCombat,
   type Dnd5eCombatant,
 } from './headlessCombatEngine'
-import { setDnd5eRoomMonsterCatalog } from './monsters'
+import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
+import { dnd5eReactionsPrevented } from './passiveDefenses'
 
 const abilities = { str: 12, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }
 
@@ -101,6 +103,7 @@ describe('custom monster authoritative trigger snapshots', () => {
       attacks: [{
         effectId: 'effect-0',
         targetId: mover.id,
+        attackMode: 'melee',
         toHit: 6,
         damage: { count: 1, sides: 6, bonus: 2, type: 'piercing' },
         economy: 'reaction',
@@ -144,6 +147,188 @@ describe('custom monster authoritative trigger snapshots', () => {
         attackRolls: [],
       },
     })).toMatchObject({ ok: false })
+  })
+
+  it('routes a legacy mechanic melee attack through target AC and Parry after Host pre-rolls damage', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'legacy-intercept',
+      name: 'Legacy Intercept',
+      trigger: 'movement',
+      triggerSubject: 'hostile-within',
+      triggerRadiusFeet: 30,
+      movementComparison: 'at-least',
+      movementFeet: 5,
+      effectKind: 'attack',
+      effectTarget: 'selected-subject',
+      attackMode: 'melee',
+      attackToHit: 5,
+      attackEconomy: 'none',
+      healingDice: '1d6',
+      damageType: 'slashing',
+      hpPercentageAtOrBelow: undefined,
+    }]
+    const guardMonster = buildDnd5eCustomMonster(draft)
+    const mechanic = guardMonster.headlessMechanics?.[0]
+    if (!mechanic || mechanic.schemaVersion !== 2 || mechanic.effects[0]?.kind !== 'attack') {
+      throw new Error('Expected a V2 attack mechanic')
+    }
+    delete (mechanic.effects[0] as { attackMode?: 'melee' | 'ranged' }).attackMode
+    setDnd5eRoomMonsterCatalog([guardMonster])
+
+    const nobleMonster = getDnd5eSrdMonster('srd-5.1:noble')
+    if (!nobleMonster) throw new Error('Missing SRD noble')
+    const noble = combatant('noble', 'player', 20, {
+      statBlockId: nobleMonster.id,
+      armorClass: nobleMonster.armorClass.value,
+      currentHp: nobleMonster.hitPoints.average,
+      maxHp: nobleMonster.hitPoints.average,
+      position: { x: 5, y: 0 },
+    })
+    const guard = combatant('guard', 'dm', 10, { statBlockId: guardMonster.id })
+    const state = startDnd5eHeadlessCombat('legacy-mechanic-parry', [noble, guard])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(noble.id, guard.id)]: 5,
+    }
+
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move',
+      actorId: noble.id,
+      to: { x: 1, y: 0 },
+      distance: 5,
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) return
+    const pending = moved.events.find((event) =>
+      event.type === 'monster-mechanic-trigger-pending' &&
+      event.snapshot.mechanicId === 'legacy-intercept',
+    )
+    if (!pending || pending.type !== 'monster-mechanic-trigger-pending') {
+      throw new Error('Expected pending legacy mechanic')
+    }
+    expect(moved.state.combatants[noble.id].turn.reactionAvailable).toBe(true)
+    expect(dnd5eReactionsPrevented(moved.state.combatants[noble.id])).toBe(false)
+    expect(dnd5eCombatantCanSee(moved.state, noble.id, guard.id)).toBe(true)
+    expect(getDnd5eSrdMonster(nobleMonster.id)?.reactions).toContainEqual(
+      expect.objectContaining({
+        id: 'parry',
+        automation: 'headless',
+        rule: expect.objectContaining({ kind: 'parry', armorClassBonus: 2 }),
+      }),
+    )
+    expect(getDnd5eSrdMonster(nobleMonster.id)?.actions.some((action) =>
+      action.attack != null && action.attack.mode !== 'ranged',
+    )).toBe(true)
+    expect(dnd5ePendingMonsterMechanicResolutions(moved.state)[0]?.attacks[0])
+      .toMatchObject({ attackMode: 'melee' })
+
+    const resolved = resolveDnd5eHeadlessAction(moved.state, {
+      type: 'resolve-monster-mechanic-trigger',
+      actorId: guard.id,
+      snapshotId: pending.snapshot.id,
+      roll: {
+        actorId: guard.id,
+        mechanicId: 'legacy-intercept',
+        targetId: noble.id,
+        attackRolls: [{
+          effectId: 'effect-0',
+          targetId: noble.id,
+          d20: noble.armorClass - 5,
+          damageRolls: [4],
+        }],
+      },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'monster-parry-used',
+      actorId: noble.id,
+      attackerId: guard.id,
+    }))
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: guard.id,
+      targetId: noble.id,
+      armorClass: noble.armorClass + 2,
+      hit: false,
+    }))
+    expect(resolved.state.combatants[noble.id].currentHp).toBe(noble.currentHp)
+  })
+
+  it('inherits the authoritative damage type after any dealt damage', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '背水斗士'
+    draft.actions[0].damageType = 'slashing'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'desperate-damage',
+      name: '不退斗志',
+      trigger: 'after-dealt-damage',
+      triggerSubject: 'self',
+      hpPercentageAtOrBelow: undefined,
+      hpBelow: 10,
+      effectKind: 'damage',
+      effectTarget: 'trigger-target',
+      healingDice: '1d6',
+      damageType: 'inherit-trigger',
+      limit: 'once-per-turn',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const attacker = combatant('attacker', 'dm', 20, {
+      statBlockId: monster.id,
+      currentHp: 9,
+      maxHp: 20,
+    })
+    const hero = combatant('hero', 'player', 10)
+    const state = startDnd5eHeadlessCombat('combat', [attacker, hero])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(attacker.id, hero.id)]: 5,
+    }
+
+    const attacked = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: attacker.id,
+      actionId: monster.actions[0].id,
+      rolls: [{ targetId: hero.id, d20: 18, damageRolls: [[3]] }],
+    })
+    expect(attacked.ok).toBe(true)
+    if (!attacked.ok) return
+    const pending = attacked.events.find((event) =>
+      event.type === 'monster-mechanic-trigger-pending' &&
+      event.snapshot.mechanicId === 'desperate-damage',
+    )
+    expect(pending).toMatchObject({
+      snapshot: {
+        subjectId: attacker.id,
+        triggerTargetId: hero.id,
+        triggerDamageType: 'slashing',
+      },
+    })
+    if (!pending || pending.type !== 'monster-mechanic-trigger-pending') return
+    const resolved = resolveDnd5eHeadlessAction(attacked.state, {
+      type: 'resolve-monster-mechanic-trigger',
+      actorId: attacker.id,
+      snapshotId: pending.snapshot.id,
+      roll: {
+        actorId: attacker.id,
+        mechanicId: 'desperate-damage',
+        effectRolls: [{ effectId: 'effect-0', rolls: [4] }],
+      },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[hero.id].currentHp).toBe(22)
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied',
+      sourceId: attacker.id,
+      targetId: hero.id,
+      amount: 4,
+      damageTypes: ['slashing'],
+      suppressAfterDealtDamageTrigger: true,
+    }))
+    expect(dnd5ePendingMonsterMechanicResolutions(resolved.state)).toEqual([])
   })
 
   it('stores a nearby ally attack bonus and consumes it on only the next monster attack', () => {

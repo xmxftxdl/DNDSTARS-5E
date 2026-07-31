@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react'
 import { Dices, X } from 'lucide-react'
 import { ABILITIES, SKILLS } from '../../lib/dnd'
 import type { Dnd5eAbilityCheckPayload, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
-import { dnd5eAbilityCheckModifier, dnd5eSkillCheckModifier, dnd5eSkillCheckProficiencyRank } from '../../rulesets/dnd5e'
+import {
+  dnd5eAbilityCheckModifier,
+  dnd5eSkillCheckModifier,
+  dnd5eSkillCheckProficiencyRank,
+  dnd5eTotemWarriorFeatureForCharacter,
+} from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 
 const DIE_SIDES = [4, 6, 8, 10, 12, 20, 100] as const
@@ -21,6 +26,8 @@ interface MapDiceRollerProps {
   canCheck: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
+  combatRollsVisible?: boolean
+  onCombatRollsVisibleChange?: (visible: boolean) => void
   onRoll: (request: MapFreeDiceRollRequest) => Promise<void>
   onCheck: (payload: Dnd5eAbilityCheckPayload) => void
 }
@@ -31,6 +38,8 @@ export default function MapDiceRoller({
   canCheck,
   pending,
   turnEconomy,
+  combatRollsVisible = true,
+  onCombatRollsVisibleChange,
   onRoll,
   onCheck,
 }: MapDiceRollerProps) {
@@ -46,6 +55,7 @@ export default function MapDiceRoller({
   const [dc, setDc] = useState(10)
   const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
   const [spendAction, setSpendAction] = useState(false)
+  const [bearAspectTask, setBearAspectTask] = useState(false)
 
   const selectedCheck = useMemo(() => {
     if (!character) return undefined
@@ -68,6 +78,11 @@ export default function MapDiceRoller({
     }
   }, [character, selection])
 
+  const bearAspectAvailable =
+    character != null &&
+    selectedCheck?.ability === 'str' &&
+    selectedCheck.skill == null &&
+    !!dnd5eTotemWarriorFeatureForCharacter(character, 'aspect-of-the-beast-bear')
   const checkDisabled = !selectedCheck || !canCheck || pending || (spendAction && turnEconomy.action.current < 1)
 
   const roll = async () => {
@@ -121,12 +136,29 @@ export default function MapDiceRoller({
           </div>
 
           {isDm && !asCheck && (
-            <label className="mt-2 block text-[10px] font-semibold text-slate-500">可见性
-              <select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
-                <option value="public">明骰 · 全房间可见</option>
-                <option value="dm">暗骰 · 仅 DM 可见</option>
-              </select>
-            </label>
+            <div className="mt-2 space-y-2">
+              <label className="block text-[10px] font-semibold text-slate-500">自由掷骰可见性
+                <select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
+                  <option value="public">明骰 · 全房间可见</option>
+                  <option value="dm">暗骰 · 仅 DM 可见</option>
+                </select>
+              </label>
+              <label className="flex items-start gap-2 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] px-3 py-2.5 text-xs text-fuchsia-100">
+                <input
+                  type="checkbox"
+                  checked={combatRollsVisible}
+                  onChange={(event) => onCombatRollsVisibleChange?.(event.target.checked)}
+                  className="mt-0.5 accent-fuchsia-400"
+                  data-testid="combat-roll-visibility-toggle"
+                />
+                <span>
+                  <strong className="block font-semibold">战斗投掷对玩家可见</strong>
+                  <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">
+                    关闭后，怪物的命中、豁免、充能与伤害骰只在 DM 端显示；暗骰 d20 可由 DM 确认或修正。
+                  </span>
+                </span>
+              </label>
+            </div>
           )}
 
           <label className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-300/10 bg-cyan-500/[0.04] px-3 py-2.5 text-xs font-semibold text-cyan-100">
@@ -161,11 +193,30 @@ export default function MapDiceRoller({
                     </label>
                   </div>
                   <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-400"><input type="checkbox" checked={spendAction} onChange={(event) => setSpendAction(event.target.checked)} />DM 将本次检定判定为一个主动动作</label>
+                  {bearAspectAvailable ? (
+                    <label className="mt-2 flex items-center gap-2 text-[11px] text-amber-200">
+                      <input
+                        type="checkbox"
+                        checked={bearAspectTask}
+                        onChange={(event) => setBearAspectTask(event.target.checked)}
+                      />
+                      熊之形：本次力量检定用于推、拉、举起或破坏物体
+                    </label>
+                  ) : null}
                   {!canCheck && <p className="mt-2 text-[11px] text-amber-300/80">只有当前获得行动权的玩家角色可以提交 Headless 鉴定。</p>}
                   <button
                     type="button"
                     disabled={checkDisabled}
-                    onClick={() => onCheck({ ability: selectedCheck.ability, skill: selectedCheck.skill, dc, mode, spendAction: spendAction || undefined })}
+                    onClick={() => onCheck({
+                      ability: selectedCheck.ability,
+                      skill: selectedCheck.skill,
+                      context: bearAspectAvailable && bearAspectTask
+                        ? 'push-pull-lift-break'
+                        : undefined,
+                      dc,
+                      mode,
+                      spendAction: spendAction || undefined,
+                    })}
                     className="mt-3 w-full rounded-xl bg-cyan-500/20 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35 disabled:cursor-not-allowed disabled:opacity-40"
                   >{pending ? '等待 DM 结算…' : `进行${selectedCheck.label}（${selectedCheck.modifier >= 0 ? '+' : ''}${selectedCheck.modifier}）· DC ${dc}`}</button>
                 </>

@@ -77,6 +77,42 @@ describe('shared combat sync', () => {
       expect(decision.shouldResetPlayerActionState).toBe(true)
       expect(decision.playerCombatEndedLocked).toBe(false)
       expect(decision.settlementMode).toBe('automatic')
+      expect(decision.monsterControl).toMatchObject({
+        schemaVersion: 1,
+        mode: 'automatic',
+        pauseRequested: false,
+      })
+    }
+  })
+
+  it('keeps a requested takeover automatic until the current event settles', () => {
+    const decision = resolveSharedCombatStateApply({
+      state: makeState({
+        monsterControl: {
+          schemaVersion: 1,
+          mode: 'automatic',
+          pauseRequested: true,
+          controlledTokenId: 'enemy-token',
+          requestedAt: 900,
+          updatedAt: 900,
+        },
+      }),
+      mapId: 'map-1',
+      validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: '',
+      lastAppliedUpdatedAt: 0,
+      lastSnapshot: '',
+      isDm: false,
+    })
+
+    expect(decision.status).toBe('apply')
+    if (decision.status === 'apply') {
+      expect(decision.monsterControl).toMatchObject({
+        mode: 'automatic',
+        pauseRequested: true,
+        controlledTokenId: 'enemy-token',
+      })
     }
   })
 

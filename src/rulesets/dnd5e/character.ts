@@ -18,8 +18,25 @@ import {
 } from './classes'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import { syncDnd5ePrimalChampion } from './hitPoints'
-import { dnd5eCharacterHasPluginFeature, dnd5ePluginBackgroundDefinition, registeredDnd5ePluginFeatures } from './pluginApi'
+import { normalizeDnd5eHitPointMaximumReductionLedger } from './hitPointMaximumReductions'
+import {
+  dnd5eCharacterHasPluginFeature,
+  dnd5ePluginBackgroundDefinition,
+  dnd5ePluginRaceDefinition,
+  registeredDnd5ePluginFeatures,
+  type Dnd5ePluginRacialSavingThrowAdvantages,
+  type Dnd5ePluginStaticCombatModifiers,
+} from './pluginApi'
 import { dnd5eCharacterClassLevel, dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels, type Dnd5eClassLevels } from './multiclass'
+import {
+  dnd5eCoreRaceMechanics,
+  mergeDnd5eRacialSavingThrowAdvantages,
+} from './coreRaceMechanics'
+import {
+  dnd5eRacialResourceDefinitions,
+  dnd5eRacialRulesForCharacter,
+  type Dnd5eRacialRulesSnapshot,
+} from './racialAutomation'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -61,6 +78,13 @@ export interface Dnd5eCharacter {
   classSelections: Record<string, string[]>
   classSelectionsByClass: Partial<Record<Dnd5eClassId, Record<string, string[]>>>
   pluginFeatureIds: readonly string[]
+  sizeRank: number
+  darkvisionRangeFeet?: number
+  racialSavingThrowAdvantages?: Dnd5ePluginRacialSavingThrowAdvantages
+  racialRules: Dnd5eRacialRulesSnapshot
+  damageResistances: readonly Dnd5eDamageType[]
+  damageImmunities: readonly Dnd5eDamageType[]
+  conditionImmunities: readonly string[]
   wearingArmor: boolean
   wearingUnproficientArmor: boolean
   armorStealthDisadvantage: boolean
@@ -69,6 +93,7 @@ export interface Dnd5eCharacter {
   hasShield: boolean
   classState: NonNullable<Character['dnd5eCombatState']>
   savingThrowEquipmentBonus?: number
+  savingThrowPluginBonus?: number
 }
 
 const DND5E_DAMAGE_TYPE_SET = new Set<string>(DND5E_DAMAGE_TYPES)
@@ -78,8 +103,37 @@ function normalizedDamageTypes(values: readonly string[] | undefined): Dnd5eDama
   return values.filter((value): value is Dnd5eDamageType => DND5E_DAMAGE_TYPE_SET.has(value))
 }
 
+function staticModifierTotal(
+  modifiers: readonly Dnd5ePluginStaticCombatModifiers[],
+  key: 'armorClassBonus' | 'initiativeBonus' | 'speedBonusFeet' | 'savingThrowBonus',
+): number {
+  return modifiers.reduce((total, modifier) => total + (modifier[key] ?? 0), 0)
+}
+
+function dnd5eRaceSizeRank(
+  race: string | undefined,
+  raceId: string | undefined,
+  pluginSize: 'small' | 'medium' | undefined,
+): number {
+  if (pluginSize) return pluginSize === 'small' ? 1 : 2
+  const identities = [race, raceId]
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim().toLowerCase())
+  return identities.some((value) => [
+    '半身人', '侏儒', 'halfling', 'gnome',
+  ].includes(value)) ? 1 : 2
+}
+
 function dnd5eClassResources(character: Character): Record<string, { current: number; max: number }> {
   const resources = Object.fromEntries(Object.entries(character.classResources ?? {}).map(([key, value]) => [key, { ...value }]))
+  for (const definition of dnd5eRacialResourceDefinitions(character)) {
+    const maximum = Math.max(0, Math.floor(definition.max(character)))
+    const existing = resources[definition.key]
+    resources[definition.key] = {
+      current: existing ? Math.min(maximum, Math.max(0, existing.current)) : maximum,
+      max: maximum,
+    }
+  }
   const fighterLevel = dnd5eCharacterClassLevel(character, 'fighter')
   if (fighterLevel < 1) return resources
   for (const key of Object.values(FIGHTER_RESOURCE_KEYS)) {
@@ -128,16 +182,29 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       : undefined
   const armor = character.equipment?.armor?.dnd5e
   const exhaustionLevel = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
-  const storedMaxHp = Math.max(1, Math.floor(character.maxHp))
-  const effectiveMaxHp = exhaustionLevel >= 4 ? Math.max(1, Math.floor(storedMaxHp / 2)) : storedMaxHp
+  const maximumReductionLedger =
+    normalizeDnd5eHitPointMaximumReductionLedger(
+      character.dnd5eCombatState?.hitPointMaximumReductionLedger,
+    )
+  const storedMaxHp = maximumReductionLedger
+    ? Math.max(0, Math.floor(character.maxHp))
+    : Math.max(1, Math.floor(character.maxHp))
+  const effectiveMaxHp = exhaustionLevel >= 4
+    ? Math.max(maximumReductionLedger ? 0 : 1, Math.floor(storedMaxHp / 2))
+    : storedMaxHp
   const classSelectionsByClass = Object.fromEntries(Object.keys(classLevels).map((classId) => {
     const typedClassId = classId as Dnd5eClassId
     const selections = Object.fromEntries(Object.entries(character.dnd5eClassChoices?.classes?.[typedClassId]?.selections ?? {})
       .map(([key, values]) => [key, [...values]]))
-    if (typedClassId === 'fighter') selections['fighting-style'] = [...fighterSelectedFightingStyles({
-      ...character,
-      level: dnd5eCharacterClassLevel(character, 'fighter'),
-    })]
+    if (typedClassId === 'fighter') {
+      for (const [key, values] of Object.entries(character.dnd5eClassChoices?.fighter?.extensionChoices ?? {})) {
+        selections[key] = [...new Set(values)]
+      }
+      selections['fighting-style'] = [...fighterSelectedFightingStyles({
+        ...character,
+        level: dnd5eCharacterClassLevel(character, 'fighter'),
+      })]
+    }
     return [typedClassId, selections]
   })) as Partial<Record<Dnd5eClassId, Record<string, string[]>>>
   const classSelections: Record<string, string[]> = Object.values(classSelectionsByClass).reduce<Record<string, string[]>>(
@@ -161,6 +228,25 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     : []
   const backgroundSkills = dnd5ePluginBackgroundDefinition(character.dnd5eBackgroundId ?? character.background)
     ?.skillProficiencies ?? character.dnd5eBackgroundSkillProficiencies ?? []
+  const raceDefinition = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+  const coreRace = dnd5eCoreRaceMechanics(character.race, character.dnd5eRaceId)
+  const racialRules = dnd5eRacialRulesForCharacter(character)
+  const selectedPluginFeatures = registeredDnd5ePluginFeatures()
+    .filter((feature) => dnd5eCharacterHasPluginFeature(character, feature.id))
+  const staticModifiers = [
+    ...(coreRace?.staticModifiers ? [coreRace.staticModifiers] : []),
+    ...(raceDefinition?.staticModifiers ? [raceDefinition.staticModifiers] : []),
+    ...selectedPluginFeatures.flatMap((feature) => feature.staticModifiers ? [feature.staticModifiers] : []),
+  ]
+  const pluginDamageResistances = normalizedDamageTypes(
+    staticModifiers.flatMap((modifier) => modifier.damageResistances ?? []),
+  ) ?? []
+  if (racialRules.dragonbornAncestry) {
+    pluginDamageResistances.push(racialRules.dragonbornAncestry.damageType)
+  }
+  const pluginDamageImmunities = normalizedDamageTypes(
+    staticModifiers.flatMap((modifier) => modifier.damageImmunities ?? []),
+  ) ?? []
   return {
     id: character.id,
     name: character.name,
@@ -170,21 +256,28 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     level,
     abilities: character.rulesetId ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
     savingThrowProficiencies: [...dnd5eEffectiveSavingThrowProficiencies(character)],
-    skillProficiencies: [...new Set([...character.skills, ...backgroundSkills, ...loreBonusSkills, ...beguilingInfluenceSkills])],
+    skillProficiencies: [...new Set([
+      ...character.skills,
+      ...backgroundSkills,
+      ...(coreRace?.skillProficiencies ?? []),
+      ...(raceDefinition?.skillProficiencies ?? []),
+      ...loreBonusSkills,
+      ...beguilingInfluenceSkills,
+    ])],
     passivePerception: Math.max(0, Math.floor(character.passivePerception)),
-    armorClass: dnd5eArmorClass(character),
+    armorClass: dnd5eArmorClass(character) + staticModifierTotal(staticModifiers, 'armorClassBonus'),
     currentHp: exhaustionLevel >= 6 ? 0 : Math.max(0, Math.min(effectiveMaxHp, character.currentHp)),
     maxHp: effectiveMaxHp,
     temporaryHp: Math.max(0, Math.floor(character.tempHp)),
     exhaustionLevel,
-    speed: dnd5eWalkingSpeed(character),
+    speed: Math.max(0, dnd5eWalkingSpeed(character) + staticModifierTotal(staticModifiers, 'speedBonusFeet')),
     movementSpeeds: {
-      walk: dnd5eWalkingSpeed(character),
+      walk: Math.max(0, dnd5eWalkingSpeed(character) + staticModifierTotal(staticModifiers, 'speedBonusFeet')),
       climb: character.dnd5eMovementSpeeds?.climb,
       swim: character.dnd5eMovementSpeeds?.swim,
       fly: character.dnd5eMovementSpeeds?.fly,
     },
-    initiativeBonus: Math.floor(character.initiativeBonus),
+    initiativeBonus: Math.floor(character.initiativeBonus) + staticModifierTotal(staticModifiers, 'initiativeBonus'),
     hitPointDice: character.hitPointDice?.length
       ? character.hitPointDice.map((pool) => ({ ...pool }))
       : [{ sides: hitDieSides, current: level, max: level }],
@@ -199,9 +292,24 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     subclassIds,
     classSelections,
     classSelectionsByClass,
-    pluginFeatureIds: registeredDnd5ePluginFeatures()
-      .filter((feature) => dnd5eCharacterHasPluginFeature(character, feature.id))
-      .map((feature) => feature.id),
+    pluginFeatureIds: selectedPluginFeatures.map((feature) => feature.id),
+    sizeRank: dnd5eRaceSizeRank(
+      character.race,
+      character.dnd5eRaceId,
+      raceDefinition?.size ?? coreRace?.size,
+    ),
+    darkvisionRangeFeet: Math.max(
+      0,
+      ...staticModifiers.map((modifier) => modifier.darkvisionRangeFeet ?? 0),
+    ) || undefined,
+    racialSavingThrowAdvantages: mergeDnd5eRacialSavingThrowAdvantages(
+      coreRace?.savingThrowAdvantages,
+      raceDefinition?.savingThrowAdvantages,
+    ),
+    racialRules,
+    damageResistances: [...new Set(pluginDamageResistances)],
+    damageImmunities: [...new Set(pluginDamageImmunities)],
+    conditionImmunities: [...new Set(staticModifiers.flatMap((modifier) => modifier.conditionImmunities ?? []))],
     wearingArmor: armor?.kind === 'armor' || !!character.equipment?.armor,
     wearingUnproficientArmor: dnd5eWearingUnproficientArmor(character),
     armorStealthDisadvantage: dnd5eArmorImposesStealthDisadvantage(character),
@@ -212,6 +320,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     hasShield: character.equipment?.offHand?.dnd5e?.kind === 'shield',
     classState: { ...character.dnd5eCombatState },
     savingThrowEquipmentBonus: dnd5eEquippedEffectTotal(character, 'savingThrowBonus'),
+    savingThrowPluginBonus: staticModifierTotal(staticModifiers, 'savingThrowBonus'),
   }
 }
 
@@ -242,7 +351,8 @@ export function createCombatantFromDnd5eCharacter(input: {
     ability,
     rules.abilityModifier(character.abilities[ability]) +
       (character.savingThrowProficiencies.includes(ability) ? rules.proficiencyBonus(character.level) : 0) +
-      (character.savingThrowEquipmentBonus ?? 0),
+      (character.savingThrowEquipmentBonus ?? 0) +
+      (character.savingThrowPluginBonus ?? 0),
   ]))
   const combatant = createDnd5eCombatant({
     id: character.id,
@@ -257,6 +367,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     skillProficiencies: [...character.skillProficiencies],
     passivePerception: character.passivePerception,
     proficiencyBonus: rules.proficiencyBonus(character.level),
+    sizeRank: character.sizeRank,
     armorClass: character.armorClass,
     currentHp: character.currentHp,
     maxHp: character.maxHp,
@@ -264,6 +375,11 @@ export function createCombatantFromDnd5eCharacter(input: {
     exhaustionLevel: character.exhaustionLevel,
     speed: character.speed,
     movementSpeeds: character.movementSpeeds ? { ...character.movementSpeeds } : undefined,
+    darkvisionRangeFeet: character.darkvisionRangeFeet,
+    racialSavingThrowAdvantages: character.racialSavingThrowAdvantages
+      ? structuredClone(character.racialSavingThrowAdvantages)
+      : undefined,
+    racialRules: structuredClone(character.racialRules),
     position: { ...input.position },
     concentrating: character.concentrating,
     creatureType: '类人生物',
@@ -281,9 +397,14 @@ export function createCombatantFromDnd5eCharacter(input: {
     wearingHeavyArmor: character.wearingHeavyArmor,
     wearingMetalArmor: character.wearingMetalArmor,
     hasShield: character.hasShield,
-    conditionImmunities: dnd5eRaceHasMagicalSleepImmunity(character.race, character.raceId)
-      ? ['magical-sleep', '魔法睡眠']
-      : undefined,
+    damageResistances: character.damageResistances,
+    damageImmunities: character.damageImmunities,
+    conditionImmunities: [
+      ...character.conditionImmunities,
+      ...(dnd5eRaceHasMagicalSleepImmunity(character.race, character.raceId)
+        ? ['magical-sleep', '魔法睡眠']
+        : []),
+    ],
     classState: {
       ...character.classState,
       wildShapeOriginalDamageVulnerabilities: normalizedDamageTypes(character.classState.wildShapeOriginalDamageVulnerabilities),

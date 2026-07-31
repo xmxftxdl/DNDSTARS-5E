@@ -249,7 +249,7 @@ export const DND5E_SRD_SPELL_NAMES_ZH: Readonly<Record<string, string>> = {
   reincarnate: '转生术',
   'remove-curse': '移除诅咒',
   'resilient-sphere': '弹力法球',
-  resistance: '提升抗性',
+  resistance: '抗力术',
   resurrection: '复生术',
   'reverse-gravity': '反重力',
   revivify: '回生术',

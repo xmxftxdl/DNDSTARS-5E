@@ -22,7 +22,7 @@ export interface MonsterAction {
   damageDice?: string
   damageType?: string
   range?: number
-  kind?: 'melee' | 'ranged' | 'aoe'
+  kind?: 'melee' | 'ranged' | 'aoe' | 'multiattack'
   save?: { ability: AbilityKey; dc: number }
   automation?: 'headless' | 'dm-adjudication' | 'invalid'
 }
@@ -87,7 +87,11 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
       damageDice: primaryDamage ? dnd5eMonsterDamageDice(primaryDamage) : undefined,
       damageType: primaryDamage?.type,
       range: attack?.rangeFeet?.normal ?? attack?.reachFeet,
-      kind: attack ? (attack.mode === 'ranged' ? 'ranged' : 'melee') : undefined,
+      kind: action.kind === 'multiattack'
+        ? 'multiattack'
+        : attack
+          ? (attack.mode === 'ranged' ? 'ranged' : 'melee')
+          : undefined,
       automation: dnd5eMonsterActionAutomation(action),
     }
   }

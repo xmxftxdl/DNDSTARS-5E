@@ -2,10 +2,29 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
+import {
+  assertExternalArtExcludedFromBuild,
+  copyBuildPublicAssets,
+} from './scripts/build-public-assets.mjs'
+
+function lightweightPublicAssetsPlugin() {
+  return {
+    name: 'stars-lightweight-public-assets',
+    async writeBundle() {
+      await copyBuildPublicAssets()
+      await assertExternalArtExcludedFromBuild()
+    },
+  }
+}
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+export default defineConfig(({ command }) => ({
+  publicDir: command === 'serve' ? 'public' : false,
+  plugins: [
+    react(),
+    tailwindcss(),
+    ...(command === 'build' ? [lightweightPublicAssetsPlugin()] : []),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -29,4 +48,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

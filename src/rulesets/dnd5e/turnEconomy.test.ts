@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createDnd5eTurnEconomyCounts,
   grantDnd5eActionSurge,
+  refreshDnd5eReactiveReactionEconomies,
   spendDnd5eMovement,
   spendDnd5eTurnResource,
 } from './turnEconomy'
@@ -52,5 +53,31 @@ describe('D&D 5e counted turn economy', () => {
   it('Action Surge grants one additional action for the current turn', () => {
     const spent = spendDnd5eTurnResource(createDnd5eTurnEconomyCounts('turn'), 'action')
     expect(grantDnd5eActionSurge(spent.economy).action).toEqual({ current: 1, max: 2 })
+  })
+
+  it('refreshes only a Reactive reaction pool for the new creature turn', () => {
+    const spent = spendDnd5eTurnResource(
+      spendDnd5eTurnResource(
+        createDnd5eTurnEconomyCounts('combat:1:first', 40),
+        'action',
+      ).economy,
+      'reaction',
+    ).economy
+    const refreshed = refreshDnd5eReactiveReactionEconomies(
+      { marilith: spent },
+      [{
+        actorId: 'marilith',
+        turnKey: 'combat:1:second',
+        reactionAvailable: true,
+        speed: 40,
+      }],
+    )
+
+    expect(refreshed.marilith).toMatchObject({
+      turnKey: 'combat:1:second',
+      action: { current: 0, max: 1 },
+      reaction: { current: 1, max: 1 },
+      movement: { current: 40, max: 40 },
+    })
   })
 })

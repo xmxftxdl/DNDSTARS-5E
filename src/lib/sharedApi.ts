@@ -1,6 +1,6 @@
 import { canWriteSharedState } from './appMode'
 import { getRoomClientId, getRoomSession } from './roomSession'
-import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocol'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 import {
   reportSharedIntegrityIssue,
   validateAndMigrateSharedResource,
@@ -22,11 +22,16 @@ const sharedResourceWriteChains = new Map<string, Promise<unknown>>()
 
 export type SharedResourceSaveResult =
   | { status: 'saved'; revision?: number }
-  | { status: 'skipped'; reason: 'spectator' | 'forbidden' | 'combat-active' }
+  | { status: 'skipped'; reason: 'spectator' | 'forbidden' }
   | { status: 'invalid'; reason: 'schema' | 'serialization' }
   | { status: 'too-large' }
   | { status: 'conflict'; expectedRevision: number; currentRevision: number }
   | { status: 'failed' }
+
+export interface SharedResourceWriteOptions {
+  undoGroupId?: string
+  undoLabel?: string
+}
 
 function sharedSecretHeader(): Record<string, string> {
   // VITE_* values are public browser code. Production authority is carried by
@@ -217,12 +222,11 @@ export interface SharedStateChangedEvent {
 const sharedStateChangedListeners = new Set<(event: SharedStateChangedEvent) => void>()
 let stopSharedStateChangedSource: (() => void) | null = null
 
-async function sharedCombatIsActive(): Promise<boolean> {
-  const combat = await requestJson<{ active?: boolean }>('/state/combat', undefined, 'combat')
-  return !!combat?.active
-}
-
-async function performSharedResourceSave<T>(name: string, data: T): Promise<SharedResourceSaveResult> {
+async function performSharedResourceSave<T>(
+  name: string,
+  data: T,
+  options: SharedResourceWriteOptions = {},
+): Promise<SharedResourceSaveResult> {
   if (getRoomSession()?.role === 'spectator') return { status: 'skipped', reason: 'spectator' }
   if (!canWriteSharedState()) {
     if (
@@ -238,9 +242,6 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<Shar
       name !== 'dice-events' &&
       name !== 'combat-log'
     ) return { status: 'skipped', reason: 'forbidden' }
-    if (name === 'characters' && (await sharedCombatIsActive())) {
-      return { status: 'skipped', reason: 'combat-active' }
-    }
   }
   const validation = validateAndMigrateSharedResource(name, data)
   if (validation.status === 'invalid') {
@@ -274,6 +275,8 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<Shar
           ...sharedMemberHeaders(),
           ...sharedProtocolHeaders(),
           'X-Stars-Expected-Revision': String(expectedRevision),
+          ...(options.undoGroupId ? { 'X-Stars-Undo-Group': options.undoGroupId } : {}),
+          ...(options.undoLabel ? { 'X-Stars-Undo-Label': encodeURIComponent(options.undoLabel) } : {}),
         },
         body: serializedBody,
       })
@@ -330,8 +333,12 @@ function enqueueSharedResourceWrite<T>(name: string, operation: () => Promise<T>
   })
 }
 
-export function saveSharedResource<T>(name: string, data: T): Promise<void> {
-  return saveSharedResourceWithResult(name, data).then(() => undefined)
+export function saveSharedResource<T>(
+  name: string,
+  data: T,
+  options: SharedResourceWriteOptions = {},
+): Promise<void> {
+  return saveSharedResourceWithResult(name, data, options).then(() => undefined)
 }
 
 /**
@@ -340,8 +347,69 @@ export function saveSharedResource<T>(name: string, data: T): Promise<void> {
  * advancing a local ACK watermark before a successful response can hide the
  * server's conflict recovery snapshot.
  */
-export function saveSharedResourceWithResult<T>(name: string, data: T): Promise<SharedResourceSaveResult> {
-  return enqueueSharedResourceWrite(name, () => performSharedResourceSave(name, data))
+export function saveSharedResourceWithResult<T>(
+  name: string,
+  data: T,
+  options: SharedResourceWriteOptions = {},
+): Promise<SharedResourceSaveResult> {
+  return enqueueSharedResourceWrite(name, () => performSharedResourceSave(name, data, options))
+}
+
+export interface DmUndoTransactionSummary {
+  transactionId: string
+  label: string
+  status: 'applied' | 'undone'
+  resources: string[]
+  createdAt: number
+  updatedAt: number
+  undoneAt?: number
+}
+
+export async function loadDmUndoHistory(): Promise<DmUndoTransactionSummary[]> {
+  for (const api of sharedWriteApiCandidates()) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/dm/undo`), {
+        method: 'GET',
+        headers: {
+          ...sharedMemberHeaders(),
+          ...sharedProtocolHeaders(),
+        },
+      })
+      if (!response.ok) continue
+      const body = await response.json() as { transactions?: DmUndoTransactionSummary[] }
+      return Array.isArray(body.transactions) ? body.transactions : []
+    } catch {
+      // Try the next configured endpoint.
+    }
+  }
+  throw new Error('dm-undo-history-unavailable')
+}
+
+export async function undoDmTransaction(transactionId?: string): Promise<{
+  transaction: DmUndoTransactionSummary
+  restored: Array<{ resource: string; revision: number }>
+}> {
+  for (const api of sharedWriteApiCandidates()) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/dm/undo`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...sharedMemberHeaders(),
+          ...sharedProtocolHeaders(),
+        },
+        body: JSON.stringify(transactionId ? { transactionId } : {}),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? `dm-undo-${response.status}`)
+      }
+      return await response.json()
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('dm-undo-')) throw error
+    }
+  }
+  throw new Error('dm-undo-unavailable')
 }
 
 export async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {

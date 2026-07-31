@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
+import type { Character } from '../../types/character'
 import EnemyDetailPanel from './EnemyDetailPanel'
 
 function monsterToken(patch: Partial<Token> = {}): Token {
@@ -40,5 +41,28 @@ describe('EnemyDetailPanel monster thumbnail', () => {
 
     expect(markup).toContain('data:image/png;base64,custom-token')
     expect(markup).not.toContain('/assets/portraits/goblin-forest-scout-token.png')
+  })
+
+  it('uses the same linked authoritative hit points for the numeric label and health bar', () => {
+    const linked = {
+      id: 'monster-character',
+      currentHp: 80,
+      maxHp: 80,
+      conditions: [],
+    } as unknown as Character
+    const markup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken({
+          characterId: linked.id,
+          hp: 40,
+          maxHp: 80,
+        })}
+        characters={[linked]}
+        onClose={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('80 / 80')
+    expect(markup).toContain('width:100%')
   })
 })

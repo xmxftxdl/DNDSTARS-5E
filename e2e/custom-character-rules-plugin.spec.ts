@@ -61,7 +61,7 @@ test('DM 可编辑、保存并分发种族和加点规则插件', async ({ brows
   await Promise.all([enterRoom(dm, DM, created), enterRoom(player, PLAYER, joined)])
 
   const builder = dm.getByTestId('custom-rules-plugin-builder')
-  await builder.getByRole('button', { name: '打开规则包工作室' }).click()
+  await builder.getByRole('button', { name: '打开扩展工作室' }).click()
   await builder.getByLabel('插件 ID', { exact: true }).fill(PLUGIN_ID)
   await builder.getByLabel('插件名称').fill('房间角色创建规则')
   await builder.getByRole('button', { name: '添加种族' }).click()

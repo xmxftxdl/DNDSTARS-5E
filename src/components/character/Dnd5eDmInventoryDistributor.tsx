@@ -8,6 +8,7 @@ import {
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e/pluginApi'
 import { useCharacterStore } from '../../store/characters'
+import { mutateRoomCharacterInventory } from '../../store/roomCommands'
 import { getRoomSession } from '../../lib/roomSession'
 import { inventoryFailureMessage } from '../../lib/inventoryAuthority'
 import type { RoomRosterMember } from '../../lib/roomApi'
@@ -44,7 +45,6 @@ export default function Dnd5eDmInventoryDistributor({
 }) {
   const session = useMemo(() => getRoomSession(), [])
   const characters = useCharacterStore((state) => state.characters)
-  const applyInventoryMutation = useCharacterStore((state) => state.applyInventoryMutation)
   const [characterId, setCharacterId] = useState('')
   const [templateId, setTemplateId] = useState('srd-5.1:item:potion-of-healing')
   const [quantity, setQuantity] = useState(1)
@@ -76,13 +76,23 @@ export default function Dnd5eDmInventoryDistributor({
   const selectedTemplate = allTemplates.find((item) => item.id === templateId)
   const validCharacterId = targets.some((character) => character.id === characterId) ? characterId : ''
 
-  const distribute = () => {
+  const distribute = async () => {
     if (!validCharacterId || !templateId) {
       setNotice('请先选择角色和物品。')
       return
     }
-    const result = applyInventoryMutation({ type: 'grant', characterId: validCharacterId, templateId, quantity, identified: selectedTemplate?.magicItem ? identified : true })
-    setNotice(result.ok ? (result.message ?? '分发完成。') : inventoryFailureMessage(result.reason))
+    const result = await mutateRoomCharacterInventory({
+      type: 'grant',
+      characterId: validCharacterId,
+      templateId,
+      quantity,
+      identified: selectedTemplate?.magicItem ? identified : true,
+    })
+    setNotice(
+      result.inventory?.ok
+        ? (result.inventory.message ?? '分发完成。')
+        : inventoryFailureMessage(result.inventory?.reason),
+    )
   }
 
   return (

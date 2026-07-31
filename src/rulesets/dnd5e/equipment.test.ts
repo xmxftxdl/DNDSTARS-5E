@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
 import {
   DND5E_DAGGER,
+  DND5E_BATTLEAXE,
   DND5E_CLUB,
   DND5E_DART,
   DND5E_FIGHTER_STARTING_EQUIPMENT,
@@ -20,12 +21,15 @@ import {
   dnd5eArmorProficiencies,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eShillelaghAttackChoice,
+  dnd5eWeaponDamageSource,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponProficient,
   dnd5eWearingUnproficientArmor,
+  normalizeDnd5eCharacterEquipment,
 } from './equipment'
 import { dnd5eWalkingSpeed } from './classes'
 import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -46,6 +50,59 @@ describe('D&D 5e 2014 fighter equipment', () => {
       armor: { name: '链甲' },
     })
     expect(defaultEquipmentForDnd5eCharacter({ charClass: '法师' })?.mainWeapon?.name).toBe('长棍')
+  })
+
+  it('round-trips authoritative magic and special-material weapon provenance', () => {
+    const silveredMagicWeapon = structuredClone(DND5E_SHORTSWORD)
+    silveredMagicWeapon.id = 'plugin:moon-silver-shortsword'
+    silveredMagicWeapon.baseEquipmentId = DND5E_SHORTSWORD.id
+    if (silveredMagicWeapon.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    silveredMagicWeapon.dnd5e.magical = true
+    silveredMagicWeapon.dnd5e.specialMaterial = 'silvered'
+
+    const normalized = normalizeDnd5eCharacterEquipment({
+      charClass: '战士',
+      equipment: structuredClone({ mainWeapon: silveredMagicWeapon }),
+    })
+    expect(normalized?.mainWeapon?.dnd5e).toMatchObject({
+      kind: 'weapon',
+      magical: true,
+      specialMaterial: 'silvered',
+    })
+    expect(dnd5eWeaponDamageSource(normalized?.mainWeapon)).toEqual({
+      weaponId: silveredMagicWeapon.id,
+      magical: true,
+      specialMaterial: 'silvered',
+    })
+  })
+
+  it('migrates legacy +N magic weapons and drops invalid provenance values', () => {
+    const legacyMagicWeapon = {
+      ...structuredClone(DND5E_SHORTSWORD),
+      id: 'srd-5.1:magic-item:weapon-shortsword-plus-1',
+      baseEquipmentId: DND5E_SHORTSWORD.id,
+      effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+    }
+    expect(dnd5eWeaponDamageSource(legacyMagicWeapon)).toEqual({
+      weaponId: legacyMagicWeapon.id,
+      magical: true,
+    })
+    expect(normalizeDnd5eCharacterEquipment({
+      charClass: '战士',
+      equipment: { mainWeapon: legacyMagicWeapon },
+    })?.mainWeapon?.dnd5e).toMatchObject({ kind: 'weapon', magical: true })
+
+    const malformed = structuredClone(DND5E_SHORTSWORD)
+    if (malformed.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    const malformedRules = malformed.dnd5e as unknown as Record<string, unknown>
+    malformedRules.magical = 'yes'
+    malformedRules.specialMaterial = 'mithral'
+    const sanitized = normalizeDnd5eCharacterEquipment({
+      charClass: '战士',
+      equipment: { mainWeapon: malformed },
+    })?.mainWeapon?.dnd5e
+    expect(sanitized?.kind === 'weapon' && sanitized.magical).toBeUndefined()
+    expect(sanitized?.kind === 'weapon' && sanitized.specialMaterial).toBeUndefined()
   })
 
   it('derives AC 18 and a proficient +5 longsword attack', () => {
@@ -133,6 +190,41 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(dnd5eArmorClass(wizard)).toBe(15)
   })
 
+  it('adds weapon and armor proficiencies granted by an imported race', () => {
+    const pluginId = 'com.example.racial-training'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Racial Training', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerRace({
+          id: 'mountain-kin', name: '山地族测试', speedFeet: 25,
+          armorProficiencies: ['light', 'medium'],
+          weaponProficiencies: ['dnd5e-battleaxe'],
+        })
+      },
+    })
+    try {
+      const wizard = fighter({
+        race: '山地族测试',
+        dnd5eRaceId: `${pluginId}:mountain-kin`,
+        charClass: '法师',
+      })
+      expect([...dnd5eArmorProficiencies(wizard)]).toEqual(['light', 'medium'])
+      expect(dnd5eWeaponProficient(wizard, DND5E_BATTLEAXE)).toBe(true)
+      expect(dnd5eWeaponProficient(wizard, DND5E_LONGBOW)).toBe(false)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('applies deterministic core dwarf weapon training', () => {
+    const wizard = fighter({ race: '矮人', charClass: '法师' })
+    expect(dnd5eWeaponProficient(wizard, DND5E_BATTLEAXE)).toBe(true)
+    expect(dnd5eWeaponProficient(wizard, DND5E_LONGBOW)).toBe(false)
+  })
+
   it('recomputes unarmored AC instead of preserving a stale saved value', () => {
     const wizard = fighter({
       charClass: '法师',
@@ -179,6 +271,10 @@ describe('D&D 5e 2014 fighter equipment', () => {
       greatWeaponFighting: true,
       damage: { sides: 10, bonus: 3 },
     })
+    expect(dnd5eWeaponAttackProfile(twoHanded, { forceOneHanded: true })).toMatchObject({
+      greatWeaponFighting: false,
+      damage: { sides: 8, bonus: 3 },
+    })
     const shielded = fighter({ dnd5eClassChoices: { fighter: { fightingStyles: ['great-weapon-fighting'] } } })
     expect(dnd5eWeaponAttackProfile(shielded)).toMatchObject({
       greatWeaponFighting: false,
@@ -187,6 +283,9 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(dnd5eWeaponAttackProfile(fighter({
       equipment: { mainWeapon: DND5E_LONGBOW, offHand: DND5E_SHIELD },
     }))).toBeUndefined()
+    expect(dnd5eWeaponAttackProfile(fighter({
+      equipment: { mainWeapon: DND5E_LONGBOW },
+    }), { forceOneHanded: true })).toBeUndefined()
   })
 
   it('applies Defense AC and Champion expanded critical ranges', () => {

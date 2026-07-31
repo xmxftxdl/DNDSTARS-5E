@@ -1,6 +1,6 @@
 import {
-  activeDnd5eRulesPluginRequirements,
   missingDnd5eRulesPluginRequirements,
+  roomActiveDnd5eRulesPluginRequirements,
 } from '../rulesets/dnd5e/pluginApi'
 import { downloadRoomPlugin, heartbeatRoom } from './roomApi'
 import type { RoomRulesSnapshot, RoomSession } from './roomSession'
@@ -16,13 +16,19 @@ async function runRoomPluginSync(
   session: RoomSession,
   rules: RoomRulesSnapshot,
 ): Promise<RoomPluginSyncResult> {
-  const missing = missingDnd5eRulesPluginRequirements(
-    rules.requiredPlugins,
-    activeDnd5eRulesPluginRequirements(),
-  )
-  if (missing.length === 0) return { rules, installedPluginIds: [] }
   const host = window.DNDSTARS_5E_RULES_PLUGINS
   if (!host) throw new Error('规则插件加载器尚未初始化')
+  for (const installed of host.listInstalled()) {
+    if (installed.source !== 'ephemeral') continue
+    const required = rules.requiredPlugins.find((requirement) =>
+      requirement.id === installed.id && requirement.integrity === installed.integrity)
+    if (!required) await host.remove(installed.id)
+  }
+  const missing = missingDnd5eRulesPluginRequirements(
+    rules.requiredPlugins,
+    roomActiveDnd5eRulesPluginRequirements(),
+  )
+  if (missing.length === 0) return { rules, installedPluginIds: [] }
 
   const installedPluginIds: string[] = []
   for (const requirement of missing) {
@@ -35,7 +41,12 @@ async function runRoomPluginSync(
         stateSchemaVersion: requirement.stateSchemaVersion ?? 1,
       },
     })
-    await host.installBytes({
+    const metadata = rules.plugins.find((candidate) => candidate.id === requirement.id)
+    if (!metadata) throw new Error(`房间规则包 ${requirement.id} 缺少分发策略元数据`)
+    const install = metadata.distributionPolicy === 'room-ephemeral'
+      ? host.installEphemeralBytes.bind(host)
+      : host.installBytes.bind(host)
+    await install({
       id: requirement.id,
       version: requirement.version,
       integrity: requirement.integrity,
@@ -45,7 +56,7 @@ async function runRoomPluginSync(
     installedPluginIds.push(requirement.id)
   }
 
-  const refreshed = await heartbeatRoom(session, activeDnd5eRulesPluginRequirements())
+  const refreshed = await heartbeatRoom(session, roomActiveDnd5eRulesPluginRequirements())
   if (!refreshed.member.ready) throw new Error('规则包已下载，但房间版本校验仍未通过')
   return { rules: refreshed, installedPluginIds }
 }

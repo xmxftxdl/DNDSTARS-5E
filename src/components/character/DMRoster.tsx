@@ -101,7 +101,7 @@ export default function DMRoster() {
             <Users className="h-5 w-5 text-arcane-300" />
             <h2 className="font-semibold text-slate-100">房间玩家</h2>
           </div>
-          <p className="mt-1 text-sm text-slate-500">只读查看已加入本房间的玩家，以及他们创建的角色。</p>
+          <p className="mt-1 text-sm text-slate-500">检视已加入本房间的玩家与角色；仅升级记录允许 DM 留痕修订。</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -254,7 +254,7 @@ function DmCharacterInspector({
       <div className="my-auto w-full max-w-7xl rounded-2xl border border-white/10 bg-void-950 shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-4 rounded-t-2xl border-b border-white/10 bg-void-950/95 px-5 py-4 backdrop-blur">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">DM 只读检视</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">DM 角色检视 · 升级可修订</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-100">{characterName}</h2>
           </div>
           <button
@@ -267,7 +267,7 @@ function DmCharacterInspector({
           </button>
         </div>
         <div className="p-4 sm:p-6">
-          <CharacterSheet id={characterId} isDM readOnly />
+          <CharacterSheet id={characterId} isDM readOnly allowAdvancementRevision />
         </div>
       </div>
     </div>,

@@ -1,8 +1,9 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
+import { dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
+import { dnd5eActionIconBackdropImage } from './dnd5eActionIconBackdropImage'
 
 describe('Dnd5eActionIcon', () => {
   it('渲染原创 SVG、环级和资源角标', () => {
@@ -110,5 +111,46 @@ describe('Dnd5eActionIcon', () => {
       expect(html).toContain(`data-class-backdrop="${castingClassId}"`)
       expect(html).toContain(`data-backdrop-detail="${detail}"`)
     }
+  })
+
+  it('renders bard music-note interiors in a pale white', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eSpellActionIcon({ id: 'message', name: '传讯术', castingClassId: 'bard' }),
+    }))
+    expect(html).toContain('data-backdrop-detail="resonant-song-filled-notes"')
+    expect(html).toContain('fill="#FFF7FF"')
+    expect(html).toContain('opacity=".9"')
+  })
+
+  it('reuses the existing class backdrop when rasterizing a status-token background', () => {
+    const image = dnd5eActionIconBackdropImage({
+      classId: 'bard',
+      background: '#D946EF',
+      backgroundDeep: '#26072C',
+      accent: '#F9D5FF',
+      glow: '#E879F9',
+    })
+    const svg = decodeURIComponent(image.slice(image.indexOf(',') + 1))
+    expect(svg).toContain('data-class-backdrop="bard"')
+    expect(svg).toContain('data-backdrop-detail="resonant-song"')
+    expect(svg).toContain('data-backdrop-detail="resonant-song-filled-notes"')
+    expect(svg).toContain('stop-color="#D946EF"')
+    expect(svg).toContain('stop-color="#26072C"')
+  })
+
+  it('renders a distinct ornamental frame for magic-item rarity', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eItemActionIcon({
+        id: 'srd-5.1:magic-item:amulet-of-health',
+        name: '健康护符',
+        englishName: 'Amulet of Health',
+        category: 'magic-item',
+        icon: 'magic-wondrous',
+        magicItem: { kind: 'wondrous-item', rarity: 'rare', attunement: 'required', automation: 'headless' },
+      }),
+    }))
+    expect(html).toContain('data-rarity-border="rare"')
+    expect(html).toContain('data-rarity-detail="four-gems"')
+    expect(html).toContain('data-icon-detail="painted-amulet-of-health"')
   })
 })

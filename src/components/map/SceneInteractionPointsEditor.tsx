@@ -22,6 +22,10 @@ import {
   DND5E_STANDARD_CONDITIONS,
   DND5E_STANDARD_CONDITION_IDS,
 } from '../../rulesets/dnd5e/conditions'
+import {
+  DND5E_EDITABLE_CURRENCIES,
+  DND5E_EDITABLE_CURRENCY_LABELS,
+} from '../../types/inventory'
 
 const ICON_LABELS: Readonly<Record<SceneInteractionPoint['icon'], string>> = {
   bookshelf: '书柜',
@@ -166,7 +170,9 @@ function OutcomeEffectsEditor({
               {effect.kind === 'currency' && (
                 <div className="grid gap-2 sm:grid-cols-2">
                   <select value={effect.currency} disabled={disabled} onChange={(event) => update(index, { currency: event.target.value as typeof effect.currency })} className={fieldClass()}>
-                    <option value="cp">铜币</option><option value="sp">银币</option><option value="ep">银金币</option><option value="gp">金币</option><option value="pp">铂金币</option>
+                    {DND5E_EDITABLE_CURRENCIES.map((currency) => (
+                      <option key={currency} value={currency}>{DND5E_EDITABLE_CURRENCY_LABELS[currency]}</option>
+                    ))}
                   </select>
                   <input type="number" min={1} max={1_000_000} value={effect.amount} disabled={disabled} onChange={(event) => update(index, { amount: Math.max(1, Math.min(1_000_000, Math.floor(Number(event.target.value) || 1))) })} className={fieldClass()} aria-label="金币数量" />
                 </div>
@@ -276,6 +282,7 @@ export default function SceneInteractionPointsEditor({
   const selected = scene.interactionPoints.find((point) => point.id === selectedId) ??
     scene.interactionPoints[0]
   const allItems = useMemo(() => {
+    void pluginRegistryRevision
     const byId = new Map(
       [...DND5E_SRD_ITEM_TEMPLATES, ...registeredDnd5ePluginItems()]
         .map((item) => [item.id, item] as const),

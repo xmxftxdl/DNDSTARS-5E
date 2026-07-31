@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   Users,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import AccountAuthPanel from '../components/AccountAuthPanel'
 import Card from '../components/Card'
 import PageHeader from '../components/PageHeader'
@@ -31,7 +31,7 @@ import {
 } from '../lib/roomSession'
 import { resumeCampaignRoom, roomApiErrorMessage } from '../lib/roomApi'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
-import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
+import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
 import type { AccountSession } from '../lib/accountSession'
 
 function campaignStatusLabel(campaign: AccountCampaign): string {
@@ -57,6 +57,7 @@ export default function AccountCampaignsPage({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
   const recentRoom = getRecentRoomPlayerResumeIdentity()
 
   useEffect(() => {
@@ -130,7 +131,7 @@ export default function AccountCampaignsPage({
       const connection = await resumeCampaignRoom({
         campaignId: campaign.campaignId,
         displayName: accountSession.displayName,
-        activePlugins: activeDnd5eRulesPluginRequirements(),
+        activePlugins: roomActiveDnd5eRulesPluginRequirements(),
       })
       saveRoomSession(connection.session)
       setRoomRulesSnapshot(connection.rules)
@@ -156,7 +157,11 @@ export default function AccountCampaignsPage({
             战役长期保存在账号中。每次开团会生成新的临时房间，但地图、角色、日志与共享资源会继续沿用。
           </p>
         </section>
-        <AccountAuthPanel account={account} />
+        <AccountAuthPanel
+          key={searchParams.get('auth') === 'register' ? 'register' : 'login'}
+          account={account}
+          initialMode={searchParams.get('auth') === 'register' ? 'register' : 'login'}
+        />
       </div>
     )
   }
@@ -277,7 +282,7 @@ export default function AccountCampaignsPage({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">
             <LibraryBig className="h-4 w-4" />
-            战役档案
+            我的战役
           </div>
           {campaigns.some((campaign) => campaign.archived) && (
             <button
@@ -285,7 +290,7 @@ export default function AccountCampaignsPage({
               onClick={() => setShowArchived((value) => !value)}
               className="text-xs font-semibold text-slate-500 hover:text-slate-200"
             >
-              {showArchived ? '隐藏已归档' : '显示已归档'}
+              {showArchived ? '隐藏已收起战役' : '显示已收起战役'}
             </button>
           )}
         </div>
@@ -334,14 +339,15 @@ export default function AccountCampaignsPage({
                     </div>
                     <button
                       type="button"
-                      title={campaign.archived ? '恢复战役' : '归档战役'}
+                      title={campaign.archived ? '恢复到战役列表' : '从列表收起（不会删除数据）'}
                       disabled={busyId != null || currentRoom}
                       onClick={() => void setArchived(campaign, !campaign.archived)}
-                      className="rounded-lg border border-white/10 p-2 text-slate-500 transition hover:bg-white/5 hover:text-slate-200 disabled:opacity-30"
+                      className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:bg-white/5 hover:text-slate-200 disabled:opacity-30"
                     >
                       {busyId === campaign.campaignId
                         ? <LoaderCircle className="h-4 w-4 animate-spin" />
                         : campaign.archived ? <RotateCcw className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                      {campaign.archived ? '恢复' : '收起'}
                     </button>
                   </div>
                   <div className="mt-5 flex flex-wrap gap-2">
@@ -411,6 +417,11 @@ export default function AccountCampaignsPage({
             <p className="mt-3 font-semibold text-slate-400">还没有战役</p>
             <p className="mt-1 text-sm text-slate-600">先建立一个长期战役档案，再为它创建游戏房间。</p>
           </div>
+        )}
+        {campaigns.length > 0 && (
+          <p className="mt-4 text-xs leading-5 text-slate-600">
+            “收起战役”只会把暂时不玩的战役隐藏起来，不会关闭仍在运行的房间，也不会删除地图、角色或记录；之后可随时恢复。
+          </p>
         )}
       </section>
     </div>

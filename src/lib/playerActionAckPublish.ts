@@ -2,7 +2,7 @@ import type { BattleMap } from '../store/maps'
 import type { Character } from '../types/character'
 import type { SharedPlayerActionAckState } from './sharedCombatTypes'
 import type { SharedCombatState } from './sharedCombatTypes'
-import type { SharedResourceSaveResult } from './sharedApi'
+import type { SharedResourceSaveResult, SharedResourceWriteOptions } from './sharedApi'
 
 export interface PlayerActionAuthoritativeSnapshots {
   characters: Character[]
@@ -13,7 +13,11 @@ export interface PlayerActionAuthoritativeSnapshots {
   combat?: SharedCombatState
 }
 
-export type PlayerActionAckResourceWriter = <T>(name: string, data: T) => Promise<SharedResourceSaveResult>
+export type PlayerActionAckResourceWriter = <T>(
+  name: string,
+  data: T,
+  options?: SharedResourceWriteOptions,
+) => Promise<SharedResourceSaveResult>
 
 export interface PublishPlayerActionAckInput {
   ack: SharedPlayerActionAckState
@@ -34,19 +38,23 @@ export async function publishPlayerActionAckWithSnapshots({
   }
 
   if (ack.status === 'accepted' && snapshots) {
+    const undoOptions = {
+      undoGroupId: `player-action:${ack.actionId}`,
+      undoLabel: '结算玩家行动',
+    }
     const resources = await Promise.all([
       saveSharedResource('characters', {
         characters: snapshots.characters,
         selectedId: snapshots.characterSelectedId ?? null,
         updatedAt: snapshots.updatedAt,
-      }),
+      }, undoOptions),
       saveSharedResource('maps', {
         maps: snapshots.maps,
         selectedId: snapshots.mapSelectedId ?? null,
         updatedAt: snapshots.updatedAt,
-      }),
+      }, undoOptions),
       ...(snapshots.combat
-        ? [saveSharedResource('combat', snapshots.combat)]
+        ? [saveSharedResource('combat', snapshots.combat, undoOptions)]
         : []),
     ])
     const resourceNames = snapshots.combat

@@ -17,6 +17,7 @@ import {
   wallEdgeId,
   wallRenderSegments,
 } from '../../shared/map-geometry-kernel.mjs'
+import { compileDnd5eEffectiveVisionProfile } from '../../shared/dnd5e-vision-profile.mjs'
 
 export const MAP_GEOMETRY_RESOURCE = 'map-geometry'
 export const MAP_GEOMETRY_SCHEMA_VERSION = 3
@@ -969,7 +970,7 @@ export function mapGeometryWallRenderSegments(
 }
 
 export function mapGeometrySegments(geometry: MapGeometryState | undefined): MapGeometrySegment[] {
-  return compileGeometryCached(geometry).segments as MapGeometrySegment[]
+  return runtimeCompiledGeometry(geometry).segments as MapGeometrySegment[]
 }
 
 function cross(a: MapGeometryPoint, b: MapGeometryPoint): number {
@@ -1099,7 +1100,7 @@ export function mapGeometryMovementBlocked(input: {
       mapGeometryPointInPolygon(to, obstacle.points)
     ) return { blocked: true, entityId: obstacle.id }
   }
-  const compiled = compileGeometryCached(geometry)
+  const compiled = runtimeCompiledGeometry(geometry)
   for (const offset of offsets) {
     const rayFrom = { x: from.x + offset.x, y: from.y + offset.y }
     const rayTo = { x: to.x + offset.x, y: to.y + offset.y }
@@ -1149,7 +1150,7 @@ export function mapGeometryPlacementBlocked(input: {
   const radius = Math.max(1, input.map.gridSize * Math.max(1, token.size) * 0.42)
   const elevation = input.elevationFeet ?? mapGeometryTokenElevation(geometry, token)
   const creatureHeight = Math.max(5, Math.max(1, token.size) * 5)
-  const candidates = querySegmentSpatialIndexBounds(compileGeometryCached(geometry).index, {
+  const candidates = querySegmentSpatialIndexBounds(runtimeCompiledGeometry(geometry).index, {
     minX: at.x - radius,
     minY: at.y - radius,
     maxX: at.x + radius,
@@ -1184,7 +1185,7 @@ function rayBlocked(input: {
   const fromElevation = input.fromElevationFeet ?? input.elevationFeet ?? 0
   const toElevation = input.toElevationFeet ?? input.elevationFeet ?? fromElevation
   return raycastGeometry({
-    compiled: compileGeometryCached(input.geometry),
+    compiled: runtimeCompiledGeometry(input.geometry),
     from: input.from,
     to: input.to,
     fromElevationFeet: fromElevation,
@@ -1379,22 +1380,24 @@ export function mapGeometryCanSeeToken(input: {
   const geometry = input.geometry
   if (!geometry?.vision.enabled && !input.forceEnabled) return true
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
-  const normalRangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
-    ? Math.max(0, input.viewer.visionRangeFeet!)
-    : input.fallbackRangeFeet ?? geometry?.vision.defaultRangeFeet ?? DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET
-  const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
-    ? Math.max(0, input.viewer.darkvisionRangeFeet!)
-    : 0
-  const blindsightRangeFeet = Number.isFinite(input.viewer.blindsightRangeFeet)
-    ? Math.max(0, input.viewer.blindsightRangeFeet!)
-    : 0
-  const truesightRangeFeet = Number.isFinite(input.viewer.truesightRangeFeet)
-    ? Math.max(0, input.viewer.truesightRangeFeet!)
-    : 0
+  const profile = compileDnd5eEffectiveVisionProfile({
+    token: input.viewer,
+    fallbackRangeFeet: input.fallbackRangeFeet ??
+      geometry?.vision.defaultRangeFeet ??
+      DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+  })
   const carriedLightRangeFeet = campaignLightIsActive(input.viewer.lightSource, input.worldMinute ?? 0)
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
+  const rangeFeet = Math.max(
+    profile.normalRangeFeet,
+    profile.darkvisionRangeFeet,
+    profile.darknessSightRangeFeet,
+    profile.magicalDarknessSightRangeFeet,
+    profile.blindsightRangeFeet,
+    profile.truesightRangeFeet,
+    carriedLightRangeFeet,
+  )
   const rangePx = rangeFeet / feetPerCell * Math.max(1, input.map.gridSize)
   const gridSize = Math.max(1, input.map.gridSize)
   const targetRadiusPx = gridSize * Math.max(1, input.target.size) * 0.4
@@ -1413,9 +1416,17 @@ export function mapGeometryCanSeeToken(input: {
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
   if (illumination === 'magical-darkness') {
-    const magicalRange = input.viewer.canSeeMagicalDarkness ? normalRangeFeet : 0
-    if (distanceFeet > Math.max(magicalRange, blindsightRangeFeet, truesightRangeFeet)) return false
-  } else if (illumination === 'darkness' && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
+    if (distanceFeet > Math.max(
+      profile.magicalDarknessSightRangeFeet,
+      profile.blindsightRangeFeet,
+      profile.truesightRangeFeet,
+    )) return false
+  } else if (illumination === 'darkness' && distanceFeet > Math.max(
+    profile.darkvisionRangeFeet,
+    profile.darknessSightRangeFeet,
+    profile.blindsightRangeFeet,
+    profile.truesightRangeFeet,
+  )) return false
   const targetSamples = [
     { x: input.target.x, y: input.target.y },
     { x: input.target.x - targetRadiusPx, y: input.target.y - targetRadiusPx },
@@ -1587,10 +1598,15 @@ function spellLightingAffectsPoint(
   source: MapGeometrySpellLightingSource,
   point: MapGeometryPoint,
   map: BattleMap,
+  elevationFeet = 0,
 ): boolean {
   const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
-  const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
+  const horizontalDistanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
     Math.max(1, map.gridSize) * feetPerCell
+  const distanceFeet = Math.hypot(
+    horizontalDistanceFeet,
+    elevationFeet - source.elevationFeet,
+  )
   return distanceFeet <= spellLightingRadius(source)
 }
 
@@ -1612,7 +1628,8 @@ export function mapGeometryIlluminationAtPoint(input: {
         obstacle, map: input.map, geometry: input.geometry, spellLighting,
       }),
   ) || spellLighting.some((source) =>
-    source.kind === 'magical-darkness' && spellLightingAffectsPoint(source, input.point, input.map),
+    source.kind === 'magical-darkness' &&
+      spellLightingAffectsPoint(source, input.point, input.map, pointElevation),
   )) return 'magical-darkness'
   if (ambient === 'bright') return 'bright'
   let result: MapGeometryIllumination = ambient
@@ -1654,7 +1671,10 @@ export function mapGeometryIlluminationAtPoint(input: {
     result = 'dim'
   }
   for (const source of spellLighting) {
-    if (source.kind !== 'light' || !spellLightingAffectsPoint(source, input.point, input.map)) continue
+    if (
+      source.kind !== 'light' ||
+      !spellLightingAffectsPoint(source, input.point, input.map, pointElevation)
+    ) continue
     const distanceFeet = Math.hypot(input.point.x - source.point.x, input.point.y - source.point.y) /
       gridSize * feetPerCell
     if (rayBlocked({
@@ -1743,30 +1763,36 @@ export function mapGeometryVisibilityPolygon(input: {
   forceEnabled?: boolean
   /** 强制启用视野时使用的基础距离；Token 的明确视野值仍优先。 */
   fallbackRangeFeet?: number
+  /** Rendering-only override used to draw a specific sense band with the same wall clipping. */
+  rangeOverrideFeet?: number
   worldMinute?: number
 }): MapGeometryPoint[] {
   const geometry = input.geometry
   if (!geometry?.vision.enabled && !input.forceEnabled) return []
   const origin = { x: input.viewer.x, y: input.viewer.y }
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
-  const normalRangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
-    ? Math.max(0, input.viewer.visionRangeFeet!)
-    : input.fallbackRangeFeet ?? geometry?.vision.defaultRangeFeet ?? DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET
-  const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
-    ? Math.max(0, input.viewer.darkvisionRangeFeet!)
-    : 0
-  const blindsightRangeFeet = Number.isFinite(input.viewer.blindsightRangeFeet)
-    ? Math.max(0, input.viewer.blindsightRangeFeet!)
-    : 0
-  const truesightRangeFeet = Number.isFinite(input.viewer.truesightRangeFeet)
-    ? Math.max(0, input.viewer.truesightRangeFeet!)
-    : 0
+  const profile = compileDnd5eEffectiveVisionProfile({
+    token: input.viewer,
+    fallbackRangeFeet: input.fallbackRangeFeet ??
+      geometry?.vision.defaultRangeFeet ??
+      DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+  })
   const lightRangeFeet = campaignLightIsActive(input.viewer.lightSource, input.worldMinute ?? 0)
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
   // 地形遮罩使用正常视距；暗光、黑暗和场景光源在 LightingLayer 内表现。
   // 服务端仍会单独过滤未被照亮的生物，因此不会因地形可见而泄露隐藏 Token。
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, lightRangeFeet)
+  const rangeFeet = Number.isFinite(input.rangeOverrideFeet)
+    ? Math.max(0, input.rangeOverrideFeet!)
+    : Math.max(
+        profile.normalRangeFeet,
+        profile.darkvisionRangeFeet,
+        profile.darknessSightRangeFeet,
+        profile.magicalDarknessSightRangeFeet,
+        profile.blindsightRangeFeet,
+        profile.truesightRangeFeet,
+        lightRangeFeet,
+      )
   if (rangeFeet <= 0) return []
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = mapGeometryTokenElevation(geometry, input.viewer)
@@ -1807,9 +1833,38 @@ export function mapGeometryVisibilityPolygon(input: {
 }
 
 let runtimeGeometryByMapId = new Map<string, MapGeometryState>()
+let runtimeCompiledGeometryByMapId = new Map<
+  string,
+  {
+    geometry: MapGeometryState
+    compiled: ReturnType<typeof compileGeometryCached>
+  }
+>()
+
+/**
+ * Runtime maps are immutable snapshots. Their compiled segment/index data is
+ * installed together with the snapshot so hot movement and ray queries avoid
+ * rebuilding the full geometry signature on every call.
+ */
+function runtimeCompiledGeometry(
+  geometry: MapGeometryState | undefined,
+): ReturnType<typeof compileGeometryCached> {
+  if (geometry) {
+    const runtime = runtimeCompiledGeometryByMapId.get(geometry.mapId)
+    if (runtime?.geometry === geometry) return runtime.compiled
+  }
+  return compileGeometryCached(geometry)
+}
 
 export function setMapGeometryRuntime(maps: readonly MapGeometryState[]): void {
   runtimeGeometryByMapId = new Map(maps.map((map) => [map.mapId, map]))
+  runtimeCompiledGeometryByMapId = new Map(maps.map((map) => [
+    map.mapId,
+    {
+      geometry: map,
+      compiled: compileGeometryCached(map),
+    },
+  ]))
 }
 
 export function mapGeometryRuntimeForMap(mapId: string): MapGeometryState | undefined {

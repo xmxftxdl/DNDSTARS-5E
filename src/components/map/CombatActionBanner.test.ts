@@ -54,5 +54,42 @@ describe('CombatActionBanner', () => {
     expect(html.match(/combat-banner-class-backdrop__bard-note--right-/g)).toHaveLength(2)
     expect(html.match(/🎵/g)).toHaveLength(2)
     expect(html.match(/♪/g)).toHaveLength(2)
+    expect(html).toContain('combat-banner-class-backdrop__main--bard')
+  })
+
+  it('怪物横幅使用与敌方回合流光一致的暗血红配色，并区别于野蛮人', () => {
+    const monster = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'monster',
+      attackName: '撕咬',
+      attackKind: 'melee',
+    }))
+    const barbarian = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'barbarian',
+      attackName: '巨斧',
+      attackKind: 'melee',
+    }))
+
+    expect(monster).toContain('--combat-banner-color:#7F1D1D')
+    expect(monster).toContain('--combat-banner-deep:#170506')
+    expect(monster).toContain('--combat-banner-glow:#EF4444')
+    expect(monster).toContain('data-icon-motif="monster-attack"')
+    expect(monster).toContain('data-icon-detail="monster-claw-attack"')
+    expect(monster).not.toContain('--combat-banner-color:#E5484D')
+    expect(barbarian).toContain('--combat-banner-color:#E5484D')
+    expect(barbarian).toContain('--combat-banner-glow:#FF6B6B')
+  })
+
+  it('renders the Thunderwave spell banner with its dedicated artwork', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'spell',
+      classId: 'bard',
+      spellId: 'thunderwave',
+      spellName: 'Thunderwave',
+    }))
+    expect(html).toContain('data-combat-banner="spell"')
+    expect(html).toContain('Thunderwave')
+    expect(html).toContain('href="/assets/icons/thunderwave-spell-action.png"')
   })
 })

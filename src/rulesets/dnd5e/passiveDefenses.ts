@@ -5,6 +5,7 @@ import type { Dnd5eDamageType } from './monsters'
 import {
   dnd5eActiveConditionImmunities,
   dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveSavingThrowDisadvantages,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveSpeedBonus,
   dnd5eActiveSpeedPenalty,
@@ -20,7 +21,7 @@ import {
   dnd5eHasStandardCondition,
   dnd5eStandardConditionId,
 } from './conditions'
-import { resolveDnd5eRollMode } from './rollMode'
+import { resolveDnd5eRollMode, type Dnd5eRollModeResolution } from './rollMode'
 
 export interface Dnd5eDefensiveCreature {
   level: number
@@ -53,9 +54,100 @@ export interface Dnd5eDefensiveCreature {
   conditions: readonly string[]
   creatureType?: string
   magicResistance?: boolean
+  racialSavingThrowAdvantages?: {
+    conditions?: readonly string[]
+    damageTypes?: readonly Dnd5eDamageType[]
+    magicAbilities?: readonly AbilityKey[]
+  }
   speed?: number
   dodging?: boolean
   wearingUnproficientArmor?: boolean
+}
+
+/** A stable, UI-safe explanation for a saving throw roll-mode source. */
+export interface Dnd5eSavingThrowRuleReason {
+  id: string
+  label: string
+  detail: string
+}
+
+const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason, 'id'>> = {
+  'danger-sense': {
+    label: '危险感知',
+    detail: '可见效果的敏捷豁免具有优势；目标未失能、未目盲且未耳聋。',
+  },
+  'steel-will': {
+    label: '钢铁意志',
+    detail: '猎人游侠对抗恐慌的豁免具有优势。',
+  },
+  countercharm: {
+    label: '反制魅惑',
+    detail: '处于反制魅惑影响内，对抗魅惑或恐慌的豁免具有优势。',
+  },
+  'rage-strength-save': {
+    label: '狂暴',
+    detail: '狂暴期间的力量豁免具有优势。',
+  },
+  'holy-nimbus': {
+    label: '圣洁灵光',
+    detail: '对邪魔或亡灵施放的法术豁免具有优势。',
+  },
+  'magic-resistance': {
+    label: '魔法抗性',
+    detail: '对法术或其他魔法效应的豁免具有优势。',
+  },
+  'racial-save-advantage': {
+    label: '种族适应',
+    detail: '当前种族规则对这次豁免提供优势。',
+  },
+  'protection-from-poison': {
+    label: '防护毒素',
+    detail: '对中毒状态的豁免具有优势。',
+  },
+  dodge: {
+    label: '闪避',
+    detail: '可见来源的敏捷豁免具有优势。',
+  },
+  'active-effect-strength-advantage': {
+    label: '持续效果',
+    detail: '当前持续效果使力量豁免具有优势。',
+  },
+  'monster-mechanic-advantage': {
+    label: '怪物特性',
+    detail: '当前怪物特性使该豁免具有优势。',
+  },
+  'exhaustion-level-3': {
+    label: '力竭（3级或更高）',
+    detail: '力量、敏捷与体质豁免具有劣势。',
+  },
+  'condition-save-disadvantage': {
+    label: '状态影响',
+    detail: '当前状态使该豁免具有劣势。',
+  },
+  'unproficient-armor': {
+    label: '未熟练护甲',
+    detail: '穿戴未熟练护甲时，力量与敏捷豁免具有劣势。',
+  },
+  'active-effect-strength-disadvantage': {
+    label: '持续效果',
+    detail: '当前持续效果使力量豁免具有劣势。',
+  },
+  'monster-mechanic-disadvantage': {
+    label: '怪物特性',
+    detail: '当前怪物特性使该豁免具有劣势。',
+  },
+}
+
+export function dnd5eSavingThrowRuleReason(reasonId: string): Dnd5eSavingThrowRuleReason {
+  const known = SAVING_THROW_RULE_REASONS[reasonId]
+  return known
+    ? { id: reasonId, ...known }
+    : { id: reasonId, label: reasonId, detail: '由当前规则上下文提供的豁免骰修正。' }
+}
+
+export interface Dnd5eSavingThrowModeExplanation extends Dnd5eRollModeResolution {
+  advantage: readonly Dnd5eSavingThrowRuleReason[]
+  disadvantage: readonly Dnd5eSavingThrowRuleReason[]
 }
 
 function defensiveClassLevel(creature: Dnd5eDefensiveCreature, classId: Dnd5eClassId): number {
@@ -89,7 +181,7 @@ export function dnd5eIsIncapacitated(
   return !!creature.classState.stunnedByActorId || dnd5eConditionIncapacitated(creature)
 }
 
-export function dnd5eSavingThrowMode(
+export function dnd5eSavingThrowModeExplanation(
   creature: Dnd5eDefensiveCreature,
   ability: AbilityKey,
   context: {
@@ -98,8 +190,9 @@ export function dnd5eSavingThrowMode(
     sourceCreatureType?: string
     sourceIsSpell?: boolean
     sourceIsMagical?: boolean
+    damageType?: Dnd5eDamageType
   } = {},
-): D20RollMode {
+): Dnd5eSavingThrowModeExplanation {
   const dangerSenseBlocked = dnd5eIsIncapacitated(creature) || hasCondition(creature, new Set([
     'blinded', 'deafened', '目盲', '耳聋',
   ]))
@@ -120,22 +213,81 @@ export function dnd5eSavingThrowMode(
   const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
   const magicResistance = creature.magicResistance === true &&
     (context.sourceIsSpell === true || context.sourceIsMagical === true)
+  const racialSaveAdvantage = !!((
+    context.condition != null &&
+    creature.racialSavingThrowAdvantages?.conditions?.some((condition) =>
+      condition.trim().toLowerCase() === context.condition?.trim().toLowerCase())
+  ) || (
+    context.damageType != null &&
+    creature.racialSavingThrowAdvantages?.damageTypes?.includes(context.damageType)
+  ) || (
+    (context.sourceIsSpell === true || context.sourceIsMagical === true) &&
+    creature.racialSavingThrowAdvantages?.magicAbilities?.includes(ability)
+  ))
   const strengthEffect = ability === 'str'
     ? dnd5eActiveStrengthRollFlags(creature.classState.activeEffects)
     : { advantage: false, disadvantage: false }
   const mechanicModifiers = creature.classState.monsterMechanicRollModifiers?.filter((entry) => entry.roll === 'saving-throw') ?? []
-  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || magicResistance ||
-    poisonProtection || dodgeDexterity || strengthEffect.advantage ||
-    mechanicModifiers.some((entry) => entry.mode === 'advantage')
-  const disadvantage = creature.exhaustionLevel >= 3 ||
-    dnd5eConditionSavingThrowDisadvantage(creature, ability) ||
-    (creature.wearingUnproficientArmor === true && (ability === 'str' || ability === 'dex')) ||
-    strengthEffect.disadvantage ||
-    mechanicModifiers.some((entry) => entry.mode === 'disadvantage')
-  return resolveDnd5eRollMode({
-    advantage: [{ active: advantage, reason: 'saving-throw-advantage' }],
-    disadvantage: [{ active: disadvantage, reason: 'saving-throw-disadvantage' }],
-  }).mode
+  const resolution = resolveDnd5eRollMode({
+    advantage: [
+      { active: dangerSense, reason: 'danger-sense' },
+      { active: steelWill, reason: 'steel-will' },
+      { active: countercharm, reason: 'countercharm' },
+      { active: rageStrength, reason: 'rage-strength-save' },
+      { active: holyNimbus, reason: 'holy-nimbus' },
+      { active: magicResistance, reason: 'magic-resistance' },
+      { active: racialSaveAdvantage, reason: 'racial-save-advantage' },
+      { active: poisonProtection, reason: 'protection-from-poison' },
+      { active: dodgeDexterity, reason: 'dodge' },
+      { active: strengthEffect.advantage, reason: 'active-effect-strength-advantage' },
+      {
+        active: mechanicModifiers.some((entry) => entry.mode === 'advantage'),
+        reason: 'monster-mechanic-advantage',
+      },
+    ],
+    disadvantage: [
+      { active: creature.exhaustionLevel >= 3, reason: 'exhaustion-level-3' },
+      {
+        active: dnd5eConditionSavingThrowDisadvantage(creature, ability),
+        reason: 'condition-save-disadvantage',
+      },
+      {
+        active: dnd5eActiveSavingThrowDisadvantages(
+          creature.classState.activeEffects,
+        ).includes(ability),
+        reason: 'active-effect-save-disadvantage',
+      },
+      {
+        active: creature.wearingUnproficientArmor === true && (ability === 'str' || ability === 'dex'),
+        reason: 'unproficient-armor',
+      },
+      { active: strengthEffect.disadvantage, reason: 'active-effect-strength-disadvantage' },
+      {
+        active: mechanicModifiers.some((entry) => entry.mode === 'disadvantage'),
+        reason: 'monster-mechanic-disadvantage',
+      },
+    ],
+  })
+  return {
+    ...resolution,
+    advantage: resolution.advantageReasons.map(dnd5eSavingThrowRuleReason),
+    disadvantage: resolution.disadvantageReasons.map(dnd5eSavingThrowRuleReason),
+  }
+}
+
+export function dnd5eSavingThrowMode(
+  creature: Dnd5eDefensiveCreature,
+  ability: AbilityKey,
+  context: {
+    effectVisible?: boolean
+    condition?: string
+    sourceCreatureType?: string
+    sourceIsSpell?: boolean
+    sourceIsMagical?: boolean
+    damageType?: Dnd5eDamageType
+  } = {},
+): D20RollMode {
+  return dnd5eSavingThrowModeExplanation(creature, ability, context).mode
 }
 
 export function dnd5eHasEvasion(creature: Dnd5eDefensiveCreature): boolean {
@@ -293,13 +445,19 @@ export function dnd5eConditionImmuneFromSource(
   if (standard != null && dnd5eActiveConditionImmunities(target.classState.activeEffects).includes(standard)) {
     return true
   }
+  const charmOrFear = standard === 'charmed' || standard === 'frightened'
+  if (
+    charmOrFear &&
+    defensiveClassLevel(target, 'barbarian') >= 6 &&
+    defensiveHasSubclass(target, 'barbarian', 'berserker') &&
+    target.classState.raging === true
+  ) return true
   const charmFearOrPossession = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌', 'possessed', '附身'].includes(normalized)
   if (
     charmFearOrPossession && defensiveClassLevel(target, 'paladin') >= 15 &&
     defensiveHasSubclass(target, 'paladin', 'devotion') &&
     dnd5eProtectionCreatureType(source?.creatureType)
   ) return true
-  const charmOrFear = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌'].includes(normalized)
   if (
     !charmOrFear || defensiveClassLevel(target, 'druid') < 10 || !defensiveHasSubclass(target, 'druid', 'land')
   ) return false
@@ -323,9 +481,6 @@ export function dnd5eClassPassiveDefenses(creature: Dnd5eDefensiveCreature): {
   if (defensiveClassLevel(creature, 'druid') >= 10 && defensiveHasSubclass(creature, 'druid', 'land')) {
     damageImmunities.push('poison')
     conditionImmunities.push('poisoned', '中毒', 'disease', '疾病')
-  }
-  if (defensiveClassLevel(creature, 'barbarian') >= 6 && defensiveHasSubclass(creature, 'barbarian', 'berserker') && creature.classState.raging) {
-    conditionImmunities.push('charmed', '魅惑', 'frightened', '惊惧', '恐慌')
   }
   return { damageImmunities, conditionImmunities }
 }

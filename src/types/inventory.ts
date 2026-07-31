@@ -64,6 +64,20 @@ export const DND5E_INVENTORY_SCHEMA_VERSION = 3 as const
 
 export type Dnd5eCurrency = 'cp' | 'sp' | 'ep' | 'gp' | 'pp'
 
+/**
+ * 当前角色与场景编辑界面使用的货币。
+ * ep/pp 仍保留在存档类型中，用于无损读取旧角色与旧场景。
+ */
+export const DND5E_EDITABLE_CURRENCIES = ['cp', 'sp', 'gp'] as const satisfies readonly Dnd5eCurrency[]
+
+export type Dnd5eEditableCurrency = (typeof DND5E_EDITABLE_CURRENCIES)[number]
+
+export const DND5E_EDITABLE_CURRENCY_LABELS: Readonly<Record<Dnd5eEditableCurrency, string>> = {
+  cp: '铜币',
+  sp: '银币',
+  gp: '金币',
+}
+
 export type Dnd5eCurrencyWallet = Record<Dnd5eCurrency, number>
 
 export type Dnd5eAmmunitionKind = 'arrow' | 'crossbow-bolt' | 'sling-bullet' | 'blowgun-needle'
@@ -133,6 +147,8 @@ export interface Dnd5eInventoryItemTemplate {
   englishName?: string
   category: Dnd5eInventoryCategory
   icon: Dnd5eInventoryIconId
+  /** Optional namespaced bitmap supplied by an installed rules package. */
+  iconAssetId?: string
   description: string
   rulesText: string
   weightLb?: number

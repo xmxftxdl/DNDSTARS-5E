@@ -1,4 +1,7 @@
-import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import type {
+  Dnd5eTurnEconomyByToken,
+  Dnd5eTurnEconomyCounts,
+} from '../../lib/sharedCombatTypes'
 
 export type Dnd5eCountedTurnResource = 'action' | 'bonusAction' | 'reaction' | 'objectInteraction'
 
@@ -31,6 +34,42 @@ export function normalizeDnd5eTurnEconomyCounts(
     movement: economy.movement ?? { current: movement, max: movement },
     objectInteraction: economy.objectInteraction ?? { current: 1, max: 1 },
   }
+}
+
+export interface Dnd5eReactiveReactionRefresh {
+  actorId: string
+  turnKey: string
+  reactionAvailable: boolean
+  speed?: number
+}
+
+/**
+ * Mirrors the Headless Reactive refresh into the Host's shared economy.
+ * Only the reaction pool and turn identity change; an off-turn refresh must
+ * not restore the creature's action, bonus action, or movement.
+ */
+export function refreshDnd5eReactiveReactionEconomies(
+  current: Dnd5eTurnEconomyByToken,
+  refreshes: readonly Dnd5eReactiveReactionRefresh[],
+): Dnd5eTurnEconomyByToken {
+  if (refreshes.length === 0) return current
+  const next = { ...current }
+  for (const refresh of refreshes) {
+    const economy = normalizeDnd5eTurnEconomyCounts(
+      next[refresh.actorId] ??
+        createDnd5eTurnEconomyCounts(refresh.turnKey, refresh.speed),
+      refresh.speed,
+    )
+    next[refresh.actorId] = {
+      ...economy,
+      turnKey: refresh.turnKey,
+      reaction: {
+        current: refresh.reactionAvailable ? 1 : 0,
+        max: 1,
+      },
+    }
+  }
+  return next
 }
 
 export function spendDnd5eTurnResource(

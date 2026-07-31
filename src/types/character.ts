@@ -1,10 +1,96 @@
 import type { AbilityKey } from '../lib/dnd'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
 import type { DND5E_COMBAT_STATE_SCHEMA_VERSION } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
 import type { CharacterEquipment } from './equipment'
 import type { Dnd5eInventory } from './inventory'
 
 export type Abilities = Record<AbilityKey, number>
+
+export type Dnd5eAdvancementHitPointMethod = 'fixed' | 'rolled'
+
+export interface Dnd5eAdvancementAbilityScoreChoice {
+  kind: 'ability-score'
+  increases: Partial<Record<AbilityKey, number>>
+}
+
+export interface Dnd5eAdvancementFeatChoice {
+  kind: 'feat'
+  featId: string
+}
+
+export type Dnd5eAdvancementAsiChoice =
+  | Dnd5eAdvancementAbilityScoreChoice
+  | Dnd5eAdvancementFeatChoice
+
+export interface Dnd5eAdvancementSpellSelectionsV1 {
+  /** 本职业升级确认后的完整戏法列表。 */
+  cantrips: string[]
+  /** “已知法术”职业升级确认后的完整已知法术列表。 */
+  knownSpells?: string[]
+  /** 法师升级确认后的完整法术书；冒险中抄录的既有法术必须保留。 */
+  wizardSpellbook?: string[]
+}
+
+export interface Dnd5eLevelAdvancementDecisionV1 {
+  schemaVersion: 1
+  classId:
+    | 'barbarian' | 'bard' | 'cleric' | 'druid' | 'fighter' | 'monk'
+    | 'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard'
+  levelsGained: number
+  hitPointMethod: Dnd5eAdvancementHitPointMethod
+  hitPointRolls: number[]
+  subclassId?: string
+  asiChoices: Array<{
+    classLevel: number
+    choice: Dnd5eAdvancementAsiChoice
+  }>
+  classChoiceSelections?: Record<string, string[]>
+  fighterFightingStyles?: Array<
+    'archery' | 'defense' | 'dueling' | 'great-weapon-fighting' | 'protection' | 'two-weapon-fighting'
+  >
+  fighterSubclassSelections?: Record<string, string[]>
+  spellSelections?: Dnd5eAdvancementSpellSelectionsV1
+}
+
+export interface Dnd5eLevelAdvancementSnapshotV1 {
+  level: number
+  dnd5eClassLevels?: Character['dnd5eClassLevels']
+  abilities: Abilities
+  skills: string[]
+  dnd5eClassChoices?: Character['dnd5eClassChoices']
+  dnd5eFeatIds?: string[]
+  hitPointMaximumMode?: 'fixed' | 'manual'
+  hitPointRolls?: number[]
+  hitPointDice?: Array<{ sides: number; current: number; max: number }>
+  maxHp: number
+  currentHp: number
+}
+
+export interface Dnd5eLevelAdvancementRevisionV1 {
+  revisedAt: number
+  revisedBy: 'dm'
+  /** 旧记录可能保留修订说明；新修订不再要求 DM 填写。 */
+  reason?: string
+  previousDecision: Dnd5eLevelAdvancementDecisionV1
+}
+
+export interface Dnd5eLevelAdvancementRecordV1 {
+  schemaVersion: 1
+  id: string
+  fromLevel: number
+  toLevel: number
+  classId: Dnd5eLevelAdvancementDecisionV1['classId']
+  fromClassLevel: number
+  toClassLevel: number
+  completedAt: number
+  completedBy: 'player' | 'dm'
+  decision: Dnd5eLevelAdvancementDecisionV1
+  grantedFeatureIds: string[]
+  before: Dnd5eLevelAdvancementSnapshotV1
+  after: Dnd5eLevelAdvancementSnapshotV1
+  revisions?: Dnd5eLevelAdvancementRevisionV1[]
+}
 
 export interface Character {
   /** 5.2.1 仅用于识别并迁移旧存档；新数据统一写入 2014 / SRD 5.1。 */
@@ -32,6 +118,10 @@ export interface Character {
   race: string
   /** 可选的完整插件命名空间种族 ID；race 保留可读名称。 */
   dnd5eRaceId?: string
+  /** Persistent mechanical choices made for ancestry-specific racial rules. */
+  dnd5eRacialChoices?: {
+    dragonbornAncestry?: import('../rulesets/dnd5e/racialAutomation').Dnd5eDragonbornAncestryId
+  }
   charClass: string
   /**
    * 2014 兼职职业等级。旧存档缺失时由 charClass + level 自动迁移；
@@ -86,6 +176,8 @@ export interface Character {
     recommendedRaces: string[]
     reasons: string[]
   }
+  /** 仅在首次建立高等级角色时存在；逐级结算完成后清除。 */
+  dnd5eCreationTargetLevel?: number
   savingThrows: AbilityKey[] // 熟练的豁免
   skills: string[] // 熟练的技能 key
 
@@ -127,6 +219,12 @@ export interface Character {
    * ID 必须保留完整插件命名空间；插件未安装时仍原样保存，不回退为核心规则内容。
    */
   dnd5ePluginFeatureIds?: string[]
+  /** Namespaced feats supplied by installed rules packages. */
+  dnd5eFeatIds?: string[]
+  /**
+   * 已确认的逐级升级事务。玩家不能改写既有记录；DM 可修订任意一次升级并重放后续记录。
+   */
+  dnd5eLevelAdvancements?: Dnd5eLevelAdvancementRecordV1[]
   /** 仅由 5e Headless 权威事务写入的战斗中职业状态。 */
   dnd5eCombatState?: {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
@@ -134,7 +232,12 @@ export interface Character {
     activeEffects?: Dnd5eActiveEffectInstance[]
     /** 铁蒺藜伤势造成的速度减值；恢复至少 1 点生命值时由 Headless 清除。 */
     caltropsSpeedPenaltyFeet?: number
+    /** Stable per-turn attack count used by effects such as Slowing Breath. */
+    attacksMadeTurnKey?: string
+    attacksMadeThisTurn?: number
     raging?: boolean
+    /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
+    turnStartResolvedTurnKey?: string
     /** 本场战斗由 DM 判定为受突袭；自身首回合结束后失效。 */
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
@@ -144,6 +247,8 @@ export interface Character {
     rageSustainedThisTurn?: boolean
     relentlessRageDc?: number
     relentlessRagePendingDc?: number
+    /** 狂战士“反击”的一次性权威触发；由造成伤害的 Headless 事务写入。 */
+    berserkerRetaliationTrigger?: { sourceId: string; round: number }
     undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
     monsterOnHitSavePending?: {
       sourceId: string
@@ -155,6 +260,8 @@ export interface Character {
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
+    /** Recoverable maximum-HP reductions applied by authoritative combat. */
+    hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
@@ -174,6 +281,8 @@ export interface Character {
     divineStrikeTurnKey?: string
     foeSlayerTurnKey?: string
     recklessAttackTurnKey?: string
+    monsterReactiveAvailableTurnKey?: string
+    monsterReactiveUsedTurnKey?: string
     weaponAttackActionTurnKey?: string
     dodgingTurnKey?: string
     helpedAbilityCheckSourceId?: string
@@ -213,10 +322,31 @@ export interface Character {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    battleMasterDroppedWeaponIds?: string[]
+    /** Weapon IDs bonded by the audited Eldritch Knight protocol (maximum two). */
+    eldritchKnightBondedWeaponIds?: string[]
+    /** Action-cantrip entitlement for the level-7 bonus-action weapon attack. */
+    eldritchKnightWarMagicCantripTurnKey?: string
+    /** Action-spell entitlement for Improved War Magic. */
+    eldritchKnightWarMagicTurnKey?: string
+    /** Source fighter IDs and the source-turn boundary after which the effect expires. */
+    eldritchStrikeBySource?: Record<string, { appliedTurnKey: string; sourceTurnsRemaining: number }>
+    /** Action Surge has opened the level-15 teleport window this turn. */
+    eldritchKnightArcaneChargeTurnKey?: string
+    eldritchKnightArcaneChargeUsedTurnKey?: string
+    /** 14级狼图腾：本回合近战命中后可选择击倒的目标。 */
+    totemWarriorWolfAttunementTargetIds?: string[]
+    totemWarriorWolfAttunementTurnKey?: string
     /** 成功躲藏后的检定结果；进行攻击时由 Headless 清除。 */
     hiddenCheckTotal?: number
     /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */
     hideInPlainSightPrepared?: boolean
+    /** Host-owned current-turn advantage marker sourced from a movable utility projection. */
+    utilityProjectionAttackAdvantage?: {
+      featureId: string
+      targetId: string
+      turnKey: string
+    }
     bonusActionSpellTurnKey?: string
     leveledSpellTurnKey?: string
     concentrationSpellId?: string
@@ -238,6 +368,10 @@ export interface Character {
     draconicWingsActive?: boolean
     /** 龙威豁免成功后，对各术士来源的24小时免疫。 */
     draconicPresenceImmunityRoundsBySource?: Record<string, number>
+    /** 怪物骇人威仪豁免后，对该来源的 24 小时免疫。 */
+    monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
+    /** 怪物动作免疫，键由来源动作或图鉴动作族稳定派生。 */
+    monsterActionImmunityRoundsByKey?: Record<string, number>
     hurlThroughHellReady?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number

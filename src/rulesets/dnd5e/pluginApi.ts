@@ -32,7 +32,12 @@ import {
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
 import type { Dnd5eClassId } from './classes'
-import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
+import type { Dnd5eMonsterStatBlock } from './monsters'
+import { parseDnd5eMonsterStatBlock } from './monsterSchema'
+import { registerDnd5ePluginMonsterCatalogEntry } from './roomMonsterCatalog'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './classLevels'
+import { dnd5ePluginSubclassRegistry as pluginSubclasses } from './pluginSubclassRegistry'
+import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
@@ -41,15 +46,22 @@ import {
 } from './spellbook'
 import {
   declarativeAbilityCompatibilityV1,
+  declarativeSubclassCompatibilityReportV1,
+  declarativeSubclassResourceDieSidesV1,
   validateDeclarativeSubclassAbilityV1,
   validateDeclarativeSubclassDefinitionV1,
+  type DeclarativeSubclassCombatHookV1,
+  type DeclarativeBattleMasterMechanicV1,
   type DeclarativeDiceFormulaV1,
   type DeclarativeEffectTargetV1,
   type DeclarativeSubclassAbilityV1,
   type DeclarativeSubclassDefinitionV1,
   type DeclarativeSubclassDurationV1,
+  type DeclarativeSubclassResourceDieV1,
+  type DeclarativeSubclassSpellcastingV1,
   type DeclarativeValueFormulaV1,
 } from './declarativeSubclassAbility'
+import { dnd5ePluginImageAsset } from './pluginAssets'
 
 export const DND5E_RULES_PLUGIN_API_VERSION = 2 as const
 export const DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS = [1, 2] as const
@@ -57,7 +69,11 @@ export const DND5E_RULES_PLUGIN_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type Dnd5eRulesPluginApiVersion = typeof DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS[number]
-export type Dnd5ePluginDistributionPolicy = 'room-distributable' | 'account-entitled' | 'local-only'
+export type Dnd5ePluginDistributionPolicy =
+  | 'room-distributable'
+  | 'room-ephemeral'
+  | 'account-entitled'
+  | 'local-only'
 export type Dnd5ePluginContentCategory =
   | 'rules'
   | 'subclasses'
@@ -211,6 +227,8 @@ export interface Dnd5ePluginHeadlessActionContext {
   targets: readonly Dnd5eCombatant[]
   /** 由 Host 骰子盒公开生成且已按声明校验的结果。 */
   rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>>
+  /** Only supplied by the private authoritative after-hit trigger path. */
+  parentAttackDamageType?: Dnd5eDamageType
   /** 赋予临时生命值；同一效果不叠加，保留较高值。返回本次实际增加量。 */
   grantTemporaryHitPoints(targetId: string, amount: number): number
   /** 恢复生命值但不超过生命上限。返回本次实际恢复量。 */
@@ -296,14 +314,28 @@ export interface Dnd5ePluginFeatureAction {
   }
 }
 
+export interface Dnd5ePluginStaticCombatModifiers {
+  armorClassBonus?: number
+  initiativeBonus?: number
+  speedBonusFeet?: number
+  savingThrowBonus?: number
+  darkvisionRangeFeet?: number
+  damageResistances?: readonly Dnd5eDamageType[]
+  damageImmunities?: readonly Dnd5eDamageType[]
+  conditionImmunities?: readonly string[]
+}
+
 export interface Dnd5ePluginFeatureDefinition {
   id: string
   name: string
   summary: string
   description: string
   sourceLabel?: string
+  iconAssetId?: string
   minimumLevel?: number
   automation: Dnd5ePluginAutomationLevel
+  /** Host-owned passive projection applied when the character owns this feature. */
+  staticModifiers?: Dnd5ePluginStaticCombatModifiers
   /** Whether this feature may submit a replacement for a successful enemy d20 result. */
   canModifyEnemyD20?: boolean
   /** 返回 false 时人物卡不能选择，Headless 也会拒绝该特性。 */
@@ -313,6 +345,9 @@ export interface Dnd5ePluginFeatureDefinition {
   sourceClassId?: Dnd5eClassId
   sourceSubclassId?: string
   grantedBySubclass?: boolean
+  /** Host-only markers populated by registerFeat. */
+  sourceFeatId?: string
+  grantedByFeat?: boolean
   /** Set only by the Host compiler for pure declarative packages. */
   declarativeAbility?: DeclarativeSubclassAbilityV1
   automationReasons?: readonly string[]
@@ -348,6 +383,8 @@ export interface RegisteredDnd5ePluginResource extends Omit<Dnd5ePluginResourceD
   ownerPluginLicense: string
   /** Host-only formula compiled from DeclarativeSubclassAbilityV1. */
   declarativeMaximum?: DeclarativeValueFormulaV1
+  /** Host-only resource-die metadata compiled from a declarative subclass. */
+  declarativeDie?: DeclarativeSubclassResourceDieV1
 }
 
 export interface Dnd5ePluginSubclassChoiceGroup {
@@ -356,6 +393,7 @@ export interface Dnd5ePluginSubclassChoiceGroup {
   name: string
   description?: string
   maxSelections: number
+  maxSelectionsByLevel?: readonly { level: number; maxSelections: number }[]
   options: readonly { id: string; name: string; summary: string }[]
 }
 
@@ -386,6 +424,9 @@ export interface RegisteredDnd5ePluginSubclass extends Omit<Dnd5ePluginSubclassD
   ownerPluginName: string
   ownerPluginLicense: string
   features: readonly (Dnd5ePluginSubclassFeature & { id: string; featureId: string })[]
+  /** Host-only metadata compiled from the pure-data subclass protocol. */
+  declarativeSpellcasting?: DeclarativeSubclassSpellcastingV1
+  declarativeCombatHooks?: readonly DeclarativeSubclassCombatHookV1[]
 }
 
 export interface Dnd5ePluginFlexibleAbilityBonus {
@@ -394,13 +435,43 @@ export interface Dnd5ePluginFlexibleAbilityBonus {
   exclude?: readonly AbilityKey[]
 }
 
+export interface Dnd5ePluginRacialSavingThrowAdvantages {
+  /** Advantage when the saving throw is explicitly associated with one of these conditions. */
+  conditions?: readonly string[]
+  /** Advantage when the saving throw is explicitly associated with one of these damage types. */
+  damageTypes?: readonly Dnd5eDamageType[]
+  /** Ability saves that gain advantage against spells or other magical effects. */
+  magicAbilities?: readonly AbilityKey[]
+}
+
 export interface Dnd5ePluginRaceDefinition {
   id: string
   name: string
   description?: string
+  iconAssetId?: string
+  /** Display-only ancestry link. A subrace remains a complete standalone rules entry. */
+  parentRace?: { id: string; name: string }
+  size?: 'small' | 'medium'
   speedFeet: number
   abilityBonuses?: Partial<Record<AbilityKey, number>>
   flexibleAbilityBonus?: Dnd5ePluginFlexibleAbilityBonus
+  skillProficiencies?: readonly string[]
+  skillProficiencyChoiceCount?: number
+  armorProficiencies?: readonly ('light' | 'medium' | 'heavy' | 'shield')[]
+  weaponProficiencies?: readonly string[]
+  toolProficiencies?: readonly string[]
+  languages?: readonly string[]
+  /** Local feature IDs are namespaced by the Host and automatically granted by this race. */
+  grantedFeatureIds?: readonly string[]
+  /** Number of installed plugin feats selected during character creation. */
+  featChoiceCount?: number
+  /** Added once per total character level to every maximum-HP calculation path. */
+  hitPointsPerLevelBonus?: number
+  savingThrowAdvantages?: Dnd5ePluginRacialSavingThrowAdvantages
+  traits?: readonly { id: string; name: string; description: string }[]
+  staticModifiers?: Dnd5ePluginStaticCombatModifiers
+  automation?: Dnd5ePluginAutomationLevel
+  automationReasons?: readonly string[]
 }
 
 export interface RegisteredDnd5ePluginRace extends Omit<Dnd5ePluginRaceDefinition, 'id'> {
@@ -408,6 +479,27 @@ export interface RegisteredDnd5ePluginRace extends Omit<Dnd5ePluginRaceDefinitio
   ownerPluginId: string
   ownerPluginName: string
   ownerPluginLicense: string
+}
+
+export interface Dnd5ePluginFeatPrerequisite {
+  minimumLevel?: number
+  abilityScores?: Partial<Record<AbilityKey, number>>
+  /** Core race names/IDs or namespaced plugin race IDs. */
+  raceIds?: readonly string[]
+}
+
+export interface Dnd5ePluginFeatDefinition
+  extends Omit<Dnd5ePluginFeatureDefinition, 'minimumLevel' | 'sourceClassId' | 'sourceSubclassId' | 'grantedBySubclass' | 'sourceFeatId' | 'grantedByFeat'> {
+  prerequisite?: Dnd5ePluginFeatPrerequisite
+}
+
+export interface RegisteredDnd5ePluginFeat extends Omit<Dnd5ePluginFeatDefinition, 'id' | 'action'> {
+  id: string
+  featureId: string
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+  action?: Dnd5ePluginFeatureAction
 }
 
 export interface Dnd5ePluginBackgroundDefinition {
@@ -448,6 +540,7 @@ export type RegisteredDnd5ePluginAbilityGeneration = WithPluginOwnership<Dnd5ePl
 
 export type Dnd5ePluginSpellDefinition = Omit<Dnd5eImportedSpell, 'id' | 'source' | 'automation'> & {
   id: string
+  iconAssetId?: string
   automation?:
     | { mode: 'reference-only' }
     | { mode: 'headless-action'; actionId: string }
@@ -457,6 +550,7 @@ export interface RegisteredDnd5ePluginSpell extends Omit<Dnd5eImportedSpell, 'au
   ownerPluginId: string
   ownerPluginName: string
   ownerPluginLicense: string
+  iconAssetId?: string
   automation:
     | { mode: 'reference-only' }
     | { mode: 'headless-action'; actionId: string }
@@ -483,6 +577,7 @@ export interface Dnd5eRulesPluginApi {
   readonly rulesetId: typeof DND5E_RULES_PLUGIN_RULESET_ID
   registerFighterSubclass(definition: Dnd5ePluginFighterSubclass): string
   registerFeature(definition: Dnd5ePluginFeatureDefinition): string
+  registerFeat(definition: Dnd5ePluginFeatDefinition): string
   registerResource(definition: Dnd5ePluginResourceDefinition): string
   registerSubclass(definition: Dnd5ePluginSubclassDefinition): string
   /** Host-only pure-data compiler. Imported JSON never supplies executable code. */
@@ -495,6 +590,8 @@ export interface Dnd5eRulesPluginApi {
   registerSpell(definition: Dnd5ePluginSpellDefinition): string
   /** 注册可由 DM 分发的声明式物品；装备效果由 Host 白名单结算。 */
   registerItem(definition: Dnd5ePluginItemDefinition): string
+  /** 注册由怪物工坊生成的纯数据 stat block；Host 会执行 monsterSchema fail-closed 校验。 */
+  registerMonster(definition: Dnd5eMonsterStatBlock): string
 }
 
 export interface Dnd5eRulesPlugin {
@@ -518,13 +615,19 @@ interface OwnedHeadlessAction {
 const plugins = new Map<string, RegisteredPlugin>()
 const headlessActions = new Map<string, OwnedHeadlessAction>()
 const pluginFeatures = new Map<string, RegisteredDnd5ePluginFeature>()
+const pluginFeats = new Map<string, RegisteredDnd5ePluginFeat>()
 const pluginResources = new Map<string, RegisteredDnd5ePluginResource>()
-const pluginSubclasses = new Map<string, RegisteredDnd5ePluginSubclass>()
 const pluginRaces = new Map<string, RegisteredDnd5ePluginRace>()
 const pluginBackgrounds = new Map<string, RegisteredDnd5ePluginBackground>()
 const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()
 const pluginSpells = new Map<string, RegisteredDnd5ePluginSpell>()
 const pluginItems = new Map<string, RegisteredDnd5ePluginItem>()
+export type RegisteredDnd5ePluginMonster = Dnd5eMonsterStatBlock & {
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+}
+const pluginMonsters = new Map<string, RegisteredDnd5ePluginMonster>()
 const pluginListeners = new Set<() => void>()
 let pluginRevision = 0
 
@@ -568,6 +671,7 @@ function clonePluginItemDefinition(
   const englishName = boundedText(definition.englishName, `${itemId} English name`, 160, true)
   const description = boundedText(definition.description, `${itemId} description`, 20_000)!
   const rulesText = boundedText(definition.rulesText, `${itemId} rules text`, 20_000)!
+  const iconAssetId = ownedPluginAssetId(manifest.id, definition.iconAssetId, itemId)
   if (!(INVENTORY_CATEGORIES as readonly unknown[]).includes(definition.category)) {
     throw new Error(`Invalid plugin item category: ${itemId}`)
   }
@@ -725,6 +829,7 @@ function clonePluginItemDefinition(
     ...(englishName ? { englishName } : {}),
     category: definition.category,
     icon: definition.icon,
+    ...(iconAssetId ? { iconAssetId } : {}),
     description,
     rulesText,
     ...(definition.weightLb != null ? { weightLb: definition.weightLb } : {}),
@@ -925,6 +1030,105 @@ function cloneAbilityBonuses(value: Dnd5ePluginRaceDefinition['abilityBonuses'])
   return result
 }
 
+function ownedPluginAssetId(pluginId: string, value: unknown, label: string): string | undefined {
+  if (value == null) return undefined
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`Invalid plugin image asset reference: ${label}`)
+  const assetId = value.startsWith(`${pluginId}:`) ? value : namespacedId(pluginId, value)
+  const asset = dnd5ePluginImageAsset(assetId)
+  if (!asset || asset.ownerPluginId !== pluginId) throw new Error(`Plugin image asset is unavailable: ${label}`)
+  return assetId
+}
+
+function cloneStaticCombatModifiers(
+  value: Dnd5ePluginStaticCombatModifiers | undefined,
+  label: string,
+): Dnd5ePluginStaticCombatModifiers | undefined {
+  if (value == null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Invalid plugin static combat modifiers: ${label}`)
+  }
+  const numeric: Array<[keyof Dnd5ePluginStaticCombatModifiers, number, number]> = [
+    ['armorClassBonus', -20, 20],
+    ['initiativeBonus', -20, 20],
+    ['speedBonusFeet', -500, 500],
+    ['savingThrowBonus', -20, 20],
+    ['darkvisionRangeFeet', 0, 10_000],
+  ]
+  for (const [key, minimum, maximum] of numeric) {
+    const candidate = value[key]
+    if (candidate != null && !finiteInteger(candidate, minimum, maximum)) {
+      throw new Error(`Invalid plugin static combat modifier ${key}: ${label}`)
+    }
+  }
+  const damageList = (values: readonly Dnd5eDamageType[] | undefined, key: string) => {
+    if (values == null) return undefined
+    if (!Array.isArray(values) || values.length > DND5E_DAMAGE_TYPES.length ||
+      values.some((entry) => !(DND5E_DAMAGE_TYPES as readonly string[]).includes(entry))) {
+      throw new Error(`Invalid plugin static combat modifier ${key}: ${label}`)
+    }
+    return [...new Set(values)]
+  }
+  const damageResistances = damageList(value.damageResistances, 'damageResistances')
+  const damageImmunities = damageList(value.damageImmunities, 'damageImmunities')
+  let conditionImmunities: string[] | undefined
+  if (value.conditionImmunities != null) {
+    if (!Array.isArray(value.conditionImmunities) || value.conditionImmunities.length > 32 ||
+      value.conditionImmunities.some((entry) => typeof entry !== 'string' || !entry.trim() || entry.length > 120)) {
+      throw new Error(`Invalid plugin condition immunities: ${label}`)
+    }
+    conditionImmunities = [...new Set(value.conditionImmunities.map((entry) => entry.trim()))]
+  }
+  return {
+    ...(value.armorClassBonus != null ? { armorClassBonus: value.armorClassBonus } : {}),
+    ...(value.initiativeBonus != null ? { initiativeBonus: value.initiativeBonus } : {}),
+    ...(value.speedBonusFeet != null ? { speedBonusFeet: value.speedBonusFeet } : {}),
+    ...(value.savingThrowBonus != null ? { savingThrowBonus: value.savingThrowBonus } : {}),
+    ...(value.darkvisionRangeFeet != null ? { darkvisionRangeFeet: value.darkvisionRangeFeet } : {}),
+    ...(damageResistances?.length ? { damageResistances } : {}),
+    ...(damageImmunities?.length ? { damageImmunities } : {}),
+    ...(conditionImmunities?.length ? { conditionImmunities } : {}),
+  }
+}
+
+function cloneRacialSavingThrowAdvantages(
+  value: Dnd5ePluginRacialSavingThrowAdvantages | undefined,
+  label: string,
+): Dnd5ePluginRacialSavingThrowAdvantages | undefined {
+  if (value == null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Invalid plugin racial saving-throw advantages: ${label}`)
+  }
+  let conditions: string[] | undefined
+  if (value.conditions != null) {
+    if (!Array.isArray(value.conditions) || value.conditions.length > 32 ||
+      value.conditions.some((entry) => typeof entry !== 'string' || !entry.trim() || entry.length > 120)) {
+      throw new Error(`Invalid plugin racial saving-throw conditions: ${label}`)
+    }
+    conditions = [...new Set(value.conditions.map((entry) => entry.trim()))]
+  }
+  let damageTypes: Dnd5eDamageType[] | undefined
+  if (value.damageTypes != null) {
+    if (!Array.isArray(value.damageTypes) || value.damageTypes.length > DND5E_DAMAGE_TYPES.length ||
+      value.damageTypes.some((entry) => !(DND5E_DAMAGE_TYPES as readonly string[]).includes(entry))) {
+      throw new Error(`Invalid plugin racial saving-throw damage types: ${label}`)
+    }
+    damageTypes = [...new Set(value.damageTypes)]
+  }
+  let magicAbilities: AbilityKey[] | undefined
+  if (value.magicAbilities != null) {
+    if (!Array.isArray(value.magicAbilities) || value.magicAbilities.length > ABILITY_KEYS.length ||
+      value.magicAbilities.some((entry) => !ABILITY_KEYS.includes(entry))) {
+      throw new Error(`Invalid plugin racial magic saving-throw abilities: ${label}`)
+    }
+    magicAbilities = [...new Set(value.magicAbilities)]
+  }
+  return {
+    ...(conditions?.length ? { conditions } : {}),
+    ...(damageTypes?.length ? { damageTypes } : {}),
+    ...(magicAbilities?.length ? { magicAbilities } : {}),
+  }
+}
+
 function assertManifest(manifest: Dnd5eRulesPluginManifest): void {
   if (!manifest || typeof manifest !== 'object') throw new Error('Invalid D&D 5e rules plugin manifest')
   if (!validId(manifest.id)) throw new Error(`Invalid D&D 5e rules plugin id: ${manifest.id}`)
@@ -978,7 +1182,7 @@ function assertManifest(manifest: Dnd5eRulesPluginManifest): void {
   ) throw new Error(`Invalid plugin capabilities: ${manifest.id}`)
   if (
     manifest.distributionPolicy != null &&
-    !['room-distributable', 'account-entitled', 'local-only'].includes(manifest.distributionPolicy)
+    !['room-distributable', 'room-ephemeral', 'account-entitled', 'local-only'].includes(manifest.distributionPolicy)
   ) throw new Error(`Invalid plugin distribution policy: ${manifest.id}`)
   if (
     manifest.contentCategory != null &&
@@ -990,6 +1194,10 @@ function assertManifest(manifest: Dnd5eRulesPluginManifest): void {
   if (manifest.rulesetId !== DND5E_RULES_PLUGIN_RULESET_ID) {
     throw new Error(`Unsupported ruleset for plugin ${manifest.id}: ${manifest.rulesetId}`)
   }
+}
+
+export function validateDnd5eRulesPluginManifest(manifest: Dnd5eRulesPluginManifest): void {
+  assertManifest(manifest)
 }
 
 function publishPluginRegistryChange(): void {
@@ -1018,8 +1226,12 @@ function declarativeFormulaValue(
   return Math.max(formula.minimum ?? Number.NEGATIVE_INFINITY, Math.floor(value * (formula.multiplier ?? 1)))
 }
 
-function declarativeResourceMaximumByLevel(formula: DeclarativeValueFormulaV1, classId: Dnd5eClassId): number[] {
-  return Array.from({ length: 20 }, (_, index) => {
+function declarativeResourceMaximumByLevel(
+  formula: DeclarativeValueFormulaV1,
+  classId: Dnd5eClassId,
+  exactSteps?: readonly { level: number; maximum: number }[],
+): number[] {
+  const values = Array.from({ length: 20 }, (_, index) => {
     const level = index + 1
     if (formula.kind === 'fixed') return Math.max(0, formula.value)
     if (formula.kind === 'proficiency-bonus') {
@@ -1033,6 +1245,12 @@ function declarativeResourceMaximumByLevel(formula: DeclarativeValueFormulaV1, c
     // Ability-based maxima cannot be represented by the legacy static resource table.
     return Math.max(0, formula.minimum ?? 0)
   })
+  for (const step of exactSteps ?? []) {
+    for (let index = step.level - 1; index < values.length; index += 1) {
+      values[index] = step.maximum
+    }
+  }
+  return values
 }
 
 function declarativeResourceMaximumForCharacter(
@@ -1104,8 +1322,8 @@ function declarativeEffectTargets(
 }
 
 function declarativeDiceCount(dice: DeclarativeDiceFormulaV1): number {
-  // Level-dependent extra dice are preserved and reported as partial in V1. The safe
-  // active slice rolls the invariant base dice only until dynamic host roll recipes land.
+  // Static actions retain the invariant base declaration. Prearmed after-hit
+  // resource-die actions receive a private, combatant-specific override.
   return dice.count
 }
 
@@ -1168,9 +1386,26 @@ function declarativeFeatureResolver(input: {
       const resourceId = namespacedId(input.pluginId, requirement.resourceId)
       if ((actor.classResources[resourceId]?.current ?? -1) < requirement.minimum) return context.fail('class-resource-unavailable')
     }
+    for (const requirement of predicates?.subclassChoices ?? []) {
+      const selectionKey = `${input.subclassId}/${requirement.groupId}`
+      if (!actor.classSelections[selectionKey]?.includes(requirement.optionId)) {
+        return context.fail('invalid-class-feature')
+      }
+    }
     const turnKey = `${state.combatId}:${state.round}:${state.turnSlotId ?? actor.id}`
     const oncePerTurn = predicates?.oncePerTurn === true || ability.limits?.oncePerTurn === true
     if (oncePerTurn && actor.classState.declarativeUsedTurnKeys?.[input.featureId] === turnKey) return context.fail('feature-already-used')
+    if (ability.mechanic?.kind === 'utility-projection-attack-advantage') {
+      if (!primaryTarget) return context.fail('invalid-target')
+      const projectionDistance = state.utilityProjectionDistanceFeetByPair?.[
+        dnd5eUtilityProjectionDistanceKey(actor.id, ability.mechanic.projectionId, primaryTarget.id)
+      ]
+      if (
+        projectionDistance == null ||
+        !Number.isFinite(projectionDistance) ||
+        projectionDistance > ability.mechanic.maximumDistanceFeet
+      ) return context.fail('invalid-target')
+    }
     const costs = [
       ...(ability.cost?.resources ?? []).map((cost) => ({ resourceId: namespacedId(input.pluginId, cost.resourceId), amount: cost.amount })),
       ...(input.usesResourceId && (ability.cost?.uses ?? 1) > 0 ? [{ resourceId: input.usesResourceId, amount: ability.cost?.uses ?? 1 }] : []),
@@ -1186,10 +1421,23 @@ function declarativeFeatureResolver(input: {
     if (operationCount > 64) return context.fail('invalid-plugin-action')
     for (const effect of ability.effects) {
       if (effect.kind === 'move') continue
-      if ((effect.kind === 'damage' || effect.kind === 'healing') && !context.rolls[effect.rollId]) {
+      if (
+        (effect.kind === 'damage' || effect.kind === 'healing' || effect.kind === 'temporary-hit-points') &&
+        effect.rollId &&
+        !context.rolls[effect.rollId]
+      ) {
         const roll = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
         if (!roll || (roll.kind !== 'damage' && roll.kind !== 'healing') || roll.dice.count > 0) return context.fail('invalid-dice')
       }
+      if (
+        effect.kind === 'damage' &&
+        (() => {
+          const declaration = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
+          return declaration?.kind === 'damage' &&
+            declaration.damageType === 'parent-weapon' &&
+            !context.parentAttackDamageType
+        })()
+      ) return context.fail('invalid-plugin-action')
       if ((effect.kind === 'standard-condition') && !declarativeDurationToCapability(effect.duration)) continue
       if ((effect.kind === 'spend-resource' || effect.kind === 'restore-resource') && declarativeFormulaValue(effect.amount, actor, context.rules) <= 0) return context.fail('invalid-plugin-action')
     }
@@ -1200,6 +1448,11 @@ function declarativeFeatureResolver(input: {
       if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') {
         const amount = declarativeFormulaValue(effect.amount, actor, context.rules)
         const resourceId = namespacedId(input.pluginId, effect.resourceId)
+        if (
+          effect.kind === 'restore-resource' &&
+          effect.whenEmpty === true &&
+          actor.classResources[resourceId]?.current !== 0
+        ) continue
         const ok = effect.kind === 'spend-resource'
           ? context.spendResource(resourceId, amount)
           : context.restoreResource(resourceId, amount)
@@ -1216,15 +1469,48 @@ function declarativeFeatureResolver(input: {
             declarativeFormulaValue(declaration.dice.modifier ?? { kind: 'fixed', value: 0 }, actor, context.rules)
           if (effect.kind === 'damage') {
             const multiplier = state.effectiveRules?.houseRules.declarativeAbilityDamageMultiplier ?? 1
-            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier)), declaration.kind === 'damage' ? declaration.damageType : 'force')
+            let damageType: Dnd5eDamageType | undefined
+            if (declaration.kind === 'damage') {
+              damageType = declaration.damageType === 'parent-weapon'
+                ? context.parentAttackDamageType
+                : declaration.damageType
+            } else damageType = 'force'
+            if (!damageType) return context.fail('invalid-plugin-action')
+            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier)), damageType)
           } else context.heal(target.id, Math.max(0, rolled))
         } else if (effect.kind === 'temporary-hit-points') {
-          context.grantTemporaryHitPoints(target.id, Math.max(0, declarativeFormulaValue(effect.amount, actor, context.rules)))
+          const roll = effect.rollId
+            ? ability.rolls?.find((candidate) => candidate.id === effect.rollId)
+            : undefined
+          const amount = effect.rollId
+            ? (
+                context.rolls[effect.rollId]?.values.reduce((total, value) => total + value, 0) ?? 0
+              ) + (
+                roll && (roll.kind === 'damage' || roll.kind === 'healing')
+                  ? declarativeFormulaValue(roll.dice.modifier ?? { kind: 'fixed', value: 0 }, actor, context.rules)
+                  : 0
+              )
+            : declarativeFormulaValue(effect.amount!, actor, context.rules)
+          context.grantTemporaryHitPoints(target.id, Math.max(0, amount))
         } else if (effect.kind === 'standard-condition') {
           const duration = declarativeDurationToCapability(effect.duration)
           if (duration) context.applyStandardCondition(target.id, effect.condition, duration)
         }
       }
+    }
+    if (ability.mechanic?.kind === 'utility-projection-attack-advantage' && primaryTarget) {
+      actor.classState.utilityProjectionAttackAdvantage = {
+        featureId: input.featureId,
+        targetId: primaryTarget.id,
+        turnKey,
+      }
+      context.events.push({
+        type: 'class-state-changed',
+        actorId: actor.id,
+        targetId: primaryTarget.id,
+        stateKey: 'utility-projection-attack-advantage',
+        active: true,
+      })
     }
     if (oncePerTurn) {
       actor.classState.declarativeUsedTurnKeys = { ...actor.classState.declarativeUsedTurnKeys, [input.featureId]: turnKey }
@@ -1336,6 +1622,11 @@ export function registerDnd5eRulesPlugin(
       if (definition.sourceLabel != null && typeof definition.sourceLabel !== 'string') {
         throw new Error(`Invalid plugin feature source label: ${featureId}`)
       }
+      if (definition.sourceFeatId != null || definition.grantedByFeat != null) {
+        throw new Error(`Feat ownership markers are Host-only: ${featureId}`)
+      }
+      const iconAssetId = ownedPluginAssetId(id, definition.iconAssetId, featureId)
+      const staticModifiers = cloneStaticCombatModifiers(definition.staticModifiers, featureId)
       if (definition.declarativeAbility) {
         validateDeclarativeSubclassAbilityV1(definition.declarativeAbility, `Plugin feature ${featureId}`)
       }
@@ -1408,6 +1699,8 @@ export function registerDnd5eRulesPlugin(
       const registered: RegisteredDnd5ePluginFeature = {
         ...definition,
         id: featureId,
+        ...(iconAssetId ? { iconAssetId } : {}),
+        ...(staticModifiers ? { staticModifiers } : {}),
         minimumLevel,
         action,
         declarativeAbility: definition.declarativeAbility ? structuredClone(definition.declarativeAbility) : undefined,
@@ -1421,6 +1714,57 @@ export function registerDnd5eRulesPlugin(
         if (pluginFeatures.get(featureId) === registered) pluginFeatures.delete(featureId)
       })
       return featureId
+    },
+    registerFeat(definition) {
+      assertAcceptingContributions()
+      const featId = namespacedId(id, definition.id)
+      if (pluginFeats.has(featId)) throw new Error(`Plugin feat already registered: ${featId}`)
+      const prerequisite = definition.prerequisite
+      if (prerequisite?.minimumLevel != null && !finiteInteger(prerequisite.minimumLevel, 1, 20)) {
+        throw new Error(`Invalid plugin feat minimum level: ${featId}`)
+      }
+      const abilityScores = cloneAbilityBonuses(prerequisite?.abilityScores)
+      if (Object.values(abilityScores).some((score) => !finiteInteger(score, 1, 30))) {
+        throw new Error(`Invalid plugin feat ability prerequisite: ${featId}`)
+      }
+      const raceIds = prerequisite?.raceIds == null ? undefined : [...new Set(prerequisite.raceIds)]
+      if (raceIds && (
+        raceIds.length < 1 || raceIds.length > 32 ||
+        raceIds.some((raceId) => typeof raceId !== 'string' || !raceId.trim() || raceId.length > 160)
+      )) throw new Error(`Invalid plugin feat race prerequisite: ${featId}`)
+      const localFeatureId = `feat-${definition.id}`
+      const { prerequisite: _prerequisite, ...featureDefinition } = definition
+      void _prerequisite
+      const featureId = api.registerFeature({
+        ...featureDefinition,
+        id: localFeatureId,
+        minimumLevel: prerequisite?.minimumLevel,
+      })
+      const feature = pluginFeatures.get(featureId)
+      if (!feature) throw new Error(`Plugin feat feature registration failed: ${featId}`)
+      feature.grantedByFeat = true
+      feature.sourceFeatId = featId
+      const registered: RegisteredDnd5ePluginFeat = {
+        ...definition,
+        id: featId,
+        featureId,
+        prerequisite: prerequisite ? {
+          ...(prerequisite.minimumLevel != null ? { minimumLevel: prerequisite.minimumLevel } : {}),
+          ...(Object.keys(abilityScores).length ? { abilityScores } : {}),
+          ...(raceIds?.length ? { raceIds } : {}),
+        } : undefined,
+        iconAssetId: feature.iconAssetId,
+        staticModifiers: feature.staticModifiers,
+        action: clonePluginFeatureAction(feature.action),
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      }
+      pluginFeats.set(featId, registered)
+      disposers.push(() => {
+        if (pluginFeats.get(featId) === registered) pluginFeats.delete(featId)
+      })
+      return featId
     },
     registerResource(definition) {
       assertAcceptingContributions()
@@ -1480,13 +1824,26 @@ export function registerDnd5eRulesPlugin(
       ) throw new Error(`Invalid plugin subclass definition: ${subclassId}`)
       const choiceGroupIds = new Set<string>()
       const choiceGroups = definition.choiceGroups?.map((group) => {
+        const maximumByLevel = group.maxSelectionsByLevel?.map((step) => ({ ...step }))
+        const highestMaximum = maximumByLevel?.at(-1)?.maxSelections ?? group.maxSelections
         if (
           !validId(group.id) || choiceGroupIds.has(group.id) ||
           !finiteInteger(group.level, 1, 20) || !finiteInteger(group.maxSelections, 1, 64) ||
           typeof group.name !== 'string' || !group.name.trim() || !Array.isArray(group.options) ||
           (group.description != null && typeof group.description !== 'string') ||
-          group.options.length < group.maxSelections || group.options.length > 128
+          group.options.length < highestMaximum || group.options.length > 128
         ) throw new Error(`Invalid plugin subclass choice group: ${subclassId}:${group.id}`)
+        let previousLevel = group.level - 1
+        let previousMaximum = group.maxSelections
+        for (const step of maximumByLevel ?? []) {
+          if (
+            !finiteInteger(step.level, group.level, 20) || step.level <= previousLevel ||
+            !finiteInteger(step.maxSelections, previousMaximum, 64) ||
+            step.maxSelections > group.options.length
+          ) throw new Error(`Invalid plugin subclass choice scaling: ${subclassId}:${group.id}`)
+          previousLevel = step.level
+          previousMaximum = step.maxSelections
+        }
         choiceGroupIds.add(group.id)
         const optionIds = new Set<string>()
         const options = group.options.map((option) => {
@@ -1497,7 +1854,7 @@ export function registerDnd5eRulesPlugin(
           optionIds.add(option.id)
           return { ...option, name: option.name.trim(), summary: option.summary.trim() }
         })
-        return { ...group, name: group.name.trim(), options }
+        return { ...group, name: group.name.trim(), maxSelectionsByLevel: maximumByLevel, options }
       })
       let registered: RegisteredDnd5ePluginSubclass = {
         ...definition,
@@ -1561,7 +1918,12 @@ export function registerDnd5eRulesPlugin(
             name: group.name,
             description: group.description,
             minLevel: group.level,
-            maxSelections: group.maxSelections,
+            maxSelections: group.maxSelectionsByLevel?.length
+              ? (character) => dnd5ePluginSubclassChoiceLimit(
+                  group,
+                  dnd5eCharacterClassLevel(character, definition.classId),
+                )
+              : group.maxSelections,
             options: group.options,
           })),
         }))
@@ -1574,8 +1936,22 @@ export function registerDnd5eRulesPlugin(
       const subclassId = namespacedId(id, definition.id)
       const features: Dnd5ePluginSubclassFeature[] = []
       const useResources: Array<{ definition: Dnd5ePluginResourceDefinition; formula: DeclarativeValueFormulaV1 }> = []
-      for (const ability of definition.abilities) {
-        const compatibility = declarativeAbilityCompatibilityV1(ability)
+      const compatibilityByAbilityId = new Map(
+        declarativeSubclassCompatibilityReportV1([definition]).abilities.map((entry) => [entry.abilityId, entry]),
+      )
+      for (const declaredAbility of definition.abilities) {
+        const hookRequiresOncePerTurn = definition.combatHooks?.some((hook) =>
+          hook.abilityId === declaredAbility.id && hook.oncePerTurn === true
+        ) === true
+        const ability: DeclarativeSubclassAbilityV1 = hookRequiresOncePerTurn &&
+          declaredAbility.predicates?.oncePerTurn !== true &&
+          declaredAbility.limits?.oncePerTurn !== true
+          ? {
+              ...declaredAbility,
+              limits: { ...declaredAbility.limits, oncePerTurn: true },
+            }
+          : declaredAbility
+        const compatibility = compatibilityByAbilityId.get(ability.id) ?? declarativeAbilityCompatibilityV1(ability)
         const actionLocalId = `decl.${definition.id}.${ability.id}`
         const featureId = namespacedId(id, `${definition.id}.${ability.id}`)
         let usesResourceId: string | undefined
@@ -1595,7 +1971,13 @@ export function registerDnd5eRulesPlugin(
             formula: ability.limits.uses,
           })
         }
-        const action = compatibility.effective === 'manual' ? undefined : {
+        const hostManagedClosedSubclass =
+          ability.mechanic?.kind === 'eldritch-knight-2014' ||
+          ability.mechanic?.kind === 'totem-warrior-2014' ||
+          ability.mechanic?.kind === 'opening-attack' ||
+          ability.mechanic?.kind === 'hidden-spell-save-disadvantage' ||
+          ability.mechanic?.kind === 'utility-projection-control'
+        const action = compatibility.effective === 'manual' || hostManagedClosedSubclass ? undefined : {
           id: actionLocalId,
           label: ability.name,
           description: ability.description,
@@ -1661,7 +2043,21 @@ export function registerDnd5eRulesPlugin(
         name: definition.name,
         summary: definition.summary,
         features,
+        choiceGroups: definition.choiceGroups?.map((group) => ({
+          ...structuredClone(group),
+          maxSelectionsByLevel: group.maxSelectionsByLevel?.map((step) => ({ ...step })),
+          options: group.options.map((option) => ({ ...option })),
+        })),
       })
+      const registeredSubclass = pluginSubclasses.get(registeredSubclassId)
+      if (registeredSubclass) {
+        registeredSubclass.declarativeSpellcasting = definition.spellcasting
+          ? structuredClone(definition.spellcasting)
+          : undefined
+        registeredSubclass.declarativeCombatHooks = definition.combatHooks
+          ? structuredClone(definition.combatHooks)
+          : undefined
+      }
       for (const resource of definition.resources ?? []) {
         const resourceId = api.registerResource({
           id: resource.id,
@@ -1669,11 +2065,20 @@ export function registerDnd5eRulesPlugin(
           classId: definition.classId,
           subclassId: definition.id,
           minimumLevel: resource.minimumLevel ?? 1,
-          maximum: declarativeResourceMaximumByLevel(resource.maximum, definition.classId),
+          maximum: declarativeResourceMaximumByLevel(
+            resource.maximum,
+            definition.classId,
+            resource.maximumByClassLevel,
+          ),
           resetOn: resource.resetOn,
         })
         const registered = pluginResources.get(resourceId)
-        if (registered) registered.declarativeMaximum = structuredClone(resource.maximum)
+        if (registered) {
+          registered.declarativeMaximum = resource.maximumByClassLevel?.length
+            ? undefined
+            : structuredClone(resource.maximum)
+          registered.declarativeDie = resource.die ? structuredClone(resource.die) : undefined
+        }
       }
       for (const resource of useResources) {
         const resourceId = api.registerResource(resource.definition)
@@ -1723,6 +2128,76 @@ export function registerDnd5eRulesPlugin(
       if (definition.description != null && typeof definition.description !== 'string') {
         throw new Error(`Invalid plugin race description: ${raceId}`)
       }
+      if (definition.size != null && definition.size !== 'small' && definition.size !== 'medium') {
+        throw new Error(`Invalid plugin race size: ${raceId}`)
+      }
+      let parentRace: Dnd5ePluginRaceDefinition['parentRace']
+      if (definition.parentRace != null) {
+        if (
+          !definition.parentRace || typeof definition.parentRace !== 'object' ||
+          !validId(definition.parentRace.id) ||
+          typeof definition.parentRace.name !== 'string' ||
+          !definition.parentRace.name.trim() ||
+          definition.parentRace.name.length > 160
+        ) throw new Error(`Invalid plugin parent race: ${raceId}`)
+        parentRace = { id: definition.parentRace.id, name: definition.parentRace.name.trim() }
+      }
+      const iconAssetId = ownedPluginAssetId(id, definition.iconAssetId, raceId)
+      const validSkills = new Set(SKILLS.map((skill) => skill.key))
+      const skillProficiencies = [...new Set(definition.skillProficiencies ?? [])]
+      if (skillProficiencies.length > 6 || skillProficiencies.some((skill) => !validSkills.has(skill))) {
+        throw new Error(`Invalid plugin race skills: ${raceId}`)
+      }
+      if (!finiteInteger(definition.skillProficiencyChoiceCount ?? 0, 0, 6)) {
+        throw new Error(`Invalid plugin race skill choice count: ${raceId}`)
+      }
+      const armorProficiencies = [...new Set(definition.armorProficiencies ?? [])]
+      if (armorProficiencies.length > 4 || armorProficiencies.some((entry) =>
+        !['light', 'medium', 'heavy', 'shield'].includes(entry)
+      )) throw new Error(`Invalid plugin race armor proficiencies: ${raceId}`)
+      const weaponProficiencies = [...new Set(definition.weaponProficiencies ?? [])]
+      if (weaponProficiencies.length > 32 || weaponProficiencies.some((entry) =>
+        typeof entry !== 'string' || !validId(entry) || entry.length > 120
+      )) throw new Error(`Invalid plugin race weapon proficiencies: ${raceId}`)
+      const toolProficiencies = [...new Set(definition.toolProficiencies ?? [])]
+      if (toolProficiencies.length > 32 || toolProficiencies.some((entry) =>
+        typeof entry !== 'string' || !entry.trim() || entry.length > 120
+      )) throw new Error(`Invalid plugin race tool proficiencies: ${raceId}`)
+      const languages = [...new Set(definition.languages ?? [])]
+      if (languages.length > 16 || languages.some((language) =>
+        typeof language !== 'string' || !language.trim() || language.length > 120
+      )) throw new Error(`Invalid plugin race languages: ${raceId}`)
+      const grantedFeatureIds = [...new Set(definition.grantedFeatureIds ?? [])]
+      if (grantedFeatureIds.length > 32 || grantedFeatureIds.some((featureId) => !validId(featureId))) {
+        throw new Error(`Invalid plugin race granted features: ${raceId}`)
+      }
+      if (!finiteInteger(definition.featChoiceCount ?? 0, 0, 2)) {
+        throw new Error(`Invalid plugin race feat choice count: ${raceId}`)
+      }
+      if (!finiteInteger(definition.hitPointsPerLevelBonus ?? 0, 0, 20)) {
+        throw new Error(`Invalid plugin race hit-point bonus: ${raceId}`)
+      }
+      const automation = definition.automation ?? 'full'
+      if (!['full', 'partial', 'manual'].includes(automation)) {
+        throw new Error(`Invalid plugin race automation level: ${raceId}`)
+      }
+      const automationReasons = [...new Set(definition.automationReasons ?? [])]
+      if (automationReasons.length > 32 || automationReasons.some((reason) =>
+        typeof reason !== 'string' || !reason.trim() || reason.length > 240
+      )) throw new Error(`Invalid plugin race automation reasons: ${raceId}`)
+      const traitIds = new Set<string>()
+      const traits = definition.traits?.map((trait) => {
+        if (
+          !validId(trait.id) || traitIds.has(trait.id) ||
+          typeof trait.name !== 'string' || !trait.name.trim() || trait.name.length > 160 ||
+          typeof trait.description !== 'string' || !trait.description.trim() || trait.description.length > 20_000
+        ) throw new Error(`Invalid plugin race trait: ${raceId}`)
+        traitIds.add(trait.id)
+        return { id: trait.id, name: trait.name.trim(), description: trait.description.trim() }
+      })
+      if (traits && traits.length > 32) throw new Error(`Too many plugin race traits: ${raceId}`)
+      const staticModifiers = cloneStaticCombatModifiers(definition.staticModifiers, raceId)
+      const savingThrowAdvantages = cloneRacialSavingThrowAdvantages(definition.savingThrowAdvantages, raceId)
       const flexible = definition.flexibleAbilityBonus
       if (flexible) {
         if (!finiteInteger(flexible.count, 1, 6) || !finiteInteger(flexible.amount, -10, 10) || flexible.amount === 0) {
@@ -1736,8 +2211,35 @@ export function registerDnd5eRulesPlugin(
       const registered: RegisteredDnd5ePluginRace = {
         id: raceId,
         name,
+        ...(iconAssetId ? { iconAssetId } : {}),
+        ...(parentRace ? { parentRace } : {}),
+        size: definition.size ?? 'medium',
         speedFeet: definition.speedFeet,
         abilityBonuses: cloneAbilityBonuses(definition.abilityBonuses),
+        ...(skillProficiencies.length ? { skillProficiencies } : {}),
+        ...(definition.skillProficiencyChoiceCount ? {
+          skillProficiencyChoiceCount: definition.skillProficiencyChoiceCount,
+        } : {}),
+        ...(armorProficiencies.length ? { armorProficiencies } : {}),
+        ...(weaponProficiencies.length ? { weaponProficiencies } : {}),
+        ...(toolProficiencies.length ? {
+          toolProficiencies: toolProficiencies.map((entry) => entry.trim()),
+        } : {}),
+        ...(languages.length ? { languages: languages.map((language) => language.trim()) } : {}),
+        ...(grantedFeatureIds.length ? {
+          grantedFeatureIds: grantedFeatureIds.map((featureId) => namespacedId(id, featureId)),
+        } : {}),
+        ...(definition.featChoiceCount ? { featChoiceCount: definition.featChoiceCount } : {}),
+        ...(definition.hitPointsPerLevelBonus ? {
+          hitPointsPerLevelBonus: definition.hitPointsPerLevelBonus,
+        } : {}),
+        ...(savingThrowAdvantages ? { savingThrowAdvantages } : {}),
+        ...(traits?.length ? { traits } : {}),
+        ...(staticModifiers ? { staticModifiers } : {}),
+        automation,
+        ...(automationReasons.length ? {
+          automationReasons: automationReasons.map((reason) => reason.trim()),
+        } : {}),
         ...(definition.description?.trim() ? { description: definition.description.trim() } : {}),
         ...(flexible ? { flexibleAbilityBonus: {
           count: flexible.count,
@@ -1880,6 +2382,7 @@ export function registerDnd5eRulesPlugin(
       assertAcceptingContributions()
       const spellId = namespacedId(id, definition.id)
       if (pluginSpells.has(spellId)) throw new Error(`Plugin spell already registered: ${spellId}`)
+      const iconAssetId = ownedPluginAssetId(id, definition.iconAssetId, spellId)
       const automation = definition.automation ?? { mode: 'reference-only' as const }
       if (automation.mode === 'headless-action' && !validId(automation.actionId)) {
         throw new Error(`Invalid plugin spell Headless action: ${spellId}`)
@@ -1903,6 +2406,7 @@ export function registerDnd5eRulesPlugin(
       }).spells[0]
       const registered: RegisteredDnd5ePluginSpell = {
         ...parsed,
+        ...(iconAssetId ? { iconAssetId } : {}),
         automation: automation.mode === 'headless-action'
           ? { mode: 'headless-action', actionId: automation.actionId }
           : { mode: 'reference-only' },
@@ -1926,6 +2430,30 @@ export function registerDnd5eRulesPlugin(
         if (pluginItems.get(itemId) === registered) pluginItems.delete(itemId)
       })
       return itemId
+    },
+    registerMonster(definition) {
+      assertAcceptingContributions()
+      const parsed = parseDnd5eMonsterStatBlock(structuredClone(definition))
+      if (!parsed.ok) {
+        throw new Error(`Invalid plugin monster ${definition?.id ?? 'unknown'}: ${parsed.issues[0]?.message ?? 'invalid stat block'}`)
+      }
+      if (parsed.value.source !== 'DM 自定义') {
+        throw new Error(`Plugin monster must be marked as DM custom: ${parsed.value.id}`)
+      }
+      if (pluginMonsters.has(parsed.value.id)) throw new Error(`Plugin monster already registered: ${parsed.value.id}`)
+      const registered: RegisteredDnd5ePluginMonster = {
+        ...parsed.value,
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      }
+      pluginMonsters.set(registered.id, registered)
+      const unregisterCatalog = registerDnd5ePluginMonsterCatalogEntry(registered)
+      disposers.push(() => {
+        if (pluginMonsters.get(registered.id) === registered) pluginMonsters.delete(registered.id)
+        unregisterCatalog()
+      })
+      return registered.id
     },
   }
 
@@ -1988,6 +2516,34 @@ export function activeDnd5eRulesPluginRequirements(): readonly Dnd5eRulesPluginR
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
+/**
+ * Network-safe room handshake projection. Device-local packages are intentionally
+ * absent, so even their ID, version, and integrity are not sent to a room server.
+ */
+export function roomDistributableDnd5eRulesPluginRequirements(): readonly Dnd5eRulesPluginRequirement[] {
+  const roomPluginIds = new Set(
+    [...plugins.values()]
+      .filter(({ plugin }) => plugin.manifest.distributionPolicy === 'room-distributable')
+      .map(({ plugin }) => plugin.manifest.id),
+  )
+  return activeDnd5eRulesPluginRequirements().filter((requirement) => roomPluginIds.has(requirement.id))
+}
+
+/**
+ * Exact requirements that may participate in a live room. Ephemeral packages
+ * are included while active in memory, but are never account-backed.
+ */
+export function roomActiveDnd5eRulesPluginRequirements(): readonly Dnd5eRulesPluginRequirement[] {
+  const roomPluginIds = new Set(
+    [...plugins.values()]
+      .filter(({ plugin }) =>
+        plugin.manifest.distributionPolicy === 'room-distributable' ||
+        plugin.manifest.distributionPolicy === 'room-ephemeral')
+      .map(({ plugin }) => plugin.manifest.id),
+  )
+  return activeDnd5eRulesPluginRequirements().filter((requirement) => roomPluginIds.has(requirement.id))
+}
+
 export function missingDnd5eRulesPluginRequirements(
   required: readonly Dnd5eRulesPluginRequirement[],
   active: readonly Dnd5eRulesPluginRequirement[] = activeDnd5eRulesPluginRequirements(),
@@ -2014,6 +2570,17 @@ export function dnd5ePluginHeadlessActionDefinition(
   } : undefined
 }
 
+function cloneRegisteredStaticModifiers(
+  value: Dnd5ePluginStaticCombatModifiers | undefined,
+): Dnd5ePluginStaticCombatModifiers | undefined {
+  return value ? {
+    ...value,
+    damageResistances: value.damageResistances ? [...value.damageResistances] : undefined,
+    damageImmunities: value.damageImmunities ? [...value.damageImmunities] : undefined,
+    conditionImmunities: value.conditionImmunities ? [...value.conditionImmunities] : undefined,
+  } : undefined
+}
+
 export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginFeature[] {
   return [...pluginFeatures.values()]
     .map((feature) => ({
@@ -2021,6 +2588,7 @@ export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginF
       action: clonePluginFeatureAction(feature.action),
       declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
       automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+      staticModifiers: cloneRegisteredStaticModifiers(feature.staticModifiers),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
@@ -2031,6 +2599,7 @@ export function registeredDnd5ePluginResources(): readonly RegisteredDnd5ePlugin
       ...resource,
       maximum: Array.isArray(resource.maximum) ? [...resource.maximum] : resource.maximum,
       declarativeMaximum: resource.declarativeMaximum ? structuredClone(resource.declarativeMaximum) : undefined,
+      declarativeDie: resource.declarativeDie ? structuredClone(resource.declarativeDie) : undefined,
     }))
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
 }
@@ -2048,8 +2617,15 @@ export function registeredDnd5ePluginSubclasses(classId?: Dnd5eClassId): readonl
       })),
       choiceGroups: subclass.choiceGroups?.map((group) => ({
         ...group,
+        maxSelectionsByLevel: group.maxSelectionsByLevel?.map((step) => ({ ...step })),
         options: group.options.map((option) => ({ ...option })),
       })),
+      declarativeSpellcasting: subclass.declarativeSpellcasting
+        ? structuredClone(subclass.declarativeSpellcasting)
+        : undefined,
+      declarativeCombatHooks: subclass.declarativeCombatHooks
+        ? structuredClone(subclass.declarativeCombatHooks)
+        : undefined,
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
@@ -2060,6 +2636,30 @@ export function dnd5ePluginSubclassDefinition(subclassId: string): RegisteredDnd
 
 export function dnd5ePluginResourceDefinition(resourceId: string): RegisteredDnd5ePluginResource | undefined {
   return registeredDnd5ePluginResources().find((resource) => resource.id === resourceId)
+}
+
+export function dnd5ePluginSubclassChoiceLimit(
+  group: Dnd5ePluginSubclassChoiceGroup,
+  classLevel: number,
+): number {
+  let maximum = group.maxSelections
+  for (const step of group.maxSelectionsByLevel ?? []) {
+    if (classLevel < step.level) break
+    maximum = step.maxSelections
+  }
+  return Math.max(0, Math.min(group.options.length, Math.floor(maximum)))
+}
+
+export function dnd5ePluginResourceDieSides(
+  resource: Pick<RegisteredDnd5ePluginResource, 'classId' | 'declarativeDie'>,
+  character: Character,
+): number | undefined {
+  return resource.declarativeDie
+    ? declarativeSubclassResourceDieSidesV1(
+        resource.declarativeDie,
+        dnd5eCharacterClassLevel(character, resource.classId),
+      )
+    : undefined
 }
 
 function selectedDnd5eSubclassId(character: Character, classId: Dnd5eClassId): string | undefined {
@@ -2098,6 +2698,10 @@ export function registeredDnd5ePluginRaces(): readonly RegisteredDnd5ePluginRace
         ...race.flexibleAbilityBonus,
         ...(race.flexibleAbilityBonus.exclude ? { exclude: [...race.flexibleAbilityBonus.exclude] } : {}),
       } : undefined,
+      skillProficiencies: race.skillProficiencies ? [...race.skillProficiencies] : undefined,
+      languages: race.languages ? [...race.languages] : undefined,
+      traits: race.traits?.map((trait) => ({ ...trait })),
+      staticModifiers: cloneRegisteredStaticModifiers(race.staticModifiers),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
@@ -2111,7 +2715,43 @@ export function dnd5ePluginRaceDefinition(idOrName: string): RegisteredDnd5ePlug
       ...race.flexibleAbilityBonus,
       ...(race.flexibleAbilityBonus.exclude ? { exclude: [...race.flexibleAbilityBonus.exclude] } : {}),
     } : undefined,
+    skillProficiencies: race.skillProficiencies ? [...race.skillProficiencies] : undefined,
+    languages: race.languages ? [...race.languages] : undefined,
+    traits: race.traits?.map((trait) => ({ ...trait })),
+    staticModifiers: cloneRegisteredStaticModifiers(race.staticModifiers),
   } : undefined
+}
+
+function cloneRegisteredFeat(feat: RegisteredDnd5ePluginFeat): RegisteredDnd5ePluginFeat {
+  return {
+    ...feat,
+    prerequisite: feat.prerequisite ? {
+      ...feat.prerequisite,
+      abilityScores: feat.prerequisite.abilityScores ? { ...feat.prerequisite.abilityScores } : undefined,
+      raceIds: feat.prerequisite.raceIds ? [...feat.prerequisite.raceIds] : undefined,
+    } : undefined,
+    action: clonePluginFeatureAction(feat.action),
+    staticModifiers: cloneRegisteredStaticModifiers(feat.staticModifiers),
+  }
+}
+
+export function registeredDnd5ePluginFeats(): readonly RegisteredDnd5ePluginFeat[] {
+  return [...pluginFeats.values()]
+    .map(cloneRegisteredFeat)
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+}
+
+export function dnd5ePluginFeatDefinition(featId: string): RegisteredDnd5ePluginFeat | undefined {
+  const feat = pluginFeats.get(featId)
+  return feat ? cloneRegisteredFeat(feat) : undefined
+}
+
+export function dnd5ePluginFeatAvailableForCharacter(
+  feat: RegisteredDnd5ePluginFeat,
+  character: Character,
+): boolean {
+  const feature = pluginFeatures.get(feat.featureId)
+  return !!feature && dnd5ePluginFeatureAvailableForCharacter(feature, character)
 }
 
 function cloneRegisteredBackground(background: RegisteredDnd5ePluginBackground): RegisteredDnd5ePluginBackground {
@@ -2188,6 +2828,12 @@ export function dnd5ePluginItemDefinition(id: string): RegisteredDnd5ePluginItem
   return item ? cloneRegisteredPluginItem(item) : undefined
 }
 
+export function registeredDnd5ePluginMonsters(): readonly RegisteredDnd5ePluginMonster[] {
+  return [...pluginMonsters.values()]
+    .map((monster) => structuredClone(monster))
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+}
+
 export function dnd5ePluginAbilityGenerationMethod(id: string): RegisteredDnd5ePluginAbilityGeneration | undefined {
   const method = pluginAbilityGenerationMethods.get(id)
   if (!method) return undefined
@@ -2203,6 +2849,7 @@ export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5e
     action: clonePluginFeatureAction(feature.action),
     declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
     automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+    staticModifiers: cloneRegisteredStaticModifiers(feature.staticModifiers),
   } : undefined
 }
 
@@ -2210,6 +2857,21 @@ export function dnd5ePluginFeatureAvailableForCharacter(
   feature: RegisteredDnd5ePluginFeature,
   character: Character,
 ): boolean {
+  if (feature.sourceFeatId) {
+    const feat = pluginFeats.get(feature.sourceFeatId)
+    if (!feat) return false
+    const prerequisite = feat.prerequisite
+    if ((prerequisite?.minimumLevel ?? 1) > character.level) return false
+    if (prerequisite?.abilityScores && Object.entries(prerequisite.abilityScores).some(
+      ([ability, score]) => character.abilities[ability as AbilityKey] < (score ?? 0),
+    )) return false
+    if (prerequisite?.raceIds?.length) {
+      const identities = new Set([character.dnd5eRaceId, character.race].filter(
+        (value): value is string => typeof value === 'string' && value.length > 0,
+      ))
+      if (!prerequisite.raceIds.some((raceId) => identities.has(raceId))) return false
+    }
+  }
   if (feature.sourceClassId) {
     const classLevel = dnd5eCharacterClassLevel(character, feature.sourceClassId)
     if (classLevel < (feature.minimumLevel ?? 1)) return false
@@ -2217,6 +2879,14 @@ export function dnd5ePluginFeatureAvailableForCharacter(
       feature.sourceSubclassId &&
       selectedDnd5eSubclassId(character, feature.sourceClassId) !== feature.sourceSubclassId
     ) return false
+    for (const requirement of feature.declarativeAbility?.predicates?.subclassChoices ?? []) {
+      if (!feature.sourceSubclassId) return false
+      const selectionKey = `${feature.sourceSubclassId}/${requirement.groupId}`
+      const selected = feature.sourceClassId === 'fighter'
+        ? character.dnd5eClassChoices?.fighter?.extensionChoices?.[selectionKey]
+        : character.dnd5eClassChoices?.classes?.[feature.sourceClassId]?.selections?.[selectionKey]
+      if (!selected?.includes(requirement.optionId)) return false
+    }
   }
   return (!feature.sourceClassId && character.level < (feature.minimumLevel ?? 1))
     ? false
@@ -2242,17 +2912,303 @@ export function dnd5eEnemyD20ModifierFeaturesForCharacter(
 
 export function dnd5eCharacterHasPluginFeature(character: Character, featureId: string): boolean {
   const feature = dnd5ePluginFeatureDefinition(featureId)
-  return !!feature &&
-    (feature.grantedBySubclass === true || character.dnd5ePluginFeatureIds?.includes(featureId) === true) &&
-    dnd5ePluginFeatureAvailableForCharacter(feature, character)
+  if (!feature || !dnd5ePluginFeatureAvailableForCharacter(feature, character)) return false
+  if (feature.grantedBySubclass === true) return true
+  if (feature.grantedByFeat === true) {
+    return !!feature.sourceFeatId && character.dnd5eFeatIds?.includes(feature.sourceFeatId) === true
+  }
+  const race = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+  if (race?.grantedFeatureIds?.includes(featureId)) return true
+  return character.dnd5ePluginFeatureIds?.includes(featureId) === true
 }
 
-/** Builds only deterministic, Host-owned automatic trigger actions from authoritative events. */
+export interface Dnd5eDeclarativeAttackIntentDefinition {
+  feature: RegisteredDnd5ePluginFeature
+  hook: DeclarativeSubclassCombatHookV1 & {
+    activation: 'prearm'
+    retention: 'single-attempt' | 'until-triggered' | 'until-turn-end'
+  }
+}
+
+export interface Dnd5eDeclarativeBattleMasterManeuverDefinition {
+  feature: RegisteredDnd5ePluginFeature
+  mechanic: DeclarativeBattleMasterMechanicV1
+  resourceId: string
+}
+
+export function dnd5eDeclarativeBattleMasterManeuverDefinition(
+  featureId: string,
+): Dnd5eDeclarativeBattleMasterManeuverDefinition | undefined {
+  const feature = pluginFeatures.get(featureId)
+  const mechanic = feature?.declarativeAbility?.mechanic
+  if (
+    !feature ||
+    feature.automation !== 'full' ||
+    mechanic?.kind !== 'battle-master-2014'
+  ) return undefined
+  return {
+    feature: {
+      ...feature,
+      action: feature.action ? clonePluginFeatureAction(feature.action) : undefined,
+      declarativeAbility: feature.declarativeAbility
+        ? structuredClone(feature.declarativeAbility)
+        : undefined,
+      automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+      staticModifiers: cloneRegisteredStaticModifiers(feature.staticModifiers),
+    },
+    mechanic: structuredClone(mechanic),
+    resourceId: namespacedId(feature.ownerPluginId, mechanic.resourceId),
+  }
+}
+
+export type Dnd5eDeclarativeAttackIntentRollPlan =
+  | {
+      ok: true
+      featureId: string
+      featureName: string
+      declarations: readonly Dnd5ePluginDiceRollDeclaration[]
+    }
+  | {
+      ok: false
+      reason: 'invalid-plugin-action' | 'class-resource-unavailable'
+    }
+
+function declarativeCombatHookActivation(
+  hook: DeclarativeSubclassCombatHookV1,
+): 'automatic' | 'prearm' | 'interrupt' {
+  return hook.activation ?? (hook.decision === 'automatic' ? 'automatic' : 'interrupt')
+}
+
+/**
+ * Resolves a client-supplied feature ID back to Host-owned hook metadata.
+ * The caller never gets to declare timing, activation, or retention itself.
+ */
+export function dnd5eDeclarativeAttackIntentDefinition(
+  featureId: string,
+): Dnd5eDeclarativeAttackIntentDefinition | undefined {
+  const feature = pluginFeatures.get(featureId)
+  const ability = feature?.declarativeAbility
+  if (!feature || !ability || feature.automation !== 'full' || !feature.action) return undefined
+  for (const subclass of pluginSubclasses.values()) {
+    const subclassFeature = subclass.features.find((entry) => entry.featureId === featureId)
+    if (!subclassFeature) continue
+    const hook = subclass.declarativeCombatHooks?.find((entry) =>
+      entry.abilityId === ability.id &&
+      ['before-attack-roll', 'after-attack-roll', 'after-attack-hit'].includes(entry.timing) &&
+      declarativeCombatHookActivation(entry) === 'prearm',
+    )
+    if (!hook) return undefined
+    return {
+      feature: {
+        ...feature,
+        action: clonePluginFeatureAction(feature.action),
+        declarativeAbility: structuredClone(ability),
+        automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+        staticModifiers: cloneRegisteredStaticModifiers(feature.staticModifiers),
+      },
+      hook: {
+        ...structuredClone(hook),
+        activation: 'prearm',
+        retention: hook.retention ?? 'single-attempt',
+      },
+    }
+  }
+  return undefined
+}
+
+function declarativeDiceCountForCombatant(
+  dice: DeclarativeDiceFormulaV1,
+  actor: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels'>,
+): number {
+  if (!dice.scaling) return dice.count
+  const scalingLevel = dice.scaling.basis === 'character-level'
+    ? actor.level
+    : actor.classLevels?.[dice.scaling.classId!] ??
+      (actor.classId === dice.scaling.classId ? actor.level : 0)
+  return dice.count + dice.scaling.steps.reduce(
+    (total, step) => total + (scalingLevel >= step.level ? step.addDice : 0),
+    0,
+  )
+}
+
+function declarativeFeatureRollPlan(
+  actor: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'classResources'>,
+  feature: RegisteredDnd5ePluginFeature,
+  critical: boolean,
+): Dnd5eDeclarativeAttackIntentRollPlan {
+  const ability = feature.declarativeAbility
+  if (!ability || !feature.action) return { ok: false, reason: 'invalid-plugin-action' }
+  const pluginId = feature.ownerPluginId
+  const requiredResources = [
+    ...(ability.predicates?.resources ?? []).map((requirement) => ({
+      resourceId: namespacedId(pluginId, requirement.resourceId),
+      amount: requirement.minimum,
+    })),
+    ...(ability.cost?.resources ?? []).map((cost) => ({
+      resourceId: namespacedId(pluginId, cost.resourceId),
+      amount: cost.amount,
+    })),
+  ]
+  if (requiredResources.some(({ resourceId, amount }) =>
+    !actor.classResources[resourceId] ||
+    actor.classResources[resourceId].current < amount
+  )) return { ok: false, reason: 'class-resource-unavailable' }
+
+  const declarations: Dnd5ePluginDiceRollDeclaration[] = []
+  for (const roll of ability.rolls ?? []) {
+    if (roll.kind !== 'damage' && roll.kind !== 'healing') continue
+    const baseCount = declarativeDiceCountForCombatant(roll.dice, actor)
+    if (baseCount < 1) continue
+    let sides = roll.dice.sides
+    if (roll.hostRoll) {
+      const resourceId = namespacedId(pluginId, roll.hostRoll.die.resourceId)
+      const resource = pluginResources.get(resourceId)
+      if (
+        !resource ||
+        resource.ownerPluginId !== pluginId ||
+        !resource.declarativeDie
+      ) return { ok: false, reason: 'invalid-plugin-action' }
+      const classLevel = actor.classLevels?.[resource.classId] ??
+        (actor.classId === resource.classId ? actor.level : 0)
+      sides = declarativeSubclassResourceDieSidesV1(resource.declarativeDie, classLevel)
+    }
+    const count = roll.kind === 'damage' &&
+      roll.hostRoll?.critical === 'double-dice' &&
+      critical
+      ? baseCount * 2
+      : baseCount
+    if (!Number.isInteger(count) || count < 1 || count > 24) {
+      return { ok: false, reason: 'invalid-plugin-action' }
+    }
+    declarations.push({
+      id: roll.id,
+      label: roll.label,
+      count,
+      sides,
+      modifier: 0,
+      visibility: 'public',
+    })
+  }
+  return {
+    ok: true,
+    featureId: feature.id,
+    featureName: feature.name,
+    declarations,
+  }
+}
+
+/** Builds authoritative dynamic declarations for an active declarative feature. */
+export function dnd5eDeclarativePluginFeatureRollPlan(
+  actor: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'classResources'>,
+  featureId: string,
+): Dnd5eDeclarativeAttackIntentRollPlan {
+  const feature = pluginFeatures.get(featureId)
+  if (
+    !feature ||
+    !feature.declarativeAbility ||
+    feature.declarativeAbility.trigger.kind !== 'active-use'
+  ) return { ok: false, reason: 'invalid-plugin-action' }
+  return declarativeFeatureRollPlan(actor, feature, false)
+}
+
+/** Builds authoritative dice declarations for a whitelisted Battle Master mechanic. */
+export function dnd5eDeclarativeBattleMasterRollPlan(
+  actor: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'classResources'>,
+  featureId: string,
+  critical = false,
+): Dnd5eDeclarativeAttackIntentRollPlan {
+  const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)
+  if (!definition) return { ok: false, reason: 'invalid-plugin-action' }
+  return declarativeFeatureRollPlan(actor, definition.feature, critical)
+}
+
+/**
+ * Builds the only accepted dice declarations for a prearmed after-hit intent.
+ * Die size and scaling come from Host-registered resource metadata, never from
+ * the attack request. Resource availability is checked before the Host rolls.
+ */
+export function dnd5eDeclarativeAttackIntentRollPlan(
+  actor: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'classResources'>,
+  featureId: string,
+  critical: boolean,
+): Dnd5eDeclarativeAttackIntentRollPlan {
+  const intent = dnd5eDeclarativeAttackIntentDefinition(featureId)
+  if (!intent) return { ok: false, reason: 'invalid-plugin-action' }
+  return declarativeFeatureRollPlan(actor, intent.feature, critical)
+}
+
+export function dnd5eDeclarativeAttackIntentsForCharacter(
+  character: Character,
+): readonly Dnd5eDeclarativeAttackIntentDefinition[] {
+  return registeredDnd5ePluginFeatures().flatMap((feature) => {
+    if (!dnd5eCharacterHasPluginFeature(character, feature.id)) return []
+    const definition = dnd5eDeclarativeAttackIntentDefinition(feature.id)
+    return definition ? [definition] : []
+  })
+}
+
+export function dnd5eDeclarativeAttackIntentResolution(
+  requestedFeatureIds: readonly string[] | undefined,
+  events: readonly Dnd5eCombatEvent[],
+): { triggeredFeatureIds: string[]; consumedFeatureIds: string[] } | undefined {
+  if (!requestedFeatureIds?.length) return undefined
+  const requested = [...new Set(requestedFeatureIds)]
+  const requestedSet = new Set(requested)
+  const triggeredFeatureIds = [...new Set(events.flatMap((event) =>
+    (
+      event.type === 'declarative-subclass-ability-resolved' ||
+      event.type === 'declarative-subclass-trigger-rejected'
+    ) &&
+    requestedSet.has(event.abilityId)
+      ? [event.abilityId]
+      : [],
+  ))]
+  const triggered = new Set(triggeredFeatureIds)
+  const consumedFeatureIds = requested.filter((featureId) => {
+    const definition = dnd5eDeclarativeAttackIntentDefinition(featureId)
+    if (!definition || definition.hook.retention === 'until-turn-end') return false
+    return definition.hook.retention === 'single-attempt' || triggered.has(featureId)
+  })
+  return { triggeredFeatureIds, consumedFeatureIds }
+}
+
+/** Builds deterministic Host-owned trigger actions from authoritative events and prearmed intent IDs. */
 export function dnd5eDeclarativeTriggeredActions(
   state: Dnd5eHeadlessCombatState,
   event: Dnd5eCombatEvent,
   eventIndex: number,
 ): Dnd5ePluginAction[] {
+  if (event.type === 'turn-started') {
+    const actor = state.combatants[event.actorId]
+    if (!actor) return []
+    return [...pluginFeatures.values()].flatMap((feature) => {
+      const ability = feature.declarativeAbility
+      if (
+        !ability ||
+        feature.automation !== 'full' ||
+        ability.trigger.kind !== 'turn-start' ||
+        !feature.action ||
+        !actor.pluginFeatureIds.includes(feature.id)
+      ) return []
+      const transactionPrefix =
+        `decl-trigger:${state.combatId}:${state.round}:${feature.id}:${actor.id}:turn-start`
+      const transactionSequence = (actor.classState.declarativeTransactionIds ?? [])
+        .filter((transactionId) => transactionId.startsWith(`${transactionPrefix}:`))
+        .length
+      return [{
+        type: 'plugin' as const,
+        pluginId: feature.ownerPluginId,
+        actionId: feature.action.id,
+        featureId: feature.id,
+        transactionId: `${transactionPrefix}:${transactionSequence}:${eventIndex}`,
+        actorId: actor.id,
+        targetId: actor.id,
+        targetIds: [actor.id],
+        distanceFeet: 0,
+        rolls: {},
+      }]
+    })
+  }
   if (event.type !== 'attack-resolved' || !event.hit) return []
   const actor = state.combatants[event.actorId]
   const target = state.combatants[event.targetId]
@@ -2262,20 +3218,40 @@ export function dnd5eDeclarativeTriggeredActions(
     const ability = feature.declarativeAbility
     if (
       !ability || feature.automation !== 'full' || ability.trigger.kind !== 'after-attack-hit' ||
+      ability.mechanic?.kind === 'battle-master-2014' ||
       !feature.action || !actor.pluginFeatureIds.includes(feature.id)
     ) return []
+    const subclass = [...pluginSubclasses.values()].find((entry) =>
+      entry.features.some((subclassFeature) => subclassFeature.featureId === feature.id),
+    )
+    const hooks = subclass?.declarativeCombatHooks?.filter((hook) => hook.abilityId === ability.id) ?? []
+    if (hooks.length > 0) {
+      const hook = hooks.find((entry) => entry.timing === 'after-attack-hit')
+      if (!hook) return []
+      const activation = declarativeCombatHookActivation(hook)
+      if (activation === 'interrupt') return []
+      if (
+        activation === 'prearm' &&
+        !event.declarativeIntentFeatureIds?.includes(feature.id)
+      ) return []
+    }
     const triggerTarget = feature.action.targeting.kind === 'self' ? actor : target
+    const transactionPrefix =
+      `decl-trigger:${state.combatId}:${state.round}:${feature.id}:${actor.id}:${target.id}`
+    const transactionSequence = (actor.classState.declarativeTransactionIds ?? [])
+      .filter((transactionId) => transactionId.startsWith(`${transactionPrefix}:`))
+      .length
     return [{
       type: 'plugin' as const,
       pluginId: feature.ownerPluginId,
       actionId: feature.action.id,
       featureId: feature.id,
-      transactionId: `decl-trigger:${state.combatId}:${state.round}:${eventIndex}:${feature.id}:${actor.id}:${target.id}`,
+      transactionId: `${transactionPrefix}:${transactionSequence}:${eventIndex}`,
       actorId: actor.id,
       targetId: triggerTarget.id,
       targetIds: [triggerTarget.id],
       distanceFeet: triggerTarget.id === actor.id ? 0 : state.distanceFeetByCombatantPair?.[pairKey] ?? 0,
-      rolls: {},
+      rolls: event.declarativeIntentRolls?.[feature.id] ?? {},
     }]
   })
 }

@@ -15,6 +15,7 @@ import { roomCharactersOwnedByMembers } from '../lib/playerView'
 import { loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../lib/roomApi'
 import { getRoomSession } from '../lib/roomSession'
 import { useCharacterStore } from '../store/characters'
+import { resolveMapTokenPortrait } from '../lib/portraitPresentation'
 
 function lastSeenLabel(lastSeenAt: number): string {
   if (!Number.isFinite(lastSeenAt) || lastSeenAt <= 0) return '没有在线记录'
@@ -178,14 +179,15 @@ export default function RoomPartyOverview() {
                   ) : ownedCharacters.map((character) => {
                     const maximumHp = Math.max(1, character.maxHp)
                     const hpRatio = Math.max(0, Math.min(1, character.currentHp / maximumHp))
+                    const portrait = resolveMapTokenPortrait(character)
                     const active = player.activeCharacterId === character.id || (
                       !player.activeCharacterId && player.activeCharacterName === character.name
                     )
                     return (
                       <div key={character.id} className="flex items-center gap-3 rounded-xl border border-white/6 bg-white/[0.025] p-2.5">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-arcane-500/10 text-xl">
-                          {character.portrait
-                            ? <img src={character.portrait} alt="" className="h-full w-full object-cover" />
+                          {portrait
+                            ? <img src={portrait} alt="" className="h-full w-full object-cover" />
                             : character.avatar || '🧙'}
                         </div>
                         <div className="min-w-0 flex-1">

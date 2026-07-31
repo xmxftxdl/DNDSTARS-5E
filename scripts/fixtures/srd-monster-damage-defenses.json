@@ -1,0 +1,95 @@
+{
+  "raw": {
+    "damage_vulnerabilities": [
+      "cold",
+      "piercing from magic weapons wielded by good creatures"
+    ],
+    "damage_resistances": [
+      "fire",
+      "damage from spells",
+      "bludgeoning, piercing, and slashing from nonmagical attacks (from stoneskin)",
+      "radiant while standing in sunlight"
+    ],
+    "damage_immunities": [
+      "poison",
+      "bludgeoning, piercing, and slashing from nonmagical weapons that aren't silvered",
+      "bludgeoning, piercing, and slashing from nonmagical attacks that aren’t adamantine",
+      "piercing and slashing from nonmagical weapons that are not adamantine."
+    ]
+  },
+  "expected": {
+    "damageVulnerabilities": [
+      "cold"
+    ],
+    "damageResistances": [
+      "fire"
+    ],
+    "damageImmunities": [
+      "poison"
+    ],
+    "damageDefenseRules": [
+      {
+        "outcome": "vulnerable",
+        "damageTypes": [
+          "piercing"
+        ],
+        "delivery": "weapon-attack",
+        "magical": true,
+        "sourceMoralAlignment": "good"
+      },
+      {
+        "outcome": "resistant",
+        "delivery": "spell",
+        "magical": true
+      },
+      {
+        "outcome": "resistant",
+        "damageTypes": [
+          "bludgeoning",
+          "piercing",
+          "slashing"
+        ],
+        "delivery": "weapon-attack",
+        "magical": false
+      },
+      {
+        "outcome": "immune",
+        "damageTypes": [
+          "bludgeoning",
+          "piercing",
+          "slashing"
+        ],
+        "delivery": "weapon-attack",
+        "magical": false,
+        "weaponMaterialNot": "silvered"
+      },
+      {
+        "outcome": "immune",
+        "damageTypes": [
+          "bludgeoning",
+          "piercing",
+          "slashing"
+        ],
+        "delivery": "weapon-attack",
+        "magical": false,
+        "weaponMaterialNot": "adamantine"
+      },
+      {
+        "outcome": "immune",
+        "damageTypes": [
+          "piercing",
+          "slashing"
+        ],
+        "delivery": "weapon-attack",
+        "magical": false,
+        "weaponMaterialNot": "adamantine"
+      }
+    ],
+    "unparsedDamageDefenses": [
+      {
+        "outcome": "resistant",
+        "text": "radiant while standing in sunlight"
+      }
+    ]
+  }
+}

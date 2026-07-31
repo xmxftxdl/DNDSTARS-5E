@@ -20,6 +20,7 @@ import {
   Trash2,
   TriangleAlert,
   Weight,
+  X,
 } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
@@ -28,7 +29,7 @@ import { formatEquipmentStatLine } from '../../lib/combatStats'
 import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
 import { getRoomSession } from '../../lib/roomSession'
-import { submitDnd5eInventoryMutation } from '../../lib/inventoryAuthority'
+import { mutateRoomCharacterInventory } from '../../store/roomCommands'
 import {
   dnd5eAttunementRequirementDecision,
   dnd5eInventoryLoad,
@@ -39,7 +40,12 @@ import {
   DND5E_MAGIC_ITEM_RARITY_LABELS,
 } from '../../rulesets/dnd5e/magicItems'
 import { dnd5eArmorProficient, dnd5eWeaponProficient } from '../../rulesets/dnd5e/equipment'
-import type { Dnd5eCurrency, Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
+import { dnd5eEldritchKnightFeatureForCharacter } from '../../rulesets/dnd5e/eldritchKnight'
+import {
+  DND5E_EDITABLE_CURRENCIES,
+  DND5E_EDITABLE_CURRENCY_LABELS,
+} from '../../types/inventory'
+import type { Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
 import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type { Character } from '../../types/character'
 
@@ -91,9 +97,6 @@ const CATEGORY_LABELS = {
   container: '容器',
 } as const
 
-const CURRENCY_LABELS: Readonly<Record<Dnd5eCurrency, string>> = { cp: '铜币', sp: '银币', ep: '银金币', gp: '金币', pp: '铂金币' }
-const CURRENCIES = Object.keys(CURRENCY_LABELS) as Dnd5eCurrency[]
-
 export interface EquipmentTabProps {
   charId: string
   editable?: boolean
@@ -101,6 +104,10 @@ export interface EquipmentTabProps {
   pending?: boolean
   /** 战斗界面将“使用”接入当前战斗的 DM/Headless 行动事务。 */
   onUseItem?: (instanceId: string) => boolean | void
+  /** 战斗快捷栏只保存实例 ID；物品本体与数量始终以权威库存为准。 */
+  quickbarSlots?: readonly (string | null)[]
+  onAssignQuickbarSlot?: (instanceId: string, slotIndex: number) => void
+  onClearQuickbarSlot?: (slotIndex: number) => void
 }
 
 function equipmentProficiency(character: Character, item: EquipmentItem): {
@@ -157,9 +164,13 @@ export default function EquipmentTab({
   compact = false,
   pending = false,
   onUseItem,
+  quickbarSlots,
+  onAssignQuickbarSlot,
+  onClearQuickbarSlot,
 }: EquipmentTabProps) {
   const character = useCharacterStore((state) => state.characters.find((candidate) => candidate.id === charId))
   const characters = useCharacterStore((state) => state.characters)
+  const updateCharacter = useCharacterStore((state) => state.update)
   const [group, setGroup] = useState<'equipment' | 'items'>(compact ? 'items' : 'equipment')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transferTargetId, setTransferTargetId] = useState('')
@@ -186,14 +197,38 @@ export default function EquipmentTab({
   )
   const load = dnd5eInventoryLoad(character)
   const containers = inventory.entries.filter((entry) => entry.item.containerCapacityWeightLb != null && entry.instanceId !== selected?.instanceId)
+  const weaponBondFeature = dnd5eEldritchKnightFeatureForCharacter(character, 'weapon-bond')
+  const bondedWeaponIds = character.dnd5eCombatState?.eldritchKnightBondedWeaponIds ?? []
 
-  const run = (mutation: Parameters<typeof submitDnd5eInventoryMutation>[0]) => {
-    const result = submitDnd5eInventoryMutation(mutation)
-    setNotice(result.message)
-    if (result.status !== 'rejected') {
-      setQuantity(1)
-      if (mutation.type === 'discard' || mutation.type === 'transfer' || mutation.type === 'use') setSelectedId(null)
+  const toggleWeaponBond = (weaponId: string, weaponName: string) => {
+    const alreadyBonded = bondedWeaponIds.includes(weaponId)
+    if (!alreadyBonded && bondedWeaponIds.length >= 2) {
+      setNotice('奥法骑士最多登记两件联结武器；请先解除一件现有联结。')
+      return
     }
+    if (!alreadyBonded && !window.confirm(`确认已完成联结仪式，并将“${weaponName}”登记为联结武器吗？`)) return
+    const nextBonded = alreadyBonded
+      ? bondedWeaponIds.filter((id) => id !== weaponId)
+      : [...bondedWeaponIds, weaponId]
+    updateCharacter(character.id, {
+      dnd5eCombatState: {
+        ...character.dnd5eCombatState,
+        eldritchKnightBondedWeaponIds: nextBonded.length > 0 ? nextBonded : undefined,
+      },
+    })
+    setNotice(alreadyBonded ? `已解除“${weaponName}”的武器联结。` : `已登记“${weaponName}”为联结武器。`)
+  }
+
+  const run = (mutation: Parameters<typeof mutateRoomCharacterInventory>[0]) => {
+    void mutateRoomCharacterInventory(mutation).then((result) => {
+      setNotice(result.message ?? (result.status === 'rejected' ? '物品操作未能完成。' : '物品变更已完成。'))
+      if (result.status !== 'rejected') {
+        setQuantity(1)
+        if (mutation.type === 'discard' || mutation.type === 'transfer' || mutation.type === 'use') setSelectedId(null)
+      }
+    }).catch((error) => {
+      setNotice(error instanceof Error ? error.message : '物品操作未能完成。')
+    })
   }
 
   const activateEntry = (entry: Dnd5eInventoryEntry) => {
@@ -221,11 +256,91 @@ export default function EquipmentTab({
           </div>
         </div>
 
+        {quickbarSlots && (
+          <div
+            data-testid="inventory-quickbar-editor"
+            className="mt-4 rounded-xl border border-amber-300/15 bg-amber-500/[0.045] p-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold text-amber-100">战斗快捷栏</p>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  先选择下方任意物品，再点击 1–7 号槽位。物品已在快捷栏时会交换槽位；右上角可移出快捷栏。
+                </p>
+              </div>
+              {selected && (
+                <span className="rounded-lg border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-100">
+                  待放入：{displayItemName(selected)}
+                </span>
+              )}
+            </div>
+            <div className="mt-3 grid grid-cols-7 gap-2">
+              {quickbarSlots.map((instanceId, slotIndex) => {
+                const entry = instanceId
+                  ? inventory.entries.find((candidate) => candidate.instanceId === instanceId)
+                  : undefined
+                const primaryResource = entry ? Object.values(entry.resources ?? {})[0] : undefined
+                return (
+                  <div key={`quickbar-slot-${slotIndex}`} className="relative">
+                    <button
+                      type="button"
+                      data-testid={`inventory-quickbar-slot-${slotIndex + 1}`}
+                      aria-label={entry
+                        ? `快捷栏 ${slotIndex + 1}：${displayItemName(entry)}`
+                        : `快捷栏 ${slotIndex + 1}：空`}
+                      onClick={() => {
+                        if (selected) {
+                          onAssignQuickbarSlot?.(selected.instanceId, slotIndex)
+                        } else if (entry) {
+                          setSelectedId(entry.instanceId)
+                          setQuantity(1)
+                        }
+                      }}
+                      className={[
+                        'relative flex aspect-square w-full items-center justify-center rounded-xl border p-1 transition',
+                        selected
+                          ? 'border-amber-300/35 bg-amber-400/10 hover:border-amber-200/70 hover:bg-amber-400/20'
+                          : entry
+                            ? 'border-white/10 bg-black/20 hover:border-white/25'
+                            : 'border-dashed border-white/10 bg-black/10',
+                      ].join(' ')}
+                    >
+                      {entry ? (
+                        <Dnd5eActionIcon
+                          spec={dnd5eItemActionIcon(entry.item)}
+                          disabled={entry.identified === false}
+                          badge={primaryResource ? primaryResource.current : entry.quantity > 1 ? entry.quantity : undefined}
+                          className="w-full"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-slate-700">{slotIndex + 1}</span>
+                      )}
+                      <span className="absolute left-1 top-0.5 text-[8px] font-black text-amber-100/70">
+                        {slotIndex + 1}
+                      </span>
+                    </button>
+                    {entry && onClearQuickbarSlot && (
+                      <button
+                        type="button"
+                        aria-label={`将${displayItemName(entry)}移出快捷栏`}
+                        onClick={() => onClearQuickbarSlot(slotIndex)}
+                        className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-void-950 text-slate-400 shadow hover:border-rose-300/40 hover:text-rose-200"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {!compact && <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
-          <div className="grid grid-cols-5 gap-2 rounded-xl border border-white/8 bg-black/15 p-3">
-            {CURRENCIES.map((currency) => (
+          <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/8 bg-black/15 p-3">
+            {DND5E_EDITABLE_CURRENCIES.map((currency) => (
               <label key={`${currency}:${inventory.currency?.[currency] ?? 0}`} className="space-y-1 text-[10px] text-slate-500">
-                <span>{CURRENCY_LABELS[currency]}</span>
+                <span>{DND5E_EDITABLE_CURRENCY_LABELS[currency]}</span>
                 <input
                   type="number"
                   min={0}
@@ -276,6 +391,19 @@ export default function EquipmentTab({
                       className="mt-2 rounded-lg border border-white/8 px-2 py-1 text-[11px] text-slate-400 hover:bg-white/5 hover:text-slate-200 disabled:opacity-40"
                     >
                       卸下
+                    </button>
+                  )}
+                  {editable && !combatManagementLocked && weaponBondFeature && item?.dnd5e?.kind === 'weapon' && (
+                    <button
+                      type="button"
+                      onClick={() => toggleWeaponBond(item.id, item.name)}
+                      disabled={
+                        pending ||
+                        (!bondedWeaponIds.includes(item.id) && bondedWeaponIds.length >= 2)
+                      }
+                      className="mt-2 ml-1 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.06] px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/15 disabled:opacity-40"
+                    >
+                      {bondedWeaponIds.includes(item.id) ? '解除联结' : '登记联结'}
                     </button>
                   )}
                 </div>

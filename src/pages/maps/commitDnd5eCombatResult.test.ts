@@ -5,6 +5,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import {
   applyDnd5eCombatResultApplication,
   commitDnd5eCombatResult,
+  mergeDnd5eCombatCharacterResult,
 } from './commitDnd5eCombatResult'
 
 function plan(patch: Partial<Dnd5eMapResultPlan> = {}): Dnd5eMapResultPlan {
@@ -20,6 +21,47 @@ function plan(patch: Partial<Dnd5eMapResultPlan> = {}): Dnd5eMapResultPlan {
 }
 
 describe('战斗结果提交协调器', () => {
+  it('保留事务提交时角色最新的法师法术书和准备法术', () => {
+    const current: Character = {
+      ...plan().characters[0],
+      id: 'hero',
+      currentHp: 30,
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            subclass: 'evocation',
+            selections: {
+              'wizard-spellbook': ['magic-missile', 'shield', 'fireball'],
+              'spell-prepared': ['shield', 'fireball'],
+            },
+          },
+        },
+      },
+    }
+    const staleCombatResult: Character = {
+      ...current,
+      currentHp: 12,
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            subclass: 'evocation',
+            selections: {
+              'wizard-spellbook': ['magic-missile'],
+              'spell-prepared': [],
+            },
+          },
+        },
+      },
+    }
+
+    const merged = mergeDnd5eCombatCharacterResult(current, staleCombatResult)
+
+    expect(merged.currentHp).toBe(12)
+    expect(merged.dnd5eClassChoices).toEqual(current.dnd5eClassChoices)
+    expect(merged.dnd5eClassChoices?.classes?.wizard?.selections?.['spell-prepared'])
+      .toEqual(['shield', 'fireball'])
+  })
+
   it('先完成全部预检，缺失记录时不会产生半提交', () => {
     const applyCharacter = vi.fn()
     const applyToken = vi.fn()

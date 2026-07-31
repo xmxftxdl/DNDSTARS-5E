@@ -50,16 +50,20 @@ describe('publishPlayerActionAckWithSnapshots', () => {
       publishAck,
     })
 
+    const undoOptions = {
+      undoGroupId: 'player-action:action-1',
+      undoLabel: '结算玩家行动',
+    }
     expect(saveSharedResource).toHaveBeenCalledWith('characters', {
       characters: [character],
       selectedId: 'char-1',
       updatedAt: 123,
-    })
+    }, undoOptions)
     expect(saveSharedResource).toHaveBeenCalledWith('maps', {
       maps: [map],
       selectedId: 'map-1',
       updatedAt: 123,
-    })
+    }, undoOptions)
     expect(saveSharedResource).toHaveBeenCalledWith('combat', {
       mapId: 'map-1',
       active: true,
@@ -67,7 +71,7 @@ describe('publishPlayerActionAckWithSnapshots', () => {
       initiativeIndex: 0,
       initiativeOrder: [],
       updatedAt: 123,
-    })
+    }, undoOptions)
     expect(saveSharedResource).toHaveBeenCalledWith('player-action-ack', makeAck('accepted'))
     expect(publishAck).toHaveBeenCalledWith(makeAck('accepted'))
     expect(calls.slice(-2)).toEqual(['save:player-action-ack', 'publish:ack'])

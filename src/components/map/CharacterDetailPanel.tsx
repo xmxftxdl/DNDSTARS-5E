@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -5,13 +6,18 @@ import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import { getAc } from '../../lib/combatStats'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
+import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
+import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 
 interface CharacterDetailPanelProps {
   token: Token
   character: Character
-  mapId: string
-  updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
-  updateChar: (charId: string, patch: Partial<Character>) => void
+  onSetHitPoints: (input: {
+    currentHp: number
+    maxHp: number
+    temporaryHp: number
+    manuallySetMaximum: boolean
+  }) => void | Promise<unknown>
   isDM?: boolean
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
@@ -22,40 +28,101 @@ interface CharacterDetailPanelProps {
 export default function CharacterDetailPanel({
   token,
   character,
-  mapId,
-  updateToken,
-  updateChar,
+  onSetHitPoints,
   isDM = false,
   canManageConditions = false,
   onConditionsChange,
   conditionSourceOptions,
   onClose,
 }: CharacterDetailPanelProps) {
-  const hpPct =
-    character.maxHp > 0 ? Math.max(0, Math.min(100, (character.currentHp / character.maxHp) * 100)) : 0
+  const portrait = resolveMapTokenPortrait(character, token)
   const tempHp = character.tempHp ?? 0
+  const [currentHpDraft, setCurrentHpDraft] = useState(String(character.currentHp))
+  const [maxHpDraft, setMaxHpDraft] = useState(String(character.maxHp))
+  const [editingCurrentHp, setEditingCurrentHp] = useState(false)
+  const [editingMaxHp, setEditingMaxHp] = useState(false)
+  const [pendingHitPoints, setPendingHitPoints] = useState<{
+    currentHp: number
+    maxHp: number
+  } | null>(null)
+  const hitPointRequestIdRef = useRef(0)
+  const displayedHitPoints = resolveHitPointDisplay({
+    currentHp: character.currentHp,
+    maxHp: character.maxHp,
+    currentHpDraft,
+    maxHpDraft,
+    editingCurrentHp,
+    editingMaxHp,
+    pending: pendingHitPoints,
+  })
 
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
     const nextHp = Math.max(0, Math.min(maxHp, hp))
-    updateChar(character.id, {
+    const requestId = ++hitPointRequestIdRef.current
+    setPendingHitPoints({ currentHp: nextHp, maxHp })
+    const result = onSetHitPoints({
       currentHp: nextHp,
       maxHp,
-      ...(manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
-        ? { hitPointMaximumMode: 'manual' as const, hitPointRolls: undefined }
-        : {}),
+      temporaryHp: character.tempHp,
+      manuallySetMaximum,
     })
-    updateToken(mapId, token.id, { hp: nextHp, maxHp })
+    if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+      return
+    }
+    const clearPendingRequest = () => {
+      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+    }
+    void Promise.resolve(result).then(clearPendingRequest, clearPendingRequest)
+  }
+
+  const commitCurrentHp = () => {
+    const nextHp = parseLiveHitPointDraft(currentHpDraft, character.maxHp) ?? character.currentHp
+    setEditingCurrentHp(false)
+    setCurrentHpDraft(String(nextHp))
+    if (
+      nextHp !== character.currentHp ||
+      token.hp !== nextHp ||
+      token.maxHp !== character.maxHp
+    ) setHp(nextHp)
+  }
+
+  const updateCurrentHpDraft = (draft: string) => {
+    setCurrentHpDraft(draft)
+    const nextHp = parseLiveHitPointDraft(draft, character.maxHp)
+    if (nextHp == null) return
+    if (
+      nextHp !== character.currentHp ||
+      token.hp !== nextHp ||
+      token.maxHp !== character.maxHp
+    ) setHp(nextHp)
+  }
+
+  const commitMaxHp = () => {
+    const parsed = Number(maxHpDraft)
+    const nextMaxHp = Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : character.maxHp
+    const nextCurrentHp = Math.min(character.currentHp, nextMaxHp)
+    setEditingMaxHp(false)
+    setMaxHpDraft(String(nextMaxHp))
+    setCurrentHpDraft(String(nextCurrentHp))
+    if (nextMaxHp !== character.maxHp || nextCurrentHp !== character.currentHp) {
+      setHp(nextCurrentHp, nextMaxHp, true)
+    }
   }
 
   return (
     <div data-testid="character-detail-panel" className="glass absolute bottom-3 left-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 bg-void-900 text-2xl"
+          className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-2xl"
           style={{ borderColor: token.color || '#34d399' }}
         >
-          {character.avatar || token.emoji}
+          {portrait ? (
+            <img src={portrait} alt={`${character.name}的地图 Token`} className="h-full w-full object-cover" />
+          ) : (
+            character.avatar || token.emoji
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -94,17 +161,38 @@ export default function CharacterDetailPanel({
               <>
                 <input
                   type="number"
+                  aria-label="当前生命值"
                   min={0}
-                  value={character.currentHp}
-                  onChange={(e) => setHp(Number(e.target.value) || 0)}
+                  max={displayedHitPoints.maxHp}
+                  value={editingCurrentHp ? currentHpDraft : String(displayedHitPoints.currentHp)}
+                  onFocus={(event) => {
+                    setCurrentHpDraft(String(character.currentHp))
+                    setEditingCurrentHp(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => updateCurrentHpDraft(event.target.value)}
+                  onBlur={commitCurrentHp}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
                   className="w-20 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
                 <span className="text-xs text-slate-500">/</span>
                 <input
                   type="number"
+                  aria-label="最大生命值"
                   min={1}
-                  value={character.maxHp}
-                  onChange={(e) => setHp(character.currentHp, Math.max(1, Number(e.target.value) || 1), true)}
+                  value={editingMaxHp ? maxHpDraft : String(displayedHitPoints.maxHp)}
+                  onFocus={(event) => {
+                    setMaxHpDraft(String(character.maxHp))
+                    setEditingMaxHp(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => setMaxHpDraft(event.target.value)}
+                  onBlur={commitMaxHp}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
                   className="w-20 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
               </>
@@ -122,7 +210,7 @@ export default function CharacterDetailPanel({
           <div className="h-2 overflow-hidden rounded-full bg-void-900/80">
             <div
               className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all"
-              style={{ width: `${hpPct}%` }}
+              style={{ width: `${displayedHitPoints.percentage}%` }}
             />
           </div>
         </section>

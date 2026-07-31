@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCombatTransaction } from '../../lib/combatTransaction'
 import { createDnd5eCombatant, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { getDnd5eSrdMonster } from './monsters'
 
 function combatant(id: string, initiative: number) {
   return createDnd5eCombatant({
@@ -76,5 +77,52 @@ describe('D&D 5e root action transactions', () => {
     }, { transaction, now: 301 })
 
     expect(result.transaction).toMatchObject({ id: 'equipment-action', actionKind: 'weapon-attack', status: 'committed' })
+  })
+
+  it('does not fabricate dice ledger entries for a source-linked on-hit condition', () => {
+    const ankheg = getDnd5eSrdMonster('srd-5.1:ankheg')
+    if (!ankheg) throw new Error('missing SRD ankheg')
+    const actor = createDnd5eCombatant({
+      id: 'actor',
+      name: ankheg.name,
+      controller: 'dm',
+      initiative: 20,
+      statBlockId: ankheg.id,
+      creatureType: ankheg.creatureType,
+      abilities: ankheg.abilities,
+      armorClass: ankheg.armorClass.value,
+      proficiencyBonus: 2,
+      currentHp: ankheg.hitPoints.average,
+      maxHp: ankheg.hitPoints.average,
+      temporaryHp: 0,
+      speed: 30,
+      concentrating: false,
+      position: { x: 0, y: 0 },
+    })
+    const target = combatant('target', 10)
+    const state = {
+      ...startDnd5eHeadlessCombat('combat', [actor, target]),
+      mapId: 'map',
+    }
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: 'bite',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: [[1, 1], [1]],
+        onHitEffectRolls: [{ effectId: 'bite-grapple' }],
+      }],
+    }, { transactionId: 'ankheg-bite', now: 400 })
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.transaction?.rollLedger.entries.some((entry) =>
+      entry.id.includes(':on-hit:'),
+    )).toBe(false)
+    expect(result.transaction?.rollLedger.entries.filter((entry) =>
+      entry.kind === 'damage',
+    )).toHaveLength(2)
   })
 })

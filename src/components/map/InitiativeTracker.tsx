@@ -5,6 +5,8 @@ import { getImage } from '../../lib/imageStore'
 export interface InitiativeEntry {
   /** Stable identity for one turn slot. A creature can own more than one slot. */
   slotId?: string
+  /** The scheduler removes this slot after the first combat round wraps. */
+  firstRoundOnly?: boolean
   turnKind?: 'thief-reflexes'
   tokenId: string
   label: string

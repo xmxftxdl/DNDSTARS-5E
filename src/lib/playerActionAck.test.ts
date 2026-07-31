@@ -118,6 +118,10 @@ describe('player action ack helpers', () => {
       initiativeIndex: 0,
       appliedAt: 2000,
       acceptedPosition: { x: 150, y: 100 },
+      dnd5eDeclarativeAttackIntents: {
+        triggeredFeatureIds: ['plugin:subclass.strike'],
+        consumedFeatureIds: ['plugin:subclass.strike'],
+      },
       before,
       after,
     })
@@ -125,6 +129,10 @@ describe('player action ack helpers', () => {
     expect(ack.id).toBe('action-1:ack:2000')
     expect(ack.appliedAt).toBe(2000)
     expect(ack.acceptedPosition).toEqual({ x: 150, y: 100 })
+    expect(ack.dnd5eDeclarativeAttackIntents).toEqual({
+      triggeredFeatureIds: ['plugin:subclass.strike'],
+      consumedFeatureIds: ['plugin:subclass.strike'],
+    })
     expect(ack.result?.changedCharacters[0]?.hp).toEqual({ before: 10, after: 9 })
     expect(ack.result?.changedTokens[0]?.position).toEqual({
       before: { x: 100, y: 100 },

@@ -120,7 +120,9 @@ export type BardicInspirationInterruptPayload = Record<string, unknown> & {
   rollType: BardicInspirationRollType
   total: number
   targetNumber: number
-  source?: 'held-inspiration' | 'peerless-skill'
+  source?: 'held-inspiration' | 'peerless-skill' | 'active-effect'
+  sourceLabel?: string
+  effectId?: string
 }
 export type BardicInspirationInterruptResponse = Record<string, unknown> & { useBardicInspiration: boolean }
 
@@ -208,7 +210,7 @@ export interface DmAdjudicationEffect extends Record<string, unknown> {
 }
 
 export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
-  contextKind?: 'spell' | 'persistent-area-trigger' | 'map-interaction'
+  contextKind?: 'spell' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action'
   actionId: string
   casterName: string
   spellId: string
@@ -333,6 +335,7 @@ export interface CombatInterruptAnswerContext {
   visibleCharacters: Character[]
   playerCharId?: string
   assignedCharacterId?: string | null
+  roomMemberId?: string
   tokens?: Token[]
   authority?: 'player' | 'dm'
 }
@@ -430,10 +433,12 @@ export function resolveCombatInterruptAnswerCandidate(
     return { character, canAnswer: false }
   }
 
+  const isOwnedRoomCharacter =
+    !!context.roomMemberId && character.roomMemberId === context.roomMemberId
   const isDmControlledCharacter = context.tokens?.some(
     (token) => token.type === 'enemy' && token.characterId === character.id,
   ) ?? false
-  if (isDmControlledCharacter && context.authority !== 'dm') {
+  if (isDmControlledCharacter && context.authority !== 'dm' && !isOwnedRoomCharacter) {
     return { character, canAnswer: false }
   }
 
@@ -442,6 +447,15 @@ export function resolveCombatInterruptAnswerCandidate(
   const isAssignedCharacter = character.id === context.assignedCharacterId
   const isVisibleCharacter = visibleIds.has(character.id)
   const isPublicCharacter = !character.dmNotes
+
+  if (interrupt.kind === 'plugin-choice') {
+    return {
+      character,
+      canAnswer: isOwnedRoomCharacter || (
+        !character.roomMemberId && (isPlayerCharacter || isAssignedCharacter)
+      ),
+    }
+  }
 
   if (interrupt.kind === 'dodge' || interrupt.kind === 'stable-mind') {
     return {

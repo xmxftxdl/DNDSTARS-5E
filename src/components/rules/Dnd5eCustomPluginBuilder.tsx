@@ -23,6 +23,9 @@ import {
   type DeclarativeSubclassDefinitionV1,
 } from '../../rulesets/dnd5e'
 import Dnd5eDeclarativeSubclassEditor from './Dnd5eDeclarativeSubclassEditor'
+import Dnd5eMonsterWorkshopDialog from '../map/Dnd5eMonsterWorkshopDialog'
+import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
+import { dnd5ePluginCapabilityLabel } from '../../rulesets/dnd5e/pluginCapabilityLabels'
 
 interface RaceDraft {
   id: string
@@ -208,7 +211,7 @@ interface ItemDraft {
   attackRerollResetOn: 'none' | 'short-rest' | 'long-rest' | 'dawn'
 }
 
-type BuilderSection = 'races' | 'backgrounds' | 'features' | 'subclasses' | 'spells' | 'items' | 'methods'
+type BuilderSection = 'races' | 'backgrounds' | 'features' | 'subclasses' | 'spells' | 'items' | 'monsters' | 'methods'
 
 interface SavedBuilderDraft {
   metadata: {
@@ -232,6 +235,7 @@ interface SavedBuilderDraft {
   items: ItemDraft[]
   methods: MethodDraft[]
   subclasses: DeclarativeSubclassDefinitionV1[]
+  monsters: Dnd5eMonsterStatBlock[]
 }
 
 const DRAFT_STORAGE_KEY = 'dndstars5e:custom-rules-workshop:v1'
@@ -835,7 +839,7 @@ export default function Dnd5eCustomPluginBuilder({
     version: '1.0.0',
     publisher: defaultPublisher || '房间 DM',
     license: '自定义内容；由房间 DM 负责授权',
-    description: '由 DNDSTARS DM 规则包工作室生成。',
+    description: '由 Astral Trace 扩展工作室生成。',
     minimumGameProtocolVersion: 5,
     dependencies: '',
     conflicts: '',
@@ -850,6 +854,8 @@ export default function Dnd5eCustomPluginBuilder({
   const [items, setItems] = useState<ItemDraft[]>([])
   const [methods, setMethods] = useState<MethodDraft[]>([])
   const [subclasses, setSubclasses] = useState<DeclarativeSubclassDefinitionV1[]>([])
+  const [monsters, setMonsters] = useState<Dnd5eMonsterStatBlock[]>([])
+  const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [localNotice, setLocalNotice] = useState<string | null>(null)
 
@@ -887,9 +893,10 @@ export default function Dnd5eCustomPluginBuilder({
       }),
     ],
     subclasses,
-  }), [backgrounds, features, items, metadata, methods, races, spells, subclasses])
+    monsters,
+  }), [backgrounds, features, items, metadata, methods, monsters, races, spells, subclasses])
 
-  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods, subclasses })
+  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods, subclasses, monsters })
 
   const saveDraft = () => {
     try {
@@ -919,6 +926,7 @@ export default function Dnd5eCustomPluginBuilder({
       setItems(Array.isArray(saved.items) ? saved.items.map((item, index) => restoreItemDraft(item, index)) : [])
       setMethods(saved.methods)
       setSubclasses(Array.isArray(saved.subclasses) ? saved.subclasses : [])
+      setMonsters(Array.isArray(saved.monsters) ? saved.monsters : [])
       setLocalError(null)
       setLocalNotice('已载入当前浏览器保存的草稿。')
     } catch {
@@ -975,13 +983,14 @@ export default function Dnd5eCustomPluginBuilder({
     <section data-testid="custom-rules-plugin-builder" className="glass mb-5 rounded-2xl border border-arcane-400/15 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="font-semibold text-slate-100">DM 规则包工作室</h2>
+          <h2 className="font-semibold text-slate-100">扩展工作室</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-            用表单创建子职、装备、特性、法术、种族、背景与加点规则。新文件是纯 JSON，由 Host 编译为白名单 Headless 事务；不会执行导入包中的 JavaScript。
+            用统一编辑器创建子职、装备、特性、法术、种族、背景、怪物与加点规则。新文件是纯 JSON，
+            由 Host 编译为白名单 Headless 事务；不会执行导入包中的 JavaScript。
           </p>
         </div>
         <button type="button" onClick={() => setOpen((value) => !value)} className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200">
-          {open ? '收起工作室' : '打开规则包工作室'}
+          {open ? '收起工作室' : '打开扩展工作室'}
         </button>
       </div>
 
@@ -1043,7 +1052,7 @@ export default function Dnd5eCustomPluginBuilder({
               onChange={(conflicts) => setMetadata((current) => ({ ...current, conflicts }))}
             />
             <fieldset>
-              <legend className="mb-1.5 text-xs font-semibold text-slate-500">声明的 Headless capability</legend>
+              <legend className="mb-1.5 text-xs font-semibold text-slate-500">声明的 Headless 能力</legend>
               <div className="flex flex-wrap gap-1.5">
                 {PLUGIN_CAPABILITIES.map((capability) => {
                   const selected = metadata.declaredCapabilities.includes(capability)
@@ -1064,7 +1073,7 @@ export default function Dnd5eCustomPluginBuilder({
                           : 'border-white/8 text-slate-500'
                       }`}
                     >
-                      {capability}
+                      {dnd5ePluginCapabilityLabel(capability)}
                     </button>
                   )
                 })}
@@ -1077,7 +1086,8 @@ export default function Dnd5eCustomPluginBuilder({
               ['races', '种族', races.length], ['backgrounds', '背景', backgrounds.length],
               ['features', '特性', features.length], ['spells', '法术', spells.length],
               ['subclasses', '声明式子职', subclasses.length],
-              ['items', '装备／物品', items.length], ['methods', '加点规则', methods.length],
+              ['items', '装备／物品', items.length], ['monsters', '怪物', monsters.length],
+              ['methods', '加点规则', methods.length],
             ] as const).map(([section, label, count]) => (
               <button
                 key={section}
@@ -1092,6 +1102,44 @@ export default function Dnd5eCustomPluginBuilder({
           </nav>
 
           {activeSection === 'subclasses' && <Dnd5eDeclarativeSubclassEditor value={subclasses} onChange={setSubclasses} />}
+
+          {activeSection === 'monsters' && (
+            <div className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.04] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-100">怪物工坊</h3>
+                  <p className="mt-1 max-w-2xl text-xs leading-6 text-slate-500">
+                    使用与战斗地图完全相同的编辑器创建属性、动作、特性、施法、传奇能力和 Headless 机制。
+                    怪物会随扩展一起校验、安装和分发。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMonsterWorkshopOpen(true)}
+                  className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"
+                >
+                  打开怪物工坊
+                </button>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {monsters.length === 0 ? (
+                  <p className="col-span-full rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-slate-600">当前扩展还没有怪物。</p>
+                ) : monsters.map((monster) => (
+                  <div key={monster.id} className="rounded-xl border border-white/8 bg-black/15 p-3">
+                    <p className="truncate text-sm font-semibold text-slate-200">{monster.name}</p>
+                    <p className="mt-1 text-xs text-slate-500">CR {monster.challenge.rating} · AC {monster.armorClass.value} · HP {monster.hitPoints.average}</p>
+                  </div>
+                ))}
+              </div>
+              <Dnd5eMonsterWorkshopDialog
+                open={monsterWorkshopOpen}
+                onClose={() => setMonsterWorkshopOpen(false)}
+                monsters={monsters}
+                onMonstersChange={setMonsters}
+                context="plugin"
+              />
+            </div>
+          )}
 
           {activeSection === 'races' && <div>
             <div className="mb-3 flex items-center justify-between gap-3">

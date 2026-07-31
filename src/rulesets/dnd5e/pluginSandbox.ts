@@ -4,6 +4,7 @@ import type {
   Dnd5ePluginBackgroundDefinition,
   Dnd5ePluginDiceRollDeclaration,
   Dnd5ePluginFeatureDefinition,
+  Dnd5ePluginFeatDefinition,
   Dnd5ePluginItemDefinition,
   Dnd5ePluginRaceDefinition,
   Dnd5ePluginResourceDefinition,
@@ -16,6 +17,7 @@ import type {
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eStandardConditionId } from './conditions'
+import type { Dnd5eMonsterStatBlock } from './monsters'
 
 export interface Dnd5eSandboxConditionDuration {
   expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
@@ -51,12 +53,14 @@ export interface Dnd5ePluginStateMigrationDeclaration {
 interface SandboxContributions {
   manifest: Dnd5eRulesPluginManifest
   features: Dnd5ePluginFeatureDefinition[]
+  feats: Dnd5ePluginFeatDefinition[]
   actions: SandboxActionDeclaration[]
   races: Dnd5ePluginRaceDefinition[]
   backgrounds: Dnd5ePluginBackgroundDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   spells: Dnd5ePluginSpellDefinition[]
   items: Dnd5ePluginItemDefinition[]
+  monsters: Dnd5eMonsterStatBlock[]
   resources: Dnd5ePluginResourceDefinition[]
   subclasses: Dnd5ePluginSubclassDefinition[]
   migrations: Dnd5ePluginStateMigrationDeclaration[]
@@ -104,12 +108,14 @@ export interface Dnd5ePluginStateMigrationResult {
 export interface Dnd5ePluginSandboxSession {
   readonly manifest: Dnd5eRulesPluginManifest
   readonly features: readonly Dnd5ePluginFeatureDefinition[]
+  readonly feats: readonly Dnd5ePluginFeatDefinition[]
   readonly actions: readonly SandboxActionDeclaration[]
   readonly races: readonly Dnd5ePluginRaceDefinition[]
   readonly backgrounds: readonly Dnd5ePluginBackgroundDefinition[]
   readonly abilityGenerationMethods: readonly Dnd5ePluginAbilityGenerationDefinition[]
   readonly spells: readonly Dnd5ePluginSpellDefinition[]
   readonly items: readonly Dnd5ePluginItemDefinition[]
+  readonly monsters: readonly Dnd5eMonsterStatBlock[]
   readonly resources: readonly Dnd5ePluginResourceDefinition[]
   readonly subclasses: readonly Dnd5ePluginSubclassDefinition[]
   readonly migrations: readonly Dnd5ePluginStateMigrationDeclaration[]
@@ -310,12 +316,14 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
   const session: Dnd5ePluginSandboxSession = {
     get manifest() { return initialized.manifest },
     get features() { return initialized.features },
+    get feats() { return initialized.feats ?? [] },
     get actions() { return initialized.actions },
     get races() { return initialized.races },
     get backgrounds() { return initialized.backgrounds ?? [] },
     get abilityGenerationMethods() { return initialized.abilityGenerationMethods },
     get spells() { return initialized.spells ?? [] },
     get items() { return initialized.items ?? [] },
+    get monsters() { return initialized.monsters ?? [] },
     get resources() { return initialized.resources ?? [] },
     get subclasses() { return initialized.subclasses ?? [] },
     get migrations() { return initialized.migrations },
@@ -389,6 +397,7 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
         api.registerHeadlessAction({ ...action, execution: 'worker' })
       }
       for (const feature of session.features) api.registerFeature(feature)
+      for (const feat of session.feats) api.registerFeat(feat)
       for (const subclass of session.subclasses) api.registerSubclass(subclass)
       for (const resource of session.resources) api.registerResource(resource)
       for (const race of session.races) api.registerRace(race)
@@ -396,6 +405,7 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
       for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
       for (const spell of session.spells) api.registerSpell(spell)
       for (const item of session.items) api.registerItem(item)
+      for (const monster of session.monsters) api.registerMonster(monster)
       return () => {
         if (activeSessions.get(session.manifest.id) === session) {
           activeSessions.delete(session.manifest.id)

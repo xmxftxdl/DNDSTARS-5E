@@ -51,4 +51,22 @@ describe('DM 裁定面板', () => {
     expect(html).toContain('按 Headless 骰值结算')
     expect(html).toContain('拒绝交互')
   })
+
+  it('其他行动明确显示资源已经消耗且裁定不会返还', () => {
+    const prompt: SharedDmAdjudicationPromptView = {
+      id: 'basic-action-adjudication',
+      payload: {
+        contextKind: 'basic-action', actionId: 'action', casterName: '游荡者',
+        spellId: 'basic-action:other-bonus-action', spellName: '其他（附赠动作）',
+        spellLevel: 0, slotLevel: 0, castingTime: 'bonus-action',
+        description: '快速割断吊灯绳索。', concentration: false,
+      },
+    }
+    const html = render({ prompt })
+    expect(html).toContain('其他行动裁定 · 其他（附赠动作）')
+    expect(html).toContain('已经消耗附赠动作')
+    expect(html).toContain('驳回裁定（不返还）')
+    expect(html).toContain('确认裁定')
+    expect(html).not.toContain('添加目标效果')
+  })
 })

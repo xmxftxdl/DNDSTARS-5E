@@ -5,7 +5,6 @@ import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useFogStore } from '../../store/fog'
 import { useCharacterStore } from '../../store/characters'
 import { useRoomCommunicationsStore } from '../../store/roomCommunications'
-import { useGroupAbilityChecksStore } from '../../store/groupAbilityChecks'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
 import { useSceneAudioStore } from '../../store/sceneAudio'
 import { getEnemyTemplate } from '../../lib/enemyPool'
@@ -128,21 +127,7 @@ export default function SceneOrchestrationSystem({
     }
 
     if (action.kind === 'group-roll') {
-      const participantCharacterIds = [...new Set(
-        map.tokens.filter((token) => token.type === 'player' && token.characterId).map((token) => token.characterId!),
-      )]
-      if (participantCharacterIds.length < 1) throw new Error('当前地图没有已关联玩家角色，无法发起群体检定。')
-      await useGroupAbilityChecksStore.getState().mutate({
-        operation: 'create',
-        label: action.label,
-        selection: action.selection,
-        dc: action.dc,
-        mode: action.mode,
-        allowPassiveFallback: action.allowPassiveFallback,
-        participantCharacterIds,
-        mapId: run.mapId,
-      })
-      return { summary, reversible: false }
+      return { summary: '已跳过：群体检定功能已移除', reversible: false }
     }
 
     if (action.kind === 'door') {
@@ -229,7 +214,7 @@ export default function SceneOrchestrationSystem({
 
     await communications.mutateJournal({ operation: 'add-campaign-entry', title: action.title, body: action.body, source: 'dm' })
     return { summary, reversible: false }
-  }, [map.tokens, onStartCombat])
+  }, [onStartCombat])
 
   const executeNext = useCallback(async (runAll: boolean) => {
     if (!isDm || executingRef.current) return

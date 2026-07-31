@@ -18,6 +18,8 @@ import {
 } from './declarativeSubclassAbility'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
+import type { Dnd5eMonsterStatBlock } from './monsters'
+import { validateDnd5eMonsterCatalog } from './monsterSchema'
 import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
@@ -69,6 +71,8 @@ export interface Dnd5eCustomRulesPluginDraft {
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   headlessActions?: Dnd5eCustomHeadlessActionDraft[]
   subclasses?: DeclarativeSubclassDefinitionV1[]
+  /** 使用怪物工坊生成的完整 stat block；Host 会再次执行 monsterSchema 校验。 */
+  monsters?: Dnd5eMonsterStatBlock[]
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
@@ -83,8 +87,16 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
   if (!manifest.license.trim()) errors.push('请填写许可证。')
   if (
     draft.races.length + draft.backgrounds.length + draft.features.length + draft.spells.length +
-    draft.items.length + draft.abilityGenerationMethods.length + (draft.subclasses?.length ?? 0) === 0
+    draft.items.length + draft.abilityGenerationMethods.length + (draft.subclasses?.length ?? 0) +
+    (draft.monsters?.length ?? 0) === 0
   ) errors.push('请至少添加一种规则内容。')
+
+  if ((draft.monsters?.length ?? 0) > 128) errors.push('单个扩展最多包含 128 个怪物模板。')
+  const monsterIssues = validateDnd5eMonsterCatalog(draft.monsters ?? [])
+  for (const issue of monsterIssues.slice(0, 20)) errors.push(`怪物 ${issue.monsterId}：${issue.message}`)
+  for (const monster of draft.monsters ?? []) {
+    if (monster.source !== 'DM 自定义') errors.push(`插件怪物 ${monster.name || monster.id} 必须标记为 DM 自定义。`)
+  }
 
   const subclassIds = new Set<string>()
   for (const subclass of draft.subclasses ?? []) {
@@ -153,7 +165,7 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!feature.name.trim() || !feature.summary.trim() || !feature.description.trim()) {
       errors.push(`特性 ${feature.id || '未命名'} 缺少名称、摘要或正文。`)
     }
-    if (feature.automation !== 'manual' && !feature.action) {
+    if (feature.automation !== 'manual' && !feature.action && !feature.staticModifiers) {
       errors.push(`自动化特性 ${feature.name || feature.id} 缺少战斗行动。`)
     }
     if (feature.action && (
@@ -286,6 +298,7 @@ export function buildDnd5eCustomRulesPluginSource(draft: Dnd5eCustomRulesPluginD
   const spells = JSON.stringify(draft.spells, null, 2)
   const items = JSON.stringify(draft.items, null, 2)
   const methods = JSON.stringify(draft.abilityGenerationMethods, null, 2)
+  const monsters = JSON.stringify(draft.monsters ?? [], null, 2)
   const headlessActions = JSON.stringify(draft.headlessActions ?? [], null, 2)
   return `/* DNDSTARS 5E custom rules package. Generated locally by the DM. */
 const manifest = ${manifest};
@@ -295,6 +308,7 @@ const features = ${features};
 const spells = ${spells};
 const items = ${items};
 const abilityGenerationMethods = ${methods};
+const monsters = ${monsters};
 const headlessActions = ${headlessActions};
 
 function compileHeadlessAction(definition) {
@@ -352,6 +366,7 @@ const plugin = {
     for (const spell of spells) api.registerSpell(spell);
     for (const item of items) api.registerItem(item);
     for (const method of abilityGenerationMethods) api.registerAbilityGenerationMethod(method);
+    for (const monster of monsters) api.registerMonster(monster);
   },
 };
 

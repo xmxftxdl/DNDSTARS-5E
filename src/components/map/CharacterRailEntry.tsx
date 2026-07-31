@@ -1,4 +1,5 @@
 import type { Character } from '../../types/character'
+import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 
 interface CharacterRailEntryProps {
   character: Character
@@ -11,7 +12,7 @@ export default function CharacterRailEntry({
   isActive,
   onAvatarClick,
 }: CharacterRailEntryProps) {
-  const portrait = character.tokenPortrait || character.portrait
+  const portrait = resolveMapTokenPortrait(character)
   return (
     <button
       type="button"

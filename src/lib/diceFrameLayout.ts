@@ -31,26 +31,16 @@ export function settledDiceGrid(
   })
 }
 
-export function diceFrameLayout(qty: number, sides: number): DiceFrameLayout {
+export function diceFrameLayout(qty: number, _sides: number): DiceFrameLayout {
+  void _sides
   const safeQty = Math.max(1, Math.min(12, Math.round(Number(qty) || 1)))
-  const safeSides = Math.max(2, Math.min(100, Math.round(Number(sides) || 6)))
-  const isD4 = safeSides === 4
-  const tableMultiplier = isD4
-    ? Math.min(1.45, 1 + Math.max(0, safeQty - 1) * 0.1)
-    : safeQty <= 3
-      ? 1
-      : Math.min(1.55, 1 + Math.max(0, safeQty - 3) * 0.12)
-
-  if (isD4) {
-    return {
-      tableMultiplier,
-      visualScaleMultiplier: 0.92 * 0.9,
-    }
-  }
+  const tableMultiplier = safeQty <= 3
+    ? 1
+    : Math.min(1.55, 1 + Math.max(0, safeQty - 3) * 0.12)
 
   // The renderer frames the whole physics table. When that table grows for a
-  // multi-die roll, scale the dice by the same factor so one die remains the
-  // same on-screen size as a normal 1d6 instead of shrinking with the camera.
+  // multi-die roll, scale every die type by the same factor so d4, d6 and d8
+  // retain the same apparent size instead of shrinking with the camera.
   return {
     tableMultiplier,
     visualScaleMultiplier: 1.15 * tableMultiplier * 0.9,

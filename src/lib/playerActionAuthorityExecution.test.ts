@@ -75,6 +75,7 @@ describe('player action authority execution plan', () => {
     expect(playerActionAuthorityRoute(action('dnd5e-weapon-attack'))).toBe('dnd5e-weapon-attack')
     expect(playerActionAuthorityRoute(action('dnd5e-fighter-feature'))).toBe('dnd5e-fighter-feature')
     expect(playerActionAuthorityRoute(action('dnd5e-class-feature'))).toBe('dnd5e-class-feature')
+    expect(playerActionAuthorityRoute(action('dnd5e-racial-action'))).toBe('dnd5e-racial-action')
     expect(playerActionAuthorityRoute(action('dnd5e-plugin-action'))).toBe('dnd5e-plugin-action')
     expect(playerActionAuthorityRoute(action('dnd5e-item-use'))).toBe('dnd5e-item-use')
     expect(playerActionAuthorityRoute(action('dnd5e-ability-check'))).toBe('dnd5e-ability-check')
@@ -113,5 +114,19 @@ describe('player action authority execution plan', () => {
 
     expect(first).toEqual({ status: 'accepted', route: 'dnd5e-weapon-attack' })
     expect(second).toEqual({ status: 'ignored' })
+  })
+
+  it('routes an owned movement request through DM authority outside combat', () => {
+    expect(planPlayerActionAuthorityExecution({
+      action: { ...action('move-token'), combatId: undefined },
+      preflight: {
+        ...preflight(),
+        combatId: undefined,
+        combatActive: false,
+        currentTokenId: undefined,
+      },
+      recentActionKeys: new Map<string, number>(),
+      now: 1000,
+    })).toEqual({ status: 'accepted', route: 'move-token' })
   })
 })

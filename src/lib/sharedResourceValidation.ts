@@ -27,9 +27,9 @@ import {
   type CombatInterruptPhase,
   type CombatInterruptStatus,
 } from './combatInterruptQueue'
-import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
 import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
 import { isDnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
+import { isDnd5eMonsterControlStateV1 } from './monsterControlState'
 import {
   SCENE_ORCHESTRATION_RESOURCE,
   validateSharedSceneOrchestration,
@@ -68,7 +68,6 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   'combat-log': 'entries',
   'room-chat': 'messages',
   'room-journal': 'handouts',
-  'group-ability-checks': 'checks',
   'dice-events': 'events',
   'combat-interrupts': 'interrupts',
   'player-action-requests': 'requests',
@@ -135,6 +134,14 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
       !Number.isInteger(raw.expiresAfterRound) || Number(raw.expiresAfterRound) < Number(raw.createdRound) ||
       Number(raw.expiresAfterRound) - Number(raw.createdRound) + 1 > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS
     ) issues.push(`${areaPath} 轮数无效`)
+    if (
+      raw.expiresAtSourceTurnEndAfterRound != null &&
+      (
+        !Number.isInteger(raw.expiresAtSourceTurnEndAfterRound) ||
+        Number(raw.expiresAtSourceTurnEndAfterRound) < Number(raw.createdRound) ||
+        Number(raw.expiresAtSourceTurnEndAfterRound) > Number(raw.expiresAfterRound)
+      )
+    ) issues.push(`${areaPath}.expiresAtSourceTurnEndAfterRound 无效`)
     if (raw.concentrationId != null && (typeof raw.concentrationId !== 'string' || !raw.concentrationId)) {
       issues.push(`${areaPath}.concentrationId 无效`)
     }
@@ -481,9 +488,6 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   if (name === COMBAT_STATISTICS_RESOURCE && !normalizeSharedCombatStatistics(input)) {
     reasons.push('进阶数据资源结构损坏')
   }
-  if (name === GROUP_ABILITY_CHECK_RESOURCE && !validateSharedGroupAbilityChecks(input)) {
-    reasons.push('群体检定资源结构损坏')
-  }
   if (name === CAMPAIGN_TIME_RESOURCE && !validateSharedCampaignTime(input)) {
     reasons.push('战役时间资源结构损坏')
   }
@@ -523,6 +527,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === 'combat' && input.effectiveRules != null && !isDnd5eEffectiveRulesContextV1(input.effectiveRules)) {
     reasons.push('combat.effectiveRules 规则快照损坏')
+  }
+  if (name === 'combat' && input.monsterControl != null && !isDnd5eMonsterControlStateV1(input.monsterControl)) {
+    reasons.push('combat.monsterControl 怪物控制状态损坏')
   }
   if (name === 'dm-authority-ready' && typeof input.ready !== 'boolean') {
     reasons.push('dm-authority-ready.ready 不是布尔值')

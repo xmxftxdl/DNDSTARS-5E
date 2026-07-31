@@ -28,6 +28,13 @@ import { dnd5eSpellcastingClassIdForSpell } from './spells'
 import type { Dnd5eSpellConditionDuration, Dnd5eSpellMechanicsDefinition } from './spellMechanics'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eWearingUnproficientArmor } from './equipment'
+import { resolveDnd5eDamageDefenses } from './damageDefenses'
+import { dnd5eLimitedMagicImmunityNegatesSpell } from './monsterGenericAbilities'
+import {
+  dnd5eSpellComponentCheck,
+  dnd5eSpellComponentsAvailable,
+  type Dnd5eSpellComponentCheck,
+} from './spellComponents'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -37,6 +44,9 @@ export type Dnd5ePluginSpellRejectReason =
   | 'plugin-not-enabled-for-room'
   | 'plugin-version-mismatch'
   | 'spell-unavailable'
+  | 'spell-not-known-or-prepared'
+  | 'spellcasting-class-unavailable'
+  | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
   | 'spell-not-headless'
   | 'component-unavailable'
@@ -49,11 +59,7 @@ export type Dnd5ePluginSpellRejectReason =
   | 'combatant-missing'
   | 'invalid-dice'
 
-export interface Dnd5ePluginSpellComponentCheck {
-  verbal: 'not-required' | 'available'
-  somatic: 'not-required' | 'available'
-  material: 'not-required' | 'focus-or-pouch' | 'unsupported-costly-material'
-}
+export type Dnd5ePluginSpellComponentCheck = Dnd5eSpellComponentCheck
 
 export interface PreparedDnd5ePluginSpellCast {
   action: SharedPlayerActionState
@@ -152,12 +158,15 @@ export function prepareDnd5ePluginSpellCast(input: {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
   const castingClassId = dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
+  if (!castingClassId) return { ok: false, reason: 'spell-not-known-or-prepared' }
   const classDefinition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  if (
-    !classDefinition?.spellcasting || !castingClassId || castingClassLevel < 1 ||
-    (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18))
-  ) return { ok: false, reason: 'spell-unavailable' }
+  if (!classDefinition?.spellcasting || castingClassLevel < 1) {
+    return { ok: false, reason: 'spellcasting-class-unavailable' }
+  }
+  if (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18)) {
+    return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
+  }
   if (spell.castingTime.value !== 1 || !['action', 'bonus-action'].includes(spell.castingTime.unit)) {
     return { ok: false, reason: 'invalid-action' }
   }
@@ -165,8 +174,8 @@ export function prepareDnd5ePluginSpellCast(input: {
   if (castingTime === 'action' && input.turnEconomy && input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
   if (castingTime === 'bonus-action' && input.turnEconomy && input.turnEconomy.bonusAction.current < 1) return { ok: false, reason: 'bonus-action-unavailable' }
 
-  const componentCheck = dnd5ePluginSpellComponentCheck(actor, spell)
-  if (componentCheck.material === 'unsupported-costly-material') return { ok: false, reason: 'component-unavailable' }
+  const componentCheck = dnd5ePluginSpellComponentCheck(actor, spell, castingClassId)
+  if (!dnd5eSpellComponentsAvailable(componentCheck)) return { ok: false, reason: 'component-unavailable' }
 
   const requestedSlot = Math.floor(payload.slotLevel)
   const slotLevel = spell.level === 0
@@ -331,6 +340,15 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
 
   let rawDamage = 0
   let finalDamage = 0
+  const sourceCombatant = prepared.state.combatants[prepared.actorToken.id]
+  const targetCombatant = prepared.state.combatants[prepared.targetToken.id]
+  const targetWilling = sourceCombatant.controller === targetCombatant.controller
+  const spellNegated = dnd5eLimitedMagicImmunityNegatesSpell({
+    rule: targetCombatant.limitedMagicImmunity,
+    spellLevel: prepared.slotLevel,
+    target: targetWilling ? 'ally' : 'hostile',
+    willing: targetWilling,
+  })
   const shouldDealDamage = !!mechanics.damage && (mechanics.resolution !== 'spell-attack' || attackHit)
   if (shouldDealDamage) {
     const count = prepared.damageDice.count * (critical ? 2 : 1)
@@ -348,7 +366,23 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
       const onSuccess = mechanics.savingThrow?.onSuccess ?? 'none'
       rawDamage = onSuccess === 'half' ? Math.floor(rawDamage / 2) : onSuccess === 'full' ? rawDamage : 0
     }
-    finalDamage = finalDamageForTarget(prepared.state.combatants[prepared.targetToken.id], rawDamage, mechanics.damage!.type)
+    finalDamage = resolveDnd5eDamageDefenses({
+      damage: rawDamage,
+      source: {
+        damageType: mechanics.damage!.type,
+        delivery: 'spell',
+        magical: true,
+        spellLevel: prepared.slotLevel,
+        sourceMoralAlignment: sourceCombatant.moralAlignment,
+      },
+      defenses: {
+        immunities: targetCombatant.damageImmunities,
+        resistances: targetCombatant.damageResistances,
+        vulnerabilities: targetCombatant.damageVulnerabilities,
+        damageDefenseRules: targetCombatant.damageDefenseRules,
+      },
+    }).finalDamage
+    if (spellNegated) finalDamage = 0
   }
 
   const conditions = (mechanics.conditions ?? []).filter((condition) => {
@@ -421,17 +455,18 @@ function dnd5ePluginSpellConditionLifecycle(
   return {}
 }
 
-export function dnd5ePluginSpellComponentCheck(actor: Character, spell: RegisteredDnd5ePluginSpell): Dnd5ePluginSpellComponentCheck {
-  const costly = (spell.components.materialCostGp ?? 0) > 0 || spell.components.materialConsumed === true
-  const hasFocusOrPouch = actor.dnd5eInventory?.entries.some((entry) => {
-    const id = entry.templateId.toLowerCase()
-    return id.includes('component-pouch') || id.includes('arcane-focus') || id.includes('druidic-focus') || id.includes('holy-symbol')
-  }) === true
-  return {
-    verbal: spell.components.verbal ? 'available' : 'not-required',
-    somatic: spell.components.somatic ? 'available' : 'not-required',
-    material: !spell.components.material ? 'not-required' : costly || !hasFocusOrPouch ? 'unsupported-costly-material' : 'focus-or-pouch',
-  }
+export function dnd5ePluginSpellComponentCheck(
+  actor: Character,
+  spell: RegisteredDnd5ePluginSpell,
+  classId?: Dnd5eClassId,
+): Dnd5ePluginSpellComponentCheck {
+  return dnd5eSpellComponentCheck(actor, {
+    verbal: spell.components.verbal,
+    somatic: spell.components.somatic,
+    material: spell.components.material,
+    costlyMaterial: (spell.components.materialCostGp ?? 0) > 0,
+    consumedMaterial: spell.components.materialConsumed === true,
+  }, classId)
 }
 
 function invalidDice(prepared: PreparedDnd5ePluginSpellCast, transaction: CombatTransaction, now: number): Dnd5ePluginSpellResolution {
@@ -452,14 +487,6 @@ function validD20Pair(first: number | undefined, second: number | undefined, mod
 function selectedD20(first: number, second: number | undefined, mode: D20RollMode): number {
   if (mode === 'normal' || second == null) return first
   return mode === 'advantage' ? Math.max(first, second) : Math.min(first, second)
-}
-
-function finalDamageForTarget(target: Dnd5eHeadlessCombatState['combatants'][string], amount: number, type: string): number {
-  if (target.damageImmunities.includes(type as never)) return 0
-  let result = amount
-  if (target.damageResistances.includes(type as never)) result = Math.floor(result / 2)
-  if (target.damageVulnerabilities.includes(type as never)) result *= 2
-  return result
 }
 
 function spellDurationRounds(spell: RegisteredDnd5ePluginSpell): number {

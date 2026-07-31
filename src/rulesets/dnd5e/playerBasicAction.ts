@@ -4,6 +4,8 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { D20RollMode } from '../contracts'
 import {
+  dnd5eAbilityCheckRollMode,
+  dnd5eBestActiveEffectEscapeOption,
   dnd5eBestGrappleDefense,
   resolveDnd5eHeadlessAction,
   type Dnd5eAction,
@@ -12,8 +14,6 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eAttacksPerAttackAction } from './classes'
-import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
-import { resolveDnd5eRollMode } from './rollMode'
 import {
   cellKey,
   mapCellExtent,
@@ -45,6 +45,7 @@ export interface PreparedDnd5eBasicAction {
   actor: Character
   actorTokenId: string
   spendsAction: boolean
+  spendsBonusAction: boolean
   attackNumber?: number
   actorRollMode: D20RollMode
   targetRollMode: D20RollMode
@@ -150,13 +151,26 @@ export function prepareDnd5ePlayerBasicAction(input: {
   if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || actor.currentHp <= 0 || !token) {
     return { ok: false, reason: 'invalid-actor' }
   }
+  if (
+    (payload.kind === 'other-action' || payload.kind === 'other-bonus-action') &&
+    (
+      (payload.description != null && typeof payload.description !== 'string') ||
+      (typeof payload.description === 'string' && payload.description.length > 320)
+    )
+  ) {
+    return { ok: false, reason: 'invalid-action' }
+  }
   const replacesAttack = payload.kind === 'grapple' || payload.kind === 'shove'
+  const freeAction = payload.kind === 'release-grapple'
+  const spendsBonusAction = payload.kind === 'other-bonus-action'
   const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
   const attacksAllowed = attacksPerAction * Math.max(1, input.turnEconomy.action.max)
   const attackNumber = replacesAttack ? input.turnEconomy.attacksUsed + 1 : undefined
-  const spendsAction = !replacesAttack || input.turnEconomy.attacksUsed % attacksPerAction === 0
+  const spendsAction = !freeAction && !spendsBonusAction &&
+    (!replacesAttack || input.turnEconomy.attacksUsed % attacksPerAction === 0)
   if (replacesAttack && input.turnEconomy.attacksUsed >= attacksAllowed) return { ok: false, reason: 'action-unavailable' }
   if (spendsAction && input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
+  if (spendsBonusAction && input.turnEconomy.bonusAction.current < 1) return { ok: false, reason: 'action-unavailable' }
   const targetTokenId = 'targetTokenId' in payload ? payload.targetTokenId : undefined
   if (targetTokenId && !input.map.tokens.some((candidate) => candidate.id === targetTokenId)) {
     return { ok: false, reason: 'invalid-target' }
@@ -173,27 +187,47 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const combatant = snapshot.state.combatants[token.id]
   if (actorIndex < 0 || !combatant) return { ok: false, reason: 'combatant-missing' }
   const targetCombatant = targetTokenId ? snapshot.state.combatants[targetTokenId] : undefined
-  const escapingGrapple = payload.kind === 'escape-grapple'
-  if (escapingGrapple && (!targetCombatant || !combatant.classState.activeEffects?.some((effect) =>
-    effect.standardCondition === 'grappled' && effect.source.actorId === targetCombatant.id))) {
+  const selectedGrappleEffect = payload.kind === 'escape-grapple' && targetCombatant
+    ? combatant.classState.activeEffects?.find((effect) =>
+        effect.standardCondition === 'grappled' && effect.source.actorId === targetCombatant.id)
+    : undefined
+  if (payload.kind === 'escape-grapple' && (!targetCombatant || !selectedGrappleEffect)) {
+    return { ok: false, reason: 'invalid-target' }
+  }
+  const releasedGrappleEffect = payload.kind === 'release-grapple' && targetCombatant
+    ? targetCombatant.classState.activeEffects?.find((effect) =>
+        effect.standardCondition === 'grappled' &&
+        effect.dependsOnEffectId == null &&
+        effect.escapeCheck == null &&
+        effect.source.kind === 'feature' &&
+        effect.source.rulesId === 'basic-action:grapple' &&
+        effect.source.actorId === combatant.id &&
+        effect.relation?.kind === 'grapple' &&
+        effect.relation.sourceActorId === combatant.id &&
+        effect.relation.sourceActionId === 'basic-action:grapple' &&
+        effect.relation.slotGroup === 'free-hand' &&
+        effect.relation.maxDistanceFeet === 5)
+    : undefined
+  if (payload.kind === 'release-grapple' && (!targetCombatant || !releasedGrappleEffect)) {
     return { ok: false, reason: 'invalid-target' }
   }
   const escapeEffect = payload.kind === 'escape-effect'
     ? combatant.classState.activeEffects?.find((effect) => effect.escapeCheck?.economy === 'action')
-    : undefined
+    : selectedGrappleEffect?.escapeCheck?.economy === 'action'
+      ? selectedGrappleEffect
+      : undefined
   if (payload.kind === 'escape-effect' && !escapeEffect) {
     return { ok: false, reason: 'invalid-target' }
   }
-  const escapeAbility = escapeEffect?.escapeCheck
-    ? escapeEffect.escapeCheck.alternativeAbility &&
-      Math.floor((combatant.abilities[escapeEffect.escapeCheck.alternativeAbility] - 10) / 2) >
-        Math.floor((combatant.abilities[escapeEffect.escapeCheck.ability] - 10) / 2)
-      ? escapeEffect.escapeCheck.alternativeAbility
-      : escapeEffect.escapeCheck.ability
+  const escapingGrapple = payload.kind === 'escape-grapple' && !escapeEffect
+  const escapeOption = escapeEffect?.escapeCheck
+    ? dnd5eBestActiveEffectEscapeOption(combatant, escapeEffect.escapeCheck)
     : undefined
+  const escapeAbility = escapeOption?.ability
+  const escapeSkill = escapeOption?.skill
   const actorContestSkill = escapingGrapple
     ? dnd5eBestGrappleDefense(combatant).skill
-    : replacesAttack ? 'athletics' : undefined
+    : escapeSkill ?? (replacesAttack ? 'athletics' : undefined)
   const targetDefense = escapingGrapple
     ? 'athletics'
     : targetCombatant && replacesAttack ? dnd5eBestGrappleDefense(targetCombatant).skill : undefined
@@ -201,31 +235,21 @@ export function prepareDnd5ePlayerBasicAction(input: {
     ? planDnd5eShovePushDestination(input.map, token.id, targetTokenId)
     : undefined
   if (payload.kind === 'shove' && payload.outcome === 'push' && !pushTo) return { ok: false, reason: 'invalid-target' }
-  const actorRollMode = resolveDnd5eRollMode({
-    advantage: [{
-      active: (
-        actorContestSkill === 'athletics' ||
-        escapeAbility === 'str'
-      ) && combatant.classState.raging === true,
-      reason: 'rage-strength-check',
-    }],
-    disadvantage: [{
-      active: combatant.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(combatant),
-      reason: payload.kind === 'hide' ? 'hide-disadvantage' : 'contest-disadvantage',
-    }],
-  }).mode
-  const targetRollMode = resolveDnd5eRollMode({
-    advantage: [{
-      active: targetDefense === 'athletics' && targetCombatant?.classState.raging === true,
-      reason: 'rage-strength-check',
-    }],
-    disadvantage: [{
-      active: !!targetCombatant && (
-        targetCombatant.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(targetCombatant)
-      ),
-      reason: 'contest-disadvantage',
-    }],
-  }).mode
+  const actorCheck = escapeOption
+    ? { ability: escapeOption.ability, skill: escapeOption.skill }
+    : payload.kind === 'hide'
+      ? { ability: 'dex' as const, skill: 'stealth' }
+      : actorContestSkill === 'acrobatics'
+        ? { ability: 'dex' as const, skill: 'acrobatics' }
+        : { ability: 'str' as const, skill: 'athletics' }
+  const actorRollMode = escapeOption?.mode ??
+    dnd5eAbilityCheckRollMode(combatant, actorCheck)
+  const targetRollMode = targetCombatant && targetDefense
+    ? dnd5eAbilityCheckRollMode(targetCombatant, {
+        ability: targetDefense === 'acrobatics' ? 'dex' : 'str',
+        skill: targetDefense,
+      })
+    : 'normal'
   combatant.turn = {
     actionAvailable: input.turnEconomy.action.current > 0,
     bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
@@ -245,6 +269,7 @@ export function prepareDnd5ePlayerBasicAction(input: {
       actor,
       actorTokenId: token.id,
       spendsAction,
+      spendsBonusAction,
       attackNumber,
       actorRollMode,
       targetRollMode,
@@ -261,8 +286,12 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   prepared: PreparedDnd5eBasicAction
   actorD20?: number
   actorD20Second?: number
+  actorHalflingLuckyD20?: number
+  actorHalflingLuckyD20Second?: number
   targetD20?: number
   targetD20Second?: number
+  targetHalflingLuckyD20?: number
+  targetHalflingLuckyD20Second?: number
   pushToElevationFeet?: number
   fallingDamageRolls?: readonly number[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
@@ -271,38 +300,87 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   let action: Dnd5eAction
   switch (payload.kind) {
     case 'dash': action = { type: 'dash', actorId: prepared.actorTokenId }; break
-    case 'hide': action = { type: 'hide', actorId: prepared.actorTokenId, d20: actorD20, d20Second: actorD20Second }; break
+    case 'hide': action = {
+      type: 'hide',
+      actorId: prepared.actorTokenId,
+      d20: actorD20,
+      d20Second: actorD20Second,
+      halflingLuckyD20: input.actorHalflingLuckyD20,
+      halflingLuckyD20Second: input.actorHalflingLuckyD20Second,
+    }; break
     case 'help': action = { type: 'help', actorId: prepared.actorTokenId, targetId: payload.targetTokenId, helpKind: payload.helpKind }; break
     case 'ready': action = { type: 'ready', actorId: prepared.actorTokenId, trigger: payload.trigger, actionKind: payload.actionKind, targetId: payload.targetTokenId }; break
     case 'use-object': action = { type: 'use-object', actorId: prepared.actorTokenId, interactionId: payload.interactionId }; break
     case 'grapple': action = {
       type: 'grapple', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
       actorD20, actorD20Second, targetD20, targetD20Second,
+      actorHalflingLuckyD20: input.actorHalflingLuckyD20,
+      actorHalflingLuckyD20Second: input.actorHalflingLuckyD20Second,
+      targetHalflingLuckyD20: input.targetHalflingLuckyD20,
+      targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense,
       spendAction: prepared.spendsAction,
     }; break
     case 'shove': action = {
       type: 'shove', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
       actorD20, actorD20Second, targetD20, targetD20Second,
+      actorHalflingLuckyD20: input.actorHalflingLuckyD20,
+      actorHalflingLuckyD20Second: input.actorHalflingLuckyD20Second,
+      targetHalflingLuckyD20: input.targetHalflingLuckyD20,
+      targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense, outcome: payload.outcome,
       pushTo: prepared.pushTo,
       pushToElevationFeet: input.pushToElevationFeet,
       fallingDamageRolls: input.fallingDamageRolls,
       spendAction: prepared.spendsAction,
     }; break
-    case 'escape-grapple': action = {
-      type: 'escape-grapple', actorId: prepared.actorTokenId, grapplerId: payload.targetTokenId,
-      actorD20, actorD20Second, targetD20, targetD20Second,
+    case 'release-grapple': action = {
+      type: 'release-grapple',
+      actorId: prepared.actorTokenId,
+      targetId: payload.targetTokenId,
     }; break
+    case 'escape-grapple': action = prepared.escapeEffectId
+      ? {
+          type: 'escape-active-effect',
+          actorId: prepared.actorTokenId,
+          effectId: prepared.escapeEffectId,
+          d20: actorD20,
+          d20Second: actorD20Second,
+          halflingLuckyD20: input.actorHalflingLuckyD20,
+          halflingLuckyD20Second: input.actorHalflingLuckyD20Second,
+        }
+      : {
+          type: 'escape-grapple',
+          actorId: prepared.actorTokenId,
+          grapplerId: payload.targetTokenId,
+          actorD20,
+          actorD20Second,
+          actorHalflingLuckyD20: input.actorHalflingLuckyD20,
+          actorHalflingLuckyD20Second: input.actorHalflingLuckyD20Second,
+          targetD20,
+          targetD20Second,
+          targetHalflingLuckyD20: input.targetHalflingLuckyD20,
+          targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
+        }; break
     case 'escape-effect': action = {
       type: 'escape-active-effect',
       actorId: prepared.actorTokenId,
       effectId: prepared.escapeEffectId ?? '',
       d20: actorD20,
       d20Second: actorD20Second,
+      halflingLuckyD20: input.actorHalflingLuckyD20,
+      halflingLuckyD20Second: input.actorHalflingLuckyD20Second,
     }; break
     case 'wake': action = {
       type: 'wake-sleeping-creature', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
+    }; break
+    case 'other-action':
+    case 'other-bonus-action': action = {
+      type: 'adjudicate-basic-action',
+      actorId: prepared.actorTokenId,
+      economy: payload.kind === 'other-bonus-action' ? 'bonusAction' : 'action',
+      description: payload.description?.trim() ||
+        (payload.kind === 'other-bonus-action' ? '玩家声明一个其他附赠动作。' : '玩家声明一个其他动作。'),
     }; break
   }
   const result = resolveDnd5eHeadlessAction(prepared.state, action)

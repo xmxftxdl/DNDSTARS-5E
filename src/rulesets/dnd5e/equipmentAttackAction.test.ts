@@ -11,7 +11,11 @@ import {
 } from './equipmentAttackAction'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 import { applyDnd5eInventoryMutation } from './items'
-import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
+import {
+  createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  DND5E_COMBAT_STATE_SCHEMA_VERSION,
+} from './activeEffects'
 
 function fighter(): Character {
   const base: Character = {
@@ -55,6 +59,60 @@ describe('D&D 5e equipment attack authority', () => {
     expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(12)
   })
 
+  it('uses a versatile weapon one-handed and rejects a true two-handed weapon while maintaining a grapple', () => {
+    const input = fixture()
+    const grapple = createDnd5eConditionEffect({
+      id: 'maintained-grapple',
+      condition: 'grappled',
+      source: { kind: 'feature', actorId: input.actorToken.id, rulesId: 'basic-action:grapple' },
+      targetId: input.targetToken.id,
+      duration: { type: 'permanent' },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: input.actorToken.id,
+        sourceActionId: 'basic-action:grapple',
+        slotGroup: 'free-hand',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    input.actor.equipment = { mainWeapon: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon }
+    input.map = {
+      ...input.map,
+      tokens: input.map.tokens.map((entry) => entry.id === input.targetToken.id
+        ? {
+            ...entry,
+            dnd5eCombatState: {
+              schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+              conditions: ['grappled'],
+              activeEffects: [grapple],
+            },
+          }
+        : entry),
+    }
+    const versatile = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(versatile.ok).toBe(true)
+    if (!versatile.ok) return
+    expect(versatile.prepared.profile).toMatchObject({
+      weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id,
+      damage: { sides: 8 },
+      greatWeaponFighting: false,
+    })
+
+    input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    expect(prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'no-weapon' })
+  })
+
   it('authorizes the selected Shillelagh ability and rejects it after the enchanted weapon is changed', () => {
     const input = fixture()
     const effect = createDnd5eMechanicalEffect({
@@ -89,6 +147,10 @@ describe('D&D 5e equipment attack authority', () => {
       attackModifier: 7,
       damage: { sides: 8, bonus: 4 },
     })
+    expect(prepared.prepared.damageSource).toEqual({
+      weaponId: DND5E_CLUB.id,
+      magical: true,
+    })
 
     input.actor.equipment = DND5E_FIGHTER_STARTING_EQUIPMENT
     expect(prepareDnd5eEquipmentAttack({
@@ -96,6 +158,65 @@ describe('D&D 5e equipment attack authority', () => {
       characters: [input.actor],
       attacksUsed: 0,
     })).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
+  it('derives damage provenance from equipped weapon data and ignores a forged request payload', () => {
+    const input = fixture()
+    const weapon = structuredClone(DND5E_SHORTSWORD)
+    weapon.id = 'plugin:silvered-magic-shortsword'
+    weapon.baseEquipmentId = DND5E_SHORTSWORD.id
+    if (weapon.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    weapon.dnd5e.magical = true
+    weapon.dnd5e.specialMaterial = 'silvered'
+    input.actor.equipment = { mainWeapon: weapon }
+    const forgedAction = {
+      ...input.action,
+      damageSource: {
+        weaponId: 'forged-ui-id',
+        magical: false,
+        specialMaterial: 'adamantine',
+      },
+    } as SharedPlayerActionState
+
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      action: forgedAction,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.damageSource).toEqual({
+      weaponId: weapon.id,
+      magical: true,
+      specialMaterial: 'silvered',
+    })
+  })
+
+  it('marks a mundane equipped weapon magical while an authoritative Magic Weapon effect is active', () => {
+    const input = fixture()
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activeEffects: [createDnd5eMechanicalEffect({
+        definitionId: 'srd-5.1:spell:magic-weapon',
+        label: '魔化武器',
+        targetId: input.actor.id,
+        source: { kind: 'spell', actorId: input.actor.id, rulesId: 'magic-weapon', spellLevel: 2 },
+        duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+        modifiers: { magicWeapon: { weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id, bonus: 1 } },
+      })],
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.damageSource).toEqual({
+      weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id,
+      magical: true,
+    })
   })
 
   it('separates weapon proficiency from armor proficiency for a wizard attack', () => {
@@ -348,6 +469,7 @@ describe('D&D 5e equipment attack authority', () => {
     expect(offHand.prepared).toMatchObject({
       offHandAttack: true, spendsAction: false, spendsBonusAction: true, countsTowardAttackAction: false,
       profile: { weaponName: '短剑', damage: { bonus: 3 } },
+      damageSource: { weaponId: DND5E_OFFHAND_SHORTSWORD.id, magical: false },
     })
     const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: offHand.prepared, d20: 15, damageRolls: [2] })
     expect(resolved.result.ok).toBe(true)

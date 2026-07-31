@@ -141,6 +141,10 @@ test('账号插件可发布到公开目录、由另一账号保存并原子启�
   await expect(privateVersion).toBeVisible()
   publisherPage.once('dialog', (dialog) => dialog.accept('首次公开发布'))
   await privateVersion.getByRole('button', { name: '发布到目录' }).click()
+  const publicationDialog = publisherPage.getByRole('dialog', { name: '提交扩展市场审核' })
+  await publicationDialog.locator('textarea').first().fill('用于验证扩展市场公开发布、账号保存与房间原子启用的完整生命周期测试。')
+  await publicationDialog.getByRole('checkbox').last().check()
+  await publicationDialog.getByRole('button', { name: '提交人工审核' }).click()
   await expect(publisherPage.getByText(`${pluginName} v${version} 已发布到公开目录。`)).toBeVisible()
   await publisherContext.close()
 
@@ -162,23 +166,18 @@ test('账号插件可发布到公开目录、由另一账号保存并原子启�
   await installBrowserIdentity(dmContext, dmAccount, room)
   const dmPage = await dmContext.newPage()
   await dmPage.goto(`${DM}/plugins`, { waitUntil: 'domcontentloaded' })
-  await dmPage.getByRole('button', { name: '公开目录' }).click()
+  await dmPage.getByRole('button', { name: '扩展市场' }).click()
   await dmPage.getByRole('textbox', { name: '搜索插件' }).fill(pluginId)
   await dmPage.getByRole('button', { name: '搜索', exact: true }).click()
   const catalogVersion = dmPage.locator('article').filter({ hasText: pluginId })
   await expect(catalogVersion).toContainText(pluginName)
-  await catalogVersion.getByRole('button', { name: '保存到我的插件' }).click()
-  await expect(dmPage.getByText(`已将 ${pluginName} v${version} 保存到账号插件库。`)).toBeVisible()
-
-  await dmPage.getByRole('button', { name: '我的插件', exact: true }).click()
-  const accountVersion = dmPage.locator('article').filter({ hasText: pluginId })
-  await expect(accountVersion).toBeVisible()
-  await accountVersion.getByRole('button', { name: '启用到房间' }).click()
-  await expect(dmPage.getByText(`已将 ${pluginName} v${version} 原子激活到房间；玩家端会自动下载。`)).toBeVisible({
+  await catalogVersion.getByRole('button', { name: '安装并激活' }).click()
+  await expect(dmPage.getByText(`已安装 ${pluginName} v${version}，并激活到当前房间；玩家端将自动下载。`)).toBeVisible({
     timeout: 20_000,
   })
 
   await dmPage.reload({ waitUntil: 'domcontentloaded' })
+  await dmPage.getByRole('button', { name: '我的插件', exact: true }).click()
   await expect(dmPage.locator('article').filter({ hasText: pluginId })
     .getByRole('button', { name: '房间已启用' })).toBeDisabled({ timeout: 20_000 })
 

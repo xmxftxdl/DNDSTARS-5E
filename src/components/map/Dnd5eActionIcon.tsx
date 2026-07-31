@@ -39,6 +39,12 @@ function Motif({ motif, color }: { motif: Dnd5eActionIconMotif; color: string })
     case 'divination': return <g {...common} strokeWidth="2.7"><circle cx="40" cy="39" r="22" /><circle cx="40" cy="39" r="9" /><path d="M18 65h44M26 65l5-9m23 9-5-9M40 17V9" /></g>
     case 'nature': return <g {...common} strokeWidth="2.7"><path d="M40 68V35M40 51c-10 0-19-8-20-21 13 0 20 6 20 17M40 43c2-14 10-21 23-22-1 14-9 22-23 22" /><path d="M29 59c-5 0-10 2-15 6m37-6c5 0 10 2 15 6" /></g>
     case 'beast': return <g {...common} strokeWidth="2.8"><path d="M24 59c-6-5-7-13-2-18 4-4 10-3 14 1 3-5 10-6 14-2 5 5 4 13-2 18-7 6-17 6-24 1ZM20 30c-4 1-8-3-9-8s2-9 6-9 8 4 8 9-1 7-5 8Zm40 0c4 1 8-3 9-8s-2-9-6-9-8 4-8 9 1 7 5 8ZM31 27c-4 0-7-4-7-9s3-9 7-9 7 4 7 9-3 9-7 9Zm18 0c4 0 7-4 7-9s-3-9-7-9-7 4-7 9 3 9 7 9Z" /></g>
+    case 'monster-attack': return <g {...common} data-icon-detail="monster-claw-attack">
+      <path d="M19 17c5 10 12 16 22 20M35 11c2 11 7 19 16 25M52 15c-1 10 2 18 10 25" strokeWidth="5.2" />
+      <path d="M18 17 13 9m22 2-1-9m18 13 5-8" strokeWidth="3.2" />
+      <path d="M23 61c8-12 18-18 31-17l9 5-9 4 5 8-10-3-5 9-6-9-10 6z" strokeWidth="2.8" />
+      <path d="M44 49h.1m11 2h.1" strokeWidth="4.4" />
+    </g>
     case 'weapon': return <g {...common} strokeWidth="3"><path d="m18 63 11-11M21 58l6 6M30 50 57 14l8 1 1 8-36 27ZM18 18l44 44M14 14l9 2 41 41-7 7-41-41z" /></g>
     case 'force': return <g {...common} strokeWidth="2.8"><path d="m40 10 25 15v30L40 70 15 55V25zM40 10v60M15 25l50 30M65 25 15 55" /><circle cx="40" cy="40" r="9" /></g>
     default: return <g {...common} strokeWidth="2.7"><path d="M40 11 51 29l20 5-14 15 2 20-19-8-19 8 2-20L9 34l20-5z" /><circle cx="40" cy="42" r="9" /></g>
@@ -67,7 +73,12 @@ export function Dnd5eClassBackdrop({ classId, color, glow }: { classId: string; 
       return <g data-backdrop-detail="resonant-song" {...common}>
         <path d="M-8 25c15-8 29-8 43 0s29 8 45-1M-8 32c15-8 29-8 43 0s29 8 45-1M-8 39c15-8 29-8 43 0s29 8 45-1M-8 46c15-8 29-8 43 0s29 8 45-1M-8 53c15-8 29-8 43 0s29 8 45-1" strokeWidth="1" opacity=".19" />
         <path d="M7 58c12 9 23 9 34 0s22-9 34 0" stroke={glow} strokeWidth="3.2" opacity=".16" />
-        <g fill={color} stroke="none" opacity=".38">
+        <g
+          data-backdrop-detail="resonant-song-filled-notes"
+          fill="#FFF7FF"
+          stroke="none"
+          opacity=".9"
+        >
           <ellipse cx="18" cy="48" rx="3.7" ry="2.8" transform="rotate(-18 18 48)" />
           <path d="M21 47V25l13-3v22h-2V25l-9 2v20z" />
           <ellipse cx="31" cy="45" rx="3.7" ry="2.8" transform="rotate(-18 31 45)" />
@@ -185,6 +196,26 @@ function ClassBorderOrnaments({ classId, color }: { classId: string; color: stri
   }
 }
 
+function RarityBorderOrnaments({ rarity, color }: { rarity: NonNullable<Dnd5eActionIconSpec['rarityBackdropId']>; color: string }) {
+  const common = { fill: color, opacity: '.9' }
+  switch (rarity) {
+    case 'common':
+      return <g data-rarity-detail="plain" fill="none" stroke={color} strokeWidth="1" opacity=".55"><path d="M8 18V8h10M62 8h10v10M72 62v10H62M18 72H8V62" /></g>
+    case 'uncommon':
+      return <g data-rarity-detail="corner-leaves" {...common}><path d="M5 17C7 9 10 6 18 5c-5 3-8 6-9 12zm70 0C73 9 70 6 62 5c5 3 8 6 9 12zM5 63c2 8 5 11 13 12-5-3-8-6-9-12zm70 0c-2 8-5 11-13 12 5-3 8-6 9-12z" /></g>
+    case 'rare':
+      return <g data-rarity-detail="four-gems" {...common}><path d="m40 2.5 4 4-4 4-4-4zm0 67 4 4-4 4-4-4zM2.5 40l4-4 4 4-4 4zm67 0 4-4 4 4-4 4z" /></g>
+    case 'very-rare':
+      return <g data-rarity-detail="arcane-crescents" fill="none" stroke={color} strokeWidth="2" opacity=".9"><path d="M7 25C9 13 16 7 28 5M53 5c12 2 18 8 20 20M73 55c-2 12-8 18-20 20M27 75C15 73 9 67 7 55" /><circle cx="7" cy="40" r="2" fill={color} /><circle cx="73" cy="40" r="2" fill={color} /></g>
+    case 'legendary':
+      return <g data-rarity-detail="sun-crown" {...common}><path d="m40 1.5 3 6 6 1-4.5 4.5 1 6-5.5-3-5.5 3 1-6L31 8.5l6-1zm0 77-3-6-6-1 4.5-4.5-1-6 5.5 3 5.5-3-1 6 4.5 4.5-6 1zM1.5 40l6-3 1-6 4.5 4.5 6-1-3 5.5 3 5.5-6-1L8.5 49l-1-6zm77 0-6 3-1 6-4.5-4.5-6 1 3-5.5-3-5.5 6 1 4.5-4.5 1 6z" /></g>
+    case 'artifact':
+      return <g data-rarity-detail="relic-spikes" {...common}><path d="m40 1 5 10-5-3-5 3zm39 39-10 5 3-5-3-5zM40 79l-5-10 5 3 5-3zM1 40l10-5-3 5 3 5zM8 8l11 4-7 1-1 7zm64 0-4 11-1-7-7-1zm0 64-11-4 7-1 1-7zM8 72l4-11 1 7 7 1z" /></g>
+    case 'varies':
+      return <g data-rarity-detail="shifting-orbs" {...common}><circle cx="12" cy="12" r="2.2" /><circle cx="40" cy="5" r="2.2" /><circle cx="68" cy="12" r="2.2" /><circle cx="75" cy="40" r="2.2" /><circle cx="68" cy="68" r="2.2" /><circle cx="40" cy="75" r="2.2" /><circle cx="12" cy="68" r="2.2" /><circle cx="5" cy="40" r="2.2" /></g>
+  }
+}
+
 export default function Dnd5eActionIcon({ spec, className = '', level, badge, active = false, disabled = false }: Dnd5eActionIconProps) {
   const reactId = useId().replace(/:/g, '')
   const gradientId = `action-icon-${reactId}`
@@ -200,7 +231,7 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
           : spec.motif === 'dodge'
             ? '/assets/icons/dodge-action.png'
             : undefined)
-  const paintedAssetDetail = spec.asset?.match(/\/([^/]+)-spell-action\.png$/)?.[1] ?? spec.motif
+  const paintedAssetDetail = spec.asset?.match(/\/([^/]+)-(?:spell|item)-action\.png$/)?.[1] ?? spec.motif
   const paintedAssetIsForeground = spec.assetMode === 'foreground'
   return (
     <span className={`relative block aspect-square overflow-hidden rounded-xl ${active ? 'ring-2 ring-amber-300 ring-offset-2 ring-offset-void-950' : ''} ${disabled ? 'grayscale opacity-45' : ''} ${className}`} aria-hidden="true">
@@ -287,6 +318,13 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
               filter={`url(#${gradientId}-border-glow)`}
             />
             <ClassBorderOrnaments classId={spec.classBackdropId} color={spec.accent} />
+          </g>
+        ) : spec.rarityBackdropId ? (
+          <g data-rarity-border={spec.rarityBackdropId}>
+            <rect x="2" y="2" width="76" height="76" rx="9.5" fill="none" stroke={spec.backgroundDeep} strokeOpacity=".9" strokeWidth="4" />
+            <rect x="3.5" y="3.5" width="73" height="73" rx="8" fill="none" stroke={spec.glow} strokeOpacity=".95" strokeWidth={spec.rarityBackdropId === 'legendary' || spec.rarityBackdropId === 'artifact' ? '2.8' : '2.1'} filter={`url(#${gradientId}-border-glow)`} />
+            <rect x="6.5" y="6.5" width="67" height="67" rx="6" fill="none" stroke={spec.accent} strokeOpacity=".45" strokeWidth="1" />
+            <RarityBorderOrnaments rarity={spec.rarityBackdropId} color={spec.accent} />
           </g>
         ) : (
           <rect x="1.5" y="1.5" width="77" height="77" rx="10" fill="none" stroke={spec.accent} strokeOpacity={paintedActionAsset ? '.34' : '.52'} strokeWidth={paintedActionAsset ? '1.5' : '2'} />

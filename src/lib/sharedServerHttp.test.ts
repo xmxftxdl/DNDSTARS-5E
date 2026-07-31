@@ -3,8 +3,8 @@
 // 强制要求：玩家 PUT 在 flag OFF 与 flag ON 两种状态下都成功。
 // 另验：DM 权威资源 combat 的鉴权三分支、未匹配 /api/* → 404、超大 PUT → 413、并发写锁。
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { createHash, createHmac } from 'node:crypto'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -76,7 +76,11 @@ beforeAll(async () => {
   // flag OFF：不带 STARS_SHARED_SECRET（必须显式从 env 里剔除，否则继承外层）。
   const offEnv = { ...process.env }
   delete offEnv.STARS_SHARED_SECRET
-  offServer = await startServer(5392, { STARS_SHARED_SECRET: '' })
+  offServer = await startServer(5392, {
+    STARS_SHARED_SECRET: '',
+    STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET: 'test-marketplace-payment-secret',
+    STARS_PLUGIN_ADMIN_ACCOUNT_IDS: '*',
+  })
   onServer = await startServer(5393, { STARS_SHARED_SECRET: SECRET })
 }, 30000)
 
@@ -104,6 +108,126 @@ describe('AC7 — 玩家 PUT 在两种 flag 状态都成功', () => {
   it('flag ON：玩家不能直接写 DM 权威 maps', async () => {
     const res = await putState(onServer.base, 'maps', { maps: [], updatedAt: Date.now() })
     expect(res.status).toBe(401)
+  })
+})
+
+describe('DM 权威撤销事务', () => {
+  it('可撤销怪物移动，并在重复撤销时安全拒绝', async () => {
+    const createResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '撤销事务测试',
+        displayName: '撤销 DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'dm-undo-test-client',
+        activePlugins: [],
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const created = await createResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const query = `?room=${created.roomId}`
+    const memberHeaders = {
+      'X-Stars-Protocol': '5',
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    }
+    const mapAt = (x: number, updatedAt: number) => ({
+      maps: [{
+        id: 'map-undo',
+        name: '撤销地图',
+        image: '',
+        width: 100,
+        height: 100,
+        gridSize: 50,
+        tokens: [{
+          id: 'goblin-token',
+          type: 'enemy',
+          label: '地精',
+          x,
+          y: 0,
+          size: 1,
+          currentHp: 7,
+          maxHp: 7,
+        }],
+      }],
+      selectedId: 'map-undo',
+      updatedAt,
+    })
+
+    const initial = await fetch(`${offServer.base}/api/state/maps${query}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Expected-Revision': '0',
+        'X-Stars-Undo-Group': 'setup:test-map',
+        ...memberHeaders,
+      },
+      body: JSON.stringify(mapAt(0, 100)),
+    })
+    expect(initial.status).toBe(200)
+    const moved = await fetch(`${offServer.base}/api/state/maps${query}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Expected-Revision': '1',
+        'X-Stars-Undo-Group': 'monster-move:test',
+        'X-Stars-Undo-Label': encodeURIComponent('移动地精'),
+        ...memberHeaders,
+      },
+      body: JSON.stringify(mapAt(50, 200)),
+    })
+    expect(moved.status).toBe(200)
+    const movedAgain = await fetch(`${offServer.base}/api/state/maps${query}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Expected-Revision': '2',
+        'X-Stars-Undo-Group': 'monster-move:test-2',
+        'X-Stars-Undo-Label': encodeURIComponent('再次移动地精'),
+        ...memberHeaders,
+      },
+      body: JSON.stringify(mapAt(75, 300)),
+    })
+    expect(movedAgain.status).toBe(200)
+
+    const undo = await fetch(`${offServer.base}/api/dm/undo${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      body: JSON.stringify({ transactionId: 'monster-move:test-2' }),
+    })
+    expect(undo.status).toBe(200)
+    await expect(undo.json()).resolves.toMatchObject({
+      ok: true,
+      transaction: { status: 'undone', label: '再次移动地精', resources: ['maps'] },
+    })
+    const restored = await (await fetch(
+      `${offServer.base}/api/state/maps${query}`,
+      { headers: memberHeaders },
+    )).json() as { maps: Array<{ tokens: Array<{ x: number }> }> }
+    expect(restored.maps[0].tokens[0].x).toBe(50)
+
+    const undoPrevious = await fetch(`${offServer.base}/api/dm/undo${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      body: JSON.stringify({ transactionId: 'monster-move:test' }),
+    })
+    expect(undoPrevious.status).toBe(200)
+    const restoredPrevious = await (await fetch(
+      `${offServer.base}/api/state/maps${query}`,
+      { headers: memberHeaders },
+    )).json() as { maps: Array<{ tokens: Array<{ x: number }> }> }
+    expect(restoredPrevious.maps[0].tokens[0].x).toBe(0)
+
+    const repeated = await fetch(`${offServer.base}/api/dm/undo${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      body: JSON.stringify({ transactionId: 'monster-move:test-2' }),
+    })
+    expect(repeated.status).toBe(404)
   })
 })
 
@@ -886,6 +1010,32 @@ describe('账号插件库协议', () => {
         contentCategory: 'rules',
       })),
     }
+    const rejectedLocalOnly = await fetch(
+      `${offServer.base}/api/accounts/me/plugins/com.example.local-only/versions/1.0.0`,
+      {
+        method: 'PUT',
+        headers: {
+          ...uploadHeaders,
+          'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+            manifestSchemaVersion: 1,
+            minimumGameProtocolVersion: 5,
+            dependencies: [],
+            conflicts: [],
+            declaredCapabilities: [],
+            distributionPolicy: 'local-only',
+            contentCategory: 'mixed',
+          })),
+        },
+        body: bytes,
+      },
+    )
+    expect(rejectedLocalOnly.status).toBe(409)
+    await expect(rejectedLocalOnly.json()).resolves.toMatchObject({ error: 'plugin-local-only' })
+    const afterRejectedLocalOnly = await fetch(`${offServer.base}/api/accounts/me/plugins`, {
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    }).then((response) => response.json()) as { plugins: unknown[] }
+    expect(afterRejectedLocalOnly.plugins).toEqual([])
+
     const upload = await fetch(`${offServer.base}${path}`, {
       method: 'PUT',
       headers: uploadHeaders,
@@ -1048,8 +1198,33 @@ describe('账号插件库协议', () => {
       plugins: [{
         id: pluginId,
         publisher: { accountId: owner.session.accountId, displayName: '公开作者' },
-        versions: [{ version: pluginVersion, integrity, status: 'published' }],
+        versions: [{
+          version: pluginVersion,
+          integrity,
+          status: 'published',
+          productManifest: {
+            schemaVersion: 1,
+            productId: pluginId,
+            version: pluginVersion,
+            integrity,
+          },
+          productSignature: {
+            schemaVersion: 1,
+            algorithm: 'Ed25519',
+            keyId: expect.any(String),
+            signature: expect.any(String),
+          },
+        }],
       }],
+    })
+
+    const signingKey = await fetch(`${offServer.base}/api/plugins/signing-key`)
+    expect(signingKey.status).toBe(200)
+    await expect(signingKey.json()).resolves.toMatchObject({
+      schemaVersion: 1,
+      algorithm: 'Ed25519',
+      keyId: expect.any(String),
+      publicKeyPem: expect.stringContaining('BEGIN PUBLIC KEY'),
     })
 
     const publisher = await fetch(
@@ -1068,6 +1243,81 @@ describe('账号插件库协议', () => {
     expect(download.headers.get('X-Stars-Plugin-Integrity')).toBe(integrity)
     expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
 
+    const detail = await fetch(`${offServer.base}/api/plugins/catalog/${pluginId}`, {
+      headers: { 'X-Stars-Account-Token': reporter.session.sessionToken },
+    })
+    expect(detail.status).toBe(200)
+
+    const reporterInstall = await fetch(`${offServer.base}${accountPath}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Stars-Account-Token': reporter.session.sessionToken,
+        'X-Stars-Plugin-Version': pluginVersion,
+        'X-Stars-Plugin-Integrity': integrity,
+        'X-Stars-Plugin-Filename': encodeURIComponent(`${pluginId}.dndstars5e`),
+        'X-Stars-Plugin-Name': encodeURIComponent('目录规则包'),
+        'X-Stars-Plugin-Publisher': encodeURIComponent('公开作者'),
+        'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+        'X-Stars-Plugin-State-Schema': '1',
+        'X-Stars-Plugin-Api-Version': '2',
+        'X-Stars-Plugin-Ruleset': 'dnd5e-2014-srd-5.1',
+        'X-Stars-Plugin-Description': encodeURIComponent('可以搜索的安全规则包'),
+        'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+          manifestSchemaVersion: 1,
+          minimumGameProtocolVersion: 5,
+          dependencies: [],
+          conflicts: [],
+          declaredCapabilities: ['damage'],
+          distributionPolicy: 'room-distributable',
+          contentCategory: 'rules',
+        })),
+      },
+      body: bytes,
+    })
+    expect(reporterInstall.status).toBe(201)
+
+    const installation = await fetch(
+      `${offServer.base}/api/plugins/catalog/${pluginId}/versions/${pluginVersion}/installation`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': reporter.session.sessionToken,
+        },
+        body: JSON.stringify({ active: true }),
+      },
+    )
+    expect(installation.status).toBe(200)
+    await expect(installation.json()).resolves.toMatchObject({ transition: null })
+
+    const analytics = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/analytics?days=30`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    expect(analytics.status).toBe(200)
+    await expect(analytics.json()).resolves.toMatchObject({
+      totals: {
+        views: 1,
+        downloads: 1,
+        installs: 1,
+        activeInstallations: 1,
+      },
+      products: [{ productId: pluginId, activeInstallations: 1 }],
+    })
+
+    const publicationStatuses = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/publications`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    expect(publicationStatuses.status).toBe(200)
+    await expect(publicationStatuses.json()).resolves.toMatchObject({
+      publications: [{
+        id: pluginId,
+        versions: [{ version: pluginVersion, status: 'published' }],
+      }],
+    })
+
     const report = await fetch(`${offServer.base}/api/plugins/catalog/${pluginId}/reports`, {
       method: 'POST',
       headers: {
@@ -1077,6 +1327,428 @@ describe('账号插件库协议', () => {
       body: JSON.stringify({ version: pluginVersion, category: 'other', details: '审核流程测试' }),
     })
     expect(report.status).toBe(201)
+
+    const paidPluginId = 'com.example.catalog.paid'
+    const registryPath = path.join(offServer.sharedRoot, 'lobby', 'plugin-registry.json')
+    const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+      entries: Array<Record<string, unknown> & { id: string; versions: Array<Record<string, unknown>> }>
+    }
+    const freeEntry = registry.entries.find((entry) => entry.id === pluginId)
+    expect(freeEntry).toBeTruthy()
+    registry.entries.push({
+      ...freeEntry!,
+      id: paidPluginId,
+      name: '付费目录规则包',
+      versions: freeEntry!.versions.map((candidate) => ({
+        ...candidate,
+        marketplace: {
+          schemaVersion: 1,
+          productType: 'plugin',
+          commerceState: 'preview',
+          pricing: {
+            kind: 'paid',
+            currency: 'CNY',
+            amountMinor: 990,
+            settlementBasis: 'net-receipts',
+            creatorShareBps: 6000,
+            platformShareBps: 4000,
+          },
+          rightsStatus: 'creator-declared',
+        },
+      })),
+    })
+    await writeFile(registryPath, JSON.stringify(registry))
+
+    const orderRequest = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': reporter.session.sessionToken,
+        'Idempotency-Key': 'paid-order-test-1',
+      },
+      body: JSON.stringify({
+        productId: paidPluginId,
+        version: pluginVersion,
+        idempotencyKey: 'paid-order-test-1',
+      }),
+    }
+    const createOrder = await fetch(`${offServer.base}/api/marketplace/orders`, orderRequest)
+    expect(createOrder.status).toBe(201)
+    const createdOrder = await createOrder.json() as {
+      order: { orderId: string; status: string; amountMinor: number }
+      sandboxAvailable: boolean
+    }
+    expect(createdOrder).toMatchObject({
+      order: { status: 'pending', amountMinor: 990 },
+      sandboxAvailable: true,
+    })
+    const repeatedOrder = await fetch(`${offServer.base}/api/marketplace/orders`, orderRequest)
+    expect(repeatedOrder.status).toBe(200)
+    await expect(repeatedOrder.json()).resolves.toMatchObject({
+      order: { orderId: createdOrder.order.orderId },
+    })
+
+    const forbiddenPaidDownload = await fetch(
+      `${offServer.base}/api/plugins/catalog/${paidPluginId}/versions/${pluginVersion}/download`,
+      { headers: { 'X-Stars-Account-Token': reporter.session.sessionToken } },
+    )
+    expect(forbiddenPaidDownload.status).toBe(403)
+
+    const payOrder = await fetch(
+      `${offServer.base}/api/marketplace/orders/${createdOrder.order.orderId}/sandbox-payment`,
+      {
+        method: 'POST',
+        headers: { 'X-Stars-Account-Token': reporter.session.sessionToken },
+      },
+    )
+    expect(payOrder.status).toBe(200)
+    await expect(payOrder.json()).resolves.toMatchObject({
+      order: { orderId: createdOrder.order.orderId, status: 'fulfilled' },
+    })
+    const repeatPayment = await fetch(
+      `${offServer.base}/api/marketplace/orders/${createdOrder.order.orderId}/sandbox-payment`,
+      {
+        method: 'POST',
+        headers: { 'X-Stars-Account-Token': reporter.session.sessionToken },
+      },
+    )
+    expect(repeatPayment.status).toBe(200)
+
+    const entitlements = await fetch(`${offServer.base}/api/accounts/me/entitlements`, {
+      headers: { 'X-Stars-Account-Token': reporter.session.sessionToken },
+    })
+    await expect(entitlements.json()).resolves.toMatchObject({
+      entitlements: [{
+        productId: paidPluginId,
+        version: pluginVersion,
+        source: 'purchase',
+        status: 'active',
+      }],
+    })
+    const paidDownload = await fetch(
+      `${offServer.base}/api/plugins/catalog/${paidPluginId}/versions/${pluginVersion}/download`,
+      { headers: { 'X-Stars-Account-Token': reporter.session.sessionToken } },
+    )
+    expect(paidDownload.status).toBe(200)
+    const creatorLedgerAfterSale = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/ledger`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    expect(creatorLedgerAfterSale.status).toBe(200)
+    await expect(creatorLedgerAfterSale.json()).resolves.toMatchObject({
+      balances: expect.arrayContaining([expect.objectContaining({
+        currency: 'CNY',
+        availableMinor: 594,
+        pendingMinor: 0,
+      })]),
+      entries: expect.arrayContaining([expect.objectContaining({
+        orderId: createdOrder.order.orderId,
+        kind: 'sale',
+        amountMinor: 594,
+      })]),
+    })
+
+    const refundPayload = JSON.stringify({
+      provider: 'test-provider',
+      providerEventId: 'refund-event-1',
+      providerOrderId: `sandbox:${createdOrder.order.orderId}`,
+      orderId: createdOrder.order.orderId,
+      status: 'refunded',
+      currency: 'CNY',
+      amountMinor: 990,
+    })
+    const refundSignature = createHmac('sha256', 'test-marketplace-payment-secret')
+      .update(refundPayload)
+      .digest('hex')
+    const refund = await fetch(`${offServer.base}/api/marketplace/payments/webhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Payment-Signature': refundSignature,
+      },
+      body: refundPayload,
+    })
+    expect(refund.status).toBe(200)
+    const refundedDownload = await fetch(
+      `${offServer.base}/api/plugins/catalog/${paidPluginId}/versions/${pluginVersion}/download`,
+      { headers: { 'X-Stars-Account-Token': reporter.session.sessionToken } },
+    )
+    expect(refundedDownload.status).toBe(403)
+    const creatorLedgerAfterRefund = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/ledger`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    await expect(creatorLedgerAfterRefund.json()).resolves.toMatchObject({
+      balances: expect.arrayContaining([expect.objectContaining({
+        currency: 'CNY',
+        availableMinor: 0,
+        pendingMinor: 0,
+      })]),
+      entries: expect.arrayContaining([
+        expect.objectContaining({ kind: 'refund', amountMinor: -594 }),
+        expect.objectContaining({ kind: 'sale', amountMinor: 594 }),
+      ]),
+    })
+
+    const secondOrderRequest = {
+      ...orderRequest,
+      headers: {
+        ...orderRequest.headers,
+        'Idempotency-Key': 'paid-order-test-2',
+      },
+      body: JSON.stringify({
+        productId: paidPluginId,
+        version: pluginVersion,
+        idempotencyKey: 'paid-order-test-2',
+      }),
+    }
+    const secondOrderResponse = await fetch(
+      `${offServer.base}/api/marketplace/orders`,
+      secondOrderRequest,
+    )
+    expect(secondOrderResponse.status).toBe(201)
+    const secondOrder = await secondOrderResponse.json() as {
+      order: { orderId: string }
+    }
+    const paidPayload = JSON.stringify({
+      provider: 'test-provider',
+      providerEventId: 'paid-event-2',
+      providerOrderId: 'provider-order-2',
+      orderId: secondOrder.order.orderId,
+      status: 'paid',
+      currency: 'CNY',
+      amountMinor: 990,
+      netReceiptsMinor: 800,
+    })
+    const paidSignature = createHmac('sha256', 'test-marketplace-payment-secret')
+      .update(paidPayload)
+      .digest('hex')
+    const paidWebhook = await fetch(`${offServer.base}/api/marketplace/payments/webhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Payment-Signature': paidSignature,
+      },
+      body: paidPayload,
+    })
+    expect(paidWebhook.status).toBe(200)
+    const creatorLedgerAfterExternalPayment = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/ledger`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    await expect(creatorLedgerAfterExternalPayment.json()).resolves.toMatchObject({
+      balances: expect.arrayContaining([expect.objectContaining({
+        currency: 'CNY',
+        availableMinor: 0,
+        pendingMinor: 480,
+      })]),
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          orderId: secondOrder.order.orderId,
+          kind: 'sale',
+          amountMinor: 480,
+        }),
+      ]),
+      settlementHoldDays: 14,
+    })
+
+    const payoutRegistry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+      creators?: Array<Record<string, unknown>>
+      ledgerEntries?: Array<Record<string, unknown>>
+    }
+    payoutRegistry.creators = [
+      ...(payoutRegistry.creators ?? []).filter((candidate) =>
+        candidate.accountId !== owner.session.accountId),
+      {
+        schemaVersion: 1,
+        accountId: owner.session.accountId,
+        status: 'verified',
+        verificationReference: 'kyc-recipient:test-owner',
+        verifiedAt: Date.now(),
+      },
+    ]
+    await writeFile(registryPath, JSON.stringify(payoutRegistry))
+
+    const insufficientPayout = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/payouts`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': owner.session.sessionToken,
+          'Idempotency-Key': 'payout-insufficient-1',
+        },
+        body: JSON.stringify({ currency: 'CNY', amountMinor: 10_000 }),
+      },
+    )
+    expect(insufficientPayout.status).toBe(409)
+    await expect(insufficientPayout.json()).resolves.toMatchObject({
+      error: 'marketplace-payout-insufficient-balance',
+    })
+
+    const fundedPayoutRegistry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+      ledgerEntries?: Array<Record<string, unknown>>
+    }
+    fundedPayoutRegistry.ledgerEntries = [
+      ...(fundedPayoutRegistry.ledgerEntries ?? []),
+      {
+        schemaVersion: 1,
+        entryId: 'test-available-creator-balance',
+        orderId: 'test-opening-balance',
+        productId: 'test-fixture',
+        version: '1',
+        beneficiaryAccountId: owner.session.accountId,
+        beneficiaryRole: 'creator',
+        kind: 'sale',
+        currency: 'CNY',
+        amountMinor: 30_000,
+        sourceEventId: 'test-opening-balance',
+        createdAt: Date.now(),
+        availableAt: Date.now(),
+      },
+    ]
+    await writeFile(registryPath, JSON.stringify(fundedPayoutRegistry))
+
+    const requestPayout = (idempotencyKey: string) => fetch(
+      `${offServer.base}/api/marketplace/creators/me/payouts`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': owner.session.sessionToken,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ currency: 'CNY', amountMinor: 10_000 }),
+      },
+    )
+    const firstPayoutResponse = await requestPayout('payout-reject-1')
+    expect(firstPayoutResponse.status).toBe(201)
+    const firstPayout = await firstPayoutResponse.json() as {
+      payout: { payoutId: string; status: string; payoutDestinationReference?: string }
+    }
+    expect(firstPayout.payout).toMatchObject({
+      status: 'pending',
+      amountMinor: 10_000,
+      currency: 'CNY',
+    })
+    expect(firstPayout.payout).not.toHaveProperty('payoutDestinationReference')
+
+    const repeatedPayoutResponse = await requestPayout('payout-reject-1')
+    expect(repeatedPayoutResponse.status).toBe(200)
+    await expect(repeatedPayoutResponse.json()).resolves.toMatchObject({
+      payout: { payoutId: firstPayout.payout.payoutId },
+    })
+    const ledgerAfterPayoutReservation = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/ledger`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    await expect(ledgerAfterPayoutReservation.json()).resolves.toMatchObject({
+      balances: expect.arrayContaining([expect.objectContaining({
+        currency: 'CNY',
+        availableMinor: 20_000,
+        pendingMinor: 480,
+      })]),
+      entries: expect.arrayContaining([expect.objectContaining({
+        orderId: firstPayout.payout.payoutId,
+        kind: 'payout',
+        amountMinor: -10_000,
+      })]),
+    })
+
+    const payoutModerationQueue = await fetch(`${offServer.base}/api/plugins/moderation`, {
+      headers: { 'X-Stars-Account-Token': reporter.session.sessionToken },
+    })
+    expect(payoutModerationQueue.status).toBe(200)
+    await expect(payoutModerationQueue.json()).resolves.toMatchObject({
+      payouts: [expect.objectContaining({
+        payoutId: firstPayout.payout.payoutId,
+        verifiedRecipientReference: 'kyc-recipient:test-owner',
+      })],
+    })
+
+    const rejectPayout = await fetch(
+      `${offServer.base}/api/marketplace/payouts/${firstPayout.payout.payoutId}/moderate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': reporter.session.sessionToken,
+        },
+        body: JSON.stringify({ action: 'reject', note: '测试退回预占余额' }),
+      },
+    )
+    expect(rejectPayout.status).toBe(200)
+    await expect(rejectPayout.json()).resolves.toMatchObject({
+      payout: { status: 'rejected' },
+    })
+    const ledgerAfterPayoutRejection = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/ledger`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    await expect(ledgerAfterPayoutRejection.json()).resolves.toMatchObject({
+      balances: expect.arrayContaining([expect.objectContaining({
+        currency: 'CNY',
+        availableMinor: 30_000,
+        pendingMinor: 480,
+      })]),
+      entries: expect.arrayContaining([expect.objectContaining({
+        orderId: firstPayout.payout.payoutId,
+        kind: 'payout-release',
+        amountMinor: 10_000,
+      })]),
+    })
+
+    const paidPayoutResponse = await requestPayout('payout-paid-1')
+    expect(paidPayoutResponse.status).toBe(201)
+    const paidPayout = await paidPayoutResponse.json() as {
+      payout: { payoutId: string }
+    }
+    const approvePayout = await fetch(
+      `${offServer.base}/api/marketplace/payouts/${paidPayout.payout.payoutId}/moderate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': reporter.session.sessionToken,
+        },
+        body: JSON.stringify({ action: 'approve' }),
+      },
+    )
+    expect(approvePayout.status).toBe(200)
+    await expect(approvePayout.json()).resolves.toMatchObject({
+      payout: { status: 'approved' },
+    })
+    const markPaidPayout = await fetch(
+      `${offServer.base}/api/marketplace/payouts/${paidPayout.payout.payoutId}/moderate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': reporter.session.sessionToken,
+        },
+        body: JSON.stringify({
+          action: 'mark-paid',
+          externalTransferReference: 'bank-transfer-test-1',
+        }),
+      },
+    )
+    expect(markPaidPayout.status).toBe(200)
+    await expect(markPaidPayout.json()).resolves.toMatchObject({
+      payout: { status: 'paid', paidAt: expect.any(Number) },
+    })
+    const payoutHistory = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/payouts`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    expect(payoutHistory.status).toBe(200)
+    const payoutHistoryPayload = await payoutHistory.json() as {
+      payouts: Array<Record<string, unknown>>
+    }
+    expect(payoutHistoryPayload.payouts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ payoutId: paidPayout.payout.payoutId, status: 'paid' }),
+      expect.objectContaining({ payoutId: firstPayout.payout.payoutId, status: 'rejected' }),
+    ]))
+    expect(JSON.stringify(payoutHistoryPayload)).not.toContain('kyc-recipient:test-owner')
 
     const removePublished = await fetch(`${offServer.base}${accountPath}`, {
       method: 'DELETE',
@@ -1147,6 +1819,7 @@ describe('账号验证码注册与密码登录协议', () => {
       headers: { 'X-Stars-Account-Token': registered.session.sessionToken },
     })).status).toBe(401)
 
+    const loginTokens: string[] = []
     for (const identifier of ['星痕玩家', 'ADVENTURER@example.com']) {
       const loginResponse = await fetch(`${offServer.base}/api/accounts/auth/login`, {
         method: 'POST',
@@ -1158,10 +1831,57 @@ describe('账号验证码注册与密码登录协议', () => {
         }),
       })
       expect(loginResponse.status).toBe(200)
-      expect(await loginResponse.json()).toMatchObject({
+      const loggedIn = await loginResponse.json() as {
+        session: { accountId: string; sessionToken: string; username: string }
+      }
+      loginTokens.push(loggedIn.session.sessionToken)
+      expect(loggedIn).toMatchObject({
         session: { accountId: registered.session.accountId, username: '星痕玩家' },
       })
     }
+
+    const avatar = `data:image/webp;base64,${Buffer.from('avatar').toString('base64')}`
+    const updateProfile = await fetch(`${offServer.base}/api/accounts/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': loginTokens[0],
+      },
+      body: JSON.stringify({ displayName: '星痕主持人', avatar }),
+    })
+    expect(updateProfile.status).toBe(200)
+    expect(await updateProfile.json()).toMatchObject({
+      displayName: '星痕主持人',
+      avatar,
+      username: '星痕玩家',
+    })
+
+    const wrongCurrentPassword = await fetch(`${offServer.base}/api/accounts/me/password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': loginTokens[0],
+      },
+      body: JSON.stringify({ currentPassword: 'WrongCurrent42', newPassword: 'ChangedPassword42' }),
+    })
+    expect(wrongCurrentPassword.status).toBe(401)
+    expect(await wrongCurrentPassword.json()).toEqual({ error: 'invalid-account-current-password' })
+
+    const changePassword = await fetch(`${offServer.base}/api/accounts/me/password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': loginTokens[0],
+      },
+      body: JSON.stringify({ currentPassword: 'CorrectHorse42', newPassword: 'ChangedPassword42' }),
+    })
+    expect(changePassword.status).toBe(200)
+    expect((await fetch(`${offServer.base}/api/accounts/me`, {
+      headers: { 'X-Stars-Account-Token': loginTokens[0] },
+    })).status).toBe(200)
+    expect((await fetch(`${offServer.base}/api/accounts/me`, {
+      headers: { 'X-Stars-Account-Token': loginTokens[1] },
+    })).status).toBe(401)
 
     const wrongPassword = await fetch(`${offServer.base}/api/accounts/auth/login`, {
       method: 'POST',
@@ -1174,6 +1894,24 @@ describe('账号验证码注册与密码登录协议', () => {
     })
     expect(wrongPassword.status).toBe(401)
     expect(await wrongPassword.json()).toEqual({ error: 'invalid-account-credentials' })
+
+    const changedPasswordLogin = await fetch(`${offServer.base}/api/accounts/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: '星痕玩家',
+        password: 'ChangedPassword42',
+        clientId: 'changed-password-device',
+      }),
+    })
+    expect(changedPasswordLogin.status).toBe(200)
+    expect(await changedPasswordLogin.json()).toMatchObject({
+      session: {
+        accountId: registered.session.accountId,
+        displayName: '星痕主持人',
+        avatar,
+      },
+    })
   })
 })
 
@@ -1214,6 +1952,7 @@ describe('P2 — 房间规则包原子升级', () => {
             'X-Stars-Plugin-Name': encodeURIComponent('原子升级测试包'),
             'X-Stars-Plugin-Publisher': encodeURIComponent('测试发布者'),
             'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+            'X-Stars-Plugin-Distribution-Policy': 'room-distributable',
           },
           body: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
         },
@@ -1342,6 +2081,94 @@ describe('P2 — 房间规则包原子升级', () => {
   })
 })
 
+describe('房间临时内容合集', () => {
+  it('只接受正文裁剪后的 V2 包，并在 DM 关闭房间时删除托管文件', async () => {
+    const createResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '临时合集测试',
+        displayName: '临时合集 DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: `ephemeral-dm-${Date.now()}`,
+        activePlugins: [],
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const created = await createResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const pluginId = 'local.example.room-runtime'
+    const placeholder = '房间临时机械数据；原始规则正文未传输。'
+    const runtimePackage = {
+      format: 'dndstars5e-content',
+      schemaVersion: 2,
+      manifest: {
+        id: pluginId,
+        name: 'Room Runtime',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Local DM',
+        license: 'Private local use',
+        description: placeholder,
+        distributionPolicy: 'room-ephemeral',
+        contentCategory: 'mixed',
+      },
+      provenance: {
+        edition: '2014',
+        contentMode: 'incremental',
+        sourceTitle: placeholder,
+        projection: 'room-runtime-mechanics',
+      },
+      assets: [],
+      content: {
+        races: [], backgrounds: [], features: [], feats: [], spells: [], items: [],
+        abilityGenerationMethods: [], headlessActions: [], subclasses: [], monsters: [],
+      },
+    }
+    const bytes = Buffer.from(JSON.stringify(runtimePackage))
+    const integrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+    const memberHeaders = {
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    }
+    const upload = await fetch(
+      `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}`,
+      {
+        method: 'PUT',
+        headers: {
+          ...memberHeaders,
+          'Content-Type': 'application/json',
+          'X-Stars-Plugin-Version': '1.0.0',
+          'X-Stars-Plugin-Integrity': integrity,
+          'X-Stars-Plugin-Filename': encodeURIComponent('room-runtime.dndstars5e'),
+          'X-Stars-Plugin-Name': encodeURIComponent('Room Runtime'),
+          'X-Stars-Plugin-Publisher': encodeURIComponent('Local DM'),
+          'X-Stars-Plugin-License': encodeURIComponent('Private local use'),
+          'X-Stars-Plugin-Distribution-Policy': 'room-ephemeral',
+        },
+        body: bytes,
+      },
+    )
+    expect(upload.status).toBe(200)
+    expect(await upload.json()).toMatchObject({
+      plugins: [{ id: pluginId, distributionPolicy: 'room-ephemeral' }],
+    })
+    const pluginDirectory = path.join(offServer.sharedRoot, 'lobby', 'plugins', created.roomId)
+    expect(await readdir(pluginDirectory)).toHaveLength(1)
+
+    const close = await fetch(`${offServer.base}/api/rooms/${created.roomId}/leave`, {
+      method: 'POST',
+      headers: { ...memberHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberId: created.member.memberId }),
+    })
+    expect(close.status).toBe(200)
+    expect(await readdir(pluginDirectory)).toEqual([])
+  })
+})
+
 describe('房间大厅协议', () => {
   it('玩家离开后可用浏览器恢复身份重新加入，DM 名册只显示当前成员', async () => {
     const createResponse = await fetch(`${offServer.base}/api/rooms`, {
@@ -1433,6 +2260,7 @@ describe('房间大厅协议', () => {
           'X-Stars-Plugin-Name': encodeURIComponent('HTTP 测试规则包'),
           'X-Stars-Plugin-Publisher': encodeURIComponent('测试发布者'),
           'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+          'X-Stars-Plugin-Distribution-Policy': 'room-distributable',
         },
         body: pluginBytes,
       },
@@ -1453,6 +2281,7 @@ describe('房间大厅协议', () => {
           'X-Stars-Plugin-Name': encodeURIComponent('HTTP 测试规则包'),
           'X-Stars-Plugin-Publisher': encodeURIComponent('测试发布者'),
           'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+          'X-Stars-Plugin-Distribution-Policy': 'room-distributable',
         },
         body: pluginBytes,
       },
@@ -1676,6 +2505,103 @@ describe('AC5/AC3/AC1 — 404 / 413 / 锁', () => {
     const data = await (await fetch(`${offServer.base}/api/state/fresh-maps`)).json()
     expect(data.updatedAt).toBe(5)
     expect(data.maps[0].id).toBe('new')
+  })
+
+  it('atomically appends concurrent Headless logs and invalidates both DM/player subscribers', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: 'Combat log sync',
+        displayName: 'DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'combat-log-dm',
+        activePlugins: [],
+      }),
+    })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Player', clientId: 'combat-log-player' }),
+    })
+    expect(joinedResponse.status).toBe(200)
+    const joined = await joinedResponse.json() as {
+      member: { memberId: string; roomToken: string }
+    }
+    const query = `?room=${created.roomId}`
+    const headersFor = (member: { memberId: string; roomToken: string }) => ({
+      'Content-Type': 'application/json',
+      'X-Stars-Protocol': '5',
+      'X-Stars-Member': member.memberId,
+      'X-Stars-Room-Token': member.roomToken,
+    })
+    const dmHeaders = headersFor(created.member)
+    const playerHeaders = headersFor(joined.member)
+    const eventStream = await fetch(`${offServer.base}/api/events/_all${query}`, {
+      headers: playerHeaders,
+    })
+    const eventReader = eventStream.body?.getReader()
+    expect(eventReader).toBeDefined()
+    expect(new TextDecoder().decode((await eventReader!.read()).value)).toContain('event: ready')
+
+    const append = (
+      headers: Record<string, string>,
+      entry: Record<string, unknown>,
+    ) => fetch(`${offServer.base}/api/state/combat-log/entry${query}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ operation: 'append', mapId: 'combat-log-map', entry }),
+    })
+    const [dmAppend, playerAppend] = await Promise.all([
+      append(dmHeaders, {
+        id: 9001,
+        round: 2,
+        text: 'DM Headless settlement',
+        kind: 'attack',
+        time: '10:01',
+        actorTokenId: 'monster-token',
+        details: ['attack hits'],
+      }),
+      append(playerHeaders, {
+        id: 9002,
+        round: 2,
+        text: 'Player Headless settlement',
+        kind: 'damage',
+        time: '10:01',
+        actorTokenId: 'player-token',
+        details: ['damage applied'],
+      }),
+    ])
+    expect([dmAppend.status, playerAppend.status]).toEqual([200, 200])
+    const invalidation = await Promise.race([
+      eventReader!.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('combat-log-invalidation-timeout')), 2_000).unref()
+      }),
+    ])
+    expect(new TextDecoder().decode(invalidation.value)).toContain('"name":"combat-log"')
+    await eventReader!.cancel()
+
+    const [dmState, playerState] = await Promise.all([
+      fetch(`${offServer.base}/api/state/combat-log${query}`, { headers: dmHeaders }).then((response) => response.json()),
+      fetch(`${offServer.base}/api/state/combat-log${query}`, { headers: playerHeaders }).then((response) => response.json()),
+    ]) as Array<{ entries: Array<{ id: number; actorTokenId?: string; details?: string[] }> }>
+    for (const state of [dmState, playerState]) {
+      expect(state.entries.map((entry) => entry.id).sort()).toEqual([9001, 9002])
+      expect(state.entries.find((entry) => entry.id === 9001)).toMatchObject({
+        actorTokenId: 'monster-token',
+        details: ['attack hits'],
+      })
+      expect(state.entries.find((entry) => entry.id === 9002)).toMatchObject({
+        actorTokenId: 'player-token',
+        details: ['damage applied'],
+      })
+    }
   })
 
   it('shared boundary rejects retired AP state and log wording from stale clients', async () => {
@@ -2211,6 +3137,30 @@ describe('room privacy projections and event channel ACLs', () => {
     const post = (channel: string, headers: Record<string, string>, body: object) => fetch(eventUrl(channel), {
       method: 'POST', headers, body: JSON.stringify(body),
     })
+    const eventStream = await fetch(eventUrl('_all'), { headers: playerHeaders })
+    expect(eventStream.status).toBe(200)
+    expect(eventStream.headers.get('content-type')).toContain('text/event-stream')
+    expect(eventStream.headers.get('cache-control')).toContain('no-transform')
+    expect(eventStream.headers.get('x-accel-buffering')).toBe('no')
+    const eventReader = eventStream.body?.getReader()
+    expect(eventReader).toBeDefined()
+    const readyChunk = await eventReader!.read()
+    expect(new TextDecoder().decode(readyChunk.value)).toContain('event: ready')
+    const dmInvalidation = await fetch(`${offServer.base}/api/state/maps${query}`, {
+      method: 'PUT',
+      headers: dmHeaders,
+      body: JSON.stringify({ maps: [], selectedId: null, updatedAt: Date.now() }),
+    })
+    expect(dmInvalidation.status).toBe(200)
+    const messageChunk = await Promise.race([
+      eventReader!.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('event-stream-message-timeout')), 2_000).unref()
+      }),
+    ])
+    expect(new TextDecoder().decode(messageChunk.value)).toContain('"name":"maps"')
+    await eventReader!.cancel()
+
     expect((await post('player-action-dm-to-player', playerHeaders, { id: 'forged-ack' })).status).toBe(403)
     expect((await post('player-action-player-to-dm', dmHeaders, { id: 'forged-request' })).status).toBe(403)
     expect((await post('shared-state-changed', playerHeaders, { name: 'maps' })).status).toBe(403)
@@ -2237,6 +3187,43 @@ describe('room privacy projections and event channel ACLs', () => {
       casterName: '吟游诗人',
       spellName: '粉碎音波',
       castingClassId: 'bard',
+    })).status).toBe(200)
+    expect((await post('combat-presentation', dmHeaders, {
+      schemaVersion: 1,
+      id: 'fighter-longbow-1:attack-banner',
+      type: 'attack-banner',
+      mapId: 'map',
+      transactionId: 'fighter-longbow-1',
+      sourceTokenId: 'fighter',
+      actorName: '战士',
+      attackName: '长弓',
+      attackKind: 'ranged',
+      classId: 'fighter',
+    })).status).toBe(200)
+    expect((await post('combat-presentation', dmHeaders, {
+      schemaVersion: 1,
+      id: 'thunderwave-animation-1:spell-banner',
+      type: 'spell-banner',
+      mapId: 'map',
+      transactionId: 'thunderwave-transaction-1',
+      spellId: 'thunderwave',
+      sourceTokenId: 'bard',
+      casterName: '吟游诗人',
+      spellName: '雷鸣波',
+      castingClassId: 'bard',
+    })).status).toBe(200)
+    expect((await post('combat-presentation', dmHeaders, {
+      schemaVersion: 1,
+      id: 'thunderwave-1:con-save:goblin',
+      type: 'saving-throw-status',
+      mapId: 'map',
+      transactionId: 'thunderwave-1',
+      sourceTokenId: 'goblin',
+      targetTokenId: 'goblin',
+      targetName: '地精',
+      ability: 'con',
+      phase: 'rolling',
+      dc: 15,
     })).status).toBe(200)
     expect((await post('unregistered-private-channel', dmHeaders, { secret: true })).status).toBe(404)
     expect((await post('player-action-player-to-dm', playerHeaders, { id: 'valid-request', sourceMode: 'dm' })).status).toBe(200)

@@ -1,13 +1,28 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { dnd5eCombatantCanSee, dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
+import {
+  dnd5eBestGrappleDefense,
+  dnd5eCombatantCanSee,
+  dnd5eTargetArmorClassForAttack,
+  resolveDnd5eHeadlessAction,
+  type Dnd5eCombatEvent,
+} from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication } from './mapBridge'
-import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
+import {
+  createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  dnd5eConditionsFromActiveEffects,
+} from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
+import {
+  DND5E_LONGSWORD,
+  DND5E_OFFHAND_SHORTSWORD,
+  DND5E_SHORTSWORD,
+} from './equipment'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -31,6 +46,266 @@ describe('D&D 5e map bridge', () => {
   afterEach(() => {
     setMapGeometryRuntime([])
     setDnd5eRoomMonsterCatalog([])
+  })
+
+  it('preserves distinct initiative slots when one combatant owns multiple turns', () => {
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token',
+      label: hero.name,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'duplicate-initiative-slots',
+      name: 'Duplicate initiative slots',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [heroToken],
+    }
+
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'duplicate-initiative-slots',
+      map,
+      characters: [hero],
+      initiativeOrder: [{
+        slotId: 'hero-token:normal',
+        tokenId: heroToken.id,
+        label: heroToken.label,
+        emoji: '',
+        color: '',
+        roll: 18,
+      }, {
+        slotId: 'hero-token:thief-reflexes',
+        firstRoundOnly: true,
+        turnKind: 'thief-reflexes',
+        tokenId: heroToken.id,
+        label: heroToken.label,
+        emoji: '',
+        color: '',
+        roll: 8,
+      }],
+    })
+
+    expect(snapshot.state.initiativeOrder).toEqual([heroToken.id, heroToken.id])
+    expect(snapshot.state.initiativeSlotIds).toEqual([
+      'hero-token:normal',
+      'hero-token:thief-reflexes',
+    ])
+    expect(snapshot.state.firstRoundOnlyInitiativeSlotIds).toEqual([
+      'hero-token:thief-reflexes',
+    ])
+    expect(snapshot.state.turnSlotId).toBe('hero-token:normal')
+  })
+
+  it('projects authoritative main-hand and off-hand weapon provenance for players', () => {
+    const ordinary = { ...character(), id: 'ordinary', alignment: 'LG', equipment: { mainWeapon: DND5E_LONGSWORD } }
+    const silveredMain = structuredClone(DND5E_SHORTSWORD)
+    if (silveredMain.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    silveredMain.id = 'plugin:silvered-shortsword'
+    silveredMain.dnd5e.specialMaterial = 'silvered'
+    const magicalOffHand = structuredClone(DND5E_OFFHAND_SHORTSWORD)
+    if (magicalOffHand.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    magicalOffHand.id = 'plugin:magic-offhand-shortsword'
+    magicalOffHand.dnd5e.magical = true
+    const dualWielder = {
+      ...character(),
+      id: 'dual-wielder',
+      alignment: '中立邪恶',
+      equipment: { mainWeapon: silveredMain, offHand: magicalOffHand },
+    }
+    const magicalMain = structuredClone(DND5E_LONGSWORD)
+    if (magicalMain.dnd5e?.kind !== 'weapon') throw new Error('test weapon missing rules')
+    magicalMain.id = 'plugin:magic-longsword'
+    magicalMain.dnd5e.magical = true
+    const magicUser = {
+      ...character(),
+      id: 'magic-user',
+      alignment: 'unknown homebrew alignment',
+      equipment: { mainWeapon: magicalMain },
+    }
+    const tokens = [ordinary, dualWielder, magicUser].map((entry, index) => token({
+      id: `${entry.id}-token`,
+      type: 'player',
+      characterId: entry.id,
+      x: index * 10,
+      hp: entry.currentHp,
+      maxHp: entry.maxHp,
+    }))
+    const map: BattleMap = {
+      id: 'weapon-provenance',
+      name: 'Weapon provenance',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens,
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'weapon-provenance',
+      map,
+      characters: [ordinary, dualWielder, magicUser],
+      initiativeOrder: tokens.map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      })),
+    })
+
+    expect(snapshot.state.combatants['ordinary-token']).toMatchObject({
+      mainWeaponId: DND5E_LONGSWORD.id,
+      mainWeaponMagical: false,
+      grappleFreeHandCapacity: 1,
+      moralAlignment: 'good',
+      weaponDamageSources: {
+        [DND5E_LONGSWORD.id]: { magical: false },
+      },
+    })
+    expect(snapshot.state.combatants['dual-wielder-token']).toMatchObject({
+      mainWeaponId: silveredMain.id,
+      mainWeaponMagical: false,
+      grappleFreeHandCapacity: 0,
+      moralAlignment: 'evil',
+      weaponDamageSources: {
+        [silveredMain.id]: { magical: false, specialMaterial: 'silvered' },
+        [magicalOffHand.id]: { magical: true },
+      },
+    })
+    expect(snapshot.state.combatants['magic-user-token']).toMatchObject({
+      mainWeaponId: magicalMain.id,
+      mainWeaponMagical: true,
+      grappleFreeHandCapacity: 1,
+      weaponDamageSources: {
+        [magicalMain.id]: { magical: true },
+      },
+    })
+    expect(snapshot.state.combatants['magic-user-token'].moralAlignment).toBeUndefined()
+  })
+
+  it('preserves exact monster Athletics expertise for opposed grapple checks', () => {
+    const giant = token({
+      id: 'stone-giant',
+      poolId: 'srd-5.1:stone-giant',
+      hp: 126,
+      maxHp: 126,
+    })
+    const map: BattleMap = {
+      id: 'monster-skill-ranks',
+      name: 'Monster skill ranks',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [giant],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'monster-skill-ranks',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: giant.id,
+        label: giant.label,
+        emoji: '',
+        color: '',
+        roll: 20,
+      }],
+    })
+
+    expect(snapshot.state.combatants[giant.id].classSelections.expertise)
+      .toContain('athletics')
+    expect(dnd5eBestGrappleDefense(snapshot.state.combatants[giant.id]))
+      .toEqual({ skill: 'athletics', modifier: 12 })
+  })
+
+  it('projects monster conditional defenses, magic weapons, and moral alignment', () => {
+    const base = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const monster = {
+      ...base,
+      id: 'custom:fiendish-guardian',
+      alignment: '守序邪恶',
+      damageDefenseRules: [{
+        outcome: 'immune' as const,
+        damageTypes: ['bludgeoning', 'piercing', 'slashing'] as const,
+        delivery: 'weapon-attack' as const,
+        magical: false,
+        weaponMaterialNot: 'silvered' as const,
+        reason: 'test:nonsilvered-immunity',
+      }],
+      traits: [...base.traits, {
+        name: 'Magic Weapons',
+        description: 'Weapon attacks are magical.',
+        automation: 'headless' as const,
+        rule: { kind: 'magic-weapons' as const, weaponAttacksMagical: true as const },
+      }, {
+        name: 'Limited Magic Immunity',
+        description: 'Spells of 6th level or lower do not affect this creature unless it wishes.',
+        automation: 'headless' as const,
+        rule: {
+          kind: 'limited-magic-immunity' as const,
+          maximumSpellLevel: 6 as const,
+          advantageAboveMaximum: true as const,
+          allowsWilling: true as const,
+        },
+      }],
+    }
+    setDnd5eRoomMonsterCatalog([monster])
+    const monsterToken = token({
+      id: 'guardian-token',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'monster-provenance',
+      name: 'Monster provenance',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'monster-provenance',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: monsterToken.id,
+        label: monsterToken.label,
+        emoji: '',
+        color: '',
+        roll: 10,
+      }],
+    })
+    expect(snapshot.state.combatants[monsterToken.id]).toMatchObject({
+      weaponAttacksMagical: true,
+      magicResistance: true,
+      limitedMagicImmunity: {
+        kind: 'limited-magic-immunity',
+        maximumSpellLevel: 6,
+        advantageAboveMaximum: true,
+        allowsWilling: true,
+      },
+      moralAlignment: 'evil',
+      damageDefenseRules: monster.damageDefenseRules,
+    })
   })
 
   it('initializes and persists custom per-day action uses and legendary points', () => {
@@ -65,6 +340,14 @@ describe('D&D 5e map bridge', () => {
       },
     })
     snapshot.state.combatants[monsterToken.id].classState.monsterActionUsesByActionId![draft.actions[0].id].current = 1
+    snapshot.state.combatants[monsterToken.id].classState.attacksMadeTurnKey = 'custom-resources:1:custom'
+    snapshot.state.combatants[monsterToken.id].classState.attacksMadeThisTurn = 1
+    snapshot.state.combatants[monsterToken.id].classState.recklessAttackTurnKey =
+      'custom-resources:1:custom'
+    snapshot.state.combatants[monsterToken.id].classState.monsterReactiveAvailableTurnKey =
+      'custom-resources:1:other'
+    snapshot.state.combatants[monsterToken.id].classState.monsterReactiveUsedTurnKey =
+      'custom-resources:1:other'
     const plan = planDnd5eMapResultApplication({
       state: snapshot.state,
       map,
@@ -73,6 +356,26 @@ describe('D&D 5e map bridge', () => {
     })
     expect(plan.map.tokens[0].dnd5eCombatState?.monsterActionUsesByActionId?.[draft.actions[0].id])
       .toEqual({ current: 1, max: 2 })
+    expect(plan.map.tokens[0].dnd5eCombatState).toMatchObject({
+      attacksMadeTurnKey: 'custom-resources:1:custom',
+      attacksMadeThisTurn: 1,
+      recklessAttackTurnKey: 'custom-resources:1:custom',
+      monsterReactiveAvailableTurnKey: 'custom-resources:1:other',
+      monsterReactiveUsedTurnKey: 'custom-resources:1:other',
+    })
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'custom-resources',
+      map: plan.map,
+      characters: [],
+      initiativeOrder: [{ tokenId: monsterToken.id, label: monsterToken.label, emoji: '', color: '', roll: 10 }],
+    })
+    expect(reconnected.state.combatants[monsterToken.id].classState).toMatchObject({
+      attacksMadeTurnKey: 'custom-resources:1:custom',
+      attacksMadeThisTurn: 1,
+      recklessAttackTurnKey: 'custom-resources:1:custom',
+      monsterReactiveAvailableTurnKey: 'custom-resources:1:other',
+      monsterReactiveUsedTurnKey: 'custom-resources:1:other',
+    })
   })
 
   it('persists pending monster triggers and one-shot roll modifiers across map snapshots', () => {
@@ -279,6 +582,91 @@ describe('D&D 5e map bridge', () => {
     expect(dnd5eCombatantCanSee(snapshot.state, heroToken.id, enemy.id)).toBe(true)
   })
 
+  it('keeps Devil’s Sight identical between map geometry and Headless visibility', () => {
+    const hero = {
+      ...character(),
+      charClass: '契术师',
+      dnd5eClassLevels: { warlock: 2 },
+      dnd5eClassChoices: {
+        classes: {
+          warlock: {
+            selections: { 'eldritch-invocations': ['devils-sight'] },
+          },
+        },
+      },
+    } satisfies Character
+    const heroToken = token({
+      id: 'hero-token',
+      type: 'player',
+      characterId: hero.id,
+      x: 10,
+      y: 50,
+      hp: 20,
+      maxHp: 20,
+    })
+    const enemy = token({ id: 'enemy-token', x: 90, y: 50 })
+    const map: BattleMap = {
+      id: 'devils-sight-map',
+      name: 'Devil’s Sight',
+      width: 120,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [heroToken, enemy],
+    }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      obstacles: [{
+        id: 'darkness',
+        kind: 'obstacle',
+        label: '黑暗术',
+        points: [{ x: 70, y: 30 }, { x: 110, y: 30 }, { x: 110, y: 70 }, { x: 70, y: 70 }],
+        blocksVision: false,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+        cover: 'none',
+        baseHeightFeet: 0,
+        heightFeet: 20,
+        magicalDarkness: true,
+        darknessSpellLevel: 2,
+        createdAt: 1,
+      }],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: false,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+    const initiativeOrder = [heroToken, enemy].map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: '',
+      color: '',
+      roll: 20 - index,
+    }))
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'devils-sight-map',
+      map,
+      characters: [hero],
+      initiativeOrder,
+    })
+    expect(snapshot.state.combatants[heroToken.id]).toMatchObject({
+      darknessSightRangeFeet: 120,
+      magicalDarknessSightRangeFeet: 120,
+    })
+    expect(snapshot.state.magicalDarknessByCombatantPair?.[
+      `${heroToken.id}\u0000${enemy.id}`
+    ]).toBe(true)
+    expect(dnd5eCombatantCanSee(snapshot.state, heroToken.id, enemy.id)).toBe(true)
+  })
+
   it('preserves native effect instances across reconnect snapshots', () => {
     const hero = characterWithConditions(character(), ['poisoned'])
     const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, hp: 20, maxHp: 20 })
@@ -300,6 +688,231 @@ describe('D&D 5e map bridge', () => {
     })
     expect(reconnected.state.combatants[heroToken.id].classState.activeEffects).toEqual(heroEffects)
     expect(reconnected.state.combatants[enemy.id].classState.activeEffects).toEqual(enemyEffects)
+  })
+
+  it('round-trips a dragged relation and reports both moved map tokens', () => {
+    const hero = { ...character(), id: 'hero', name: 'Hero' }
+    const source = token({
+      id: 'ankheg',
+      label: 'Ankheg',
+      poolId: 'srd-5.1:ankheg',
+      x: 5,
+      y: 5,
+      hp: 39,
+      maxHp: 39,
+    })
+    const target = token({
+      id: 'hero-token',
+      label: hero.name,
+      type: 'player',
+      characterId: hero.id,
+      x: 5,
+      y: 15,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'relation-round-trip',
+      name: 'Relation Round Trip',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [source, target],
+    }
+    const initiativeOrder = [
+      { tokenId: source.id, label: source.label, emoji: '', color: '', roll: 20 },
+      { tokenId: target.id, label: target.label, emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'combat',
+      map,
+      characters: [hero],
+      initiativeOrder,
+    })
+    const relation = createDnd5eConditionEffect({
+      id: 'relation:grapple:ankheg:bite:hero-token',
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: source.id,
+        rulesId: 'monster:srd-5.1:ankheg:bite:bite-grapple',
+      },
+      targetId: target.id,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: source.id,
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+      stackingKey: 'relation:grapple:ankheg:bite:hero-token',
+    })
+    snapshot.state.combatants[target.id].classState.activeEffects = [relation]
+    snapshot.state.combatants[target.id].conditions = ['grappled']
+    snapshot.state.combatants[source.id].position = { x: 25, y: 5 }
+    snapshot.state.combatants[target.id].position = { x: 25, y: 15 }
+
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [hero],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+
+    expect(plan.changedTokenIds).toEqual(expect.arrayContaining([source.id, target.id]))
+    expect(plan.changedCharacterIds).toContain(hero.id)
+    expect(plan.map.tokens.find((entry) => entry.id === source.id))
+      .toMatchObject({ x: 25, y: 5 })
+    expect(plan.map.tokens.find((entry) => entry.id === target.id))
+      .toMatchObject({ x: 25, y: 15 })
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'combat',
+      map: plan.map,
+      characters: plan.characters,
+      initiativeOrder,
+    })
+    expect(reconnected.state.combatants[target.id].classState.activeEffects)
+      .toContainEqual(expect.objectContaining({
+        id: relation.id,
+        relation: relation.relation,
+      }))
+  })
+
+  it('rebuilds line of effect at mapped result positions before retaining a grapple', () => {
+    const hero = { ...character(), id: 'hero', name: 'Hero' }
+    const source = token({
+      id: 'ankheg',
+      label: 'Ankheg',
+      poolId: 'srd-5.1:ankheg',
+      x: 0,
+      y: 10,
+      hp: 39,
+      maxHp: 39,
+    })
+    const target = token({
+      id: 'hero-token',
+      label: hero.name,
+      type: 'player',
+      characterId: hero.id,
+      x: 10,
+      y: 10,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'relation-post-move-line-of-effect',
+      name: 'Relation post-move line of effect',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [source, target],
+    }
+    const initiativeOrder = [
+      { tokenId: source.id, label: source.label, emoji: '', color: '', roll: 20 },
+      { tokenId: target.id, label: target.label, emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'combat',
+      map,
+      characters: [hero],
+      initiativeOrder,
+    })
+    const grapple = createDnd5eConditionEffect({
+      id: 'relation:grapple:ankheg:bite:hero-token',
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: source.id,
+        rulesId: 'monster:srd-5.1:ankheg:bite:bite-grapple',
+      },
+      targetId: target.id,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: source.id,
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+      stackingKey: 'relation:grapple:ankheg:bite:hero-token',
+    })
+    snapshot.state.combatants[target.id].classState.activeEffects = [grapple]
+    snapshot.state.combatants[target.id].conditions = ['grappled']
+    snapshot.state.combatants[source.id].position = { x: 10, y: 10 }
+    snapshot.state.combatants[target.id].position = { x: 20, y: 10 }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [{
+        id: 'new-wall',
+        kind: 'wall',
+        label: 'New wall',
+        points: [{ x: 15, y: 0 }, { x: 15, y: 30 }],
+        blocksVision: true,
+        blocksMovement: true,
+        blocksLineOfEffect: true,
+        baseHeightFeet: 0,
+        heightFeet: 10,
+        createdAt: 1,
+      }],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: false,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+
+    const events: Dnd5eCombatEvent[] = []
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [hero],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+      events,
+    })
+
+    expect(snapshot.state.combatants[target.id].conditions).not.toContain('grappled')
+    expect(plan.characters[0].dnd5eCombatState?.activeEffects ?? []).toEqual([])
+    expect(plan.changedCharacterIds).toContain(hero.id)
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed',
+      targetId: target.id,
+      reason: 'invalid-relation',
+    }))
   })
 
   it('persists a Help attack marker on an unlinked monster token', () => {
@@ -331,6 +944,137 @@ describe('D&D 5e map bridge', () => {
       combatId: 'help', map: plan.map, characters: [], initiativeOrder,
     })
     expect(reconnected.state.combatants[enemy.id].classState.helpedAttackSourceId).toBe(helper.id)
+  })
+
+  it('round-trips a Giant Spider stable-at-zero poison outcome for an unlinked monster', () => {
+    const spider = token({
+      id: 'spider',
+      poolId: 'srd-5.1:giant-spider',
+      hp: 26,
+      maxHp: 26,
+      x: 0,
+      y: 0,
+    })
+    const victim = token({
+      id: 'victim',
+      poolId: 'srd-5.1:goblin',
+      hp: 8,
+      maxHp: 8,
+      x: 0,
+      y: 0,
+    })
+    const ordinaryZeroHpMonster = token({
+      id: 'ordinary-zero',
+      poolId: 'srd-5.1:goblin',
+      hp: 0,
+      maxHp: 7,
+      x: 50,
+      y: 0,
+    })
+    const map: BattleMap = {
+      id: 'stable-poison-map',
+      name: 'Stable poison',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [spider, victim, ordinaryZeroHpMonster],
+    }
+    const initiativeOrder = [
+      { tokenId: spider.id, label: spider.label, emoji: '', color: '', roll: 20 },
+      { tokenId: victim.id, label: victim.label, emoji: '', color: '', roll: 10 },
+      {
+        tokenId: ordinaryZeroHpMonster.id,
+        label: ordinaryZeroHpMonster.label,
+        emoji: '',
+        color: '',
+        roll: 5,
+      },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'stable-poison',
+      map,
+      characters: [],
+      initiativeOrder,
+    })
+
+    expect(snapshot.state.combatants[ordinaryZeroHpMonster.id].deathSaves).toMatchObject({
+      stable: false,
+      dead: true,
+    })
+
+    const poisoned = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'monster-action',
+      actorId: spider.id,
+      actionId: 'bite',
+      rolls: [{
+        targetId: victim.id,
+        d20: 10,
+        damageRolls: [[1]],
+        onHitEffectRolls: [{
+          effectId: 'poison-save-damage',
+          d20: 1,
+          damageRolls: [[2, 2]],
+        }],
+      }],
+    })
+    expect(poisoned.ok, poisoned.ok ? undefined : poisoned.reason).toBe(true)
+    if (!poisoned.ok) return
+    expect(poisoned.state.combatants[victim.id]).toMatchObject({
+      currentHp: 0,
+      deathSaves: { stable: true, dead: false },
+    })
+
+    const plan = planDnd5eMapResultApplication({
+      state: poisoned.state,
+      map,
+      characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    const persistedVictim = plan.map.tokens.find((entry) => entry.id === victim.id)
+    const persistedOrdinary = plan.map.tokens.find((entry) => entry.id === ordinaryZeroHpMonster.id)
+    expect(persistedVictim?.dnd5eCombatState?.stableAtZero).toBe(true)
+    expect(persistedOrdinary?.dnd5eCombatState?.stableAtZero).toBeUndefined()
+
+    const poisonedEffect = persistedVictim?.dnd5eCombatState?.activeEffects?.find(
+      (effect) => effect.standardCondition === 'poisoned',
+    )
+    const paralyzedEffect = persistedVictim?.dnd5eCombatState?.activeEffects?.find(
+      (effect) => effect.standardCondition === 'paralyzed',
+    )
+    expect(poisonedEffect).toBeDefined()
+    expect(paralyzedEffect?.dependsOnEffectId).toBe(poisonedEffect?.id)
+
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'stable-poison',
+      map: plan.map,
+      characters: [],
+      initiativeOrder,
+    })
+    const reconnectedVictim = reconnected.state.combatants[victim.id]
+    expect(reconnectedVictim).toMatchObject({
+      currentHp: 0,
+      deathSaves: {
+        successes: 0,
+        failures: 0,
+        stable: true,
+        dead: false,
+      },
+    })
+    const reconnectedPoison = reconnectedVictim.classState.activeEffects?.find(
+      (effect) => effect.standardCondition === 'poisoned',
+    )
+    const reconnectedParalysis = reconnectedVictim.classState.activeEffects?.find(
+      (effect) => effect.standardCondition === 'paralyzed',
+    )
+    expect(reconnectedParalysis?.dependsOnEffectId).toBe(reconnectedPoison?.id)
+    expect(reconnected.state.combatants[ordinaryZeroHpMonster.id].deathSaves).toMatchObject({
+      stable: false,
+      dead: true,
+    })
   })
 
   it('persists pending monster saving-throw transactions across map reconnect snapshots', () => {
@@ -400,6 +1144,79 @@ describe('D&D 5e map bridge', () => {
     const plan = planDnd5eMapResultApplication({ state: attack.state, map, characters: [hero], characterIdByCombatantId: snapshot.characterIdByCombatantId })
     expect(plan.map.tokens.find((item) => item.id === enemy.id)?.hp).toBe(2)
     expect(plan.changedTokenIds).toEqual([enemy.id])
+  })
+
+  it('persists and rehydrates the Berserker Retaliation damage trigger', () => {
+    const berserker: Character = {
+      ...character(),
+      charClass: '野蛮人',
+      level: 14,
+      dnd5eClassChoices: {
+        classes: { barbarian: { subclass: 'berserker', selections: {} } },
+      },
+    }
+    const berserkerToken = token({
+      id: 'berserker-token',
+      type: 'player',
+      characterId: berserker.id,
+      label: berserker.name,
+      x: 10,
+      hp: berserker.currentHp,
+      maxHp: berserker.maxHp,
+    })
+    const enemy = token({ id: 'enemy-token', label: 'Enemy', x: 0 })
+    const map: BattleMap = {
+      id: 'retaliation-map',
+      name: 'Retaliation',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [enemy, berserkerToken],
+    }
+    const initiativeOrder = [
+      { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 20 },
+      { tokenId: berserkerToken.id, label: berserkerToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'retaliation',
+      map,
+      characters: [berserker],
+      initiativeOrder,
+    })
+    const damaged = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'attack',
+      actorId: enemy.id,
+      targetId: berserkerToken.id,
+      attackModifier: 20,
+      d20: 10,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [4], type: 'slashing' },
+    })
+    expect(damaged.ok).toBe(true)
+    if (!damaged.ok) return
+    const plan = planDnd5eMapResultApplication({
+      state: damaged.state,
+      map,
+      characters: [berserker],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.characters[0].dnd5eCombatState?.berserkerRetaliationTrigger).toEqual({
+      sourceId: enemy.id,
+      round: 1,
+    })
+
+    const rehydrated = createDnd5eMapCombatSnapshot({
+      combatId: 'retaliation',
+      map: plan.map,
+      characters: plan.characters,
+      initiativeOrder,
+    })
+    expect(
+      rehydrated.state.combatants[berserkerToken.id].classState.berserkerRetaliationTrigger,
+    ).toEqual({ sourceId: enemy.id, round: 1 })
   })
 
   it('hydrates a namespaced SRD monster with its exact stat block', () => {

@@ -39,6 +39,10 @@ export interface EquipmentItem {
         mode: 'melee' | 'ranged'
         damage: { count: number; sides: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
         attackAbility: 'str' | 'dex' | 'finesse'
+        /** 武器本体是否为魔法武器；临时法术附魔不写回装备。 */
+        magical?: boolean
+        /** 用于绕过依赖武器材质的抗性／免疫；材质本身不代表魔法。 */
+        specialMaterial?: 'silvered' | 'adamantine'
         reachFeet?: number
         rangeFeet?: { normal: number; long: number }
         properties?: readonly string[]

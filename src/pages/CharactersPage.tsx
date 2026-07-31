@@ -4,6 +4,7 @@ import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import CharacterSheet from '../components/character/CharacterSheet'
 import CharacterSetupDialog, { type CharacterSetupResult } from '../components/character/CharacterSetupDialog'
+import CharacterCreationAdvancementFlow from '../components/character/CharacterCreationAdvancementFlow'
 import DMRoster from '../components/character/DMRoster'
 import AccountCharacterVaultPanel from '../components/character/AccountCharacterVaultPanel'
 import { useCharacterStore } from '../store/characters'
@@ -27,12 +28,17 @@ export default function CharactersPage() {
   const [selectedMode, setSelectedMode] = useState<Mode>('player')
   const mode = forcedMode ?? selectedMode
   const [showCreate, setShowCreate] = useState(false)
+  const [pendingCreation, setPendingCreation] = useState<{
+    characterId: string
+    targetLevel: number
+  } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const characters = useCharacterStore((s) => s.characters)
   const selectedId = useCharacterStore((s) => s.selectedId)
   const select = useCharacterStore((s) => s.select)
   const add = useCharacterStore((s) => s.add)
   const update = useCharacterStore((s) => s.update)
+  const remove = useCharacterStore((s) => s.remove)
   const importCharacter = useCharacterStore((s) => s.importCharacter)
   const [assignmentTick, setAssignmentTick] = useState(0)
   const isDM = mode === 'dm'
@@ -55,11 +61,6 @@ export default function CharactersPage() {
 
   const confirmCreate = (setup: CharacterSetupResult) => {
     const definition = dnd5eClassDefinition(setup.charClass)
-    const dnd5eClassChoices = definition?.id === 'fighter'
-      ? { fighter: { subclass: 'champion' as const, fightingStyles: [] } }
-      : definition
-        ? { classes: { [definition.id]: { subclass: definition.subclass.id, selections: {} } } }
-        : undefined
     const id = add(setup.name)
     const startingEquipment = resolveDnd5eStartingEquipment(
       id,
@@ -70,22 +71,29 @@ export default function CharactersPage() {
       charClass: setup.charClass,
       race: setup.race,
       dnd5eRaceId: setup.dnd5eRaceId,
+      ...(setup.dragonbornAncestry ? {
+        dnd5eRacialChoices: { dragonbornAncestry: setup.dragonbornAncestry },
+      } : {}),
       alignment: setup.alignment,
       background: setup.background,
       dnd5eBackgroundId: setup.dnd5eBackgroundId,
       dnd5eBackgroundSkillProficiencies: setup.backgroundSkillProficiencies,
+      level: 1,
+      ...(definition ? { dnd5eClassLevels: { [definition.id]: 1 } } : {}),
       abilities: setup.abilities,
-      skills: [...new Set(setup.backgroundSkillProficiencies ?? [])],
+      skills: [...new Set([
+        ...setup.classSkillProficiencies,
+        ...(setup.backgroundSkillProficiencies ?? []),
+        ...(setup.racialSkillProficiencies ?? []),
+      ])],
+      ...(setup.racialFeatIds?.length ? { dnd5eFeatIds: [...setup.racialFeatIds] } : {}),
       savingThrows: definition ? [...definition.savingThrows] : [],
       speed: dnd5eRaceSpeed(setup.dnd5eRaceId ?? setup.race),
       hitPointMaximumMode: 'fixed',
       equipment: startingEquipment.equipment,
       dnd5eInventory: startingEquipment.inventory,
-      dnd5eClassChoices,
-      ...(setup.recommendation ? {
-        dnd5eCreationRecommendation: setup.recommendation,
-        notes: `角色创建向导推荐理由：\n${setup.recommendation.reasons.map((reason) => `- ${reason}`).join('\n')}`,
-      } : {}),
+      dnd5eClassChoices: setup.initialClassChoices,
+      ...(setup.targetLevel > 1 ? { dnd5eCreationTargetLevel: setup.targetLevel } : {}),
       dnd5eAbilityGeneration: {
         method: setup.method,
         baseScores: setup.baseAbilities,
@@ -104,6 +112,9 @@ export default function CharactersPage() {
     }
     select(id)
     setShowCreate(false)
+    if (setup.targetLevel > 1) {
+      setPendingCreation({ characterId: id, targetLevel: setup.targetLevel })
+    }
   }
 
   void assignmentTick
@@ -116,6 +127,31 @@ export default function CharactersPage() {
   const activeId =
     selectedId && visibleList.some((c) => c.id === selectedId) ? selectedId : visibleList[0]?.id ?? null
   const activeCharacter = activeId ? visibleList.find((c) => c.id === activeId) ?? null : null
+  const unfinishedCreation = !isDM && !showCreate
+    ? visibleList.find((character) =>
+        (character.dnd5eCreationTargetLevel ?? 0) > character.level)
+    : undefined
+  const effectivePendingCreation = pendingCreation ?? (
+    unfinishedCreation?.dnd5eCreationTargetLevel
+      ? {
+          characterId: unfinishedCreation.id,
+          targetLevel: unfinishedCreation.dnd5eCreationTargetLevel,
+        }
+      : null
+  )
+
+  const finishPendingCreation = () => {
+    if (effectivePendingCreation) {
+      update(effectivePendingCreation.characterId, { dnd5eCreationTargetLevel: undefined })
+    }
+    setPendingCreation(null)
+  }
+
+  const abandonPendingCreation = () => {
+    if (!effectivePendingCreation) return
+    remove(effectivePendingCreation.characterId)
+    setPendingCreation(null)
+  }
 
   const exportCharacter = () => {
     if (!activeCharacter) return
@@ -264,6 +300,14 @@ export default function CharactersPage() {
 
       {!isDM && showCreate && (
         <CharacterSetupDialog onCancel={() => setShowCreate(false)} onComplete={confirmCreate} />
+      )}
+      {!isDM && effectivePendingCreation && (
+        <CharacterCreationAdvancementFlow
+          characterId={effectivePendingCreation.characterId}
+          targetLevel={effectivePendingCreation.targetLevel}
+          onComplete={finishPendingCreation}
+          onAbandon={abandonPendingCreation}
+        />
       )}
     </div>
   )

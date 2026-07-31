@@ -8,6 +8,7 @@ import {
   dnd5ePreventsAttackAdvantage,
   dnd5eReactionsPrevented,
   dnd5eSavingThrowMode,
+  dnd5eSavingThrowModeExplanation,
   dnd5eTargetGrantsAttackAdvantage,
   dnd5eUnseenTargetImposesDisadvantage,
   type Dnd5eDefensiveCreature,
@@ -28,6 +29,36 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode(resistant, 'str')).toBe('normal')
     expect(dnd5eSavingThrowMode({ ...resistant, exhaustionLevel: 3 }, 'wis', { sourceIsSpell: true }))
       .toBe('normal')
+  })
+
+  it('applies imported racial saving-throw advantages only to declared contexts', () => {
+    const ancestry = creature({
+      racialSavingThrowAdvantages: {
+        conditions: ['charmed'],
+        damageTypes: ['poison'],
+        magicAbilities: ['int', 'wis', 'cha'],
+      },
+    })
+    expect(dnd5eSavingThrowMode(ancestry, 'con', { damageType: 'poison' })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(ancestry, 'wis', { condition: 'charmed' })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(ancestry, 'int', { sourceIsMagical: true })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(ancestry, 'str', { sourceIsMagical: true })).toBe('normal')
+    expect(dnd5eSavingThrowMode(ancestry, 'wis', { condition: 'frightened' })).toBe('normal')
+  })
+
+  it('exposes the rule sources behind a saving throw roll mode', () => {
+    const explanation = dnd5eSavingThrowModeExplanation(
+      creature({ magicResistance: true, exhaustionLevel: 3 }),
+      'con',
+      { sourceIsSpell: true },
+    )
+    expect(explanation.mode).toBe('normal')
+    expect(explanation.advantage).toContainEqual(expect.objectContaining({
+      id: 'magic-resistance', label: '魔法抗性',
+    }))
+    expect(explanation.disadvantage).toContainEqual(expect.objectContaining({
+      id: 'exhaustion-level-3', label: '力竭（3级或更高）',
+    }))
   })
 
   it('applies Danger Sense and cancels it against level-three exhaustion', () => {
@@ -64,6 +95,26 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode(barbarian, 'str')).toBe('advantage')
     expect(dnd5eSavingThrowMode(barbarian, 'dex')).toBe('normal')
     expect(dnd5eSavingThrowMode({ ...barbarian, exhaustionLevel: 3 }, 'str')).toBe('normal')
+  })
+
+  it('grants Mindless Rage immunity only to a raging level-6 Berserker', () => {
+    const berserker = creature({
+      classId: 'barbarian',
+      subclassId: 'berserker',
+      level: 6,
+      classState: { raging: true },
+    })
+    expect(dnd5eConditionImmuneFromSource(berserker, 'charmed')).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(berserker, '恐慌')).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(berserker, 'poisoned')).toBe(false)
+    expect(dnd5eConditionImmuneFromSource({
+      ...berserker,
+      classState: {},
+    }, 'charmed')).toBe(false)
+    expect(dnd5eConditionImmuneFromSource({
+      ...berserker,
+      level: 5,
+    }, 'frightened')).toBe(false)
   })
 
   it('grants a dodging creature advantage on Dexterity saving throws', () => {

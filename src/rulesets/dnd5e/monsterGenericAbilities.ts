@@ -1,6 +1,7 @@
 import type {
   Dnd5eDamageType,
   Dnd5eMonsterAction,
+  Dnd5eMonsterDamage,
   Dnd5eMonsterStatBlock,
   Dnd5eMonsterTrait,
   Dnd5eMonsterWeaponAttack,
@@ -15,6 +16,7 @@ export type Dnd5eMonsterGenericAbilityId =
   | 'swarm'
   | 'recharge'
   | 'spellcasting'
+  | 'magic-weapons'
 
 export interface Dnd5eMonsterGenericAbility {
   id: Dnd5eMonsterGenericAbilityId
@@ -31,6 +33,7 @@ const DEFINITIONS: Record<Dnd5eMonsterGenericAbilityId, Omit<Dnd5eMonsterGeneric
   swarm: { name: '群集', automation: 'headless' },
   recharge: { name: '充能能力', automation: 'headless' },
   spellcasting: { name: '施法', automation: 'headless' },
+  'magic-weapons': { name: '魔法武器', automation: 'headless' },
 }
 
 function traitMatches(monster: Dnd5eMonsterStatBlock, pattern: RegExp): boolean {
@@ -41,7 +44,10 @@ export function dnd5eMonsterHasGenericAbility(
   monster: Dnd5eMonsterStatBlock,
   abilityId: Dnd5eMonsterGenericAbilityId,
 ): boolean {
-  if (abilityId === 'pack-tactics') return traitMatches(monster, /集群战术|pack tactics/i)
+  if (abilityId === 'pack-tactics') {
+    return dnd5eMonsterPackTacticsRule(monster) != null ||
+      traitMatches(monster, /集群战术|pack tactics/i)
+  }
   if (abilityId === 'multiattack') return monster.actions.some((action) => action.kind === 'multiattack')
   if (abilityId === 'legendary-resistance') {
     return (monster.legendaryResistanceUses ?? 0) > 0 || traitMatches(monster, /传奇抗性|legendary resistance/i)
@@ -53,6 +59,7 @@ export function dnd5eMonsterHasGenericAbility(
     return [...monster.actions, ...monster.legendaryActions ?? [], ...monster.lairActions ?? []]
       .some((action) => /充能|recharge/i.test(`${action.name} ${action.description}`))
   }
+  if (abilityId === 'magic-weapons') return dnd5eMonsterWeaponAttacksAreMagical(monster)
   return monster.spellcasting != null || monster.capabilities?.spellcaster === true
 }
 
@@ -69,6 +76,52 @@ export function dnd5eMonsterRegenerationRule(
     Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined
 }
 
+export type Dnd5eMonsterPackTacticsRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'pack-tactics' }
+>
+
+export interface Dnd5eMonsterPackTacticsCandidate {
+  id: string
+  alliedWithActor: boolean
+  currentHp: number
+  incapacitated: boolean
+  distanceFeetToTarget: number
+}
+
+export function dnd5eMonsterPackTacticsRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterPackTacticsRule | undefined {
+  const structured = monster?.traits.find((trait) => trait.rule?.kind === 'pack-tactics')?.rule as
+    Dnd5eMonsterPackTacticsRule | undefined
+  if (structured) return structured
+  return monster?.traits.some((trait) => /集群战术|pack tactics/i.test(trait.name))
+    ? {
+        kind: 'pack-tactics',
+        allyDistanceFeet: 5,
+        requiresAllyNotIncapacitated: true,
+      }
+    : undefined
+}
+
+export function dnd5eMonsterPackTacticsApplies(input: {
+  monster: Dnd5eMonsterStatBlock | undefined
+  actorId: string
+  targetId: string
+  candidates: readonly Dnd5eMonsterPackTacticsCandidate[]
+}): boolean {
+  const rule = dnd5eMonsterPackTacticsRule(input.monster)
+  if (!rule) return false
+  return input.candidates.some((candidate) =>
+    candidate.id !== input.actorId &&
+    candidate.id !== input.targetId &&
+    candidate.alliedWithActor &&
+    candidate.currentHp > 0 &&
+    (!rule.requiresAllyNotIncapacitated || !candidate.incapacitated) &&
+    Number.isFinite(candidate.distanceFeetToTarget) &&
+    candidate.distanceFeetToTarget <= rule.allyDistanceFeet)
+}
+
 export function dnd5eMonsterIsSwarm(monster: Dnd5eMonsterStatBlock | undefined): boolean {
   return monster?.traits.some((trait) => trait.rule?.kind === 'swarm') === true
 }
@@ -83,12 +136,275 @@ export function dnd5eMonsterEffectiveWeaponAttack(
     : attack
 }
 
+export interface Dnd5eMonsterAttackTraitContext {
+  combatId: string
+  round: number
+  targetCurrentHp: number
+  targetMaxHp: number
+  targetSurprisedCombatId?: string
+  targetSurpriseResolvedCombatId?: string
+  /** True after this target has crossed any authoritative turn-start boundary in this combat. */
+  targetHasTakenTurn?: boolean
+  /** An active, allied, non-incapacitated creature is close enough to the target. */
+  adjacentActiveAllyNearTarget?: boolean
+  /** Final effective attack mode after all advantage and disadvantage sources cancel. */
+  effectiveRollMode?: 'normal' | 'advantage' | 'disadvantage'
+  /** Stable initiative-slot turn key used by once-per-turn monster damage traits. */
+  turnKey?: string
+  /** Shared authoritative ledger; keys use `monster-trait:<kind>`. */
+  usedTurnKeys?: Readonly<Record<string, string>>
+  /** Set only after the authoritative turn-start lifecycle activates Reckless. */
+  actorRecklessActive?: boolean
+}
+
+function dnd5eMonsterTargetIsCurrentlySurprised(
+  context: Dnd5eMonsterAttackTraitContext,
+): boolean {
+  return context.targetSurprisedCombatId === context.combatId &&
+    context.targetSurpriseResolvedCombatId !== context.combatId
+}
+
+export type Dnd5eMonsterRecklessRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'reckless' }
+>
+
+export function dnd5eMonsterRecklessRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterRecklessRule | undefined {
+  return monster?.traits.find((trait) =>
+    trait.automation === 'headless' && trait.rule?.kind === 'reckless')?.rule as
+    Dnd5eMonsterRecklessRule | undefined
+}
+
+/**
+ * Returns authoritative advantage granted by target-dependent SRD traits.
+ * The attack must already be reduced from `melee-or-ranged` to its concrete
+ * distance-specific mode.
+ */
+export function dnd5eMonsterAttackTraitAdvantage(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  attack: Dnd5eMonsterWeaponAttack,
+  context: Dnd5eMonsterAttackTraitContext,
+): boolean {
+  if (!monster) return false
+  const currentlySurprised = context.round === 1 &&
+    dnd5eMonsterTargetIsCurrentlySurprised(context)
+  return monster.traits.some((trait) => {
+    if (trait.automation !== 'headless') return false
+    if (trait.rule?.kind === 'blood-frenzy') {
+      return attack.mode === trait.rule.attackMode &&
+        context.targetCurrentHp < context.targetMaxHp
+    }
+    if (trait.rule?.kind === 'ambusher-attack-advantage') {
+      return context.round === trait.rule.requiredRound && currentlySurprised
+    }
+    if (trait.rule?.kind === 'assassinate') {
+      return context.round === trait.rule.requiredRound &&
+        context.targetHasTakenTurn === false
+    }
+    if (trait.rule?.kind === 'reckless') {
+      return context.actorRecklessActive === true &&
+        attack.mode === trait.rule.outgoing.mode
+    }
+    return false
+  })
+}
+
+export function dnd5eMonsterAssassinateAutomaticCritical(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  context: Dnd5eMonsterAttackTraitContext,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'assassinate' &&
+    context.round === trait.rule.requiredRound &&
+    dnd5eMonsterTargetIsCurrentlySurprised(context)) === true
+}
+
+export interface Dnd5eMonsterTraitDamageDefinition {
+  traitId: 'sneak-attack' | 'martial-advantage'
+  traitName: string
+  damage: Dnd5eMonsterDamage
+}
+
+/**
+ * Returns the extra-damage traits eligible for this concrete hit. The caller
+ * still owns dice validation and must write the returned trait key to the
+ * shared once-per-turn ledger only after the hit is committed.
+ */
+export function dnd5eMonsterTraitDamageDefinitions(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  attack: Dnd5eMonsterWeaponAttack,
+  context: Dnd5eMonsterAttackTraitContext,
+): readonly Dnd5eMonsterTraitDamageDefinition[] {
+  const inheritedType = attack.damage[0]?.type
+  if (!monster || !inheritedType || !context.turnKey) return []
+  return monster.traits.flatMap((trait) => {
+    if (
+      trait.automation !== 'headless' ||
+      (
+        trait.rule?.kind !== 'sneak-attack' &&
+        trait.rule?.kind !== 'martial-advantage'
+      )
+    ) return []
+    const rule = trait.rule
+    const traitId = rule.kind
+    if (context.usedTurnKeys?.[`monster-trait:${traitId}`] === context.turnKey) {
+      return []
+    }
+    const qualifies = rule.kind === 'martial-advantage'
+      ? context.adjacentActiveAllyNearTarget === true
+      : context.effectiveRollMode !== 'disadvantage' &&
+        (
+          context.effectiveRollMode === 'advantage' ||
+          context.adjacentActiveAllyNearTarget === true
+        )
+    if (!qualifies) return []
+    return [{
+      traitId,
+      traitName: trait.name,
+      damage: {
+        average: rule.extraDamage.average,
+        count: rule.extraDamage.count,
+        sides: rule.extraDamage.sides,
+        bonus: rule.extraDamage.bonus,
+        type: inheritedType,
+      },
+    }]
+  })
+}
+
+/**
+ * Appends target-triggered damage components without mutating catalog data.
+ * Surprise Attack intentionally applies to every qualifying hit; Multiattack
+ * callers invoke this once for each concrete child attack.
+ */
+export function dnd5eMonsterWeaponAttackWithTriggeredTraits(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  attack: Dnd5eMonsterWeaponAttack,
+  context: Dnd5eMonsterAttackTraitContext,
+): Dnd5eMonsterWeaponAttack {
+  if (
+    !monster ||
+    context.round !== 1 ||
+    !dnd5eMonsterTargetIsCurrentlySurprised(context)
+  ) return attack
+  const rules = monster.traits.flatMap((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'surprise-attack' &&
+    context.round === trait.rule.requiredRound
+      ? [trait.rule]
+      : [])
+  if (rules.length === 0) return attack
+  const inheritedType = attack.damage[0]?.type
+  if (!inheritedType) return attack
+  return {
+    ...attack,
+    damage: [
+      ...attack.damage,
+      ...rules.map((rule) => ({
+        average: rule.extraDamage.average,
+        count: rule.extraDamage.count,
+        sides: rule.extraDamage.sides,
+        bonus: rule.extraDamage.bonus,
+        type: inheritedType,
+      })),
+    ],
+  }
+}
+
+export type Dnd5eMonsterParryRule = Extract<
+  NonNullable<Dnd5eMonsterAction['rule']>,
+  { kind: 'parry' }
+>
+
+export function dnd5eMonsterParryRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterParryRule | undefined {
+  return monster?.reactions?.find((reaction) =>
+    reaction.automation === 'headless' &&
+    reaction.id === 'parry' &&
+    reaction.rule?.kind === 'parry')?.rule as Dnd5eMonsterParryRule | undefined
+}
+
+export function dnd5eMonsterHasReactive(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'reactive' &&
+    trait.rule.reactionRefresh === 'every-turn-start') === true
+}
+
+/**
+ * Resolves a hybrid weapon attack to the concrete mode used at an
+ * authoritative distance, unless a parent Multiattack explicitly restricts
+ * its hybrid child attacks to one mode. Call this after HP-dependent damage
+ * selection and before target-condition modifiers so every consumer validates
+ * and rolls the same damage expression.
+ */
+export function dnd5eMonsterWeaponAttackAtDistance(
+  attack: Dnd5eMonsterWeaponAttack,
+  distanceFeet: number,
+  forcedMode?: 'melee' | 'ranged',
+): Dnd5eMonsterWeaponAttack {
+  if (attack.mode !== 'melee-or-ranged') return attack
+  const usesRangedAttack = forcedMode
+    ? forcedMode === 'ranged'
+    : Number.isFinite(distanceFeet) && distanceFeet > (attack.reachFeet ?? 5)
+  const { rangedDamage, ...baseAttack } = attack
+  return {
+    ...baseAttack,
+    mode: usesRangedAttack ? 'ranged' : 'melee',
+    damage: usesRangedAttack && rangedDamage ? rangedDamage : attack.damage,
+  }
+}
+
 export function dnd5eMonsterHasMagicResistance(
   monster: Dnd5eMonsterStatBlock | undefined,
 ): boolean {
   return monster?.traits.some((trait) =>
     trait.rule?.kind === 'magic-resistance' ||
+    trait.rule?.kind === 'limited-magic-immunity' ||
     /魔法抗性|magic resistance/i.test(trait.name)) === true
+}
+
+export type Dnd5eLimitedMagicImmunityRule = Extract<
+  NonNullable<Dnd5eMonsterStatBlock['traits'][number]['rule']>,
+  { kind: 'limited-magic-immunity' }
+>
+
+export type Dnd5eLimitedMagicImmunitySpellTarget = 'hostile' | 'ally' | 'creature' | 'area'
+
+export function dnd5eMonsterLimitedMagicImmunityRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eLimitedMagicImmunityRule | undefined {
+  return monster?.traits
+    .map((trait) => trait.rule)
+    .find((rule): rule is Dnd5eLimitedMagicImmunityRule =>
+      rule?.kind === 'limited-magic-immunity')
+}
+
+export function dnd5eLimitedMagicImmunityNegatesSpell(input: {
+  rule: Dnd5eLimitedMagicImmunityRule | undefined
+  spellLevel: number
+  target: Dnd5eLimitedMagicImmunitySpellTarget
+  /** Must be inferred by the authoritative host, never accepted from a hostile client payload. */
+  willing: boolean
+}): boolean {
+  if (!input.rule || input.spellLevel > input.rule.maximumSpellLevel) return false
+  const mayBeWilling = input.target === 'ally' || input.target === 'creature'
+  return !(input.rule.allowsWilling && input.willing && mayBeWilling)
+}
+
+export function dnd5eMonsterWeaponAttacksAreMagical(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.rule?.kind === 'magic-weapons' ||
+    /^(?:魔法武器|天使武器|地狱武器|炼狱武器|magic weapons|angelic weapons|hellish weapons)$/i
+      .test(trait.name.trim())) === true
 }
 
 export function dnd5eMonsterWeaponAttackAgainstConditions(

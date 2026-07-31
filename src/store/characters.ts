@@ -37,7 +37,7 @@ import { applyDnd5eLongRestBenefits, reconcileDnd5eCharacterCampaignTime } from 
 import { canBenefitFromLongRest } from '../lib/campaignTime'
 import { useCampaignTimeStore } from './campaignTime'
 
-import type { Character } from '../types/character'
+import type { Character, Dnd5eLevelAdvancementRecordV1 } from '../types/character'
 import type { LegacyCharacterSave } from '../types/legacyCharacter'
 
 function uid(): string {
@@ -45,10 +45,11 @@ function uid(): string {
 }
 
 let lastSharedCharactersSnapshot = ''
-let lastLocalCharactersWriteAt = 0
-// 玩家端记录已应用的最新时间戳，丢弃乱序或陈旧的共享快照。
-// 与 DM 用的 lastLocalCharactersWriteAt 语义不同，故单列一个，避免相互污染。
+// Legacy snapshots without server metadata still use this timestamp watermark.
 let lastAppliedCharactersUpdatedAt = 0
+// Cross-device ordering must use the server-issued revision. Client wall clocks
+// are not comparable and can otherwise make an authoritative HP update look stale.
+const lastAppliedCharactersRevisionByRoom = new Map<string, number>()
 let characterSaveSeq = 0
 const LOCAL_CHARACTER_CREATE_TTL_MS = 60000
 const pendingLocalCharacterCreations = new Map<string, number>()
@@ -673,6 +674,157 @@ export function mergePendingLocalPluginFeatures(
   })
 }
 
+const PENDING_LOCAL_ADVANCEMENTS_TTL_MS = 30000
+const PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY = 'stars-character-advancements-v1'
+const pendingLocalAdvancements = new Map<string, {
+  records: Dnd5eLevelAdvancementRecordV1[]
+  updatedAt: number
+}>()
+let pendingLocalAdvancementsHydrated = false
+
+function advancementRecordsSnapshot(records: readonly Dnd5eLevelAdvancementRecordV1[] | undefined): string {
+  return JSON.stringify(records ?? [])
+}
+
+function pendingAdvancementAcknowledged(
+  character: Character,
+  records: readonly Dnd5eLevelAdvancementRecordV1[],
+): boolean {
+  const after = records.at(-1)?.after
+  return advancementRecordsSnapshot(character.dnd5eLevelAdvancements) === advancementRecordsSnapshot(records) &&
+    (!after || (
+      JSON.stringify(character.abilities) === JSON.stringify(after.abilities) &&
+      JSON.stringify([...(character.skills ?? [])].sort()) === JSON.stringify([...(after.skills ?? [])].sort()) &&
+      JSON.stringify([...(character.dnd5eFeatIds ?? [])].sort()) === JSON.stringify([...(after.dnd5eFeatIds ?? [])].sort())
+    ))
+}
+
+function advancementProjectionSnapshot(character: Character | undefined): string {
+  if (!character) return ''
+  return JSON.stringify({
+    records: character.dnd5eLevelAdvancements ?? [],
+    abilities: character.abilities,
+    skills: [...(character.skills ?? [])].sort(),
+    featIds: [...(character.dnd5eFeatIds ?? [])].sort(),
+  })
+}
+
+function persistPendingLocalAdvancements(): void {
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalAdvancements.size === 0) {
+      storage.removeItem(PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalAdvancements)),
+    )
+  } catch {
+    // The in-memory guard remains useful when localStorage is unavailable.
+  }
+}
+
+function hydratePendingLocalAdvancements(): void {
+  if (pendingLocalAdvancementsHydrated) return
+  pendingLocalAdvancementsHydrated = true
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, {
+      records?: unknown
+      updatedAt?: unknown
+    }>
+    for (const [id, pending] of Object.entries(parsed)) {
+      const updatedAt = Number(pending.updatedAt)
+      if (
+        !id ||
+        !Array.isArray(pending.records) ||
+        !pending.records.every((record) =>
+          record && typeof record === 'object' &&
+          (record as { schemaVersion?: unknown }).schemaVersion === 1) ||
+        !Number.isFinite(updatedAt)
+      ) continue
+      pendingLocalAdvancements.set(id, {
+        records: structuredClone(pending.records) as Dnd5eLevelAdvancementRecordV1[],
+        updatedAt,
+      })
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_ADVANCEMENTS_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject both reads and writes.
+    }
+  }
+}
+
+function gcPendingLocalAdvancements(now: number = Date.now()): void {
+  hydratePendingLocalAdvancements()
+  let changed = false
+  for (const [id, pending] of pendingLocalAdvancements) {
+    if (now - pending.updatedAt > PENDING_LOCAL_ADVANCEMENTS_TTL_MS) {
+      pendingLocalAdvancements.delete(id)
+      changed = true
+    }
+  }
+  if (changed) persistPendingLocalAdvancements()
+}
+
+export function markPendingLocalAdvancements(
+  id: string,
+  records: readonly Dnd5eLevelAdvancementRecordV1[],
+  now: number = Date.now(),
+): void {
+  hydratePendingLocalAdvancements()
+  pendingLocalAdvancements.set(id, {
+    records: records.map((record) => structuredClone(record)),
+    updatedAt: now,
+  })
+  persistPendingLocalAdvancements()
+}
+
+export function clearPendingLocalAdvancementsForTest(): void {
+  pendingLocalAdvancements.clear()
+  pendingLocalAdvancementsHydrated = true
+  persistPendingLocalAdvancements()
+}
+
+export function resetPendingLocalAdvancementsMemoryForTest(): void {
+  pendingLocalAdvancements.clear()
+  pendingLocalAdvancementsHydrated = false
+}
+
+export function mergePendingLocalAdvancements(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingLocalAdvancements(now)
+  if (pendingLocalAdvancements.size === 0) return sharedCharacters
+  return sharedCharacters.map((character) => {
+    const pending = pendingLocalAdvancements.get(character.id)
+    if (!pending) return character
+    if (pendingAdvancementAcknowledged(character, pending.records)) {
+      pendingLocalAdvancements.delete(character.id)
+      persistPendingLocalAdvancements()
+      return character
+    }
+    const after = pending.records.at(-1)?.after
+    return {
+      ...character,
+      dnd5eLevelAdvancements: structuredClone(pending.records),
+      ...(after ? {
+        abilities: { ...after.abilities },
+        skills: [...after.skills],
+        dnd5eFeatIds: after.dnd5eFeatIds ? [...after.dnd5eFeatIds] : undefined,
+      } : {}),
+    }
+  })
+}
+
 /**
  * 删除墓碑：id ⇒ 删除时间戳。
  * 没有墓碑时，一次本地删除若落在 `setTimeout(saveCharacters,0)` 窗口内、或对端尚未看到该删除，
@@ -756,6 +908,32 @@ interface SharedCharactersState {
   characters: Character[]
   selectedId: string | null
   updatedAt?: number
+  _sync?: {
+    schemaVersion: 1
+    revision: number
+    writerId: string
+    writtenAt: number
+  }
+}
+
+function sharedCharactersRoomKey(): string {
+  return getRoomSession()?.roomId ?? '__local__'
+}
+
+export function shouldApplySharedCharactersSnapshot(input: {
+  incomingRevision?: number
+  lastAppliedRevision?: number
+  incomingUpdatedAt?: number
+  lastAppliedUpdatedAt?: number
+}): boolean {
+  const incomingRevision = Number(input.incomingRevision)
+  const lastAppliedRevision = Number(input.lastAppliedRevision)
+  if (Number.isInteger(incomingRevision) && incomingRevision >= 0) {
+    return !Number.isInteger(lastAppliedRevision) ||
+      lastAppliedRevision < 0 ||
+      incomingRevision >= lastAppliedRevision
+  }
+  return (input.incomingUpdatedAt ?? 0) >= (input.lastAppliedUpdatedAt ?? 0)
 }
 
 export function mergePlayerWritableCharacter(local: Character, shared: Character): Character {
@@ -1024,6 +1202,12 @@ interface CharacterState {
     longRestsApplied: number
     longRestsBlocked: number
   }
+  reconcileCampaignTimeAndSave: (clock: SharedCampaignTimeState) => Promise<{
+    changed: boolean
+    dawnsApplied: number
+    longRestsApplied: number
+    longRestsBlocked: number
+  }>
 }
 
 export const useCharacterStore = create<CharacterState>()(
@@ -1040,20 +1224,25 @@ export const useCharacterStore = create<CharacterState>()(
           selectedId,
           updatedAt,
         }
-        lastLocalCharactersWriteAt = payload.updatedAt ?? Date.now()
         const result = await saveSharedResourceWithResult('characters', payload)
-        if (result.status !== 'saved' && seq === characterSaveSeq) {
-          lastLocalCharactersWriteAt = lastAppliedCharactersUpdatedAt
-        }
         if (result.status !== 'saved') {
           throw new Error(`characters-save-rejected:${result.status}`)
         }
         if (result.status === 'saved' && seq === characterSaveSeq) {
           lastSharedCharactersSnapshot = JSON.stringify(payload)
+          if (Number.isInteger(result.revision)) {
+            lastAppliedCharactersRevisionByRoom.set(sharedCharactersRoomKey(), Number(result.revision))
+          }
         }
         if (seq !== characterSaveSeq) return updatedAt
         return updatedAt
       }
+      let campaignTimeReconcileAndSavePromise: Promise<{
+        changed: boolean
+        dawnsApplied: number
+        longRestsApplied: number
+        longRestsBlocked: number
+      }> | null = null
 
       const saveCharacters = () => {
         const seq = ++characterSaveSeq
@@ -1088,13 +1277,12 @@ export const useCharacterStore = create<CharacterState>()(
             updatedAt: Date.now(),
           }
           if (seq !== characterSaveSeq) return
-          lastLocalCharactersWriteAt = payload.updatedAt ?? Date.now()
           const result = await saveSharedResourceWithResult('characters', payload)
-          if (result.status !== 'saved' && seq === characterSaveSeq) {
-            lastLocalCharactersWriteAt = lastAppliedCharactersUpdatedAt
-          }
           if (result.status === 'saved' && seq === characterSaveSeq) {
             lastSharedCharactersSnapshot = JSON.stringify(payload)
+            if (Number.isInteger(result.revision)) {
+              lastAppliedCharactersRevisionByRoom.set(sharedCharactersRoomKey(), Number(result.revision))
+            }
           }
         }
         void save()
@@ -1115,16 +1303,25 @@ export const useCharacterStore = create<CharacterState>()(
             saveCharacters()
             return
           }
-          if (!isPlayerPort() && (shared.updatedAt ?? 0) < lastLocalCharactersWriteAt) {
+          const roomKey = sharedCharactersRoomKey()
+          const incomingRevision = shared._sync?.revision
+          const lastAppliedRevision = lastAppliedCharactersRevisionByRoom.get(roomKey)
+          if (!shouldApplySharedCharactersSnapshot({
+            incomingRevision,
+            lastAppliedRevision,
+            incomingUpdatedAt: shared.updatedAt,
+            lastAppliedUpdatedAt: lastAppliedCharactersUpdatedAt,
+          })) {
             console.info('[characters-shared-stale-ignored]', {
+              incomingRevision,
+              lastAppliedRevision,
               sharedUpdatedAt: shared.updatedAt ?? 0,
-              lastLocalCharactersWriteAt,
+              lastAppliedCharactersUpdatedAt,
             })
             return
           }
           // DM 与玩家两端都丢弃严格更旧的乱序快照。
           const incomingUpdatedAt = shared.updatedAt ?? 0
-          if (incomingUpdatedAt < lastAppliedCharactersUpdatedAt) return
           const withoutTombstones = filterTombstonedCharacters(shared.characters)
           const filteredSharedCharacters = filterLegacySampleCharacters(withoutTombstones)
           const legacySamplesMustBeRepublished = !isPlayerPort() &&
@@ -1143,6 +1340,10 @@ export const useCharacterStore = create<CharacterState>()(
           )
           const sharedCharactersWithPendingHitPoints = mergePendingLocalCharacterHitPointEdits(
             sharedCharactersWithPendingPluginFeatures,
+            Date.now(),
+          )
+          const sharedCharactersWithPendingAdvancements = mergePendingLocalAdvancements(
+            sharedCharactersWithPendingHitPoints,
             Date.now(),
           )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
@@ -1172,26 +1373,37 @@ export const useCharacterStore = create<CharacterState>()(
               )
             },
           )
+          const pendingAdvancementsMustBeRepublished = sharedCharactersWithPendingAdvancements.some(
+            (character, index) =>
+              advancementProjectionSnapshot(character) !==
+              advancementProjectionSnapshot(sharedCharactersWithPendingHitPoints[index]),
+          )
           const pendingCharacterEditMustBeRepublished =
             pendingLevelMustBeRepublished || pendingFighterChoicesMustBeRepublished ||
             pendingClassChoicesMustBeRepublished || pendingPluginFeaturesMustBeRepublished ||
-            pendingHitPointsMustBeRepublished
+            pendingHitPointsMustBeRepublished || pendingAdvancementsMustBeRepublished
           const snapshot = JSON.stringify(shared)
           // 普通重复快照可短路；若它仍落后于持久化的本地编辑，则必须重新应用并重试保存。
           if (snapshot === lastSharedCharactersSnapshot && !pendingCharacterEditMustBeRepublished) {
             // saveCharacters 会在 PUT 前记录本地 snapshot；服务端回显该 snapshot 时仍须推进
             // 单调水位，否则玩家端随后可能接受夹在旧水位与本次 ACK 之间的乱序快照。
             lastAppliedCharactersUpdatedAt = incomingUpdatedAt
+            if (Number.isInteger(incomingRevision)) {
+              lastAppliedCharactersRevisionByRoom.set(roomKey, Number(incomingRevision))
+            }
             return
           }
           lastAppliedCharactersUpdatedAt = incomingUpdatedAt
+          if (Number.isInteger(incomingRevision)) {
+            lastAppliedCharactersRevisionByRoom.set(roomKey, Number(incomingRevision))
+          }
           lastSharedCharactersSnapshot = snapshot
           // 先剔除仍被墓碑标记的角色，避免旧全量快照复活已删除角色。
           // 不得复活它。墓碑过期后（GC）该过滤自动失效，被删 id 可被复用。
           const currentRoomSession = getRoomSession()
           const currentAccount = getAccountSession()
           let accountOwnershipMustBeRepublished = false
-          const sharedCharacters = sharedCharactersWithPendingHitPoints.map(finalizeCharacter).map((character) => {
+          const sharedCharacters = sharedCharactersWithPendingAdvancements.map(finalizeCharacter).map((character) => {
             if (
               currentRoomSession?.role === 'player' && currentAccount &&
               character.roomId === currentRoomSession.roomId &&
@@ -1237,7 +1449,6 @@ export const useCharacterStore = create<CharacterState>()(
                   ? get().selectedId
                   : nextSelectedId,
           })
-          if (shared.updatedAt != null) lastLocalCharactersWriteAt = shared.updatedAt
           // 页面可能在原 PUT 完成前刷新，另一端也可能发布更新较晚但内容较旧的全量数组。
           // 持久化的等级／战士选择覆盖旧快照并主动重试，直到服务端回显后清除待确认记录。
           if (
@@ -1320,6 +1531,12 @@ export const useCharacterStore = create<CharacterState>()(
         },
         update: (id, patch) => {
           if (patch.level != null) markPendingLocalCharacterLevelEdit(id, patch.level)
+          if (
+            patch.currentHp != null || patch.maxHp != null || patch.tempHp != null ||
+            patch.hitPointMaximumMode != null || patch.hitPointRolls != null || patch.hitPointDice != null
+          ) {
+            markPendingLocalCharacterHitPointEdit(id, patch)
+          }
           if (patch.dnd5eClassChoices?.fighter) {
             markPendingLocalFighterChoices(id, patch.dnd5eClassChoices.fighter)
           }
@@ -1329,6 +1546,9 @@ export const useCharacterStore = create<CharacterState>()(
           if (patch.dnd5ePluginFeatureIds) {
             markPendingLocalPluginFeatures(id, patch.dnd5ePluginFeatureIds)
           }
+          if (patch.dnd5eLevelAdvancements) {
+            markPendingLocalAdvancements(id, patch.dnd5eLevelAdvancements)
+          }
           const current = get().characters.find((character) => character.id === id)
           if (!current) return
           const adjustedPatch = reconcileDnd5eClassLevelPatch(current, patch)
@@ -1336,7 +1556,7 @@ export const useCharacterStore = create<CharacterState>()(
           const hitPointPlanChanged =
             patch.level != null || patch.charClass != null || patch.dnd5eClassLevels != null || patch.hitPointMaximumMode != null ||
             patch.hitPointRolls != null || (patch.abilities != null && patch.abilities.con !== current.abilities.con)
-          if (isPlayerPort() && hitPointPlanChanged) {
+          if (hitPointPlanChanged) {
             markPendingLocalCharacterHitPointEdit(id, {
               ...(next.currentHp === current.currentHp ? {} : { currentHp: next.currentHp }),
               maxHp: next.maxHp,
@@ -1350,14 +1570,12 @@ export const useCharacterStore = create<CharacterState>()(
           const current = get().characters.find((character) => character.id === id)
           if (!current) return
           const next = finalizeCharacter({ ...current, ...patch })
-          if (isPlayerPort()) {
-            markPendingLocalCharacterHitPointEdit(id, {
-              ...(patch.currentHp == null && next.currentHp === current.currentHp ? {} : { currentHp: next.currentHp }),
-              ...(patch.maxHp == null && next.maxHp === current.maxHp ? {} : { maxHp: next.maxHp }),
-              ...(patch.tempHp == null && next.tempHp === current.tempHp ? {} : { tempHp: next.tempHp }),
-              ...(patch.hitPointDice == null ? {} : { hitPointDice: next.hitPointDice?.map((pool) => ({ ...pool })) }),
-            })
-          }
+          markPendingLocalCharacterHitPointEdit(id, {
+            ...(patch.currentHp == null && next.currentHp === current.currentHp ? {} : { currentHp: next.currentHp }),
+            ...(patch.maxHp == null && next.maxHp === current.maxHp ? {} : { maxHp: next.maxHp }),
+            ...(patch.tempHp == null && next.tempHp === current.tempHp ? {} : { tempHp: next.tempHp }),
+            ...(patch.hitPointDice == null ? {} : { hitPointDice: next.hitPointDice?.map((pool) => ({ ...pool })) }),
+          })
           updateChar(id, () => next)
         },
         applyAuthorityUpdate: (id, patch) => {
@@ -1449,6 +1667,33 @@ export const useCharacterStore = create<CharacterState>()(
           if (changed) set({ characters: results.map((result) => result.character) })
           if (changed) saveCharacters()
           return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
+        },
+        reconcileCampaignTimeAndSave: async (clock) => {
+          if (campaignTimeReconcileAndSavePromise) {
+            await campaignTimeReconcileAndSavePromise
+          }
+          campaignTimeReconcileAndSavePromise = (async () => {
+            let dawnsApplied = 0
+            let longRestsApplied = 0
+            let longRestsBlocked = 0
+            const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(character, clock))
+            const changed = results.some((result) => result.changed)
+            for (const result of results) {
+              dawnsApplied += result.dawnsApplied
+              longRestsApplied += result.longRestsApplied
+              longRestsBlocked += result.longRestsBlocked
+            }
+            if (changed) {
+              set({ characters: results.map((result) => result.character) })
+              await publishCharactersSnapshot()
+            }
+            return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
+          })()
+          try {
+            return await campaignTimeReconcileAndSavePromise
+          } finally {
+            campaignTimeReconcileAndSavePromise = null
+          }
         },
 
       }

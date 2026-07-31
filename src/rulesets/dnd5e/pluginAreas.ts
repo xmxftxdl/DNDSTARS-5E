@@ -341,3 +341,34 @@ export function reconcileDnd5ePluginAreasOnMap(
   ) return anchoredMap
   return { ...anchoredMap, dnd5ePluginAreas: next, tokens }
 }
+
+/**
+ * 处理不能只用整轮编号表达的区域寿命。
+ * 例如冰风暴在施法者下一回合结束时才解除，因此同一轮中先于施法者行动的
+ * 生物仍会受到困难地形影响。
+ */
+export function expireDnd5ePluginAreasAtTurnBoundary(input: {
+  map: BattleMap
+  timing: 'turn-start' | 'turn-end'
+  round: number
+  tokenId: string
+}): BattleMap {
+  if (input.timing !== 'turn-end') return input.map
+  const previous = input.map.dnd5ePluginAreas ?? []
+  const next = previous.filter((area) =>
+    area.expiresAtSourceTurnEndAfterRound == null ||
+    area.sourceTokenId !== input.tokenId ||
+    input.round < area.expiresAtSourceTurnEndAfterRound,
+  )
+  if (next.length === previous.length) return input.map
+  const liveEffectTokenIds = new Set(next.flatMap((area) =>
+    area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : [],
+  ))
+  return {
+    ...input.map,
+    dnd5ePluginAreas: next,
+    tokens: input.map.tokens.filter((token) =>
+      !token.dnd5eSpellEffect || liveEffectTokenIds.has(token.id),
+    ),
+  }
+}

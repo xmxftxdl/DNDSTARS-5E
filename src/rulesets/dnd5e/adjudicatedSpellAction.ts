@@ -28,12 +28,28 @@ import {
 import type { Dnd5eSpellbookEntry } from './spellbook'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eWearingUnproficientArmor } from './equipment'
+import {
+  dnd5eCoreSpellComponentRequirements,
+  dnd5eSpellComponentCheck,
+  dnd5eSpellComponentsAvailable,
+} from './spellComponents'
+import {
+  dnd5eEffectiveSpellSelections,
+  dnd5eEffectiveSpellcastingSource,
+  dnd5eSubclassSpellSchoolAllowed,
+  dnd5eSubclassUnrestrictedSpellLimit,
+} from './subclassSpellcasting'
 
 export type Dnd5eAdjudicatedSpellRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'spell-unavailable'
+  | 'spell-not-known-or-prepared'
+  | 'spellcasting-class-unavailable'
+  | 'spell-school-restricted'
+  | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
+  | 'component-unavailable'
   | 'slot-unavailable'
   | 'action-unavailable'
   | 'bonus-action-unavailable'
@@ -111,6 +127,7 @@ export function dnd5eSpellbookEntryDescription(spell: Dnd5eSpellbookEntry): stri
 export function prepareDnd5eAdjudicatedSpell(input: {
   action: SharedPlayerActionState
   spell: Dnd5eSpellbookEntry | undefined
+  spellbookEntries?: readonly Dnd5eSpellbookEntry[]
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
@@ -139,12 +156,31 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     payload.castingClassId,
     input.spell.classes,
   )
-  const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
+  if (!castingClassId) return { ok: false, reason: 'spell-not-known-or-prepared' }
+  const effectiveSource = castingClassId
+    ? dnd5eEffectiveSpellcastingSource(actor, castingClassId)
+    : undefined
+  const definition = effectiveSource?.definition ??
+    (castingClassId ? dnd5eClassDefinition(castingClassId) : undefined)
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  if (
-    !definition?.spellcasting || !castingClassId || castingClassLevel < 1 ||
-    (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18))
-  ) return { ok: false, reason: 'spell-unavailable' }
+  if (!definition?.spellcasting || castingClassLevel < 1) {
+    return { ok: false, reason: 'spellcasting-class-unavailable' }
+  }
+  if (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18)) {
+    return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
+  }
+  const importedComponents = input.spell.imported?.components
+  const componentRequirements = importedComponents ? {
+    verbal: importedComponents.verbal,
+    somatic: importedComponents.somatic,
+    material: importedComponents.material,
+    costlyMaterial: (importedComponents.materialCostGp ?? 0) > 0,
+    consumedMaterial: importedComponents.materialConsumed === true,
+  } : dnd5eCoreSpellComponentRequirements(input.spell.id)
+  const componentCheck = dnd5eSpellComponentCheck(actor, componentRequirements, castingClassId)
+  if (!dnd5eSpellComponentsAvailable(componentCheck)) {
+    return { ok: false, reason: 'component-unavailable' }
+  }
   const castingTime = dnd5eSpellbookEntryCastingTime(input.spell)
   if (castingTime === 'reaction' || castingTime === 'unsupported') return { ok: false, reason: 'invalid-action' }
 
@@ -153,7 +189,26 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     : definition.spellcasting.kind === 'pact' && input.spell.level <= 5
       ? dnd5ePactSlotLevel(castingClassLevel)
       : payload.slotLevel
-  const selections = actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
+  const selections = effectiveSource
+    ? dnd5eEffectiveSpellSelections(actor, effectiveSource)
+    : actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
+  if (effectiveSource?.declarative && input.spell.level > 0) {
+    const entriesById = new Map(
+      [...(input.spellbookEntries ?? []), input.spell].map((entry) => [entry.id, entry]),
+    )
+    const unrestrictedSelected = (selections[effectiveSource.spellSelectionKey] ?? [])
+      .map((spellId) => entriesById.get(spellId))
+      .filter((entry): entry is Dnd5eSpellbookEntry =>
+        !!entry && entry.level > 0 && !dnd5eSubclassSpellSchoolAllowed(effectiveSource, entry),
+      )
+    if (
+      !dnd5eSubclassSpellSchoolAllowed(effectiveSource, input.spell) &&
+      (
+        unrestrictedSelected.length > dnd5eSubclassUnrestrictedSpellLimit(effectiveSource) ||
+        !unrestrictedSelected.some((entry) => entry.id === input.spell!.id)
+      )
+    ) return { ok: false, reason: 'spell-school-restricted' }
+  }
   if (input.spell.level > 0) {
     const resourceKey = definition.spellcasting.kind === 'pact' && input.spell.level <= 5
       ? 'dnd5e-pact-slot'

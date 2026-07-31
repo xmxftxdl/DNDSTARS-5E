@@ -4,6 +4,9 @@ import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
   dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveAbilityCheckDisadvantages,
+  dnd5eActiveActionOrBonusActionOnly,
+  dnd5eActiveArmorClassBonus,
   dnd5eActiveCarryingCapacityMultiplier,
   dnd5eActiveConditionImmunities,
   dnd5eActiveDarkvisionRangeFeet,
@@ -11,13 +14,20 @@ import {
   dnd5eActiveEffectsSeeInvisible,
   dnd5eActiveFlySpeed,
   dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveMaximumAttacksPerTurn,
+  dnd5eActiveOptionalBonusDice,
+  dnd5eActiveResistanceToAllDamage,
+  dnd5eActiveSavingThrowBonus,
+  dnd5eActiveSavingThrowDisadvantages,
   dnd5eActiveSizeRankDelta,
   dnd5eActiveSafeFallFeet,
   dnd5eActiveSpeedPenalty,
+  dnd5eActiveSpeedMultiplier,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveWeaponDamageD4Mode,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
+  removeDnd5eActiveEffectsByStandardCondition,
   removeDnd5eActiveEffectsForEvent,
   validateDnd5eActiveEffectsStrict,
 } from './activeEffects'
@@ -29,6 +39,113 @@ import {
 } from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
+  it('keeps suspended effects authoritative while excluding their conditions and modifiers', () => {
+    const charmed = {
+      ...createDnd5eConditionEffect({
+        id: 'mindless-rage:charmed',
+        condition: 'charmed',
+        source: { kind: 'spell', actorId: 'caster', rulesId: 'charm-person' },
+        targetId: 'berserker',
+        duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      }),
+      suspendedBy: ['class:berserker:mindless-rage'],
+    }
+    const dependent = {
+      ...createDnd5eMechanicalEffect({
+        id: 'mindless-rage:dependent',
+        definitionId: 'test:charm-dependent',
+        label: '魅惑依赖效果',
+        source: { kind: 'spell', actorId: 'caster', rulesId: 'charm-person' },
+        targetId: 'berserker',
+        dependsOnEffectId: charmed.id,
+        modifiers: { armorClassBonus: -2 },
+      }),
+      suspendedBy: ['class:berserker:mindless-rage'],
+    }
+
+    expect(normalizeDnd5eActiveEffects([charmed, dependent])).toHaveLength(2)
+    expect(dnd5eConditionsFromActiveEffects([charmed, dependent])).toEqual([])
+    expect(dnd5eActiveArmorClassBonus([charmed, dependent])).toBe(0)
+    expect(validateDnd5eActiveEffectsStrict([charmed, dependent])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...charmed,
+      suspendedBy: ['duplicate', 'duplicate'],
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('suspendedBy')]),
+    })
+  })
+
+  it('normalizes and validates player-controlled optional bonus dice', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:guidance',
+      label: '神导术',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'guidance' },
+      targetId: 'ally',
+      modifiers: {
+        optionalBonusDie: {
+          sides: 4,
+          appliesTo: ['ability-check'],
+          consumeOnUse: true,
+        },
+      },
+    })
+    expect(dnd5eActiveOptionalBonusDice([effect], 'ability-check')).toHaveLength(1)
+    expect(dnd5eActiveOptionalBonusDice([effect], 'saving-throw')).toHaveLength(0)
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: {
+        optionalBonusDie: {
+          sides: 20,
+          appliesTo: ['attack'],
+          consumeOnUse: false,
+        },
+      },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('optionalBonusDie')]),
+    })
+  })
+
+  it('normalizes reusable AC, saving throw, and all-damage resistance modifiers', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:warding-bond',
+      label: '守护之链',
+      source: { kind: 'spell', actorId: 'cleric' },
+      targetId: 'ally',
+      modifiers: {
+        armorClassBonus: 1,
+        savingThrowBonus: 1,
+        savingThrowBonusByAbility: { dex: -2 },
+        resistanceToAllDamage: true,
+      },
+    })
+    expect(dnd5eActiveArmorClassBonus([effect])).toBe(1)
+    expect(dnd5eActiveSavingThrowBonus([effect])).toBe(1)
+    expect(dnd5eActiveSavingThrowBonus([effect], 'dex')).toBe(-1)
+    expect(dnd5eActiveSavingThrowBonus([effect], 'wis')).toBe(1)
+    expect(dnd5eActiveResistanceToAllDamage([effect])).toBe(true)
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: {
+        armorClassBonus: 21,
+        savingThrowBonus: Number.NaN,
+        savingThrowBonusByAbility: { dex: -21 },
+        resistanceToAllDamage: 'yes',
+      },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.stringContaining('armorClassBonus'),
+        expect.stringContaining('savingThrowBonus'),
+        expect.stringContaining('savingThrowBonusByAbility'),
+        expect.stringContaining('resistanceToAllDamage'),
+      ]),
+    })
+  })
+
   it('normalizes the reusable see-invisible sight modifier', () => {
     const effect = createDnd5eMechanicalEffect({
       definitionId: 'srd-5.1:spell:see-invisibility',
@@ -77,6 +194,52 @@ describe('D&D 5e ActiveEffectInstance', () => {
     }])).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('safeFallFeet')]),
+    })
+  })
+
+  it('normalizes and queries ability-check and saving-throw disadvantages', () => {
+    const first = createDnd5eMechanicalEffect({
+      definitionId: 'test:disadvantage:first',
+      label: '能力检定与豁免劣势',
+      source: { kind: 'monster', actorId: 'monster' },
+      targetId: 'target',
+      modifiers: {
+        abilityCheckDisadvantages: ['str', 'str', 'dex'],
+        savingThrowDisadvantages: ['wis', 'wis'],
+      },
+    })
+    const second = createDnd5eMechanicalEffect({
+      definitionId: 'test:disadvantage:second',
+      label: '额外劣势',
+      source: { kind: 'monster', actorId: 'monster' },
+      targetId: 'target',
+      modifiers: {
+        abilityCheckDisadvantages: ['dex', 'con'],
+        savingThrowDisadvantages: ['cha', 'wis'],
+      },
+    })
+
+    expect(first.modifiers?.abilityCheckDisadvantages).toEqual(['str', 'dex'])
+    expect(first.modifiers?.savingThrowDisadvantages).toEqual(['wis'])
+    expect(dnd5eActiveAbilityCheckDisadvantages([first, second])).toEqual(['str', 'dex', 'con'])
+    expect(dnd5eActiveSavingThrowDisadvantages([first, second])).toEqual(['wis', 'cha'])
+    expect(validateDnd5eActiveEffectsStrict([first, second])).toMatchObject({ ok: true })
+
+    const malformed = {
+      ...first,
+      modifiers: {
+        ...first.modifiers,
+        abilityCheckDisadvantages: ['luck'],
+        savingThrowDisadvantages: 'wis',
+      },
+    }
+    expect(normalizeDnd5eActiveEffects([malformed])[0].modifiers).toBeUndefined()
+    expect(validateDnd5eActiveEffectsStrict([malformed])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.stringContaining('abilityCheckDisadvantages'),
+        expect.stringContaining('savingThrowDisadvantages'),
+      ]),
     })
   })
 
@@ -248,6 +411,41 @@ describe('D&D 5e ActiveEffectInstance', () => {
     })
   })
 
+  it('normalizes and combines conservative slow-breath action modifiers', () => {
+    const slowingBreath = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:slowing-breath', label: '迟缓吐息', targetId: 'target',
+      source: { kind: 'monster', actorId: 'copper-dragon' },
+      modifiers: {
+        speedMultiplier: 0.5,
+        maximumAttacksPerTurn: 1,
+        actionOrBonusActionOnly: true,
+      },
+    })
+    const stricterCap = createDnd5eMechanicalEffect({
+      definitionId: 'test:attack-cap', label: '更严格上限', targetId: 'target',
+      source: { kind: 'system' }, modifiers: { maximumAttacksPerTurn: 1 },
+    })
+    expect(dnd5eActiveSpeedMultiplier([slowingBreath])).toBe(0.5)
+    expect(dnd5eActiveMaximumAttacksPerTurn([slowingBreath, stricterCap])).toBe(1)
+    expect(dnd5eActiveActionOrBonusActionOnly([slowingBreath])).toBe(true)
+    expect(validateDnd5eActiveEffectsStrict([slowingBreath])).toMatchObject({ ok: true })
+    expect(normalizeDnd5eActiveEffects([{
+      ...slowingBreath,
+      modifiers: { speedMultiplier: 0, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
+    }])[0].modifiers).toBeUndefined()
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...slowingBreath,
+      modifiers: { speedMultiplier: 0, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.stringContaining('speedMultiplier'),
+        expect.stringContaining('maximumAttacksPerTurn'),
+        expect.stringContaining('actionOrBonusActionOnly'),
+      ]),
+    })
+  })
+
   it('strictly rejects malformed remote values instead of silently repairing them', () => {
     const effect = createDnd5eConditionEffect({
       id: 'blind', condition: 'blinded', targetId: 'target', source: { kind: 'dm' },
@@ -309,6 +507,204 @@ describe('D&D 5e ActiveEffectInstance', () => {
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('repeatSave')]),
     })
+  })
+
+  it('round-trips source-linked grapple relations and skill-based escape checks', () => {
+    const relation = {
+      schemaVersion: 1,
+      kind: 'grapple',
+      sourceActorId: 'ankheg',
+      sourceActionId: 'bite',
+      slotGroup: 'mandibles',
+      maxDistanceFeet: 5,
+      movement: 'drag-target',
+      endsOnSourceIncapacitated: true,
+    } as const
+    const effect = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation,
+    })
+
+    expect(effect.relation).toEqual(relation)
+    expect(effect.relation).not.toBe(relation)
+    expect(normalizeDnd5eActiveEffects([effect])).toEqual([effect])
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+  })
+
+  it('rejects malformed source-linked relations and mismatched escape skills', () => {
+    const effect = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'ankheg',
+        sourceActionId: 'bite',
+        slotGroup: 'mandibles',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      relation: { ...effect.relation!, sourceActorId: 'other-monster' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(normalizeDnd5eActiveEffects([{
+      ...effect,
+      relation: { ...effect.relation!, sourceActorId: 'other-monster' },
+    }])).toEqual([])
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      relation: { ...effect.relation!, unexpected: true },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      escapeCheck: { ...effect.escapeCheck!, skill: 'acrobatics' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('escapeCheck')]),
+    })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      escapeCheck: { ...effect.escapeCheck!, alternativeSkill: 'athletics' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('escapeCheck')]),
+    })
+  })
+
+  it('fails closed when a grapple relation is not an independent grappled root', () => {
+    const anchor = createDnd5eConditionEffect({
+      id: 'anchor:prone',
+      condition: 'prone',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+    })
+    const grapple = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'ankheg',
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const relationOnRestrained = {
+      ...grapple,
+      standardCondition: 'restrained' as const,
+    }
+    const dependentRelation = {
+      ...grapple,
+      dependsOnEffectId: anchor.id,
+    }
+
+    expect(validateDnd5eActiveEffectsStrict([relationOnRestrained])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(normalizeDnd5eActiveEffects([relationOnRestrained])).toEqual([])
+    expect(validateDnd5eActiveEffectsStrict([anchor, dependentRelation])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(normalizeDnd5eActiveEffects([anchor, dependentRelation])).toEqual([anchor])
+  })
+
+  it('cascades removal through source-specific effect dependencies', () => {
+    const poisoned = createDnd5eConditionEffect({
+      id: 'venom:poisoned',
+      condition: 'poisoned',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+    })
+    const paralyzed = createDnd5eConditionEffect({
+      id: 'venom:paralyzed',
+      condition: 'paralyzed',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      dependsOnEffectId: poisoned.id,
+    })
+    const removed = removeDnd5eActiveEffectsByStandardCondition({
+      effects: [poisoned, paralyzed],
+      condition: 'poisoned',
+    })
+    expect(removed.effects).toEqual([])
+    expect(removed.removed.map((effect) => effect.id)).toEqual([
+      poisoned.id,
+      paralyzed.id,
+    ])
+  })
+
+  it('rejects dangling, self-referencing, and cyclic effect dependencies at strict boundaries', () => {
+    const parent = createDnd5eConditionEffect({
+      id: 'parent',
+      condition: 'poisoned',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+    })
+    const child = createDnd5eConditionEffect({
+      id: 'child',
+      condition: 'paralyzed',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+      dependsOnEffectId: parent.id,
+    })
+    expect(validateDnd5eActiveEffectsStrict([parent, child])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([child])).toMatchObject({ ok: false })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...parent,
+      dependsOnEffectId: parent.id,
+    }])).toMatchObject({ ok: false })
+    expect(validateDnd5eActiveEffectsStrict([
+      { ...parent, dependsOnEffectId: child.id },
+      { ...child, dependsOnEffectId: parent.id },
+    ])).toMatchObject({ ok: false })
   })
 
   it('migrates old timed mechanics once and then treats them as native active effects', () => {

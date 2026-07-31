@@ -5,6 +5,10 @@ import type { Character } from '../../types/character'
 import { restoreDnd5eInventoryResources } from './items'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { advanceDnd5eDivineInterventionCalendarDays } from './restFeatures'
+import {
+  normalizeDnd5eHitPointMaximumReductionLedger,
+  recoverDnd5eHitPointMaximumReductions,
+} from './hitPointMaximumReductions'
 
 export interface Dnd5eCampaignTimeReconcileResult {
   character: Character
@@ -26,13 +30,21 @@ export function applyDnd5eLongRestBenefits(character: Character, completionWorld
   const gainsTranquility = dnd5eCharacterClassLevel(character, 'monk') >= 11 &&
     character.dnd5eClassChoices?.classes?.monk?.subclass === 'open-hand'
   const divineInterventionCooldownDays = character.dnd5eCombatState?.divineInterventionCooldownDays
+  const maximumReductionRecovery = recoverDnd5eHitPointMaximumReductions(
+    normalizeDnd5eHitPointMaximumReductionLedger(
+      character.dnd5eCombatState?.hitPointMaximumReductionLedger,
+    ),
+    'long-rest',
+  )
+  const restoredMaximum = maximumReductionRecovery.maximum ?? character.maxHp
   const exhaustionLevel = character.rulesetId === 'dnd5e-2014-srd-5.1'
     ? Math.max(0, Math.floor(character.exhaustionLevel ?? 0) - 1)
     : character.exhaustionLevel
   const restored = restoreDnd5eInventoryResources(restoreClassResources({
     ...character,
     exhaustionLevel,
-    currentHp: character.maxHp,
+    maxHp: restoredMaximum,
+    currentHp: restoredMaximum,
     tempHp: 0,
     hitPointDice: character.hitPointDice?.map((pool) => ({
       ...pool,
@@ -43,10 +55,19 @@ export function applyDnd5eLongRestBenefits(character: Character, completionWorld
     deathSaveStable: false,
     concentrating: false,
     dnd5eLastLongRestWorldMinute: completionWorldMinute,
-    dnd5eCombatState: gainsTranquility || divineInterventionCooldownDays
+    dnd5eCombatState:
+      gainsTranquility ||
+      divineInterventionCooldownDays ||
+      maximumReductionRecovery.ledger
       ? {
           ...(gainsTranquility ? { tranquilityActive: true } : {}),
           ...(divineInterventionCooldownDays ? { divineInterventionCooldownDays } : {}),
+          ...(maximumReductionRecovery.ledger
+            ? {
+                hitPointMaximumReductionLedger:
+                  maximumReductionRecovery.ledger,
+              }
+            : {}),
         }
       : undefined,
   }, 'long-rest'), 'long-rest')

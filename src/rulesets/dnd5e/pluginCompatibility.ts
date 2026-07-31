@@ -1,4 +1,4 @@
-import { CLIENT_SHARED_PROTOCOL_VERSION } from '../../lib/sharedProtocol'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from '../../lib/sharedProtocolVersion'
 import type {
   Dnd5ePluginDeclaredCapability,
   Dnd5ePluginDependency,

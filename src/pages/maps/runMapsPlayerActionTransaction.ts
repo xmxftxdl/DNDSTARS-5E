@@ -13,6 +13,7 @@ export interface RunMapsPlayerActionTransactionInput {
   clearOutcome: (actionId: string) => void
   setTransactionActive: (active: boolean, transactionId: string | null) => void
   recover: (error: unknown) => Promise<void>
+  rejectAfterRecovery?: (error: unknown) => Promise<void> | void
   now?: number
 }
 
@@ -53,6 +54,7 @@ export function runMapsPlayerActionTransaction(input: RunMapsPlayerActionTransac
       input.setTransactionActive(false, null)
       input.clearOutcome(action.id)
       await input.recover(error)
+      await input.rejectAfterRecovery?.(error)
     },
   )
 }

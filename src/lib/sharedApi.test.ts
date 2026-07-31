@@ -6,6 +6,16 @@ import {
   sharedEventApiCandidates,
   sharedWriteApiCandidates,
 } from './sharedApi'
+import { ROOM_SESSION_STORAGE_KEY, type RoomSession } from './roomSession'
+
+function localStorageDouble() {
+  const values = new Map<string, string>()
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, String(value)),
+    removeItem: (key: string) => values.delete(key),
+  }
+}
 
 // Pin the previously-untested client sync-layer routing core (src/lib/sharedApi.ts
 // had ZERO .test.ts references). The base-list parse de-DUPLICATES + trims + drops empties, and the
@@ -87,5 +97,66 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     await expect(saveSharedResourceWithResult('test-save-conflict', { updatedAt: 2 })).resolves.toEqual({
       status: 'conflict', expectedRevision: 0, currentRevision: 4,
     })
+  })
+
+  it('persists a player wizard preparation during active combat instead of keeping it only in memory', async () => {
+    const localStorage = localStorageDouble()
+    const session: RoomSession = {
+      roomId: 'ABC234',
+      roomName: 'Test room',
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      memberId: 'member-player-123',
+      roomToken: 'room-token-abcdefghijklmnopqrstuvwxyz-1234567890',
+      clientId: 'player-browser',
+      role: 'player',
+      slot: 'player1',
+      displayName: 'Wizard',
+      createdAt: 1,
+    }
+    localStorage.setItem(ROOM_SESSION_STORAGE_KEY, JSON.stringify(session))
+    vi.stubGlobal('window', {
+      localStorage,
+      dispatchEvent: vi.fn(),
+      location: {
+        origin: 'http://127.0.0.1:5274',
+        protocol: 'http:',
+        hostname: '127.0.0.1',
+        port: '5274',
+      },
+    })
+    vi.stubEnv('VITE_SHARED_API_BASES', 'http://127.0.0.1:5273/api')
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 404,
+        headers: { 'X-Stars-State-Revision': '0' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await saveSharedResourceWithResult('characters', {
+      selectedId: 'wizard-1',
+      characters: [{
+        id: 'wizard-1',
+        name: 'Wizard',
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              selections: {
+                'wizard-spellbook': ['magic-missile'],
+                'spell-prepared': ['magic-missile'],
+              },
+            },
+          },
+        },
+      }],
+    })
+
+    expect(result).toEqual({ status: 'saved', revision: 1 })
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/state/combat'))).toBe(false)
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
   })
 })

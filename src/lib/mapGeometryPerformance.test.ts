@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { compileGeometryCached, raycastGeometry } from '../../shared/map-geometry-kernel.mjs'
-import { createEmptyMapGeometry, type MapGeometryState } from './mapGeometry'
+import {
+  createEmptyMapGeometry,
+  mapGeometryLineOfSightBlocked,
+  setMapGeometryRuntime,
+  type MapGeometryState,
+} from './mapGeometry'
 
 function largeGeometry(segmentCount: number): MapGeometryState {
   const geometry = createEmptyMapGeometry(`large-${segmentCount}`, 1)
@@ -45,6 +50,24 @@ describe('map geometry performance budgets', () => {
         })
       }
       expect(performance.now() - queryStarted).toBeLessThan(5_000)
+    }
+  })
+
+  it('reuses the installed runtime index without rescanning a large geometry signature', () => {
+    const geometry = largeGeometry(1_000)
+    setMapGeometryRuntime([geometry])
+    try {
+      const queryStarted = performance.now()
+      for (let index = 0; index < 5_000; index += 1) {
+        mapGeometryLineOfSightBlocked({
+          geometry,
+          from: { x: 1, y: 600 + index % 20 },
+          to: { x: 10, y: 600 + index % 20 },
+        })
+      }
+      expect(performance.now() - queryStarted).toBeLessThan(1_500)
+    } finally {
+      setMapGeometryRuntime([])
     }
   })
 })

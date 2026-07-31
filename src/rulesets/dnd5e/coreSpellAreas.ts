@@ -47,6 +47,8 @@ export interface Dnd5eCoreSpellAreaDeclaration {
   minimumSlotLevel: number
   template: SkillAoeTargeting
   durationRounds: number
+  /** 区域在施法者下一回合结束时到期，而不是在整轮切换时提前移除。 */
+  expiresAtSourceNextTurnEnd?: boolean
   concentration: boolean
   anchorMode: Dnd5ePersistentAreaAnchorMode
   movement?: Dnd5ePersistentAreaMovementDeclaration
@@ -66,6 +68,21 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  * Headless Plugin API V2 的声明边界创建区域。
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
+  {
+    spellId: 'mage-hand',
+    label: '法师之手',
+    minimumSlotLevel: 0,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 30 },
+    durationRounds: 10,
+    concentration: false,
+    anchorMode: 'fixed',
+    movement: { economy: 'action', maximumFeet: 30 },
+    relation: 'any',
+    includeSelf: true,
+    color: '#a78bfa',
+    visual: { preset: 'arcane', intensity: 'subtle' },
+    triggers: [],
+  },
   {
     spellId: 'darkness',
     label: '黑暗术',
@@ -400,6 +417,22 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
       },
     ],
   },
+  {
+    spellId: 'ice-storm',
+    label: '冰风暴·冰雹地面',
+    minimumSlotLevel: 4,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 300 },
+    durationRounds: 1,
+    expiresAtSourceNextTurnEnd: true,
+    concentration: false,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#bfdbfe',
+    visual: { preset: 'arcane', intensity: 'subtle' },
+    triggers: [],
+  },
 ]
 
 export function getDnd5eCoreSpellAreaDeclaration(
@@ -482,6 +515,9 @@ export function createDnd5eCoreSpellArea(input: {
     cells: input.cells.map((cell) => ({ ...cell })),
     createdRound: input.round,
     expiresAfterRound: input.round + (input.durationRounds ?? declaration.durationRounds),
+    expiresAtSourceTurnEndAfterRound: declaration.expiresAtSourceNextTurnEnd
+      ? input.round + 1
+      : undefined,
     concentrationId: declaration.concentration ? declaration.spellId : undefined,
     anchorMode: declaration.anchorMode,
     anchorTokenId: input.anchorTokenId ?? (

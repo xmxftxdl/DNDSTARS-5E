@@ -8,6 +8,7 @@ import {
   syncDnd5eHitPoints,
   syncDnd5ePrimalChampion,
 } from './hitPoints'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -160,6 +161,45 @@ describe('D&D 5e 2014 character hit points', () => {
       dnd5eClassChoices: { classes: { sorcerer: { subclass: 'draconic' } } },
     })
     expect(dnd5eFixedMaxHp(sorcerer)).toBe(37)
+  })
+
+  it('applies an imported racial per-level HP bonus to fixed and manual totals', () => {
+    const pluginId = 'local.test.hill-dwarf'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Hill Dwarf Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerRace({
+          id: 'hill-dwarf',
+          name: '丘陵矮人测试',
+          speedFeet: 25,
+          hitPointsPerLevelBonus: 1,
+        })
+      },
+    })
+    try {
+      const hillDwarf = fighter({
+        race: '丘陵矮人测试',
+        dnd5eRaceId: `${pluginId}:hill-dwarf`,
+        level: 5,
+        maxHp: 39,
+        currentHp: 39,
+        hitPointMaximumMode: 'fixed',
+      })
+      expect(dnd5eFixedMaxHp(hillDwarf)).toBe(39)
+      expect(dnd5eManualMaxHp({
+        ...hillDwarf,
+        hitPointRolls: [10, 5, 5, 5, 5],
+      })).toBe(35)
+      expect(syncDnd5eHitPoints(hillDwarf)).toMatchObject({
+        maxHp: 39,
+        currentHp: 39,
+      })
+    } finally {
+      dispose()
+    }
   })
 
   it('applies Primal Champion once and reverses it when the Barbarian drops below level 20', () => {

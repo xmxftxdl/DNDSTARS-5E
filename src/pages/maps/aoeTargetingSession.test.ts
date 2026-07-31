@@ -29,6 +29,16 @@ describe('mapAoeTargetingSessionKey', () => {
       .not.toBe(mapAoeTargetingSessionKey({ spellArea: { ...base, slotLevel: 4 } }))
   })
 
+  it('uses a stable identity for a racial innate spell without a class id', () => {
+    expect(mapAoeTargetingSessionKey({
+      spellArea: {
+        characterId: 'dragonborn',
+        spellId: 'burning-hands',
+        slotLevel: 1,
+      },
+    })).toBe('spell:dragonborn:racial-innate:burning-hands:1:')
+  })
+
   it('uses the active targeting source priority and clears when none is active', () => {
     expect(mapAoeTargetingSessionKey({
       coreAreaMove: { characterId: 'wizard', areaId: 'flaming-sphere' },
@@ -55,7 +65,7 @@ describe('mapSpellTargetIdsForAuthoritySubmission', () => {
   it('preserves explicitly selected targets for selective spells', () => {
     expect(mapSpellTargetIdsForAuthoritySubmission({
       hasArea: true,
-      targetKind: 'ally',
+      targetKind: 'creature',
       selectedTargetIds: ['cleric', 'fighter', 'fighter'],
     })).toEqual(['cleric', 'fighter'])
   })

@@ -4,6 +4,27 @@ import {
   AccountApiError,
   type AccountPluginVersion,
 } from './accountApi'
+import type {
+  MarketplaceAutomationReportV1,
+  MarketplacePublicationV1,
+  MarketplaceRightsManifestV1,
+} from '../../shared/marketplace-publication.mjs'
+import type {
+  MarketplaceEntitlementV1,
+  MarketplaceProductManifestV1,
+  MarketplaceProductSignatureV1,
+} from '../../shared/marketplace-entitlement.mjs'
+import type { MarketplaceOrderV1 } from '../../shared/marketplace-order.mjs'
+import type {
+  MarketplaceLedgerBalance,
+  MarketplaceLedgerEntryV1,
+} from '../../shared/marketplace-ledger.mjs'
+import type { MarketplacePayoutV1 } from '../../shared/marketplace-payout.mjs'
+import {
+  verifyMarketplacePackageIntegrity,
+  verifyMarketplaceProductSignature,
+  type MarketplaceSigningKey,
+} from './marketplaceSignature'
 
 export type PluginPublicationVisibility = 'public' | 'unlisted' | 'private'
 export type PluginPublicationStatus = 'pending' | 'published' | 'rejected' | 'suspended' | 'withdrawn'
@@ -11,6 +32,23 @@ export type PluginPublicationStatus = 'pending' | 'published' | 'rejected' | 'su
 export interface PluginCatalogPublisher {
   accountId: string
   displayName: string
+  creatorVerified?: boolean
+}
+
+export type MarketplaceCreatorStatus = 'unregistered' | 'pending' | 'verified' | 'rejected' | 'suspended'
+
+export interface MarketplaceCreatorProfile {
+  schemaVersion: 1
+  accountId: string
+  displayName: string
+  status: MarketplaceCreatorStatus
+  countryOrRegion?: string
+  verificationReference?: string
+  policyVersion?: string
+  noticeVersion?: string
+  appliedAt?: number
+  verifiedAt?: number
+  moderationNote?: string
 }
 
 export interface PluginCatalogVersion extends Omit<AccountPluginVersion, 'schemaVersion' | 'name' | 'publisher' |
@@ -21,6 +59,11 @@ export interface PluginCatalogVersion extends Omit<AccountPluginVersion, 'schema
   submittedAt: number
   publishedAt?: number
   moderationNote?: string
+  storeDescription?: string
+  marketplace?: MarketplacePublicationV1
+  automatedAnalysis?: MarketplaceAutomationReportV1
+  productManifest?: MarketplaceProductManifestV1
+  productSignature?: MarketplaceProductSignatureV1
 }
 
 export interface PluginCatalogEntry {
@@ -34,6 +77,53 @@ export interface PluginCatalogEntry {
   versions: PluginCatalogVersion[]
   createdAt: number
   updatedAt: number
+}
+
+export interface MarketplaceCapabilities {
+  schemaVersion: 1
+  marketMode: 'free-beta' | 'live'
+  freePublishingEnabled: boolean
+  paidPublishingEnabled: boolean
+  checkoutAvailable: boolean
+  creatorVerificationMode: 'manual-review' | 'provider'
+  moderationConfigured: boolean
+}
+
+export interface MarketplaceCreatorAnalyticsPoint {
+  day: string
+  views: number
+  downloads: number
+  installs: number
+  sales: number
+  revenueMinor: Record<string, number>
+}
+
+export interface MarketplaceCreatorProductAnalytics {
+  productId: string
+  name: string
+  views: number
+  downloads: number
+  installs: number
+  activeInstallations: number
+  sales: number
+  installConversionRate: number
+  revenueMinor: Record<string, number>
+}
+
+export interface MarketplaceCreatorAnalytics {
+  schemaVersion: 1
+  generatedAt: number
+  periodDays: number
+  totals: Omit<MarketplaceCreatorProductAnalytics, 'productId' | 'name'>
+  series: MarketplaceCreatorAnalyticsPoint[]
+  products: MarketplaceCreatorProductAnalytics[]
+}
+
+export interface MarketplaceCreatorPublication {
+  id: string
+  name: string
+  versions: Array<Pick<PluginCatalogVersion,
+    'version' | 'status' | 'submittedAt' | 'publishedAt' | 'moderationNote' | 'visibility'>>
 }
 
 async function catalogRequest<T>(path: string, init?: RequestInit, accountRequired = false): Promise<T> {
@@ -61,6 +151,17 @@ async function catalogRequest<T>(path: string, init?: RequestInit, accountRequir
   throw new AccountApiError(reachedServer ? 'plugin-catalog-request-failed' : 'server-unavailable')
 }
 
+let marketplaceSigningKeyPromise: Promise<MarketplaceSigningKey> | null = null
+
+export function loadMarketplaceSigningKey(): Promise<MarketplaceSigningKey> {
+  marketplaceSigningKeyPromise ??= catalogRequest<MarketplaceSigningKey>('/plugins/signing-key')
+    .catch((error) => {
+      marketplaceSigningKeyPromise = null
+      throw error
+    })
+  return marketplaceSigningKeyPromise
+}
+
 export async function loadPluginCatalog(input: {
   query?: string
   category?: string
@@ -74,6 +175,10 @@ export async function loadPluginCatalog(input: {
     `/plugins/catalog${params.size ? `?${params.toString()}` : ''}`,
   )
   return Array.isArray(response.plugins) ? response.plugins : []
+}
+
+export async function loadMarketplaceCapabilities(): Promise<MarketplaceCapabilities> {
+  return catalogRequest('/marketplace/capabilities', { method: 'GET' })
 }
 
 export async function loadPluginCatalogEntry(pluginId: string): Promise<PluginCatalogEntry> {
@@ -92,7 +197,18 @@ export async function loadPluginPublisher(accountId: string): Promise<{
 
 export async function publishAccountPluginVersion(
   plugin: Pick<AccountPluginVersion, 'id' | 'version'>,
-  input: { visibility: PluginPublicationVisibility; changelog?: string; tags?: string[] },
+  input: {
+    visibility: PluginPublicationVisibility
+    changelog?: string
+    tags?: string[]
+    storeDescription?: string
+    commerce?: {
+      schemaVersion: 1
+      productType: 'plugin' | 'adventure'
+      pricing: Pick<MarketplacePublicationV1['pricing'], 'kind' | 'currency' | 'amountMinor'>
+    }
+    rightsManifest?: MarketplaceRightsManifestV1
+  },
 ): Promise<{ publication: unknown; status?: PluginPublicationStatus }> {
   return catalogRequest(
     `/accounts/me/plugins/${encodeURIComponent(plugin.id)}/versions/${encodeURIComponent(plugin.version)}/publication`,
@@ -101,15 +217,70 @@ export async function publishAccountPluginVersion(
   )
 }
 
+export async function loadMarketplaceCreatorProfile(): Promise<MarketplaceCreatorProfile> {
+  const response = await catalogRequest<{ creator: MarketplaceCreatorProfile }>(
+    '/accounts/me/creator',
+    { method: 'GET' },
+    true,
+  )
+  return response.creator
+}
+
+export async function applyForMarketplaceCreator(input: {
+  countryOrRegion: string
+  verificationReference: string
+  acceptedPolicyVersion: string
+  acceptedNoticeVersion: string
+}): Promise<MarketplaceCreatorProfile> {
+  const response = await catalogRequest<{ creator: MarketplaceCreatorProfile }>(
+    '/accounts/me/creator',
+    { method: 'POST', body: JSON.stringify(input) },
+    true,
+  )
+  return response.creator
+}
+
+export async function moderateMarketplaceCreator(input: {
+  accountId: string
+  action: 'approve' | 'reject' | 'suspend'
+  note?: string
+}): Promise<void> {
+  await catalogRequest(
+    `/plugins/creators/${encodeURIComponent(input.accountId)}/moderate`,
+    { method: 'POST', body: JSON.stringify({ action: input.action, note: input.note }) },
+    true,
+  )
+}
+
 export async function downloadPublicPlugin(
   pluginId: string,
-  version: Pick<PluginCatalogVersion, 'version' | 'integrity' | 'fileName'>,
+  version: Pick<PluginCatalogVersion,
+    'version' | 'integrity' | 'fileName' | 'marketplace' | 'productManifest' | 'productSignature'>,
 ): Promise<{ bytes: ArrayBuffer; fileName: string }> {
+  if (version.marketplace?.pricing.kind === 'paid' && (!version.productManifest || !version.productSignature)) {
+    throw new AccountApiError('marketplace-signature-required', 409)
+  }
+  if (version.productManifest && version.productSignature) {
+    if (
+      version.productManifest.productId !== pluginId ||
+      version.productManifest.version !== version.version ||
+      version.productManifest.integrity !== version.integrity ||
+      !await verifyMarketplaceProductSignature({
+        manifest: version.productManifest,
+        signature: version.productSignature,
+        key: await loadMarketplaceSigningKey(),
+      })
+    ) throw new AccountApiError('marketplace-signature-invalid', 409)
+  }
   let reachedServer = false
+  const session = getAccountSession()
   for (const api of sharedLobbyApiCandidates()) {
     try {
       const response = await fetch(
         `${api}/plugins/catalog/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version.version)}/download`,
+        {
+          headers: session ? { 'X-Stars-Account-Token': session.sessionToken } : {},
+        },
       )
       reachedServer = true
       if (!response.ok) {
@@ -125,12 +296,218 @@ export async function downloadPublicPlugin(
       } catch {
         // File names are cosmetic; identity remains the signed manifest and integrity.
       }
-      return { bytes: await response.arrayBuffer(), fileName }
+      const bytes = await response.arrayBuffer()
+      if (!await verifyMarketplacePackageIntegrity(bytes, version.integrity)) {
+        throw new AccountApiError('public-plugin-integrity-mismatch', 409)
+      }
+      return { bytes, fileName }
     } catch (error) {
       if (error instanceof AccountApiError) throw error
     }
   }
   throw new AccountApiError(reachedServer ? 'plugin-catalog-request-failed' : 'server-unavailable')
+}
+
+export async function loadMarketplaceEntitlements(): Promise<MarketplaceEntitlementV1[]> {
+  const response = await catalogRequest<{ entitlements: MarketplaceEntitlementV1[] }>(
+    '/accounts/me/entitlements',
+    { method: 'GET' },
+    true,
+  )
+  return Array.isArray(response.entitlements) ? response.entitlements : []
+}
+
+export async function grantSandboxMarketplaceEntitlement(
+  pluginId: string,
+  version: string,
+): Promise<MarketplaceEntitlementV1> {
+  const response = await catalogRequest<{ entitlement: MarketplaceEntitlementV1 }>(
+    `/plugins/catalog/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}/entitlements`,
+    { method: 'POST', body: JSON.stringify({ sandbox: true }) },
+    true,
+  )
+  return response.entitlement
+}
+
+export async function moderateMarketplaceEntitlement(input: {
+  entitlementId: string
+  status: MarketplaceEntitlementV1['status']
+  reason?: string
+}): Promise<MarketplaceEntitlementV1> {
+  const response = await catalogRequest<{ entitlement: MarketplaceEntitlementV1 }>(
+    `/plugins/entitlements/${encodeURIComponent(input.entitlementId)}/status`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        status: input.status,
+        reason: input.reason?.trim() || undefined,
+      }),
+    },
+    true,
+  )
+  return response.entitlement
+}
+
+export async function createMarketplaceOrder(input: {
+  productId: string
+  version: string
+  idempotencyKey?: string
+}): Promise<{
+  order: MarketplaceOrderV1
+  sandboxAvailable: boolean
+  checkoutAvailable: boolean
+}> {
+  const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID()
+  return catalogRequest(
+    '/marketplace/orders',
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({
+        productId: input.productId,
+        version: input.version,
+        idempotencyKey,
+      }),
+    },
+    true,
+  )
+}
+
+export async function startMarketplaceCheckout(orderId: string): Promise<{
+  order: MarketplaceOrderV1
+  checkout: {
+    provider: string
+    providerOrderId: string
+    checkoutUrl: string
+    expiresAt: number
+  }
+}> {
+  return catalogRequest(
+    `/marketplace/orders/${encodeURIComponent(orderId)}/checkout`,
+    { method: 'POST', body: '{}' },
+    true,
+  )
+}
+
+export async function completeSandboxMarketplaceOrder(
+  orderId: string,
+): Promise<MarketplaceOrderV1> {
+  const response = await catalogRequest<{ order: MarketplaceOrderV1 }>(
+    `/marketplace/orders/${encodeURIComponent(orderId)}/sandbox-payment`,
+    { method: 'POST', body: '{}' },
+    true,
+  )
+  return response.order
+}
+
+export async function loadMarketplaceOrders(): Promise<MarketplaceOrderV1[]> {
+  const response = await catalogRequest<{ orders: MarketplaceOrderV1[] }>(
+    '/marketplace/orders',
+    { method: 'GET' },
+    true,
+  )
+  return Array.isArray(response.orders) ? response.orders : []
+}
+
+export async function cancelMarketplaceOrder(orderId: string): Promise<MarketplaceOrderV1> {
+  const response = await catalogRequest<{ order: MarketplaceOrderV1 }>(
+    `/marketplace/orders/${encodeURIComponent(orderId)}/cancel`,
+    { method: 'POST', body: '{}' },
+    true,
+  )
+  return response.order
+}
+
+export async function loadMarketplaceCreatorLedger(): Promise<{
+  balances: MarketplaceLedgerBalance[]
+  entries: MarketplaceLedgerEntryV1[]
+  settlementHoldDays: number
+}> {
+  return catalogRequest(
+    '/marketplace/creators/me/ledger',
+    { method: 'GET' },
+    true,
+  )
+}
+
+export async function loadMarketplaceCreatorAnalytics(
+  periodDays = 30,
+): Promise<MarketplaceCreatorAnalytics> {
+  const days = Math.max(7, Math.min(365, Math.round(periodDays)))
+  return catalogRequest(
+    `/marketplace/creators/me/analytics?days=${days}`,
+    { method: 'GET' },
+    true,
+  )
+}
+
+export async function loadMarketplaceCreatorPublications(): Promise<MarketplaceCreatorPublication[]> {
+  const response = await catalogRequest<{ publications: MarketplaceCreatorPublication[] }>(
+    '/marketplace/creators/me/publications',
+    { method: 'GET' },
+    true,
+  )
+  return Array.isArray(response.publications) ? response.publications : []
+}
+
+export async function recordMarketplaceInstallation(input: {
+  productId: string
+  version: string
+  active: boolean
+}): Promise<void> {
+  await catalogRequest(
+    `/plugins/catalog/${encodeURIComponent(input.productId)}/versions/${encodeURIComponent(input.version)}/installation`,
+    { method: 'POST', body: JSON.stringify({ active: input.active }) },
+    true,
+  )
+}
+
+export async function loadMarketplaceCreatorPayouts(): Promise<MarketplacePayoutV1[]> {
+  const response = await catalogRequest<{ payouts: MarketplacePayoutV1[] }>(
+    '/marketplace/creators/me/payouts',
+    { method: 'GET' },
+    true,
+  )
+  return Array.isArray(response.payouts) ? response.payouts : []
+}
+
+export async function requestMarketplaceCreatorPayout(input: {
+  currency: 'CNY' | 'USD'
+  amountMinor: number
+  idempotencyKey?: string
+}): Promise<MarketplacePayoutV1> {
+  const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID()
+  const response = await catalogRequest<{ payout: MarketplacePayoutV1 }>(
+    '/marketplace/creators/me/payouts',
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ ...input, idempotencyKey }),
+    },
+    true,
+  )
+  return response.payout
+}
+
+export async function moderateMarketplacePayout(input: {
+  payoutId: string
+  action: 'approve' | 'reject' | 'mark-paid'
+  note?: string
+  externalTransferReference?: string
+}): Promise<MarketplacePayoutV1> {
+  const response = await catalogRequest<{ payout: MarketplacePayoutV1 }>(
+    `/marketplace/payouts/${encodeURIComponent(input.payoutId)}/moderate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        action: input.action,
+        note: input.note,
+        externalTransferReference: input.externalTransferReference,
+      }),
+    },
+    true,
+  )
+  return response.payout
 }
 
 export async function reportPublicPlugin(input: {
@@ -168,10 +545,20 @@ export interface PluginModerationQueue {
     status: string
     createdAt: number
   }>
+  creatorApplications: MarketplaceCreatorProfile[]
+  payouts: Array<MarketplacePayoutV1 & {
+    verifiedRecipientReference?: string
+  }>
 }
 
 export async function loadPluginModerationQueue(): Promise<PluginModerationQueue> {
-  return catalogRequest('/plugins/moderation', { method: 'GET' }, true)
+  const response = await catalogRequest<PluginModerationQueue>('/plugins/moderation', { method: 'GET' }, true)
+  return {
+    pending: Array.isArray(response.pending) ? response.pending : [],
+    reports: Array.isArray(response.reports) ? response.reports : [],
+    creatorApplications: Array.isArray(response.creatorApplications) ? response.creatorApplications : [],
+    payouts: Array.isArray(response.payouts) ? response.payouts : [],
+  }
 }
 
 export async function moderatePluginVersion(input: {

@@ -7,6 +7,7 @@ import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type { RoomSession } from '../lib/roomSession'
+import { resolveInitiativePortrait } from '../lib/portraitPresentation'
 
 export function placeableRoomCharacters(
   characters: readonly Character[],
@@ -68,7 +69,7 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         tokenId: token.id,
         label: ch?.name || token.label,
         emoji: ch?.avatar || token.emoji,
-        portrait: ch?.initiativePortrait ?? ch?.portrait ?? token.portrait,
+        portrait: resolveInitiativePortrait(ch, token),
         portraitImageId: token.portraitImageId,
         color: token.color,
         accent: ch?.accent,
@@ -82,12 +83,22 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         : [normal, {
             ...normal,
             slotId: `${token.id}:thief-reflexes`,
+            firstRoundOnly: true,
             turnKind: 'thief-reflexes' as const,
             roll: reflexesInitiative,
           }]
     })
     .flat()
     .sort((a, b) => b.roll - a.roll)
+}
+
+export function initiativeOrderForRound(
+  order: readonly InitiativeEntry[],
+  round: number,
+): InitiativeEntry[] {
+  return round <= 1
+    ? [...order]
+    : order.filter((entry) => entry.firstRoundOnly !== true)
 }
 
 export function insertInitiativeEntriesPreservingActive(

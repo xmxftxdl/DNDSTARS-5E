@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { characterCompatibilityForRoom, type AccountCharacterRecord } from './accountApi'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  characterCompatibilityForRoom,
+  uploadAccountPlugin,
+  type AccountCharacterRecord,
+} from './accountApi'
 import type { RoomRulesSnapshot } from './roomSession'
 
 const plugin = {
@@ -48,5 +52,61 @@ describe('账号角色兼容性核对', () => {
 
   it('没有房间规则快照时拒绝启用角色', () => {
     expect(characterCompatibilityForRoom(record(), null)).toMatchObject({ compatible: false })
+  })
+})
+
+describe('账号插件本地隐私边界', () => {
+  it('在发起 fetch 前拒绝 local-only 包', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    try {
+      await expect(uploadAccountPlugin({
+        manifest: {
+          id: 'local.example.private',
+          name: 'Private local package',
+          version: '1.0.0',
+          apiVersion: 2,
+          rulesetId: 'dnd5e-2014-srd-5.1',
+          publisher: 'Local user',
+          license: 'Private local copy',
+          distributionPolicy: 'local-only',
+        },
+        fileName: 'private.dndstars5e',
+        integrity: 'sha256-YWJjZA==',
+        bytes: new TextEncoder().encode('{}').buffer,
+      })).rejects.toMatchObject({
+        code: 'plugin-local-only',
+        status: 409,
+      })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  it('在发起 fetch 前拒绝 room-ephemeral 包', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    try {
+      await expect(uploadAccountPlugin({
+        manifest: {
+          id: 'local.example.ephemeral',
+          name: 'Room ephemeral package',
+          version: '1.0.0',
+          apiVersion: 2,
+          rulesetId: 'dnd5e-2014-srd-5.1',
+          publisher: 'Local user',
+          license: 'Private local copy',
+          distributionPolicy: 'room-ephemeral',
+        },
+        fileName: 'ephemeral.dndstars5e',
+        integrity: 'sha256-YWJjZA==',
+        bytes: new TextEncoder().encode('{}').buffer,
+      })).rejects.toMatchObject({
+        code: 'plugin-ephemeral-room-only',
+        status: 409,
+      })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 })

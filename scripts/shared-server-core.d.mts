@@ -22,7 +22,6 @@ export const DND5E_2014_RULESET_ID: 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION: number
 export const SHARED_MIN_CLIENT_PROTOCOL: number
 export const SHARED_STATE_SCHEMA_VERSION: number
-export const ACCOUNT_CHARACTER_SCHEMA_VERSION: number
 export const ACCOUNT_SESSION_LIMIT: number
 export const ACCOUNT_CHARACTER_LIMIT: number
 export const ACCOUNT_AUTH_SCHEMA_VERSION: number
@@ -44,6 +43,38 @@ export function validateProductionSecurityConfig(env?: Record<string, string | u
   allowedOrigins?: string[]
   errors: string[]
 }
+export function marketplaceCheckoutAdapter(env?: Record<string, string | undefined>): {
+  endpoint: string
+  secret: string
+  provider: string
+} | null
+export function marketplacePaidPublishingEnabled(env?: Record<string, string | undefined>): boolean
+export function marketplaceCapabilities(env?: Record<string, string | undefined>): {
+  schemaVersion: 1
+  marketMode: 'free-beta' | 'live'
+  freePublishingEnabled: boolean
+  paidPublishingEnabled: boolean
+  checkoutAvailable: boolean
+  creatorVerificationMode: 'manual-review' | 'provider'
+  moderationConfigured: boolean
+}
+export function createMarketplaceCheckout(
+  order: {
+    orderId: string
+    accountId: string
+    productId: string
+    version: string
+    amountMinor: number
+    currency: 'CNY' | 'USD'
+    expiresAt: number
+  },
+  env?: Record<string, string | undefined>,
+): Promise<{
+  provider: string
+  providerOrderId: string
+  checkoutUrl: string
+  expiresAt: number
+}>
 export function applySecurityHeaders(
   res: { setHeader(name: string, value: string): void },
   options?: { production?: boolean },
@@ -141,18 +172,6 @@ export function projectCombatInterruptsForRoomMember(
 export function projectCustomMonstersForRoomMember(
   value: Record<string, unknown>,
 ): Record<string, unknown> & { monsters: Array<Record<string, unknown>> }
-export function mutateGroupAbilityChecksState(
-  current: unknown,
-  mutation: Record<string, unknown>,
-  now: number,
-  member: Record<string, unknown>,
-  context?: Record<string, unknown>,
-): RoomCommunicationMutationResult
-export function projectGroupAbilityChecksForMember(
-  value: Record<string, unknown>,
-  memberId: string,
-  isDm?: boolean,
-): Record<string, unknown> & { checks: Array<Record<string, unknown>> }
 export function projectSceneOrchestrationForPlayer(value: unknown): {
   schemaVersion: 1
   scenes: []
@@ -201,6 +220,14 @@ export class LockTimeoutError extends Error {
 
 export function withWriteLock<T>(filePath: string, fn: () => Promise<T>): Promise<T>
 export function atomicWriteLocked(filePath: string, body: Buffer | Uint8Array | string): Promise<void>
+export function retryTransientWindowsRename<T>(
+  operation: () => Promise<T>,
+  options?: {
+    platform?: string
+    delays?: readonly number[]
+    wait?: (delayMs: number) => Promise<void>
+  },
+): Promise<T>
 export function atomicWriteJsonStateFreshLocked(
   filePath: string,
   body: Buffer | Uint8Array | string,

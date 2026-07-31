@@ -37,6 +37,7 @@ describe('runMapsPlayerActionTransaction', () => {
   it('rolls back and recovers when a rules branch forgets to acknowledge', async () => {
     const coordinator = new DmActionTransactionCoordinator()
     const recover = vi.fn(async () => undefined)
+    const rejectAfterRecovery = vi.fn(async () => undefined)
 
     await expect(runMapsPlayerActionTransaction({
       coordinator,
@@ -47,10 +48,12 @@ describe('runMapsPlayerActionTransaction', () => {
       clearOutcome: () => undefined,
       setTransactionActive: () => undefined,
       recover,
+      rejectAfterRecovery,
       now: 1,
     })).rejects.toThrow('missing-player-action-authority-outcome')
 
     expect(recover).toHaveBeenCalledOnce()
+    expect(rejectAfterRecovery).toHaveBeenCalledOnce()
     expect(coordinator.transaction('action-1')?.status).toBe('rolled-back')
   })
 

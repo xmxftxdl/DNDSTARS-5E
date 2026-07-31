@@ -38,7 +38,6 @@ import {
   normalizeCombatPresentationEvent,
   mutateRoomChatState,
   mutateRoomJournalState,
-  mutateGroupAbilityChecksState,
   mutateSceneAudioPlaybackState,
   mutateCampaignTimeState,
   parseRoomChatRollCommand,
@@ -51,11 +50,11 @@ import {
   projectCustomMonstersForRoomMember,
   eventChannelOperationAllowed,
   projectEventPayloadForViewer,
-  projectGroupAbilityChecksForMember,
   projectSceneOrchestrationForPlayer,
   stateResourceWriteAllowedForRole,
   pushBacklog,
   replaySlice,
+  retryTransientWindowsRename,
   safeName,
   roomPluginReadiness,
   roomPlayerPresence,
@@ -112,6 +111,50 @@ describe('production transport security', () => {
       { setHeader: () => undefined },
       env,
     )).toBe(false)
+  })
+})
+
+describe('retired group ability check protocol', () => {
+  const invoke = async (pathname: string, method: string) => {
+    let status = 0
+    let body = ''
+    const response = {
+      setHeader: () => undefined,
+      writeHead: (nextStatus: number) => { status = nextStatus },
+      end: (value?: string) => { body = value ?? '' },
+    }
+    const root = path.join(os.tmpdir(), 'stars-retired-group-check')
+    const handled = await sharedServerCore.handleSharedApi(
+      { method, headers: {} } as never,
+      response as never,
+      new URL(`http://localhost${pathname}`),
+      {
+        stateRoot: root,
+        imageRoot: root,
+        quarantineRoot: root,
+        snapshotRoot: root,
+        legacyStateRoot: root,
+        legacyImageRoot: root,
+        eventClients: new Map(),
+        eventBacklog: new Map(),
+      },
+    )
+    return { handled, status, body: JSON.parse(body) as { error: string; name?: string } }
+  }
+
+  it('returns Gone for the retired generic resource and Not Found for its removed mutation endpoint', async () => {
+    for (const method of ['GET', 'PUT', 'PATCH']) {
+      await expect(invoke('/api/state/group-ability-checks', method)).resolves.toMatchObject({
+        handled: true,
+        status: 410,
+        body: { error: 'resource-retired', name: 'group-ability-checks' },
+      })
+    }
+    await expect(invoke('/api/state/group-ability-checks/mutation', 'PATCH')).resolves.toMatchObject({
+      handled: true,
+      status: 404,
+      body: { error: 'Not Found' },
+    })
   })
 })
 
@@ -306,6 +349,9 @@ describe('member-specific shared state projections', () => {
         { id: 'dm', kind: 'dm-adjudication', actorCharId: 'own', payload: {} },
         { id: 'legendary', kind: 'legendary-resistance', targetCharId: 'own', payload: {} },
         { id: 'plugin-dm', kind: 'plugin-choice', actorCharId: 'own', payload: { audience: 'dm' } },
+        { id: 'plugin-actor-own', kind: 'plugin-choice', actorCharId: 'own', targetCharId: 'party', payload: { audience: 'actor' } },
+        { id: 'plugin-target-party', kind: 'plugin-choice', actorCharId: 'own', targetCharId: 'party', payload: { audience: 'target' } },
+        { id: 'plugin-target-own', kind: 'plugin-choice', actorCharId: 'party', targetCharId: 'own', payload: { audience: 'target' } },
         { id: 'public-roll', kind: 'roll-confirmation', payload: { visibility: 'public' } },
         { id: 'dark-roll', kind: 'roll-confirmation', payload: { visibility: 'dm-only' } },
         { id: 'own', kind: 'shield-spell', targetCharId: 'own', payload: {} },
@@ -313,7 +359,7 @@ describe('member-specific shared state projections', () => {
       ],
     }
     expect(projectCombatInterruptsForRoomMember(queue, member, characters).interrupts.map((entry) => entry.id))
-      .toEqual(['public-roll', 'own'])
+      .toEqual(['plugin-actor-own', 'plugin-target-own', 'public-roll', 'own'])
     expect(projectCombatInterruptsForRoomMember(queue, member, characters, true).interrupts).toEqual([])
   })
 
@@ -427,116 +473,6 @@ describe('authoritative campaign time', () => {
     expect(mutateCampaignTimeState(null, {
       operation: 'set-time', displayMode: 'gregorian', date: '1992-02-30', hour: 8, minute: 0,
     }, 40, host, context)).toMatchObject({ ok: false, error: 'invalid-campaign-date' })
-  })
-})
-
-describe('authoritative group ability checks', () => {
-  const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }
-  const playerA = { role: 'player', memberId: 'player-a', displayName: '玩家甲' }
-  const playerB = { role: 'player', memberId: 'player-b', displayName: '玩家乙' }
-  const characters = {
-    characters: [
-      {
-        id: 'hero-a', roomMemberId: 'player-a', name: '游荡者', avatar: '🗡️', level: 11,
-        charClass: 'rogue', abilities: { str: 10, dex: 16, con: 10, int: 10, wis: 12, cha: 10 },
-        skills: ['perception'], dnd5eClassChoices: { classes: { rogue: { selections: {} } } },
-      },
-      {
-        id: 'hero-b', roomMemberId: 'player-b', name: '吟游诗人', avatar: '🎵', level: 2,
-        charClass: 'bard', abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 8, cha: 16 },
-        skills: [], dnd5eClassChoices: { classes: { bard: { selections: {} } } },
-      },
-    ],
-  }
-  const context = {
-    host,
-    players: [
-      { ...playerA, activeCharacterId: 'hero-a' },
-      { ...playerB, activeCharacterId: 'hero-b' },
-    ],
-    characters,
-  }
-
-  function createCheck(now = 1_000, overrides: Record<string, unknown> = {}) {
-    return mutateGroupAbilityChecksState(null, {
-      operation: 'create', label: '全队察觉检定', selection: 'skill:perception', dc: 15,
-      mode: 'normal', allowPassiveFallback: false,
-      participantCharacterIds: ['hero-a', 'hero-b'], ...overrides,
-    }, now, host, context)
-  }
-
-  it('collects one server roll per member and only exposes each player own row', () => {
-    const created = createCheck()
-    if (!created.ok) throw new Error('expected group check creation')
-    const checkId = String((created as unknown as { check: { id: string } }).check.id)
-    const first = mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 1_100, playerA, { ...context, rollDie: () => 1 })
-    if (!first.ok) throw new Error('expected first roll')
-    expect(first).toMatchObject({ result: { rolls: [1], d20: 10, modifier: 5, finalTotal: 15, reliableTalentApplied: true, success: true } })
-    const duplicate = mutateGroupAbilityChecksState(first.next, { operation: 'roll', checkId }, 1_150, playerA, { ...context, rollDie: () => 20 })
-    expect(duplicate).toMatchObject({ ok: true, changed: false })
-    const second = mutateGroupAbilityChecksState(first.next, { operation: 'roll', checkId }, 1_200, playerB, { ...context, rollDie: () => 4 })
-    if (!second.ok) throw new Error('expected second roll')
-    const projectedA = projectGroupAbilityChecksForMember(second.next, 'player-a', false)
-    expect(projectedA.checks[0]).toMatchObject({ participants: [{ memberId: 'player-a' }], results: [{ memberId: 'player-a' }] })
-    expect((projectedA.checks[0].participants as unknown[])).toHaveLength(1)
-    expect((projectedA.checks[0].results as unknown[])).toHaveLength(1)
-    const completed = mutateGroupAbilityChecksState(second.next, { operation: 'finalize', checkId }, 1_300, host, context)
-    expect(completed).toMatchObject({ ok: true, check: { status: 'completed', aggregate: { successCount: 1, requiredSuccesses: 1, groupSuccess: true } } })
-  })
-
-  it('lets the DM settle missing players by passive value only when enabled', () => {
-    const created = createCheck(2_000, { allowPassiveFallback: true, dc: 10 })
-    if (!created.ok) throw new Error('expected group check creation')
-    const checkId = String((created as unknown as { check: { id: string } }).check.id)
-    expect(mutateGroupAbilityChecksState(created.next, { operation: 'finalize', checkId }, 2_100, host, context)).toMatchObject({
-      ok: false, error: 'group-check-responses-pending',
-    })
-    const completed = mutateGroupAbilityChecksState(created.next, { operation: 'finalize', checkId, usePassiveForPending: true }, 2_200, host, context)
-    expect(completed).toMatchObject({
-      ok: true,
-      check: {
-        results: [
-          { source: 'passive-only', finalTotal: 15, success: true },
-          { source: 'passive-only', finalTotal: 10, success: true },
-        ],
-        aggregate: { successCount: 2, groupSuccess: true },
-      },
-    })
-  })
-
-  it('resolves group saving throws with save proficiency and no passive fallback', () => {
-    const savingContext = {
-      ...context,
-      characters: {
-        characters: context.characters.characters.map((character) => character.id === 'hero-a'
-          ? { ...character, savingThrows: ['dex'] }
-          : character),
-      },
-    }
-    const created = mutateGroupAbilityChecksState(null, {
-      operation: 'create', label: 'Dexterity saves', selection: 'save:dex', dc: 15,
-      mode: 'normal', allowPassiveFallback: true, participantCharacterIds: ['hero-a'],
-    }, 2_500, host, savingContext)
-    if (!created.ok) throw new Error('expected saving throw creation')
-    expect(created).toMatchObject({ check: { rollKind: 'saving-throw', ability: 'dex', allowPassiveFallback: false } })
-    const checkId = String((created as unknown as { check: { id: string } }).check.id)
-    const rolled = mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 2_600, playerA, {
-      ...savingContext,
-      rollDie: () => 10,
-    })
-    expect(rolled).toMatchObject({
-      ok: true,
-      result: { d20: 10, modifier: 7, finalTotal: 17, proficiencyRank: 1, reliableTalentApplied: false, success: true },
-    })
-  })
-
-  it('rejects forged participants, late rolls and non-participant responses', () => {
-    expect(createCheck(3_000, { participantCharacterIds: ['hero-a', 'missing'] })).toMatchObject({ ok: false, error: 'invalid-group-check-participant' })
-    const created = createCheck(3_000)
-    if (!created.ok) throw new Error('expected group check creation')
-    const checkId = String((created as unknown as { check: { id: string } }).check.id)
-    expect(mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 3_100, { role: 'player', memberId: 'outsider' }, context)).toMatchObject({ ok: false, error: 'not-a-group-check-participant' })
-    expect(mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 3_000 + 10 * 60 * 1_000, playerA, context)).toMatchObject({ ok: false, error: 'group-check-expired' })
   })
 })
 
@@ -1079,6 +1015,75 @@ describe('map geometry player projection', () => {
     expect(project({ truesightRangeFeet: 60 }, {}).map((token: { id: string }) => token.id)).toContain('target')
   })
 
+  it('projects character-derived Darkvision and Devil’s Sight before hiding enemy tokens', () => {
+    const maps = {
+      maps: [{
+        id: 'map-1', width: 120, height: 60, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'target', type: 'enemy', x: 80, y: 20 },
+        ],
+      }],
+    }
+    const baseMapGeometry = {
+      mapId: 'map-1',
+      walls: [],
+      doors: [],
+      windows: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: false,
+        ambientLight: 'darkness',
+      },
+      updatedAt: 1,
+    }
+    const project = (
+      character: Record<string, unknown>,
+      mapGeometry: Record<string, unknown> = baseMapGeometry,
+    ) =>
+      sharedServerCore.projectMapsForPlayer(
+        maps,
+        { schemaVersion: 2, updatedAt: 1, maps: [mapGeometry] },
+        'character-1',
+        { characters: [{ id: 'character-1', ...character }] },
+      ).maps[0].tokens
+
+    expect(project({ race: '人类' }).map((token: { id: string }) => token.id))
+      .not.toContain('target')
+    expect(project({ race: '精灵' }).map((token: { id: string }) => token.id))
+      .toContain('target')
+    const magicalDarknessGeometry = {
+      ...baseMapGeometry,
+      vision: { ...baseMapGeometry.vision, ambientLight: 'bright' },
+      obstacles: [{
+        ...common,
+        id: 'darkness',
+        kind: 'obstacle',
+        points: [{ x: 65, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 35 }, { x: 65, y: 35 }],
+        blocksVision: false,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+        magicalDarkness: true,
+        darknessSpellLevel: 2,
+        heightFeet: 20,
+      }],
+    }
+    expect(project({ race: '精灵' }, magicalDarknessGeometry)
+      .map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({
+      dnd5eClassChoices: {
+        classes: {
+          warlock: {
+            selections: { 'eldritch-invocations': ['devils-sight'] },
+          },
+        },
+      },
+    }, magicalDarknessGeometry).map((token: { id: string }) => token.id))
+      .toContain('target')
+  })
+
   it('raises a scene light to its terrain surface before tracing over a low wall', () => {
     const elevatedLightGeometry = {
       schemaVersion: 2,
@@ -1309,6 +1314,58 @@ describe('map geometry player projection', () => {
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
+    for (const spellId of [
+      'jump',
+      'darkvision',
+      'see-invisibility',
+      'warding-bond',
+      'fly',
+      'heroism',
+      'enlarge-reduce',
+      'enhance-ability',
+      'divine-favor',
+      'hunters-mark',
+      'magic-weapon',
+      'flame-blade',
+      'invisibility',
+      'blur',
+      'barkskin',
+      'protection-from-poison',
+      'longstrider',
+      'protection-from-energy',
+      'death-ward',
+      'greater-invisibility',
+      'charm-person',
+      'hideous-laughter',
+      'hold-person',
+      'blindness-deafness',
+    ]) {
+      const normalized = normalizeCombatPresentationEvent(
+        {
+          ...payload,
+          id: `${spellId}-transaction-1`,
+          spellId,
+          sourceTokenId: 'caster',
+          accentColor: '#8b5cf6',
+          glowColor: '#c4b5fd',
+        },
+        { role: 'dm' },
+        timestamp,
+      )
+      expect(normalized).toMatchObject({
+        ok: true,
+        event: {
+          spellId,
+          targetTokenId: 'guardian',
+          accentColor: '#8b5cf6',
+          glowColor: '#c4b5fd',
+          createdAt: timestamp,
+          expiresAt: timestamp + 1_600,
+        },
+      })
+      if (!normalized.ok) throw new Error(`expected ${spellId} presentation normalization`)
+      expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    }
   })
 
   it('authors bounded Fireball presentation events with an authoritative lifetime', () => {
@@ -1366,7 +1423,47 @@ describe('map geometry player projection', () => {
     )).toMatchObject({ ok: false, status: 400 })
   })
 
-  it('accepts Shatter spell banners and authors their display lifetime', () => {
+  it('authors Thunderwave area effects for cross-client playback', () => {
+    const timestamp = 31_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'thunderwave-transaction-1:area-effect',
+      type: 'spell-area-effect',
+      mapId: 'map-1',
+      transactionId: 'thunderwave-transaction-1',
+      spellId: 'thunderwave',
+      sourceTokenId: 'bard',
+      targetCell: { col: 7, row: 4 },
+      shape: 'line',
+      lengthFeet: 15,
+      widthFeet: 15,
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+    expect(normalized).toEqual({
+      ok: true,
+      event: {
+        ...payload,
+        createdAt: timestamp,
+        expiresAt: timestamp + 1_600,
+      },
+    })
+    if (!normalized.ok) throw new Error('expected Thunderwave presentation normalization')
+    expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, shape: 'circle' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, widthFeet: 10 },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('accepts Shatter and Thunderwave spell banners and authors their display lifetime', () => {
     const timestamp = 33_000
     const payload = {
       schemaVersion: 1,
@@ -1404,13 +1501,71 @@ describe('map geometry player projection', () => {
     })
     if (!normalized.ok) throw new Error('expected Shatter banner normalization')
     expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    expect(normalizeCombatPresentationEvent({
+      ...payload,
+      id: 'thunderwave-transaction-1:spell-banner',
+      transactionId: 'thunderwave-transaction-1',
+      spellId: 'thunderwave',
+      spellName: '雷鸣波',
+    }, { role: 'dm' }, timestamp)).toMatchObject({
+      ok: true,
+      event: {
+        spellId: 'thunderwave',
+        spellName: '雷鸣波',
+        castingClassId: 'bard',
+        expiresAt: timestamp + 3_500,
+      },
+    })
     expect(normalizeCombatPresentationEvent(
       { ...payload, spellName: '' },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
     expect(normalizeCombatPresentationEvent(
-      { ...payload, spellId: 'unknown' },
+      { ...payload, spellId: 'plugin.example:storm-song', spellName: '风暴歌' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({
+      ok: true,
+      event: { spellId: 'plugin.example:storm-song', spellName: '风暴歌' },
+    })
+  })
+
+  it('accepts authoritative melee and ranged attack banners', () => {
+    const timestamp = 34_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'attack-1:banner',
+      type: 'attack-banner',
+      mapId: 'map-1',
+      transactionId: 'attack-1',
+      sourceTokenId: 'fighter',
+      actorName: '战士',
+      attackName: '长剑',
+      attackKind: 'melee',
+      classId: 'fighter',
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    expect(normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp))
+      .toMatchObject({
+        ok: true,
+        event: {
+          actorName: '战士',
+          attackName: '长剑',
+          attackKind: 'melee',
+          classId: 'fighter',
+          createdAt: timestamp,
+          expiresAt: timestamp + 3_500,
+        },
+      })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, id: 'attack-2:banner', transactionId: 'attack-2', attackKind: 'ranged', attackName: '长弓' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: true, event: { attackKind: 'ranged', attackName: '长弓' } })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, attackKind: 'magic' },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
@@ -1447,6 +1602,64 @@ describe('map geometry player projection', () => {
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('authors all saving-throw abilities for cross-client presentation', () => {
+    const timestamp = 8_000
+    const rolling = {
+      schemaVersion: 1,
+      id: 'cast-1:dex-save:goblin',
+      type: 'saving-throw-status',
+      mapId: 'map',
+      transactionId: 'cast-1',
+      sourceTokenId: 'goblin',
+      targetTokenId: 'goblin',
+      targetName: '地精',
+      ability: 'dex',
+      phase: 'rolling',
+      dc: 15,
+    }
+    expect(normalizeCombatPresentationEvent(rolling, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    const normalizedRolling = normalizeCombatPresentationEvent(rolling, { role: 'dm' }, timestamp)
+    expect(normalizedRolling).toEqual({
+      ok: true,
+      event: {
+        ...rolling,
+        createdAt: timestamp,
+        expiresAt: timestamp + 300_000,
+      },
+    })
+    if (!normalizedRolling.ok) throw new Error('expected Dexterity save presentation normalization')
+    expect(parseCombatPresentationEvent(normalizedRolling.event)).toEqual(normalizedRolling.event)
+    for (const ability of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
+      expect(normalizeCombatPresentationEvent(
+        { ...rolling, id: `cast-1:${ability}-save:goblin`, ability },
+        { role: 'dm' },
+        timestamp,
+      )).toMatchObject({ ok: true, event: { ability } })
+    }
+    expect(normalizeCombatPresentationEvent(
+      { ...rolling, ability: 'luck' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+
+    expect(normalizeCombatPresentationEvent({
+      ...rolling,
+      phase: 'result',
+      total: 17,
+      success: true,
+    }, { role: 'dm' }, timestamp)).toMatchObject({
+      ok: true,
+      event: {
+        phase: 'result',
+        total: 17,
+        success: true,
+        createdAt: timestamp,
+        expiresAt: timestamp + 3_000,
+      },
+    })
   })
 
   it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {
@@ -2103,6 +2316,35 @@ const mutateCombatInterruptQueue = (
 ).mutateCombatInterruptQueue
 
 describe('combat interrupt atomic mutation', () => {
+  it('allows only the declared plugin-choice audience owner to answer', () => {
+    const targetChoice = {
+      mapId: 'map-1',
+      revision: 1,
+      updatedAt: 100,
+      interrupts: [{
+        id: 'choice',
+        mapId: 'map-1',
+        kind: 'plugin-choice',
+        actorCharId: 'actor',
+        targetCharId: 'target',
+        status: 'pending',
+        payload: { audience: 'target' },
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }
+    const mutation = {
+      operation: 'answer',
+      mapId: 'map-1',
+      id: 'choice',
+      response: { optionId: 'accept' },
+    }
+    expect(mutateCombatInterruptQueue(targetChoice, mutation, 200, 'player', ['actor']))
+      .toMatchObject({ ok: false, status: 403, error: 'character-ownership-required' })
+    expect(mutateCombatInterruptQueue(targetChoice, mutation, 200, 'player', ['target']))
+      .toMatchObject({ ok: true, changed: true })
+  })
+
   it('updates different interrupt ids without replacing the queue', () => {
     const queue = {
       mapId: 'map-1',
@@ -2189,9 +2431,16 @@ describe('combat interrupt atomic mutation', () => {
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         label: '黑暗术', createdRound: 1, expiresAfterRound: 2,
+        expiresAtSourceTurnEndAfterRound: 2,
         lighting: { kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2 },
       }] }],
     })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        label: '冰风暴', createdRound: 1, expiresAfterRound: 2,
+        expiresAtSourceTurnEndAfterRound: 3,
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         label: '非法光照', createdRound: 1, expiresAfterRound: 2,
@@ -2442,6 +2691,16 @@ describe('player character aggregate authority', () => {
         conditions: ['paralyzed'], concentrating: true,
         dnd5eCombatState: { schemaVersion: 2, activeEffects: [activeEffect], concentrationSpellId: 'bless' },
         dnd5eInventory: { schemaVersion: 2, entries: [{ id: 'potion', templateId: 'potion', quantity: 1 }] },
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              selections: {
+                'wizard-spellbook': ['magic-missile'],
+                'spell-prepared': [],
+              },
+            },
+          },
+        },
         classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 2 } },
         equipment: { armorId: 'chain-mail' }, dmNotes: 'secret', visibleToPlayers: true,
       },
@@ -2458,6 +2717,16 @@ describe('player character aggregate authority', () => {
         name: 'Renamed Hero', ownerAccountId: 'forged-account', currentHp: 20, tempHp: 0,
         hitPointDice: [{ sides: 10, current: 2, max: 2 }], conditions: [], concentrating: false,
         dnd5eCombatState: undefined, dnd5eInventory: { schemaVersion: 2, entries: [] },
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              selections: {
+                'wizard-spellbook': ['magic-missile'],
+                'spell-prepared': ['magic-missile'],
+              },
+            },
+          },
+        },
         classResources: { 'dnd5e-spell-slot-1': { current: 2, max: 2 } }, equipment: undefined,
         dmNotes: 'stolen', visibleToPlayers: false,
       }],
@@ -2469,6 +2738,7 @@ describe('player character aggregate authority', () => {
       conditions: ['paralyzed'], concentrating: true, dmNotes: 'secret', visibleToPlayers: true,
       dnd5eCombatState: current.characters[0].dnd5eCombatState,
       dnd5eInventory: current.characters[0].dnd5eInventory,
+      dnd5eClassChoices: forged.characters[0].dnd5eClassChoices,
       classResources: current.characters[0].classResources,
       equipment: current.characters[0].equipment,
     })
@@ -2484,6 +2754,277 @@ describe('player character aggregate authority', () => {
     const merged = mergePlayerCharactersStateForAuthority(current, incoming, 'member-a', { combatActive: false })
     expect(merged.characters[0]).toMatchObject({ name: 'Renamed Hero', currentHp: 20, concentrating: true })
     expect(merged.characters[0].dnd5eCombatState).toEqual(current.characters[0].dnd5eCombatState)
+  })
+
+  it('rejects a direct multi-level edit when no advancement receipt is appended', () => {
+    const base = {
+      ...current.characters[0],
+      level: 1,
+      dnd5eClassLevels: { fighter: 1 },
+      dnd5eLevelAdvancements: undefined,
+    }
+    const merged = mergePlayerCharactersStateForAuthority(
+      { selectedId: base.id, characters: [base] },
+      {
+        selectedId: base.id,
+        characters: [{
+          ...base,
+          name: '仍允许改名',
+          level: 7,
+          dnd5eClassLevels: { fighter: 7 },
+        }],
+      },
+      'member-a',
+    )
+    expect(merged.characters[0]).toMatchObject({
+      name: '仍允许改名',
+      level: 1,
+      dnd5eClassLevels: { fighter: 1 },
+    })
+  })
+
+  it('allows one valid player advancement append and then makes the receipt append-only', () => {
+    const base = {
+      ...current.characters[0],
+      level: 1,
+      charClass: '战士',
+      dnd5eClassLevels: { fighter: 1 },
+      abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+      savingThrows: ['str', 'con'],
+      skills: ['athletics'],
+      dnd5eClassChoices: { fighter: { fightingStyles: ['archery'] } },
+      dnd5eFeatIds: undefined,
+      hitDice: '1d10',
+      hitPointMaximumMode: 'fixed',
+      hitPointRolls: undefined,
+      maxHp: 12,
+      dnd5eLevelAdvancements: undefined,
+    }
+    const upgraded = {
+      ...base,
+      level: 2,
+      dnd5eClassLevels: { fighter: 2 },
+      maxHp: 20,
+    }
+    const before = {
+      level: base.level,
+      dnd5eClassLevels: base.dnd5eClassLevels,
+      abilities: base.abilities,
+      skills: base.skills,
+      dnd5eClassChoices: base.dnd5eClassChoices,
+      dnd5eFeatIds: base.dnd5eFeatIds,
+      hitPointMaximumMode: base.hitPointMaximumMode,
+      hitPointRolls: base.hitPointRolls,
+      maxHp: base.maxHp,
+      currentHp: base.currentHp,
+    }
+    const receipt = {
+      schemaVersion: 1,
+      id: 'adv-1',
+      fromLevel: 1,
+      toLevel: 2,
+      classId: 'fighter',
+      fromClassLevel: 1,
+      toClassLevel: 2,
+      completedAt: 100,
+      completedBy: 'player',
+      decision: {
+        schemaVersion: 1,
+        classId: 'fighter',
+        levelsGained: 1,
+        hitPointMethod: 'fixed',
+        hitPointRolls: [],
+        asiChoices: [],
+        fighterFightingStyles: ['archery'],
+      },
+      grantedFeatureIds: ['action-surge-1'],
+      before,
+      after: {
+        ...before,
+        level: 2,
+        dnd5eClassLevels: { fighter: 2 },
+        maxHp: 20,
+      },
+    }
+    const appended = mergePlayerCharactersStateForAuthority(
+      { selectedId: base.id, characters: [base] },
+      { selectedId: base.id, characters: [{ ...upgraded, dnd5eLevelAdvancements: [receipt] }] },
+      'member-a',
+    )
+    expect(appended.characters[0]).toMatchObject({
+      level: 2,
+      maxHp: 20,
+      dnd5eLevelAdvancements: [receipt],
+    })
+
+    const acknowledged = appended.characters[0] as unknown as Record<string, unknown> & {
+      id: string
+      abilities: typeof base.abilities
+      dnd5eLevelAdvancements: (typeof receipt)[]
+    }
+    const rewritten = mergePlayerCharactersStateForAuthority(
+      { selectedId: acknowledged.id, characters: [acknowledged] },
+      {
+        selectedId: acknowledged.id,
+        characters: [{
+          ...acknowledged,
+          name: '仍允许改名',
+          level: 8,
+          abilities: { ...acknowledged.abilities, str: 30 },
+          dnd5eClassChoices: {
+            fighter: { fightingStyles: ['defense'] },
+            classes: {
+              wizard: {
+                selections: { 'spell-prepared': ['magic-missile'] },
+              },
+            },
+          },
+          dnd5eLevelAdvancements: [{
+            ...receipt,
+            decision: { ...receipt.decision, levelsGained: 7 },
+          }],
+        }],
+      },
+      'member-a',
+    )
+    expect(rewritten.characters[0]).toMatchObject({
+      name: '仍允许改名',
+      level: 2,
+      abilities: acknowledged.abilities,
+      dnd5eClassChoices: {
+        fighter: { fightingStyles: ['archery'] },
+        classes: {
+          wizard: {
+            selections: { 'spell-prepared': ['magic-missile'] },
+          },
+        },
+      },
+      dnd5eLevelAdvancements: [receipt],
+    })
+  })
+
+  it('keeps advancement-granted spells immutable while allowing daily wizard preparation changes', () => {
+    const base = {
+      ...current.characters[0],
+      level: 1,
+      charClass: '法师',
+      dnd5eClassLevels: { wizard: 1 },
+      abilities: { str: 8, dex: 14, con: 14, int: 16, wis: 12, cha: 10 },
+      savingThrows: ['int', 'wis'],
+      skills: ['arcana'],
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            selections: {
+              'spell-cantrips': ['fire-bolt', 'light', 'mage-hand'],
+              'wizard-spellbook': ['burning-hands', 'detect-magic', 'mage-armor', 'magic-missile', 'shield', 'sleep'],
+              'spell-prepared': ['mage-armor', 'magic-missile'],
+            },
+          },
+        },
+      },
+      dnd5eFeatIds: undefined,
+      hitDice: '1d6',
+      hitPointMaximumMode: 'fixed',
+      hitPointRolls: undefined,
+      maxHp: 8,
+      dnd5eLevelAdvancements: undefined,
+    }
+    const upgradedChoices = {
+      classes: {
+        wizard: {
+          subclass: 'evocation',
+          selections: {
+            ...base.dnd5eClassChoices.classes.wizard.selections,
+            'wizard-spellbook': [
+              ...base.dnd5eClassChoices.classes.wizard.selections['wizard-spellbook'],
+              'thunderwave',
+              'unseen-servant',
+            ],
+          },
+        },
+      },
+    }
+    const upgraded = {
+      ...base,
+      level: 2,
+      dnd5eClassLevels: { wizard: 2 },
+      dnd5eClassChoices: upgradedChoices,
+      maxHp: 14,
+    }
+    const snapshot = (character: typeof base | typeof upgraded) => ({
+      level: character.level,
+      dnd5eClassLevels: character.dnd5eClassLevels,
+      abilities: character.abilities,
+      skills: character.skills,
+      dnd5eClassChoices: character.dnd5eClassChoices,
+      dnd5eFeatIds: character.dnd5eFeatIds,
+      hitPointMaximumMode: character.hitPointMaximumMode,
+      hitPointRolls: character.hitPointRolls,
+      maxHp: character.maxHp,
+      currentHp: character.currentHp,
+    })
+    const receipt = {
+      schemaVersion: 1,
+      id: 'wizard-adv-2',
+      fromLevel: 1,
+      toLevel: 2,
+      classId: 'wizard',
+      fromClassLevel: 1,
+      toClassLevel: 2,
+      completedAt: 200,
+      completedBy: 'player',
+      decision: {
+        schemaVersion: 1,
+        classId: 'wizard',
+        levelsGained: 1,
+        hitPointMethod: 'fixed',
+        hitPointRolls: [],
+        asiChoices: [],
+        subclassId: 'evocation',
+        spellSelections: {
+          cantrips: upgradedChoices.classes.wizard.selections['spell-cantrips'],
+          wizardSpellbook: upgradedChoices.classes.wizard.selections['wizard-spellbook'],
+        },
+      },
+      grantedFeatureIds: ['arcane-tradition'],
+      before: snapshot(base),
+      after: snapshot(upgraded),
+    }
+    const appended = mergePlayerCharactersStateForAuthority(
+      { selectedId: base.id, characters: [base] },
+      {
+        selectedId: base.id,
+        characters: [{ ...upgraded, dnd5eLevelAdvancements: [receipt] }],
+      },
+      'member-a',
+    )
+    const acknowledged = appended.characters[0] as Record<string, unknown> & {
+      id: string
+      dnd5eClassChoices: typeof upgradedChoices
+    }
+    const forgedChoices = structuredClone(acknowledged.dnd5eClassChoices)
+    forgedChoices.classes.wizard.selections['spell-cantrips'] = ['acid-splash']
+    forgedChoices.classes.wizard.selections['wizard-spellbook'] = ['fireball']
+    forgedChoices.classes.wizard.selections['spell-prepared'] = ['shield']
+
+    const merged = mergePlayerCharactersStateForAuthority(
+      { selectedId: acknowledged.id, characters: [acknowledged] },
+      {
+        selectedId: acknowledged.id,
+        characters: [{
+          ...acknowledged,
+          dnd5eClassChoices: forgedChoices,
+        }],
+      },
+      'member-a',
+    )
+
+    const mergedChoices = merged.characters[0].dnd5eClassChoices as typeof upgradedChoices
+    expect(mergedChoices.classes.wizard.selections).toEqual({
+      ...upgradedChoices.classes.wizard.selections,
+      'spell-prepared': ['shield'],
+    })
   })
 
   it('rejects new characters that claim a different room member', () => {
@@ -2682,6 +3223,45 @@ describe('withWriteLock / atomicWriteLocked — AC1 锁', () => {
     )
     expect(accepted).toBe(false)
     expect(JSON.parse(await readFile(file, 'utf8')).value).toBe('new')
+  })
+
+  it('retries only transient Windows rename failures', async () => {
+    const waits: number[] = []
+    let attempts = 0
+    const result = await retryTransientWindowsRename(
+      async () => {
+        attempts += 1
+        if (attempts < 3) {
+          throw Object.assign(new Error('temporarily locked'), { code: 'EPERM' })
+        }
+        return 'renamed'
+      },
+      {
+        platform: 'win32',
+        delays: [1, 2],
+        wait: async (delayMs: number) => {
+          waits.push(delayMs)
+        },
+      },
+    )
+
+    expect(result).toBe('renamed')
+    expect(attempts).toBe(3)
+    expect(waits).toEqual([1, 2])
+
+    const nonWindowsError = Object.assign(new Error('not retryable here'), { code: 'EPERM' })
+    await expect(
+      retryTransientWindowsRename(
+        async () => {
+          throw nonWindowsError
+        },
+        {
+          platform: 'linux',
+          delays: [1],
+          wait: async () => {},
+        },
+      ),
+    ).rejects.toBe(nonWindowsError)
   })
 
   // 抢锁超时 ⇒ fail-closed：抛 LockTimeoutError(503)，fn 绝不无锁运行。

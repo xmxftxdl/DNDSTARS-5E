@@ -1,6 +1,6 @@
 import type { Character } from '../types/character'
 import { sharedLobbyApiCandidates } from './sharedApi'
-import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocol'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 import {
   DND5E_2014_RULESET_ID,
   type RoomPluginRequirement,
@@ -39,6 +39,7 @@ export interface AccountCharacterRecord {
 export interface AccountProfile {
   accountId: string
   displayName: string
+  avatar?: string
   username?: string
   contactChannel?: 'email' | 'phone'
   contactLabel?: string
@@ -253,6 +254,26 @@ export async function loadAccountProfile(): Promise<AccountProfile> {
   return accountRequest<AccountProfile>('/accounts/me', { method: 'GET' })
 }
 
+export async function updateAccountProfile(input: {
+  displayName: string
+  avatar?: string
+}): Promise<AccountProfile> {
+  return accountRequest<AccountProfile>('/accounts/me', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function changeAccountPassword(input: {
+  currentPassword: string
+  newPassword: string
+}): Promise<void> {
+  await accountRequest<{ ok: true }>('/accounts/me/password', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 export async function loadAccountCampaigns(): Promise<AccountCampaign[]> {
   const response = await accountRequest<{ campaigns: AccountCampaign[] }>('/accounts/me/campaigns', {
     method: 'GET',
@@ -336,6 +357,12 @@ export async function uploadAccountPlugin(input: {
   integrity: string
   bytes: ArrayBuffer
 }): Promise<AccountPluginVersion> {
+  if (input.manifest.distributionPolicy === 'local-only') {
+    throw new AccountApiError('plugin-local-only', 409)
+  }
+  if (input.manifest.distributionPolicy === 'room-ephemeral') {
+    throw new AccountApiError('plugin-ephemeral-room-only', 409)
+  }
   const response = await accountBinaryRequest(
     `/accounts/me/plugins/${encodeURIComponent(input.manifest.id)}/versions/${encodeURIComponent(input.manifest.version)}`,
     {
@@ -446,6 +473,9 @@ export function accountApiErrorMessage(error: unknown): string {
     'invalid-account-name': '账号称呼必须为 1～24 个字符。',
     'invalid-account-username': '用户名需为 3～24 个中文、字母、数字、下划线或连字符。',
     'invalid-account-password': '密码长度至少为 8 个字符，最多 128 个字符。',
+    'invalid-account-current-password': '当前密码不正确。',
+    'invalid-account-avatar': '头像格式不正确或文件过大。',
+    'registered-account-required': '这个旧版账号尚未设置密码，暂时不能使用修改密码功能。',
     'invalid-account-credentials': '用户名、邮箱、手机号或密码不正确。',
     'invalid-verification-destination': '请输入有效的邮箱地址或带国家区号的手机号。',
     'invalid-verification-code': '验证码不正确。',
@@ -477,6 +507,8 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-plugin-version-limit': '账号插件版本数量已达到上限。',
     'account-plugin-storage-limit': '账号插件库空间已达到上限。',
     'account-plugin-in-use': '该插件版本仍被账号角色或发布记录引用，不能删除。',
+    'plugin-local-only': 'local-only 内容包只能保存在当前设备，不能上传到账号云库、房间或市场。',
+    'plugin-ephemeral-room-only': 'room-ephemeral 合集只能临时导入当前房间，不能保存到账号云库或市场。',
     'public-plugin-must-be-declarative-json': '公开目录只接受声明式 JSON 规则包，不接受 JavaScript 插件。',
     'invalid-public-plugin-package': '规则包未通过公开发布结构校验。',
     'plugin-not-publicly-distributable': '该版本的分发策略不允许发布到公共目录。',
@@ -484,6 +516,53 @@ export function accountApiErrorMessage(error: unknown): string {
     'public-plugin-not-found': '公开目录中没有找到这个插件版本。',
     'public-plugin-integrity-mismatch': '公开插件文件的 SHA-256 校验失败。',
     'plugin-admin-required': '当前账号没有插件审核权限。',
+    'invalid-creator-application': '创作者申请资料、政策版本或实名认证核验引用无效。',
+    'creator-already-verified': '当前账号已经通过创作者实名认证。',
+    'creator-account-suspended': '当前账号的创作者权限已暂停，请联系平台处理。',
+    'verified-creator-required': '设置付费价格前，需要先在创作者中心完成实名认证。',
+    'marketplace-rights-manifest-required': '公开商品必须提交权利清单。',
+    'invalid-marketplace-rights-manifest': '权利清单不完整，请检查来源、许可证和创作者声明。',
+    'marketplace-ai-disclosure-required': '包含 AI 辅助内容时必须填写公开披露说明。',
+    'invalid-marketplace-price': '商品价格无效；付费商品价格范围为 ¥1～¥99。',
+    'marketplace-paid-commerce-disabled': '当前为免费扩展市场 Beta，付费发布和购买尚未开放。',
+    'invalid-marketplace-installation': '插件安装状态无效，未写入市场统计。',
+    'marketplace-store-description-required': '商品详情至少需要 20 个字符。',
+    'marketplace-automated-analysis-blocked': '自动解析发现疑似可执行内容，不能提交市场审核。',
+    'marketplace-entitlement-required': '当前账号没有这个付费商品的有效使用许可。',
+    'paid-marketplace-product-not-found': '没有找到可授权的已发布付费商品。',
+    'marketplace-entitlement-not-found': '没有找到这条市场授权记录。',
+    'invalid-entitlement-status': '市场授权状态无效。',
+    'invalid-marketplace-order': '订单参数无效，请重新发起购买。',
+    'marketplace-order-not-found': '没有找到该订单。',
+    'marketplace-order-not-payable': '订单已失效或不能再次支付。',
+    'marketplace-order-not-cancelable': '该订单当前不能取消。',
+    'marketplace-order-not-reversible': '该订单当前不能退款或转为争议状态。',
+    'marketplace-idempotency-conflict': '重复请求对应了不同商品，已拒绝创建订单。',
+    'marketplace-product-already-owned': '当前账号已经拥有这个商品。',
+    'marketplace-product-owned-by-account': '发布者无需购买自己发布的商品。',
+    'marketplace-pending-order-limit': '待支付订单过多，请先完成或取消已有订单。',
+    'marketplace-payment-amount-mismatch': '支付金额或币种与订单不一致。',
+    'marketplace-provider-order-mismatch': '支付渠道订单号与平台订单不一致。',
+    'invalid-marketplace-settlement': '商品分账设置无效，暂时无法创建订单。',
+    'invalid-payment-webhook-signature': '支付回调签名无效。',
+    'invalid-payment-webhook': '支付回调内容无效。',
+    'invalid-marketplace-net-receipts': '支付渠道提供的净到账金额无效。',
+    'marketplace-checkout-unavailable': '支付渠道尚未开放。',
+    'marketplace-checkout-provider-unavailable': '暂时无法连接支付渠道。',
+    'marketplace-checkout-provider-rejected': '支付渠道拒绝创建付款页面。',
+    'invalid-marketplace-checkout-response': '支付渠道返回了无效的付款地址。',
+    'marketplace-order-changed': '订单状态已经变化，请刷新后重试。',
+    'marketplace-creator-required': '当前账号尚未开通创作者权限。',
+    'invalid-marketplace-payout': '提现金额、币种或请求标识无效；人民币最低提现 ¥100。',
+    'marketplace-payout-insufficient-balance': '当前可提现余额不足；结算保留期内的收入暂时不能提取。',
+    'marketplace-payout-not-found': '没有找到这笔提现申请。',
+    'invalid-payout-moderation': '提现审核操作无效。',
+    'payout-moderation-note-required': '拒绝提现时必须填写原因。',
+    'payout-transfer-reference-required': '确认打款时必须填写支付平台或银行流水号。',
+    'invalid-payout-status-transition': '这笔提现的当前状态不允许执行该操作。',
+    'marketplace-signature-verification-failed': '平台商品签名生成或验证失败。',
+    'marketplace-signature-required': '这个付费商品缺少平台数字签名，已拒绝下载。',
+    'marketplace-signature-invalid': '商品签名无效或商品信息被修改，已拒绝下载。',
     'plugin-catalog-request-failed': '插件目录请求失败，请稍后再试。',
     'account-request-failed': '账号操作失败，请稍后重试。',
   }

@@ -62,6 +62,69 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('职业特性')
   })
 
+  it('在法术栏位上方显示剩余法术位', () => {
+    const wizard: Character = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      charClass: '法师',
+      level: 5,
+      dnd5eClassLevels: { wizard: 5 },
+      classResources: {
+        'dnd5e-spell-slot-1': { current: 2, max: 4 },
+        'dnd5e-spell-slot-2': { current: 0, max: 3 },
+        'dnd5e-spell-slot-3': { current: 1, max: 2 },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: wizard,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('data-testid="combat-hotbar-spell-slots"')
+    expect(html.indexOf('combat-hotbar-spell-slots')).toBeLessThan(html.indexOf('>法术<'))
+    expect(html).toContain('1环')
+    expect(html).toContain('<strong class="text-[10px]">2</strong>/4')
+    expect(html).toContain('<strong class="text-[10px]">0</strong>/3')
+  })
+
+  it('渲染由 MapsPage 共享的固定环位，并按该环位显示法术伤害', () => {
+    const wizard: Character = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      charClass: '法师',
+      level: 5,
+      dnd5eClassLevels: { wizard: 5 },
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            selections: { 'spell-prepared': ['magic-missile'] },
+          },
+        },
+      },
+      classResources: {
+        'dnd5e-spell-slot-1': { current: 2, max: 4 },
+        'dnd5e-spell-slot-3': { current: 1, max: 2 },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: wizard,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      selectedSpellSlotLevels: { 'spell:wizard:magic-missile': 3 },
+      onSelectedSpellSlotLevelChange: () => undefined,
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('aria-label="魔法飞弹"')
+    expect(html).toContain('data-spell-slot-level="3"')
+    expect(html).toContain('data-spell-slot-locked="true"')
+    expect(html).toContain('5枚飞弹，每枚1d4+1力场伤害；合计5d4+5')
+  })
+
   it('从角色实际选择生成可分页的通用施法修正图标', () => {
     const sorcerer: Character = {
       ...character(),
@@ -93,5 +156,47 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('aria-label="谨慎法术"')
     expect(html).toContain('aria-label="强效法术"')
     expect(html).toContain('5 项 · 1/2')
+  })
+
+  it('道具栏固定显示七个快捷槽，并将第八格保留为完整背包入口', () => {
+    const inventoryCharacter: Character = {
+      ...character(),
+      dnd5eInventory: {
+        schemaVersion: 3,
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        entries: Array.from({ length: 9 }, (_, index) => ({
+          instanceId: `item-${index + 1}`,
+          templateId: `template-${index + 1}`,
+          quantity: 1,
+          acquiredAt: index + 1,
+          identified: true,
+          item: {
+            id: `template-${index + 1}`,
+            name: `道具-${index + 1}`,
+            category: 'adventuring-gear' as const,
+            icon: 'generic' as const,
+            description: `第 ${index + 1} 件道具`,
+            rulesText: '由背包查看详情。',
+            stackable: false,
+            source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+          },
+        })),
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: inventoryCharacter,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+
+    expect(html.match(/data-testid="combat-item-quick-slot-/g)).toHaveLength(7)
+    expect(html).toContain('data-testid="combat-item-backpack"')
+    expect(html).toContain('data-testid="combat-item-quick-grid"')
+    expect(html).toContain('class="grid grid-cols-4 gap-1"')
+    expect(html).toContain('快捷 7/7 · 背包 9')
+    expect(html).toContain('aria-label="道具-7（打开背包查看）"')
+    expect(html).not.toContain('aria-label="道具-8（打开背包查看）"')
   })
 })

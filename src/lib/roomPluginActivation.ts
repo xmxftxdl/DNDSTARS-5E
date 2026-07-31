@@ -28,6 +28,10 @@ export async function activateRoomPluginPackage(input: {
 }): Promise<RoomRulesSnapshot> {
   if (input.session.role !== 'dm') throw new Error('只有 DM 可以发布房间规则包')
   const plugin = input.package
+  const distributionPolicy = plugin.manifest.distributionPolicy
+  if (distributionPolicy !== 'room-distributable' && distributionPolicy !== 'room-ephemeral') {
+    throw new Error('该规则包必须声明 room-distributable 或 room-ephemeral 才能用于房间')
+  }
   const stateSchemaVersion = plugin.manifest.stateSchemaVersion ?? 1
   await stageRoomPlugin({
     session: input.session,
@@ -38,6 +42,7 @@ export async function activateRoomPluginPackage(input: {
     name: plugin.manifest.name,
     publisher: plugin.manifest.publisher,
     license: plugin.manifest.license,
+    distributionPolicy,
     fileName: plugin.fileName,
     bytes: plugin.bytes,
   })

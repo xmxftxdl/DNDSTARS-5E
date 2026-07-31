@@ -33,6 +33,22 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values)]
 }
 
+/**
+ * Headless transactions carry a full character snapshot, but class choices are
+ * durable character-sheet data rather than combat-owned state. A transaction
+ * that finishes after the sheet changed must not restore its stale copy (most
+ * visibly, a wizard's `spell-prepared` selection).
+ */
+export function mergeDnd5eCombatCharacterResult(
+  current: Character,
+  resolved: Character,
+): Character {
+  return {
+    ...resolved,
+    dnd5eClassChoices: current.dnd5eClassChoices,
+  }
+}
+
 function prepareCommit(input: Pick<Dnd5eCombatResultApplicationPort, 'application' | 'mapId'>) {
   if (input.application.map.id !== input.mapId) {
     throw new Error(`combat-result-map-mismatch:${input.application.map.id}:${input.mapId}`)

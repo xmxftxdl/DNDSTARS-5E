@@ -62,6 +62,48 @@ describe('scene orchestration shared model', () => {
     })
   })
 
+  it('accepts legacy group-roll actions but removes them from the client runtime', () => {
+    const legacy = {
+      ...shared,
+      runtime: {
+        ...shared.runtime,
+        pendingRuns: [{
+          id: 'legacy-run',
+          sceneId: scene.id,
+          triggerId: trigger.id,
+          mapId: scene.mapId,
+          event: 'enter',
+          nextActionIndex: 1,
+          createdAt: 1,
+        }],
+      },
+      scenes: [{
+        ...scene,
+        triggers: [{
+          ...trigger,
+          actions: [
+            {
+              id: 'legacy-group-roll',
+              kind: 'group-roll',
+              enabled: true,
+              label: '旧群体豁免',
+              selection: 'save:dex',
+              dc: 15,
+              mode: 'normal',
+              allowPassiveFallback: false,
+            },
+            ...trigger.actions,
+          ],
+        }],
+      }],
+    }
+    expect(validateSharedSceneOrchestration(legacy)).toBe(true)
+    expect(normalizeSharedSceneOrchestration(legacy)).toMatchObject({
+      scenes: [{ triggers: [{ actions: trigger.actions }] }],
+      runtime: { pendingRuns: [] },
+    })
+  })
+
   it('evaluates circle and rectangle regions at their boundaries', () => {
     expect(scenePointInsideRegion({ x: 30, y: 20 }, trigger.region)).toBe(true)
     expect(scenePointInsideRegion({ x: 31, y: 20 }, trigger.region)).toBe(false)

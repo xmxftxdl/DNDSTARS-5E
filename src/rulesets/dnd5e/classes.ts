@@ -18,7 +18,13 @@ export type Dnd5eClassId =
   | 'warlock'
   | 'wizard'
 
-export type Dnd5eSpellcastingKind = 'full-known' | 'full-prepared' | 'half-known' | 'half-prepared' | 'pact'
+export type Dnd5eSpellcastingKind =
+  | 'full-known'
+  | 'full-prepared'
+  | 'half-known'
+  | 'half-prepared'
+  | 'one-third-known'
+  | 'pact'
 
 export interface Dnd5eClassFeatureDefinition {
   id: string
@@ -716,6 +722,12 @@ export function dnd5eClassSpellSlots(definition: Dnd5eClassDefinition, level: nu
   if (!definition.spellcasting) return []
   if (definition.spellcasting.kind === 'full-known' || definition.spellcasting.kind === 'full-prepared') return FULL_CASTER_SLOTS[current - 1]
   if (definition.spellcasting.kind === 'half-known' || definition.spellcasting.kind === 'half-prepared') return HALF_CASTER_SLOTS[current - 1]
+  if (definition.spellcasting.kind === 'one-third-known') {
+    // The single-class Eldritch Knight/Arcane Trickster table advances at
+    // levels 3, 4, 7, 10, ...; multiclass slot contribution still rounds down.
+    const casterLevel = current < 3 ? 0 : Math.ceil(current / 3)
+    return casterLevel > 0 ? FULL_CASTER_SLOTS[casterLevel - 1] : []
+  }
   const slots = current >= 17 ? 4 : current >= 11 ? 3 : current >= 2 ? 2 : 1
   return [slots]
 }
@@ -730,7 +742,7 @@ export function dnd5ePactSlotLevel(level: number): number {
 }
 
 export function dnd5eClassProgression(definition: Dnd5eClassDefinition): readonly Dnd5eClassProgressionLevel[] {
-  if (definition.id === 'fighter') {
+  if (definition.id === 'fighter' && !definition.spellcasting) {
     return fighterProgression('champion').map((entry) => ({
       ...entry,
       features: entry.features.map((feature) => ({ ...feature, source: feature.source === 'fighter' ? 'class' as const : 'subclass' as const })),

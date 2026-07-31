@@ -1,0 +1,92 @@
+{
+  "format": "dndstars5e-content",
+  "schemaVersion": 2,
+  "manifest": {
+    "id": "local.example.original-content-v2",
+    "name": "Original Content V2 Example",
+    "version": "1.0.0",
+    "apiVersion": 2,
+    "rulesetId": "dnd5e-2014-srd-5.1",
+    "publisher": "Local example",
+    "license": "CC0-1.0",
+    "description": "Original test content only. No third-party rule text or artwork is included.",
+    "distributionPolicy": "local-only",
+    "contentCategory": "mixed"
+  },
+  "provenance": {
+    "edition": "2014",
+    "contentMode": "incremental",
+    "sourceTitle": "Original local example"
+  },
+  "assets": [
+    {
+      "id": "ember",
+      "mediaType": "image/png",
+      "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+  ],
+  "content": {
+    "races": [
+      {
+        "id": "emberkin",
+        "name": "Emberkin",
+        "description": "An original example ancestry.",
+        "iconAssetId": "ember",
+        "size": "small",
+        "speedFeet": 30,
+        "skillProficiencies": ["perception"],
+        "languages": ["Common"],
+        "traits": [
+          {
+            "id": "heat-sight",
+            "name": "Heat Sight",
+            "description": "An original example trait."
+          }
+        ],
+        "staticModifiers": {
+          "darkvisionRangeFeet": 60,
+          "damageResistances": ["fire"]
+        }
+      }
+    ],
+    "backgrounds": [],
+    "features": [],
+    "feats": [
+      {
+        "id": "steady-step",
+        "name": "Steady Step",
+        "summary": "An original passive feat.",
+        "description": "Your practiced footing improves initiative and walking speed.",
+        "iconAssetId": "ember",
+        "prerequisite": {
+          "minimumLevel": 4,
+          "abilityScores": {
+            "dex": 10
+          }
+        },
+        "automation": "full",
+        "staticModifiers": {
+          "initiativeBonus": 1,
+          "speedBonusFeet": 5
+        }
+      }
+    ],
+    "spells": [],
+    "items": [
+      {
+        "id": "ember-token",
+        "name": "Ember Token",
+        "category": "magic-item",
+        "icon": "generic",
+        "iconAssetId": "ember",
+        "description": "An original example item.",
+        "rulesText": "This demonstration item has no executable effect.",
+        "stackable": true
+      }
+    ],
+    "abilityGenerationMethods": [],
+    "headlessActions": [],
+    "subclasses": [],
+    "monsters": []
+  }
+}

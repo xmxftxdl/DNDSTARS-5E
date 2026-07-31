@@ -54,11 +54,27 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('see-invisibility')!)).toMatchObject({
       automation: 'full',
     })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('warding-bond')!)).toMatchObject({
+      automation: 'full',
+    })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('misty-step')!)).toMatchObject({
       automation: 'full',
     })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('magic-weapon')!)).toMatchObject({
       automation: 'full',
+    })
+    const sanctuary = getDnd5eSrdCombatSpell('sanctuary')!
+    expect(dnd5eMonsterCoreSpellCompatibility(sanctuary)).toMatchObject({
+      automation: 'full',
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility({
+      ...sanctuary,
+      id: 'not-sanctuary',
+    })).toMatchObject({
+      automation: 'manual',
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('bless')!)).toMatchObject({
+      automation: 'manual',
     })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('blight')!)).toMatchObject({
       automation: 'manual',

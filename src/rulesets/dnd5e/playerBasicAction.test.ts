@@ -36,6 +36,94 @@ function request(payload: SharedPlayerActionState['dnd5eBasicAction']): SharedPl
 }
 
 describe('D&D 5e player basic action bridge', () => {
+  it.each([
+    {
+      payload: { kind: 'other-action', description: '尝试翻过桌子压住机关。' } as const,
+      economy: 'action' as const,
+      spendsAction: true,
+      spendsBonusAction: false,
+    },
+    {
+      payload: { kind: 'other-bonus-action', description: '向同伴喊出约定的暗号。' } as const,
+      economy: 'bonusAction' as const,
+      spendsAction: false,
+      spendsBonusAction: true,
+    },
+  ])('authoritatively spends $economy before routing a custom action to DM adjudication', ({
+    payload,
+    economy,
+    spendsAction,
+    spendsBonusAction,
+  }) => {
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request(payload),
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ spendsAction, spendsBonusAction })
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual({
+      type: 'turn-resource-spent',
+      actorId: 'hero-token',
+      resource: economy,
+    })
+    expect(resolved.result.events).toContainEqual({
+      type: 'basic-action-adjudication-requested',
+      actorId: 'hero-token',
+      economy,
+      description: payload.description,
+    })
+  })
+
+  it('rejects a custom bonus action when the Host snapshot has no bonus action remaining', () => {
+    const economy = createDnd5eTurnEconomyCounts('turn', 30)
+    economy.bonusAction.current = 0
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'other-bonus-action', description: '尝试快速完成额外动作。' }),
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: economy,
+    })
+    expect(prepared).toEqual({ ok: false, reason: 'action-unavailable' })
+  })
+
+  it('accepts an omitted custom-action description and supplies a safe default for the DM', () => {
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'other-action' }),
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual({
+      type: 'basic-action-adjudication-requested',
+      actorId: 'hero-token',
+      economy: 'action',
+      description: '玩家声明一个其他动作。',
+    })
+  })
+
   it('prepares and resolves a grapple without trusting the player result', () => {
     const prepared = prepareDnd5ePlayerBasicAction({
       action: request({ kind: 'grapple', targetTokenId: 'enemy', targetDefense: 'athletics' }),
@@ -52,6 +140,65 @@ describe('D&D 5e player basic action bridge', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')?.dnd5eCombatState?.activeEffects)
       .toContainEqual(expect.objectContaining({ standardCondition: 'grappled' }))
+  })
+
+  it('releases the actor own basic grapple without spending an action', () => {
+    const grapple = createDnd5eConditionEffect({
+      id: 'basic-grapple',
+      condition: 'grappled',
+      source: { kind: 'feature', actorId: 'hero-token', rulesId: 'basic-action:grapple' },
+      targetId: 'enemy',
+      duration: { type: 'permanent' },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'hero-token',
+        sourceActionId: 'basic-action:grapple',
+        slotGroup: 'free-hand',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const grappleMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((entry) => entry.id === 'enemy'
+        ? {
+            ...entry,
+            dnd5eCombatState: {
+              schemaVersion: 2,
+              conditions: ['grappled'],
+              activeEffects: [grapple],
+            },
+          }
+        : entry),
+    }
+    const economy = createDnd5eTurnEconomyCounts('turn', 30)
+    economy.action.current = 0
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'release-grapple', targetTokenId: 'enemy' }),
+      map: grappleMap,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: 'Enemy', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: economy,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.spendsAction).toBe(false)
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed',
+      targetId: 'enemy',
+      reason: 'released',
+    }))
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === 'enemy')
+      ?.dnd5eCombatState?.activeEffects ?? []).not.toContainEqual(
+        expect.objectContaining({ id: 'basic-grapple' }),
+      )
   })
 
   it('lets grapple or shove replace one Extra Attack instead of consuming another action', () => {
@@ -80,7 +227,7 @@ describe('D&D 5e player basic action bridge', () => {
   it('moves a successfully shoved target exactly one legal grid square', () => {
     const elevatedMap = {
       ...map,
-      tokens: map.tokens.map((token) => token.id === 'enemy' ? { ...token, elevationFeet: 20 } : token),
+      tokens: map.tokens.map((token) => ({ ...token, elevationFeet: 20 })),
     }
     const prepared = prepareDnd5ePlayerBasicAction({
       action: request({ kind: 'shove', targetTokenId: 'enemy', targetDefense: 'athletics', outcome: 'push' }),
@@ -218,6 +365,76 @@ describe('D&D 5e player basic action bridge', () => {
     })
   })
 
+  it('routes shaking a Hypnotic Pattern target through the same authoritative wake action', () => {
+    const hypnotizedMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((entry) => entry.id === 'enemy'
+        ? {
+            ...entry,
+            dnd5eCombatState: {
+              schemaVersion: 2,
+              conditions: ['charmed', 'incapacitated'],
+              activeEffects: [
+                createDnd5eConditionEffect({
+                  id: 'hypnotic-pattern-charmed',
+                  condition: 'charmed',
+                  source: { kind: 'spell', actorId: 'wizard', rulesId: 'hypnotic-pattern' },
+                  targetId: 'enemy',
+                  duration: {
+                    type: 'concentration',
+                    sourceActorId: 'wizard',
+                    concentrationId: 'hypnotic-pattern',
+                    remainingRounds: 10,
+                  },
+                  breakOn: ['takes-damage', 'awakened'],
+                  removal: {
+                    action: { label: '摇醒受术者', economy: 'action', maxDistanceFeet: 5 },
+                  },
+                }),
+                createDnd5eConditionEffect({
+                  id: 'hypnotic-pattern-incapacitated',
+                  condition: 'incapacitated',
+                  source: { kind: 'spell', actorId: 'wizard', rulesId: 'hypnotic-pattern' },
+                  targetId: 'enemy',
+                  duration: {
+                    type: 'concentration',
+                    sourceActorId: 'wizard',
+                    concentrationId: 'hypnotic-pattern',
+                    remainingRounds: 10,
+                  },
+                  dependsOnEffectId: 'hypnotic-pattern-charmed',
+                  modifiers: { speedPenaltyFeet: 1_000 },
+                }),
+              ],
+            },
+          }
+        : entry),
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'wake', targetTokenId: 'enemy' }),
+      map: hypnotizedMap,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === 'enemy')?.dnd5eCombatState?.conditions)
+      .not.toEqual(expect.arrayContaining(['charmed', 'incapacitated']))
+    expect(resolved.result.events).toContainEqual({
+      type: 'sleeping-creature-awakened',
+      actorId: 'hero-token',
+      targetId: 'enemy',
+      sourceRulesIds: ['hypnotic-pattern'],
+    })
+  })
+
   it('routes an Entangle escape check through the authoritative basic-action bridge', () => {
     const restrainedHero: Character = {
       ...hero,
@@ -270,5 +487,96 @@ describe('D&D 5e player basic action bridge', () => {
       dc: 14,
       success: true,
     }))
+  })
+
+  it('routes a source-linked fixed-DC grapple through the ordinary escape-grapple UI path', () => {
+    const sourceLinkedGrapple = createDnd5eConditionEffect({
+      id: 'relation:grapple:enemy:bite:hero-token',
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: 'enemy',
+        rulesId: 'monster:srd-5.1:ankheg:bite:bite-grapple',
+      },
+      targetId: 'hero-token',
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'enemy',
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+      stackingKey: 'relation:grapple:enemy:bite:hero-token',
+    })
+    const acrobat: Character = {
+      ...hero,
+      abilities: { ...hero.abilities, str: 10, dex: 18 },
+      skills: ['athletics', 'acrobatics'],
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [sourceLinkedGrapple],
+      },
+    }
+    const grappleMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((entry) => entry.id === 'enemy'
+        ? { ...entry, poolId: 'srd-5.1:ankheg', hp: 39, maxHp: 39 }
+        : entry),
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'escape-grapple', targetTokenId: 'enemy' }),
+      map: grappleMap,
+      characters: [acrobat],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: 'Ankheg', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      actorContestSkill: 'acrobatics',
+      actorCheckAbility: 'dex',
+      escapeEffectId: 'relation:grapple:enemy:bite:hero-token',
+      targetDefense: undefined,
+    })
+
+    // A roll of 8 succeeds only with the selected Acrobatics modifier (+6).
+    // No opposing d20 is supplied because this path resolves against fixed DC 13.
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({
+      prepared: prepared.prepared,
+      actorD20: 8,
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved',
+      actorId: 'hero-token',
+      ability: 'dex',
+      skill: 'acrobatics',
+      dc: 13,
+      total: 14,
+      success: true,
+    }))
+    expect(resolved.result.events).not.toContainEqual(expect.objectContaining({
+      type: 'contest-resolved',
+      contest: 'escape-grapple',
+    }))
+    expect(resolved.application?.characters[0].dnd5eCombatState?.activeEffects ?? [])
+      .not.toContainEqual(expect.objectContaining({
+        id: 'relation:grapple:enemy:bite:hero-token',
+      }))
   })
 })

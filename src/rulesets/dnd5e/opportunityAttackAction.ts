@@ -15,6 +15,9 @@ import {
   dnd5eCombatantCanSee,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
+  dnd5eTotemBearGuardianDisadvantage,
+  dnd5eTotemEagleOpportunityDisadvantage,
+  dnd5eTotemWolfPackAdvantage,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eTranquilityWardCheck,
@@ -136,7 +139,13 @@ export function prepareDnd5eOpportunityAttack(input: {
   if (target ? target.currentHp <= 0 : (targetToken.hp ?? 1) <= 0) return { ok: false, reason: 'invalid-target' }
   if (
     input.reactionFeature === 'berserker-retaliation' &&
-    (!actor || dnd5eCharacterClassLevel(actor, 'barbarian') < 14 || actor.dnd5eClassChoices?.classes?.barbarian?.subclass !== 'berserker')
+    (
+      !actor ||
+      dnd5eCharacterClassLevel(actor, 'barbarian') < 14 ||
+      actor.dnd5eClassChoices?.classes?.barbarian?.subclass !== 'berserker' ||
+      actor.dnd5eCombatState?.berserkerRetaliationTrigger?.sourceId !== targetToken.id ||
+      actor.dnd5eCombatState.berserkerRetaliationTrigger.round !== Math.max(1, input.round ?? 1)
+    )
   ) return { ok: false, reason: 'invalid-actor' }
   if (
     input.reactionFeature === 'hunter-giant-killer' &&
@@ -216,7 +225,13 @@ export function prepareDnd5eOpportunityAttack(input: {
     const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) ||
       dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
-      targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+      targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
+      dnd5eTotemWolfPackAdvantage(
+        snapshot.state,
+        actorCombatant,
+        targetCombatant,
+        true,
+      )
     const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
       (!!actor && dnd5eWearingUnproficientArmor(actor)) ||
       dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
@@ -225,7 +240,9 @@ export function prepareDnd5eOpportunityAttack(input: {
       dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
       actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
       (targetCombatant.classId === 'ranger' && targetCombatant.subclassId === 'hunter' &&
-        targetCombatant.level >= 7 && targetCombatant.classSelections['defensive-tactics']?.includes('escape-the-horde'))
+        targetCombatant.level >= 7 && targetCombatant.classSelections['defensive-tactics']?.includes('escape-the-horde')) ||
+      dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, targetCombatant) ||
+      dnd5eTotemEagleOpportunityDisadvantage(targetCombatant, true)
     return resolveDnd5eRollMode({
       advantage: [{ active: advantage, reason: 'opportunity-attack-advantage' }],
       disadvantage: [{ active: disadvantage, reason: 'opportunity-attack-disadvantage' }],
@@ -284,6 +301,8 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   prepared: PreparedDnd5eOpportunityAttack
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
@@ -296,6 +315,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   hurlThroughHellDamageRolls?: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
   damageRolls: readonly number[]
+  savageAttacksRoll?: number
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
@@ -307,6 +327,8 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     criticalThreshold: prepared.criticalThreshold,
     d20: input.d20,
     d20Second: input.d20Second,
+    halflingLuckyD20: input.halflingLuckyD20,
+    halflingLuckyD20Second: input.halflingLuckyD20Second,
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
     bardicInspirationRoll: input.bardicInspirationRoll,
@@ -321,6 +343,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     mode: prepared.attackMode,
     reactionFeature: prepared.reactionFeature,
     damage: { ...prepared.damage, rolls: input.damageRolls },
+    savageAttacksRoll: input.savageAttacksRoll,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
   })

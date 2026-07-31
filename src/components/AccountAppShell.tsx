@@ -1,19 +1,22 @@
-import { DoorOpen, LibraryBig, Puzzle, Sparkles } from 'lucide-react'
+import { DoorOpen, Home, LibraryBig, Puzzle, Sparkles, UserRound } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
 
 const accountNavigation = [
   { to: '/app', label: '我的战役', icon: LibraryBig, end: true },
   { to: '/app/rooms', label: '创建／加入房间', icon: DoorOpen },
-  { to: '/app/extensions', label: '我的扩展', icon: Puzzle },
+  { to: '/app/extensions', label: '扩展市场', icon: Puzzle },
+  { to: '/app/profile', label: '个人资料', icon: UserRound },
 ]
 
 export default function AccountAppShell({
   accountName,
+  accountAvatar,
   activeCampaignPath,
   children,
 }: {
   accountName?: string
+  accountAvatar?: string
   activeCampaignPath?: string
   children: ReactNode
 }) {
@@ -37,6 +40,13 @@ export default function AccountAppShell({
                 {accountName}
               </span>
             )}
+            <Link
+              to="/"
+              aria-label="返回主页"
+              className="rounded-xl border border-white/10 p-2 text-slate-300 hover:bg-white/5 hover:text-white lg:hidden"
+            >
+              <Home className="h-4 w-4" />
+            </Link>
           </div>
 
           <nav aria-label="账号控制台导航" className="flex min-w-0 gap-1 overflow-x-auto rounded-2xl border border-white/8 bg-black/15 p-1.5">
@@ -60,7 +70,19 @@ export default function AccountAppShell({
           </nav>
 
           <div className="hidden items-center gap-3 lg:flex">
-            {accountName && <span className="max-w-48 truncate text-xs font-semibold text-slate-400">{accountName}</span>}
+            <Link to="/" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white">
+              <Home className="h-4 w-4" />返回主页
+            </Link>
+            {accountName && (
+              <Link to="/app/profile" className="flex max-w-52 items-center gap-2 truncate rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/5">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-arcane-500/10">
+                  {accountAvatar
+                    ? <img src={accountAvatar} alt="" className="h-full w-full object-cover" />
+                    : <UserRound className="h-4 w-4 text-arcane-200" />}
+                </span>
+                <span className="truncate">{accountName}</span>
+              </Link>
+            )}
             {activeCampaignPath && (
               <Link
                 to={activeCampaignPath}

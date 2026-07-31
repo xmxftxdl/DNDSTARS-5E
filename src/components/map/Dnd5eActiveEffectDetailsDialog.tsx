@@ -3,6 +3,7 @@ import {
   dnd5eActiveEffectRemainingLabel,
   type Dnd5eActiveEffectInstance,
 } from '../../rulesets/dnd5e/activeEffects'
+import { dnd5eConditionLabel } from '../../rulesets/dnd5e/conditions'
 
 const BREAK_LABELS = {
   'takes-damage': '受到伤害后解除',
@@ -11,6 +12,8 @@ const BREAK_LABELS = {
   'makes-attack': '发动攻击后解除',
   'casts-spell': '施放法术后解除',
   moves: '移动后解除',
+  awakened: '被唤醒后解除',
+  'magical-healing': '接受魔法治疗后解除',
 } as const
 
 const ABILITY_LABELS = { str: '力量', dex: '敏捷', con: '体质', int: '智力', wis: '感知', cha: '魅力' } as const
@@ -63,8 +66,13 @@ export default function Dnd5eActiveEffectDetailsDialog({
                 <div><dt className="text-slate-500">持续</dt><dd className="mt-0.5 inline-flex items-center gap-1 text-slate-200"><Clock3 className="h-3.5 w-3.5 text-violet-300" />{dnd5eActiveEffectRemainingLabel(effect)}</dd></div>
                 {effect.repeatSave ? <div><dt className="text-slate-500">重复豁免</dt><dd className="mt-0.5 text-slate-200">每个目标回合{effect.repeatSave.timing === 'target-turn-start' ? '开始' : '结束'}：{ABILITY_LABELS[effect.repeatSave.ability]} DC {effect.repeatSave.dc}</dd></div> : null}
                 {effect.repeatSave?.damageOnFailure ? <div><dt className="text-slate-500">豁免失败</dt><dd className="mt-0.5 text-slate-200">{effect.repeatSave.damageOnFailure.count}d{effect.repeatSave.damageOnFailure.sides}{effect.repeatSave.damageOnFailure.modifier ? `${effect.repeatSave.damageOnFailure.modifier > 0 ? '+' : ''}${effect.repeatSave.damageOnFailure.modifier}` : ''} {DAMAGE_LABELS[effect.repeatSave.damageOnFailure.type] ?? effect.repeatSave.damageOnFailure.type}伤害</dd></div> : null}
+                {effect.repeatSave?.onFailureTransition ? <div><dt className="text-slate-500">复检失败</dt><dd className="mt-0.5 text-slate-200">转为{dnd5eConditionLabel(effect.repeatSave.onFailureTransition.replaceWithCondition)}（永久）</dd></div> : null}
                 {effect.escapeCheck ? <div><dt className="text-slate-500">挣脱</dt><dd className="mt-0.5 text-slate-200">消耗动作，{ABILITY_LABELS[effect.escapeCheck.ability]}{effect.escapeCheck.alternativeAbility ? `或${ABILITY_LABELS[effect.escapeCheck.alternativeAbility]}` : ''}检定 DC {effect.escapeCheck.dc}</dd></div> : null}
+                {effect.periodicDamage ? <div><dt className="text-slate-500">回合开始</dt><dd className="mt-0.5 text-slate-200">{effect.periodicDamage.count}d{effect.periodicDamage.sides}{effect.periodicDamage.modifier ? `${effect.periodicDamage.modifier > 0 ? '+' : ''}${effect.periodicDamage.modifier}` : ''} {effect.periodicDamage.type ? `${DAMAGE_LABELS[effect.periodicDamage.type] ?? effect.periodicDamage.type}伤害` : '生命值损失'}</dd></div> : null}
+                {effect.removal?.action ? <div><dt className="text-slate-500">主动解除</dt><dd className="mt-0.5 text-slate-200">{effect.removal.action.label}（动作{effect.removal.action.abilityCheck ? `，${ABILITY_LABELS[effect.removal.action.abilityCheck.ability]}${effect.removal.action.abilityCheck.skill === 'medicine' ? '（医药）' : ''} DC ${effect.removal.action.abilityCheck.dc}` : ''}）</dd></div> : null}
+                {effect.removal?.onMagicalHealing ? <div><dt className="text-slate-500">魔法治疗</dt><dd className="mt-0.5 text-slate-200">接受魔法治疗时自动解除</dd></div> : null}
                 {effect.modifiers?.flySpeedFeet ? <div><dt className="text-slate-500">飞行速度</dt><dd className="mt-0.5 text-slate-200">{effect.modifiers.flySpeedFeet} 尺</dd></div> : null}
+                {effect.modifiers?.preventHealing ? <div><dt className="text-slate-500">治疗</dt><dd className="mt-0.5 text-rose-200">无法恢复生命值</dd></div> : null}
                 <div><dt className="text-slate-500">重复规则</dt><dd className="mt-0.5 text-slate-200">{effect.stackingPolicy}</dd></div>
               </dl>
               {effect.duration.type === 'concentration' ? <p className="mt-3 inline-flex items-center gap-1 rounded bg-sky-500/10 px-2 py-1 text-[11px] text-sky-200"><Link2 className="h-3.5 w-3.5" />来源失去专注时自动解除</p> : null}

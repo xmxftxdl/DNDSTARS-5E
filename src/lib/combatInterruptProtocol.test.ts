@@ -86,6 +86,64 @@ describe('combatInterruptProtocol', () => {
     })).toEqual({ character: hero, canAnswer: false })
   })
 
+  it('routes a target plugin choice only to the room member who owns that target', () => {
+    const actor = baseCharacter({
+      id: 'actor',
+      roomMemberId: 'member-a',
+      visibleToPlayers: true,
+      dmNotes: '',
+    })
+    const target = baseCharacter({
+      id: 'target',
+      roomMemberId: 'member-b',
+      visibleToPlayers: true,
+      dmNotes: '',
+    })
+    const interrupt = createCombatInterrupt({
+      id: 'plugin-choice-target',
+      mapId: 'map',
+      kind: 'plugin-choice',
+      actorCharId: actor.id,
+      targetCharId: target.id,
+      payload: {
+        pluginId: 'com.example.choice',
+        featureId: 'com.example.choice:command',
+        featureName: '指令',
+        prompt: '是否接受？',
+        audience: 'target',
+        options: [{ id: 'accept', label: '接受' }, { id: 'decline', label: '拒绝' }],
+        defaultOptionId: 'decline',
+      },
+      now: 100,
+    })
+    const tokens: Token[] = [{
+      id: 'target-token',
+      label: 'Target',
+      type: 'enemy',
+      characterId: target.id,
+      x: 0,
+      y: 0,
+      size: 1,
+      color: '#fff',
+      emoji: 'T',
+    }]
+
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [actor, target],
+      visibleCharacters: [actor, target],
+      playerCharId: actor.id,
+      roomMemberId: 'member-a',
+      tokens,
+    }).canAnswer).toBe(false)
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [actor, target],
+      visibleCharacters: [actor, target],
+      playerCharId: target.id,
+      roomMemberId: 'member-b',
+      tokens,
+    }).canAnswer).toBe(true)
+  })
+
   it('type-narrows interrupts by kind', () => {
     const interrupt = createCombatInterrupt({
       id: 'dodge-1',

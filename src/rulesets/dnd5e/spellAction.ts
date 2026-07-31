@@ -14,7 +14,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
+import { dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBlurImposesAttackDisadvantage,
@@ -25,6 +25,8 @@ import {
   endDnd5eConcentration,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
+  dnd5eTotemBearGuardianDisadvantage,
+  dnd5eTotemWolfPackAdvantage,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
@@ -35,14 +37,16 @@ import {
   type Dnd5eSpellForcedMovement,
   type Dnd5eSpellTeleportDestination,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eOptionalBonusDieUse,
   type Dnd5eSpellTargetAttackRoll,
   type Dnd5eSpellTargetSavingThrowRoll,
   type Dnd5eTargetTranquilitySaveRoll,
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eStandAgainstTideUse,
+  type Dnd5eOpeningAttackSavingThrowRoll,
 } from './headlessCombatEngine'
 import { applyDnd5eAttackCoverOverride, createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellAttackDelivery, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { normalizeDnd5eActiveEffects } from './activeEffects'
 import { dnd5eWearingUnproficientArmor } from './equipment'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
@@ -57,9 +61,28 @@ import {
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
+  type MapGeometryState,
 } from '../../lib/mapGeometry'
 import { createDnd5eCoreSpellArea, dnd5eWallOfFireDamagingSideCells, getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
+import { dnd5eEldritchStrikeApplies } from './eldritchKnight'
+import {
+  dnd5eCoreSpellComponentRequirements,
+  dnd5eSpellComponentCheck,
+  dnd5eSpellComponentsAvailable,
+} from './spellComponents'
+import {
+  DND5E_RACIAL_RESOURCE_KEYS,
+  dnd5eRacialInnateSpellGrant,
+  dnd5eRacialRulesForCharacter,
+  type Dnd5eRacialInnateSpellGrant,
+} from './racialAutomation'
+import {
+  dnd5eOpeningAttackHasAdvantage,
+  dnd5eOpeningAttackSavingThrowRequirement,
+} from './openingAttack'
+import { dnd5eHiddenSpellSaveDisadvantageApplies } from './spellSavePressure'
 
 export type Dnd5eSpellCastRejectReason =
   | 'invalid-action'
@@ -68,7 +91,14 @@ export type Dnd5eSpellCastRejectReason =
   | 'target-out-of-range'
   | 'effect-line-blocked'
   | 'spell-unavailable'
+  | 'spell-definition-unavailable'
+  | 'spell-not-known-or-prepared'
+  | 'spellcasting-class-unavailable'
+  | 'innate-spell-unavailable'
+  | 'sustained-spell-unavailable'
+  | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
+  | 'component-unavailable'
   | 'slot-unavailable'
   | 'combatant-missing'
 
@@ -79,11 +109,16 @@ export interface PreparedDnd5eSpellCast {
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actor: Character
-  castingClassId: Dnd5eClassId
+  castingClassId?: Dnd5eClassId
+  racialInnate: boolean
+  racialGrant?: Dnd5eRacialInnateSpellGrant
+  spellcastingAbility: keyof Character['abilities']
   castingClassLevel: number
   actorToken: Token
   targetToken: Token
   targetTokens: readonly Token[]
+  guessedTargetCell?: { col: number; row: number }
+  blindTargetMiss: boolean
   projectileTargetIds?: readonly string[]
   spell: Dnd5eSrdSpellDefinition
   slotLevel: number
@@ -97,7 +132,9 @@ export interface PreparedDnd5eSpellCast {
     targetToken: Token
     mode: 'normal' | 'advantage' | 'disadvantage'
     armorClass: number
+    openingAttackSavingThrow?: PreparedDnd5eOpeningAttackSavingThrow
   }[]
+  openingAttackSavingThrow?: PreparedDnd5eOpeningAttackSavingThrow
   attackBlessed: boolean
   attackBaned: boolean
   savingThrow?: { modifier: number; dc: number; mode: 'normal' | 'advantage' | 'disadvantage' }
@@ -139,17 +176,32 @@ export interface PreparedDnd5eSpellCast {
   sustainedEffectAreaId?: string
 }
 
+export interface PreparedDnd5eOpeningAttackSavingThrow {
+  featureId: string
+  ability: keyof Character['abilities']
+  dc: number
+  modifier: number
+  mode: 'normal' | 'advantage' | 'disadvantage'
+  blessed: boolean
+  baned: boolean
+  failureDamageMultiplier: number
+}
+
 /**
- * DM 地图桥为“斥力魔爆”计算一段远离施法者的合法直线位移。
- * 每道命中射线都重新调用，因此同一目标可被连续推动；边界、障碍和其他 Token 会截短位移。
+ * Finds the furthest legal grid destination for movement directly away from
+ * a source. Map bounds, movement geometry and occupied cells truncate the
+ * requested distance at the first illegal step.
  */
-export function dnd5eRepellingBlastPushDestination(
+export function dnd5eForcedPushDestination(
   map: BattleMap,
   actor: Token,
   target: Token,
+  maximumDistanceFeet: number,
 ): { to: { x: number; y: number }; distanceFeet: number } {
   const feetPerCell = Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
-  const maximumSteps = Math.max(0, Math.floor(10 / feetPerCell))
+  const maximumSteps = Number.isFinite(maximumDistanceFeet)
+    ? Math.max(0, Math.floor(maximumDistanceFeet / feetPerCell))
+    : 0
   const actorAnchor = tokenAnchorCellFromPixel(actor.x, actor.y, actor, map)
   const targetAnchor = tokenAnchorCellFromPixel(target.x, target.y, target, map)
   const dc = Math.sign(targetAnchor.col - actorAnchor.col)
@@ -177,6 +229,108 @@ export function dnd5eRepellingBlastPushDestination(
   return { to: destination, distanceFeet: steps * feetPerCell }
 }
 
+/**
+ * Finds the furthest legal grid destination for movement directly toward a
+ * source. The source itself remains occupied, so a pulled creature stops in
+ * the nearest legal space instead of overlapping it.
+ */
+export function dnd5eForcedPullDestination(
+  map: BattleMap,
+  actor: Token,
+  target: Token,
+  maximumDistanceFeet: number,
+): { to: { x: number; y: number }; distanceFeet: number } {
+  const feetPerCell = Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+  const maximumSteps = Number.isFinite(maximumDistanceFeet)
+    ? Math.max(0, Math.floor(maximumDistanceFeet / feetPerCell))
+    : 0
+  const actorAnchor = tokenAnchorCellFromPixel(actor.x, actor.y, actor, map)
+  const targetAnchor = tokenAnchorCellFromPixel(target.x, target.y, target, map)
+  const dc = Math.sign(actorAnchor.col - targetAnchor.col)
+  const dr = Math.sign(actorAnchor.row - targetAnchor.row)
+  if (maximumSteps < 1 || (dc === 0 && dr === 0)) {
+    return { to: { x: target.x, y: target.y }, distanceFeet: 0 }
+  }
+  const blocked = occupiedCells(map.tokens, map, target.id)
+  const columns = Math.max(
+    1,
+    Math.floor((map.width - map.gridOffsetX) / Math.max(1, map.gridSize)),
+  )
+  const rows = Math.max(
+    1,
+    Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)),
+  )
+  let destination = { x: target.x, y: target.y }
+  let steps = 0
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  for (let step = 1; step <= maximumSteps; step += 1) {
+    const anchor = {
+      col: targetAnchor.col + dc * step,
+      row: targetAnchor.row + dr * step,
+    }
+    const position = tokenCenterForAnchorCell(anchor, target, map)
+    const footprint = tokenOccupiedCellsAt(target, map, position)
+    if (footprint.some((cell) =>
+      cell.col < 0 ||
+      cell.row < 0 ||
+      cell.col >= columns ||
+      cell.row >= rows ||
+      blocked.has(cellKey(cell)),
+    )) break
+    if (mapGeometryMovementBlocked({
+      geometry,
+      map,
+      token: { ...target, ...destination },
+      to: position,
+    }).blocked) break
+    destination = position
+    steps = step
+  }
+  return { to: destination, distanceFeet: steps * feetPerCell }
+}
+
+export function dnd5eRepellingBlastPushDestination(
+  map: BattleMap,
+  actor: Token,
+  target: Token,
+): { to: { x: number; y: number }; distanceFeet: number } {
+  return dnd5eForcedPushDestination(map, actor, target, 10)
+}
+
+/**
+ * Resolves whether a forced horizontal move actually carries a creature off
+ * the ground it was standing on. A lower terrain value alone is insufficient:
+ * airborne or otherwise unsupported tokens require DM adjudication instead.
+ */
+export function dnd5eForcedMovementFall(input: {
+  geometry?: MapGeometryState
+  target: Pick<Token, 'x' | 'y' | 'elevationFeet'>
+  to: { x: number; y: number }
+}): {
+  sourceElevationFeet: number
+  sourceGroundElevationFeet: number
+  landingGroundElevationFeet: number
+  groundedAtSource: boolean
+  fallDistanceFeet: number
+  toElevationFeet?: number
+} {
+  const sourceGroundElevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, input.target, 0)
+  const sourceElevationFeet = mapGeometryTokenElevation(input.geometry, input.target)
+  const landingGroundElevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, input.to, 0)
+  const groundedAtSource = Math.abs(sourceElevationFeet - sourceGroundElevationFeet) <= 1e-4
+  const fallDistanceFeet = groundedAtSource
+    ? Math.max(0, sourceElevationFeet - landingGroundElevationFeet)
+    : 0
+  return {
+    sourceElevationFeet,
+    sourceGroundElevationFeet,
+    landingGroundElevationFeet,
+    groundedAtSource,
+    fallDistanceFeet,
+    toElevationFeet: fallDistanceFeet > 0 ? landingGroundElevationFeet : undefined,
+  }
+}
+
 export function prepareDnd5eSpellCast(input: {
   action: SharedPlayerActionState
   map: BattleMap
@@ -191,11 +345,12 @@ export function prepareDnd5eSpellCast(input: {
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
   const spell = getDnd5eSrdCombatSpell(payload.spellId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  if (!spell) return { ok: false, reason: 'spell-definition-unavailable' }
   if (!payload.sustainedEffectAttack && dnd5eWearingUnproficientArmor(actor)) {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
   const sustainedEffectAttack = payload.sustainedEffectAttack
-  const sustainedAttack = sustainedEffectAttack && spell?.sustainedAttack?.id === sustainedEffectAttack
+  const sustainedAttack = sustainedEffectAttack && spell.sustainedAttack?.id === sustainedEffectAttack
     ? spell.sustainedAttack
     : undefined
   if ((sustainedEffectAttack != null) !== (sustainedAttack != null)) {
@@ -214,7 +369,7 @@ export function prepareDnd5eSpellCast(input: {
     ? input.map.dnd5ePluginAreas?.find((area) =>
         area.id === sustainedEffectAreaId &&
         area.sourceKind === 'core-spell' &&
-        area.coreSpellId === spell?.id &&
+        area.coreSpellId === spell.id &&
         area.sourceCharacterId === actor.id &&
         area.sourceTokenId === actorToken.id &&
         area.anchorMode === (sustainedAttack?.origin === 'effect-token' ? 'effect-token' : 'fixed') &&
@@ -224,7 +379,7 @@ export function prepareDnd5eSpellCast(input: {
         input.action.round <= area.expiresAfterRound,
       )
     : undefined
-  const sustainedEffect = spell && sustainedAttack
+  const sustainedEffect = sustainedAttack
     ? normalizeDnd5eActiveEffects(actor.dnd5eCombatState?.activeEffects).find((effect) =>
         effect.source.kind === 'spell' &&
         effect.source.actorId === actorToken.id &&
@@ -238,24 +393,24 @@ export function prepareDnd5eSpellCast(input: {
   if (
     sustainedAttack && (
       !sustainedEffect || !Number.isInteger(sustainedEffect.potency) ||
-      sustainedEffect.potency! < (spell?.level ?? 1) || sustainedEffect.potency! > 9 ||
+      sustainedEffect.potency! < spell.level || sustainedEffect.potency! > 9 ||
       (sustainedAttack.origin === 'effect-token' && (
         !sustainedArea || sustainedArea.slotLevel !== sustainedEffect.potency ||
         !input.map.tokens.some((token) =>
           token.id === sustainedArea.anchorTokenId &&
-          token.dnd5eSpellEffect?.spellId === spell?.id &&
+          token.dnd5eSpellEffect?.spellId === spell.id &&
           token.dnd5eSpellEffect?.sourceCharacterId === actor.id &&
           token.dnd5eSpellEffect?.sourceTokenId === actorToken.id
         )
       )) ||
       (sustainedAttack.origin === 'persistent-area' && (
         !sustainedArea || sustainedArea.slotLevel !== sustainedEffect.potency ||
-        sustainedArea.concentrationId !== spell?.id ||
-        actor.dnd5eCombatState?.concentrationSpellId !== spell?.id
+        sustainedArea.concentrationId !== spell.id ||
+        actor.dnd5eCombatState?.concentrationSpellId !== spell.id
       ))
     )
-  ) return { ok: false, reason: 'spell-unavailable' }
-  const authorizedSustainedEffectAreaId = spell?.sustainedAttack?.origin === 'effect-token'
+  ) return { ok: false, reason: 'sustained-spell-unavailable' }
+  const authorizedSustainedEffectAreaId = spell.sustainedAttack?.origin === 'effect-token'
     ? sustainedEffectAreaId ?? `core-spell-area:${input.action.id}`
     : sustainedAttack?.origin === 'persistent-area'
       ? sustainedEffectAreaId
@@ -278,24 +433,59 @@ export function prepareDnd5eSpellCast(input: {
         : 'invalid-target',
     }
   }
-  const castingClassId = spell
+  const racialGrant = payload.racialInnate
+    ? dnd5eRacialInnateSpellGrant(dnd5eRacialRulesForCharacter(actor), spell.id)
+    : undefined
+  if (payload.racialInnate === true && (
+    !racialGrant ||
+    payload.castingClassId != null ||
+    payload.slotLevel !== racialGrant.castAtLevel
+  )) {
+    return { ok: false, reason: 'innate-spell-unavailable' }
+  }
+  const castingClassId = !racialGrant
     ? dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
     : undefined
-  const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
-  const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  if (!spell || !definition?.spellcasting || !castingClassId || castingClassLevel < 1) {
-    return { ok: false, reason: 'spell-unavailable' }
+  if (!racialGrant && !castingClassId) {
+    return { ok: false, reason: 'spell-not-known-or-prepared' }
   }
-  if (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18)) {
-    return { ok: false, reason: 'spell-unavailable' }
+  const castingSource = castingClassId
+    ? dnd5eEffectiveSpellcastingSource(actor, castingClassId)
+    : undefined
+  const definition = castingSource?.definition
+  const castingClassLevel = racialGrant
+    ? actor.level
+    : castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
+  const spellcastingAbility = racialGrant?.ability ?? definition?.spellcasting?.ability
+  if (
+    !spellcastingAbility ||
+    (!racialGrant && (!definition?.spellcasting || castingClassLevel < 1))
+  ) {
+    return { ok: false, reason: 'spellcasting-class-unavailable' }
+  }
+  const druidLevel = dnd5eCharacterClassLevel(actor, 'druid')
+  if (actor.dnd5eCombatState?.wildShapeFormId && druidLevel < 18) {
+    return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   }
   if (spell.castingTime === 'reaction') return { ok: false, reason: 'invalid-action' }
+  if (!racialGrant && !sustainedAttack) {
+    const componentCheck = dnd5eSpellComponentCheck(
+      actor,
+      dnd5eCoreSpellComponentRequirements(spell.id),
+      castingClassId,
+    )
+    if (!dnd5eSpellComponentsAvailable(componentCheck)) {
+      return { ok: false, reason: 'component-unavailable' }
+    }
+  }
 
   const slotLevel = sustainedAttack
     ? sustainedEffect!.potency!
+    : racialGrant
+      ? racialGrant.castAtLevel
     : spell.level === 0
     ? 0
-    : definition.spellcasting.kind === 'pact' && spell.level <= 5
+    : definition!.spellcasting!.kind === 'pact' && spell.level <= 5
       ? dnd5ePactSlotLevel(castingClassLevel)
       : payload.slotLevel
   const higherSlotDamageChoices = dnd5eSpellHigherSlotDamageChoices(spell, slotLevel)
@@ -304,19 +494,34 @@ export function prepareDnd5eSpellCast(input: {
     (payload.higherSlotDamageType != null && !higherSlotDamageChoices.includes(payload.higherSlotDamageType))
   ) return { ok: false, reason: 'invalid-action' }
   if (spell.level > 0 && !sustainedAttack) {
-    const resourceKey = definition.spellcasting.kind === 'pact' && spell.level <= 5 ? 'dnd5e-pact-slot' : `dnd5e-spell-slot-${slotLevel}`
+    const resourceKey = racialGrant
+      ? DND5E_RACIAL_RESOURCE_KEYS.innateSpell(spell.id)
+      : definition!.spellcasting!.kind === 'pact' && spell.level <= 5
+        ? 'dnd5e-pact-slot'
+        : `dnd5e-spell-slot-${slotLevel}`
     const slot = actor.classResources?.[resourceKey]
-    const freeCastSource = dnd5eFreeSpellCastSource({
-      classId: definition.id,
+    const freeCastSource = racialGrant ? undefined : dnd5eFreeSpellCastSource({
+      classId: definition!.id,
       level: castingClassLevel,
-      classSelections: actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {},
+      classSelections: actor.dnd5eClassChoices?.classes?.[definition!.id]?.selections ?? {},
       classResources: actor.classResources ?? {},
     }, spell, slotLevel)
     if (
       !Number.isInteger(slotLevel) || slotLevel < spell.level ||
-      (!freeCastSource && (!slot || slot.current < 1))
+      (!freeCastSource && (!slot || slot.current < 1)) ||
+      (racialGrant && racialGrant.resetOn !== 'long-rest')
     ) return { ok: false, reason: 'slot-unavailable' }
   }
+  if (
+    racialGrant && (
+      payload.overchannel === true ||
+      payload.empowered === true ||
+      payload.draconicResistance === true ||
+      payload.repellingBlast === true ||
+      payload.metamagic != null ||
+      sustainedAttack != null
+    )
+  ) return { ok: false, reason: 'invalid-action' }
   const overchannel = payload.overchannel === true
   if (sustainedAttack && (
     overchannel || payload.empowered || payload.draconicResistance || payload.repellingBlast ||
@@ -329,8 +534,8 @@ export function prepareDnd5eSpellCast(input: {
     (sustainedAttack.resolution !== 'saving-throw' && (payload.targetTokenIds?.length ?? 0) > 1)
   )) return { ok: false, reason: 'invalid-action' }
   if (overchannel && !dnd5eCanOverchannelSpell({
-    classId: definition.id,
-    subclassId: actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
+    classId: definition?.id,
+    subclassId: definition ? actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass : undefined,
     level: castingClassLevel,
   }, spell, slotLevel)) return { ok: false, reason: 'invalid-action' }
   const overchannelUses = Math.max(0, Math.floor(actor.dnd5eCombatState?.overchannelUsesSinceLongRest ?? 0))
@@ -338,20 +543,22 @@ export function prepareDnd5eSpellCast(input: {
     ? (overchannelUses + 1) * slotLevel
     : 0
   const metamagic = payload.metamagic
-  const classSelections = actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
+  const classSelections = definition
+    ? actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
+    : {}
   const sorceryPoints = actor.classResources?.['dnd5e-sorcery-points']
   const metamagicCost = metamagic ? dnd5eMetamagicCost(metamagic.kind, slotLevel) : 0
   if (metamagic) {
     const selectedMetamagic = classSelections.metamagic ?? []
     if (
-      definition.id !== 'sorcerer' || castingClassLevel < 3 || !selectedMetamagic.includes(metamagic.kind) ||
+      definition?.id !== 'sorcerer' || castingClassLevel < 3 || !selectedMetamagic.includes(metamagic.kind) ||
       !dnd5eMetamagicAvailableForSpell(metamagic.kind, spell, slotLevel)
     ) return { ok: false, reason: 'invalid-action' }
   }
   const empowered = payload.empowered === true
   if (
     empowered && (
-      definition.id !== 'sorcerer' || castingClassLevel < 3 ||
+      definition?.id !== 'sorcerer' || castingClassLevel < 3 ||
       !(classSelections.metamagic ?? []).includes('empowered') ||
       !dnd5eCanEmpowerSpell(spell) || overchannel
     )
@@ -361,11 +568,11 @@ export function prepareDnd5eSpellCast(input: {
   const repellingBlast = payload.repellingBlast === true
   if (
     repellingBlast &&
-    (definition.id !== 'warlock' || spell.id !== 'eldritch-blast' || !invocations.includes('repelling-blast'))
+    (definition?.id !== 'warlock' || spell.id !== 'eldritch-blast' || !invocations.includes('repelling-blast'))
   ) return { ok: false, reason: 'invalid-action' }
   const draconicResistanceType = dnd5eDraconicElementalResistanceType({
-    classId: definition.id,
-    subclassId: actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
+    classId: definition?.id,
+    subclassId: definition ? actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass : undefined,
     level: castingClassLevel,
     classSelections,
   }, spell)
@@ -379,13 +586,99 @@ export function prepareDnd5eSpellCast(input: {
     : dnd5eSpellDiceCount(spell, actor.level, slotLevel)
   const projectileCount = dnd5eSpellProjectileCount(spell, actor.level, slotLevel)
   const repeatedTargets = dnd5eSpellAllowsRepeatedTargets(spell)
-  const projectileTargetIds = repeatedTargets ? payload.projectileTargetIds : undefined
+  const guessedTargetCell = payload.guessedTargetCell
+  let projectileTargetIds = repeatedTargets ? payload.projectileTargetIds : undefined
   if (
-    (repeatedTargets && projectileTargetIds?.length !== projectileCount) ||
+    (guessedTargetCell == null && repeatedTargets && projectileTargetIds?.length !== projectileCount) ||
+    (guessedTargetCell != null && (payload.projectileTargetIds?.length ?? 0) > 0) ||
     (!repeatedTargets && (payload.projectileTargetIds?.length ?? 0) > 0)
   ) return { ok: false, reason: 'invalid-target' }
   const persistentArea = spell.effect === 'persistent-area'
-  let requestedTargetIds = persistentArea || (spell.area && spell.target === 'area')
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  let blindTargetMiss = false
+  let guessedTargetId: string | undefined
+  if (guessedTargetCell != null) {
+    const guessedSpiritualWeapon = spell.id === 'spiritual-weapon' && sustainedAttack == null
+    const guessedDispelMagic = spell.effect === 'dispel-magic'
+    const guessedSanctuary = spell.id === 'sanctuary'
+    const guessedAnyCreature = guessedDispelMagic || guessedSanctuary
+    const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
+    const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
+    if (
+      spell.allowsGuessedTargetCell !== true ||
+      (spell.effect !== 'spell-attack' && spell.effect !== 'saving-throw' &&
+        !guessedDispelMagic && !guessedSanctuary) ||
+      (spell.target !== 'hostile' && !guessedAnyCreature) ||
+      (spell.area != null && !guessedSpiritualWeapon) ||
+      sustainedAttack != null ||
+      metamagic?.kind === 'twinned' ||
+      payload.targetTokenId !== '' ||
+      (payload.targetTokenIds?.length ?? 0) !== 0 ||
+      (input.action.targetTokenId != null && input.action.targetTokenId !== '') ||
+      (input.action.targetTokenIds?.length ?? 0) !== 0 ||
+      input.action.targetCell?.col !== guessedTargetCell.col ||
+      input.action.targetCell?.row !== guessedTargetCell.row ||
+      !Number.isInteger(guessedTargetCell.col) ||
+      !Number.isInteger(guessedTargetCell.row) ||
+      guessedTargetCell.col < 0 ||
+      guessedTargetCell.row < 0 ||
+      guessedTargetCell.col >= columns ||
+      guessedTargetCell.row >= rows
+    ) return { ok: false, reason: 'invalid-target' }
+    const guessedPoint = tokenCenterForAnchorCell(guessedTargetCell, { size: 1 }, input.map)
+    const guessedElevation = mapGeometryTerrainElevationAtPoint(geometry, guessedPoint)
+    const guessedToken = {
+      ...actorToken,
+      id: `${actorToken.id}:guessed-target`,
+      characterId: undefined,
+      type: 'enemy' as const,
+      size: 1,
+      ...guessedPoint,
+      elevationFeet: guessedElevation,
+    }
+    const spiritualWeaponOrigin = guessedSpiritualWeapon && payload.areaTargetCell
+      ? tokenCenterForAnchorCell(payload.areaTargetCell, { size: 1 }, input.map)
+      : undefined
+    if (guessedSpiritualWeapon && !spiritualWeaponOrigin) return { ok: false, reason: 'invalid-target' }
+    const invocationRange = spell.id === 'eldritch-blast' && invocations.includes('eldritch-spear')
+      ? 300
+      : guessedSpiritualWeapon
+        ? spell.sustainedAttack?.rangeFeet ?? 5
+        : spell.rangeFeet
+    const placementRange = metamagic?.kind === 'distant' ? invocationRange * 2 : invocationRange
+    const guessedOriginToken = spiritualWeaponOrigin
+      ? { ...actorToken, ...spiritualWeaponOrigin, size: 1 }
+      : actorToken
+    const distanceFeet = tokenFootprintDistanceCells(guessedOriginToken, guessedToken, input.map) *
+      Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    if (distanceFeet > placementRange) return { ok: false, reason: 'target-out-of-range' }
+    if (mapGeometryLineOfEffectBlocked({
+      geometry,
+      from: spiritualWeaponOrigin ?? actorToken,
+      to: guessedPoint,
+      fromElevationFeet: spiritualWeaponOrigin
+        ? mapGeometryTerrainElevationAtPoint(geometry, spiritualWeaponOrigin)
+        : mapGeometryTokenElevation(geometry, actorToken),
+      toElevationFeet: guessedElevation,
+    })) return { ok: false, reason: 'effect-line-blocked' }
+    const guessedKey = cellKey(guessedTargetCell)
+    guessedTargetId = input.map.tokens
+      .filter((candidate) =>
+        candidate.type !== 'obstacle' &&
+        candidate.id !== actorToken.id &&
+        (guessedAnyCreature || areOpposedCombatTokens(actorToken, candidate)) &&
+        tokenOccupiedCellsAt(candidate, input.map, candidate).some((cell) => cellKey(cell) === guessedKey),
+      )
+      .sort((left, right) => left.id.localeCompare(right.id))[0]?.id
+    blindTargetMiss = guessedTargetId == null
+    if (guessedTargetId && repeatedTargets && projectileCount != null) {
+      const authoritativeTargetId = guessedTargetId
+      projectileTargetIds = Array.from({ length: projectileCount }, () => authoritativeTargetId)
+    }
+  }
+  let requestedTargetIds = guessedTargetCell != null
+    ? guessedTargetId ? [guessedTargetId] : []
+    : persistentArea || (spell.area && spell.target === 'area')
     ? []
     : [...new Set(
         projectileTargetIds?.length
@@ -422,7 +715,8 @@ export function prepareDnd5eSpellCast(input: {
       : 1
     : metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, slotLevel, actor.level)
   if (
-    (!persistentArea && !spell.area && requestedTargetIds.length < 1) || requestedTargetIds.length > maximumTargets ||
+    (!persistentArea && spell.target !== 'area' && requestedTargetIds.length < 1 && !blindTargetMiss) ||
+    requestedTargetIds.length > maximumTargets ||
     (metamagic?.kind === 'twinned' && requestedTargetIds.length !== 2)
   ) {
     return { ok: false, reason: 'invalid-target' }
@@ -438,7 +732,6 @@ export function prepareDnd5eSpellCast(input: {
     return { ok: false, reason: 'invalid-target' }
   }
   let validTargetTokens = targetTokens as Token[]
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
   let areaCells: readonly { col: number; row: number }[] | undefined
   let areaAnchorCell: { col: number; row: number } | undefined
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
@@ -474,6 +767,23 @@ export function prepareDnd5eSpellCast(input: {
         y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
       }
       const areaPointElevation = mapGeometryTerrainElevationAtPoint(geometry, areaPoint)
+      if (
+        spell.requiresVisibleTarget === 'placement' &&
+        !mapGeometryCanSeeToken({
+          geometry,
+          map: input.map,
+          viewer: actorToken,
+          target: {
+            ...actorToken,
+            id: `${actorToken.id}:spell-placement`,
+            characterId: undefined,
+            ...areaPoint,
+            elevationFeet: areaPointElevation,
+          },
+          forceEnabled: true,
+          fallbackRangeFeet: areaTargeting.placeRangeFeet ?? spell.rangeFeet,
+        })
+      ) return { ok: false, reason: 'invalid-target' }
       if (spell.effect === 'teleport') {
         const destination = tokenCenterForAnchorCell(areaCell, actorToken, input.map)
         const destinationFootprint = tokenOccupiedCellsAt(actorToken, input.map, destination)
@@ -589,6 +899,21 @@ export function prepareDnd5eSpellCast(input: {
       return { ok: false, reason: 'target-out-of-range' }
     }
   }
+  if (
+    guessedTargetCell == null &&
+    spell.requiresVisibleTarget !== 'placement' &&
+    (spell.allowsGuessedTargetCell === true || spell.requiresVisibleTarget != null) &&
+    validTargetTokens.some((target, targetIndex) =>
+      (spell.requiresVisibleTarget !== 'primary' || targetIndex === 0) &&
+      !mapGeometryCanSeeToken({
+      geometry,
+      map: input.map,
+      viewer: actorToken,
+      target,
+      forceEnabled: true,
+      fallbackRangeFeet: metamagic?.kind === 'distant' ? spell.rangeFeet * 2 : spell.rangeFeet,
+    }))
+  ) return { ok: false, reason: 'invalid-target' }
   if (spell.maximumTargetSeparationFeet != null && validTargetTokens.length > 1) {
     for (let leftIndex = 0; leftIndex < validTargetTokens.length; leftIndex += 1) {
       for (let rightIndex = leftIndex + 1; rightIndex < validTargetTokens.length; rightIndex += 1) {
@@ -623,8 +948,8 @@ export function prepareDnd5eSpellCast(input: {
   const suppliedSculptedTargetIds = payload.sculptedTargetIds ?? []
   const sculptedTargetIds = [...new Set(suppliedSculptedTargetIds)]
   const canSculpt = dnd5eCanSculptSpell({
-    classId: definition.id,
-    subclassId: actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
+    classId: definition?.id,
+    subclassId: definition ? actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass : undefined,
     level: castingClassLevel,
   }, spell)
   if (
@@ -782,7 +1107,7 @@ export function prepareDnd5eSpellCast(input: {
       movementRemaining: input.turnEconomy.movement.current,
     }
   }
-  const abilityModifier = rules.abilityModifier(actor.abilities[definition.spellcasting.ability])
+  const abilityModifier = rules.abilityModifier(actor.abilities[spellcastingAbility])
   const baseDamageDiceCounts = sustainedAttack || spell.sustainedAttack?.immediateAttack
     ? [dnd5eSustainedSpellAttackDiceCount(spell, slotLevel)]
     : dnd5eSpellDamageDiceCounts(
@@ -797,8 +1122,36 @@ export function prepareDnd5eSpellCast(input: {
   const usesSpellAttackRoll = spell.effect === 'spell-attack' ||
     sustainedAttack?.resolution === 'spell-attack' ||
     (sustainedAttack != null && sustainedAttack.resolution == null)
-  const effectiveSpellAttackRangeFeet = sustainedAttack?.rangeFeet ?? spell.rangeFeet
-  const rangedSpellThreatened = usesSpellAttackRoll && effectiveSpellAttackRangeFeet > 5 && input.map.tokens.some((candidate) => {
+  const openingAttackSavingThrowFor = (
+    currentTarget: typeof targetCombatant,
+  ): PreparedDnd5eOpeningAttackSavingThrow | undefined => {
+    const requirement = dnd5eOpeningAttackSavingThrowRequirement(
+      snapshot.state,
+      actorCombatant,
+      currentTarget,
+    )
+    return requirement ? {
+      featureId: requirement.featureId,
+      ability: requirement.ability,
+      dc: requirement.dc,
+      modifier: currentTarget.savingThrowBonuses[requirement.ability] ??
+        rules.abilityModifier(currentTarget.abilities[requirement.ability]),
+      mode: dnd5eSavingThrowMode(currentTarget, requirement.ability),
+      blessed: dnd5eCombatantHasConcentrationEffect(
+        snapshot.state,
+        currentTarget.id,
+        'bless',
+      ),
+      baned: dnd5eCombatantHasConcentrationEffect(
+        snapshot.state,
+        currentTarget.id,
+        'bane',
+      ),
+      failureDamageMultiplier: requirement.failureDamageMultiplier,
+    } : undefined
+  }
+  const spellAttackDelivery = dnd5eSpellAttackDelivery(spell, sustainedAttack)
+  const rangedSpellThreatened = usesSpellAttackRoll && spellAttackDelivery === 'ranged' && input.map.tokens.some((candidate) => {
     const candidateCombatant = snapshot.state.combatants[candidate.id]
     return candidate.id !== actorToken.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(actorToken, candidate) &&
       dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
@@ -809,11 +1162,23 @@ export function prepareDnd5eSpellCast(input: {
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5))
+      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5) ||
+      dnd5eTotemWolfPackAdvantage(
+        snapshot.state,
+        actorCombatant,
+        targetCombatant,
+        spellAttackDelivery === 'melee',
+      ) ||
+      dnd5eOpeningAttackHasAdvantage(
+        snapshot.state,
+        actorCombatant,
+        targetCombatant,
+      ))
   const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
     dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
     dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
-    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
+    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5) ||
+    dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, targetCombatant)
   const attackMode = usesSpellAttackRoll && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
     ? resolveDnd5eRollMode({
         advantage: [{ active: advantage, reason: 'spell-attack-advantage' }],
@@ -836,12 +1201,24 @@ export function prepareDnd5eSpellCast(input: {
             (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
             !!currentTarget.classState.recklessAttackTurnKey || !!currentTarget.classState.stunnedByActorId ||
             dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) ||
-            (currentTargetProne && currentDistanceFeet <= 5))
+            (currentTargetProne && currentDistanceFeet <= 5) ||
+            dnd5eTotemWolfPackAdvantage(
+              snapshot.state,
+              actorCombatant,
+              currentTarget,
+              spellAttackDelivery === 'melee',
+            ) ||
+            dnd5eOpeningAttackHasAdvantage(
+              snapshot.state,
+              actorCombatant,
+              currentTarget,
+            ))
         const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(currentTarget) ||
           dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, currentTarget.id) ||
           (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
           dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) || actorProne ||
-          (currentTargetProne && currentDistanceFeet > 5)
+          (currentTargetProne && currentDistanceFeet > 5) ||
+          dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, currentTarget)
         return {
           targetToken: currentTargetToken,
           mode: resolveDnd5eRollMode({
@@ -849,6 +1226,8 @@ export function prepareDnd5eSpellCast(input: {
             disadvantage: [{ active: currentDisadvantage, reason: 'spell-target-attack-disadvantage' }],
           }).mode,
           armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, currentTargetToken.id),
+          openingAttackSavingThrow:
+            openingAttackSavingThrowFor(currentTarget),
         }
       })
     : undefined
@@ -856,6 +1235,9 @@ export function prepareDnd5eSpellCast(input: {
   const unwillingTargetTokens = spell.unwillingSaveAbility
     ? validTargetTokens.filter((candidate) => areOpposedCombatTokens(actorToken, candidate))
     : []
+  const hiddenSpellSaveDisadvantage =
+    sustainedAttack == null &&
+    dnd5eHiddenSpellSaveDisadvantageApplies(actorCombatant)
   const spellSavingThrowMode = (combatant: typeof targetCombatant, targetId: string) => {
     let mode = dnd5eHeightenedSavingThrowMode(
       dnd5eSavingThrowMode(combatant, savingThrowAbility!, {
@@ -863,7 +1245,7 @@ export function prepareDnd5eSpellCast(input: {
         sourceCreatureType: actorCombatant.creatureType,
         sourceIsSpell: true,
       }),
-      heightenedTargetId === targetId,
+      heightenedTargetId === targetId || hiddenSpellSaveDisadvantage,
     )
     mode = dnd5eSpellSpecificSavingThrowMode({
       spellId: spell.id,
@@ -878,6 +1260,9 @@ export function prepareDnd5eSpellCast(input: {
       spell.id === 'sunburst' &&
       (creatureType === 'undead' || creatureType.includes('亡灵') || creatureType === 'ooze' || creatureType.includes('泥怪'))
     ) mode = dnd5eHeightenedSavingThrowMode(mode, true)
+    if (dnd5eEldritchStrikeApplies(actorCombatant, combatant)) {
+      mode = imposeDnd5eRollDisadvantage(mode, 'eldritch-strike').mode
+    }
     return mode
   }
   const usesSingleSavingThrow = (
@@ -942,9 +1327,14 @@ export function prepareDnd5eSpellCast(input: {
       actor,
       castingClassId,
       castingClassLevel,
+      racialInnate: racialGrant != null,
+      racialGrant,
+      spellcastingAbility,
       actorToken,
       targetToken,
       targetTokens: validTargetTokens,
+      guessedTargetCell,
+      blindTargetMiss,
       projectileTargetIds,
       spell,
       slotLevel,
@@ -957,6 +1347,9 @@ export function prepareDnd5eSpellCast(input: {
         (spell.id === 'eldritch-blast' && invocations.includes('agonizing-blast') ? abilityModifier : 0),
       attackMode,
       targetSpellAttacks,
+      openingAttackSavingThrow: attackMode
+        ? openingAttackSavingThrowFor(targetCombatant)
+        : undefined,
       attackBlessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
       attackBaned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
       savingThrow,
@@ -1010,13 +1403,14 @@ export function dnd5eSpellAttackModeWithProtection(
 
 export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, protectedAttack = false, blessRoll?: number, baneRoll?: number) {
   if (!prepared.attackMode) throw new TypeError('spell does not use a spell attack')
-  const definition = dnd5eClassDefinition(prepared.castingClassId)!
   const mode = dnd5eSpellAttackModeWithProtection(prepared.attackMode, protectedAttack)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   return rules.resolveAttack({
     rolls,
     mode,
-    modifier: rules.proficiencyBonus(prepared.actor.level) + rules.abilityModifier(prepared.actor.abilities[definition.spellcasting!.ability]) + (blessRoll ?? 0) - (baneRoll ?? 0),
+    modifier: rules.proficiencyBonus(prepared.actor.level) +
+      rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
+      (blessRoll ?? 0) - (baneRoll ?? 0),
     targetAc: dnd5eTargetArmorClassForAttack(prepared.state, prepared.actorToken.id, prepared.targetToken.id),
   })
 }
@@ -1032,14 +1426,13 @@ export function previewDnd5eSpellTargetAttack(
 ) {
   const target = prepared.targetSpellAttacks?.[targetIndex]
   if (!target) throw new RangeError('spell does not use a target spell attack at this index')
-  const definition = dnd5eClassDefinition(prepared.castingClassId)!
   const mode = dnd5eSpellAttackModeWithProtection(target.mode, protectedAttack)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   return rules.resolveAttack({
     rolls,
     mode,
     modifier: rules.proficiencyBonus(prepared.actor.level) +
-      rules.abilityModifier(prepared.actor.abilities[definition.spellcasting!.ability]) +
+      rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
       (blessRoll ?? 0) - (baneRoll ?? 0),
     targetAc: target.armorClass,
   })
@@ -1086,6 +1479,9 @@ export function resolvePreparedDnd5eSpellCast(input: {
   prepared: PreparedDnd5eSpellCast
   d20?: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
+  openingAttackSavingThrow?: Dnd5eOpeningAttackSavingThrowRoll
   attackBlessRoll?: number
   attackBaneRoll?: number
   cuttingWords?: Dnd5eCuttingWordsUse
@@ -1104,6 +1500,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   savingThrowRerollD20Second?: number
   bardicInspirationRoll?: number
   darkOnesOwnLuckRoll?: number
+  optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
   hurlThroughHellDamageRolls?: readonly number[]
   overchannelSelfDamageRolls?: readonly number[]
   protectionReactionActorId?: string
@@ -1123,8 +1520,10 @@ export function resolvePreparedDnd5eSpellCast(input: {
     type: 'cast-spell',
     actorId: prepared.actorToken.id,
     castingClassId: prepared.castingClassId,
+    racialInnate: prepared.racialInnate || undefined,
     targetId: prepared.targetToken.id,
     targetIds: prepared.targetTokens.map((target) => target.id),
+    blindTargetMiss: prepared.blindTargetMiss || undefined,
     projectileTargetIds: prepared.projectileTargetIds,
     sculptedTargetIds: prepared.sculptedTargetIds,
     metamagic: prepared.metamagic,
@@ -1145,6 +1544,9 @@ export function resolvePreparedDnd5eSpellCast(input: {
     higherSlotDamageType: prepared.higherSlotDamageType,
     d20: input.d20,
     d20Second: input.d20Second,
+    halflingLuckyD20: input.halflingLuckyD20,
+    halflingLuckyD20Second: input.halflingLuckyD20Second,
+    openingAttackSavingThrow: input.openingAttackSavingThrow,
     attackBlessRoll: input.attackBlessRoll,
     attackBaneRoll: input.attackBaneRoll,
     cuttingWords: input.cuttingWords,
@@ -1170,6 +1572,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     savingThrowRerollD20Second: input.savingThrowRerollD20Second,
     bardicInspirationRoll: input.bardicInspirationRoll,
     darkOnesOwnLuckRoll: input.darkOnesOwnLuckRoll,
+    optionalBonusDice: input.optionalBonusDice,
       hurlThroughHellDamageRolls: input.hurlThroughHellDamageRolls,
       overchannel: input.prepared.overchannel,
       overchannelSelfDamageRolls: input.overchannelSelfDamageRolls,
@@ -1200,10 +1603,9 @@ export function resolvePreparedDnd5eSpellCast(input: {
     !counterspelled
   ) {
     const actorCombatant = result.state.combatants[prepared.actorToken.id]
-    const definition = dnd5eClassDefinition(prepared.castingClassId)
-    if (actorCombatant && definition?.spellcasting) {
+    if (actorCombatant) {
       const sourceSaveDc = 8 + actorCombatant.proficiencyBonus +
-        rules.abilityModifier(actorCombatant.abilities[definition.spellcasting.ability])
+        rules.abilityModifier(actorCombatant.abilities[prepared.spellcastingAbility])
       const effectTokenId = declaration.anchorMode === 'effect-token'
         ? `core-spell-effect:${prepared.action.id}`
         : undefined

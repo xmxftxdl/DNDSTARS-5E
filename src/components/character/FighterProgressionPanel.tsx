@@ -18,7 +18,10 @@ import {
   registeredFighterSubclasses,
   subscribeFighterSubclassRegistry,
   dnd5eArmorClass,
+  dnd5ePluginResourceDieSides,
+  dnd5ePluginSubclassDefinition,
   dnd5eWeaponAttackProfile,
+  registeredDnd5ePluginResources,
   type FighterFightingStyleId,
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
@@ -27,18 +30,28 @@ import type { Character } from '../../types/character'
 interface FighterProgressionPanelProps {
   character: Character
   onChange: (patch: Partial<Character>) => void
+  lockedChoiceKeys?: ReadonlySet<string>
 }
 
-export default function FighterProgressionPanel({ character, onChange }: FighterProgressionPanelProps) {
+export default function FighterProgressionPanel({
+  character,
+  onChange,
+  lockedChoiceKeys = new Set<string>(),
+}: FighterProgressionPanelProps) {
   useSyncExternalStore(subscribeFighterSubclassRegistry, fighterSubclassRegistrySnapshot, fighterSubclassRegistrySnapshot)
   const fighter = character.dnd5eClassChoices?.fighter ?? {}
   const subclass = fighter.subclass
   const subclassOptions = registeredFighterSubclasses()
   const subclassOption = fighterSubclassDefinition(subclass)
+  const pluginSubclass = subclass ? dnd5ePluginSubclassDefinition(subclass) : undefined
+  const pluginResourceDice = registeredDnd5ePluginResources()
+    .filter((resource) => resource.subclassId === subclass && resource.declarativeDie)
   const fightingStyles = fighterSelectedFightingStyles(character)
   const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
   const progression = fighterProgression(subclass)
   const weapon = dnd5eWeaponAttackProfile(character)
+  const subclassLocked = lockedChoiceKeys.has('fighter:subclass')
+  const fightingStylesLocked = lockedChoiceKeys.has('fighter:fighting-styles')
   const setFighterChoices = (patch: NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>) => {
     onChange({
       dnd5eClassChoices: {
@@ -48,6 +61,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     })
   }
   const setSubclass = (next: FighterSubclassId | undefined) => {
+    if (subclassLocked) return
     const nextCharacter: Character = {
       ...character,
       dnd5eClassChoices: {
@@ -62,6 +76,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     })
   }
   const toggleFightingStyle = (style: FighterFightingStyleId) => {
+    if (fightingStylesLocked) return
     const selected = fightingStyles.includes(style)
     if (!selected && fightingStyles.length >= fightingStyleLimit) return
     setFighterChoices({ fightingStyles: selected ? fightingStyles.filter((item) => item !== style) : [...fightingStyles, style] })
@@ -75,6 +90,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     const limit = fighterSubclassChoiceLimit(group, character)
     if (!isSelected && selected.length >= limit) return
     const key = fighterSubclassChoiceKey(subclassOption.id, group.id)
+    if (lockedChoiceKeys.has(`fighter:subclass:${key}`)) return
     setFighterChoices({
       extensionChoices: {
         ...fighter.extensionChoices,
@@ -100,7 +116,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
             value={subclass ?? ''}
             placeholder={character.level >= 3 ? '选择子职' : '3级解锁'}
             options={subclassOptions}
-            disabled={character.level < 3}
+            disabled={character.level < 3 || subclassLocked}
             onChange={(value) => setSubclass(value as FighterSubclassId || undefined)}
           />
         </div>
@@ -121,7 +137,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
               name={option.name}
               summary={option.summary}
               selected={fightingStyles.includes(option.id)}
-              disabled={!fightingStyles.includes(option.id) && fightingStyles.length >= fightingStyleLimit}
+              disabled={fightingStylesLocked || (!fightingStyles.includes(option.id) && fightingStyles.length >= fightingStyleLimit)}
               onClick={() => toggleFightingStyle(option.id)}
             />
           ))}
@@ -134,6 +150,34 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         <Summary icon={Shield} label="不屈" value={`${fighterIndomitableUses(character.level)} 次／长休`} />
         <Summary icon={Sparkles} label="战斗风格" value={fightingStyles.map(fighterFightingStyleName).join('、') || '尚未选择'} />
       </div>
+
+      {(pluginSubclass?.declarativeSpellcasting || pluginResourceDice.length > 0) && (
+        <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-500/5 p-4">
+          <h4 className="text-sm font-semibold text-violet-100">子职扩展协议</h4>
+          {pluginSubclass?.declarativeSpellcasting && (() => {
+            const spellcasting = pluginSubclass.declarativeSpellcasting
+            const levelIndex = Math.max(0, Math.min(19, character.level - 1))
+            return (
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                三分之一施法者 · {spellcasting.ability.toUpperCase()} 施法 ·
+                当前已知 {spellcasting.cantripsKnownByClassLevel[levelIndex] ?? 0} 个戏法、
+                {spellcasting.spellsKnownByClassLevel[levelIndex] ?? 0} 个法术 ·
+                法术表：{spellcasting.spellListClassId}
+              </p>
+            )
+          })()}
+          {pluginResourceDice.length > 0 && (
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              资源骰：{pluginResourceDice.map((resource) =>
+                `${resource.label} d${dnd5ePluginResourceDieSides(resource, character) ?? '—'}`
+              ).join('、')}
+            </p>
+          )}
+          <p className="mt-2 text-[11px] text-amber-200/70">
+            这里只显示已注册的纯数据协议；实际法术和战斗选项仍由房间目录与 Headless 再校验。
+          </p>
+        </div>
+      )}
 
       {subclassOption?.choiceGroups?.filter((group) => character.level >= (group.minLevel ?? 1)).map((group) => {
         const selected = fighterSelectedSubclassChoices(character, subclassOption.id, group)
@@ -154,7 +198,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
                   name={option.name}
                   summary={option.summary}
                   selected={selected.includes(option.id)}
-                  disabled={!selected.includes(option.id) && selected.length >= limit}
+                  disabled={lockedChoiceKeys.has(`fighter:subclass:${fighterSubclassChoiceKey(subclassOption.id, group.id)}`) || (!selected.includes(option.id) && selected.length >= limit)}
                   onClick={() => toggleSubclassChoice(group.id, option.id)}
                 />
               ))}

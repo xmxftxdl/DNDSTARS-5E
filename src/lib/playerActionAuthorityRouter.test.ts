@@ -118,6 +118,22 @@ describe('player action authority router', () => {
     )).toEqual({ status: 'rejected', reason: 'stale-turn' })
   })
 
+  it('allows an owned Token to move outside combat but rejects a delayed combat move', () => {
+    const exploration = preflightPlayerActionAuthority(
+      makeAction({ combatId: undefined }),
+      makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+    )
+    expect(exploration.status).toBe('accepted')
+    if (exploration.status === 'accepted') {
+      expect(exploration.currentToken.id).toBe('hero-token')
+    }
+
+    expect(preflightPlayerActionAuthority(
+      makeAction({ combatId: 'ended-combat' }),
+      makeContext({ combatActive: false, combatId: 'ended-combat', currentTokenId: undefined }),
+    )).toEqual({ status: 'rejected', reason: 'stale-combat' })
+  })
+
   it('rejects actions that do not match the current initiative actor', () => {
     const result = preflightPlayerActionAuthority(
       makeAction({ round: 2 }),
@@ -195,6 +211,8 @@ describe('player action authority router', () => {
     expect(reservePlayerActionExecution(makeAction({ id: 'fighter-feature', type: 'dnd5e-fighter-feature' }), recent, { now: 1007 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: 'class-feature', type: 'dnd5e-class-feature' }), recent, { now: 1008 })).toBe(true)
     expect(reservePlayerActionExecution(makeAction({ id: 'class-feature', type: 'dnd5e-class-feature' }), recent, { now: 1009 })).toBe(false)
+    expect(reservePlayerActionExecution(makeAction({ id: 'racial-feature', type: 'dnd5e-racial-action' }), recent, { now: 1009 })).toBe(true)
+    expect(reservePlayerActionExecution(makeAction({ id: 'racial-feature', type: 'dnd5e-racial-action' }), recent, { now: 1009 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: 'plugin-feature', type: 'dnd5e-plugin-action' }), recent, { now: 1010 })).toBe(true)
     expect(reservePlayerActionExecution(makeAction({ id: 'plugin-feature', type: 'dnd5e-plugin-action' }), recent, { now: 1011 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: 'item-use', type: 'dnd5e-item-use' }), recent, { now: 1012 })).toBe(true)

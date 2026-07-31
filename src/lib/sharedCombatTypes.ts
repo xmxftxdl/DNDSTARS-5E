@@ -4,6 +4,7 @@ import type { AbilityKey } from './dnd'
 import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 import type { CombatSettlementMode } from './combatSettlementMode'
+import type { Dnd5eMonsterControlStateV1 } from './monsterControlState'
 import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
 import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
@@ -38,6 +39,8 @@ export type Dnd5eTurnEconomyByToken = Record<string, Dnd5eTurnEconomyCounts>
 
 export type Dnd5eClassFeaturePayload =
   | { feature: 'barbarian-rage'; frenzy?: boolean; end?: boolean }
+  | { feature: 'barbarian-totem-eagle-dash' }
+  | { feature: 'barbarian-totem-wolf-knockdown'; targetTokenId: string }
   | { feature: 'barbarian-intimidating-presence'; targetTokenId: string }
   | { feature: 'rogue-cunning-action'; option: 'dash' | 'disengage' | 'hide' }
   | { feature: 'rogue-fast-hands'; option: 'sleight-of-hand' | 'thieves-tools' | 'use-object' }
@@ -81,10 +84,14 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'druid-wild-shape'; formId: string }
   | { feature: 'druid-end-wild-shape' }
   | { feature: 'warlock-hurl-through-hell-ready'; active: boolean }
+  | { feature: 'eldritch-knight-summon-bonded-weapon'; weaponId: string }
+  | { feature: 'eldritch-knight-arcane-charge'; targetCell: GridCell }
 
 export interface Dnd5eAbilityCheckPayload {
   ability: AbilityKey
   skill?: string
+  /** Explicit non-skill Strength task eligible for Totem Warrior Bear Aspect. */
+  context?: 'push-pull-lift-break'
   mode?: 'normal' | 'advantage' | 'disadvantage'
   dc: number
   /** 部分检定由 DM 判定为一个动作；关闭时只进行检定，不消耗行动经济。 */
@@ -98,6 +105,9 @@ export interface Dnd5ePluginActionPayload {
   payload?: SharedJsonValue
 }
 
+export type Dnd5eRacialActionPayload =
+  | { feature: 'dragonborn-breath' }
+
 export interface Dnd5eItemUsePayload {
   /** 名称、数量、骰值与效果由 DM 端当前角色快照重建。 */
   instanceId: string
@@ -110,6 +120,11 @@ export interface Dnd5eItemUsePayload {
 export interface Dnd5eWeaponAttackOptions {
   /** DM-only, single-transaction cover ruling. The Headless authority rejects this field on player requests. */
   coverOverride?: Dnd5eAttackCoverOverride
+  /**
+   * Player-owned prearmed subclass intents. These are only identifiers:
+   * timing, ownership, retention, costs, and effects are rebuilt by the Host.
+   */
+  declarativeIntentFeatureIds?: string[]
   /** 橡棍术生效时，本次主手近战攻击使用力量或施法关键属性。 */
   shillelaghAbility?: 'str' | 'spellcasting'
   /** 荒野变形后使用当前野兽数据块中的动作序号；由 Headless 重新验证。 */
@@ -122,6 +137,8 @@ export interface Dnd5eWeaponAttackOptions {
   frenzyAttack?: boolean
   /** 2014 双武器战斗：完成轻型近战武器的攻击动作后，以附赠动作用另一把轻型近战武器攻击。 */
   offHandAttack?: boolean
+  /** Audited Eldritch Knight War Magic/Improved War Magic bonus-action attack. */
+  eldritchKnightWarMagicAttack?: boolean
   /** 猎人“灭群者”在同回合对原目标 5 尺内另一生物进行的免费攻击。 */
   hordeBreakerAttack?: boolean
   /** 猎人 11 级多重攻击；点击的 Token 作为万箭齐发中心或旋风攻击的目标确认点。 */
@@ -156,9 +173,16 @@ export interface Dnd5eSpellCastPayload {
   spellId: string
   /** The class whose spellcasting feature authorizes this cast. */
   castingClassId?: Dnd5eClassId
+  /** The character's racial spell grant authorizes this cast instead of a class spellcasting feature. */
+  racialInnate?: boolean
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
+  /**
+   * An unseen-target spell attack may name only a map cell. The DM Host binds
+   * that cell to the current authoritative token snapshot, never the client.
+   */
+  guessedTargetCell?: GridCell
   /** 点起源范围法术的权威落点；DM 会据此重新计算效果线。 */
   areaTargetCell?: GridCell
   /** 可旋转矩形模板的方向；DM 只接受 0–3 并据此重建覆盖格。 */
@@ -227,6 +251,8 @@ export interface SharedCombatState {
   initiativeOrder: InitiativeEntry[]
   /** DM 权威的结算策略；旧快照缺失时按 automatic 处理。 */
   settlementMode?: CombatSettlementMode
+  /** DM-authoritative automatic/manual monster control and safe takeover state. */
+  monsterControl?: Dnd5eMonsterControlStateV1
   dnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   /** DM-pinned rules and exact plugin set; active room combat rejects plugin actions when absent. */
   effectiveRules?: Dnd5eEffectiveRulesContextV1
@@ -241,9 +267,12 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'use-object'; interactionId: string }
   | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
   | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
+  | { kind: 'release-grapple'; targetTokenId: string }
   | { kind: 'escape-grapple'; targetTokenId: string }
   | { kind: 'escape-effect' }
   | { kind: 'wake'; targetTokenId: string }
+  | { kind: 'other-action'; description?: string }
+  | { kind: 'other-bonus-action'; description?: string }
 
 export interface SharedPlayerActionState {
   id: string
@@ -259,6 +288,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-weapon-attack'
     | 'dnd5e-fighter-feature'
     | 'dnd5e-class-feature'
+    | 'dnd5e-racial-action'
     | 'dnd5e-plugin-action'
     | 'dnd5e-item-use'
     | 'dnd5e-ability-check'
@@ -287,6 +317,7 @@ export interface SharedPlayerActionState {
   targetElevationFeet?: number
   dnd5eFighterFeature?: 'second-wind' | 'action-surge'
   dnd5eClassFeature?: Dnd5eClassFeaturePayload
+  dnd5eRacialAction?: Dnd5eRacialActionPayload
   dnd5ePluginAction?: Dnd5ePluginActionPayload
   dnd5eItemUse?: Dnd5eItemUsePayload
   dnd5eAbilityCheck?: Dnd5eAbilityCheckPayload
@@ -328,6 +359,11 @@ export interface SharedPlayerActionAckState {
   acceptedPosition?: { x: number; y: number }
   appliedAt?: number
   result?: PlayerActionResultSummary
+  /** Host result used only to reconcile the player's local prearm toggles. */
+  dnd5eDeclarativeAttackIntents?: {
+    triggeredFeatureIds: string[]
+    consumedFeatureIds: string[]
+  }
   round: number
   initiativeIndex: number
   updatedAt: number
@@ -391,6 +427,8 @@ export interface CombatLogEntry {
   text: string
   kind: 'system' | 'turn' | 'attack' | 'damage'
   time: string
+  /** Stable map Token that owns the event; absent on legacy or actor-less rows. */
+  actorTokenId?: string
   /** 由 Headless 结算事件生成的可读过程；旧日志可不包含。 */
   details?: string[]
 }

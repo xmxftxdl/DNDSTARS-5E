@@ -1,6 +1,8 @@
 import type { AbilityKey } from './dnd'
 import { dnd5eConditionLabel } from '../rulesets/dnd5e/conditions'
+import { DND5E_DAMAGE_TYPE_LABELS } from '../rulesets/dnd5e/damageTypes'
 import type { Dnd5eCombatEvent } from '../rulesets/dnd5e/headlessCombatEngine'
+import { getDnd5eSrdCombatSpell } from '../rulesets/dnd5e/spells'
 
 const ABILITY_LABELS: Record<AbilityKey, string> = {
   str: '力量',
@@ -51,6 +53,17 @@ const CLASS_DAMAGE_LABELS: Record<string, string> = {
   'foe-slayer': '屠灭众敌',
 }
 
+const CLASS_STATE_LABELS: Record<string, string> = {
+  'shield-spell': '护盾术',
+  dodging: '闪避',
+  raging: '狂暴',
+  hidden: '隐藏',
+  'wild-shape': '荒野变形',
+  'hurl-through-hell-ready': '坠入地狱预备',
+  'vicious-mockery': '恶言相加',
+  'reckless-attack': '鲁莽攻击',
+}
+
 const REMOVAL_REASON_LABELS: Record<string, string> = {
   expired: '持续时间结束',
   'save-succeeded': '豁免成功',
@@ -87,7 +100,181 @@ function effectDefinitionLabel(definitionId: string): string {
     : definitionId
 }
 
-function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => string): string[] {
+function classStateLabel(stateKey: string): string {
+  return CLASS_STATE_LABELS[stateKey] ?? stateKey
+}
+
+type DamageAppliedEvent = Extract<Dnd5eCombatEvent, { type: 'damage-applied' }>
+type MagicMissileDamageEvent = Extract<
+  Dnd5eCombatEvent,
+  { type: 'magic-missile-damage-resolved' }
+>
+
+const MAGIC_MISSILE_PROJECTILES_PER_DETAIL = 5
+const COMBAT_LOG_ENTITY_NAME_MAX_LENGTH = 120
+
+function compactCombatLogName(name: string): string {
+  if (name.length <= COMBAT_LOG_ENTITY_NAME_MAX_LENGTH) return name
+  return `${name.slice(0, COMBAT_LOG_ENTITY_NAME_MAX_LENGTH - 1)}…`
+}
+
+function magicMissileHpDetails(
+  damageEvents: readonly DamageAppliedEvent[],
+  resolveName: (id: string) => string,
+): string[] {
+  const byTarget = new Map<string, {
+    hpBefore: number
+    hpAfter: number
+    temporaryHpBefore: number
+    temporaryHpAfter: number
+  }>()
+  for (const event of damageEvents) {
+    const current = byTarget.get(event.targetId)
+    if (current) {
+      current.hpAfter = event.hpAfter
+      current.temporaryHpAfter = event.temporaryHpAfter
+    } else {
+      byTarget.set(event.targetId, {
+        hpBefore: event.hpBefore,
+        hpAfter: event.hpAfter,
+        temporaryHpBefore: event.temporaryHpBefore,
+        temporaryHpAfter: event.temporaryHpAfter,
+      })
+    }
+  }
+  const targetDetails = [...byTarget].map(([targetId, hp]) => {
+    const temporaryHp = hp.temporaryHpBefore !== hp.temporaryHpAfter
+      ? `，临时 HP ${hp.temporaryHpBefore} → ${hp.temporaryHpAfter}`
+      : ''
+    return `${compactCombatLogName(resolveName(targetId))}：HP ${hp.hpBefore} → ${hp.hpAfter}${temporaryHp}`
+  })
+  const lines: string[] = []
+  for (let index = 0; index < targetDetails.length; index += 4) {
+    lines.push(`生命值结算｜${targetDetails.slice(index, index + 4).join('；')}`)
+  }
+  return lines
+}
+
+function magicMissileDetails(
+  event: MagicMissileDamageEvent,
+  resolveName: (id: string) => string,
+  damageEvents: readonly DamageAppliedEvent[],
+): string[] {
+  const projectileDetails = event.projectiles.map((projectile, index) => {
+    const targetName = compactCombatLogName(resolveName(projectile.targetId))
+    const rollExpression = [
+      `d${event.dieSides}(${projectile.dieRoll})`,
+      `${signed(event.baseBonusPerProjectile)}`,
+      ...(projectile.featureBonus > 0
+        ? [`强化塑能（智力）${signed(projectile.featureBonus)}`]
+        : []),
+    ].join(' ')
+    if (projectile.outcome === 'shielded') {
+      return `#${index + 1} → ${targetName}：${rollExpression}，被护盾术免疫`
+    }
+    if (projectile.outcome === 'limited-magic-immunity') {
+      return `#${index + 1} → ${targetName}：${rollExpression}，被有限魔法免疫抵消`
+    }
+    const reduction = projectile.cuttingWordsReduction > 0
+      ? ` - 斩词${projectile.cuttingWordsReduction}`
+      : ''
+    const defenses = projectile.finalDamage !== projectile.damageBeforeDefenses
+      ? ` → 防御调整后 ${projectile.finalDamage}`
+      : ''
+    return `#${index + 1} → ${targetName}：${rollExpression}${reduction} = ${projectile.damageBeforeDefenses}${defenses}`
+  })
+  const projectileLines: string[] = []
+  for (
+    let index = 0;
+    index < projectileDetails.length;
+    index += MAGIC_MISSILE_PROJECTILES_PER_DETAIL
+  ) {
+    const end = Math.min(
+      projectileDetails.length,
+      index + MAGIC_MISSILE_PROJECTILES_PER_DETAIL,
+    )
+    const range = projectileDetails.length > MAGIC_MISSILE_PROJECTILES_PER_DETAIL
+      ? `（#${index + 1}–#${end}）`
+      : ''
+    projectileLines.push(
+      `逐枚结算${range}｜${projectileDetails.slice(index, end).join('；')}`,
+    )
+  }
+  const effectiveProjectiles = event.projectiles.filter(
+    (projectile) => projectile.outcome === 'damage',
+  ).length
+  return [
+    `${compactCombatLogName(resolveName(event.actorId))}｜魔法飞弹（${event.slotLevel}环）｜共 ${event.projectiles.length} 枚｜每枚 1d${event.dieSides}${signed(event.baseBonusPerProjectile)} 力场伤害`,
+    ...projectileLines,
+    `魔法飞弹总伤害｜${event.totalDamage} 点｜实际生效 ${effectiveProjectiles}/${event.projectiles.length} 枚`,
+    ...magicMissileHpDetails(damageEvents, resolveName),
+  ]
+}
+
+function correlateMagicMissileDamageEvents(events: readonly Dnd5eCombatEvent[]): {
+  matchedBySummaryIndex: ReadonlyMap<number, readonly DamageAppliedEvent[]>
+  suppressedDamageIndexes: ReadonlySet<number>
+} {
+  const matchedBySummaryIndex = new Map<number, readonly DamageAppliedEvent[]>()
+  const suppressedDamageIndexes = new Set<number>()
+
+  events.forEach((event, summaryIndex) => {
+    if (event.type !== 'magic-missile-damage-resolved') return
+    let castIndex = -1
+    for (let index = summaryIndex - 1; index >= 0; index -= 1) {
+      const candidate = events[index]
+      if (
+        candidate.type === 'spell-cast' &&
+        candidate.actorId === event.actorId &&
+        candidate.spellId === event.spellId
+      ) {
+        castIndex = index
+        break
+      }
+    }
+    if (castIndex < 0) return
+
+    const expectedProjectiles = event.projectiles.filter(
+      (projectile) => projectile.outcome === 'damage',
+    )
+    if (expectedProjectiles.length === 0) return
+    const candidateIndexes: number[] = []
+    for (let index = castIndex + 1; index < summaryIndex; index += 1) {
+      const candidate = events[index]
+      if (
+        candidate.type === 'damage-applied' &&
+        candidate.sourceId === event.actorId &&
+        candidate.damageTypes?.includes('force') &&
+        !suppressedDamageIndexes.has(index)
+      ) candidateIndexes.push(index)
+    }
+    // Suppress only an exact one-to-one sequence. If another same-source force
+    // effect appears in the interval, retaining every generic line is safer.
+    if (candidateIndexes.length !== expectedProjectiles.length) return
+    const matched: DamageAppliedEvent[] = []
+    for (let index = 0; index < expectedProjectiles.length; index += 1) {
+      const projectile = expectedProjectiles[index]
+      const candidate = events[candidateIndexes[index]]
+      if (
+        candidate.type !== 'damage-applied' ||
+        candidate.targetId !== projectile.targetId ||
+        candidate.amount !== projectile.finalDamage
+      ) return
+      matched.push(candidate)
+    }
+    for (const index of candidateIndexes) suppressedDamageIndexes.add(index)
+    matchedBySummaryIndex.set(summaryIndex, matched)
+  })
+
+  return { matchedBySummaryIndex, suppressedDamageIndexes }
+}
+
+function eventDetails(
+  event: Dnd5eCombatEvent,
+  resolveName: (id: string) => string,
+  formatPosition: (position: { x: number; y: number }) => string,
+  correlatedDamageEvents: readonly DamageAppliedEvent[] = [],
+): string[] {
   switch (event.type) {
     case 'attack-resolved':
       return [
@@ -101,6 +288,10 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
     }
     case 'class-damage-applied':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${CLASS_DAMAGE_LABELS[event.source] ?? event.source}造成 ${event.amount} 点额外伤害`]
+    case 'movement-granted':
+      return [`${resolveName(event.actorId)}｜获得 ${event.amount} 尺额外移动力`]
+    case 'disengage-granted':
+      return [`${resolveName(event.actorId)}｜获得撤离状态`]
     case 'damage-reduced':
       return [`${resolveName(event.targetId)}｜伤害减免 ${event.amount}（${event.damageBefore} → ${event.damageAfter}）${event.caught ? '｜接住投射物' : ''}`]
     case 'healing-applied':
@@ -111,6 +302,45 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [
         `${resolveName(event.targetId)}｜${ABILITY_LABELS[event.ability]}豁免 d20 ${event.d20} ${signed(event.modifier)} = ${event.total} vs DC ${event.dc}｜${event.success ? '成功' : '失败'}`,
       ]
+    case 'spell-damage-feature-bonus-applied': {
+      const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      const application = event.application === 'first-projectile'
+        ? '第一枚飞弹的伤害掷骰'
+        : '一次法术伤害掷骰'
+      return [
+        `${resolveName(event.actorId)}｜法师特性「强化塑能」｜${ABILITY_LABELS[event.ability]}调整值 ${signed(event.amount)} 加入${spellName}的${application}`,
+      ]
+    }
+    case 'magic-missile-damage-resolved':
+      return magicMissileDetails(event, resolveName, correlatedDamageEvents)
+    case 'spell-saving-throw-damage-resolved': {
+      const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      const saveResult = event.saveSucceeded
+        ? event.successfulSave === 'half'
+          ? `豁免成功减半为 ${event.damageAfterSavingThrow}`
+          : `豁免成功，伤害降为 ${event.damageAfterSavingThrow}`
+        : `豁免失败，伤害为 ${event.damageAfterSavingThrow}`
+      const defenses = event.components.flatMap((component) =>
+        component.defenses.map((defense) => {
+          const damageType = component.damageType
+            ? DND5E_DAMAGE_TYPE_LABELS[component.damageType]
+            : '伤害'
+          return `${damageType}${
+            defense.kind === 'immune'
+              ? '免疫'
+              : defense.kind === 'resistant'
+                ? '抗性'
+                : '易伤'
+          }`
+        }),
+      )
+      const defenseResult = defenses.length > 0
+        ? `${resolveName(event.targetId)}${[...new Set(defenses)].join('、')}，最终 ${event.finalDamage}`
+        : `最终 ${event.finalDamage}`
+      return [
+        `${spellName}伤害 ${event.damageBeforeSavingThrow}；${saveResult}；${defenseResult}`,
+      ]
+    }
     case 'ability-check-resolved':
       return [
         `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.skill ? `（${event.skill}）` : ''}检定 d20 ${event.d20} ${signed(event.modifier)} = ${event.total}${event.dc === undefined ? '' : ` vs DC ${event.dc}`}｜${event.success === undefined ? event.mode === 'advantage' ? '优势' : event.mode === 'disadvantage' ? '劣势' : '普通' : event.success ? '成功' : '失败'}`,
@@ -121,6 +351,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.actorId)}｜消耗${resourceLabel(event.resourceKey)}｜剩余 ${event.current}/${event.max}`]
     case 'class-resource-restored':
       return [`${resolveName(event.actorId)}｜恢复${resourceLabel(event.resourceKey)}｜当前 ${event.current}/${event.max}`]
+    case 'class-state-changed':
+      return [`${resolveName(event.actorId)}｜${classStateLabel(event.stateKey)}${event.active ? '生效' : '结束'}${event.value == null ? '' : `｜数值 ${event.value}`}${event.targetId ? `｜目标 ${resolveName(event.targetId)}` : ''}`]
     case 'spell-cast':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜使用 ${event.slotLevel} 环法术位`]
     case 'sleep-resolved':
@@ -135,6 +367,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.targetId)}｜获得状态：${dnd5eConditionLabel(event.condition)}｜来源：${resolveName(event.actorId)}`]
     case 'condition-ended':
       return [`${resolveName(event.targetId)}｜状态结束：${dnd5eConditionLabel(event.condition)}`]
+    case 'contest-resolved':
+      return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${event.contest === 'grapple' ? '擒抱' : event.contest === 'shove' ? '推撞' : '挣脱擒抱'} ${event.actorTotal} vs ${event.targetTotal}｜${event.success ? '成功' : '失败'}${event.outcome ? `｜${event.outcome === 'prone' ? '击倒' : '推开'}` : ''}`]
     case 'active-effect-applied':
       return [`${resolveName(event.targetId)}｜效果生效：${effectDefinitionLabel(event.definitionId)}`]
     case 'active-effect-refreshed':
@@ -159,10 +393,16 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.targetId)}｜受到大规模伤害并立即死亡（受伤前 ${event.hpBefore} HP）`]
     case 'death-ward-triggered':
       return [`${resolveName(event.targetId)}｜死亡防护触发（${event.trigger === 'damage' ? '伤害' : '即死效果'}）`]
+    case 'hostile-targeting-prevented':
+      return [`${resolveName(event.actorId)}无法指定 ${resolveName(event.targetId)}｜${event.source === 'sanctuary' ? '庇护术' : event.source === 'nature-sanctuary' ? '自然庇护' : '宁静心境'}阻止敌对目标选择`]
     case 'moved':
-      return [`${resolveName(event.actorId)}｜移动 ${event.distance} 尺｜(${event.from.x}, ${event.from.y}) → (${event.to.x}, ${event.to.y})`]
+      return [`${resolveName(event.actorId)}｜移动 ${event.distance} 尺｜${formatPosition(event.from)} → ${formatPosition(event.to)}`]
     case 'teleported':
-      return [`${resolveName(event.actorId)}｜${event.spellId}传送 ${event.distanceFeet} 尺｜(${event.from.x}, ${event.from.y}) → (${event.to.x}, ${event.to.y})`]
+      return [`${resolveName(event.actorId)}｜${event.spellId}传送 ${event.distanceFeet} 尺｜${formatPosition(event.from)} → ${formatPosition(event.to)}`]
+    case 'elevation-changed':
+      return [`${resolveName(event.actorId)}｜${event.mode === 'fly' ? '飞行' : event.mode === 'climb' ? '攀爬' : '移动'}高度变化 ${event.fromElevationFeet} 尺 → ${event.toElevationFeet} 尺`]
+    case 'falling-damage-resolved':
+      return [`${resolveName(event.actorId)}｜坠落 ${event.distanceFeet} 尺｜${event.dice}d6 = ${event.damage} 点伤害${event.landedProne ? '｜落地倒地' : ''}`]
     case 'legendary-resistance-used':
       return [`${resolveName(event.targetId)}｜使用传奇抗性｜剩余 ${event.remainingUses} 次`]
     case 'counterspell-resolved':
@@ -180,6 +420,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
 
 export interface CombatLogDetailOptions {
   resolveName?: (id: string) => string
+  /** Projects engine-space coordinates into player-facing coordinates such as map cells. */
+  formatPosition?: (position: { x: number; y: number }) => string
   extra?: readonly string[]
   limit?: number
 }
@@ -190,9 +432,28 @@ export function formatDnd5eCombatLogDetails(
   options: CombatLogDetailOptions = {},
 ): string[] {
   const resolveName = options.resolveName ?? ((id: string) => id)
+  const formatPosition = options.formatPosition ?? ((position) => `(${position.x}, ${position.y})`)
+  const correlation = correlateMagicMissileDamageEvents(events)
+  const semanticSummaryLines: string[] = []
+  const regularEventLines: string[] = []
+  events.forEach((event, index) => {
+    if (correlation.suppressedDamageIndexes.has(index)) return
+    const lines = eventDetails(
+      event,
+      resolveName,
+      formatPosition,
+      correlation.matchedBySummaryIndex.get(index),
+    )
+    if (
+      event.type === 'spell-damage-feature-bonus-applied' ||
+      event.type === 'magic-missile-damage-resolved'
+    ) semanticSummaryLines.push(...lines)
+    else regularEventLines.push(...lines)
+  })
   const all = [
     ...(options.extra ?? []).filter((line) => line.trim().length > 0),
-    ...events.flatMap((event) => eventDetails(event, resolveName)),
+    ...semanticSummaryLines,
+    ...regularEventLines,
   ]
   const unique = all.filter((line, index) => all.indexOf(line) === index)
   const limit = Math.max(1, options.limit ?? 14)

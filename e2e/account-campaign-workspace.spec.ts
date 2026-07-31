@@ -131,7 +131,8 @@ test('账号控制台、房间入口和战役工作台使用独立路由外壳',
 
   await page.goto(`${APP}/app`, { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: '我的战役' })).toBeVisible()
-  await expect(page.getByText(room.roomName, { exact: true })).toBeVisible()
+  await expect(page.getByText(campaign.name, { exact: true })).toBeVisible()
+  await expect(page.getByText(room.roomId)).toBeVisible()
   await page.getByTestId('open-active-campaign').click()
 
   await expect(page).toHaveURL(`${APP}/campaign/${campaign.campaignId}/overview`)

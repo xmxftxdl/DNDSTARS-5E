@@ -96,6 +96,17 @@ export function preflightPlayerActionAuthority(
     return { status: 'accepted', currentToken: actorToken }
   }
 
+  if (action.type === 'move-token' && !context.combatActive) {
+    // Exploration movement must be authored outside any combat snapshot. This
+    // prevents a delayed packet from the previous initiative from moving a
+    // Token after combat has ended.
+    if (action.combatId) return { status: 'rejected', reason: 'stale-combat' }
+    if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
+      return { status: 'ignored' }
+    }
+    return { status: 'accepted', currentToken: actorToken }
+  }
+
   if (!action.combatId || action.combatId !== context.combatId) {
     return { status: 'rejected', reason: 'stale-combat' }
   }

@@ -49,4 +49,38 @@ describe('SRD 物品区域 Headless 触发', () => {
     expect(result.state.combatants.actor.currentHp).toBe(16)
     expect(result.state.combatants.actor.conditions).toContain('restrained')
   })
+
+  it('物品区域豁免的自然 1 会要求并使用半身人幸运重投', () => {
+    const source = state(18)
+    source.combatants.actor.racialRules = {
+      halflingLucky: true,
+      halfOrcRelentlessEndurance: false,
+      halfOrcSavageAttacks: false,
+      innateSpells: [],
+    }
+    const action = {
+      type: 'item-area-trigger' as const,
+      actorId: 'actor',
+      areaId: 'area',
+      areaKind: 'ball-bearings' as const,
+      d20: 1,
+    }
+    expect(resolveDnd5eHeadlessAction(source, action)).toMatchObject({
+      ok: false,
+      reason: 'invalid-dice',
+    })
+
+    const result = resolveDnd5eHeadlessAction(source, {
+      ...action,
+      halflingLuckyD20: 12,
+    })
+    expect(result.ok).toBe(true)
+    expect(result.state.combatants.actor.conditions).not.toContain('prone')
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'halfling-lucky-rerolled',
+      actorId: 'actor',
+      original: 1,
+      reroll: 12,
+    }))
+  })
 })

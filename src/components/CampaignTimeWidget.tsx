@@ -65,10 +65,13 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
     }
   }
   const advance = (minutes: number, reason: string) => run(() => mutate({ operation: 'advance', minutes, reason }))
-  const startLongRest = () => run(() => mutate({
-    operation: 'long-rest',
-    reason: '队伍完成长休',
-  }))
+  const startLongRest = () => run(async () => {
+    const nextClock = await mutate({
+      operation: 'long-rest',
+      reason: '队伍完成长休',
+    })
+    await useCharacterStore.getState().reconcileCampaignTimeAndSave(nextClock)
+  })
   const createTimer = () => {
     const character = characters.find((entry) => entry.id === timerCharacterId)
     const durationMinutes = timerDuration * (timerUnit === 'hour' ? 60 : 1)

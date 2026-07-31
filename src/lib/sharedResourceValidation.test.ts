@@ -13,7 +13,6 @@ describe('shared resource runtime validation', () => {
       'combat-log': { entries: [], updatedAt: 1 },
       'room-chat': { schemaVersion: 1, messages: [], updatedAt: 1 },
       'room-journal': { schemaVersion: 1, handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 1 },
-      'group-ability-checks': { schemaVersion: 1, checks: [], updatedAt: 1 },
       'campaign-time': { schemaVersion: 2, worldMinute: 480, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], advances: [], updatedAt: 1 },
       'scene-orchestration': { schemaVersion: 1, scenes: [], runtime: { paused: false, pendingRuns: [], receipts: [], history: [] }, updatedAt: 1 },
       'scene-audio-library': { schemaVersion: 1, assets: [], updatedAt: 1 },
@@ -41,6 +40,16 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('spellbook', { spells: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('custom-monsters', { monsters: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('combat', {
+      active: true,
+      monsterControl: {
+        schemaVersion: 1,
+        mode: 'manual',
+        pauseRequested: true,
+        controlledTokenId: '',
+        updatedAt: 1,
+      },
+    }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-journal', { handouts: [], campaignEntries: 'broken', sharedNotes: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-journal', {
@@ -49,7 +58,6 @@ describe('shared resource runtime validation', () => {
       sharedNotes: [],
       authorityMutationReceipts: [''],
     }).status).toBe('invalid')
-    expect(validateAndMigrateSharedResource('group-ability-checks', { schemaVersion: 1, checks: [{ id: 'broken' }] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('campaign-time', { schemaVersion: 1, worldMinute: -1, timers: [], advances: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('scene-orchestration', { schemaVersion: 1, scenes: 'hidden', runtime: {} }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('scene-audio-library', { schemaVersion: 1, assets: [{ id: '../escape' }] }).status).toBe('invalid')
@@ -163,7 +171,15 @@ describe('shared resource runtime validation', () => {
       concentrationId: 'plugin-area:action-1',
     }
     expect(validateAndMigrateSharedResource('maps', {
-      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'toxic-cloud', intensity: 'normal' } }] }],
+      maps: [{
+        id: 'map',
+        tokens: [],
+        dnd5ePluginAreas: [{
+          ...validArea,
+          expiresAtSourceTurnEndAfterRound: 2,
+          visual: { preset: 'toxic-cloud', intensity: 'normal' },
+        }],
+      }],
     }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
@@ -190,6 +206,13 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, expiresAfterRound: 14_401 }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [],
+        dnd5ePluginAreas: [{ ...validArea, expiresAtSourceTurnEndAfterRound: 4 }],
+      }],
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'remote-script' } }] }],

@@ -13,9 +13,10 @@ describe('D&D 5e combat action icon registry', () => {
   })
 
   it('为全部戏法提供专属绘制缩略图', () => {
-    const cantrips = DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.level === 0)
-    expect(cantrips).toHaveLength(24)
-    expect(cantrips.filter((spell) => !dnd5eSpellActionIcon(spell).asset).map((spell) => spell.id)).toEqual([])
+    expect(DND5E_SRD_SPELL_CATALOG).toHaveLength(319)
+    for (const spell of DND5E_SRD_SPELL_CATALOG) {
+      expect(dnd5eSpellActionIcon(spell).asset).toBe(`/assets/icons/${spell.id}-spell-action.png`)
+    }
   })
 
   it('为全部核心物品模板生成稳定图标', () => {
@@ -23,6 +24,24 @@ describe('D&D 5e combat action icon registry', () => {
     expect(specs).toHaveLength(DND5E_SRD_ITEM_TEMPLATES.length)
     expect(specs.every((spec) => spec.key.startsWith('item:') && spec.accent.startsWith('#'))).toBe(true)
     expect(new Set(specs.map((spec) => spec.key)).size).toBe(DND5E_SRD_ITEM_TEMPLATES.length)
+  })
+
+  it('为绘制魔法物品绑定前景资源与稀有度背景', () => {
+    const adamantineArmor = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:adamantine-armor')
+    const amuletOfHealth = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:amulet-of-health')
+    expect(adamantineArmor).toBeDefined()
+    expect(amuletOfHealth).toBeDefined()
+    expect(dnd5eItemActionIcon(adamantineArmor!)).toMatchObject({
+      asset: '/assets/icons/adamantine-armor-item-action.png',
+      assetMode: 'foreground',
+      rarityBackdropId: 'uncommon',
+      background: '#237A4A',
+    })
+    expect(dnd5eItemActionIcon(amuletOfHealth!)).toMatchObject({
+      asset: '/assets/icons/amulet-of-health-item-action.png',
+      rarityBackdropId: 'rare',
+      background: '#2563A8',
+    })
   })
 
   it('优先按伤害与用途选择视觉母题', () => {
@@ -172,12 +191,397 @@ describe('D&D 5e combat action icon registry', () => {
       darkvision: '/assets/icons/darkvision-spell-action.png',
       darkness: '/assets/icons/darkness-spell-action.png',
       blur: '/assets/icons/blur-spell-action.png',
+      knock: '/assets/icons/knock-spell-action.png',
+      barkskin: '/assets/icons/barkskin-spell-action.png',
+      invisibility: '/assets/icons/invisibility-spell-action.png',
+      aid: '/assets/icons/aid-spell-action.png',
+      moonbeam: '/assets/icons/moonbeam-spell-action.png',
+      'animate-dead': '/assets/icons/animate-dead-spell-action.png',
+      'stinking-cloud': '/assets/icons/stinking-cloud-spell-action.png',
+      'hypnotic-pattern': '/assets/icons/hypnotic-pattern-spell-action.png',
+      'beacon-of-hope': '/assets/icons/beacon-of-hope-spell-action.png',
+      'bestow-curse': '/assets/icons/bestow-curse-spell-action.png',
+      blink: '/assets/icons/blink-spell-action.png',
+      'call-lightning': '/assets/icons/call-lightning-spell-action.png',
+      clairvoyance: '/assets/icons/clairvoyance-spell-action.png',
+      'conjure-animals': '/assets/icons/conjure-animals-spell-action.png',
+      counterspell: '/assets/icons/counterspell-spell-action.png',
+      'create-food-and-water': '/assets/icons/create-food-and-water-spell-action.png',
+      daylight: '/assets/icons/daylight-spell-action.png',
+      'dispel-magic': '/assets/icons/dispel-magic-spell-action.png',
+      fear: '/assets/icons/fear-spell-action.png',
+      fly: '/assets/icons/fly-spell-action.png',
+      'gaseous-form': '/assets/icons/gaseous-form-spell-action.png',
+      'glyph-of-warding': '/assets/icons/glyph-of-warding-spell-action.png',
+      haste: '/assets/icons/haste-spell-action.png',
+      'lightning-bolt': '/assets/icons/lightning-bolt-spell-action.png',
+      'magic-circle': '/assets/icons/magic-circle-spell-action.png',
+      'major-image': '/assets/icons/major-image-spell-action.png',
+      'mass-healing-word': '/assets/icons/mass-healing-word-spell-action.png',
+      'meld-into-stone': '/assets/icons/meld-into-stone-spell-action.png',
+      nondetection: '/assets/icons/nondetection-spell-action.png',
+      'phantom-steed': '/assets/icons/phantom-steed-spell-action.png',
+      'plant-growth': '/assets/icons/plant-growth-spell-action.png',
+      'protection-from-energy': '/assets/icons/protection-from-energy-spell-action.png',
+      'remove-curse': '/assets/icons/remove-curse-spell-action.png',
+      revivify: '/assets/icons/revivify-spell-action.png',
+      sending: '/assets/icons/sending-spell-action.png',
+      'sleet-storm': '/assets/icons/sleet-storm-spell-action.png',
+      slow: '/assets/icons/slow-spell-action.png',
+      'speak-with-dead': '/assets/icons/speak-with-dead-spell-action.png',
+      'speak-with-plants': '/assets/icons/speak-with-plants-spell-action.png',
+      'spirit-guardians': '/assets/icons/spirit-guardians-spell-action.png',
+      'tiny-hut': '/assets/icons/tiny-hut-spell-action.png',
+      tongues: '/assets/icons/tongues-spell-action.png',
+      'vampiric-touch': '/assets/icons/vampiric-touch-spell-action.png',
+      'water-breathing': '/assets/icons/water-breathing-spell-action.png',
+      'water-walk': '/assets/icons/water-walk-spell-action.png',
+      'wind-wall': '/assets/icons/wind-wall-spell-action.png',
+      'arcane-eye': '/assets/icons/arcane-eye-spell-action.png',
+      banishment: '/assets/icons/banishment-spell-action.png',
+      'black-tentacles': '/assets/icons/black-tentacles-spell-action.png',
+      blight: '/assets/icons/blight-spell-action.png',
+      compulsion: '/assets/icons/compulsion-spell-action.png',
+      confusion: '/assets/icons/confusion-spell-action.png',
+      'conjure-minor-elementals': '/assets/icons/conjure-minor-elementals-spell-action.png',
+      'conjure-woodland-beings': '/assets/icons/conjure-woodland-beings-spell-action.png',
+      'control-water': '/assets/icons/control-water-spell-action.png',
+      'death-ward': '/assets/icons/death-ward-spell-action.png',
+      'dimension-door': '/assets/icons/dimension-door-spell-action.png',
+      divination: '/assets/icons/divination-spell-action.png',
+      'dominate-beast': '/assets/icons/dominate-beast-spell-action.png',
+      fabricate: '/assets/icons/fabricate-spell-action.png',
     }
     for (const [id, asset] of Object.entries(expected)) {
       expect(dnd5eSpellActionIcon({ id, name: id, castingClassId: 'wizard' })).toMatchObject({
         asset,
         assetMode: 'foreground',
         classBackdropId: 'wizard',
+      })
+    }
+  })
+
+  it('为九种独立的强化护甲绑定各自图标和稀有度背景', () => {
+    const cases = [
+      ['armor-chain-mail-plus-1', 'armor-chain-mail-plus-1-item-action.png', 'rare', '#2563A8'],
+      ['armor-chain-mail-plus-2', 'armor-chain-mail-plus-2-item-action.png', 'very-rare', '#7138A8'],
+      ['armor-chain-mail-plus-3', 'armor-chain-mail-plus-3-item-action.png', 'legendary', '#B86A12'],
+      ['armor-scale-mail-plus-1', 'armor-scale-mail-plus-1-item-action.png', 'rare', '#2563A8'],
+      ['armor-scale-mail-plus-2', 'armor-scale-mail-plus-2-item-action.png', 'very-rare', '#7138A8'],
+      ['armor-scale-mail-plus-3', 'armor-scale-mail-plus-3-item-action.png', 'legendary', '#B86A12'],
+      ['armor-leather-armor-plus-1', 'armor-leather-armor-plus-1-item-action.png', 'rare', '#2563A8'],
+      ['armor-leather-armor-plus-2', 'armor-leather-armor-plus-2-item-action.png', 'very-rare', '#7138A8'],
+      ['armor-leather-armor-plus-3', 'armor-leather-armor-plus-3-item-action.png', 'legendary', '#B86A12'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('为下一组魔法护甲与盾牌绑定独立绘制图标', () => {
+    const cases = [
+      ['armor-of-invulnerability', 'armor-of-invulnerability-item-action.png', 'legendary', '#B86A12'],
+      ['armor-of-resistance', 'armor-of-resistance-item-action.png', 'rare', '#2563A8'],
+      ['armor-of-vulnerability', 'armor-of-vulnerability-item-action.png', 'rare', '#2563A8'],
+      ['arrow-catching-shield', 'arrow-catching-shield-item-action.png', 'rare', '#2563A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('为屠戮之箭与三种魔法袋绑定独立绘制图标', () => {
+    const cases = [
+      ['arrow-of-slaying', 'arrow-of-slaying-item-action.png', 'very-rare', '#7138A8'],
+      ['bag-of-beans', 'bag-of-beans-item-action.png', 'rare', '#2563A8'],
+      ['bag-of-devouring', 'bag-of-devouring-item-action.png', 'very-rare', '#7138A8'],
+      ['bag-of-holding', 'bag-of-holding-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('为戏法袋、力场珠与两种魔法腰带绑定独立绘制图标', () => {
+    const cases = [
+      ['bag-of-tricks', 'bag-of-tricks-item-action.png', 'uncommon', '#237A4A'],
+      ['bead-of-force', 'bead-of-force-item-action.png', 'rare', '#2563A8'],
+      ['belt-of-dwarvenkind', 'belt-of-dwarvenkind-item-action.png', 'rare', '#2563A8'],
+      ['belt-of-giant-strength', 'belt-of-giant-strength-item-action.png', 'varies', '#326C8C'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('为狂战斧与三种魔法靴绑定独立绘制图标', () => {
+    const cases = [
+      ['berserker-axe', 'berserker-axe-item-action.png', 'rare', '#2563A8'],
+      ['boots-of-elvenkind', 'boots-of-elvenkind-item-action.png', 'uncommon', '#237A4A'],
+      ['boots-of-levitation', 'boots-of-levitation-item-action.png', 'rare', '#2563A8'],
+      ['boots-of-speed', 'boots-of-speed-item-action.png', 'rare', '#2563A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('为奔跃靴、冬境靴、控水碗与箭术护腕绑定独立绘制图标', () => {
+    const cases = [
+      ['boots-of-striding-and-springing', 'boots-of-striding-and-springing-item-action.png', 'uncommon', '#237A4A'],
+      ['boots-of-the-winterlands', 'boots-of-the-winterlands-item-action.png', 'uncommon', '#237A4A'],
+      ['bowl-of-commanding-water-elementals', 'bowl-of-commanding-water-elementals-item-action.png', 'rare', '#2563A8'],
+      ['bracers-of-archery', 'bracers-of-archery-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('为防御护腕、控火火盆、屏障胸针与飞行扫帚绑定独立绘制图标', () => {
+    const cases = [
+      ['bracers-of-defense', 'bracers-of-defense-item-action.png', 'rare', '#2563A8'],
+      ['brazier-of-commanding-fire-elementals', 'brazier-of-commanding-fire-elementals-item-action.png', 'rare', '#2563A8'],
+      ['brooch-of-shielding', 'brooch-of-shielding-item-action.png', 'uncommon', '#237A4A'],
+      ['broom-of-flying', 'broom-of-flying-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the next four magic items', () => {
+    const cases = [
+      ['candle-of-invocation', 'candle-of-invocation-item-action.png', 'very-rare', '#7138A8'],
+      ['cape-of-the-mountebank', 'cape-of-the-mountebank-item-action.png', 'rare', '#2563A8'],
+      ['carpet-of-flying', 'carpet-of-flying-item-action.png', 'very-rare', '#7138A8'],
+      ['censer-of-controlling-air-elementals', 'censer-of-controlling-air-elementals-item-action.png', 'rare', '#2563A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the chime, circlet, and magical cloaks', () => {
+    const cases = [
+      ['chime-of-opening', 'chime-of-opening-item-action.png', 'rare', '#2563A8'],
+      ['circlet-of-blasting', 'circlet-of-blasting-item-action.png', 'uncommon', '#237A4A'],
+      ['cloak-of-arachnida', 'cloak-of-arachnida-item-action.png', 'very-rare', '#7138A8'],
+      ['cloak-of-displacement', 'cloak-of-displacement-item-action.png', 'rare', '#2563A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the next four magical cloaks', () => {
+    const cases = [
+      ['cloak-of-elvenkind', 'cloak-of-elvenkind-item-action.png', 'uncommon', '#237A4A'],
+      ['cloak-of-protection', 'cloak-of-protection-item-action.png', 'uncommon', '#237A4A'],
+      ['cloak-of-the-bat', 'cloak-of-the-bat-item-action.png', 'rare', '#2563A8'],
+      ['cloak-of-the-manta-ray', 'cloak-of-the-manta-ray-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the crystal ball, magical cubes, and venom dagger', () => {
+    const cases = [
+      ['crystal-ball', 'crystal-ball-item-action.png', 'very-rare', '#7138A8'],
+      ['cube-of-force', 'cube-of-force-item-action.png', 'rare', '#2563A8'],
+      ['cubic-gate', 'cubic-gate-item-action.png', 'legendary', '#B86A12'],
+      ['dagger-of-venom', 'dagger-of-venom-item-action.png', 'rare', '#2563A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the dancing sword, endless water, and magical decks', () => {
+    const cases = [
+      ['dancing-sword', 'dancing-sword-item-action.png', 'very-rare', '#7138A8'],
+      ['decanter-of-endless-water', 'decanter-of-endless-water-item-action.png', 'uncommon', '#237A4A'],
+      ['deck-of-illusions', 'deck-of-illusions-item-action.png', 'uncommon', '#237A4A'],
+      ['deck-of-many-things', 'deck-of-many-things-item-action.png', 'legendary', '#B86A12'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the defender, demon armor, shackles, and dragon mail', () => {
+    const cases = [
+      ['defender', 'defender-item-action.png', 'legendary', '#B86A12'],
+      ['demon-armor', 'demon-armor-item-action.png', 'very-rare', '#7138A8'],
+      ['dimensional-shackles', 'dimensional-shackles-item-action.png', 'rare', '#2563A8'],
+      ['dragon-scale-mail', 'dragon-scale-mail-item-action.png', 'very-rare', '#7138A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the dragon slayer and three magical dusts', () => {
+    const cases = [
+      ['dragon-slayer', 'dragon-slayer-item-action.png', 'rare', '#2563A8'],
+      ['dust-of-disappearance', 'dust-of-disappearance-item-action.png', 'uncommon', '#237A4A'],
+      ['dust-of-dryness', 'dust-of-dryness-item-action.png', 'uncommon', '#237A4A'],
+      ['dust-of-sneezing-and-choking', 'dust-of-sneezing-and-choking-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the dwarven gear, efficient quiver, and efreeti bottle', () => {
+    const cases = [
+      ['dwarven-plate', 'dwarven-plate-item-action.png', 'very-rare', '#7138A8'],
+      ['dwarven-thrower', 'dwarven-thrower-item-action.png', 'very-rare', '#7138A8'],
+      ['efficient-quiver', 'efficient-quiver-item-action.png', 'uncommon', '#237A4A'],
+      ['efreeti-bottle', 'efreeti-bottle-item-action.png', 'very-rare', '#7138A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
+
+  it('binds painted icons for the elemental gem, elven chain, smoke bottle, and charming eyes', () => {
+    const cases = [
+      ['elemental-gem', 'elemental-gem-item-action.png', 'uncommon', '#237A4A'],
+      ['elven-chain', 'elven-chain-item-action.png', 'rare', '#2563A8'],
+      ['eversmoking-bottle', 'eversmoking-bottle-item-action.png', 'uncommon', '#237A4A'],
+      ['eyes-of-charming', 'eyes-of-charming-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
       })
     }
   })

@@ -1,1 +1,5 @@
 *.sh text eol=lf
+public/assets/portraits/*.png filter=lfs diff=lfs merge=lfs -text
+public/assets/icons/*.png filter=lfs diff=lfs merge=lfs -text
+public/assets/vfx/*.png filter=lfs diff=lfs merge=lfs -text
+public/assets/vfx/*.webp filter=lfs diff=lfs merge=lfs -text

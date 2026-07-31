@@ -12,24 +12,34 @@ import {
   dnd5eClassDefinitionForCharacter,
   dnd5eClassProgression,
   dnd5eCombatSpellSelectionLimits,
+  dnd5eEffectiveSpellcastingSources,
+  dnd5eEffectiveSpellSelections,
   dnd5ePactSlotLevel,
+  dnd5ePatchEffectiveSpellSelections,
+  dnd5eSubclassSpellSchoolAllowed,
+  dnd5eSubclassUnrestrictedSpellLimit,
   dnd5eSpellSelectionKey,
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginSpells,
   subscribeDnd5eRulesPluginRegistry,
-  DND5E_SRD_CLASS_DEFINITIONS,
-  dnd5eCharacterClassLevel,
-  normalizeDnd5eClassLevels,
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { useSpellbookStore } from '../../store/spellbook'
 import { DND5E_SRD_5_1_LICENSE_URL, DND5E_SRD_5_1_SOURCE_URL } from '../../rulesets/dnd5e/srdContent'
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
+import { dnd5eWizardSpellPreparationDisabled } from './dnd5eSpellbookPanelRules'
+import { replaceRoomCharacterSpellSelections } from '../../store/roomCommands'
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
-export default function Dnd5eSpellbookPanel({ character, onChange }: { character: Character; onChange: (patch: Partial<Character>) => void }) {
+export default function Dnd5eSpellbookPanel({
+  character,
+  lockedChoiceKeys = new Set<string>(),
+}: {
+  character: Character
+  lockedChoiceKeys?: ReadonlySet<string>
+}) {
   const imported = useSpellbookStore((state) => state.spells)
   const pluginRevision = useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -40,26 +50,32 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   const [levelFilter, setLevelFilter] = useState('all')
   const [wizardSpellLevel, setWizardSpellLevel] = useState(0)
   const [detailSpellId, setDetailSpellId] = useState<string | null>(null)
-  const classLevels = normalizeDnd5eClassLevels(character)
-  const castingDefinitions = DND5E_SRD_CLASS_DEFINITIONS.filter((candidate) =>
-    (classLevels[candidate.id] ?? 0) > 0 && !!candidate.spellcasting)
+  const [previewSpellId, setPreviewSpellId] = useState<string | null>(null)
+  const castingSources = dnd5eEffectiveSpellcastingSources(character)
+  const castingDefinitions = castingSources.map((candidate) => candidate.definition)
+  const classLevels = Object.fromEntries(castingSources.map((candidate) => [
+    candidate.classId,
+    candidate.classLevel,
+  ])) as Partial<Record<Dnd5eClassId, number>>
   const [casterClassId, setCasterClassId] = useState<Dnd5eClassId | undefined>()
-  const definition = castingDefinitions.find((candidate) => candidate.id === casterClassId) ?? castingDefinitions[0] ?? dnd5eClassDefinitionForCharacter(character)
+  const source = castingSources.find((candidate) => candidate.classId === casterClassId) ?? castingSources[0]
+  const definition = source?.definition ?? dnd5eClassDefinitionForCharacter(character)
   void pluginRevision
   const pluginSpells = registeredDnd5ePluginSpells()
   const allEntries = dnd5eSpellbookEntriesWithPlugins(imported, pluginSpells)
   if (!definition?.spellcasting) return <section className="glass rounded-2xl p-6 text-sm text-slate-500">该职业没有 D&D 5e 2014 施法或契约魔法能力。</section>
-  const classLevel = dnd5eCharacterClassLevel(character, definition.id)
+  if (!source) return <section className="glass rounded-2xl p-6 text-sm text-slate-500">当前职业或子职尚未提供可用的施法来源。</section>
+  const classLevel = source.classLevel
   const classCharacter = { ...character, charClass: definition.name, level: classLevel }
   const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, classLevel - 1))]
   const highestSpellLevel = definition.spellcasting.kind === 'pact'
     ? dnd5ePactSlotLevel(classLevel)
     : progression.spellSlots.length
   const limits = dnd5eCombatSpellSelectionLimits(classCharacter)
-  const stored = character.dnd5eClassChoices?.classes?.[definition.id] ?? { subclass: definition.subclass.id, selections: {} }
-  const selections = stored.selections ?? {}
-  const selectionKey = dnd5eSpellSelectionKey(classCharacter)
-  const selectedCantrips = [...new Set(selections['spell-cantrips'] ?? [])]
+  const selections = dnd5eEffectiveSpellSelections(character, source)
+  const selectionKey = source.spellSelectionKey ?? dnd5eSpellSelectionKey(classCharacter)
+  const selectedCantrips = [...new Set(selections[source.cantripSelectionKey] ?? [])]
+  const requiredCantripIds = source.declarative?.requiredCantripIds ?? []
   const selectedSpells = [...new Set(selectionKey ? selections[selectionKey] ?? [] : [])]
   const wizardBook = [...new Set([
     ...(selections[WIZARD_SPELLBOOK_KEY] ?? []),
@@ -67,7 +83,7 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   ])]
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
   const candidates = allEntries.filter((spell) => {
-    if (!(spell.classes as readonly string[]).includes(definition.id)) return false
+    if (!(spell.classes as readonly string[]).includes(source.spellListClassId)) return false
     if (spell.level > highestSpellLevel) return false
     if (spell.level === 0 && (progression.cantripsKnown ?? 0) < 1) return false
     if (levelFilter !== 'all' && spell.level !== Number(levelFilter)) return false
@@ -77,6 +93,9 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   const entriesById = new Map(allEntries.map((spell) => [spell.id, spell]))
   const selectedCantripEntries = selectedCantrips.flatMap((id) => entriesById.get(id) ?? [])
   const selectedSpellEntries = selectedSpells.flatMap((id) => entriesById.get(id) ?? [])
+  const selectedUnrestrictedSpellCount = selectedSpellEntries.filter((spell) =>
+    !dnd5eSubclassSpellSchoolAllowed(source, spell)).length
+  const unrestrictedSpellLimit = dnd5eSubclassUnrestrictedSpellLimit(source)
   const wizardBookEntries = wizardBook.flatMap((id) => entriesById.get(id) ?? []).filter((spell) => spell.level > 0)
   const wizardSpellbookEntries = [...selectedCantripEntries, ...wizardBookEntries]
   const visibleWizardBookEntries = wizardSpellbookEntries.filter((spell) => spell.level === wizardSpellLevel)
@@ -86,33 +105,51 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
       ? !wizardBook.includes(spell.id)
       : !selectedSpells.includes(spell.id))
   const detailSpell = detailSpellId ? entriesById.get(detailSpellId) : undefined
+  const previewSpell = previewSpellId ? entriesById.get(previewSpellId) : undefined
   const preparationMode = definition.id === 'wizard' || selectionKey === 'spell-prepared'
+  const cantripChoicesLocked = lockedChoiceKeys.has(
+    `${source.classId}:class:${source.cantripSelectionKey}`,
+  )
+  const spellChoicesLocked = selectionKey
+    ? lockedChoiceKeys.has(`${source.classId}:class:${selectionKey}`)
+    : false
+  const wizardSpellbookLocked = lockedChoiceKeys.has(
+    `${source.classId}:class:${WIZARD_SPELLBOOK_KEY}`,
+  )
 
-  const setSelections = (next: Record<string, string[]>) => {
-    onChange({
-      dnd5eClassChoices: {
-        ...character.dnd5eClassChoices,
-        classes: {
-          ...character.dnd5eClassChoices?.classes,
-          [definition.id]: { ...stored, selections: next },
-        },
-      },
-    })
+  const setSelections = (next: Readonly<Record<string, readonly string[]>>) => {
+    const mutableSelections = Object.fromEntries(
+      Object.entries(next).map(([key, values]) => [key, [...values]]),
+    )
+    void replaceRoomCharacterSpellSelections(
+      character.id,
+      dnd5ePatchEffectiveSpellSelections(character, source, mutableSelections),
+    )
   }
 
   const toggleCantrip = (id: string) => {
+    if (cantripChoicesLocked) return
+    if (requiredCantripIds.includes(id)) return
     const selected = selectedCantrips.includes(id)
     if (!selected && selectedCantrips.length >= limits.cantrips) return
     setSelections({
       ...selections,
-      'spell-cantrips': selected ? selectedCantrips.filter((spellId) => spellId !== id) : [...selectedCantrips, id],
+      [source.cantripSelectionKey]: selected ? selectedCantrips.filter((spellId) => spellId !== id) : [...selectedCantrips, id],
     })
   }
 
   const toggleKnownOrPrepared = (id: string) => {
     if (!selectionKey) return
+    if (spellChoicesLocked) return
     const selected = selectedSpells.includes(id)
     if (!selected && selectedSpells.length >= limits.spells) return
+    const entry = entriesById.get(id)
+    if (
+      !selected &&
+      entry &&
+      !dnd5eSubclassSpellSchoolAllowed(source, entry) &&
+      selectedUnrestrictedSpellCount >= unrestrictedSpellLimit
+    ) return
     if (definition.id === 'wizard' && !wizardBook.includes(id)) return
     setSelections({
       ...selections,
@@ -122,6 +159,7 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
 
   const toggleWizardBook = (id: string) => {
     const selected = wizardBook.includes(id)
+    if (selected && wizardSpellbookLocked) return
     const nextBook = selected ? wizardBook.filter((spellId) => spellId !== id) : [...wizardBook, id]
     setSelections({
       ...selections,
@@ -148,12 +186,31 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     inWizardBook={wizardBook.includes(spell.id)}
     selected={spell.level === 0 ? selectedCantrips.includes(spell.id) : selectedSpells.includes(spell.id)}
     disabled={spell.level === 0
-      ? !selectedCantrips.includes(spell.id) && selectedCantrips.length >= limits.cantrips
-      : definition.id !== 'wizard' && !selectedSpells.includes(spell.id) && selectedSpells.length >= limits.spells}
-    preparationDisabled={definition.id === 'wizard' && !wizardBook.includes(spell.id)}
+      ? cantripChoicesLocked ||
+        (!selectedCantrips.includes(spell.id) && selectedCantrips.length >= limits.cantrips)
+      : (
+          (
+            definition.id !== 'wizard' &&
+            !selectedSpells.includes(spell.id) &&
+            (
+              selectedSpells.length >= limits.spells ||
+              (
+                !dnd5eSubclassSpellSchoolAllowed(source, spell) &&
+                selectedUnrestrictedSpellCount >= unrestrictedSpellLimit
+              )
+            )
+          ) ||
+          spellChoicesLocked
+        )}
+    bookDisabled={wizardSpellbookLocked && wizardBook.includes(spell.id)}
+    preparationDisabled={definition.id === 'wizard' && dnd5eWizardSpellPreparationDisabled(
+      spell.level,
+      wizardBook.includes(spell.id),
+    )}
     selectionMode={preparationMode ? 'prepared' : 'known'}
     showPreparedCheck={showPreparedCheck}
     onView={() => setDetailSpellId(spell.id)}
+    onPreview={() => setPreviewSpellId(spell.id)}
     onToggleBook={() => toggleWizardBook(spell.id)}
     onToggle={() => spell.level === 0 ? toggleCantrip(spell.id) : toggleKnownOrPrepared(spell.id)}
   />
@@ -181,6 +238,13 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
           ? `长休后可从本职业当前可用法术表中准备至多 ${limits.spells} 个法术。`
           : `当前等级可选择至多 ${limits.spells} 个已知法术；升级时的替换仍由玩家与 DM 按 2014 职业规则确认。`}
     </div>
+    {(cantripChoicesLocked || spellChoicesLocked || wizardSpellbookLocked) ? (
+      <div className="mt-3 rounded-xl border border-amber-300/15 bg-amber-500/[0.045] px-4 py-3 text-xs leading-5 text-amber-100/75">
+        升级记录中的戏法与已知法术只能在后续升级中替换，或由 DM 修订对应升级。
+        {wizardSpellbookLocked ? ' 法师仍可抄录新法术，但升级记录中已有的法术书条目不能删除。' : ''}
+        今日准备法术不受此限制。
+      </div>
+    ) : null}
 
     <div className="mt-5 space-y-4">
       {definition.id === 'wizard' ? <section className="rounded-2xl border border-white/8 bg-black/10 p-4">
@@ -244,21 +308,30 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     </div>
     {availableCandidates.length === 0 ? <p className="py-12 text-center text-sm text-slate-500">没有符合条件的未选择法术。</p> : null}
     <p className="mt-4 text-[11px] leading-5 text-slate-600">房间导入和仅目录法术可以正常记录在人物法术书中，但不会出现在自动战斗施法栏；只有带“Headless”标记的法术会自动结算。</p>
-    {detailSpell ? <SpellDetailsDialog spell={detailSpell} castingClassId={definition.id} onClose={() => setDetailSpellId(null)} /> : null}
+    {detailSpell ? <SpellDetailsDialog
+      spell={detailSpell}
+      castingClassId={definition.id}
+      previewOpen={previewSpell?.id === detailSpell.id}
+      onPreview={() => setPreviewSpellId(detailSpell.id)}
+      onClose={() => setDetailSpellId(null)}
+    /> : null}
+    {previewSpell ? <SpellIconPreviewDialog spell={previewSpell} castingClassId={definition.id} onClose={() => setPreviewSpellId(null)} /> : null}
   </section>
 }
 
-function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, disabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onToggleBook, onToggle }: {
+function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, disabled, bookDisabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onPreview, onToggleBook, onToggle }: {
   spell: Dnd5eSpellbookEntry
   castingClassId: Dnd5eClassId
   wizard: boolean
   inWizardBook: boolean
   selected: boolean
   disabled: boolean
+  bookDisabled: boolean
   preparationDisabled: boolean
   selectionMode: 'known' | 'prepared'
   showPreparedCheck: boolean
   onView: () => void
+  onPreview: () => void
   onToggleBook: () => void
   onToggle: () => void
 }) {
@@ -274,21 +347,26 @@ function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, di
     damageType: spell.combat?.damageType ?? spell.imported?.mechanics?.damage?.type,
     tags: spell.imported?.tags,
     castingClassId,
+    iconAssetId: spell.iconAssetId,
   })
   return <div className={`rounded-xl border p-3 ${selected ? 'border-violet-300/30 bg-violet-500/[0.08]' : 'border-white/8 bg-black/10'}`}>
-    <button type="button" onClick={onView} className="block w-full rounded-lg text-left outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-violet-400/60" aria-label={`查看${spell.name}详情`}>
-      <span className="flex items-start gap-3">
+    <div className="flex items-start gap-3">
+      <button type="button" onClick={onPreview} className="shrink-0 cursor-zoom-in rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70" aria-label={`放大查看${spell.name}图标`} title="点击放大图标">
         <Dnd5eActionIcon spec={icon} level={spell.level} className="h-12 w-12 shrink-0" />
+      </button>
+      <button type="button" onClick={onView} className="min-w-0 flex-1 rounded-lg text-left outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-violet-400/60" aria-label={`查看${spell.name}详情`}>
         <span className="min-w-0 flex-1">
-          <span className="flex items-start justify-between gap-2"><span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{spell.name}</strong><span className="mt-0.5 block text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`}{school ? ` · ${school}` : ''}</span></span><span className="flex shrink-0 flex-wrap justify-end gap-1">{showPreparedCheck && selected ? <span className="flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-semibold text-violet-100" title="已准备"><Check className="h-3 w-3" />已准备</span> : null}{spell.headless ? <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-200"><Bot className="h-3 w-3" />Headless</span> : null}</span></span>
+          <span className="flex items-start justify-between gap-2"><span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{spell.name}</strong><span className="mt-0.5 block text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`}{school ? ` · ${school}` : ''}</span></span><span className="flex shrink-0 flex-wrap justify-end gap-1">{showPreparedCheck && selected ? <span className="flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-semibold text-violet-100" title="已准备"><Check className="h-3 w-3" />已准备</span> : null}<SpellAutomationBadge spell={spell} /></span></span>
         </span>
-      </span>
+      </button>
+    </div>
+    <button type="button" onClick={onView} className="mt-2 block w-full rounded-lg text-left outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-violet-400/60" aria-label={`查看${spell.name}详情`}>
       <span className="mt-2 block text-[10px] leading-4 text-slate-500">职业：{spellClassLabel(spell)}</span>
       {description ? <span className="mt-2 line-clamp-4 whitespace-pre-line text-[11px] leading-4 text-slate-500">{description}</span> : null}
       <span className="mt-2 flex items-center gap-1 text-[10px] font-semibold text-violet-300"><BookOpen className="h-3 w-3" />点击法术查看详情</span>
     </button>
     <div className="mt-3 flex flex-wrap gap-2">
-      {wizard && spell.level > 0 ? <ToggleButton active={inWizardBook} onClick={onToggleBook} label={inWizardBook ? '移出法术书' : '加入法术书'} /> : null}
+      {wizard && spell.level > 0 ? <ToggleButton active={inWizardBook} disabled={bookDisabled} onClick={onToggleBook} label={inWizardBook ? '移出法术书' : '加入法术书'} /> : null}
       {(!wizard || spell.level === 0 || inWizardBook) ? <ToggleButton
         active={selected}
         disabled={disabled || preparationDisabled}
@@ -353,7 +431,7 @@ function importedDuration(spell: ImportedSpell): string {
   return `${prefix}${spell.duration.value ?? 0} ${spell.duration.unit ? units[spell.duration.unit] : ''}`
 }
 
-function SpellDetailsDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSpellbookEntry; castingClassId: Dnd5eClassId; onClose: () => void }) {
+function SpellIconPreviewDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSpellbookEntry; castingClassId: Dnd5eClassId; onClose: () => void }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -366,6 +444,59 @@ function SpellDetailsDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSp
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [onClose])
+
+  const school = spell.imported
+    ? DND5E_SPELL_SCHOOL_LABELS[spell.imported.school]
+    : spell.reference?.school ?? spell.combat?.school
+  const icon = dnd5eSpellActionIcon({
+    id: spell.id,
+    name: spell.name,
+    englishName: spell.englishName,
+    level: spell.level,
+    school,
+    effect: spell.combat?.effect ?? spell.imported?.mechanics?.resolution,
+    damageType: spell.combat?.damageType ?? spell.imported?.mechanics?.damage?.type,
+    tags: spell.imported?.tags,
+    castingClassId,
+    iconAssetId: spell.iconAssetId,
+  })
+
+  return createPortal(<div role="presentation" className="fixed inset-0 z-[110] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md" onMouseDown={(event) => {
+    if (event.target === event.currentTarget) onClose()
+  }}>
+    <section role="dialog" aria-modal="true" aria-labelledby="character-spell-icon-preview-title" className="glass w-full max-w-xl rounded-3xl border border-white/15 p-4 shadow-2xl shadow-black/70 sm:p-6">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 id="character-spell-icon-preview-title" className="text-lg font-bold text-slate-50">{spell.name}</h3>
+          <p className="mt-1 text-xs text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`} · 法术图标预览</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="关闭法术图标预览" className="rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-slate-100"><X className="h-5 w-5" /></button>
+      </div>
+      <Dnd5eActionIcon spec={icon} level={spell.level} className="mx-auto w-full max-w-lg rounded-3xl shadow-2xl shadow-black/60" />
+      <p className="mt-4 text-center text-xs text-slate-500">点击空白处或按 Esc 关闭</p>
+    </section>
+  </div>, document.body)
+}
+
+function SpellDetailsDialog({ spell, castingClassId, previewOpen, onPreview, onClose }: {
+  spell: Dnd5eSpellbookEntry
+  castingClassId: Dnd5eClassId
+  previewOpen: boolean
+  onPreview: () => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !previewOpen) onClose()
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [onClose, previewOpen])
 
   const reference = spell.reference
   const imported = spell.imported
@@ -387,6 +518,7 @@ function SpellDetailsDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSp
     damageType: combat?.damageType ?? imported?.mechanics?.damage?.type,
     tags: imported?.tags,
     castingClassId,
+    iconAssetId: spell.iconAssetId,
   })
 
   return createPortal(<div role="presentation" className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm" onMouseDown={(event) => {
@@ -394,7 +526,12 @@ function SpellDetailsDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSp
   }}>
     <section role="dialog" aria-modal="true" aria-labelledby="character-spell-detail-title" className="glass max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/12 p-5 shadow-2xl shadow-black/50">
       <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
-        <div className="flex min-w-0 items-start gap-4"><Dnd5eActionIcon spec={icon} level={spell.level} className="h-16 w-16 shrink-0" /><div className="min-w-0"><h3 id="character-spell-detail-title" className="text-xl font-bold text-slate-50">{spell.name}</h3>{spell.englishName && spell.englishName !== spell.name ? <p className="mt-1 text-sm text-slate-500">{spell.englishName}</p> : null}<p className="mt-2 text-xs text-slate-400">施法职业：{DND5E_SPELL_CLASS_LABELS[castingClassId as keyof typeof DND5E_SPELL_CLASS_LABELS] ?? castingClassId}</p></div></div>
+        <div className="flex min-w-0 items-start gap-4">
+          <button type="button" onClick={onPreview} className="shrink-0 cursor-zoom-in rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70" aria-label={`放大查看${spell.name}图标`} title="点击放大图标">
+            <Dnd5eActionIcon spec={icon} level={spell.level} className="h-16 w-16 shrink-0" />
+          </button>
+          <div className="min-w-0"><h3 id="character-spell-detail-title" className="text-xl font-bold text-slate-50">{spell.name}</h3>{spell.englishName && spell.englishName !== spell.name ? <p className="mt-1 text-sm text-slate-500">{spell.englishName}</p> : null}<p className="mt-2 text-xs text-slate-400">施法职业：{DND5E_SPELL_CLASS_LABELS[castingClassId as keyof typeof DND5E_SPELL_CLASS_LABELS] ?? castingClassId}</p></div>
+        </div>
         <button type="button" onClick={onClose} aria-label="关闭法术详情" className="rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-slate-100"><X className="h-5 w-5" /></button>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -405,16 +542,40 @@ function SpellDetailsDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSp
         <SpellDetail label="射程／范围" value={range} />
         <SpellDetail label="成分" value={components} />
         <SpellDetail label="持续时间" value={duration} />
-        <SpellDetail label="自动结算" value={spell.headless ? '已接入 Headless' : '由 DM 裁定'} />
+        <SpellDetail
+          label="目标可见性"
+          value={
+            spell.visibilityRequirement === 'required'
+              ? '必须看见目标或落点'
+              : spell.visibilityRequirement === 'conditional'
+                ? '取决于所选效果'
+                : spell.visibilityRequirement === 'not-required'
+                  ? '规则未要求看见'
+                  : '由插件或 DM 声明'
+          }
+        />
+        <SpellDetail label="自动结算" value={spell.automationLevel === 'full' ? '完全自动化' : spell.automationLevel === 'partial' ? '半自动化' : '由 DM 裁定'} />
       </div>
       <SpellRuleBlock title="规则正文" text={description} />
       {higherLevels ? <SpellRuleBlock title="升环效果" text={higherLevels} /> : null}
       {combat && (reference || imported) ? <SpellRuleBlock title="Headless 结算说明" text={combat.description} /> : null}
+      {spell.automationReason ? <SpellRuleBlock title="半自动化边界" text={spell.automationReason} /> : null}
       <p className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">
         {reference ? <>规则目录：<a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_SOURCE_URL} target="_blank" rel="noreferrer">英文 SRD 5.1</a> · <a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer">CC BY 4.0</a><br />中文条目：{spell.name}{spell.englishName ? `（${spell.englishName}）` : ''} · 中文正文已完成语境审校</> : imported ? `房间导入：${imported.source.title} · ${imported.source.publisher} · ${imported.source.license}` : 'SRD 5.1 核心目录 · 中文正文待人工审校，未装载未审校旧正文'}<br />ID：{spell.id}
       </p>
     </section>
   </div>, document.body)
+}
+
+function SpellAutomationBadge({ spell }: { spell: Dnd5eSpellbookEntry }) {
+  if (spell.automationLevel === 'manual') return null
+  const full = spell.automationLevel === 'full'
+  return <span
+    title={full ? '已接入 Headless 完整结算' : spell.automationReason ?? '部分效果需要 DM 裁定'}
+    className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${full ? 'bg-emerald-500/10 text-emerald-200' : 'bg-sky-500/10 text-sky-200'}`}
+  >
+    <Bot className="h-3 w-3" />{full ? 'Headless' : '半自动'}
+  </span>
 }
 
 function SpellDetail({ label, value }: { label: string; value: string }) {

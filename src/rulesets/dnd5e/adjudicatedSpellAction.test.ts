@@ -67,12 +67,30 @@ function fixture() {
 }
 
 describe('DM-adjudicated spell Headless transaction', () => {
+  it('reports when the character has not learned or prepared the spell', () => {
+    const input = fixture()
+    input.actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-prepared': [] } } } }
+    expect(prepareDnd5eAdjudicatedSpell(input)).toEqual({
+      ok: false,
+      reason: 'spell-not-known-or-prepared',
+    })
+  })
+
   it('rejects DM-adjudicated casting while the caster wears unproficient armor', () => {
     const input = fixture()
     input.actor.equipment = { armor: DND5E_LEATHER_ARMOR }
     expect(prepareDnd5eAdjudicatedSpell(input)).toEqual({
       ok: false,
       reason: 'armor-proficiency-required',
+    })
+  })
+
+  it('rejects a verbal DM-adjudicated spell while the caster is silenced', () => {
+    const input = fixture()
+    input.actor.conditions = ['沉默']
+    expect(prepareDnd5eAdjudicatedSpell(input)).toEqual({
+      ok: false,
+      reason: 'component-unavailable',
     })
   })
 

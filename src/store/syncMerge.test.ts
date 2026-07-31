@@ -6,6 +6,7 @@ import {
   clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterHitPointEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
+  clearPendingLocalAdvancementsForTest,
   filterLegacySampleCharacters,
   mergeCharactersForSharedSave,
   mergePendingLocalFighterChoices,
@@ -13,25 +14,31 @@ import {
   mergePendingLocalPluginFeatures,
   mergePendingLocalCharacterLevelEdits,
   mergePendingLocalCharacterHitPointEdits,
+  mergePendingLocalAdvancements,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
   markPendingLocalCharacterHitPointEdit,
   markPendingLocalFighterChoices,
   markPendingLocalClassChoices,
   markPendingLocalPluginFeatures,
+  markPendingLocalAdvancements,
   resetPendingLocalFighterChoicesMemoryForTest,
   resetPendingLocalClassChoicesMemoryForTest,
   resetPendingLocalPluginFeaturesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
   resetPendingLocalCharacterHitPointEditMemoryForTest,
+  resetPendingLocalAdvancementsMemoryForTest,
+  shouldApplySharedCharactersSnapshot,
 } from './characters'
 import {
   clearPendingLocalTokenHitPointEditsForTest,
+  createLatestMapsPublishPump,
   markPendingLocalTokenHitPointEdit,
   mergePendingLocalTokenHitPointEdits,
   mergePlayerTokenCombatFields,
   resetPendingLocalTokenHitPointEditMemoryForTest,
   saveMapsStateWithPendingHitPointRetry,
+  saveMapsStateWithTokenPatchRetry,
   type BattleMap,
   type Token,
 } from './maps'
@@ -334,6 +341,33 @@ describe('pending local character-sheet hit point edits', () => {
   })
 })
 
+describe('character shared snapshot ordering', () => {
+  it('accepts a newer server revision even when the DM wall clock is behind the player', () => {
+    expect(shouldApplySharedCharactersSnapshot({
+      incomingRevision: 84,
+      lastAppliedRevision: 83,
+      incomingUpdatedAt: 1_000,
+      lastAppliedUpdatedAt: 9_000,
+    })).toBe(true)
+  })
+
+  it('rejects an older revision even when its client timestamp is later', () => {
+    expect(shouldApplySharedCharactersSnapshot({
+      incomingRevision: 83,
+      lastAppliedRevision: 84,
+      incomingUpdatedAt: 9_000,
+      lastAppliedUpdatedAt: 1_000,
+    })).toBe(false)
+  })
+
+  it('uses timestamps only for legacy snapshots without server revisions', () => {
+    expect(shouldApplySharedCharactersSnapshot({
+      incomingUpdatedAt: 1_000,
+      lastAppliedUpdatedAt: 9_000,
+    })).toBe(false)
+  })
+})
+
 describe('pending local fighter choices', () => {
   afterEach(() => {
     clearPendingLocalFighterChoicesForTest()
@@ -439,7 +473,86 @@ describe('pending local plugin feature choices', () => {
   })
 })
 
-describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', () => {
+describe('pending local level advancement receipts', () => {
+  afterEach(() => {
+    clearPendingLocalAdvancementsForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps an immutable advancement receipt until the shared snapshot acknowledges it', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('window', { localStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } })
+    clearPendingLocalAdvancementsForTest()
+
+    const base = char({ id: 'hero' })
+    const record = {
+      schemaVersion: 1 as const,
+      id: 'adv-1',
+      fromLevel: 1,
+      toLevel: 2,
+      classId: 'fighter' as const,
+      fromClassLevel: 1,
+      toClassLevel: 2,
+      completedAt: 1_000,
+      completedBy: 'player' as const,
+      decision: {
+        schemaVersion: 1 as const,
+        classId: 'fighter' as const,
+        levelsGained: 1,
+        hitPointMethod: 'fixed' as const,
+        hitPointRolls: [],
+        asiChoices: [],
+        fighterFightingStyles: ['archery' as const],
+      },
+      grantedFeatureIds: ['action-surge-1'],
+      before: {
+        level: 1,
+        dnd5eClassLevels: { fighter: 1 },
+        abilities: { ...base.abilities },
+        skills: [...(base.skills ?? [])],
+        maxHp: base.maxHp,
+        currentHp: base.currentHp,
+      },
+      after: {
+        level: 2,
+        dnd5eClassLevels: { fighter: 2 },
+        abilities: { ...base.abilities, str: 18 },
+        skills: [...(base.skills ?? []), 'perception'],
+        dnd5eFeatIds: ['srd5.1:grappler'],
+        maxHp: base.maxHp + 6,
+        currentHp: base.currentHp + 6,
+      },
+    }
+    markPendingLocalAdvancements('hero', [record], 1_000)
+    resetPendingLocalAdvancementsMemoryForTest()
+
+    const merged = mergePendingLocalAdvancements([
+      char({ id: 'hero', dnd5eLevelAdvancements: [] }),
+    ], 1_001)[0]
+    expect(merged.dnd5eLevelAdvancements).toEqual([record])
+    expect(merged.abilities.str).toBe(18)
+    expect(merged.skills).toContain('perception')
+    expect(merged.dnd5eFeatIds).toEqual(['srd5.1:grappler'])
+    expect(values.size).toBe(1)
+
+    expect(mergePendingLocalAdvancements([
+      char({
+        id: 'hero',
+        abilities: { ...record.after.abilities },
+        skills: [...record.after.skills],
+        dnd5eFeatIds: [...(record.after.dnd5eFeatIds ?? [])],
+        dnd5eLevelAdvancements: [record],
+      }),
+    ], 1_002)[0].dnd5eLevelAdvancements).toEqual([record])
+    expect(values.size).toBe(0)
+  })
+})
+
+describe('T13/AC6 mergePlayerTokenCombatFields preserves DM-authoritative token positions', () => {
   it('keeps DM-authored item areas when a player publishes an unrelated map write', () => {
     const localMap = map({ dnd5eItemAreas: [] })
     const sharedArea = {
@@ -473,15 +586,20 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     expect(e1.dnd5eCombatState?.activeEffects).toEqual([blinded])
   })
 
-  it("a player-type token keeps its OWN local x/y (DM does not move the player's own token)", () => {
-    const localMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 120, y: 130, hp: 20, maxHp: 30 })] })
-    const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 999, y: 888, hp: 15, maxHp: 30 })] })
+  it('takes an authoritative forced-movement position for a player-type token', () => {
+    const localMap = map({ tokens: [token({
+      id: 'p1', type: 'player', x: 120, y: 130, elevationFeet: 40, hp: 20, maxHp: 30,
+    })] })
+    const sharedMap = map({ tokens: [token({
+      id: 'p1', type: 'player', x: 999, y: 888, elevationFeet: 0, hp: 15, maxHp: 30,
+    })] })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
     const p1 = result.tokens.find((t) => t.id === 'p1')!
-    // 玩家自己 token 的位置保留本地（dmControlledPosition 仅对非 player 生效）。
-    expect(p1.x).toBe(120)
-    expect(p1.y).toBe(130)
-    // 但战斗字段（hp 等）仍取 DM 权威值。
+    // 玩家端旧快照不能覆盖 DM 已结算的强制位移。
+    expect(p1.x).toBe(999)
+    expect(p1.y).toBe(888)
+    expect(p1.elevationFeet).toBe(0)
+    // 战斗字段（hp 等）同样取 DM 权威值。
     expect(p1.hp).toBe(15)
   })
 
@@ -621,5 +739,150 @@ describe('地图 Token HP 本地写入竞争保护', () => {
     expect(save).toHaveBeenCalledTimes(2)
     expect(load).toHaveBeenCalledTimes(1)
     expect(writes[1].maps[0].tokens[0]).toMatchObject({ x: 275, hp: 4, maxHp: 12 })
+  })
+})
+
+describe('地图 Token 权威补丁重试', () => {
+  it('CAS 冲突后保留服务端其它 Token 的移动并重放当前移动', async () => {
+    const writes: Array<{ maps: BattleMap[]; selectedId: string | null; updatedAt?: number }> = []
+    const save = vi.fn(async (payload) => {
+      writes.push(payload)
+      return writes.length === 1
+        ? { status: 'conflict' as const, expectedRevision: 7, currentRevision: 8 }
+        : { status: 'saved' as const, revision: 9 }
+    })
+    const load = vi.fn(async () => ({
+      maps: [map({
+        id: 'map-1',
+        tokens: [
+          token({ id: 'player', type: 'player', x: 425, y: 325 }),
+          token({ id: 'monster', type: 'enemy', x: 500, y: 300 }),
+        ],
+      })],
+      selectedId: 'map-1',
+      updatedAt: 1_050,
+    }))
+
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [
+            token({ id: 'player', type: 'player', x: 350, y: 300 }),
+            token({ id: 'monster', type: 'enemy', x: 575, y: 325 }),
+          ],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_001,
+      },
+      mapId: 'map-1',
+      tokenId: 'monster',
+      patch: { x: 575, y: 325 },
+      save,
+      load,
+      now: () => 1_051,
+    })
+
+    expect(outcome.result).toMatchObject({ status: 'saved', revision: 9 })
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(writes[1].maps[0].tokens).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'player', x: 425, y: 325 }),
+      expect.objectContaining({ id: 'monster', x: 575, y: 325 }),
+    ]))
+  })
+
+  it('目标已被服务端删除时 fail closed，不会重新创建 Token', async () => {
+    const save = vi.fn(async () => (
+      { status: 'conflict' as const, expectedRevision: 2, currentRevision: 3 }
+    ))
+    const load = vi.fn(async () => ({
+      maps: [map({ id: 'map-1', tokens: [] })],
+      selectedId: 'map-1',
+      updatedAt: 2_000,
+    }))
+
+    await expect(saveMapsStateWithTokenPatchRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [token({ id: 'monster', x: 500, y: 300 })],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_000,
+      },
+      mapId: 'map-1',
+      tokenId: 'monster',
+      patch: { x: 575, y: 325 },
+      save,
+      load,
+    })).rejects.toThrow('map-token-patch-target-missing-after-conflict')
+  })
+})
+
+describe('地图共享发布 latest-wins 泵', () => {
+  it('连续 20 次 HP 更新最多保留一笔处理中和一笔最新待处理保存', async () => {
+    let releaseFirstSave!: () => void
+    const firstSaveBlocked = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    const persisted: Array<{ hp: number }> = []
+    const persist = vi.fn(async (value: { hp: number }) => {
+      persisted.push(value)
+      if (persisted.length === 1) await firstSaveBlocked
+    })
+    const publish = createLatestMapsPublishPump(persist)
+
+    const requests = Array.from({ length: 20 }, (_, index) =>
+      publish({ hp: index + 1 }, { retryPendingHitPoints: true }))
+
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(persisted).toEqual([{ hp: 1 }])
+
+    releaseFirstSave()
+    await Promise.all(requests)
+
+    expect(persist).toHaveBeenCalledTimes(2)
+    expect(persisted).toEqual([{ hp: 1 }, { hp: 20 }])
+  })
+
+  it('requireSaved 会跨过失败的当前代并等待更新代真正保存成功', async () => {
+    let releaseFirstSave!: () => void
+    let releaseLatestSave!: () => void
+    const firstSaveBlocked = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    const latestSaveBlocked = new Promise<void>((resolve) => {
+      releaseLatestSave = resolve
+    })
+    let attempt = 0
+    const persist = vi.fn(async () => {
+      attempt += 1
+      if (attempt === 1) {
+        await firstSaveBlocked
+        throw new Error('first-save-failed')
+      }
+      await latestSaveBlocked
+    })
+    const publish = createLatestMapsPublishPump(persist)
+    let durableState: 'pending' | 'resolved' | 'rejected' = 'pending'
+
+    const durable = publish({ hp: 4 }, { requireSaved: true }).then(
+      () => { durableState = 'resolved' },
+      (error) => {
+        durableState = 'rejected'
+        throw error
+      },
+    )
+    const newer = publish({ hp: 3 })
+
+    releaseFirstSave()
+    await vi.waitFor(() => expect(persist).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    expect(durableState).toBe('pending')
+
+    releaseLatestSave()
+    await Promise.all([durable, newer])
+    expect(durableState).toBe('resolved')
   })
 })

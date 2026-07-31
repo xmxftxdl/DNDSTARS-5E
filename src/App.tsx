@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { PanelLeftOpen } from 'lucide-react'
 import AccountAppShell from './components/AccountAppShell'
-import Sidebar from './components/Sidebar'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
 import PageErrorBoundary from './components/PageErrorBoundary'
@@ -11,16 +10,17 @@ import { modeFromPort } from './lib/appMode'
 import { heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
 import { clearRoomSession, getRoomSession, subscribeRoomSession } from './lib/roomSession'
 import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesState'
-import { synchronizeRoomPlugins } from './lib/roomPluginSync'
-import { useCharacterStore } from './store/characters'
-import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e/pluginApi'
-import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
-import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
+const Sidebar = lazy(() => import('./components/Sidebar'))
+const AccountProfilePage = lazy(() => import('./pages/AccountProfilePage'))
 const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
+const PublicCombatPage = lazy(() => import('./pages/PublicCombatPage'))
+const PublicExtensionPage = lazy(() => import('./pages/PublicExtensionPage'))
+const PublicBlogPage = lazy(() => import('./pages/PublicBlogPage'))
+const PublicPricingPage = lazy(() => import('./pages/PublicPricingPage'))
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
@@ -29,10 +29,10 @@ const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
 const PluginsPage = lazy(() => import('./pages/PluginsPage'))
 const PluginPublisherPage = lazy(() => import('./pages/PluginPublisherPage'))
+const PluginCatalogDetailPage = lazy(() => import('./pages/PluginCatalogDetailPage'))
 const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
-const GroupAbilityCheckSystem = lazy(() => import('./components/GroupAbilityCheckSystem'))
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
 const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
 
@@ -70,7 +70,7 @@ export default function App() {
   const defaultCampaignPath = `${campaignBasePath}/${endpointMode === 'player' ? 'maps' : 'overview'}`
   const campaignRouteMatch = location.pathname.match(/^\/campaign\/([^/]+)(?:\/|$)/)
   const campaignSectionMatch = location.pathname.match(/^\/campaign\/[^/]+\/([^/]+)(?:\/|$)/)
-  const publicWebsitePaths = new Set(['/', '/combat', '/extensions', '/blog', '/pricing'])
+  const publicWebsitePaths = new Set(['/', '/combat', '/extension', '/extensions', '/blog', '/pricing'])
   const publicWebsiteRequested = publicWebsitePaths.has(location.pathname) &&
     !(bypassRoomLobby && location.pathname === '/')
   const legacyWorkspacePaths = new Set([
@@ -96,6 +96,10 @@ export default function App() {
       if (pulsing) return
       pulsing = true
       try {
+        const [{ useCharacterStore }, { roomActiveDnd5eRulesPluginRequirements }] = await Promise.all([
+          import('./store/characters'),
+          import('./rulesets/dnd5e/pluginApi'),
+        ])
         const characterState = useCharacterStore.getState()
         const assignedCharacterId = roomSession.role === 'player'
           ? getAssignedPlayerCharacterId(roomSession.slot)
@@ -110,13 +114,14 @@ export default function App() {
             : undefined
         let rules = await heartbeatRoom(
           roomSession,
-          activeDnd5eRulesPluginRequirements(),
+          roomActiveDnd5eRulesPluginRequirements(),
           activeCharacter
             ? { activeCharacterId: activeCharacter.id, activeCharacterName: activeCharacter.name }
             : undefined,
         )
         if (!rules.member.ready) {
           try {
+            const { synchronizeRoomPlugins } = await import('./lib/roomPluginSync')
             rules = (await synchronizeRoomPlugins(roomSession, rules)).rules
             setRoomPluginSyncError(null)
           } catch (pluginError) {
@@ -132,6 +137,7 @@ export default function App() {
         if (disposed) return
         const terminal = roomHeartbeatErrorIsTerminal(error)
         if (terminal) {
+          await window.DNDSTARS_5E_RULES_PLUGINS?.clearEphemeral()
           clearRoomSession()
           setRoomRulesSnapshot(null)
           setRoomPluginSyncError(null)
@@ -178,25 +184,41 @@ export default function App() {
 
   useEffect(() => {
     if (publicWebsiteRequested || !roomReady || roomSession?.role === 'spectator') return
-    const stopInventory = startDnd5eInventoryAuthoritySync()
-    return () => stopInventory()
+    let disposed = false
+    let stopInventory: (() => void) | undefined
+    void import('./lib/inventoryAuthority').then(({ startDnd5eInventoryAuthoritySync }) => {
+      if (disposed) return
+      stopInventory = startDnd5eInventoryAuthoritySync()
+    })
+    return () => {
+      disposed = true
+      stopInventory?.()
+    }
   }, [endpointMode, publicWebsiteRequested, roomReady, roomSession])
 
   useEffect(() => {
     if (publicWebsiteRequested || roomSession?.role !== 'player') return
-    return startAccountCharacterVaultSync()
+    let disposed = false
+    let stopVault: (() => void) | undefined
+    void import('./lib/accountCharacterVault').then(({ startAccountCharacterVaultSync }) => {
+      if (disposed) return
+      stopVault = startAccountCharacterVaultSync()
+    })
+    return () => {
+      disposed = true
+      stopVault?.()
+    }
   }, [publicWebsiteRequested, roomSession])
 
   if (publicWebsiteRequested) {
     return (
       <Routes>
-        {Array.from(publicWebsitePaths).map((path) => (
-          <Route
-            key={path}
-            path={path}
-            element={lazyPage('星痕产品网站', <PublicLandingPage />)}
-          />
-        ))}
+        <Route path="/" element={lazyPage('星痕产品网站', <PublicLandingPage />)} />
+        <Route path="/combat" element={lazyPage('星痕战斗系统', <PublicCombatPage />)} />
+        <Route path="/extension" element={lazyPage('星痕扩展中心', <PublicExtensionPage />)} />
+        <Route path="/extensions" element={<Navigate to="/extension" replace />} />
+        <Route path="/blog" element={lazyPage('星痕博客', <PublicBlogPage />)} />
+        <Route path="/pricing" element={lazyPage('星痕价格', <PublicPricingPage />)} />
       </Routes>
     )
   }
@@ -212,6 +234,7 @@ export default function App() {
         <SharedSyncRecoveryBanner />
         <AccountAppShell
           accountName={account?.username ?? account?.displayName}
+          accountAvatar={account?.avatar}
           activeCampaignPath={activeCampaignPath}
         >
           <Routes>
@@ -224,9 +247,17 @@ export default function App() {
               element={lazyPage('创建或加入房间', <RoomLobbyPage notice={roomNotice} embedded />)}
             />
             <Route path="/app/extensions" element={lazyPage('我的扩展', <PluginsPage />)} />
+            <Route path="/app/profile" element={account
+              ? lazyPage('个人资料', <AccountProfilePage />)
+              : <Navigate to="/app?auth=login" replace />}
+            />
             <Route
               path="/app/extensions/publishers/:publisherId"
               element={lazyPage('扩展发布者', <PluginPublisherPage />)}
+            />
+            <Route
+              path="/app/extensions/catalog/:pluginId"
+              element={lazyPage('扩展商品详情', <PluginCatalogDetailPage />)}
             />
             <Route path="/plugin" element={<Navigate to="/app/extensions" replace />} />
             <Route path="/plugins" element={<Navigate to="/app/extensions" replace />} />
@@ -286,6 +317,7 @@ export default function App() {
     } catch {
       // 即使共享服务暂时不可达，也清除本机会话；房主心跳超时后房间会自动离线。
     }
+    await window.DNDSTARS_5E_RULES_PLUGINS?.clearEphemeral()
     clearRoomSession()
     setRoomRulesSnapshot(null)
     setRoomPluginSyncError(null)
@@ -304,7 +336,6 @@ export default function App() {
       <SharedSyncRecoveryBanner />
       <Suspense fallback={null}>
         {!isSpectator && <RoomHandoutNotification />}
-        {!isSpectator && <GroupAbilityCheckSystem />}
         <CampaignTimeSystem isDm={endpointMode !== 'player'} />
         <SceneAudioPlaybackSystem />
       </Suspense>
@@ -316,14 +347,16 @@ export default function App() {
         aria-hidden="true"
       />
       {!collapsed && (
-        <Sidebar
-          mode={endpointMode ?? undefined}
-          roomSession={roomSession ?? undefined}
-          campaignBasePath={campaignBasePath}
-          connection={connection}
-          onCollapse={() => setCollapsed(true)}
-          onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
-        />
+        <Suspense fallback={null}>
+          <Sidebar
+            mode={endpointMode ?? undefined}
+            roomSession={roomSession ?? undefined}
+            campaignBasePath={campaignBasePath}
+            connection={connection}
+            onCollapse={() => setCollapsed(true)}
+            onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
+          />
+        </Suspense>
       )}
       <main className={`relative flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
         {collapsed && (

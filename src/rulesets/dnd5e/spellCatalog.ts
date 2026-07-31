@@ -1,5 +1,9 @@
 import type { Dnd5eClassId } from './classes'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
+import {
+  dnd5eSpellVisibilityRequirement,
+  type Dnd5eSpellVisibilityRequirement,
+} from './spellVisibility'
 
 export interface Dnd5eSrdSpellCatalogEntry {
   id: string
@@ -7,6 +11,7 @@ export interface Dnd5eSrdSpellCatalogEntry {
   englishName: string
   level: number
   classes: readonly Dnd5eClassId[]
+  visibilityRequirement: Dnd5eSpellVisibilityRequirement
 }
 
 export interface Dnd5eWarlockMysticArcanumOption extends Dnd5eSrdSpellCatalogEntry {
@@ -348,6 +353,7 @@ export const DND5E_SRD_SPELL_CATALOG: readonly Dnd5eSrdSpellCatalogEntry[] = RAW
       englishName,
       level: Number(level),
       classes: classIds.split(',') as Dnd5eClassId[],
+      visibilityRequirement: dnd5eSpellVisibilityRequirement(id),
     }
   })
 

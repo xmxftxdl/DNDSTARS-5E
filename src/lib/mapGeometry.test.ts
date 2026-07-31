@@ -293,6 +293,12 @@ describe('map geometry', () => {
     expect(mapGeometryIlluminationAtPoint({ geometry: g, map: litMap, point: target })).toBe('magical-darkness')
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(false)
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer: { ...viewer, canSeeMagicalDarkness: true }, target })).toBe(true)
+    expect(mapGeometryCanSeeToken({
+      geometry: g,
+      map: litMap,
+      viewer: { ...viewer, magicalDarknessSightRangeFeet: 60 },
+      target,
+    })).toBe(true)
   })
 
   it('uses core spell areas as authoritative light and magical-darkness sources', () => {
@@ -324,6 +330,12 @@ describe('map geometry', () => {
     expect(mapGeometryIlluminationAtPoint({
       geometry: g, map: { ...map, dnd5ePluginAreas: [darkness] }, point: target,
     })).toBe('magical-darkness')
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g,
+      map: { ...map, dnd5ePluginAreas: [darkness] },
+      point: target,
+      elevationFeet: 20,
+    })).not.toBe('magical-darkness')
     expect(mapGeometryIlluminationAtPoint({
       geometry: g, map: { ...map, dnd5ePluginAreas: [darkness, daylight] }, point: target,
     })).toBe('bright')

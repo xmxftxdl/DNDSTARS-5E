@@ -186,12 +186,14 @@ function assertId(value: unknown, label: string): asserts value is string {
 function initializePlugin(source: string): {
   manifest: Record<string, unknown>
   features: readonly Record<string, unknown>[]
+  feats: readonly Record<string, unknown>[]
   actions: readonly { id: string; allowOffTurn?: boolean; rolls?: readonly Record<string, unknown>[] }[]
   races: readonly Record<string, unknown>[]
   backgrounds: readonly Record<string, unknown>[]
   abilityGenerationMethods: readonly Record<string, unknown>[]
   spells: readonly Record<string, unknown>[]
   items: readonly Record<string, unknown>[]
+  monsters: readonly Record<string, unknown>[]
   resources: readonly Record<string, unknown>[]
   subclasses: readonly Record<string, unknown>[]
   migrations: readonly { fromVersion: number; toVersion: number }[]
@@ -234,11 +236,13 @@ function initializePlugin(source: string): {
   }
   migrationDeclarations.sort((left, right) => left.fromVersion - right.fromVersion)
   const features: Record<string, unknown>[] = []
+  const feats: Record<string, unknown>[] = []
   const races: Record<string, unknown>[] = []
   const backgrounds: Record<string, unknown>[] = []
   const abilityGenerationMethods: Record<string, unknown>[] = []
   const spells: Record<string, unknown>[] = []
   const items: Record<string, unknown>[] = []
+  const monsters: Record<string, unknown>[] = []
   const resources: Record<string, unknown>[] = []
   const subclasses: Record<string, unknown>[] = []
   const api = Object.freeze({
@@ -251,6 +255,12 @@ function initializePlugin(source: string): {
       const safe = clonePlain(definition, 'feature') as Record<string, unknown>
       assertId(safe.id, 'feature id')
       features.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
+    registerFeat(definition: unknown) {
+      const safe = clonePlain(definition, 'feat') as Record<string, unknown>
+      assertId(safe.id, 'feat id')
+      feats.push(safe)
       return `${manifest.id}:${safe.id}`
     },
     registerResource(definition: unknown) {
@@ -314,18 +324,28 @@ function initializePlugin(source: string): {
       items.push(safe)
       return `${manifest.id}:${safe.id}`
     },
+    registerMonster(definition: unknown) {
+      const safe = clonePlain(definition, 'monster') as Record<string, unknown>
+      if (typeof safe.id !== 'string' || !safe.id.startsWith('room-monster:')) {
+        throw new Error('Invalid monster id')
+      }
+      monsters.push(safe)
+      return safe.id
+    },
   })
   const dispose = plugin.setup(api)
   if (dispose != null && typeof dispose !== 'function') throw new Error('Plugin setup must be synchronous')
   return {
     manifest,
     features,
+    feats,
     actions: [...headlessActions.values()].map(({ id, allowOffTurn, rolls }) => ({ id, allowOffTurn, rolls })),
     races,
     backgrounds,
     abilityGenerationMethods,
     spells,
     items,
+    monsters,
     resources,
     subclasses,
     migrations: migrationDeclarations,

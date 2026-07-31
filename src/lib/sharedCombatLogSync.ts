@@ -1,4 +1,16 @@
-import type { CombatLogEntry } from './sharedCombatTypes'
+import { mutateSharedRoomResource } from './sharedApi'
+import type { CombatLogEntry, SharedCombatLogState } from './sharedCombatTypes'
+
+export function appendSharedCombatLogEntry(
+  mapId: string,
+  entry: CombatLogEntry,
+): Promise<SharedCombatLogState> {
+  return mutateSharedRoomResource<SharedCombatLogState>(
+    'combat-log',
+    '/state/combat-log/entry',
+    { operation: 'append', mapId, entry },
+  )
+}
 
 export function mergeSharedCombatLogEntries(
   current: CombatLogEntry[],

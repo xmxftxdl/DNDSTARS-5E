@@ -241,6 +241,7 @@ export default function MapGeometryToolbar({
           <select
             value={tool}
             onChange={(event) => onToolChange(event.target.value as MapGeometryTool)}
+            aria-label="地图几何工具"
             className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
             title="按住并拖动绘制；门窗工具下从空白地图拖动仍可平移视角"
           >
@@ -277,6 +278,7 @@ export default function MapGeometryToolbar({
               <select
                 value={wallMaterial}
                 onChange={(event) => onWallMaterialChange(event.target.value as MapGeometryWallMaterial)}
+                aria-label="墙体材质"
                 className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
                 title="新绘制墙体的材质"
               >
@@ -325,7 +327,10 @@ export default function MapGeometryToolbar({
             <option value="normal">地表规则</option>
             <option value="underwater">水下规则</option>
           </select>
-          <label className="flex items-center gap-1 text-[10px] text-slate-300" title="玩家共享所有队友的视野；关闭后只使用当前控制角色">
+          <label
+            className="flex items-center gap-1 text-[10px] text-slate-300"
+            title="开启后玩家看到全队感官的并集；关闭后只使用当前控制角色的黑暗视觉与特殊感官"
+          >
             <input
               type="checkbox"
               checked={geometry.vision.sharePartyVision}

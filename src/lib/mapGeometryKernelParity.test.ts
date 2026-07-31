@@ -11,6 +11,7 @@ import {
   mapGeometryLineOfSightBlocked,
   mapGeometrySegments,
   migrateMapGeometryV3,
+  setMapGeometryRuntime,
   type MapGeometryState,
 } from './mapGeometry'
 
@@ -127,6 +128,21 @@ describe('shared map geometry kernel parity', () => {
     expect(compileGeometryCached(geometry).segments.find((segment) => segment.entityId === 'door')?.a.x).toBe(20)
     geometry.doors[0].points = [{ x: 40, y: 80 }, { x: 40, y: 120 }]
     expect(compileGeometryCached(geometry).segments.find((segment) => segment.entityId === 'door')?.a.x).toBe(40)
+  })
+
+  it('recompiles an immutable runtime snapshot when it is reinstalled after an edit', () => {
+    const geometry = fixture()
+    const from = { x: 50, y: 100 }
+    const to = { x: 150, y: 100 }
+    setMapGeometryRuntime([geometry])
+    expect(mapGeometryLineOfSightBlocked({ geometry, from, to })).toBe(true)
+
+    geometry.doors[0].state = 'open'
+    geometry.doors[0].openState = 'open'
+    geometry.updatedAt += 1
+    setMapGeometryRuntime([geometry])
+    expect(mapGeometryLineOfSightBlocked({ geometry, from, to })).toBe(false)
+    setMapGeometryRuntime([])
   })
 
   it('rejects conflicting legacy/stable attachments and mismatched stored points', () => {

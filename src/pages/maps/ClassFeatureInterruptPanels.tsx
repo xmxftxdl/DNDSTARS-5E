@@ -53,11 +53,11 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
   return (
     <>
       {sharedPluginChoicePrompt && (
-        <div className="absolute inset-0 z-[62] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="absolute inset-0 z-[62] flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-labelledby="shared-plugin-choice-title"
-            className="relative mx-4 w-full max-w-lg rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl"
+            className="relative my-auto flex max-h-[calc(100%-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl"
           >
             {sharedPluginChoicePrompt.expiresAt != null && (
               <div className="absolute right-5 top-5 rounded-full border border-violet-300/40 bg-violet-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-violet-100">
@@ -75,7 +75,10 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
               {sharedPluginChoicePrompt.payload.prompt}
             </p>
-            <div className="mt-5 grid gap-2">
+            <div
+              data-testid="shared-plugin-choice-options"
+              className="mt-5 grid min-h-0 gap-2 overflow-y-auto pr-1"
+            >
               {sharedPluginChoicePrompt.payload.options.map((option) => (
                 <button
                   key={option.id}
@@ -115,10 +118,14 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
               </div>
             )}
             <h3 id="shared-bardic-inspiration-prompt-title" className="text-lg font-semibold text-amber-100">
-              {sharedBardicInspirationPrompt.source === 'peerless-skill' ? '超凡技艺' : '吟游激励'}
+              {sharedBardicInspirationPrompt.source === 'active-effect'
+                ? sharedBardicInspirationPrompt.sourceLabel ?? '奖励骰'
+                : sharedBardicInspirationPrompt.source === 'peerless-skill'
+                  ? '超凡技艺'
+                  : '吟游激励'}
             </h3>
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
-              {`${sharedBardicInspirationPrompt.targetChar.name} 的${sharedBardicInspirationPrompt.rollType}当前结果为 ${sharedBardicInspirationPrompt.total}，目标值为 ${sharedBardicInspirationPrompt.targetNumber}。\n\n是否消耗一枚 d${sharedBardicInspirationPrompt.dieSides} 吟游激励骰${sharedBardicInspirationPrompt.source === 'peerless-skill' ? '发动超凡技艺' : ''}并加入结果？`}
+              {`${sharedBardicInspirationPrompt.targetChar.name} 的${sharedBardicInspirationPrompt.rollType}当前结果为 ${sharedBardicInspirationPrompt.total}，目标值为 ${sharedBardicInspirationPrompt.targetNumber}。\n\n是否使用${sharedBardicInspirationPrompt.source === 'active-effect' ? `“${sharedBardicInspirationPrompt.sourceLabel ?? '奖励骰'}”的` : '一枚'} d${sharedBardicInspirationPrompt.dieSides}${sharedBardicInspirationPrompt.source === 'peerless-skill' ? ' 吟游激励骰发动超凡技艺' : sharedBardicInspirationPrompt.source === 'held-inspiration' || sharedBardicInspirationPrompt.source == null ? ' 吟游激励骰' : ' 奖励骰'}并加入结果？`}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -126,7 +133,7 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
                 onClick={() => handleSharedBardicInspirationChoice(false)}
                 className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80"
               >
-                保留次数
+                暂不使用
               </button>
               <button
                 type="button"
@@ -383,4 +390,3 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
     </>
   )
 }
-

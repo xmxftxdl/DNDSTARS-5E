@@ -1,26 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   COMBAT_PRESENTATION_CHANNEL,
   EMPTY_COMBAT_PRESENTATION_STATE,
   combatPresentationKillStreakForMap,
+  combatPresentationAttackBannerForMap,
   combatPresentationProjectilesForMap,
+  combatPresentationSavingThrowForMap,
   combatPresentationServerNow,
   combatPresentationSpellBannerForMap,
   reduceCombatPresentationState,
   refreshCombatPresentationClock,
+  subscribeLocalCombatPresentationEvent,
   type CombatPresentationMapProjectile,
   type CombatPresentationKillStreak,
+  type CombatPresentationAttackBanner,
   type CombatPresentationSpellBanner,
+  type CombatPresentationSavingThrow,
   type CombatPresentationState,
 } from '../../lib/combatPresentation'
 import { subscribeSharedEvent } from '../../lib/sharedApi'
 import type { BattleMap } from '../../store/maps'
+
+const PRESENTATION_PROJECTION_TICK_MS = 125
 
 export interface CombatPresentationCoordinator {
   state: CombatPresentationState
   projectiles: CombatPresentationMapProjectile[]
   spellBanner: CombatPresentationSpellBanner | null
   killStreak: CombatPresentationKillStreak | null
+  attackBanner: CombatPresentationAttackBanner | null
+  savingThrow: CombatPresentationSavingThrow | null
 }
 
 export function useCombatPresentationCoordinator(
@@ -37,9 +47,15 @@ export function useCombatPresentationCoordinator(
     const unsubscribe = subscribeSharedEvent(COMBAT_PRESENTATION_CHANNEL, (event) => {
       setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
     })
+    const unsubscribeLocal = subscribeLocalCombatPresentationEvent((event) => {
+      flushSync(() => {
+        setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
+      })
+    })
     return () => {
       cancelled = true
       unsubscribe()
+      unsubscribeLocal()
     }
   }, [])
 
@@ -52,30 +68,62 @@ export function useCombatPresentationCoordinator(
 
   useEffect(() => {
     if (state.spellProjectiles.length === 0) return
-    const timer = window.setInterval(() => setClockRevision((value) => value + 1), 50)
+    const timer = window.setInterval(
+      () => setClockRevision((value) => value + 1),
+      PRESENTATION_PROJECTION_TICK_MS,
+    )
     return () => window.clearInterval(timer)
   }, [state.spellProjectiles.length])
 
   const projectiles = useMemo(
-    () => map
-      ? combatPresentationProjectilesForMap(state, map, combatPresentationServerNow())
-      : [],
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationProjectilesForMap(state, map, combatPresentationServerNow())
+        : []
+    },
     [clockRevision, map, state],
   )
 
   const spellBanner = useMemo(
-    () => map
-      ? combatPresentationSpellBannerForMap(state, map.id, combatPresentationServerNow())
-      : null,
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationSpellBannerForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
     [clockRevision, map, state],
   )
 
   const killStreak = useMemo(
-    () => map
-      ? combatPresentationKillStreakForMap(state, map.id, combatPresentationServerNow())
-      : null,
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationKillStreakForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
     [clockRevision, map, state],
   )
 
-  return { state, projectiles, spellBanner, killStreak }
+  const attackBanner = useMemo(
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationAttackBannerForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
+    [clockRevision, map, state],
+  )
+
+  const savingThrow = useMemo(
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationSavingThrowForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
+    [clockRevision, map, state],
+  )
+
+  return { state, projectiles, spellBanner, killStreak, attackBanner, savingThrow }
 }

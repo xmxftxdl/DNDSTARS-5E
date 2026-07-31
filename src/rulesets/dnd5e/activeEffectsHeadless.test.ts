@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { createDnd5eCombatant, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 
 const abilities = { str: 14, dex: 14, con: 14, int: 10, wis: 12, cha: 10 } as const
@@ -224,6 +224,47 @@ describe('ActiveEffectInstance Headless 生命周期', () => {
     expect(resolved.events).toContainEqual(expect.objectContaining({ type: 'active-effect-save-resolved', success: true }))
     expect(resolved.events.filter((event) => event.type === 'active-effect-removed').map((event) => event.reason))
       .toEqual(expect.arrayContaining(['save-succeeded', 'expired']))
+  })
+
+  it('grants Protection from Poison advantage on a poisoned repeat save', () => {
+    const protection = createDnd5eMechanicalEffect({
+      id: 'protection-from-poison',
+      definitionId: 'srd-5.1:spell:protection-from-poison',
+      label: 'Protection from Poison',
+      kind: 'buff',
+      source: { kind: 'spell', actorId: 'source', rulesId: 'protection-from-poison' },
+      targetId: 'actor',
+    })
+    const poisoned = createDnd5eConditionEffect({
+      id: 'quasit-poison',
+      condition: 'poisoned',
+      targetId: 'actor',
+      source: { kind: 'monster', actorId: 'source', rulesId: 'monster:quasit:claw:poison' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      repeatSave: { ability: 'con', dc: 12, timing: 'target-turn-end', onSuccess: 'remove' },
+    })
+    const state = startDnd5eHeadlessCombat('poison-protection', [
+      combatant('actor', 20, { classState: { activeEffects: [protection, poisoned] } }),
+      combatant('source', 10, { controller: 'dm' }),
+    ])
+
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'end-turn',
+      actorId: 'actor',
+      activeEffectSavingThrows: [{ effectId: poisoned.id, d20: 1, d20Second: 20 }],
+    })
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: 'actor',
+      d20: 20,
+      success: true,
+    }))
+    expect(resolved.state.combatants.actor.conditions).not.toContain('poisoned')
+    expect(resolved.state.combatants.actor.classState.activeEffects?.map((effect) => effect.id))
+      .toEqual(['protection-from-poison'])
   })
 
   it('resolves the next creature repeated start-of-turn save during the authoritative turn transaction', () => {

@@ -8,6 +8,7 @@ import {
 } from '../lib/gridCombat'
 import { applyGridDetectPatch, type GridDetectResult } from '../lib/gridDetect'
 import {
+  assignEnemyVisualVariants,
   enemyTemplateToTokenPatch,
   getEnemyVisualPresentation,
   type EnemyTemplate,
@@ -23,8 +24,13 @@ import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
-import { dnd5eActiveDarkvisionRangeFeet, type Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import {
+  applyDnd5eEffectiveVisionProfile,
+  compileDnd5eEffectiveVisionProfile,
+} from '../../shared/dnd5e-vision-profile.mjs'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
 import type {
   Dnd5eDamageType,
   Dnd5eMonsterBehaviorPreferenceV1,
@@ -70,7 +76,6 @@ function uid(): string {
 
 let lastSharedMapsSnapshot = ''
 let lastSharedMapsUpdatedAt = 0
-let mapSaveSeq = 0
 let lastLocalMapsWriteAt = 0
 const LOCAL_TOKEN_HIT_POINT_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY = 'stars-map-token-hit-point-edits-v1'
@@ -85,6 +90,111 @@ const pendingLocalTokenHitPointEdits = new Map<string, PendingLocalTokenHitPoint
 let pendingLocalTokenHitPointEditsHydrated = false
 
 const pendingTokenKey = (mapId: string, tokenId: string) => `${mapId}:${tokenId}`
+
+/**
+ * Serializes full-map persistence without letting rapid edits build an
+ * unbounded FIFO of stale snapshots. One request may be in flight while a
+ * single trailing request is retained; every newer request replaces that
+ * trailing payload.
+ *
+ * Callers that require durability wait for their generation (or a newer one)
+ * to save successfully. Best-effort callers keep the historical fire-and-
+ * forget behavior and resolve even when the final underlying save fails.
+ */
+export function createLatestMapsPublishPump<T>(
+  persist: (
+    value: T,
+    options: { retryPendingHitPoints: boolean },
+  ) => Promise<void>,
+): (
+  value: T,
+  options?: { retryPendingHitPoints?: boolean; requireSaved?: boolean },
+) => Promise<void> {
+  type PendingPublish = {
+    generation: number
+    value: T
+    retryPendingHitPoints: boolean
+  }
+  type PublishWaiter = {
+    generation: number
+    requireSaved: boolean
+    resolve: () => void
+    reject: (reason: unknown) => void
+  }
+
+  let generation = 0
+  let running = false
+  let pending: PendingPublish | null = null
+  let waiters: PublishWaiter[] = []
+
+  const settleThrough = (
+    savedGeneration: number,
+    outcome?: { failure: unknown },
+  ) => {
+    const completed = waiters.filter((waiter) => waiter.generation <= savedGeneration)
+    waiters = waiters.filter((waiter) => waiter.generation > savedGeneration)
+    for (const waiter of completed) {
+      if (outcome && waiter.requireSaved) waiter.reject(outcome.failure)
+      else waiter.resolve()
+    }
+  }
+
+  const drain = async () => {
+    if (running) return
+    running = true
+    try {
+      while (pending) {
+        const request = pending
+        pending = null
+        try {
+          await persist(request.value, {
+            retryPendingHitPoints: request.retryPendingHitPoints,
+          })
+          settleThrough(request.generation)
+        } catch (error) {
+          // TypeScript does not model assignments made by publish calls while
+          // the awaited persistence promise is suspended.
+          const trailing = pending as PendingPublish | null
+          if (trailing) {
+            // A failed HP write must retain its conflict-retry semantics when a
+            // newer non-HP snapshot has already replaced the trailing request.
+            trailing.retryPendingHitPoints =
+              trailing.retryPendingHitPoints || request.retryPendingHitPoints
+            continue
+          }
+          settleThrough(request.generation, { failure: error })
+        }
+      }
+    } finally {
+      running = false
+      // A caller cannot normally enqueue between the final loop check and this
+      // assignment, but retaining this guard makes the pump robust to unusual
+      // thenables used by tests or integrations.
+      if (pending) void drain()
+    }
+  }
+
+  return (value, options = {}) => {
+    const requestedGeneration = ++generation
+    const promise = new Promise<void>((resolve, reject) => {
+      waiters.push({
+        generation: requestedGeneration,
+        requireSaved: options.requireSaved === true,
+        resolve,
+        reject,
+      })
+    })
+    pending = {
+      generation: requestedGeneration,
+      value,
+      retryPendingHitPoints:
+        options.retryPendingHitPoints === true ||
+        pending?.retryPendingHitPoints === true,
+    }
+    if (!running) void drain()
+    return promise
+  }
+}
 
 function pendingTokenEditStorage(): Storage | null {
   if (typeof window === 'undefined') return null
@@ -272,6 +382,97 @@ export async function saveMapsStateWithPendingHitPointRetry(input: {
   return { result, payload }
 }
 
+function applyTokenPatchToSharedMaps(
+  maps: BattleMap[],
+  mapId: string,
+  tokenId: string,
+  patch: Partial<Token>,
+): BattleMap[] | null {
+  let matched = false
+  const nextMaps = maps.map((map) => {
+    if (map.id !== mapId) return map
+    return {
+      ...map,
+      tokens: map.tokens.map((token) => {
+        if (token.id !== tokenId) return token
+        matched = true
+        const next = { ...token, ...patch }
+        return {
+          ...next,
+          ...clampTokenPositionToMap(next, next, map),
+        }
+      }),
+    }
+  })
+  return matched ? nextMaps : null
+}
+
+/**
+ * Persists one authoritative Token patch without replacing unrelated remote
+ * map changes. On a CAS conflict the command is rebased onto the newest server
+ * snapshot and retried, so two rapid DM moves cannot make either Token jump
+ * back merely because another map write landed between them.
+ */
+export async function saveMapsStateWithTokenPatchRetry(input: {
+  payload: SharedMapsState
+  mapId: string
+  tokenId: string
+  patch: Partial<Token>
+  save: (payload: SharedMapsState) => Promise<SharedResourceSaveResult>
+  load: () => Promise<SharedMapsState | null>
+  now?: () => number
+  maximumAttempts?: number
+}): Promise<{ result: SharedResourceSaveResult; payload: SharedMapsState }> {
+  const maximumAttempts = Math.max(1, Math.min(5, Math.floor(input.maximumAttempts ?? 4)))
+  const now = input.now ?? Date.now
+  const initialMaps = applyTokenPatchToSharedMaps(
+    input.payload.maps,
+    input.mapId,
+    input.tokenId,
+    input.patch,
+  )
+  if (!initialMaps) throw new Error('map-token-patch-target-missing')
+  let payload: SharedMapsState = {
+    ...input.payload,
+    maps: initialMaps.map((map) => ({
+      ...map,
+      tokens: map.tokens.map(stripViewerControlProjection),
+    })),
+  }
+  let result: SharedResourceSaveResult = { status: 'failed' }
+
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    result = await input.save(payload)
+    if (result.status === 'saved') return { result, payload }
+    if (result.status !== 'conflict' || attempt >= maximumAttempts - 1) {
+      return { result, payload }
+    }
+
+    const shared = await input.load()
+    if (!shared?.maps) return { result, payload }
+    const rebasedMaps = applyTokenPatchToSharedMaps(
+      shared.maps,
+      input.mapId,
+      input.tokenId,
+      input.patch,
+    )
+    if (!rebasedMaps) throw new Error('map-token-patch-target-missing-after-conflict')
+    payload = {
+      maps: rebasedMaps.map((map) => ({
+        ...map,
+        tokens: map.tokens.map(stripViewerControlProjection),
+      })),
+      selectedId: shared.selectedId ?? payload.selectedId,
+      updatedAt: Math.max(
+        now(),
+        (payload.updatedAt ?? 0) + 1,
+        (shared.updatedAt ?? 0) + 1,
+      ),
+    }
+  }
+  return { result, payload }
+}
+
 export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps: BattleMap[]): BattleMap[] {
   const sharedMapById = new Map(sharedMaps.map((map) => [map.id, map]))
   return localMaps.map((map) => {
@@ -288,17 +489,17 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
         ...map.tokens.flatMap((token) => {
         const sharedToken = sharedTokenById.get(token.id)
         if (!sharedToken) return token.type === 'player' ? [token] : []
-        const dmControlledPosition =
-          token.type !== 'player'
-            ? {
-                x: sharedToken.x,
-                y: sharedToken.y,
-                elevationFeet: sharedToken.elevationFeet,
-              }
-            : {}
+        // Token positions are resolved by the DM authority, including player
+        // tokens. Player movement uses action requests, so a stale local map
+        // snapshot must never undo forced movement such as Thunderwave.
+        const authoritativePosition = {
+          x: sharedToken.x,
+          y: sharedToken.y,
+          elevationFeet: sharedToken.elevationFeet,
+        }
         return [{
           ...token,
-          ...dmControlledPosition,
+          ...authoritativePosition,
           hp: sharedToken.hp,
           maxHp: sharedToken.maxHp,
           creatureTypes: sharedToken.creatureTypes,
@@ -326,43 +527,45 @@ function stripViewerControlProjection(token: Token): Omit<Token, 'viewerControll
   return persisted
 }
 
+async function persistMapsState(
+  state: Pick<MapState, 'maps' | 'selectedId'>,
+  options: { retryPendingHitPoints: boolean },
+): Promise<void> {
+  let maps = state.maps
+  if (isPlayerPort()) {
+    const shared = await loadSharedResource<SharedMapsState>('maps')
+    if (shared?.maps) maps = mergePlayerTokenCombatFields(maps, shared.maps)
+  }
+  const persistedMaps = maps.map((map) => ({
+    ...map,
+    tokens: map.tokens.map(stripViewerControlProjection),
+  }))
+  const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
+  const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
+  lastLocalMapsWriteAt = updatedAt
+  const saved = await saveMapsStateWithPendingHitPointRetry({
+    payload,
+    retryPendingHitPoints: options.retryPendingHitPoints,
+    save: (nextPayload) => saveSharedResourceWithResult('maps', nextPayload),
+    load: () => loadSharedResource<SharedMapsState>('maps'),
+  })
+  const result = saved.result
+  if (result.status !== 'saved') {
+    lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
+    throw new Error(`maps-save-rejected:${result.status}`)
+  }
+  lastLocalMapsWriteAt = saved.payload.updatedAt ?? lastLocalMapsWriteAt
+  lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? Date.now()
+  lastSharedMapsSnapshot = JSON.stringify(saved.payload)
+}
+
+const enqueueLatestMapsPublish = createLatestMapsPublishPump(persistMapsState)
+
 function publishMapsState(
   state: Pick<MapState, 'maps' | 'selectedId'>,
   options: { retryPendingHitPoints?: boolean; requireSaved?: boolean } = {},
 ): Promise<void> {
-  const seq = ++mapSaveSeq
-  return (async () => {
-    let maps = state.maps
-    if (isPlayerPort()) {
-      const shared = await loadSharedResource<SharedMapsState>('maps')
-      if (seq !== mapSaveSeq) return
-      if (shared?.maps) maps = mergePlayerTokenCombatFields(maps, shared.maps)
-    }
-    const persistedMaps = maps.map((map) => ({
-      ...map,
-      tokens: map.tokens.map(stripViewerControlProjection),
-    }))
-    const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
-    const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
-    if (seq !== mapSaveSeq) return
-    lastLocalMapsWriteAt = updatedAt
-    const saved = await saveMapsStateWithPendingHitPointRetry({
-      payload,
-      retryPendingHitPoints: options.retryPendingHitPoints === true,
-      save: (nextPayload) => saveSharedResourceWithResult('maps', nextPayload),
-      load: () => loadSharedResource<SharedMapsState>('maps'),
-    })
-    const result = saved.result
-    if (result.status !== 'saved') {
-      if (seq === mapSaveSeq) lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
-      if (options.requireSaved) throw new Error(`maps-save-rejected:${result.status}`)
-      return
-    }
-    if (seq !== mapSaveSeq) return
-    lastLocalMapsWriteAt = saved.payload.updatedAt ?? lastLocalMapsWriteAt
-    lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? Date.now()
-    lastSharedMapsSnapshot = JSON.stringify(saved.payload)
-  })()
+  return enqueueLatestMapsPublish(state, options)
 }
 
 export interface Token {
@@ -424,9 +627,17 @@ export interface Token {
   /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
   dnd5eCombatState?: {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
+    /**
+     * An unlinked creature at 0 HP is alive and stable.
+     * Literal `true` keeps malformed/legacy falsey values out of persisted state.
+     */
+    stableAtZero?: true
     /** 权威状态实例；由 DM/Headless 写入并通过房间资源同步。 */
     activeEffects?: Dnd5eActiveEffectInstance[]
     caltropsSpeedPenaltyFeet?: number
+    /** Stable per-turn attack count used by effects such as Slowing Breath. */
+    attacksMadeTurnKey?: string
+    attacksMadeThisTurn?: number
     temporaryHp?: number
     undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
     monsterOnHitSavePending?: {
@@ -439,9 +650,17 @@ export interface Token {
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
+    /** Recoverable maximum-HP reductions for this unlinked creature. */
+    hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
+    /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
+    turnStartResolvedTurnKey?: string
+    /** Reckless is active until this creature's next authoritative turn start. */
+    recklessAttackTurnKey?: string
+    monsterReactiveAvailableTurnKey?: string
+    monsterReactiveUsedTurnKey?: string
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
     countercharmRoundsRemaining?: number
@@ -453,6 +672,8 @@ export interface Token {
     turnedRoundsRemaining?: number
     holyNimbusRoundsRemaining?: number
     draconicPresenceImmunityRoundsBySource?: Record<string, number>
+    monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
+    monsterActionImmunityRoundsByKey?: Record<string, number>
     conditions?: string[]
     stunnedByActorId?: string
     stunnedAppliedTurnKey?: string
@@ -461,6 +682,13 @@ export interface Token {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    /** 奥法打击：按来源战士记录标记及其来源回合失效边界。 */
+    eldritchStrikeBySource?: Record<string, {
+      appliedTurnKey: string
+      sourceTurnsRemaining: number
+    }>
+    totemWarriorWolfAttunementTargetIds?: string[]
+    totemWarriorWolfAttunementTurnKey?: string
     monsterMechanicRollModifiers?: Array<{
       id: string
       mechanicOwnerId: string
@@ -473,6 +701,11 @@ export interface Token {
     monsterMechanicTriggerSequence?: number
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
+    utilityProjectionAttackAdvantage?: {
+      featureId: string
+      targetId: string
+      turnKey: string
+    }
     concentrationSpellId?: string
     concentrationSpellLevel?: number
     concentrationTargetIds?: string[]
@@ -490,10 +723,27 @@ export interface Token {
     monsterActionUsesByActionId?: Record<string, { current: number; max: number }>
     monsterSpellSlots?: Record<string, { current: number; max: number }>
     monsterSpellUsesBySpellId?: Record<string, { current: number; max: number }>
+    monsterMultiattackContinuation?: {
+      schemaVersion: 1
+      combatId: string
+      round: number
+      turnKey: string
+      parentActionId: string
+      nextOccurrenceIndex: number
+      sequenceActionIds: string[]
+      targetIds: string[]
+      hitByOccurrence: boolean[]
+    }
     monsterShapechangeOriginalStatBlockId?: string
     monsterShapechangeFormId?: string
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
+    monsterHydraHeadCount?: number
+    monsterHydraHeadsLostSinceLastTurn?: number
+    monsterHydraDamageTurnKey?: string
+    monsterHydraDamageTakenThisTurn?: number
+    monsterHydraHeadSeveredTurnKey?: string
+    monsterHydraFireDamageSinceLastTurn?: boolean
     /** 由 Headless 按有效承伤累计；DM 可在怪物面板中调整。 */
     monsterThreatByTargetId?: Record<string, number>
     hurlThroughHellSourceId?: string
@@ -507,6 +757,10 @@ export interface Token {
   visionRangeFeet?: number
   /** 2014 规则中的黑暗视觉距离；0 或缺失表示没有黑暗视觉。 */
   darkvisionRangeFeet?: number
+  /** Sees normally in nonmagical darkness, such as Devil's Sight. */
+  darknessSightRangeFeet?: number
+  /** Sees normally through magical darkness, such as Devil's Sight. */
+  magicalDarknessSightRangeFeet?: number
   /** 特殊感官由地图快照投影到 Headless；距离外仍按普通视线判定。 */
   blindsightRangeFeet?: number
   tremorsenseRangeFeet?: number
@@ -606,6 +860,8 @@ export interface Dnd5ePluginArea {
   cells: Array<{ col: number; row: number }>
   createdRound: number
   expiresAfterRound: number
+  /** 到达指定轮次后，在来源 Token 的回合结束边界移除。 */
+  expiresAtSourceTurnEndAfterRound?: number
   concentrationId?: string
   /** fixed 保持落点；source-token 跟随施法者；effect-token 跟随独立法术实体。 */
   anchorMode?: Dnd5ePersistentAreaAnchorMode
@@ -625,8 +881,8 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V15：持续区域增加经白名单校验的法术光照声明。 */
-export const MAPS_PERSIST_VERSION = 15
+/** 地图存档 V16：未关联角色的 0 HP 生物可持久保存 Headless 的稳定/存活结算。 */
+export const MAPS_PERSIST_VERSION = 16
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -712,7 +968,14 @@ function normalizeToken(raw: unknown): Token {
         conditions: legacyCombatState.conditions,
       })
     : undefined
-  const { timedEffects: _legacyTimedEffects, ...nativeCombatState } = legacyCombatState ?? {}
+  const {
+    timedEffects: _legacyTimedEffects,
+    stableAtZero: _legacyStableAtZero,
+    ...nativeCombatState
+  } = legacyCombatState ?? {}
+  const stableAtZero = !t.characterId && t.hp === 0 && _legacyStableAtZero === true
+    ? true as const
+    : undefined
   const monsterThreatByTargetId = legacyCombatState?.monsterThreatByTargetId &&
     typeof legacyCombatState.monsterThreatByTargetId === 'object'
     ? Object.fromEntries(Object.entries(legacyCombatState.monsterThreatByTargetId).flatMap(([targetId, value]) =>
@@ -760,6 +1023,8 @@ function normalizeToken(raw: unknown): Token {
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
+    darknessSightRangeFeet: Number.isFinite(t.darknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.darknessSightRangeFeet as number)) : undefined,
+    magicalDarknessSightRangeFeet: Number.isFinite(t.magicalDarknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.magicalDarknessSightRangeFeet as number)) : undefined,
     blindsightRangeFeet: Number.isFinite(t.blindsightRangeFeet) ? Math.max(0, Math.min(10_000, t.blindsightRangeFeet as number)) : undefined,
     tremorsenseRangeFeet: Number.isFinite(t.tremorsenseRangeFeet) ? Math.max(0, Math.min(10_000, t.tremorsenseRangeFeet as number)) : undefined,
     truesightRangeFeet: Number.isFinite(t.truesightRangeFeet) ? Math.max(0, Math.min(10_000, t.truesightRangeFeet as number)) : undefined,
@@ -794,13 +1059,21 @@ function normalizeToken(raw: unknown): Token {
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {
           ...nativeCombatState,
+          stableAtZero,
           monsterThreatByTargetId,
           schemaVersion: migratedEffects!.schemaVersion,
           activeEffects: migratedEffects!.activeEffects,
           conditions: migratedEffects!.conditions.length > 0 ? migratedEffects!.conditions : undefined,
       }
       : invalidCurrentEffects
-        ? { ...nativeCombatState, monsterThreatByTargetId, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: undefined, conditions: undefined }
+        ? {
+            ...nativeCombatState,
+            stableAtZero,
+            monsterThreatByTargetId,
+            schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+            activeEffects: undefined,
+            conditions: undefined,
+          }
         : undefined,
   }
 }
@@ -917,6 +1190,12 @@ function normalizeMap(raw: unknown): BattleMap {
           cells,
           createdRound: area.createdRound!,
           expiresAfterRound: area.expiresAfterRound!,
+          expiresAtSourceTurnEndAfterRound:
+            Number.isInteger(area.expiresAtSourceTurnEndAfterRound) &&
+            Number(area.expiresAtSourceTurnEndAfterRound) >= area.createdRound! &&
+            Number(area.expiresAtSourceTurnEndAfterRound) <= area.expiresAfterRound!
+              ? Number(area.expiresAtSourceTurnEndAfterRound)
+              : undefined,
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
           anchorMode,
           anchorTokenId: typeof area.anchorTokenId === 'string' && area.anchorTokenId
@@ -994,9 +1273,28 @@ type CharacterTokenPresentation = {
   avatar: string
   portrait?: string
   tokenPortrait?: string
+  race?: string
+  dnd5eRaceId?: string
+  dnd5eClassChoices?: unknown
   dnd5eCombatState?: {
     activeEffects?: Dnd5eActiveEffectInstance[]
   }
+}
+
+function projectTokenEffectiveVision(
+  token: Token,
+  character?: CharacterTokenPresentation,
+): Token {
+  const profile = compileDnd5eEffectiveVisionProfile({ token, character })
+  if (
+    (token.darkvisionRangeFeet ?? 0) === profile.darkvisionRangeFeet &&
+    (token.darknessSightRangeFeet ?? 0) === profile.darknessSightRangeFeet &&
+    (token.magicalDarknessSightRangeFeet ?? 0) === profile.magicalDarknessSightRangeFeet &&
+    (token.blindsightRangeFeet ?? 0) === profile.blindsightRangeFeet &&
+    (token.tremorsenseRangeFeet ?? 0) === profile.tremorsenseRangeFeet &&
+    (token.truesightRangeFeet ?? 0) === profile.truesightRangeFeet
+  ) return token
+  return applyDnd5eEffectiveVisionProfile(token, profile)
 }
 
 /** 角色资料与内置怪物素材只在渲染时投影，不写入地图存档。 */
@@ -1008,11 +1306,7 @@ export function projectCharacterTokenPresentations(
   let changed = false
   const projected = tokens.map((token) => {
     if (!token.characterId) {
-      const grantedDarkvision = dnd5eActiveDarkvisionRangeFeet(token.dnd5eCombatState?.activeEffects)
-      const effectiveDarkvision = Math.max(token.darkvisionRangeFeet ?? 0, grantedDarkvision)
-      const visionToken = effectiveDarkvision > (token.darkvisionRangeFeet ?? 0)
-        ? { ...token, darkvisionRangeFeet: effectiveDarkvision }
-        : token
+      const visionToken = projectTokenEffectiveVision(token)
       const presentation = token.poolId
         ? getEnemyVisualPresentation(token.poolId, token.visualVariantId)
         : undefined
@@ -1049,23 +1343,21 @@ export function projectCharacterTokenPresentations(
     const label = character.name || token.label
     const portrait = character.portrait
     const tokenPortrait = character.tokenPortrait
-    const grantedDarkvision = dnd5eActiveDarkvisionRangeFeet(character.dnd5eCombatState?.activeEffects)
-    const darkvisionRangeFeet = Math.max(token.darkvisionRangeFeet ?? 0, grantedDarkvision)
+    const visionToken = projectTokenEffectiveVision(token, character)
     if (
       emoji === token.emoji &&
       label === token.label &&
       portrait === token.portrait &&
       tokenPortrait === token.tokenPortrait &&
-      darkvisionRangeFeet === (token.darkvisionRangeFeet ?? 0)
+      visionToken === token
     ) return token
     changed = true
     return {
-      ...token,
+      ...visionToken,
       emoji,
       label,
       portrait,
       tokenPortrait,
-      darkvisionRangeFeet: darkvisionRangeFeet > 0 ? darkvisionRangeFeet : undefined,
     }
   })
   return changed ? projected : tokens
@@ -1083,6 +1375,11 @@ interface MapState {
   selectedId: string | null
   loadShared: () => Promise<void>
   saveSharedNow: () => Promise<void>
+  saveAuthorityTokenPatch: (
+    mapId: string,
+    tokenId: string,
+    patch: Partial<Token>,
+  ) => Promise<void>
   select: (id: string | null) => void
   addMap: (meta: {
     name: string
@@ -1139,6 +1436,29 @@ export const useMapStore = create<MapState>()(
         ]))
       },
       saveSharedNow: () => publishMapsState(get(), { requireSaved: true }),
+      saveAuthorityTokenPatch: async (mapId, tokenId, patch) => {
+        const state = get()
+        const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
+        const saved = await saveMapsStateWithTokenPatchRetry({
+          payload: {
+            maps: state.maps,
+            selectedId: state.selectedId,
+            updatedAt,
+          },
+          mapId,
+          tokenId,
+          patch,
+          save: (payload) => saveSharedResourceWithResult('maps', payload),
+          load: () => loadSharedResource<SharedMapsState>('maps'),
+        })
+        if (saved.result.status !== 'saved') {
+          lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
+          throw new Error(`maps-token-patch-save-rejected:${saved.result.status}`)
+        }
+        lastLocalMapsWriteAt = saved.payload.updatedAt ?? updatedAt
+        lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? updatedAt
+        lastSharedMapsSnapshot = JSON.stringify(saved.payload)
+      },
       select: (id) => set({ selectedId: id }),
 
       addMap: async ({ name, width, height, blob, gridDetect }) => {
@@ -1269,7 +1589,10 @@ export const useMapStore = create<MapState>()(
       addEncounterFromPool: (mapId, entries) => {
         const map = get().maps.find((candidate) => candidate.id === mapId)
         if (!map) return []
-        const roster = dnd5eEncounterRoster(entries)
+        const roster = assignEnemyVisualVariants(
+          dnd5eEncounterRoster(entries),
+          map.tokens,
+        )
         if (roster.length === 0) return []
         const tokens = roster.map((template, index): Token => {
           const patch = enemyTemplateToTokenPatch(template)
