@@ -3,6 +3,7 @@ import {
   completeDnd5eMonsterTakeoverAtSafePoint,
   createDnd5eMonsterControlState,
   dnd5eMonsterAutomationEnabled,
+  dnd5eMonsterManualMovementEnabled,
   normalizeDnd5eMonsterControlState,
   requestDnd5eMonsterTakeover,
   resumeDnd5eMonsterAutomation,
@@ -62,6 +63,36 @@ describe('monster control state', () => {
     )
     expect(completeDnd5eMonsterTakeoverAtSafePoint(pending, 'goblin-2', 30))
       .toEqual(pending)
+  })
+
+  it('authorizes Headless click movement only for the current enemy after takeover', () => {
+    const manual = requestDnd5eMonsterTakeover(
+      createDnd5eMonsterControlState('automatic', 10),
+      { currentTokenId: 'ankheg-1', eventInFlight: false, now: 20 },
+    )
+    const input = {
+      combatActive: true,
+      currentTokenId: 'ankheg-1',
+      token: { id: 'ankheg-1', type: 'enemy' },
+    }
+
+    expect(dnd5eMonsterManualMovementEnabled(manual, input)).toBe(true)
+    expect(dnd5eMonsterManualMovementEnabled(manual, {
+      ...input,
+      token: { id: 'ankheg-2', type: 'enemy' },
+    })).toBe(false)
+    expect(dnd5eMonsterManualMovementEnabled(manual, {
+      ...input,
+      token: { id: 'ankheg-1', type: 'player' },
+    })).toBe(false)
+    expect(dnd5eMonsterManualMovementEnabled(manual, {
+      ...input,
+      combatActive: false,
+    })).toBe(false)
+    expect(dnd5eMonsterManualMovementEnabled(
+      createDnd5eMonsterControlState('automatic', 30),
+      input,
+    )).toBe(false)
   })
 
   it('resumes automation and normalizes legacy or malformed snapshots', () => {

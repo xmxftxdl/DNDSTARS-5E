@@ -4,6 +4,7 @@ import {
   dnd5eArmorClass,
   dnd5eEldritchKnightFeatureForCharacter,
   dnd5eEldritchKnightWarMagicAvailable,
+  dnd5eEscapableGrapples,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eWeaponAttackProfile,
   fighterAttacksPerAttackAction,
@@ -175,6 +176,10 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction)}
         pending={pending}
         targets={basicActionTargets}
+        grappleEscapes={dnd5eEscapableGrapples(character.dnd5eCombatState?.activeEffects).map((grapple) => ({
+          grapplerTokenId: grapple.grapplerId,
+          dc: grapple.dc,
+        }))}
         onAction={onBasicAction}
       />
     </div>

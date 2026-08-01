@@ -18,6 +18,8 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonkUnarmedStrikeProfile, type Dnd5eUnarmedStrikeProfile } from './equipment'
+import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBlurImposesAttackDisadvantage,
@@ -701,7 +703,10 @@ export function prepareDnd5eClassFeature(input: {
         (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
           !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
           dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-          (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant)) || targetProne ||
+          (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant)) ||
+          dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, targetCombatant) ||
+          dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
+          targetProne ||
           dnd5eTotemWolfPackAdvantage(snapshot.state, actorCombatant, targetCombatant, true))
       const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) ||
         dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || (actor.exhaustionLevel ?? 0) >= 3 ||

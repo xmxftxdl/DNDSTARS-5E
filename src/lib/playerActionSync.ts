@@ -7,6 +7,7 @@ import type {
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { PLAYER_ACTION_QUEUE_LIMIT } from './playerActionAck'
+import { getRoomClientId } from './roomSession'
 
 export function isAuthoritativeActionSnapshotReady(
   appliedAt: number | undefined,
@@ -39,6 +40,7 @@ export interface BuildSharedPlayerActionInput {
   mapId: string
   combatId?: string
   roomMemberId?: string
+  clientId?: string
   sourceMode: SharedPlayerActionState['sourceMode']
   actorTokenId: string
   characterId: string
@@ -51,8 +53,11 @@ export interface BuildSharedPlayerActionInput {
 
 export function buildSharedPlayerAction(input: BuildSharedPlayerActionInput): SharedPlayerActionState {
   const prefix = input.sourceMode === 'dm' ? 'dm-action' : 'player-action'
+  const sourceIdentity = input.clientId
+    ? `:${input.roomMemberId ?? 'local'}:${input.clientId}`
+    : ''
   return {
-    id: `${input.mapId}:${prefix}:${input.now}:${input.seq}`,
+    id: `${input.mapId}:${prefix}${sourceIdentity}:${input.now}:${input.seq}`,
     mapId: input.mapId,
     combatId: input.combatId,
     ...(input.roomMemberId ? { roomMemberId: input.roomMemberId } : {}),
@@ -104,6 +109,7 @@ export function createSharedPlayerActionEnvelope(input: {
     mapId: input.mapId,
     combatId: input.combatId,
     roomMemberId: input.roomMemberId,
+    clientId: input.roomMemberId ? getRoomClientId() : undefined,
     sourceMode: input.sourceMode,
     actorTokenId: input.actorTokenId,
     characterId: input.characterId,
@@ -165,11 +171,17 @@ export function buildPlayerActionRequestQueueState(input: {
 
 export async function publishPlayerActionRequest(input: {
   action: SharedPlayerActionState
+  appendAction?: (action: SharedPlayerActionState) => Promise<void>
   loadQueue: () => Promise<SharedPlayerActionRequestQueueState | null>
   saveQueue: (queue: SharedPlayerActionRequestQueueState) => Promise<void>
   publishAction: (action: SharedPlayerActionState) => Promise<void>
   now?: () => number
 }): Promise<void> {
+  if (input.appendAction) {
+    await input.appendAction(input.action)
+    await input.publishAction(input.action)
+    return
+  }
   const current = await input.loadQueue()
   await input.saveQueue(
     buildPlayerActionRequestQueueState({
@@ -185,19 +197,30 @@ export async function submitPlayerActionRequestWithLock(input: {
   action: SharedPlayerActionState
   label: string
   lockPendingAction: (pending: { id: string; label: string }) => void
+  getPendingAction: () => PendingPlayerActionLock | null | undefined
+  clearPendingAction: () => void
+  appendAction?: (action: SharedPlayerActionState) => Promise<void>
   loadQueue: () => Promise<SharedPlayerActionRequestQueueState | null>
   saveQueue: (queue: SharedPlayerActionRequestQueueState) => Promise<void>
   publishAction: (action: SharedPlayerActionState) => Promise<void>
   now?: () => number
 }): Promise<void> {
   input.lockPendingAction({ id: input.action.id, label: input.label })
-  await publishPlayerActionRequest({
-    action: input.action,
-    loadQueue: input.loadQueue,
-    saveQueue: input.saveQueue,
-    publishAction: input.publishAction,
-    now: input.now,
-  })
+  try {
+    await publishPlayerActionRequest({
+      action: input.action,
+      appendAction: input.appendAction,
+      loadQueue: input.loadQueue,
+      saveQueue: input.saveQueue,
+      publishAction: input.publishAction,
+      now: input.now,
+    })
+  } catch (error) {
+    if (shouldClearPendingPlayerActionAfterAck(input.getPendingAction(), input.action.id)) {
+      input.clearPendingAction()
+    }
+    throw error
+  }
 }
 
 export function queuedPlayerActionsForDm(input: {
@@ -276,6 +299,7 @@ export type PlayerActionAckDecision =
       markSeenAckId: string
       actionId: string
       waitForAppliedAt?: number
+      authorityRevisions?: Readonly<Record<string, number>>
     }
 
 export function resolvePlayerActionAckDecision(input: {
@@ -297,6 +321,7 @@ export function resolvePlayerActionAckDecision(input: {
     markSeenAckId: ack.id,
     actionId: ack.actionId,
     waitForAppliedAt: ack.status === 'accepted' ? ack.appliedAt : undefined,
+    authorityRevisions: ack.status === 'accepted' ? ack.authorityRevisions : undefined,
   }
 }
 
@@ -312,10 +337,14 @@ export async function consumePlayerActionAck(input: {
   mapId: string
   seenAckIds: Set<string>
   getPendingAction: () => PendingPlayerActionLock | null | undefined
-  waitForAuthoritativeSync: (appliedAt?: number) => Promise<void>
+  waitForAuthoritativeSync: (
+    appliedAt?: number,
+    authorityRevisions?: Readonly<Record<string, number>>,
+  ) => Promise<void>
   sleep: (ms: number) => Promise<void>
   clearPendingAction: () => void
   isCancelled?: () => boolean
+  onAuthoritativeSyncError?: (error: unknown) => void
   unlockDelayMs?: number
 }): Promise<'ignored' | 'handled' | 'cancelled'> {
   const decision = resolvePlayerActionAckDecision({
@@ -327,7 +356,16 @@ export async function consumePlayerActionAck(input: {
   if (decision.markSeenAckId) input.seenAckIds.add(decision.markSeenAckId)
   if (decision.status !== 'handle') return 'ignored'
 
-  await input.waitForAuthoritativeSync(decision.waitForAppliedAt)
+  try {
+    await input.waitForAuthoritativeSync(decision.waitForAppliedAt, decision.authorityRevisions)
+  } catch (error) {
+    if (input.isCancelled?.()) return 'cancelled'
+    input.onAuthoritativeSyncError?.(error)
+    if (shouldClearPendingPlayerActionAfterAck(input.getPendingAction(), decision.actionId)) {
+      input.clearPendingAction()
+    }
+    return 'handled'
+  }
   if (input.isCancelled?.()) return 'cancelled'
 
   await input.sleep(input.unlockDelayMs ?? 100)

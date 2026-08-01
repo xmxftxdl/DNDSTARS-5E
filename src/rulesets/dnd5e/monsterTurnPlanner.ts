@@ -27,7 +27,12 @@ import {
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
-import { findMapGeometryPath } from '../../lib/mapPathfinding'
+import {
+  createMapGeometryPathTree,
+  findMapGeometryPath,
+  type MapGeometryPathTree,
+  type MapPathResult,
+} from '../../lib/mapPathfinding'
 import {
   dnd5eMonsterAreaSavingThrowVariants,
   dnd5eMonsterMapSpeed,
@@ -288,6 +293,14 @@ export interface Dnd5eMonsterTurnPlannerOptions {
    * Multiattack occurrence to plan only the next Headless-authorized strike.
    */
   requiredActionId?: string
+  /**
+   * Restricts the next strike to one target while continuing a Multiattack.
+   * The Host may retry without this restriction when that target is no longer
+   * reachable or legal.
+   */
+  requiredTargetId?: string
+  /** Targets forbidden by an earlier Multiattack occurrence constraint. */
+  excludedTargetIds?: readonly string[]
   /** Remaining movement in the current turn, after any earlier movement. */
   movementBudgetFeet?: number
   /** Current authoritative combat identity used by surprise-dependent traits. */
@@ -312,6 +325,13 @@ export interface Dnd5eMonsterTurnPlannerOptions {
      * for every ranked option.
      */
     skipFinalRouteValidation?: boolean
+    /**
+     * Test/rollback switch. The shared tree is exact and is the live default;
+     * per-destination preserves the former repeated A* implementation.
+     */
+    candidateRouteSearch?: 'shared-tree' | 'per-destination'
+    /** Test/diagnostic override; a truncated tree falls back to exact A*. */
+    candidateRouteTreeMaximumVisited?: number
     /** Per-job cache keyed by dynamic token occupancy and movement profile. */
     reachabilityCache?: Dnd5eMonsterSimulationRuntimeCache
   }
@@ -2680,6 +2700,31 @@ interface ExactMonsterRoute {
   points: Array<{ x: number; y: number }>
 }
 
+function exactMonsterRouteFromPath(
+  enemy: Token,
+  monster: Dnd5eMonsterStatBlock,
+  plan: Dnd5eMonsterTurnPlan,
+  actorElevationFeet: number,
+  path: MapPathResult | undefined,
+): ExactMonsterRoute | undefined {
+  if (!path || path.doorsToOpen.length > 1) return undefined
+  const verticalDistanceFeet = Math.abs(
+    (path.elevationsFeet.at(-1) ?? actorElevationFeet) - actorElevationFeet,
+  )
+  const available = (plan.movementMode === 'fly'
+    ? plannerTokenEffectiveFlySpeed(
+        enemy,
+        monster.speed.fly ?? dnd5eMonsterMapSpeed(monster),
+      )
+    : plannerTokenEffectiveSpeed(
+        enemy,
+        dnd5eMonsterMapSpeed(monster),
+      )) * (plan.dashed ? 2 : 1)
+  const movementCostFeet = path.movementCostFeet + verticalDistanceFeet
+  if (movementCostFeet > available + 1e-4) return undefined
+  return { movementCostFeet, points: path.points }
+}
+
 function exactMonsterRouteForPlan(
   map: BattleMap,
   enemy: Token,
@@ -2715,20 +2760,13 @@ function exactMonsterRouteForPlan(
     additionalSpeedCostMultiplier: (token, position) =>
       dnd5ePersistentAreaSpeedCostMultiplierAt({ map, token, position }),
   })
-  if (!path || path.doorsToOpen.length > 1) return undefined
-  const verticalDistanceFeet = Math.abs((path.elevationsFeet.at(-1) ?? actorElevationFeet) - actorElevationFeet)
-  const available = (plan.movementMode === 'fly'
-    ? plannerTokenEffectiveFlySpeed(
-        enemy,
-        monster.speed.fly ?? dnd5eMonsterMapSpeed(monster),
-      )
-    : plannerTokenEffectiveSpeed(
-        enemy,
-        dnd5eMonsterMapSpeed(monster),
-      )) * (plan.dashed ? 2 : 1)
-  const movementCostFeet = path.movementCostFeet + verticalDistanceFeet
-  if (movementCostFeet > available + 1e-4) return undefined
-  return { movementCostFeet, points: path.points }
+  return exactMonsterRouteFromPath(
+    enemy,
+    monster,
+    plan,
+    actorElevationFeet,
+    path,
+  )
 }
 
 function movementCandidateIsExecutable(
@@ -2754,6 +2792,7 @@ function createTacticalCandidates(input: {
   requiredActionId?: string
   movementBudgetFeet?: number
   simulationOptimization?: Dnd5eMonsterTurnPlannerOptions['simulationOptimization']
+  exactRouteTrees?: Map<string, MapGeometryPathTree>
   reconciledActiveEffects?: PlannerReconciledActiveEffects
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
   const { map, enemy, monster, target, characters } = input
@@ -2889,6 +2928,50 @@ function createTacticalCandidates(input: {
     targetSupportCount: number
   }>()
   const routeCache = new Map<string, ExactMonsterRoute | null>()
+  const hasOpenableClosedDoor = geometry?.doors.some((door) =>
+    mapGeometryDoorOpenState(door) === 'closed' &&
+    mapGeometryDoorLockState(door) === 'unlocked') === true
+  const exactRouteTreeKey = [
+    movementProfile.mode,
+    movementProfile.fromElevationFeet,
+    movementProfile.toElevationFeet,
+    input.simulationOptimization?.candidateRouteTreeMaximumVisited ?? '',
+  ].join(':')
+  let localExactRouteTree: MapGeometryPathTree | undefined
+  const sharedExactRouteTree = () => {
+    const cached = input.exactRouteTrees?.get(exactRouteTreeKey)
+    if (cached) return cached
+    if (localExactRouteTree) return localExactRouteTree
+    const maximumMovementCostFeet = Math.max(
+      plannerTokenEffectiveSpeed(enemy, dnd5eMonsterMapSpeed(monster)),
+      plannerTokenEffectiveFlySpeed(
+        enemy,
+        monster.speed.fly ?? dnd5eMonsterMapSpeed(monster),
+      ),
+    ) * 2
+    const created = createMapGeometryPathTree({
+      geometry,
+      map,
+      token: enemy,
+      allowOpenUnlockedDoors: true,
+      canClimb: (monster.speed.climb ?? 0) > 0,
+      canSwim: (monster.speed.swim ?? 0) > 0,
+      canFly: movementProfile.canFly,
+      targetElevationFeet: movementProfile.canFly
+        ? movementProfile.toElevationFeet
+        : undefined,
+      maximumVisited:
+        input.simulationOptimization?.candidateRouteTreeMaximumVisited,
+      maximumMovementCostFeet,
+      additionalDifficultTerrainMultiplier: (token, position) =>
+        dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map, token, position }),
+      additionalSpeedCostMultiplier: (token, position) =>
+        dnd5ePersistentAreaSpeedCostMultiplierAt({ map, token, position }),
+    })
+    localExactRouteTree = created
+    input.exactRouteTrees?.set(exactRouteTreeKey, created)
+    return created
+  }
   const exactRoute = (
     plan: Dnd5eMonsterTurnPlan,
     reachableSteps: number,
@@ -2913,7 +2996,43 @@ function createTacticalCandidates(input: {
       plan.dashed ? 'dash' : 'move',
     ].join(':')
     if (routeCache.has(key)) return routeCache.get(key) ?? undefined
-    const route = exactMonsterRouteForPlan(map, enemy, monster, plan)
+    let route: ExactMonsterRoute | undefined
+    const destinationGroundElevationFeet =
+      mapGeometryTerrainElevationAtPoint(geometry, destination)
+    const exactTargetElevationFeet = plan.newElevationFeet ?? (
+      currentElevationFeet > currentGroundFeet
+        ? Math.max(destinationGroundElevationFeet, currentElevationFeet)
+        : destinationGroundElevationFeet
+    )
+    const exactCanFly = (monster.speed.fly ?? 0) > 0 && (
+      currentElevationFeet > currentGroundFeet ||
+      exactTargetElevationFeet > destinationGroundElevationFeet
+    )
+    const treeUsesExactMovementPlane =
+      exactCanFly === movementProfile.canFly &&
+      (
+        exactCanFly ||
+        currentElevationFeet <= currentGroundFeet
+      )
+    if (
+      input.simulationOptimization?.candidateRouteSearch === 'per-destination' ||
+      hasOpenableClosedDoor ||
+      !treeUsesExactMovementPlane
+    ) {
+      route = exactMonsterRouteForPlan(map, enemy, monster, plan)
+    } else {
+      const routeTree = sharedExactRouteTree()
+      const treePath = routeTree.pathTo(destination)
+      route = routeTree.truncated
+        ? exactMonsterRouteForPlan(map, enemy, monster, plan)
+        : exactMonsterRouteFromPath(
+            enemy,
+            monster,
+            plan,
+            currentElevationFeet,
+            treePath,
+          )
+    }
     routeCache.set(key, route ?? null)
     return route
   }
@@ -3743,6 +3862,7 @@ function createMonsterReleaseCandidates(input: {
   round?: number
   preferredTargetId?: string
   simulationOptimization?: Dnd5eMonsterTurnPlannerOptions['simulationOptimization']
+  exactRouteTrees?: Map<string, MapGeometryPathTree>
   reconciledActiveEffects?: PlannerReconciledActiveEffects
   currentTacticalCandidates: readonly MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[]
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
@@ -3775,6 +3895,7 @@ function createMonsterReleaseCandidates(input: {
         round: input.round,
         preferredTargetId: input.preferredTargetId,
         simulationOptimization: input.simulationOptimization,
+        exactRouteTrees: input.exactRouteTrees,
         reconciledActiveEffects: releasedEffects,
       }))
       for (const candidate of unlocked) {
@@ -3837,10 +3958,16 @@ export function planDnd5eMonsterTurn(
 
   const preferredTarget = selectDnd5eMonsterPreferredTarget({ map, enemy, monster, characters })
   if (!preferredTarget) return { moved: false, attacked: false, message: `${enemy.label} 找不到可攻击目标。` }
+  const excludedTargetIds = new Set(options.excludedTargetIds ?? [])
   const targets = map.tokens.filter((target) =>
     target.id !== enemy.id &&
     target.type !== 'obstacle' &&
     areOpposedCombatTokens(enemy, target) &&
+    !excludedTargetIds.has(target.id) &&
+    (
+      options.requiredTargetId == null ||
+      target.id === options.requiredTargetId
+    ) &&
     targetHitPoints(target, characters).current > 0,
   )
   const role = monsterTacticalRole(monster)
@@ -3848,6 +3975,14 @@ export function planDnd5eMonsterTurn(
   const hp = targetHitPoints(enemy, characters)
   const canUseAction = (options.turnEconomy?.action.current ?? 1) > 0
   const canUseBonusAction = (options.turnEconomy?.bonusAction.current ?? 1) > 0
+  const reachabilityCache = options.simulationOptimization?.reachabilityCache ?? {
+    reachablePositions: new Map(),
+  }
+  const simulationOptimization = {
+    ...options.simulationOptimization,
+    reachabilityCache,
+  }
+  const exactRouteTrees = new Map<string, MapGeometryPathTree>()
   const tacticalCandidates = targets.flatMap((target) => createTacticalCandidates({
     map,
     enemy,
@@ -3861,7 +3996,8 @@ export function planDnd5eMonsterTurn(
     preferredTargetId: preferredTarget.id,
     requiredActionId: options.requiredActionId,
     movementBudgetFeet: options.movementBudgetFeet,
-    simulationOptimization: options.simulationOptimization,
+    simulationOptimization,
+    exactRouteTrees,
     reconciledActiveEffects,
   }))
   const candidates = options.requiredActionId
@@ -3887,7 +4023,8 @@ export function planDnd5eMonsterTurn(
       combatId: options.combatId,
       round: options.round,
       preferredTargetId: preferredTarget.id,
-      simulationOptimization: options.simulationOptimization,
+      simulationOptimization,
+      exactRouteTrees,
       reconciledActiveEffects,
       currentTacticalCandidates: tacticalCandidates,
     }),

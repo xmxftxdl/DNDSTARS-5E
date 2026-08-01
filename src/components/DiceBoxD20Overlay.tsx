@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
 // FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
 import { DICE_TIMING, parseDiceBoxMessage, resolveFlyOffset } from '../lib/diceOverlayShared'
+import DiceOverlayPortal from './DiceOverlayPortal'
 
 const MIN_VISIBLE_ROLL_MS = DICE_TIMING.D20_MIN_VISIBLE_MS
 
@@ -122,15 +123,17 @@ export default function DiceBoxD20Overlay({
   }, [active, requestId, value])
 
   return (
-    <div className={`pointer-events-none absolute inset-0 z-[60] ${active ? '' : 'dice-box-d20-stage--idle'}`}>
-      <iframe
-        ref={iframeRef}
-        title="D20 dice roller"
-        src="/dice-box-frame.html?badge=0"
-        className="dice-box-d20-frame"
-        style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
-        sandbox="allow-scripts allow-same-origin"
-      />
-    </div>
+    <DiceOverlayPortal>
+      <div className={`absolute inset-0 ${active ? '' : 'dice-box-d20-stage--idle'}`}>
+        <iframe
+          ref={iframeRef}
+          title="D20 dice roller"
+          src="/dice-box-frame.html?badge=0"
+          className="dice-box-d20-frame"
+          style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
+          sandbox="allow-scripts allow-same-origin"
+        />
+      </div>
+    </DiceOverlayPortal>
   )
 }

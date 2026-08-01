@@ -39,7 +39,7 @@ import {
   DND5E_SRD_5_1_TRANSLATION_NOTICE,
 } from '../rulesets/dnd5e/srdContent'
 
-export default function RulesPluginsPage() {
+export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settings' | 'workshop' }) {
   const { campaignId } = useParams()
   const fileRef = useRef<HTMLInputElement>(null)
   const collectionRef = useRef<HTMLInputElement>(null)
@@ -322,6 +322,54 @@ export default function RulesPluginsPage() {
     URL.revokeObjectURL(url)
   }
 
+  if (view === 'workshop') return (
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="自定义工坊"
+        description="创建当前战役可安装的怪物、子职、种族、背景、特性、法术、装备与规则内容。所有自动化能力仍由 Host 白名单和 DM 权威层校验。"
+      />
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.04] p-4">
+          <p className="text-sm font-semibold text-amber-100">专长编辑器</p>
+          <p className="mt-1 text-xs leading-5 text-amber-100/60">已接通等级、属性与种族前提、角色选择以及声明式 Headless 行动；资格和资源由 Host 复核。</p>
+        </div>
+        <div className="rounded-2xl border border-sky-400/15 bg-sky-500/[0.04] p-4">
+          <p className="text-sm font-semibold text-sky-100">声明式职业 V1</p>
+          <p className="mt-1 text-xs leading-5 text-sky-100/60">已支持职业底盘、1–20 级进度、熟练项、施法、兼职前提、升级选择与起始装备；不安全的战斗特性会显式降级。</p>
+        </div>
+      </div>
+      <Dnd5eCustomPluginBuilder
+        defaultPublisher={roomSession?.displayName}
+        busy={busy}
+        onInstall={installFile}
+        installLabel="安装并启用到当前战役"
+        alwaysExpanded
+        categoryControl="select"
+      />
+      {notice && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          {notice}
+        </div>
+      )}
+      {automationCoverage && (
+        <section className="mb-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.05] px-4 py-3 text-sm text-sky-100">
+          <p className="font-semibold">自动化兼容报告</p>
+          <p className="mt-1 text-xs leading-5 text-sky-100/65">
+            完整 {automationCoverage.totals.full} · 部分 {automationCoverage.totals.partial} ·
+            手动 {automationCoverage.totals.manual} · 仅资料 {automationCoverage.totals.referenceOnly}。
+          </p>
+        </section>
+      )}
+      {error && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
@@ -548,14 +596,6 @@ export default function RulesPluginsPage() {
           </div>
         </div>
       </div>
-
-      {roomSession?.role !== 'player' && (
-        <Dnd5eCustomPluginBuilder
-          defaultPublisher={roomSession?.displayName}
-          busy={busy}
-          onInstall={installFile}
-        />
-      )}
 
       {notice && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">

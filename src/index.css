@@ -571,81 +571,17 @@ body > .dice-box-canvas {
   animation: initiative-ring-flow 8s linear infinite;
 }
 
+/* Combat Log shares the initiative perimeter flow, but not its outer pulse.
+   Keeping only the masked ::before edge avoids a second solid-looking frame. */
+.initiative-active-ring.combat-log-flow-only {
+  animation: none;
+  box-shadow: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .initiative-active-ring,
   .initiative-active-ring::before {
     animation: none;
-  }
-}
-
-/* Combat-log identity border: the actor's class/monster color remains the
-   stable border while a narrow highlight travels around its perimeter. */
-@property --combat-log-border-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes combat-log-border-flow {
-  to { --combat-log-border-angle: 360deg; }
-}
-
-.combat-log-entry-card {
-  position: relative;
-  isolation: isolate;
-}
-
-.combat-log-entry-card::before {
-  content: "";
-  position: absolute;
-  z-index: 2;
-  inset: -1px;
-  padding: 2px;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    conic-gradient(
-      from var(--combat-log-border-angle),
-      transparent 0deg,
-      color-mix(in srgb, var(--combat-log-subject-color) 24%, transparent) 24deg,
-      var(--combat-log-subject-color) 42deg,
-      color-mix(in srgb, var(--combat-log-subject-color) 34%, white 66%) 55deg,
-      var(--combat-log-subject-color) 68deg,
-      transparent 96deg,
-      transparent 180deg,
-      color-mix(in srgb, var(--combat-log-subject-color) 18%, transparent) 204deg,
-      var(--combat-log-subject-color) 222deg,
-      color-mix(in srgb, var(--combat-log-subject-color) 52%, white 48%) 235deg,
-      var(--combat-log-subject-color) 248deg,
-      transparent 276deg,
-      transparent 360deg
-    );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  filter: drop-shadow(
-    0 0 4px color-mix(in srgb, var(--combat-log-subject-color) 58%, transparent)
-  );
-  animation: combat-log-border-flow 5.5s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .combat-log-entry-card::before {
-    animation: none;
-    background:
-      linear-gradient(
-        115deg,
-        var(--combat-log-subject-color),
-        color-mix(in srgb, var(--combat-log-subject-color) 42%, white 58%),
-        var(--combat-log-subject-color)
-      );
-    filter: none;
-    opacity: 0.78;
   }
 }
 
@@ -1078,7 +1014,7 @@ body > .dice-box-canvas {
 
 .kill-streak-presentation {
   position: absolute;
-  z-index: 78;
+  z-index: 130;
   inset: 0;
   overflow: hidden;
   pointer-events: none;

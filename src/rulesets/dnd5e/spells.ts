@@ -661,6 +661,12 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '触碰一名生物，结束影响它的一种疾病，或结束目盲、耳聋、麻痹、毒素状态中的一种。',
   },
   {
+    id: 'prayer-of-healing', name: '治疗祷言', englishName: 'Prayer of Healing', level: 2, school: '塑能',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 30, target: 'ally', effect: 'healing', requiresVisibleTarget: true,
+    dice: { count: 2, sides: 8, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
+    description: '完成10分钟祷告后，射程内至多六名可见生物各恢复2d8＋施法属性调整值的生命；每升一环增加1d8治疗。对构装生物和亡灵无效。Headless 负责目标与治疗结算，施法时间推进仍由 DM 确认。',
+  },
+  {
     id: 'mass-healing-word', name: '群体治愈真言', englishName: 'Mass Healing Word', level: 3, school: '塑能',
     classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing', requiresVisibleTarget: true,
     dice: { count: 1, sides: 4, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,

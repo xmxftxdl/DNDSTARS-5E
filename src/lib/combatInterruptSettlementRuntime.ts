@@ -30,6 +30,8 @@ interface ApplyDmCombatInterruptSettlementsInput {
   channels: DmCombatInterruptSettlementChannels
   settle: (settlement: DmCombatInterruptSettlement) => Promise<void>
   clearDmAdjudicationPrompt: () => void
+  /** Keeps the originating Headless transaction blocked after the ruling until the DM resumes combat. */
+  waitForDmAdjudicationResume?: (settlement: Extract<DmCombatInterruptSettlement, { kind: 'dm-adjudication' }>) => Promise<void>
 }
 
 function takePending<T>(channel: PendingCombatInterruptChannel<T>, id: string) {
@@ -99,6 +101,7 @@ export async function applyDmCombatInterruptSettlements(
         const pending = takePending(input.channels.dmAdjudication, settlement.id)
         if (!pending) break
         input.clearDmAdjudicationPrompt()
+        await input.waitForDmAdjudicationResume?.(settlement)
         pending.resolve(settlement.response)
         break
       }

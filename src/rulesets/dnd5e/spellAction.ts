@@ -15,6 +15,8 @@ import type { Character } from '../../types/character'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
+import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBlurImposesAttackDisadvantage,
@@ -28,6 +30,8 @@ import {
   dnd5eTotemBearGuardianDisadvantage,
   dnd5eTotemWolfPackAdvantage,
   dnd5eTranquilityWardCheck,
+  previewDnd5ePostD20AdjustedAttack,
+  previewDnd5ePostD20AdjustedSavingThrow,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCuttingWordsUse,
@@ -38,6 +42,7 @@ import {
   type Dnd5eSpellTeleportDestination,
   type Dnd5eHeadlessCombatState,
   type Dnd5eOptionalBonusDieUse,
+  type Dnd5ePostD20AdjustmentUse,
   type Dnd5eSpellTargetAttackRoll,
   type Dnd5eSpellTargetSavingThrowRoll,
   type Dnd5eTargetTranquilitySaveRoll,
@@ -1162,7 +1167,10 @@ export function prepareDnd5eSpellCast(input: {
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5) ||
+      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) ||
+      dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, targetCombatant) ||
+      dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
+      (targetProne && distanceFeet <= 5) ||
       dnd5eTotemWolfPackAdvantage(
         snapshot.state,
         actorCombatant,
@@ -1401,17 +1409,24 @@ export function dnd5eSpellAttackModeWithProtection(
   return protectedAttack ? imposeDnd5eRollDisadvantage(mode, 'protection').mode : mode
 }
 
-export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, protectedAttack = false, blessRoll?: number, baneRoll?: number) {
+export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, protectedAttack = false, blessRoll?: number, baneRoll?: number, postD20Adjustment?: Dnd5ePostD20AdjustmentUse) {
   if (!prepared.attackMode) throw new TypeError('spell does not use a spell attack')
   const mode = dnd5eSpellAttackModeWithProtection(prepared.attackMode, protectedAttack)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
-  return rules.resolveAttack({
-    rolls,
-    mode,
-    modifier: rules.proficiencyBonus(prepared.actor.level) +
-      rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
-      (blessRoll ?? 0) - (baneRoll ?? 0),
-    targetAc: dnd5eTargetArmorClassForAttack(prepared.state, prepared.actorToken.id, prepared.targetToken.id),
+  const targetAc = dnd5eTargetArmorClassForAttack(prepared.state, prepared.actorToken.id, prepared.targetToken.id)
+  return previewDnd5ePostD20AdjustedAttack({
+    state: prepared.state,
+    affectedId: prepared.actorToken.id,
+    targetAc,
+    resolution: rules.resolveAttack({
+      rolls,
+      mode,
+      modifier: rules.proficiencyBonus(prepared.actor.level) +
+        rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
+        (blessRoll ?? 0) - (baneRoll ?? 0),
+      targetAc,
+    }),
+    use: postD20Adjustment,
   })
 }
 
@@ -1423,27 +1438,39 @@ export function previewDnd5eSpellTargetAttack(
   protectedAttack = false,
   blessRoll?: number,
   baneRoll?: number,
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
 ) {
   const target = prepared.targetSpellAttacks?.[targetIndex]
   if (!target) throw new RangeError('spell does not use a target spell attack at this index')
   const mode = dnd5eSpellAttackModeWithProtection(target.mode, protectedAttack)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
-  return rules.resolveAttack({
-    rolls,
-    mode,
-    modifier: rules.proficiencyBonus(prepared.actor.level) +
-      rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
-      (blessRoll ?? 0) - (baneRoll ?? 0),
+  return previewDnd5ePostD20AdjustedAttack({
+    state: prepared.state,
+    affectedId: target.targetToken.id,
     targetAc: target.armorClass,
+    resolution: rules.resolveAttack({
+      rolls,
+      mode,
+      modifier: rules.proficiencyBonus(prepared.actor.level) +
+        rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
+        (blessRoll ?? 0) - (baneRoll ?? 0),
+      targetAc: target.armorClass,
+    }),
+    use: postD20Adjustment,
   })
 }
 
-export function previewDnd5eSpellSavingThrow(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, blessRoll?: number, baneRoll?: number) {
+export function previewDnd5eSpellSavingThrow(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, blessRoll?: number, baneRoll?: number, postD20Adjustment?: Dnd5ePostD20AdjustmentUse) {
   if (!prepared.savingThrow) throw new TypeError('spell does not use a saving throw')
   const ability = prepared.spell.saveAbility ?? prepared.spell.unwillingSaveAbility
   if (!ability) throw new TypeError('spell does not define a saving throw ability')
   const rolls = prepared.savingThrow.mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
-  const resolved = rules.resolveSavingThrow({ rolls, mode: prepared.savingThrow.mode, modifier: prepared.savingThrow.modifier + (blessRoll ?? 0) - (baneRoll ?? 0), dc: prepared.savingThrow.dc })
+  const resolved = previewDnd5ePostD20AdjustedSavingThrow({
+    state: prepared.state,
+    affectedId: prepared.targetToken.id,
+    resolution: rules.resolveSavingThrow({ rolls, mode: prepared.savingThrow.mode, modifier: prepared.savingThrow.modifier + (blessRoll ?? 0) - (baneRoll ?? 0), dc: prepared.savingThrow.dc }),
+    use: postD20Adjustment,
+  })
   const target = prepared.state.combatants[prepared.targetToken.id]
   return target && dnd5eConditionSavingThrowAutomaticallyFails(target, ability)
     ? { ...resolved, success: false }
@@ -1457,17 +1484,23 @@ export function previewDnd5eSpellTargetSavingThrow(
   d20Second?: number,
   blessRoll?: number,
   baneRoll?: number,
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
 ) {
   const savingThrow = prepared.targetSavingThrows?.[targetIndex]
   if (!savingThrow) throw new RangeError('spell does not use a target saving throw at this index')
   const ability = prepared.spell.saveAbility ?? prepared.spell.unwillingSaveAbility
   if (!ability) throw new TypeError('spell does not define a saving throw ability')
   const rolls = savingThrow.mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
-  const resolved = rules.resolveSavingThrow({
-    rolls,
-    mode: savingThrow.mode,
-    modifier: savingThrow.modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
-    dc: savingThrow.dc,
+  const resolved = previewDnd5ePostD20AdjustedSavingThrow({
+    state: prepared.state,
+    affectedId: savingThrow.targetToken.id,
+    resolution: rules.resolveSavingThrow({
+      rolls,
+      mode: savingThrow.mode,
+      modifier: savingThrow.modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
+      dc: savingThrow.dc,
+    }),
+    use: postD20Adjustment,
   })
   const target = prepared.state.combatants[savingThrow.targetToken.id]
   return target && dnd5eConditionSavingThrowAutomaticallyFails(target, ability)
@@ -1486,11 +1519,13 @@ export function resolvePreparedDnd5eSpellCast(input: {
   attackBaneRoll?: number
   cuttingWords?: Dnd5eCuttingWordsUse
   cuttingWordsDamage?: Dnd5eCuttingWordsUse
+  attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse
   standAgainstTide?: Dnd5eStandAgainstTideUse
   savingThrowD20?: number
   savingThrowD20Second?: number
   savingThrowBlessRoll?: number
   savingThrowBaneRoll?: number
+  savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse
   targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]
   forcedMovements?: readonly Dnd5eSpellForcedMovement[]
   targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]
@@ -1551,6 +1586,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     attackBaneRoll: input.attackBaneRoll,
     cuttingWords: input.cuttingWords,
     cuttingWordsDamage: input.cuttingWordsDamage,
+    attackPostD20Adjustment: input.attackPostD20Adjustment,
     standAgainstTide: input.standAgainstTide,
     mode: prepared.attackMode,
     targetAttacks: input.targetAttacks,
@@ -1565,6 +1601,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     savingThrowD20Second: input.savingThrowD20Second,
     savingThrowBlessRoll: input.savingThrowBlessRoll,
     savingThrowBaneRoll: input.savingThrowBaneRoll,
+    savingThrowPostD20Adjustment: input.savingThrowPostD20Adjustment,
     targetSavingThrows: input.targetSavingThrows,
     forcedMovements: input.forcedMovements,
     teleportDestination: prepared.teleportDestination,

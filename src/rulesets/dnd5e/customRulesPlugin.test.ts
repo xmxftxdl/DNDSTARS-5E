@@ -13,6 +13,7 @@ import {
   registeredDnd5ePluginMonsters,
 } from './pluginApi'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
+import { dnd5eClassDefinition } from './classes'
 
 function draft(): Dnd5eCustomRulesPluginDraft {
   return {
@@ -69,6 +70,23 @@ describe('DM custom rules plugin builder', () => {
         automation: 'full',
       }],
     }]
+    value.classes = [{
+      schemaVersion: 1,
+      id: 'star-warden',
+      name: '星痕守望者',
+      summary: '声明式测试职业。',
+      hitDie: 8,
+      primaryAbilities: ['wis'],
+      savingThrows: ['wis', 'con'],
+      armorProficiencies: ['轻甲'],
+      weaponProficiencies: ['简易武器'],
+      skills: { choiceCount: 2, options: 'any' },
+      features: [{ id: 'star-watch', level: 1, name: '星界守望', description: '由 DM 裁定。', automation: 'manual' }],
+    }]
+    value.feats = [{
+      id: 'star-touched', name: '星界触碰', summary: '测试专长。', description: '测试专长正文。',
+      automation: 'manual', prerequisite: { minimumLevel: 4, abilityScores: { wis: 13 } },
+    }]
     const monsterDraft = createDnd5eCustomMonsterDraft()
     monsterDraft.name = '星痕守卫'
     monsterDraft.slug = 'astral-guard'
@@ -78,11 +96,13 @@ describe('DM custom rules plugin builder', () => {
     const parsed = parseDnd5eDeclarativeRulesPackageV1(new TextEncoder().encode(source).buffer as ArrayBuffer)
     expect(parsed).toMatchObject({ format: 'dndstars5e-declarative', schemaVersion: 1 })
     expect(parsed?.subclasses[0].abilities[0].id).toBe('arc-strike')
+    expect(parsed?.classes?.[0].id).toBe('star-warden')
     const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromDeclarativePackageV1(parsed!))
     try {
       expect(dnd5ePluginSubclassDefinition('local.dm.character-rules:arc-guard')?.features[0]).toMatchObject({
         name: '奥能打击', automation: 'full',
       })
+      expect(dnd5eClassDefinition('local.dm.character-rules:star-warden')?.name).toBe('星痕守望者')
       expect(registeredDnd5ePluginMonsters()).toEqual([
         expect.objectContaining({
           id: 'room-monster:astral-guard',
@@ -94,6 +114,7 @@ describe('DM custom rules plugin builder', () => {
       dispose()
       expect(registeredDnd5ePluginMonsters()).toEqual([])
     }
+    expect(dnd5eClassDefinition('local.dm.character-rules:star-warden')).toBeUndefined()
   })
 
   it('emits a self-contained sandbox-compatible module', () => {
@@ -102,6 +123,7 @@ describe('DM custom rules plugin builder', () => {
     expect(source).toContain('api.registerAbilityGenerationMethod(method)')
     expect(source).toContain('api.registerBackground(background)')
     expect(source).toContain('api.registerFeature(feature)')
+    expect(source).toContain('api.registerFeat(feat)')
     expect(source).toContain('api.registerHeadlessAction(compileHeadlessAction(action))')
     expect(source).toContain('api.registerSpell(spell)')
     expect(source).toContain('api.registerItem(item)')

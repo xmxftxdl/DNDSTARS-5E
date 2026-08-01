@@ -2,6 +2,7 @@ import type { AbilityKey } from '../lib/dnd'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
 import type { DND5E_COMBAT_STATE_SCHEMA_VERSION } from '../rulesets/dnd5e/activeEffects'
 import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
+import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
 import type { CharacterEquipment } from './equipment'
 import type { Dnd5eInventory } from './inventory'
 
@@ -131,7 +132,7 @@ export interface Character {
     'barbarian' | 'bard' | 'cleric' | 'druid' | 'fighter' | 'monk' |
     'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard',
     number
-  >>
+  >> & Partial<Record<string, number>>
   level: number
   background: string
   /** 可选的完整插件命名空间背景 ID；background 保留可读名称。 */
@@ -346,6 +347,26 @@ export interface Character {
       featureId: string
       targetId: string
       turnKey: string
+    }
+    /** Host-owned pending advantage for the next eligible d20 resolution. */
+    nextD20Advantage?: {
+      featureId: string
+      rollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
+    }
+    postSpellRandomTableCheck?: {
+      featureId: string
+      spellId: string
+      spellLevel: number
+      slotLevel: number
+      castingClassId: Dnd5eClassId
+      forceTable: boolean
+    }
+    postSpellRandomTableManualAdjudication?: {
+      id: string
+      featureId: string
+      sourceSpellId: string
+      tableRoll: number
+      outcomeId?: string
     }
     bonusActionSpellTurnKey?: string
     leveledSpellTurnKey?: string

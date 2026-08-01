@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
-import { drainDmPlayerActionQueue, playerActionRejectionNotice } from './useMapsPlayerActionTransport'
+import { consumePlayerActionAck } from '../../lib/playerActionSync'
+import {
+  drainDmPlayerActionQueue,
+  playerActionRejectionNotice,
+  syncPersistedAcceptedPlayerActionSnapshot,
+} from './useMapsPlayerActionTransport'
 
 function action(id: string): SharedPlayerActionState {
   return {
@@ -65,6 +70,50 @@ describe('DM player action drain', () => {
     expect(handled).toBe(1)
     expect(onAction).toHaveBeenCalledTimes(1)
     expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'first', sourceMode: 'player' }))
+  })
+})
+
+describe('persisted player action ACK fallback', () => {
+  it('loads combat after fallback sync and before unlocking an accepted action without revisions', async () => {
+    const calls: string[] = []
+    let pendingAction: { id: string; label?: string } | null = { id: 'action-1' }
+
+    const result = await consumePlayerActionAck({
+      ack: {
+        id: 'ack-1',
+        mapId: 'map-1',
+        actionId: 'action-1',
+        status: 'accepted',
+        appliedAt: 1_234,
+        round: 1,
+        initiativeIndex: 1,
+        updatedAt: 1_234,
+      },
+      mapId: 'map-1',
+      seenAckIds: new Set(),
+      getPendingAction: () => pendingAction,
+      waitForAuthoritativeSync: async (appliedAt, authorityRevisions) => {
+        expect(authorityRevisions).toBeUndefined()
+        await syncPersistedAcceptedPlayerActionSnapshot({
+          appliedAt,
+          syncAuthoritativeState: async () => { calls.push('fallback-sync') },
+          loadCombatState: async () => {
+            expect(pendingAction?.id).toBe('action-1')
+            calls.push('load-combat')
+          },
+        })
+      },
+      sleep: async (ms) => { calls.push(`sleep:${ms}`) },
+      clearPendingAction: () => {
+        calls.push('unlock')
+        pendingAction = null
+      },
+      unlockDelayMs: 0,
+    })
+
+    expect(result).toBe('handled')
+    expect(calls).toEqual(['fallback-sync', 'load-combat', 'sleep:0', 'unlock'])
+    expect(pendingAction).toBeNull()
   })
 })
 

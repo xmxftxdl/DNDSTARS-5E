@@ -27,6 +27,84 @@ describe('RoomCommandBus', () => {
     await expect(second).resolves.toBe(2)
   })
 
+  it('runs commands for unrelated aggregates without waiting on each other', async () => {
+    const events: string[] = []
+    const resolvers = new Map<number, () => void>()
+    const bus = new RoomCommandBus<TestCommand, number>(async (command) => {
+      events.push(`start:${command.value}`)
+      await new Promise<void>((resolve) => resolvers.set(command.value, resolve))
+      events.push(`end:${command.value}`)
+      return command.value
+    })
+
+    const first = bus.dispatch({
+      id: 'one',
+      type: 'test',
+      aggregateId: 'character:a',
+      issuedAt: 1,
+      value: 1,
+    })
+    const second = bus.dispatch({
+      id: 'two',
+      type: 'test',
+      aggregateId: 'character:b',
+      issuedAt: 2,
+      value: 2,
+    })
+
+    expect(events).toEqual(['start:1', 'start:2'])
+    resolvers.get(1)?.()
+    resolvers.get(2)?.()
+    await expect(Promise.all([first, second])).resolves.toEqual([1, 2])
+  })
+
+  it('serializes commands that overlap on any related aggregate', async () => {
+    const events: string[] = []
+    const resolvers = new Map<number, () => void>()
+    const bus = new RoomCommandBus<TestCommand, number>(async (command) => {
+      events.push(`start:${command.value}`)
+      await new Promise<void>((resolve) => resolvers.set(command.value, resolve))
+      events.push(`end:${command.value}`)
+      return command.value
+    })
+
+    const first = bus.dispatch({
+      id: 'character-and-token',
+      type: 'test',
+      aggregateId: 'character:a',
+      relatedAggregateIds: ['map:a:token:one'],
+      issuedAt: 1,
+      value: 1,
+    })
+    const overlapping = bus.dispatch({
+      id: 'same-token',
+      type: 'test',
+      aggregateId: 'map:a:token:one',
+      issuedAt: 2,
+      value: 2,
+    })
+    const unrelated = bus.dispatch({
+      id: 'other-character',
+      type: 'test',
+      aggregateId: 'character:b',
+      issuedAt: 3,
+      value: 3,
+    })
+
+    expect(events).toEqual(['start:1', 'start:3'])
+    resolvers.get(3)?.()
+    await expect(unrelated).resolves.toBe(3)
+    expect(events).toEqual(['start:1', 'start:3', 'end:3'])
+
+    resolvers.get(1)?.()
+    await expect(first).resolves.toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toEqual(['start:1', 'start:3', 'end:3', 'end:1', 'start:2'])
+
+    resolvers.get(2)?.()
+    await expect(overlapping).resolves.toBe(2)
+  })
+
   it('returns the same result for a replayed command ID', async () => {
     let calls = 0
     const bus = new RoomCommandBus<TestCommand, number>((command) => {

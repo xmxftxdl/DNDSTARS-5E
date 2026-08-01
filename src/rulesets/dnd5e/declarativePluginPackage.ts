@@ -57,6 +57,7 @@ function registerLegacyContributions(api: Dnd5eRulesPluginApi, draft: Dnd5eCusto
   for (const race of draft.races) api.registerRace(race)
   for (const background of draft.backgrounds) api.registerBackground(background)
   for (const feature of draft.features) api.registerFeature(feature)
+  for (const feat of draft.feats ?? []) api.registerFeat(feat)
   for (const spell of draft.spells) api.registerSpell(spell)
   for (const item of draft.items) api.registerItem(item)
   for (const method of draft.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
@@ -68,7 +69,7 @@ export function dnd5eRulesPluginFromDeclarativePackageV1(
 ): Dnd5eRulesPlugin {
   const legacy = value.legacy == null ? undefined : value.legacy as Dnd5eCustomRulesPluginDraft
   const hasLegacy = !!legacy && (
-    legacy.races.length + legacy.backgrounds.length + legacy.features.length + legacy.spells.length +
+    legacy.races.length + legacy.backgrounds.length + legacy.features.length + (legacy.feats?.length ?? 0) + legacy.spells.length +
     legacy.items.length + legacy.abilityGenerationMethods.length + (legacy.monsters?.length ?? 0) > 0
   )
   if (hasLegacy) {
@@ -79,6 +80,7 @@ export function dnd5eRulesPluginFromDeclarativePackageV1(
     manifest: { ...value.manifest },
     setup(api) {
       if (hasLegacy) registerLegacyContributions(api, legacy!)
+      for (const definition of value.classes ?? []) api.registerDeclarativeClass(definition)
       for (const subclass of value.subclasses) api.registerDeclarativeSubclass(subclass)
     },
   }

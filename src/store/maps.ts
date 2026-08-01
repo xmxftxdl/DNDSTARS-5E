@@ -25,6 +25,7 @@ import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
 import {
   applyDnd5eEffectiveVisionProfile,
   compileDnd5eEffectiveVisionProfile,
@@ -77,6 +78,7 @@ function uid(): string {
 let lastSharedMapsSnapshot = ''
 let lastSharedMapsUpdatedAt = 0
 let lastLocalMapsWriteAt = 0
+const lastAppliedMapsRevisionByRoom = new Map<string, number>()
 const LOCAL_TOKEN_HIT_POINT_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY = 'stars-map-token-hit-point-edits-v1'
 type PendingLocalTokenHitPointEdit = {
@@ -106,6 +108,7 @@ export function createLatestMapsPublishPump<T>(
     value: T,
     options: { retryPendingHitPoints: boolean },
   ) => Promise<void>,
+  resolveLatestValue?: () => T,
 ): (
   value: T,
   options?: { retryPendingHitPoints?: boolean; requireSaved?: boolean },
@@ -147,7 +150,7 @@ export function createLatestMapsPublishPump<T>(
         const request = pending
         pending = null
         try {
-          await persist(request.value, {
+          await persist(resolveLatestValue?.() ?? request.value, {
             retryPendingHitPoints: request.retryPendingHitPoints,
           })
           settleThrough(request.generation)
@@ -332,6 +335,41 @@ export interface SharedMapsState {
   maps: BattleMap[]
   selectedId: string | null
   updatedAt?: number
+  _sync?: {
+    schemaVersion: 1
+    revision: number
+    writerId: string
+    writtenAt: number
+  }
+}
+
+function sharedMapsRoomKey(): string {
+  return getRoomSession()?.roomId ?? '__local__'
+}
+
+export function shouldApplySharedMapsSnapshot(input: {
+  incomingRevision?: number
+  lastAppliedRevision?: number
+  incomingUpdatedAt?: number
+  lastAppliedUpdatedAt?: number
+}): boolean {
+  const incomingRevision = Number(input.incomingRevision)
+  const lastAppliedRevision = Number(input.lastAppliedRevision)
+  if (Number.isInteger(incomingRevision) && incomingRevision >= 0) {
+    return !Number.isInteger(lastAppliedRevision) ||
+      lastAppliedRevision < 0 ||
+      incomingRevision >= lastAppliedRevision
+  }
+  return (input.incomingUpdatedAt ?? 0) >= (input.lastAppliedUpdatedAt ?? 0)
+}
+
+function rememberAppliedMapsRevision(revision?: number): void {
+  if (!Number.isInteger(revision) || Number(revision) < 0) return
+  const roomKey = sharedMapsRoomKey()
+  const previous = lastAppliedMapsRevisionByRoom.get(roomKey) ?? -1
+  if (Number(revision) > previous) {
+    lastAppliedMapsRevisionByRoom.set(roomKey, Number(revision))
+  }
 }
 
 export async function saveMapsStateWithPendingHitPointRetry(input: {
@@ -405,6 +443,28 @@ function applyTokenPatchToSharedMaps(
     }
   })
   return matched ? nextMaps : null
+}
+
+/**
+ * Reads back exactly the fields written by one Token patch from the payload
+ * that won the server CAS. A maps invalidation can arrive while the request is
+ * in flight and temporarily project an older Token into the local Store; the
+ * caller uses this patch after the save succeeds so releasing the drag preview
+ * cannot expose that older position.
+ */
+export function committedTokenPatchFromSharedMaps(
+  maps: BattleMap[],
+  mapId: string,
+  tokenId: string,
+  patch: Partial<Token>,
+): Partial<Token> | null {
+  const committedToken = maps
+    .find((map) => map.id === mapId)
+    ?.tokens.find((token) => token.id === tokenId)
+  if (!committedToken) return null
+  return Object.fromEntries(
+    (Object.keys(patch) as Array<keyof Token>).map((key) => [key, committedToken[key]]),
+  ) as Partial<Token>
 }
 
 /**
@@ -554,12 +614,19 @@ async function persistMapsState(
     lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
     throw new Error(`maps-save-rejected:${result.status}`)
   }
+  rememberAppliedMapsRevision(result.revision)
   lastLocalMapsWriteAt = saved.payload.updatedAt ?? lastLocalMapsWriteAt
   lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? Date.now()
   lastSharedMapsSnapshot = JSON.stringify(saved.payload)
 }
 
-const enqueueLatestMapsPublish = createLatestMapsPublishPump(persistMapsState)
+const enqueueLatestMapsPublish = createLatestMapsPublishPump(
+  persistMapsState,
+  () => {
+    const state = useMapStore.getState()
+    return { maps: state.maps, selectedId: state.selectedId }
+  },
+)
 
 function publishMapsState(
   state: Pick<MapState, 'maps' | 'selectedId'>,
@@ -705,6 +772,25 @@ export interface Token {
       featureId: string
       targetId: string
       turnKey: string
+    }
+    nextD20Advantage?: {
+      featureId: string
+      rollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
+    }
+    postSpellRandomTableCheck?: {
+      featureId: string
+      spellId: string
+      spellLevel: number
+      slotLevel: number
+      castingClassId: Dnd5eClassId
+      forceTable: boolean
+    }
+    postSpellRandomTableManualAdjudication?: {
+      id: string
+      featureId: string
+      sourceSpellId: string
+      tableRoll: number
+      outcomeId?: string
     }
     concentrationSpellId?: string
     concentrationSpellLevel?: number
@@ -1256,7 +1342,7 @@ export function migrateMapsState(persisted: unknown): Pick<MapState, 'maps' | 's
 /**
  * 角色 → token.hp 单向镜像的唯一真相源。
  * `Character.currentHp` 是关联 token 血量的权威；token.hp 只是它的镜像（玩家端合并/阵亡判定用）。
- * 所有改血路径（普通伤害 / DOT 每回合 / 静水回血 / 魔法浪涌）改完 character 后，
+ * 所有改血路径（普通伤害 / DOT 每回合 / 静水回血 / 本地扩展效果）改完 character 后，
  * 都用本 helper 算出要写回 token 的 patch，保证 `token.hp === character.currentHp`、不被任何路径绕过。
  * 纯函数，便于单测：post-change 断言 patch.hp === character.currentHp。
  */
@@ -1398,7 +1484,12 @@ interface MapState {
     payload: { characterId: string; name: string; emoji: string; type?: Token['type'] },
   ) => void
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
-  applyAuthorityTokenUpdate: (mapId: string, tokenId: string, patch: Partial<Token>) => void
+  applyAuthorityTokenUpdate: (
+    mapId: string,
+    tokenId: string,
+    patch: Partial<Token>,
+    options?: Partial<Token> | { protectHitPointsUntilAcknowledged?: boolean },
+  ) => void
   applyAuthorityMapUpdate: (mapId: string, patch: Partial<BattleMap>) => void
   expireTimedLights: (worldMinute: number) => number
   removeToken: (mapId: string, tokenId: string) => void
@@ -1419,14 +1510,39 @@ export const useMapStore = create<MapState>()(
         // 单调 guard：丢弃 updatedAt 严格更旧的乱序/陈旧快照。
         // 旧实现仅在 !isPlayerPort() 时做此检查 —— 玩家端裸接受任意顺序的快照，乱序写会回退状态。
         // 现在 DM 与玩家两端都走同一纯 guard（decideApply），相等时落内容 equality 短路。
-        const prevGuard: MonotonicState = {
-          lastUpdatedAt: lastSharedMapsUpdatedAt,
-          lastSnapshot: lastSharedMapsSnapshot,
+        const roomKey = sharedMapsRoomKey()
+        const incomingRevision = shared._sync?.revision
+        const lastAppliedRevision = lastAppliedMapsRevisionByRoom.get(roomKey)
+        if (!shouldApplySharedMapsSnapshot({
+          incomingRevision,
+          lastAppliedRevision,
+          incomingUpdatedAt: shared.updatedAt,
+          lastAppliedUpdatedAt: lastSharedMapsUpdatedAt,
+        })) {
+          console.info('[maps-shared-stale-ignored]', {
+            incomingRevision,
+            lastAppliedRevision,
+            sharedUpdatedAt: shared.updatedAt ?? 0,
+            lastSharedMapsUpdatedAt,
+          })
+          return
         }
-        const decision = decideApply(prevGuard, shared.updatedAt ?? 0, JSON.stringify(shared))
-        if (!decision.apply) return
-        lastSharedMapsUpdatedAt = decision.next.lastUpdatedAt
-        lastSharedMapsSnapshot = decision.next.lastSnapshot
+        const snapshot = JSON.stringify(shared)
+        if (Number.isInteger(incomingRevision)) {
+          lastAppliedMapsRevisionByRoom.set(roomKey, Number(incomingRevision))
+          lastSharedMapsUpdatedAt = Math.max(lastSharedMapsUpdatedAt, shared.updatedAt ?? 0)
+          if (snapshot === lastSharedMapsSnapshot) return
+          lastSharedMapsSnapshot = snapshot
+        } else {
+          const prevGuard: MonotonicState = {
+            lastUpdatedAt: lastSharedMapsUpdatedAt,
+            lastSnapshot: lastSharedMapsSnapshot,
+          }
+          const decision = decideApply(prevGuard, shared.updatedAt ?? 0, snapshot)
+          if (!decision.apply) return
+          lastSharedMapsUpdatedAt = decision.next.lastUpdatedAt
+          lastSharedMapsSnapshot = decision.next.lastSnapshot
+        }
         const protectedMaps = mergePendingLocalTokenHitPointEdits(shared.maps)
         set({ maps: protectedMaps, selectedId: shared.selectedId ?? shared.maps[0]?.id ?? null })
         // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
@@ -1455,9 +1571,22 @@ export const useMapStore = create<MapState>()(
           lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
           throw new Error(`maps-token-patch-save-rejected:${saved.result.status}`)
         }
+        rememberAppliedMapsRevision(saved.result.revision)
         lastLocalMapsWriteAt = saved.payload.updatedAt ?? updatedAt
         lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? updatedAt
         lastSharedMapsSnapshot = JSON.stringify(saved.payload)
+        const committedPatch = committedTokenPatchFromSharedMaps(
+          saved.payload.maps,
+          mapId,
+          tokenId,
+          patch,
+        )
+        if (!committedPatch) throw new Error('maps-token-patch-committed-target-missing')
+        // Re-project the payload that actually won CAS before the command
+        // promise resolves. Otherwise an older SSE snapshot received during
+        // the save can become visible as soon as MapCanvas releases its drag
+        // preview, which looks like the monster jumping back.
+        get().applyAuthorityTokenUpdate(mapId, tokenId, committedPatch)
       },
       select: (id) => set({ selectedId: id }),
 
@@ -1669,11 +1798,20 @@ export const useMapStore = create<MapState>()(
         publishMapsState(get(), { retryPendingHitPoints: updatesHitPoints })
       },
 
-      applyAuthorityTokenUpdate: (mapId, tokenId, patch) => {
+      applyAuthorityTokenUpdate: (mapId, tokenId, patch, options) => {
+        const protectHitPointsUntilAcknowledged = !!options &&
+          'protectHitPointsUntilAcknowledged' in options &&
+          options.protectHitPointsUntilAcknowledged === true
         if (
           Object.prototype.hasOwnProperty.call(patch, 'hp') ||
           Object.prototype.hasOwnProperty.call(patch, 'maxHp')
-        ) clearPendingLocalTokenHitPointEdit(mapId, tokenId)
+        ) {
+          if (protectHitPointsUntilAcknowledged) {
+            markPendingLocalTokenHitPointEdit(mapId, tokenId, patch)
+          } else {
+            clearPendingLocalTokenHitPointEdit(mapId, tokenId)
+          }
+        }
         set((state) => ({
           maps: state.maps.map((map) =>
             map.id === mapId

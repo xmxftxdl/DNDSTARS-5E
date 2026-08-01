@@ -12,6 +12,7 @@ import {
   normalizeDnd5eClassLevels,
 } from './classLevels'
 import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
+import { declarativeClassMulticlassPrerequisitesV1 } from './declarativeClass'
 
 export {
   dnd5eCharacterClassLevel,
@@ -42,9 +43,11 @@ export function dnd5eMeetsMulticlassPrerequisite(
   character: Pick<Character, 'abilities'>,
   classId: Dnd5eClassId,
 ): boolean {
-  return MULTICLASS_PREREQUISITES[classId].every((alternatives) =>
-    alternatives.some((ability) => character.abilities[ability] >= 13),
-  )
+  const core = MULTICLASS_PREREQUISITES[classId]
+  if (core) return core.every((alternatives) => alternatives.some((ability) => character.abilities[ability] >= 13))
+  const declared = declarativeClassMulticlassPrerequisitesV1(classId)
+  if (!declared) return false
+  return declared.every((group) => group.oneOf.some((ability) => character.abilities[ability] >= group.minimum))
 }
 
 export function validateDnd5eMulticlassLevelGain(
@@ -71,9 +74,10 @@ export function dnd5eMulticlassCasterLevel(
   const levels = normalizeDnd5eClassLevels(character)
   let casterLevel = 0
   for (const [classId, level] of Object.entries(levels) as Array<[Dnd5eClassId, number]>) {
-    if (FULL_CASTERS.has(classId)) casterLevel += level
-    else if (HALF_CASTERS.has(classId)) casterLevel += Math.floor(level / 2)
-    else if (dnd5eEffectiveSpellcastingSource(character as Character, classId)?.definition.spellcasting?.kind === 'one-third-known') {
+    const kind = dnd5eEffectiveSpellcastingSource(character as Character, classId)?.definition.spellcasting?.kind
+    if (FULL_CASTERS.has(classId) || kind === 'full-known' || kind === 'full-prepared') casterLevel += level
+    else if (HALF_CASTERS.has(classId) || kind === 'half-known' || kind === 'half-prepared') casterLevel += Math.floor(level / 2)
+    else if (kind === 'one-third-known') {
       casterLevel += Math.floor(level / 3)
     }
   }

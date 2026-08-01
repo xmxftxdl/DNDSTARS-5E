@@ -15,7 +15,11 @@ import type {
   Dnd5eCombatEvent,
   Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
-import { DND5E_2014_BACKGROUND_OPTIONS, DND5E_2014_RACE_OPTIONS } from './characterOptions'
+import {
+  DND5E_2014_BACKGROUND_OPTIONS,
+  DND5E_2014_CLASS_OPTIONS,
+  DND5E_2014_RACE_OPTIONS,
+} from './characterOptions'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
@@ -58,14 +62,22 @@ import {
   type DeclarativeSubclassDefinitionV1,
   type DeclarativeSubclassDurationV1,
   type DeclarativeSubclassResourceDieV1,
+  type DeclarativeSubclassResourceCostV1,
+  type DeclarativeSubclassResourceRequirementV1,
   type DeclarativeSubclassSpellcastingV1,
   type DeclarativeValueFormulaV1,
 } from './declarativeSubclassAbility'
 import { dnd5ePluginImageAsset } from './pluginAssets'
+import {
+  registerDeclarativeClassV1,
+  validateDeclarativeClassDefinitionV1,
+  type DeclarativeClassDefinitionV1,
+} from './declarativeClass'
 
 export const DND5E_RULES_PLUGIN_API_VERSION = 2 as const
 export const DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS = [1, 2] as const
 export const DND5E_RULES_PLUGIN_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
+export const DND5E_POST_D20_ADJUSTMENT_ROLL_ID = 'post-d20-adjustment' as const
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type Dnd5eRulesPluginApiVersion = typeof DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS[number]
@@ -76,7 +88,9 @@ export type Dnd5ePluginDistributionPolicy =
   | 'local-only'
 export type Dnd5ePluginContentCategory =
   | 'rules'
+  | 'classes'
   | 'subclasses'
+  | 'feats'
   | 'spells'
   | 'items'
   | 'monsters'
@@ -580,6 +594,8 @@ export interface Dnd5eRulesPluginApi {
   registerFeat(definition: Dnd5ePluginFeatDefinition): string
   registerResource(definition: Dnd5ePluginResourceDefinition): string
   registerSubclass(definition: Dnd5ePluginSubclassDefinition): string
+  /** Host-only pure-data class compiler. Imported JSON never supplies executable code. */
+  registerDeclarativeClass(definition: DeclarativeClassDefinitionV1): string
   /** Host-only pure-data compiler. Imported JSON never supplies executable code. */
   registerDeclarativeSubclass(definition: DeclarativeSubclassDefinitionV1): string
   registerHeadlessAction(definition: Dnd5ePluginHeadlessActionDefinition): string
@@ -1186,7 +1202,7 @@ function assertManifest(manifest: Dnd5eRulesPluginManifest): void {
   ) throw new Error(`Invalid plugin distribution policy: ${manifest.id}`)
   if (
     manifest.contentCategory != null &&
-    !['rules', 'subclasses', 'spells', 'items', 'monsters', 'adventure', 'mixed'].includes(manifest.contentCategory)
+    !['rules', 'classes', 'subclasses', 'feats', 'spells', 'items', 'monsters', 'adventure', 'mixed'].includes(manifest.contentCategory)
   ) throw new Error(`Invalid plugin content category: ${manifest.id}`)
   if (!(DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS as readonly number[]).includes(manifest.apiVersion)) {
     throw new Error(`Unsupported rules plugin API version: ${manifest.apiVersion}`)
@@ -1208,6 +1224,16 @@ function publishPluginRegistryChange(): void {
 function namespacedId(pluginId: string, localId: string): string {
   if (!validId(localId)) throw new Error(`Invalid plugin contribution id: ${localId}`)
   return `${pluginId}:${localId}`
+}
+
+export function dnd5eDeclarativeResourceKey(
+  pluginId: string,
+  reference: Pick<DeclarativeSubclassResourceCostV1, 'resourceId' | 'scope'> |
+    Pick<DeclarativeSubclassResourceRequirementV1, 'resourceId' | 'scope'>,
+): string {
+  return reference.scope === 'core'
+    ? reference.resourceId
+    : namespacedId(pluginId, reference.resourceId)
 }
 
 function declarativeFormulaValue(
@@ -1383,7 +1409,7 @@ function declarativeFeatureResolver(input: {
       }
     }
     for (const requirement of predicates?.resources ?? []) {
-      const resourceId = namespacedId(input.pluginId, requirement.resourceId)
+      const resourceId = dnd5eDeclarativeResourceKey(input.pluginId, requirement)
       if ((actor.classResources[resourceId]?.current ?? -1) < requirement.minimum) return context.fail('class-resource-unavailable')
     }
     for (const requirement of predicates?.subclassChoices ?? []) {
@@ -1406,8 +1432,15 @@ function declarativeFeatureResolver(input: {
         projectionDistance > ability.mechanic.maximumDistanceFeet
       ) return context.fail('invalid-target')
     }
+    if (
+      ability.mechanic?.kind === 'next-d20-advantage' &&
+      actor.classState.nextD20Advantage != null
+    ) return context.fail('invalid-plugin-action')
     const costs = [
-      ...(ability.cost?.resources ?? []).map((cost) => ({ resourceId: namespacedId(input.pluginId, cost.resourceId), amount: cost.amount })),
+      ...(ability.cost?.resources ?? []).map((cost) => ({
+        resourceId: dnd5eDeclarativeResourceKey(input.pluginId, cost),
+        amount: cost.amount,
+      })),
       ...(input.usesResourceId && (ability.cost?.uses ?? 1) > 0 ? [{ resourceId: input.usesResourceId, amount: ability.cost?.uses ?? 1 }] : []),
     ]
     if (costs.some((cost) => !actor.classResources[cost.resourceId] || actor.classResources[cost.resourceId].current < cost.amount)) {
@@ -1509,6 +1542,18 @@ function declarativeFeatureResolver(input: {
         actorId: actor.id,
         targetId: primaryTarget.id,
         stateKey: 'utility-projection-attack-advantage',
+        active: true,
+      })
+    }
+    if (ability.mechanic?.kind === 'next-d20-advantage') {
+      actor.classState.nextD20Advantage = {
+        featureId: input.featureId,
+        rollKinds: [...ability.mechanic.rollKinds],
+      }
+      context.events.push({
+        type: 'class-state-changed',
+        actorId: actor.id,
+        stateKey: 'next-d20-advantage',
         active: true,
       })
     }
@@ -1723,9 +1768,12 @@ export function registerDnd5eRulesPlugin(
       if (prerequisite?.minimumLevel != null && !finiteInteger(prerequisite.minimumLevel, 1, 20)) {
         throw new Error(`Invalid plugin feat minimum level: ${featId}`)
       }
-      const abilityScores = cloneAbilityBonuses(prerequisite?.abilityScores)
-      if (Object.values(abilityScores).some((score) => !finiteInteger(score, 1, 30))) {
-        throw new Error(`Invalid plugin feat ability prerequisite: ${featId}`)
+      const abilityScores: Partial<Record<AbilityKey, number>> = {}
+      for (const [ability, score] of Object.entries(prerequisite?.abilityScores ?? {})) {
+        if (!ABILITY_KEYS.includes(ability as AbilityKey) || !finiteInteger(score, 1, 30)) {
+          throw new Error(`Invalid plugin feat ability prerequisite: ${featId}`)
+        }
+        abilityScores[ability as AbilityKey] = score
       }
       const raceIds = prerequisite?.raceIds == null ? undefined : [...new Set(prerequisite.raceIds)]
       if (raceIds && (
@@ -1930,6 +1978,21 @@ export function registerDnd5eRulesPlugin(
       }
       return subclassId
     },
+    registerDeclarativeClass(definition) {
+      assertAcceptingContributions()
+      validateDeclarativeClassDefinitionV1(definition, `声明式职业 ${definition?.id ?? ''}`)
+      if ((DND5E_2014_CLASS_OPTIONS as readonly string[]).includes(definition.name.trim())) {
+        throw new Error(`声明式职业不能覆盖 SRD 职业名称：${definition.name}`)
+      }
+      const result = registerDeclarativeClassV1({
+        definition,
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      })
+      disposers.push(result.dispose)
+      return result.registered.id
+    },
     registerDeclarativeSubclass(definition) {
       assertAcceptingContributions()
       validateDeclarativeSubclassDefinitionV1(definition, `Declarative subclass ${definition?.id ?? ''}`)
@@ -1976,7 +2039,8 @@ export function registerDnd5eRulesPlugin(
           ability.mechanic?.kind === 'totem-warrior-2014' ||
           ability.mechanic?.kind === 'opening-attack' ||
           ability.mechanic?.kind === 'hidden-spell-save-disadvantage' ||
-          ability.mechanic?.kind === 'utility-projection-control'
+          ability.mechanic?.kind === 'utility-projection-control' ||
+          ability.mechanic?.kind === 'post-spell-random-table'
         const action = compatibility.effective === 'manual' || hostManagedClosedSubclass ? undefined : {
           id: actionLocalId,
           label: ability.name,
@@ -2009,6 +2073,16 @@ export function registerDnd5eRulesPlugin(
               visibility: 'public' as const,
             }]
           })
+          if (ability.mechanic?.kind === 'post-d20-adjustment') {
+            rollDeclarations.push({
+              id: DND5E_POST_D20_ADJUSTMENT_ROLL_ID,
+              label: ability.name,
+              count: 1,
+              sides: ability.mechanic.dieSides,
+              modifier: 0,
+              visibility: 'public',
+            })
+          }
           api.registerHeadlessAction({
             id: actionLocalId,
             execution: 'trusted',
@@ -2910,6 +2984,16 @@ export function dnd5eEnemyD20ModifierFeaturesForCharacter(
   )
 }
 
+export function dnd5ePostD20AdjustmentFeaturesForCharacter(
+  character: Character,
+) {
+  return registeredDnd5ePluginFeatures().filter((feature) =>
+    feature.automation === 'full' &&
+    feature.declarativeAbility?.mechanic?.kind === 'post-d20-adjustment' &&
+    dnd5eCharacterHasPluginFeature(character, feature.id),
+  )
+}
+
 export function dnd5eCharacterHasPluginFeature(character: Character, featureId: string): boolean {
   const feature = dnd5ePluginFeatureDefinition(featureId)
   if (!feature || !dnd5ePluginFeatureAvailableForCharacter(feature, character)) return false
@@ -3041,11 +3125,11 @@ function declarativeFeatureRollPlan(
   const pluginId = feature.ownerPluginId
   const requiredResources = [
     ...(ability.predicates?.resources ?? []).map((requirement) => ({
-      resourceId: namespacedId(pluginId, requirement.resourceId),
+      resourceId: dnd5eDeclarativeResourceKey(pluginId, requirement),
       amount: requirement.minimum,
     })),
     ...(ability.cost?.resources ?? []).map((cost) => ({
-      resourceId: namespacedId(pluginId, cost.resourceId),
+      resourceId: dnd5eDeclarativeResourceKey(pluginId, cost),
       amount: cost.amount,
     })),
   ]
@@ -3055,6 +3139,16 @@ function declarativeFeatureRollPlan(
   )) return { ok: false, reason: 'class-resource-unavailable' }
 
   const declarations: Dnd5ePluginDiceRollDeclaration[] = []
+  if (ability.mechanic?.kind === 'post-d20-adjustment') {
+    declarations.push({
+      id: DND5E_POST_D20_ADJUSTMENT_ROLL_ID,
+      label: ability.name,
+      count: 1,
+      sides: ability.mechanic.dieSides,
+      modifier: 0,
+      visibility: 'public',
+    })
+  }
   for (const roll of ability.rolls ?? []) {
     if (roll.kind !== 'damage' && roll.kind !== 'healing') continue
     const baseCount = declarativeDiceCountForCombatant(roll.dice, actor)

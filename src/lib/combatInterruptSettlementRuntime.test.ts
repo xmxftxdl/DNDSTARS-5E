@@ -126,4 +126,29 @@ describe('DM combat interrupt settlement runtime', () => {
     expect(pending.dmAdjudication.resolve).toHaveBeenCalledWith(response)
     expect(pending.dmAdjudication.ref.current).toBeNull()
   })
+
+  it('does not resume a DM adjudication transaction until the combat pause gate opens', async () => {
+    const pending = channels()
+    const response: DmAdjudicationInterruptResponse = { decision: 'approved', effects: [] }
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const waitForDmAdjudicationResume = vi.fn(async () => gate)
+    const settling = applyDmCombatInterruptSettlements({
+      settlements: [{
+        kind: 'dm-adjudication', id: 'adjudication', reason: 'answered',
+        finishResponse: response, response,
+      }],
+      channels: refs(pending),
+      settle: vi.fn(),
+      clearDmAdjudicationPrompt: vi.fn(),
+      waitForDmAdjudicationResume,
+    })
+    await Promise.resolve()
+
+    expect(waitForDmAdjudicationResume).toHaveBeenCalledOnce()
+    expect(pending.dmAdjudication.resolve).not.toHaveBeenCalled()
+    release()
+    await settling
+    expect(pending.dmAdjudication.resolve).toHaveBeenCalledWith(response)
+  })
 })

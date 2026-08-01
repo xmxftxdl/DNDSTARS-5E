@@ -282,7 +282,7 @@ async function linkDmWizardToEnemy(
   return reactor
 }
 
-test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准后原子同步', async ({ browser, request }) => {
+test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动继续', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const mapId = `spell-interrupt-${Date.now()}`
   const seeded = await seedCombat(request, mapId, ['suggestion'])
@@ -317,6 +317,13 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
   await expect(dialog).toBeVisible({ timeout: 20_000 })
   await expect(dialog).toContainText('DM 裁定 · 暗示术')
   await expect(player.getByTestId('dm-adjudication-dialog')).toHaveCount(0)
+  await expect(dm.getByTestId('combat-flow-pause-control')).toContainText('DM 裁定中')
+  await expect(dm.getByTestId('combat-flow-pause-control')).toBeDisabled()
+  await expect(player.getByTestId('combat-flow-pause-label')).toContainText('DM 裁定中')
+  await expect.poll(async () => {
+    const combat = await getState<{ flowPause?: { phase?: string } }>(request, 'combat')
+    return combat.flowPause?.phase
+  }).toBe('adjudicating')
   const before = await getState<{ characters: ResourceCharacter[]; _sync?: unknown }>(request, 'characters')
   expect(before.characters[0].classResources?.['dnd5e-spell-slot-2']?.current).toBe(2)
 
@@ -336,6 +343,26 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
   await dialog.getByLabel('添加状态（可选）').fill('魅惑')
   await dialog.getByLabel('DM 裁定备注（可选）').fill('跨端 Interrupt E2E')
   await dialog.getByTestId('dm-adjudication-approve').click()
+
+  await expect(dm.getByTestId('dm-adjudication-dialog')).toHaveCount(0)
+  await expect(dm.getByTestId('combat-flow-pause-control')).toContainText('继续战斗', { timeout: 20_000 })
+  await expect(dm.getByTestId('combat-flow-pause-control')).toBeEnabled()
+  await expect(player.getByTestId('combat-flow-pause-label')).toContainText('等待 DM 继续', { timeout: 20_000 })
+  await expect.poll(async () => {
+    const combat = await getState<{ flowPause?: { phase?: string } }>(request, 'combat')
+    return combat.flowPause?.phase
+  }).toBe('awaiting-resume')
+
+  // 裁定已经回答，但门闩尚未打开：资源、伤害和 action ACK 都不能提前提交。
+  const pausedCharacters = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+  expect(pausedCharacters.characters[0].classResources?.['dnd5e-spell-slot-2']?.current).toBe(2)
+  const pausedMaps = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+  expect(pausedMaps.maps.find((map) => map.id === mapId)?.tokens
+    .find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(40)
+  const pausedAck = await getState<{ actionId?: string }>(request, 'player-action-ack')
+  expect(pausedAck.actionId).not.toBe(action.id)
+
+  await dm.getByTestId('combat-flow-pause-control').click()
 
   await expect.poll(async () => {
     const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
@@ -360,6 +387,86 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
   }))
   const playerMaps = await loadPlayerState<{ maps: ResourceMap[] }>(player, 'maps')
   expect(playerMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(33)
+  await context.close()
+})
+
+test('本地扩展随机表暂停状态跨端同步，并由 DM 顶部按钮显式恢复', async ({ browser, request }, testInfo) => {
+  test.setTimeout(60_000)
+  const mapId = `local-rule-table-pause-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['magic-missile'])
+  const current = await getState<Record<string, unknown> & { _sync?: unknown }>(request, 'combat')
+  const combat = { ...current }
+  delete combat._sync
+  const interruptId = `dm-adjudication:post-spell-random-table:${mapId}:50`
+  const pausedAt = Date.now()
+  await putState(request, 'combat', {
+    ...combat,
+    flowPause: {
+      schemaVersion: 1,
+      reason: 'dm-adjudication',
+      phase: 'adjudicating',
+      interruptId,
+      label: '本地扩展 · 施法后随机表结果 50',
+      pausedAt,
+    },
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  await expect(dm.getByTestId('combat-flow-pause-control')).toContainText('DM 裁定中')
+  await expect(dm.getByTestId('combat-flow-pause-control')).toBeDisabled()
+  await expect(dm.getByTestId('combat-flow-pause-overlay')).toContainText('本地扩展 · 施法后随机表结果 50')
+  await expect(player.getByTestId('combat-flow-pause-label')).toContainText('DM 裁定中')
+  await dm.screenshot({
+    path: process.env.LOCAL_RULE_TABLE_ADJUDICATING_SCREENSHOT_PATH ??
+      testInfo.outputPath('local-rule-table-adjudicating.png'),
+    fullPage: true,
+  })
+
+  const latest = await getState<Record<string, unknown> & { _sync?: unknown }>(request, 'combat')
+  const latestCombat = { ...latest }
+  delete latestCombat._sync
+  await putState(request, 'combat', {
+    ...latestCombat,
+    flowPause: {
+      schemaVersion: 1,
+      reason: 'dm-adjudication',
+      phase: 'awaiting-resume',
+      interruptId,
+      label: '本地扩展 · 施法后随机表结果 50',
+      pausedAt,
+      resolvedAt: Date.now(),
+    },
+  })
+  // Reload both clients to prove that the room-level gate survives navigation and
+  // to refresh the optimistic sync revision before the DM publishes "continue".
+  await Promise.all([
+    dm.reload({ waitUntil: 'domcontentloaded' }),
+    player.reload({ waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  await expect(dm.getByTestId('combat-flow-pause-control')).toContainText('继续战斗', { timeout: 20_000 })
+  await expect(dm.getByTestId('combat-flow-pause-control')).toBeEnabled()
+  await expect(player.getByTestId('combat-flow-pause-label')).toContainText('等待 DM 继续', { timeout: 20_000 })
+  await dm.screenshot({
+    path: process.env.LOCAL_RULE_TABLE_RESUME_SCREENSHOT_PATH ??
+      testInfo.outputPath('local-rule-table-awaiting-resume.png'),
+    fullPage: true,
+  })
+
+  await dm.getByTestId('combat-flow-pause-control').click()
+  await expect(dm.getByTestId('combat-flow-pause-overlay')).toHaveCount(0)
+  await expect(player.getByTestId('combat-flow-pause-label')).toHaveCount(0)
+  await expect.poll(async () => {
+    const state = await getState<{ flowPause?: unknown }>(request, 'combat')
+    return state.flowPause == null
+  }).toBe(true)
   await context.close()
 })
 

@@ -39,6 +39,138 @@ describe('SRD monster 5e turn planner', () => {
     expect(plan.moveApSpent).toBeUndefined()
   })
 
+  it('moves between Multiattack strikes only within the remaining movement budget', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:owlbear')!
+    const clawsIndex = monster.actions.findIndex((action) =>
+      action.id === 'claws')
+    const owlbear = token({
+      id: 'owlbear',
+      label: 'Owlbear',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const defeated = token({
+      id: 'defeated',
+      label: 'Defeated hero',
+      type: 'player',
+      characterId: 'defeated-character',
+      x: 10,
+      hp: 0,
+      maxHp: 20,
+    })
+    const nextTarget = token({
+      id: 'next-target',
+      label: 'Next hero',
+      type: 'player',
+      characterId: 'next-character',
+      x: 50,
+      hp: 20,
+      maxHp: 20,
+    })
+    const characters = [
+      character({
+        id: 'defeated-character',
+        currentHp: 0,
+        maxHp: 20,
+      }),
+      character({
+        id: 'next-character',
+        currentHp: 20,
+        maxHp: 20,
+      }),
+    ]
+    const economy = {
+      ...createDnd5eTurnEconomyCounts('combat:1:owlbear'),
+      movement: { current: 30, max: 30 },
+    }
+
+    const reachable = planDnd5eMonsterTurn(
+      map([owlbear, defeated, nextTarget]),
+      owlbear,
+      characters,
+      {
+        requiredActionId: 'claws',
+        requiredTargetId: nextTarget.id,
+        movementBudgetFeet: 30,
+        turnEconomy: economy,
+      },
+    )
+    expect(reachable).toMatchObject({
+      attacked: true,
+      moved: true,
+      actionIndex: clawsIndex,
+      targetTokenId: nextTarget.id,
+    })
+
+    const unreachable = planDnd5eMonsterTurn(
+      map([owlbear, defeated, { ...nextTarget, x: 100 }]),
+      owlbear,
+      characters,
+      {
+        requiredActionId: 'claws',
+        requiredTargetId: nextTarget.id,
+        movementBudgetFeet: 5,
+        turnEconomy: {
+          ...economy,
+          movement: { current: 5, max: 30 },
+        },
+      },
+    )
+    expect(unreachable.attacked).toBe(false)
+  })
+
+  it('excludes targets forbidden by an earlier Multiattack occurrence', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:tyrannosaurus-rex')!
+    const tailIndex = monster.actions.findIndex((action) =>
+      action.id === 'tail')
+    const tyrannosaurus = token({
+      id: 'tyrannosaurus',
+      label: 'Tyrannosaurus',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const firstTarget = token({
+      id: 'first-target',
+      label: 'First hero',
+      type: 'player',
+      characterId: 'first-character',
+      x: 10,
+      hp: 20,
+      maxHp: 20,
+    })
+    const secondTarget = token({
+      id: 'second-target',
+      label: 'Second hero',
+      type: 'player',
+      characterId: 'second-character',
+      x: 20,
+      hp: 20,
+      maxHp: 20,
+    })
+    const plan = planDnd5eMonsterTurn(
+      map([tyrannosaurus, firstTarget, secondTarget]),
+      tyrannosaurus,
+      [
+        character({ id: 'first-character' }),
+        character({ id: 'second-character' }),
+      ],
+      {
+        requiredActionId: 'tail',
+        excludedTargetIds: [firstTarget.id],
+        movementBudgetFeet: 30,
+        turnEconomy:
+          createDnd5eTurnEconomyCounts('combat:1:tyrannosaurus'),
+      },
+    )
+    expect(plan).toMatchObject({
+      attacked: true,
+      actionIndex: tailIndex,
+      targetTokenId: secondTarget.id,
+    })
+  })
+
   it('allocates the Tyrannosaurus Bite and Tail to different targets', () => {
     const monster = getDnd5eSrdMonster('srd-5.1:tyrannosaurus-rex')!
     const multiattackIndex = monster.actions.findIndex((action) =>
@@ -752,6 +884,64 @@ describe('SRD monster 5e turn planner', () => {
       saveDc: 16,
       damage: { diceCount: 12, diceSides: 10, damageType: 'lightning' },
     })
+  })
+
+  it('selects Ankheg Acid Spray for two aligned hostiles when recharge is ready', () => {
+    const ankheg = token({
+      id: 'ankheg',
+      label: 'Ankheg',
+      poolId: 'srd-5.1:ankheg',
+      x: 20,
+      y: 50,
+      size: 2,
+      hp: 39,
+      maxHp: 39,
+      dnd5eCombatState: {
+        monsterRechargeReadyByActionId: { 'acid-spray': true },
+      },
+    })
+    const first = token({
+      id: 'first',
+      label: 'First Hero',
+      type: 'player',
+      characterId: 'first-character',
+      x: 55,
+      y: 45,
+      hp: 100,
+      maxHp: 100,
+    })
+    const second = token({
+      id: 'second',
+      label: 'Second Hero',
+      type: 'player',
+      characterId: 'second-character',
+      x: 85,
+      y: 45,
+      hp: 100,
+      maxHp: 100,
+    })
+
+    const plan = planDnd5eMonsterTurn(
+      map([ankheg, first, second]),
+      ankheg,
+      [
+        character({ id: 'first-character', currentHp: 100, maxHp: 100 }),
+        character({ id: 'second-character', currentHp: 100, maxHp: 100 }),
+      ],
+    )
+
+    expect(plan).toMatchObject({
+      attacked: false,
+      attackerTokenId: ankheg.id,
+      areaAction: {
+        actionId: 'acid-spray',
+        targetTokenIds: [first.id, second.id],
+        saveAbility: 'dex',
+        saveDc: 13,
+        damage: { diceCount: 3, diceSides: 6, damageType: 'acid' },
+      },
+    })
+    expect(plan.decision?.providerId).toBe('dnd5e:deterministic-tactical-v3')
   })
 
   it('can freely release an Ankheg Bite grapple before selecting Acid Spray', () => {
@@ -2290,6 +2480,176 @@ describe('SRD monster 5e turn planner', () => {
     expect(plan).toMatchObject({ moved: true, attacked: true, attackerTokenId: wolf.id, targetTokenId: hero.id })
     expect(plan.newPosition?.x).toBeGreaterThan(wolf.x)
     expect(plan.newPosition?.y).not.toBe(wolf.y)
+  })
+
+  it('keeps the selected candidate identical to per-destination A* on complex terrain', () => {
+    const barbedDevil = token({
+      id: 'barbed-devil', label: 'Barbed Devil',
+      poolId: 'srd-5.1:barbed-devil', x: 15, y: 85,
+      hp: 110, maxHp: 110,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player',
+      characterId: 'hero', x: 175, y: 15, hp: 40, maxHp: 40,
+    })
+    const battleMap = map([barbedDevil, hero])
+    const state = createEmptyMapGeometry(battleMap.id, 1)
+    state.walls.push({
+      id: 'divider', kind: 'wall', label: 'Divider',
+      points: [{ x: 95, y: 0 }, { x: 95, y: 60 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    state.obstacles.push({
+      id: 'mud', kind: 'obstacle', label: 'Mud',
+      points: [
+        { x: 40, y: 60 }, { x: 150, y: 60 },
+        { x: 150, y: 100 }, { x: 40, y: 100 },
+      ],
+      blocksVision: false, blocksMovement: false,
+      blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0,
+      terrainCostMultiplier: 2, traversal: 'ground', createdAt: 1,
+    })
+    setMapGeometryRuntime([state])
+
+    const sharedTree = planDnd5eMonsterTurn(
+      battleMap,
+      barbedDevil,
+      [character({ currentHp: 40, maxHp: 40 })],
+    )
+    const perDestination = planDnd5eMonsterTurn(
+      battleMap,
+      barbedDevil,
+      [character({ currentHp: 40, maxHp: 40 })],
+      {
+        simulationOptimization: {
+          candidateRouteSearch: 'per-destination',
+        },
+      },
+    )
+
+    expect(sharedTree).toEqual(perDestination)
+    expect(sharedTree.decision?.candidateCount).toBeGreaterThan(100)
+  })
+
+  it('keeps same-cell flight elevation and movement cost identical to per-destination A*', () => {
+    const bat = token({
+      id: 'bat', label: 'Bat', poolId: 'srd-5.1:bat',
+      x: 5, y: 5, elevationFeet: 0, hp: 1, maxHp: 1,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player',
+      characterId: 'hero', x: 15, y: 5, hp: 20, maxHp: 20,
+    })
+    const battleMap = map([bat, hero])
+    const sharedTree = planDnd5eMonsterTurn(battleMap, bat, [character()])
+    const perDestination = planDnd5eMonsterTurn(
+      battleMap,
+      bat,
+      [character()],
+      {
+        simulationOptimization: {
+          candidateRouteSearch: 'per-destination',
+        },
+      },
+    )
+
+    expect(sharedTree).toEqual(perDestination)
+    expect(sharedTree).toMatchObject({
+      moved: true,
+      attacked: true,
+      newPosition: { x: bat.x, y: bat.y },
+      newElevationFeet: 5,
+      decision: { metrics: { movementFeet: 5 } },
+    })
+  })
+
+  it('falls back to per-destination A* when the shared route tree is truncated', () => {
+    const barbedDevil = token({
+      id: 'barbed-devil', label: 'Barbed Devil',
+      poolId: 'srd-5.1:barbed-devil', x: 95, y: 45,
+      hp: 110, maxHp: 110,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player',
+      characterId: 'hero', x: 175, y: 45, hp: 40, maxHp: 40,
+    })
+    const battleMap = map([barbedDevil, hero])
+    const sharedTree = planDnd5eMonsterTurn(
+      battleMap,
+      barbedDevil,
+      [character({ currentHp: 40, maxHp: 40 })],
+      {
+        simulationOptimization: {
+          candidateRouteTreeMaximumVisited: 100,
+        },
+      },
+    )
+    const perDestination = planDnd5eMonsterTurn(
+      battleMap,
+      barbedDevil,
+      [character({ currentHp: 40, maxHp: 40 })],
+      {
+        simulationOptimization: {
+          candidateRouteSearch: 'per-destination',
+          candidateRouteTreeMaximumVisited: 100,
+        },
+      },
+    )
+
+    expect(sharedTree).toEqual(perDestination)
+    expect(sharedTree.decision?.candidateCount).toBeGreaterThan(100)
+  })
+
+  it('preserves the exact candidate set when closed doors can be opened', () => {
+    const barbedDevil = token({
+      id: 'barbed-devil', label: 'Barbed Devil',
+      poolId: 'srd-5.1:barbed-devil', x: 15, y: 45,
+      hp: 110, maxHp: 110,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player',
+      characterId: 'hero', x: 175, y: 45, hp: 40, maxHp: 40,
+    })
+    const battleMap = map([barbedDevil, hero])
+    const state = createEmptyMapGeometry(battleMap.id, 1)
+    state.doors.push(
+      {
+        id: 'door-1', kind: 'door', label: 'Door 1',
+        points: [{ x: 65, y: 0 }, { x: 65, y: 100 }],
+        state: 'closed', secret: false,
+        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      },
+      {
+        id: 'door-2', kind: 'door', label: 'Door 2',
+        points: [{ x: 125, y: 0 }, { x: 125, y: 100 }],
+        state: 'closed', secret: false,
+        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      },
+    )
+    setMapGeometryRuntime([state])
+    const sharedTree = planDnd5eMonsterTurn(
+      battleMap,
+      barbedDevil,
+      [character({ currentHp: 40, maxHp: 40 })],
+    )
+    const perDestination = planDnd5eMonsterTurn(
+      battleMap,
+      barbedDevil,
+      [character({ currentHp: 40, maxHp: 40 })],
+      {
+        simulationOptimization: {
+          candidateRouteSearch: 'per-destination',
+        },
+      },
+    )
+
+    expect(sharedTree).toEqual(perDestination)
+    expect(sharedTree.decision?.candidateCount)
+      .toBe(perDestination.decision?.candidateCount)
   })
 
   it('uses authoritative Dodge when an enclosed monster has no legal attack or useful movement', () => {

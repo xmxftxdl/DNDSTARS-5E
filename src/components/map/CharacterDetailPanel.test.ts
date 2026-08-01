@@ -4,6 +4,10 @@ import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import CharacterDetailPanel from './CharacterDetailPanel'
+import {
+  closeCharacterDetailOnPrimaryPointerDown,
+  shouldCloseCharacterDetailForKey,
+} from './characterDetailClose'
 import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
 
 const token: Token = {
@@ -99,5 +103,52 @@ describe('CharacterDetailPanel', () => {
 
     expect(markup).toContain('value="79"')
     expect(markup).toContain('value="94"')
+  })
+
+  it('角色降至 0 HP 后仍保留独立的可访问关闭入口', () => {
+    const defeatedCharacter = {
+      ...character,
+      currentHp: 0,
+    } as Character
+    const markup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
+      token: { ...token, hp: 0, maxHp: character.maxHp },
+      character: defeatedCharacter,
+      onSetHitPoints: () => undefined,
+      onClose: () => undefined,
+      isDM: true,
+    }))
+
+    expect(markup).toContain('data-defeated="true"')
+    expect(markup).toContain('z-[70]')
+    expect(markup).toContain('data-testid="close-character-detail"')
+    expect(markup).toContain('aria-label="关闭角色详情"')
+  })
+
+  it('在主指针按下时先阻止地图事件，再立即关闭死亡角色详情', () => {
+    const calls: string[] = []
+    const handled = closeCharacterDetailOnPrimaryPointerDown({
+      isPrimary: true,
+      button: 0,
+      preventDefault: () => calls.push('prevent-default'),
+      stopPropagation: () => calls.push('stop-propagation'),
+    }, () => calls.push('close'))
+
+    expect(handled).toBe(true)
+    expect(calls).toEqual(['prevent-default', 'stop-propagation', 'close'])
+  })
+
+  it('忽略副指针并保留 Escape 键盘关闭路径', () => {
+    let closed = false
+    const handled = closeCharacterDetailOnPrimaryPointerDown({
+      isPrimary: false,
+      button: 0,
+      preventDefault: () => undefined,
+      stopPropagation: () => undefined,
+    }, () => { closed = true })
+
+    expect(handled).toBe(false)
+    expect(closed).toBe(false)
+    expect(shouldCloseCharacterDetailForKey('Escape')).toBe(true)
+    expect(shouldCloseCharacterDetailForKey('Enter')).toBe(false)
   })
 })

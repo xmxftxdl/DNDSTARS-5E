@@ -29,10 +29,12 @@ import {
   resetPendingLocalCharacterHitPointEditMemoryForTest,
   resetPendingLocalAdvancementsMemoryForTest,
   shouldApplySharedCharactersSnapshot,
+  useCharacterStore,
 } from './characters'
 import {
   clearPendingLocalTokenHitPointEditsForTest,
   createLatestMapsPublishPump,
+  committedTokenPatchFromSharedMaps,
   markPendingLocalTokenHitPointEdit,
   mergePendingLocalTokenHitPointEdits,
   mergePlayerTokenCombatFields,
@@ -41,6 +43,7 @@ import {
   saveMapsStateWithTokenPatchRetry,
   type BattleMap,
   type Token,
+  useMapStore,
 } from './maps'
 import type { Character } from '../types/character'
 import { dnd5eInventoryItemTemplate } from '../rulesets/dnd5e/items'
@@ -255,6 +258,25 @@ describe('pending local character-sheet hit point edits', () => {
       [char({ currentHp: 8 })],
       1_003,
     )[0].currentHp).toBe(8)
+  })
+
+  it('keeps a room-authority HP update protected during its server save window', () => {
+    useCharacterStore.setState({
+      characters: [char({ currentHp: 20, maxHp: 40 })],
+      selectedId: 'hero',
+    })
+    useCharacterStore.getState().applyAuthorityUpdate(
+      'hero',
+      { currentHp: 21, maxHp: 40 },
+      { protectHitPointsUntilAcknowledged: true },
+    )
+
+    expect(mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 20, maxHp: 40 })],
+    )[0].currentHp).toBe(21)
+    expect(mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 21, maxHp: 40 })],
+    )[0].currentHp).toBe(21)
   })
 
   it('does not compare wall clocks from different clients while awaiting acknowledgement', () => {
@@ -676,6 +698,35 @@ describe('地图 Token HP 本地写入竞争保护', () => {
     expect(laterAuthority[0].tokens[0].hp).toBe(2)
   })
 
+  it('在房间权威保存完成前保护怪物 HP，不接受旧地图快照回滚', () => {
+    useMapStore.setState({
+      maps: [map({
+        id: 'map-1',
+        tokens: [token({ id: 'enemy', type: 'enemy', hp: 20, maxHp: 40 })],
+      })],
+      selectedId: 'map-1',
+    })
+    useMapStore.getState().applyAuthorityTokenUpdate(
+      'map-1',
+      'enemy',
+      { hp: 21, maxHp: 40 },
+      { protectHitPointsUntilAcknowledged: true },
+    )
+
+    expect(mergePendingLocalTokenHitPointEdits([
+      map({
+        id: 'map-1',
+        tokens: [token({ id: 'enemy', type: 'enemy', hp: 20, maxHp: 40 })],
+      }),
+    ])[0].tokens[0].hp).toBe(21)
+    expect(mergePendingLocalTokenHitPointEdits([
+      map({
+        id: 'map-1',
+        tokens: [token({ id: 'enemy', type: 'enemy', hp: 21, maxHp: 40 })],
+      }),
+    ])[0].tokens[0].hp).toBe(21)
+  })
+
   it('刷新后仍保留保护，并且不覆盖其他地图或 Token', () => {
     const values = new Map<string, string>()
     vi.stubGlobal('window', { localStorage: {
@@ -743,6 +794,33 @@ describe('地图 Token HP 本地写入竞争保护', () => {
 })
 
 describe('地图 Token 权威补丁重试', () => {
+  it('从胜出的 CAS 载荷重建提交字段，避免释放预览时暴露旧坐标', () => {
+    const committed = committedTokenPatchFromSharedMaps(
+      [map({
+        id: 'map-1',
+        tokens: [token({
+          id: 'monster',
+          x: 575,
+          y: 325,
+          elevationFeet: 15,
+          hp: 9,
+        }),
+        ],
+      })],
+      'map-1',
+      'monster',
+      { x: 575, y: 325, elevationFeet: 15, movementAnimation: undefined },
+    )
+
+    expect(committed).toEqual({
+      x: 575,
+      y: 325,
+      elevationFeet: 15,
+      movementAnimation: undefined,
+    })
+    expect(committed).not.toHaveProperty('hp')
+  })
+
   it('CAS 冲突后保留服务端其它 Token 的移动并重放当前移动', async () => {
     const writes: Array<{ maps: BattleMap[]; selectedId: string | null; updatedAt?: number }> = []
     const save = vi.fn(async (payload) => {
@@ -821,6 +899,29 @@ describe('地图 Token 权威补丁重试', () => {
 })
 
 describe('地图共享发布 latest-wins 泵', () => {
+  it('排队旧快照不会在外部权威提交后覆盖最新 Store 状态', async () => {
+    let releaseFirstSave!: () => void
+    const firstSaveBlocked = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    const persisted: Array<{ x: number }> = []
+    let latest = { x: 10 }
+    const persist = vi.fn(async (value: { x: number }) => {
+      persisted.push(value)
+      if (persisted.length === 1) await firstSaveBlocked
+    })
+    const publish = createLatestMapsPublishPump(persist, () => latest)
+
+    const first = publish({ x: 10 })
+    const staleTrailing = publish({ x: 20 })
+    latest = { x: 30 }
+
+    releaseFirstSave()
+    await Promise.all([first, staleTrailing])
+
+    expect(persisted).toEqual([{ x: 10 }, { x: 30 }])
+  })
+
   it('连续 20 次 HP 更新最多保留一笔处理中和一笔最新待处理保存', async () => {
     let releaseFirstSave!: () => void
     const firstSaveBlocked = new Promise<void>((resolve) => {

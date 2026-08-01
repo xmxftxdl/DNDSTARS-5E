@@ -3195,6 +3195,7 @@ describe('room privacy projections and event channel ACLs', () => {
       mapId: 'map',
       transactionId: 'fighter-longbow-1',
       sourceTokenId: 'fighter',
+      targetTokenId: 'goblin',
       actorName: '战士',
       attackName: '长弓',
       attackKind: 'ranged',

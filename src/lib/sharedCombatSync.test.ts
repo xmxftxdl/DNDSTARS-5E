@@ -5,6 +5,7 @@ import {
   reconcileDnd5eTurnEconomy,
   resolveSharedCombatStateApply,
 } from './sharedCombatSync'
+import { createDnd5eMonsterTurnProgress } from './monsterTurnProgress'
 
 function makeState(patch: Partial<SharedCombatState> = {}): SharedCombatState {
   return {
@@ -82,7 +83,47 @@ describe('shared combat sync', () => {
         mode: 'automatic',
         pauseRequested: false,
       })
+      expect(decision.flowPause).toBeUndefined()
     }
+  })
+
+  it('projects a valid room-wide DM adjudication pause and rejects malformed pause metadata', () => {
+    const resolve = (flowPause: SharedCombatState['flowPause']) => resolveSharedCombatStateApply({
+      state: makeState({ flowPause }),
+      mapId: 'map-1',
+      validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: '',
+      lastAppliedUpdatedAt: 0,
+      lastSnapshot: '',
+      isDm: false,
+    })
+    const valid = resolve({
+      schemaVersion: 1,
+      reason: 'dm-adjudication',
+      phase: 'awaiting-resume',
+      interruptId: 'dm-adjudication:table-result-50',
+      label: '施法后随机表结果 50',
+      pausedAt: 1_000,
+      resolvedAt: 1_100,
+    })
+    expect(valid.status).toBe('apply')
+    if (valid.status === 'apply') {
+      expect(valid.flowPause).toMatchObject({
+        reason: 'dm-adjudication',
+        phase: 'awaiting-resume',
+        interruptId: 'dm-adjudication:table-result-50',
+      })
+    }
+
+    const malformed = resolve({
+      schemaVersion: 1,
+      reason: 'dm-adjudication',
+      phase: 'paused',
+      pausedAt: 1_000,
+    } as SharedCombatState['flowPause'])
+    expect(malformed.status).toBe('apply')
+    if (malformed.status === 'apply') expect(malformed.flowPause).toBeUndefined()
   })
 
   it('keeps a requested takeover automatic until the current event settles', () => {
@@ -114,6 +155,55 @@ describe('shared combat sync', () => {
         controlledTokenId: 'enemy-token',
       })
     }
+  })
+
+  it('projects only a live progress lease owned by the current initiative slot', () => {
+    const progress = createDnd5eMonsterTurnProgress({
+      identity: {
+        combatId: 'combat-1',
+        round: 2,
+        initiativeIndex: 1,
+        initiativeSlotId: 'enemy-token',
+        tokenId: 'enemy-token',
+      },
+      requestId: 'end-turn-1',
+      now: 1_000,
+    })
+    const state = makeState({ initiativeIndex: 1, monsterTurnProgress: progress })
+    const resolve = (now: number, patch: Partial<SharedCombatState> = {}) =>
+      resolveSharedCombatStateApply({
+        state: { ...state, ...patch },
+        mapId: 'map-1',
+        validTokenIds: ['hero-token', 'enemy-token'],
+        currentCombatId: 'combat-1',
+        lastAppliedCombatId: '',
+        lastAppliedUpdatedAt: 0,
+        lastSnapshot: '',
+        isDm: false,
+        now,
+      })
+
+    const current = resolve(2_000)
+    expect(current.status).toBe('apply')
+    if (current.status === 'apply') expect(current.monsterTurnProgress).toEqual(progress)
+
+    const wrongTurn = resolve(2_000, { initiativeIndex: 0 })
+    expect(wrongTurn.status).toBe('apply')
+    if (wrongTurn.status === 'apply') expect(wrongTurn.monsterTurnProgress).toBeUndefined()
+
+    const expired = resolveSharedCombatStateApply({
+      state,
+      mapId: 'map-1',
+      validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: 'combat-1',
+      lastAppliedUpdatedAt: state.updatedAt,
+      lastSnapshot: current.status === 'apply' ? current.snapshot : '',
+      isDm: false,
+      now: progress.expiresAt,
+    })
+    expect(expired.status).toBe('apply')
+    if (expired.status === 'apply') expect(expired.monsterTurnProgress).toBeUndefined()
   })
 
   it('keeps player initiative slots when a projected edge token is temporarily absent', () => {

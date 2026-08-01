@@ -10,7 +10,8 @@ interface D20RollConfirmationOverlayProps {
   onContribute: (input: {
     featureId: string
     featureLabel: string
-    replacementValue: number
+    replacementValue?: number
+    direction?: 'add' | 'subtract'
   }) => void | Promise<void>
   onContinue: (acceptedContributionId?: string, dmOverrideValue?: number) => void | Promise<void>
 }
@@ -48,22 +49,28 @@ export default function D20RollConfirmationOverlay({
     ? selectedContributionId
     : ''
   const selectedContribution = contributions.find((entry) => entry.id === effectiveSelectedContributionId)
+  const selectedFeature = ownEligibleFeatures.find((entry) => entry.featureId === selectedFeatureId)
+  const selectedFeatureAdjusts = selectedFeature?.modifierKind === 'adjust-d20'
   const parsedDmOverride = Number(dmOverrideValue)
   const dmOverrideValid = Number.isInteger(parsedDmOverride) && parsedDmOverride >= 1 && parsedDmOverride <= 20
   const finalValue = isSecretDmRoll && dmOverrideValid
     ? parsedDmOverride
-    : selectedContribution?.replacementValue ?? interrupt.payload.originalValue
+    : selectedContribution?.kind === 'replace-d20'
+      ? selectedContribution.replacementValue
+      : interrupt.payload.originalValue
 
   const submitContribution = async () => {
     const parsedValue = Number(replacementValue)
-    const selectedFeature = ownEligibleFeatures.find((entry) => entry.featureId === selectedFeatureId)
-    if (!selectedFeature || !Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 20) return
+    if (!selectedFeature) return
+    if (!selectedFeatureAdjusts && (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 20)) return
     setSubmitting(true)
     try {
       await onContribute({
         featureId: selectedFeature.featureId,
         featureLabel: selectedFeature.featureLabel,
-        replacementValue: parsedValue,
+        ...(selectedFeatureAdjusts
+          ? { direction: selectedFeature.direction }
+          : { replacementValue: parsedValue }),
       })
     } finally {
       setSubmitting(false)
@@ -76,7 +83,7 @@ export default function D20RollConfirmationOverlay({
       data-testid="d20-roll-confirmation"
       role="dialog"
       aria-modal="true"
-      aria-label={isSecretDmRoll ? 'DM 暗骰确认' : '敌方 d20 结果修改'}
+      aria-label={isSecretDmRoll ? 'DM 暗骰确认' : 'd20 结果调整'}
     >
       <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-violet-300/25 bg-void-950 shadow-[0_28px_100px_rgba(0,0,0,0.7)]">
         <div className="border-b border-white/10 bg-gradient-to-r from-violet-500/20 via-indigo-500/10 to-transparent px-6 py-5">
@@ -86,7 +93,7 @@ export default function D20RollConfirmationOverlay({
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">
-                {isSecretDmRoll ? '暗骰待 DM 确认' : '敌方成功结果 · 反应窗口'}
+                {isSecretDmRoll ? '暗骰待 DM 确认' : 'd20 结果 · 反应窗口'}
               </p>
               <h2 className="mt-1 truncate text-xl font-bold text-slate-50">{interrupt.payload.label}</h2>
               {interrupt.payload.targetName && (
@@ -110,8 +117,8 @@ export default function D20RollConfirmationOverlay({
               : isDM
                 ? '只有拥有已声明改骰特性的玩家可以提交结果；DM 可采用一项声明，或保留原始骰值继续。'
                 : ownEligibleFeatures.length > 0
-                  ? '你拥有可改变敌方 d20 的特性。若不使用，无需操作，DM 可以直接继续。'
-                  : '你没有可用于本次敌方 d20 的特性，请等待 DM 继续结算。'}
+                  ? '你拥有可改变本次 d20 的特性。若不使用，无需操作，DM 可以直接继续。'
+                  : '你没有可用于本次 d20 的特性，请等待 DM 继续结算。'}
           </div>
 
           {isDM ? (
@@ -161,10 +168,16 @@ export default function D20RollConfirmationOverlay({
                         <p className="truncate font-semibold text-slate-100">
                           {entry.characterName} · {entry.featureLabel}
                         </p>
-                        <p className="text-xs text-slate-500">声明将 d20 替换为 {entry.replacementValue}</p>
+                        <p className="text-xs text-slate-500">
+                          {entry.kind === 'adjust-d20'
+                            ? `声明${entry.direction === 'add' ? '增加' : '降低'}本次总值；调整骰由 Host 掷`
+                            : `声明将 d20 替换为 ${entry.replacementValue}`}
+                        </p>
                       </div>
                       <span className="text-2xl font-black tabular-nums text-emerald-200">
-                        {entry.replacementValue}
+                        {entry.kind === 'adjust-d20'
+                          ? entry.direction === 'add' ? '+' : '−'
+                          : entry.replacementValue}
                       </span>
                     </label>
                   ))}
@@ -196,7 +209,10 @@ export default function D20RollConfirmationOverlay({
               </p>
               {ownContribution && (
                 <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">
-                  已提交：{ownContribution.featureLabel}，替换为 {ownContribution.replacementValue}。
+                  已提交：{ownContribution.featureLabel}，
+                  {ownContribution.kind === 'adjust-d20'
+                    ? `等待 Host 掷骰并${ownContribution.direction === 'add' ? '增加' : '降低'}本次总值。`
+                    : `替换为 ${ownContribution.replacementValue}。`}
                   再次提交会更新本次声明。
                 </div>
               )}
@@ -215,21 +231,29 @@ export default function D20RollConfirmationOverlay({
                     ))}
                   </select>
                 </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-slate-400">替换点数</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={replacementValue}
-                    onChange={(event) => setReplacementValue(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60"
-                  />
-                </label>
+                {selectedFeatureAdjusts ? (
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-300">
+                    Host 掷 d{selectedFeature?.dieSides}，并
+                    {selectedFeature?.direction === 'add' ? '增加' : '降低'}总值
+                  </div>
+                ) : (
+                  <label className="space-y-1">
+                    <span className="text-xs text-slate-400">替换点数</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={replacementValue}
+                      onChange={(event) => setReplacementValue(event.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60"
+                    />
+                  </label>
+                )}
               </div>
               <button
                 type="button"
-                disabled={submitting || !selectedFeatureId || Number(replacementValue) < 1 || Number(replacementValue) > 20}
+                disabled={submitting || !selectedFeatureId || (!selectedFeatureAdjusts &&
+                  (Number(replacementValue) < 1 || Number(replacementValue) > 20))}
                 onClick={() => void submitContribution()}
                 className="w-full rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-3 font-semibold text-violet-100 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
                 data-testid="d20-roll-contribute"

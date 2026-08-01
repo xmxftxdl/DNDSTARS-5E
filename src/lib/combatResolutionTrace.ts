@@ -42,13 +42,16 @@ export function formatDnd5eAttackResolutionTrace(input: {
   critical?: boolean
   reactionDetails?: readonly string[]
 }): string[] {
-  const selected = input.d20Second == null
+  const rolledFaces = input.d20Second == null
     ? `${input.d20}`
+    : `${input.d20} / ${input.d20Second}`
+  const selected = input.d20Second == null
+    ? input.d20
     : input.mode === 'advantage'
-      ? `${input.d20} / ${input.d20Second} → ${Math.max(input.d20, input.d20Second)}`
+      ? Math.max(input.d20, input.d20Second)
       : input.mode === 'disadvantage'
-        ? `${input.d20} / ${input.d20Second} → ${Math.min(input.d20, input.d20Second)}`
-        : `${input.d20} / ${input.d20Second}`
+        ? Math.min(input.d20, input.d20Second)
+        : input.d20
   const elevationDetail = input.actorElevationFeet === input.targetElevationFeet
     ? `双方海拔均为 ${input.actorElevationFeet} 尺`
     : `${input.actorName}海拔 ${input.actorElevationFeet} 尺；${input.targetName}海拔 ${input.targetElevationFeet} 尺`
@@ -56,7 +59,7 @@ export function formatDnd5eAttackResolutionTrace(input: {
   return [
     `攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 ${input.distanceFeet} 尺（${input.rangeLabel}）。`,
     `空间判定 · ${elevationDetail}；${input.cover ? `掩护：${COVER_LABELS[input.cover]}${input.coverOverriddenByDm ? '（DM 覆盖）' : ''}。` : '掩护：已由 Headless 计入目标 AC。'}`,
-    `攻击骰 · ${rollModeLabel(input.mode)}；骰面 ${selected}；调整值 ${input.modifier >= 0 ? '+' : ''}${input.modifier}${modifierDetail ? `（${modifierDetail}）` : ''}。`,
+    `攻击骰 · ${rollModeLabel(input.mode)}；各骰面 ${rolledFaces}；最终采用 ${selected}；调整值 ${input.modifier >= 0 ? '+' : ''}${input.modifier}${modifierDetail ? `（${modifierDetail}）` : ''}。`,
     ...(input.reactionDetails ?? []).filter(Boolean).map((detail) => `反应资格/消耗 · ${detail}`),
     `结果 · ${input.total} vs AC ${input.targetArmorClass}：${input.critical ? '重击' : input.hit ? '命中' : '未命中'}。`,
   ]

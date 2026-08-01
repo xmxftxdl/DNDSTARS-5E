@@ -22,6 +22,7 @@ import {
   dnd5eStandardConditionId,
 } from './conditions'
 import { resolveDnd5eRollMode, type Dnd5eRollModeResolution } from './rollMode'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 
 export interface Dnd5eDefensiveCreature {
   level: number
@@ -32,6 +33,7 @@ export interface Dnd5eDefensiveCreature {
   subclassIds?: Partial<Record<Dnd5eClassId, string>>
   classSelections: Record<string, string[]>
   classSelectionsByClass?: Partial<Record<Dnd5eClassId, Record<string, string[]>>>
+  pluginFeatureIds?: readonly string[]
   countercharmSourceIds?: readonly string[]
   classState: {
     activeEffects?: readonly Dnd5eActiveEffectInstance[]
@@ -46,6 +48,10 @@ export interface Dnd5eDefensiveCreature {
     holyNimbusRoundsRemaining?: number
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
+    nextD20Advantage?: {
+      featureId: string
+      rollKinds: readonly ('attack' | 'ability-check' | 'saving-throw')[]
+    }
     monsterMechanicRollModifiers?: readonly {
       roll: 'attack' | 'damage' | 'saving-throw'
       mode: 'bonus' | 'advantage' | 'disadvantage'
@@ -135,6 +141,10 @@ const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason,
   'monster-mechanic-disadvantage': {
     label: '怪物特性',
     detail: '当前怪物特性使该豁免具有劣势。',
+  },
+  'next-d20-advantage': {
+    label: '预激活优势',
+    detail: '玩家此前已主动准备一次优势，本次豁免会消耗该状态。',
   },
 }
 
@@ -240,6 +250,10 @@ export function dnd5eSavingThrowModeExplanation(
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: dodgeDexterity, reason: 'dodge' },
       { active: strengthEffect.advantage, reason: 'active-effect-strength-advantage' },
+      {
+        active: dnd5eNextD20AdvantageApplies(creature, 'saving-throw'),
+        reason: 'next-d20-advantage',
+      },
       {
         active: mechanicModifiers.some((entry) => entry.mode === 'advantage'),
         reason: 'monster-mechanic-advantage',

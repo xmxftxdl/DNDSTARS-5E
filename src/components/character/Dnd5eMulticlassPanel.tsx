@@ -1,21 +1,28 @@
 import { Plus } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { Character } from '../../types/character'
 import {
   DND5E_MULTICLASS_PREREQUISITES,
-  DND5E_SRD_CLASS_DEFINITIONS,
+  availableDnd5eClassDefinitions,
   dnd5eClassDefinition,
   dnd5eMeetsMulticlassPrerequisite,
   normalizeDnd5eClassLevels,
   validateDnd5eMulticlassLevelGain,
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
+import { declarativeClassMulticlassPrerequisitesV1 } from '../../rulesets/dnd5e/declarativeClass'
 import { ABILITIES } from '../../lib/dnd'
 
 const ABILITY_LABELS = Object.fromEntries(ABILITIES.map((ability) => [ability.key, ability.label]))
 
 function prerequisiteLabel(classId: Dnd5eClassId): string {
-  return DND5E_MULTICLASS_PREREQUISITES[classId]
+  const core = DND5E_MULTICLASS_PREREQUISITES[classId]
+  if (!core) {
+    return (declarativeClassMulticlassPrerequisitesV1(classId) ?? [])
+      .map((group) => group.oneOf.map((ability) => `${ABILITY_LABELS[ability]} ${group.minimum}`).join('或'))
+      .join('，') || '未声明（禁止兼职）'
+  }
+  return core
     .map((alternatives) => alternatives.map((ability) => `${ABILITY_LABELS[ability]} 13`).join('或'))
     .join('，')
 }
@@ -40,11 +47,12 @@ export default function Dnd5eMulticlassPanel({
   readOnly?: boolean
 }) {
   const levels = normalizeDnd5eClassLevels(character)
-  const unowned = DND5E_SRD_CLASS_DEFINITIONS.filter((definition) => !levels[definition.id])
+  const classDefinitions = availableDnd5eClassDefinitions()
+  const unowned = classDefinitions.filter((definition) => !levels[definition.id])
   const [targetClassId, setTargetClassId] = useState<Dnd5eClassId>(unowned[0]?.id ?? 'fighter')
   const targetDefinition = dnd5eClassDefinition(targetClassId)
   const validation = validateDnd5eMulticlassLevelGain(character, targetClassId)
-  const owned = useMemo(() => DND5E_SRD_CLASS_DEFINITIONS.filter((definition) => (levels[definition.id] ?? 0) > 0), [levels])
+  const owned = classDefinitions.filter((definition) => (levels[definition.id] ?? 0) > 0)
 
   return <section className="glass rounded-2xl border border-violet-400/15 p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -72,7 +80,7 @@ export default function Dnd5eMulticlassPanel({
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-slate-500">下一等级加入</span>
           <select value={targetClassId} onChange={(event) => setTargetClassId(event.target.value as Dnd5eClassId)} className="rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200">
-            {DND5E_SRD_CLASS_DEFINITIONS.map((definition) => <option key={definition.id} value={definition.id}>{definition.name}{levels[definition.id] ? `（当前 ${levels[definition.id]}级）` : ''}</option>)}
+            {classDefinitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.name}{levels[definition.id] ? `（当前 ${levels[definition.id]}级）` : ''}</option>)}
           </select>
         </label>
         <button

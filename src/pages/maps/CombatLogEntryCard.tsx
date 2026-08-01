@@ -86,16 +86,14 @@ export default function CombatLogEntryCard({
           ? 'bg-amber-500/10 text-amber-100'
           : 'bg-white/[0.04] text-slate-200'
   const style = {
-    '--combat-log-subject-color': subject.borderColor,
-    borderColor: subject.borderColor,
-    boxShadow: `inset 3px 0 0 ${subject.borderColor}`,
+    '--initiative-turn-color': subject.borderColor,
   } as CSSProperties
 
   return (
     <article
       data-testid={`combat-log-entry-${entry.id}`}
       data-actor-token-id={entry.actorTokenId}
-      className={`combat-log-entry-card rounded-lg border px-2 py-1.5 ${tone}`}
+      className={`initiative-active-ring combat-log-flow-only relative rounded-lg border-2 px-2 py-1.5 ${tone}`}
       style={style}
     >
       <div className="flex items-start gap-2">

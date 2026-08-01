@@ -15,9 +15,9 @@ import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   DND5E_2014_ALIGNMENT_OPTIONS,
   DND5E_2014_BACKGROUND_OPTIONS,
-  DND5E_2014_CLASS_OPTIONS,
   DND5E_2014_RACE_OPTIONS,
 } from '../../rulesets/dnd5e/characterOptions'
+import { availableDnd5eClassDefinitions } from '../../rulesets/dnd5e/classes'
 import {
   applyDnd5eRacialAbilityBonuses,
   DND5E_CORE_POINT_BUY_RULE,
@@ -204,7 +204,9 @@ function ClassFields({
           onChange={(event) => onClassChange(event.target.value)}
           className="w-full rounded-xl border border-white/10 bg-void-900/80 px-4 py-3 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
         >
-          {DND5E_2014_CLASS_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+          {availableDnd5eClassDefinitions().map((definition) => (
+            <option key={definition.id} value={definition.name}>{definition.name}</option>
+          ))}
         </select>
       </label>
       <div className="rounded-2xl border border-violet-300/15 bg-violet-500/[0.05] p-4 text-xs leading-5 text-slate-400">

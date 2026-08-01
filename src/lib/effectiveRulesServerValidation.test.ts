@@ -38,4 +38,27 @@ describe('server combat rules boundary', () => {
       },
     })).toEqual({ ok: false, reason: 'invalid-monster-control' })
   })
+
+  it('accepts only coherent room-wide combat pause states', () => {
+    expect(validateSharedStateShape('combat', {
+      ...combat,
+      flowPause: {
+        schemaVersion: 1,
+        reason: 'dm-adjudication',
+        phase: 'adjudicating',
+        interruptId: 'dm-adjudication:table-result-50',
+        label: '施法后随机表结果 50',
+        pausedAt: 2,
+      },
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat', {
+      ...combat,
+      flowPause: {
+        schemaVersion: 1,
+        reason: 'manual',
+        phase: 'awaiting-resume',
+        pausedAt: 2,
+      },
+    })).toEqual({ ok: false, reason: 'invalid-combat-flow-pause' })
+  })
 })

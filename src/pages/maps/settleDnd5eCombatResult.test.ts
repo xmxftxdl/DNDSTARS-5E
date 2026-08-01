@@ -3,15 +3,23 @@ import {
   createDnd5eConditionEffect,
   createDnd5eCombatant,
   dnd5eConditionsFromActiveEffects,
+  registerDnd5eRulesPlugin,
   startDnd5eHeadlessCombat,
   type Dnd5eActionResult,
+  type Dnd5eCombatant,
+  type DeclarativeSubclassDefinitionV1,
 } from '../../rulesets/dnd5e'
 import type { BattleMap, Token } from '../../store/maps'
 import { settleDnd5eConcentrationChecks } from './settleDnd5eCombatResult'
 
 const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
 
-function combatant(id: string, initiative: number, concentrating = false) {
+function combatant(
+  id: string,
+  initiative: number,
+  concentrating = false,
+  patch: Partial<Dnd5eCombatant> = {},
+) {
   return createDnd5eCombatant({
     id,
     name: id,
@@ -26,6 +34,7 @@ function combatant(id: string, initiative: number, concentrating = false) {
     speed: 30,
     position: { x: 0, y: 0 },
     concentrating,
+    ...patch,
   })
 }
 
@@ -171,5 +180,219 @@ describe('地图战斗结果结算器', () => {
     expect(settled.result.events).toContainEqual(expect.objectContaining({
       type: 'active-effect-save-resolved', targetId: 'enemy', success: true,
     }))
+  })
+
+  it('has the Host roll and settle a self-centered core spell from a post-spell table', async () => {
+    const pluginId = 'com.example.settle-post-spell-table'
+    const subclassId = `${pluginId}:random-caster`
+    const featureId = `${subclassId}.table-check`
+    const definition: DeclarativeSubclassDefinitionV1 = {
+      schemaVersion: 1,
+      id: 'random-caster',
+      classId: 'sorcerer',
+      name: 'Random Caster',
+      summary: 'Synthetic settlement fixture.',
+      abilities: [{
+        schemaVersion: 1,
+        id: 'table-check',
+        name: 'Post-Spell Table Check',
+        description: 'Synthetic settlement fixture.',
+        level: 1,
+        trigger: { kind: 'after-spell-cast' },
+        targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'post-spell-random-table',
+          spellcastingClassId: 'sorcerer',
+          minimumSpellLevel: 1,
+          triggerDieSides: 20,
+          triggerValues: [1],
+          tableDieSides: 100,
+          outcomes: [{
+            id: 'synthetic-centered-spell',
+            minimum: 42,
+            maximum: 43,
+            effect: {
+              kind: 'self-centered-core-spell',
+              spellId: 'fireball',
+              slotLevel: 3,
+            },
+          }],
+        },
+        effects: [],
+        automation: 'partial',
+      }],
+    }
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId,
+        name: 'Settlement Post Spell Table Test',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Test',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerDeclarativeSubclass(definition)
+      },
+    })
+    try {
+      const hero = combatant('hero', 20, false, {
+        level: 5,
+        classId: 'sorcerer',
+        subclassId,
+        classLevels: { sorcerer: 5 },
+        subclassIds: { sorcerer: subclassId },
+        pluginFeatureIds: [featureId],
+        abilities: { ...abilities, cha: 18 },
+        proficiencyBonus: 3,
+      })
+      hero.classState.postSpellRandomTableCheck = {
+        featureId,
+        spellId: 'magic-missile',
+        spellLevel: 1,
+        slotLevel: 1,
+        castingClassId: 'sorcerer',
+        forceTable: false,
+      }
+      const state = startDnd5eHeadlessCombat('post-spell-settlement', [
+        hero,
+        combatant('enemy', 10),
+      ])
+      state.distanceFeetByCombatantPair = { ['enemy\u0000hero']: 5 }
+      const result: Extract<Dnd5eActionResult, { ok: true }> = {
+        ok: true,
+        state,
+        events: [{
+          type: 'post-spell-random-table-check-required',
+          actorId: 'hero',
+          featureId,
+          spellId: 'magic-missile',
+          spellLevel: 1,
+          slotLevel: 1,
+          forceTable: false,
+          triggerDieSides: 20,
+          triggerValues: [1],
+          tableDieSides: 100,
+        }],
+      }
+      const d20s = [1, 20, 1]
+      const rollD20 = vi.fn(async () => d20s.shift() ?? 1)
+      const rollDice = vi.fn(async (count: number, sides: number) =>
+        sides === 100 ? [42] : Array(count).fill(1))
+
+      const settled = await settleDnd5eConcentrationChecks({
+        result,
+        map: map(),
+        characters: [],
+        characterIdByCombatantId: {},
+        rollD20,
+        rollD4: unusedRoll,
+        rollDice,
+      })
+
+      expect(settled.result.state.combatants.hero.currentHp).toBe(12)
+      expect(settled.result.state.combatants.enemy.currentHp).toBe(16)
+      expect(rollD20).toHaveBeenCalledTimes(3)
+      expect(rollDice).toHaveBeenCalledWith(
+        1,
+        100,
+        '施法后随机表·结果',
+        'hero',
+      )
+      expect(rollDice).toHaveBeenCalledWith(
+        8,
+        6,
+        '随机表核心法术·伤害',
+        'hero',
+      )
+      expect(settled.result.events).toContainEqual(expect.objectContaining({
+        type: 'post-spell-random-table-outcome-resolved',
+        actorId: 'hero',
+        tableRoll: 42,
+        automation: 'full',
+        spellId: 'fireball',
+      }))
+
+      const manualHero = combatant('hero', 20, false, {
+        level: 5,
+        classId: 'sorcerer',
+        subclassId,
+        classLevels: { sorcerer: 5 },
+        subclassIds: { sorcerer: subclassId },
+        pluginFeatureIds: [featureId],
+        abilities: { ...abilities, cha: 18 },
+        proficiencyBonus: 3,
+      })
+      manualHero.classState.postSpellRandomTableCheck = {
+        featureId,
+        spellId: 'magic-missile',
+        spellLevel: 1,
+        slotLevel: 1,
+        castingClassId: 'sorcerer',
+        forceTable: false,
+      }
+      const manualState = startDnd5eHeadlessCombat('manual-post-spell-settlement', [
+        manualHero,
+        combatant('enemy', 10),
+      ])
+      const manualResult: Extract<Dnd5eActionResult, { ok: true }> = {
+        ok: true,
+        state: manualState,
+        events: [{
+          type: 'post-spell-random-table-check-required',
+          actorId: 'hero',
+          featureId,
+          spellId: 'magic-missile',
+          spellLevel: 1,
+          slotLevel: 1,
+          forceTable: false,
+          triggerDieSides: 20,
+          triggerValues: [1],
+          tableDieSides: 100,
+        }],
+      }
+      const requestManualAdjudication = vi.fn(async () => ({
+        decision: 'approved' as const,
+        effects: [{
+          targetTokenId: 'enemy',
+          operation: 'damage' as const,
+          amount: 3,
+          addCondition: 'poisoned',
+        }],
+        note: 'final DM effect',
+      }))
+      const manuallySettled = await settleDnd5eConcentrationChecks({
+        result: manualResult,
+        map: map(),
+        characters: [],
+        characterIdByCombatantId: {},
+        rollD20: async () => 1,
+        rollD4: unusedRoll,
+        rollDice: async (_count, sides) => sides === 100 ? [50] : [],
+        requestPostSpellRandomTableAdjudication: requestManualAdjudication,
+      })
+
+      expect(requestManualAdjudication).toHaveBeenCalledWith(expect.objectContaining({
+        actor: expect.objectContaining({ id: 'hero' }),
+        featureId,
+        sourceSpellId: 'magic-missile',
+        tableRoll: 50,
+        events: expect.arrayContaining([expect.objectContaining({
+          type: 'post-spell-random-table-manual-adjudication-required',
+        })]),
+      }))
+      expect(manuallySettled.result.state.combatants.hero.classState.postSpellRandomTableManualAdjudication)
+        .toBeUndefined()
+      expect(manuallySettled.result.state.combatants.enemy.currentHp).toBe(17)
+      expect(manuallySettled.result.state.combatants.enemy.conditions).toContain('poisoned')
+      expect(manuallySettled.result.events).toContainEqual(expect.objectContaining({
+        type: 'post-spell-random-table-manual-adjudication-resolved',
+        decision: 'approved',
+        effectCount: 1,
+      }))
+    } finally {
+      dispose()
+    }
   })
 })

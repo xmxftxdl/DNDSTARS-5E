@@ -5,6 +5,7 @@ import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 import type { CombatSettlementMode } from './combatSettlementMode'
 import type { Dnd5eMonsterControlStateV1 } from './monsterControlState'
+import type { Dnd5eMonsterTurnProgressV1 } from './monsterTurnProgress'
 import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
 import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
@@ -36,6 +37,16 @@ export interface Dnd5eTurnEconomyCounts {
 }
 
 export type Dnd5eTurnEconomyByToken = Record<string, Dnd5eTurnEconomyCounts>
+
+export interface SharedCombatFlowPauseV1 {
+  schemaVersion: 1
+  reason: 'manual' | 'dm-adjudication'
+  phase: 'paused' | 'adjudicating' | 'awaiting-resume'
+  pausedAt: number
+  interruptId?: string
+  label?: string
+  resolvedAt?: number
+}
 
 export type Dnd5eClassFeaturePayload =
   | { feature: 'barbarian-rage'; frenzy?: boolean; end?: boolean }
@@ -253,6 +264,10 @@ export interface SharedCombatState {
   settlementMode?: CombatSettlementMode
   /** DM-authoritative automatic/manual monster control and safe takeover state. */
   monsterControl?: Dnd5eMonsterControlStateV1
+  /** Room-wide gate. DM adjudications remain blocked here until the DM explicitly resumes combat. */
+  flowPause?: SharedCombatFlowPauseV1
+  /** Short-lived authority lease shown while the active monster plan is pending. */
+  monsterTurnProgress?: Dnd5eMonsterTurnProgressV1
   dnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   /** DM-pinned rules and exact plugin set; active room combat rejects plugin actions when absent. */
   effectiveRules?: Dnd5eEffectiveRulesContextV1
@@ -358,6 +373,8 @@ export interface SharedPlayerActionAckState {
   reason?: string
   acceptedPosition?: { x: number; y: number }
   appliedAt?: number
+  /** Revisions committed atomically with an accepted action ACK. */
+  authorityRevisions?: Readonly<Record<string, number>>
   result?: PlayerActionResultSummary
   /** Host result used only to reconcile the player's local prearm toggles. */
   dnd5eDeclarativeAttackIntents?: {

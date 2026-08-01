@@ -79,6 +79,7 @@ export const KILL_STREAK_PRESENTATION_EVENT_TTL_MS = 5_800
 export const SAVING_THROW_PENDING_TTL_MS = 300_000
 export const SAVING_THROW_RESULT_TTL_MS = 3_000
 export const SAVING_THROW_RESULT_HOLD_MS = 1_100
+export const ATTACK_TARGET_EFFECT_DURATION_MS = 1_200
 
 let combatPresentationClockOffsetMs = 0
 let combatPresentationClockSampledAt = 0
@@ -217,6 +218,8 @@ export interface CombatPresentationAttackBannerEventV1 {
   mapId: string
   transactionId: string
   sourceTokenId: string
+  /** Present for single-creature attacks; omitted by legacy banner events. */
+  targetTokenId?: string
   actorName: string
   attackName: string
   attackKind: 'melee' | 'ranged'
@@ -475,6 +478,18 @@ export interface CombatPresentationAttackBanner {
   expiresAt: number
 }
 
+export interface CombatPresentationAttackTargetEffect {
+  id: string
+  targetTokenId: string
+  x: number
+  y: number
+  radiusPx: number
+  attackKind: 'melee' | 'ranged'
+  classId: string
+  issuedAt: number
+  durationMs: number
+}
+
 export interface CombatPresentationKillStreak {
   id: string
   actorName: string
@@ -625,7 +640,8 @@ export function parseCombatPresentationEvent(
       !boundedId(banner.actorName, 80) ||
       !boundedId(banner.attackName, 80) ||
       (banner.attackKind !== 'melee' && banner.attackKind !== 'ranged') ||
-      !boundedId(banner.classId, 40)
+      !boundedId(banner.classId, 40) ||
+      (banner.targetTokenId != null && !boundedId(banner.targetTokenId, 160))
     ) return null
     return banner as CombatPresentationAttackBannerEventV1
   }
@@ -1067,6 +1083,35 @@ export function combatPresentationSpellBannerForMap(
   }
 }
 
+export function combatPresentationAttackTargetEffectsForMap(
+  state: CombatPresentationState,
+  map: PresentationMap,
+  now = Date.now(),
+): CombatPresentationAttackTargetEffect[] {
+  return state.spellProjectiles.flatMap<CombatPresentationAttackTargetEffect>((event) => {
+    if (
+      event.type !== 'attack-banner' ||
+      !event.targetTokenId ||
+      event.mapId !== map.id ||
+      event.createdAt > now ||
+      event.createdAt + ATTACK_TARGET_EFFECT_DURATION_MS <= now
+    ) return []
+    const target = map.tokens.find((token) => token.id === event.targetTokenId)
+    if (!target) return []
+    return [{
+      id: `${event.id}:target`,
+      targetTokenId: target.id,
+      x: target.x,
+      y: target.y,
+      radiusPx: map.gridSize * Math.max(1, target.size ?? 1) * 0.5,
+      attackKind: event.attackKind,
+      classId: event.classId,
+      issuedAt: combatPresentationLocalTime(event.createdAt),
+      durationMs: ATTACK_TARGET_EFFECT_DURATION_MS,
+    }]
+  })
+}
+
 export function combatPresentationAttackBannerForMap(
   state: CombatPresentationState,
   mapId: string,
@@ -1167,6 +1212,7 @@ export async function publishAttackBannerPresentation(input: {
   mapId: string
   transactionId: string
   sourceTokenId: string
+  targetTokenId: string
   actorName: string
   attackName: string
   attackKind: 'melee' | 'ranged'
@@ -1927,7 +1973,7 @@ export async function publishAreaSpellPresentation(input: {
   radiusFeet?: number
 }): Promise<{ completesAt: number }> {
   const asset = {
-    'burning-hands': '/assets/vfx/burning-hands-fluid.png',
+    'burning-hands': '/assets/vfx/burning-hands-sprite-v2.png',
     thunderwave: '/assets/vfx/thunderwave-fluid.webp',
     shatter: '/assets/vfx/shatter-fluid.png',
     'lightning-bolt': '/assets/vfx/lightning-bolt-fluid.png',

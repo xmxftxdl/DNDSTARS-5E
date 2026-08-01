@@ -8,41 +8,16 @@ export interface CombatEndCoordinatorOptions {
 /**
  * Combat termination and XP settlement are separate phases.
  *
- * The inactive snapshot is started first, while the DM's post-combat dialog
- * may open immediately. Transaction and queue cleanup happens afterwards and
- * is still attempted if the authoritative publish fails.
+ * Finish the currently accepted authority transaction before publishing the
+ * inactive snapshot. Once that snapshot commits, players can leave combat and
+ * the DM may distribute XP independently. Never clear request queues while the
+ * authoritative combat is still active.
  */
 export async function coordinateCombatEnd(
   options: CombatEndCoordinatorOptions,
 ): Promise<void> {
-  let publishError: unknown
-  let publishPromise: Promise<void>
-  try {
-    publishPromise = options.publishInactiveCombat()
-  } catch (error) {
-    publishError = error
-    publishPromise = Promise.resolve()
-  }
-
+  await options.awaitPendingTransactions()
+  await options.publishInactiveCombat()
   options.openExperienceSettlement()
-
-  try {
-    await publishPromise
-  } catch (error) {
-    publishError ??= error
-  }
-
-  try {
-    await options.awaitPendingTransactions()
-  } catch (error) {
-    publishError ??= error
-  }
-
-  try {
-    await options.clearMessageQueues()
-  } catch (error) {
-    publishError ??= error
-  }
-
-  if (publishError !== undefined) throw publishError
+  await options.clearMessageQueues()
 }

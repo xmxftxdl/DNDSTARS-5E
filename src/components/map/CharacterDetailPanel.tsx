@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -8,6 +8,10 @@ import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
 import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
+import {
+  closeCharacterDetailOnPrimaryPointerDown,
+  shouldCloseCharacterDetailForKey,
+} from './characterDetailClose'
 
 interface CharacterDetailPanelProps {
   token: Token
@@ -55,6 +59,14 @@ export default function CharacterDetailPanel({
     editingMaxHp,
     pending: pendingHitPoints,
   })
+  const defeated = displayedHitPoints.currentHp <= 0
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldCloseCharacterDetailForKey(event.key)) onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
@@ -112,7 +124,11 @@ export default function CharacterDetailPanel({
   }
 
   return (
-    <div data-testid="character-detail-panel" className="glass absolute bottom-3 left-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+    <div
+      data-testid="character-detail-panel"
+      data-defeated={defeated || undefined}
+      className={`glass absolute bottom-3 left-3 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl ${defeated ? 'z-[70]' : 'z-40'}`}
+    >
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
           className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-2xl"
@@ -142,8 +158,20 @@ export default function CharacterDetailPanel({
         </div>
         <button
           type="button"
-          onClick={onClose}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-slate-200"
+          data-testid="close-character-detail"
+          aria-label="关闭角色详情"
+          onPointerDown={(event) => {
+            closeCharacterDetailOnPrimaryPointerDown(event, onClose)
+          }}
+          onClick={(event) => {
+            event.stopPropagation()
+            // Pointer input closes on pointerdown so an authoritative death
+            // snapshot cannot replace the panel between down/up and swallow
+            // the click. Keyboard and assistive activation still arrive as a
+            // click with detail === 0 and close through this fallback.
+            if (event.detail === 0) onClose()
+          }}
+          className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-slate-200"
           title="关闭"
         >
           <X className="h-4 w-4" />

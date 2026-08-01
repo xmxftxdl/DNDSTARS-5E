@@ -69,4 +69,32 @@ describe('DM 裁定面板', () => {
     expect(html).toContain('确认裁定')
     expect(html).not.toContain('添加目标效果')
   })
+
+  it('未自动化的随机表结果显示暂停状态和恢复操作', () => {
+    const prompt: SharedDmAdjudicationPromptView = {
+      id: 'random-table-adjudication',
+      payload: {
+        contextKind: 'post-spell-random-table',
+        actionId: 'random-table-action',
+        casterName: '术士',
+        spellId: 'fixture.table-check',
+        spellName: '施法后随机表结果 50',
+        spellLevel: 0,
+        slotLevel: 0,
+        castingTime: 'action',
+        description: '当前结果需要 DM 裁定。',
+        concentration: false,
+        randomTableRoll: 50,
+        sourceSpellId: 'magic-missile',
+      },
+    }
+
+    const html = render({ prompt })
+    expect(html).toContain('随机表结果裁定 · 施法后随机表结果 50')
+    expect(html).toContain('d100 结果 50 · 原始法术 magic-missile')
+    expect(html).toContain('战斗结算已暂停')
+    expect(html).toContain('跳过该随机表结果')
+    expect(html).toContain('提交裁定并继续')
+    expect(html).not.toContain('取消施法（不消费）')
+  })
 })

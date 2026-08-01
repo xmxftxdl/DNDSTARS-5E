@@ -42,12 +42,37 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', {
       active: true,
+      flowPause: {
+        schemaVersion: 1,
+        reason: 'dm-adjudication',
+        phase: 'paused',
+        pausedAt: 1,
+      },
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('combat', {
+      active: true,
       monsterControl: {
         schemaVersion: 1,
         mode: 'manual',
         pauseRequested: true,
         controlledTokenId: '',
         updatedAt: 1,
+      },
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('combat', {
+      active: true,
+      monsterTurnProgress: {
+        schemaVersion: 1,
+        status: 'planning',
+        combatId: 'combat-1',
+        round: 1,
+        initiativeIndex: 0,
+        initiativeSlotId: 'enemy-slot',
+        tokenId: 'enemy-token',
+        requestId: '',
+        startedAt: 1,
+        updatedAt: 1,
+        expiresAt: 60_001,
       },
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')

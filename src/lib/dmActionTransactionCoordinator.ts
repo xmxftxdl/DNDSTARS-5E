@@ -4,6 +4,10 @@ import {
   rollbackCombatTransaction,
   type CombatTransaction,
 } from './combatTransaction'
+import {
+  appRoomAuthorityScheduler,
+  type RoomAuthorityScheduler,
+} from './roomAuthorityScheduler'
 
 export interface DmAuthoritativeActionTransactionInput {
   id: string
@@ -24,6 +28,13 @@ export class DmActionTransactionCoordinator {
   private queue: Promise<void> = Promise.resolve()
   private inFlight = new Map<string, Promise<void>>()
   private transactions = new Map<string, CombatTransaction>()
+  private readonly authorityScheduler: RoomAuthorityScheduler
+
+  constructor(
+    authorityScheduler: RoomAuthorityScheduler = appRoomAuthorityScheduler,
+  ) {
+    this.authorityScheduler = authorityScheduler
+  }
 
   enqueue(run: () => Promise<void>, recover: (error: unknown) => Promise<void>): Promise<void> {
     const task = this.queue.then(async () => {
@@ -68,7 +79,7 @@ export class DmActionTransactionCoordinator {
     return this.enqueueTransaction(
       input.id,
       async () => {
-        const outcome = await run(transaction)
+        const outcome = await this.authorityScheduler.run(input.id, () => run(transaction))
         const current = this.transactions.get(input.id) ?? transaction
         if (outcome.status === 'ignored') {
           if (previousTransaction) this.transactions.set(input.id, previousTransaction)

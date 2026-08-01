@@ -16,6 +16,7 @@ import {
   previewDnd5eMonsterAttack,
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
+import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 
@@ -1051,6 +1052,151 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(17)
     expect(resolved.application?.changedCharacterIds).toEqual([hero.id])
     expect(resolved.application?.changedTokenIds).toEqual(['owlbear', heroToken.id])
+  })
+
+  it('preserves an owlbear Multiattack continuation across movement after its action is spent', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:owlbear')!
+    const owlbear = token({
+      id: 'takeover-owlbear',
+      label: '枭熊',
+      poolId: monster.id,
+      x: 5,
+      y: 5,
+      hp: 59,
+      maxHp: 59,
+    })
+    const heroToken = token({
+      id: 'takeover-hero-token',
+      label: hero.name,
+      type: 'player',
+      characterId: hero.id,
+      x: 15,
+      y: 5,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'takeover-multiattack-map',
+      name: 'Takeover Multiattack',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [owlbear, heroToken],
+    }
+    const initiativeOrder = [
+      { tokenId: owlbear.id, label: owlbear.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const multiattackIndex = monster.actions.findIndex((action) => action.id === 'multiattack')
+    const clawsIndex = monster.actions.findIndex((action) => action.id === 'claws')
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'takeover-combat',
+      round: 1,
+      map,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: owlbear.id,
+      targetTokenId: heroToken.id,
+      actionIndex: multiattackIndex,
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const firstOccurrence = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 10, damageRolls: [[5]] }],
+      settleAttackCount: 1,
+    })
+    expect(
+      firstOccurrence.result.ok,
+      firstOccurrence.result.ok ? undefined : firstOccurrence.result.reason,
+    ).toBe(true)
+    if (!firstOccurrence.result.ok || !firstOccurrence.application) return
+    const spentEconomy = spendDnd5eTurnResource(
+      createDnd5eTurnEconomyCounts('takeover-combat:1:takeover-owlbear', 30),
+      'action',
+    ).economy
+    expect(spentEconomy.action.current).toBe(0)
+    expect(firstOccurrence.application.map.tokens.find((entry) => entry.id === owlbear.id)
+      ?.dnd5eCombatState?.monsterMultiattackContinuation).toMatchObject({
+        parentActionId: 'multiattack',
+        nextOccurrenceIndex: 1,
+        sequenceActionIds: ['beak', 'claws'],
+      })
+
+    const moved = resolveDnd5eMonsterMapMove({
+      combatId: 'takeover-combat',
+      round: 1,
+      map: firstOccurrence.application.map,
+      characters: firstOccurrence.application.characters,
+      initiativeOrder,
+      actorTokenId: owlbear.id,
+      to: { x: 5, y: 15 },
+      turnEconomy: spentEconomy,
+    })
+    expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+    if (!moved.ok || !moved.result.ok || !moved.application) return
+    expect(moved.result.state.combatants[owlbear.id].turn).toMatchObject({
+      actionAvailable: false,
+      movementRemaining: 25,
+    })
+    expect(moved.application.map.tokens.find((entry) => entry.id === owlbear.id)).toMatchObject({
+      x: 5,
+      y: 15,
+      dnd5eCombatState: {
+        monsterMultiattackContinuation: {
+          parentActionId: 'multiattack',
+          nextOccurrenceIndex: 1,
+        },
+      },
+    })
+
+    const continued = prepareDnd5eMonsterAttack({
+      combatId: 'takeover-combat',
+      round: 1,
+      map: moved.application.map,
+      characters: moved.application.characters,
+      initiativeOrder,
+      actorTokenId: owlbear.id,
+      targetTokenId: heroToken.id,
+      actionIndex: clawsIndex,
+      multiattackContinuation: {
+        schemaVersion: 1,
+        parentActionId: 'multiattack',
+        occurrenceIndex: 1,
+      },
+      turnEconomy: {
+        ...spentEconomy,
+        movement: {
+          ...spentEconomy.movement,
+          current: moved.result.state.combatants[owlbear.id].turn.movementRemaining,
+        },
+      },
+    })
+    expect(continued.ok, continued.ok ? undefined : continued.reason).toBe(true)
+    if (!continued.ok) return
+    const continuedResult = resolvePreparedDnd5eMonsterAttack({
+      prepared: continued.prepared,
+      rolls: [{ d20: 10, damageRolls: [[4, 4]] }],
+      multiattackContinuation: {
+        schemaVersion: 1,
+        parentActionId: 'multiattack',
+        occurrenceIndex: 1,
+      },
+    })
+    expect(
+      continuedResult.result.ok,
+      continuedResult.result.ok ? undefined : continuedResult.result.reason,
+    ).toBe(true)
+    expect(continuedResult.result.events.filter((event) =>
+      event.type === 'turn-resource-spent' && event.resource === 'action')).toHaveLength(0)
+    expect(continuedResult.application?.map.tokens.find((entry) => entry.id === owlbear.id)
+      ?.dnd5eCombatState?.monsterMultiattackContinuation).toBeUndefined()
   })
 
   it('applies Enlarge weapon damage to an SRD monster attack', () => {

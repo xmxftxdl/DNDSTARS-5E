@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createD20AdjustmentContribution,
   createD20ReplacementContribution,
   createD20RollConfirmationInterrupt,
+  resolvedD20Adjustment,
   resolvedD20Value,
   settleD20RollConfirmation,
 } from './rollConfirmation'
@@ -73,5 +75,58 @@ describe('d20 roll confirmation', () => {
       replacementValue: 15,
       sourceId: 'dm',
     })
+  })
+
+  it('records a Host-rolled total adjustment without replacing the natural d20', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1',
+      rollId: 'roll-adjustment',
+      label: '攻击检定',
+      originalValue: 20,
+      now: 10,
+      eligibleModifiers: [{
+        characterId: 'support',
+        featureId: 'test.plugin:feature',
+        featureLabel: '结果干预',
+        modifierKind: 'adjust-d20',
+        sourceTokenId: 'support-token',
+        dieSides: 6,
+        direction: 'subtract',
+      }],
+    })
+    const contribution = createD20AdjustmentContribution({
+      interruptId: interrupt.id,
+      characterId: 'support',
+      characterName: '支援者',
+      featureId: 'test.plugin:feature',
+      featureLabel: '结果干预',
+      direction: 'subtract',
+      now: 12,
+    })
+    const response = settleD20RollConfirmation(
+      { ...interrupt, contributions: [contribution] },
+      contribution.id,
+      20,
+      undefined,
+      4,
+    )
+
+    expect(response).toMatchObject({
+      finalValue: 20,
+      acceptedContributionId: contribution.id,
+      adjustment: {
+        sourceId: 'support-token',
+        featureId: 'test.plugin:feature',
+        direction: 'subtract',
+        roll: 4,
+      },
+    })
+    expect(response.transaction?.rollLedger.entries).toHaveLength(2)
+    expect(response.transaction?.rollLedger.entries[0].dice.values).toEqual([20])
+    expect(response.transaction?.rollLedger.entries[1]).toMatchObject({
+      dice: { sides: 6, values: [4] },
+      sourceId: 'support-token',
+    })
+    expect(resolvedD20Adjustment(response)).toEqual(response.adjustment)
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 // HUD 自关闭时间纳入共享时序契约（结算窗口的一部分）。
 import { DICE_TIMING } from '../lib/diceOverlayShared'
+import DiceOverlayPortal from './DiceOverlayPortal'
 
 export interface D20AttackRoll {
   value: number
@@ -51,7 +52,7 @@ export default function DiceRollOverlay({ roll, onDone }: { roll: DiceRoll; onDo
   }, [roll])
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-50">
+    <DiceOverlayPortal>
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-2xl border border-rose-400/40 bg-void-950/85 px-6 py-2 text-center shadow-2xl backdrop-blur-sm">
         <div className="text-xs text-slate-400">
           {roll.label} {'->'} {roll.targetName}
@@ -101,6 +102,6 @@ export default function DiceRollOverlay({ roll, onDone }: { roll: DiceRoll; onDo
           </div>
         ) : null}
       </div>
-    </div>
+    </DiceOverlayPortal>
   )
 }

@@ -1,14 +1,63 @@
 import { modeFromPort } from '../lib/appMode'
 import { submitDnd5eInventoryMutation } from '../lib/inventoryAuthority'
+import {
+  DND5E_COMBAT_STATE_SCHEMA_VERSION,
+  dnd5eConditionLabel,
+  dnd5eConditionsFromActiveEffects,
+  normalizeDnd5eActiveEffects,
+  validateDnd5eSourceBoundConditions,
+  type Dnd5eActiveEffectInstance,
+} from '../rulesets/dnd5e'
 import { RoomCommandBus, type RoomCommandEnvelope } from '../lib/roomCommandBus'
+import { appRoomAuthorityScheduler } from '../lib/roomAuthorityScheduler'
 import { getRoomSession } from '../lib/roomSession'
+import { saveSharedResourcesAtomically } from '../lib/sharedApi'
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
 import { useCharacterStore } from './characters'
 import { useMapStore } from './maps'
 
 type SpellChoicePatch = Pick<Character, 'dnd5eClassChoices'>
-const ROOM_SHARED_STATE_AGGREGATE_ID = 'room:shared-state'
+
+interface RoomCommandAggregateTarget {
+  characterIds?: readonly (string | undefined)[]
+  mapId?: string
+  tokenId?: string
+  fallback: string
+}
+
+function roomCharacterAggregateId(characterId: string): string {
+  return `room:characters:${characterId}`
+}
+
+function roomTokenAggregateId(mapId: string | undefined, tokenId: string): string {
+  return mapId
+    ? `room:maps:${mapId}:tokens:${tokenId}`
+    : `room:maps:tokens:${tokenId}`
+}
+
+function roomCommandAggregateTarget(
+  target: RoomCommandAggregateTarget,
+): Pick<RoomCommandEnvelope, 'aggregateId' | 'relatedAggregateIds'> {
+  const aggregateIds = [...new Set([
+    ...(target.characterIds ?? [])
+      .filter((characterId): characterId is string => Boolean(characterId))
+      .map(roomCharacterAggregateId),
+    ...(target.tokenId ? [roomTokenAggregateId(target.mapId, target.tokenId)] : []),
+  ])]
+  return {
+    aggregateId: aggregateIds[0] ?? target.fallback,
+    relatedAggregateIds: aggregateIds.slice(1),
+  }
+}
+
+function linkedCharacterIdForToken(mapId: string | undefined, tokenId: string | undefined): string | undefined {
+  if (!mapId || !tokenId) return undefined
+  return useMapStore.getState().maps
+    .find((candidate) => candidate.id === mapId)
+    ?.tokens.find((candidate) => candidate.id === tokenId)
+    ?.characterId
+}
 
 export type AppRoomCommand =
   | (RoomCommandEnvelope & {
@@ -28,6 +77,13 @@ export type AppRoomCommand =
       x: number
       y: number
       elevationFeet?: number
+    })
+  | (RoomCommandEnvelope & {
+      type: 'combat.active-effects.replace'
+      characterId?: string
+      mapId: string
+      tokenId: string
+      activeEffects: readonly Dnd5eActiveEffectInstance[]
     })
   | (RoomCommandEnvelope & {
       type: 'character.spell-selections.replace'
@@ -62,6 +118,25 @@ function characterMutationAllowed(character: Character): boolean {
 }
 
 async function persistRoomStores(resources: readonly ('characters' | 'maps')[]): Promise<void> {
+  if (resources.includes('characters') && resources.includes('maps')) {
+    const now = Date.now()
+    const characters = useCharacterStore.getState()
+    const maps = useMapStore.getState()
+    await saveSharedResourcesAtomically([
+      {
+        name: 'characters',
+        data: { characters: characters.characters, selectedId: characters.selectedId ?? null, updatedAt: now },
+      },
+      {
+        name: 'maps',
+        data: { maps: maps.maps, selectedId: maps.selectedId ?? null, updatedAt: now },
+      },
+    ], {
+      transactionId: `room-command:${now}:${Math.random().toString(36).slice(2)}`,
+      undoLabel: '房间权威调整',
+    })
+    return
+  }
   await Promise.all(resources.map((resource) =>
     resource === 'characters'
       ? useCharacterStore.getState().saveSharedNow()
@@ -97,10 +172,15 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
         ...(command.manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
           ? { hitPointMaximumMode: 'manual', hitPointRolls: undefined }
           : {}),
-      })
+      }, { protectHitPointsUntilAcknowledged: true })
     }
     if (map && token) {
-      mapState.applyAuthorityTokenUpdate(map.id, token.id, { hp: currentHp, maxHp })
+      mapState.applyAuthorityTokenUpdate(
+        map.id,
+        token.id,
+        { hp: currentHp, maxHp },
+        { protectHitPointsUntilAcknowledged: true },
+      )
     }
     try {
       await persistRoomStores([
@@ -140,7 +220,83 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       })
       return { status: 'applied' }
     } catch (error) {
-      state.applyAuthorityTokenUpdate(map.id, token.id, previous)
+      // A conflict may mean another authoritative write already moved this
+      // Token. Reload the winning server snapshot instead of restoring the
+      // stale pre-drag closure, which would manufacture a visible rollback.
+      try {
+        await state.loadShared()
+      } catch {
+        state.applyAuthorityTokenUpdate(map.id, token.id, previous)
+      }
+      throw error
+    }
+  }
+
+  if (command.type === 'combat.active-effects.replace') {
+    if (!directDmMutationAllowed()) {
+      return { status: 'rejected', message: '只有 DM 可以直接调整战斗状态。' }
+    }
+    const characterState = useCharacterStore.getState()
+    const mapState = useMapStore.getState()
+    const map = mapState.maps.find((candidate) => candidate.id === command.mapId)
+    const token = map?.tokens.find((candidate) => candidate.id === command.tokenId)
+    const characterId = command.characterId ?? token?.characterId
+    const character = characterId
+      ? characterState.characters.find((candidate) => candidate.id === characterId)
+      : undefined
+    if (!map || !token || (characterId && !character)) {
+      return { status: 'rejected', message: '找不到待调整状态的目标。' }
+    }
+
+    const activeEffects = normalizeDnd5eActiveEffects(command.activeEffects)
+    if (activeEffects.length !== command.activeEffects.length) {
+      return { status: 'rejected', message: '状态数据未通过 Headless 校验。' }
+    }
+    const creatureSourceIds = new Set(map.tokens
+      .filter((candidate) => candidate.type === 'player' || candidate.type === 'enemy' || candidate.type === 'npc')
+      .map((candidate) => candidate.id))
+    const sourceValidation = validateDnd5eSourceBoundConditions({
+      effects: activeEffects,
+      targetActorId: token.id,
+      availableActorIds: creatureSourceIds,
+    })
+    if (!sourceValidation.ok && sourceValidation.effect?.standardCondition) {
+      return {
+        status: 'rejected',
+        message: `${dnd5eConditionLabel(sourceValidation.effect.standardCondition)}必须指定同一地图上的其他来源生物。`,
+      }
+    }
+    const conditions = dnd5eConditionsFromActiveEffects(activeEffects)
+    const previousCharacter = character ? structuredClone(character) : undefined
+    const previousToken = structuredClone(token)
+    if (character) {
+      characterState.applyAuthorityUpdate(character.id, {
+        conditions,
+        dnd5eCombatState: {
+          ...(character.dnd5eCombatState ?? {}),
+          schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+          activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+        },
+      })
+    } else {
+      mapState.applyAuthorityTokenUpdate(map.id, token.id, {
+        dnd5eCombatState: {
+          ...(token.dnd5eCombatState ?? {}),
+          schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+          conditions: conditions.length > 0 ? conditions : undefined,
+          activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+        },
+      })
+    }
+    try {
+      await persistRoomStores(character ? ['characters'] : ['maps'])
+      return { status: 'applied' }
+    } catch (error) {
+      if (previousCharacter) {
+        characterState.applyAuthorityUpdate(previousCharacter.id, previousCharacter)
+      } else {
+        mapState.applyAuthorityTokenUpdate(map.id, previousToken.id, previousToken)
+      }
       throw error
     }
   }
@@ -180,7 +336,7 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
 }
 
 export const appRoomCommandBus = new RoomCommandBus<AppRoomCommand, AppRoomCommandResult>(
-  handleAppRoomCommand,
+  (command) => appRoomAuthorityScheduler.run(command.id, () => handleAppRoomCommand(command)),
 )
 
 export function setRoomCharacterHitPoints(input: {
@@ -192,11 +348,20 @@ export function setRoomCharacterHitPoints(input: {
   temporaryHp?: number
   manuallySetMaximum?: boolean
 }): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [
+      input.characterId,
+      linkedCharacterIdForToken(input.mapId, input.tokenId),
+    ],
+    mapId: input.mapId,
+    tokenId: input.tokenId,
+    fallback: 'room:invalid:hit-points',
+  })
   return appRoomCommandBus.dispatch({
     ...input,
     id: commandId('hp'),
     type: 'character.hit-points.set',
-    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
+    ...aggregateTarget,
     issuedAt: Date.now(),
   })
 }
@@ -208,11 +373,38 @@ export function moveRoomToken(input: {
   y: number
   elevationFeet?: number
 }): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [linkedCharacterIdForToken(input.mapId, input.tokenId)],
+    mapId: input.mapId,
+    tokenId: input.tokenId,
+    fallback: 'room:invalid:token-move',
+  })
   return appRoomCommandBus.dispatch({
     ...input,
     id: commandId('move'),
     type: 'map.token.move',
-    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
+    ...aggregateTarget,
+    issuedAt: Date.now(),
+  })
+}
+
+export function replaceRoomCombatantActiveEffects(input: {
+  characterId?: string
+  mapId: string
+  tokenId: string
+  activeEffects: readonly Dnd5eActiveEffectInstance[]
+}): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [input.characterId, linkedCharacterIdForToken(input.mapId, input.tokenId)],
+    mapId: input.mapId,
+    tokenId: input.tokenId,
+    fallback: 'room:invalid:active-effects',
+  })
+  return appRoomCommandBus.dispatch({
+    ...input,
+    id: commandId('active-effects'),
+    type: 'combat.active-effects.replace',
+    ...aggregateTarget,
     issuedAt: Date.now(),
   })
 }
@@ -221,10 +413,14 @@ export function replaceRoomCharacterSpellSelections(
   characterId: string,
   patch: SpellChoicePatch,
 ): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [characterId],
+    fallback: 'room:invalid:spell-selections',
+  })
   return appRoomCommandBus.dispatch({
     id: commandId('spells'),
     type: 'character.spell-selections.replace',
-    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
+    ...aggregateTarget,
     issuedAt: Date.now(),
     characterId,
     patch,
@@ -234,10 +430,17 @@ export function replaceRoomCharacterSpellSelections(
 export function mutateRoomCharacterInventory(
   mutation: Dnd5eInventoryMutation,
 ): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [
+      mutation.characterId,
+      mutation.type === 'transfer' ? mutation.targetCharacterId : undefined,
+    ],
+    fallback: 'room:invalid:inventory',
+  })
   return appRoomCommandBus.dispatch({
     id: commandId('inventory'),
     type: 'character.inventory.mutate',
-    aggregateId: ROOM_SHARED_STATE_AGGREGATE_ID,
+    ...aggregateTarget,
     issuedAt: Date.now(),
     mutation,
   })

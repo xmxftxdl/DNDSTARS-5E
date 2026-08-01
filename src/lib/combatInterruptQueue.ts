@@ -6,7 +6,7 @@ export type CombatInterruptStatus = 'pending' | 'waiting-for-dm' | 'rolling' | '
 export type CombatInterruptPhase = 'before-action' | 'after-roll' | 'before-hit' | 'before-damage' | 'after-save' | 'before-condition'
 export type CombatInterruptTimeoutPolicy = 'rollback' | 'wait-for-dm'
 
-export interface CombatInterruptContribution {
+export interface D20ReplacementInterruptContribution {
   id: string
   kind: 'replace-d20'
   characterId: string
@@ -17,6 +17,21 @@ export interface CombatInterruptContribution {
   replacementValue: number
   createdAt: number
 }
+
+export interface D20AdjustmentInterruptContribution {
+  id: string
+  kind: 'adjust-d20'
+  characterId: string
+  characterName: string
+  featureId: string
+  featureLabel: string
+  direction: 'add' | 'subtract'
+  createdAt: number
+}
+
+export type CombatInterruptContribution =
+  | D20ReplacementInterruptContribution
+  | D20AdjustmentInterruptContribution
 
 const TERMINAL_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>(['done', 'rolled-back'])
 
@@ -198,26 +213,39 @@ export function contributeCombatInterrupt(
   contribution: CombatInterruptContribution,
   now = Date.now(),
 ): SharedCombatInterruptQueueState | null {
-  if (
-    contribution.kind !== 'replace-d20' || !contribution.id || !contribution.characterId ||
+  if (!contribution.id || !contribution.characterId ||
     !contribution.characterName.trim() || !contribution.featureLabel.trim() ||
-    contribution.dieIndex !== 0 || !Number.isInteger(contribution.replacementValue) ||
-    contribution.replacementValue < 1 || contribution.replacementValue > 20 ||
-    !Number.isFinite(contribution.createdAt)
+    !Number.isFinite(contribution.createdAt)) return queue ?? null
+  if (contribution.kind === 'replace-d20') {
+    if (
+      contribution.dieIndex !== 0 || !Number.isInteger(contribution.replacementValue) ||
+      contribution.replacementValue < 1 || contribution.replacementValue > 20
+    ) return queue ?? null
+  } else if (
+    contribution.kind !== 'adjust-d20' || !contribution.featureId.trim() ||
+    (contribution.direction !== 'add' && contribution.direction !== 'subtract')
   ) return queue ?? null
   return updateCombatInterrupt(queue, id, (interrupt) => {
     if (
       interrupt.kind !== 'roll-confirmation' ||
       (interrupt.status !== 'pending' && interrupt.status !== 'waiting-for-dm')
     ) return interrupt
+    const normalizedContribution: CombatInterruptContribution = contribution.kind === 'adjust-d20'
+      ? {
+          ...contribution,
+          characterName: contribution.characterName.trim().slice(0, 80),
+          featureId: contribution.featureId.trim().slice(0, 160),
+          featureLabel: contribution.featureLabel.trim().slice(0, 120),
+        }
+      : {
+          ...contribution,
+          characterName: contribution.characterName.trim().slice(0, 80),
+          featureId: contribution.featureId?.trim().slice(0, 160) || undefined,
+          featureLabel: contribution.featureLabel.trim().slice(0, 120),
+        }
     const contributions = [
       ...(interrupt.contributions ?? []).filter((entry) => entry.id !== contribution.id),
-      {
-        ...contribution,
-        characterName: contribution.characterName.trim().slice(0, 80),
-        featureId: contribution.featureId?.trim().slice(0, 160) || undefined,
-        featureLabel: contribution.featureLabel.trim().slice(0, 120),
-      },
+      normalizedContribution,
     ].sort((left, right) => left.createdAt - right.createdAt).slice(-32)
     return { ...interrupt, contributions, updatedAt: now }
   }, now)

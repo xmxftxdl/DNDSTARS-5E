@@ -181,4 +181,46 @@ describe('战斗结果提交协调器', () => {
       saveMap: async () => undefined,
     })).rejects.toThrow('characters-save-rejected:conflict')
   })
+
+  it('applies only declared combat patches so a newer DM edit is preserved', () => {
+    const current = {
+      id: 'hero',
+      name: 'Hero',
+      currentHp: 27,
+      tempHp: 4,
+      playerNotes: 'DM edited while dice were rolling',
+    } as unknown as Character
+    const staleResolved = {
+      ...current,
+      currentHp: 10,
+      tempHp: 0,
+      playerNotes: 'stale snapshot',
+    }
+    expect(mergeDnd5eCombatCharacterResult(current, staleResolved, {
+      currentHp: 10,
+      tempHp: 0,
+    })).toMatchObject({
+      currentHp: 10,
+      tempHp: 0,
+      playerNotes: 'DM edited while dice were rolling',
+    })
+  })
+
+  it('uses one coupled persistence operation when an atomic saver is available', async () => {
+    const saveAll = vi.fn(async () => undefined)
+    const saveCharacters = vi.fn(async () => undefined)
+    const saveMap = vi.fn(async () => undefined)
+    await commitDnd5eCombatResult({
+      application: plan(),
+      mapId: 'map',
+      applyCharacter: vi.fn(),
+      applyToken: vi.fn(),
+      saveAll,
+      saveCharacters,
+      saveMap,
+    })
+    expect(saveAll).toHaveBeenCalledOnce()
+    expect(saveCharacters).not.toHaveBeenCalled()
+    expect(saveMap).not.toHaveBeenCalled()
+  })
 })

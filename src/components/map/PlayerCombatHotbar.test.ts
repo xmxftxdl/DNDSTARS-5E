@@ -62,6 +62,24 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('职业特性')
   })
 
+  it('keeps an active grapple escape command visible in the default hotbar', () => {
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: character(),
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 0 } },
+      grappleEscapes: [{
+        grapplerTokenId: 'ankheg-token',
+        grapplerLabel: '掘穴虫',
+        dc: 13,
+      }],
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('aria-label="挣脱 掘穴虫 的擒抱"')
+    expect(html).toContain('system:escape-grapple:ankheg-token')
+  })
+
   it('在法术栏位上方显示剩余法术位', () => {
     const wizard: Character = {
       ...character(),

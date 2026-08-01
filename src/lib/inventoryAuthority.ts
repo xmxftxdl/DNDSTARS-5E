@@ -59,7 +59,9 @@ export function submitDnd5eInventoryMutation(
     mutation: sanitizeDnd5ePlayerInventoryMutation(mutation),
     updatedAt: Date.now(),
   }
-  void publishSharedEvent(DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL, request)
+  void publishSharedEvent(DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL, request).catch((error) => {
+    console.error('[inventory-authority] request event publication failed', error)
+  })
   return { status: 'submitted', message: '已提交给 DM 权威端，完成后库存会自动同步。' }
 }
 

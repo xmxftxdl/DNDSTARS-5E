@@ -65,4 +65,45 @@ describe('Interrupt 请求创建与等待 runtime', () => {
     })).rejects.toThrow('offline')
     expect(channel.current).toBeNull()
   })
+  it('clears the resolver and rejects when an interrupt never reaches a terminal state', async () => {
+    vi.useFakeTimers()
+    try {
+      const channel: PendingCombatInterruptRequestChannel<boolean> = { current: null }
+      const pending = requestAndWaitForCombatInterrupt({
+        id: 'timeout-interrupt',
+        channel,
+        metadata: {},
+        create: () => interrupt('timeout-interrupt'),
+        publish: async () => {},
+        timeoutMs: 1_000,
+      })
+      const rejected = expect(pending).rejects.toThrow('combat-interrupt-timeout:timeout-interrupt')
+      await vi.advanceTimersByTimeAsync(1_000)
+      await rejected
+      expect(channel.current).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a DM-controlled request open without a local timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const channel: PendingCombatInterruptRequestChannel<boolean> = { current: null }
+      const pending = requestAndWaitForCombatInterrupt({
+        id: 'dm-pause',
+        channel,
+        metadata: {},
+        create: () => interrupt('dm-pause'),
+        publish: async () => {},
+        timeoutMs: null,
+      })
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000)
+      expect(channel.current?.id).toBe('dm-pause')
+      channel.current?.resolve(true)
+      await expect(pending).resolves.toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

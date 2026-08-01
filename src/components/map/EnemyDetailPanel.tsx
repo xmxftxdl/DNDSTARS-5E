@@ -33,6 +33,10 @@ import {
   DND5E_MONSTER_TARGET_PRIORITY_OPTIONS,
 } from '../../rulesets/dnd5e/monsterAutomation'
 import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
+import {
+  dnd5eManualMonsterMultiattackContinuation,
+  type Dnd5eManualMonsterMultiattackContinuation,
+} from '../../lib/monsterManualControl'
 
 function SharedMonsterPortrait({
   imageId,
@@ -91,7 +95,9 @@ export default function EnemyDetailPanel({
   conditionSourceOptions = [],
   canUseMonsterActions = false,
   monsterActionUsed = false,
+  monsterActionPending = false,
   onSelectMonsterAction,
+  onSelectMonsterContinuation,
 }: {
   token: Token
   onClose: () => void
@@ -112,12 +118,19 @@ export default function EnemyDetailPanel({
   conditionSourceOptions?: readonly { id: string; label: string }[]
   canUseMonsterActions?: boolean
   monsterActionUsed?: boolean
+  monsterActionPending?: boolean
   onSelectMonsterAction?: (actionIndex: number, actionName: string) => void
+  onSelectMonsterContinuation?: (
+    continuation: Dnd5eManualMonsterMultiattackContinuation,
+  ) => void
 }) {
   const portraitInputRef = useRef<HTMLInputElement>(null)
   const [portraitBusy, setPortraitBusy] = useState(false)
   const [portraitError, setPortraitError] = useState('')
   const { template, stats } = resolveEnemyDetail(token)
+  const multiattackContinuation = canUseMonsterActions
+    ? dnd5eManualMonsterMultiattackContinuation(token)
+    : undefined
   const derived = token.poolId ? getEnemyDerivedCombatStats(token.poolId) : undefined
   const isStructured5eMonster = stats?.source === 'SRD 5.1' || stats?.source === 'DM 自定义'
   const maxHp = token.maxHp ?? derived?.maxHp ?? template?.maxHp ?? 20
@@ -678,6 +691,29 @@ export default function EnemyDetailPanel({
                 </ul>
               </section>
             )}
+
+            {multiattackContinuation ? (
+              <section
+                data-testid="enemy-detail-multiattack-continuation"
+                className="mb-4 rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-3"
+              >
+                <p className="text-xs font-bold text-amber-100">继续多重攻击</p>
+                <p className="mt-1 text-[11px] text-amber-100/70">
+                  {multiattackContinuation.parentActionName} · 第 {multiattackContinuation.occurrenceNumber}/{multiattackContinuation.occurrenceCount} 击：
+                  {multiattackContinuation.actionName}
+                </p>
+                <button
+                  type="button"
+                  disabled={monsterActionPending}
+                  onClick={() => onSelectMonsterContinuation?.(multiattackContinuation)}
+                  className="mt-2 w-full rounded-lg bg-amber-400/20 px-2 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-400/30 disabled:cursor-wait disabled:opacity-40"
+                >
+                  {monsterActionPending
+                    ? '正在结算当前攻击…'
+                    : `选择目标 · ${multiattackContinuation.actionName}`}
+                </button>
+              </section>
+            ) : null}
 
             {/* 动作 */}
             {stats.actions.length > 0 && (

@@ -13,13 +13,14 @@ const entry: InitiativeEntry = {
   roll: 18,
 }
 
-function renderTracker() {
+function renderTracker(monsterThinkingTokenId?: string) {
   return renderToStaticMarkup(createElement(InitiativeTracker, {
     entries: [entry],
     activeIndex: 0,
     scrollOffset: 0,
     round: 2,
     hpByToken: { 'hero-token': { hp: 6, max: 12 } },
+    monsterThinkingTokenId,
     onScroll: vi.fn(),
     onSelect: vi.fn(),
   }))
@@ -45,5 +46,14 @@ describe('先攻头像队列', () => {
 
     expect(html).not.toContain('>影心<')
     expect(html).toContain('aria-label="影心，先攻 18，生命值 6/12，当前回合"')
+  })
+
+  it('shows an accessible pending-plan badge only for the active authority token', () => {
+    const html = renderTracker('hero-token')
+
+    expect(html).toContain('data-testid="initiative-thinking-hero-token"')
+    expect(html).toContain('role="status"')
+    expect(html).toContain('AI 思考中…')
+    expect(renderTracker('another-token')).not.toContain('initiative-thinking-hero-token')
   })
 })
