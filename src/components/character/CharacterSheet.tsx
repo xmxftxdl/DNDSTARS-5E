@@ -5,13 +5,13 @@ import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '..
 import {
   DND5E_2014_ALIGNMENT_OPTIONS,
   DND5E_2014_BACKGROUND_OPTIONS,
-  DND5E_2014_CLASS_OPTIONS,
   DND5E_2014_RACE_OPTIONS,
   dnd5eClassHitPointRule,
   dnd5eFixedMaxHp,
   dnd5eManualHitPointRolls,
   dnd5e2014Adapter as rules,
   dnd5eArmorClass,
+  availableDnd5eClassDefinitions,
   dnd5eClassDefinition,
   dnd5eClassDefinitionForCharacter,
   dnd5eWalkingSpeed,
@@ -242,7 +242,7 @@ export default function CharacterSheet({
             <SelectField
               label="起始职业"
               value={c.charClass}
-              options={DND5E_2014_CLASS_OPTIONS}
+              options={availableDnd5eClassDefinitions().map((definition) => definition.name)}
               disabled={Object.keys(classLevels).length > 1}
               onChange={(value) => {
                 const nextClass = dnd5eClassDefinition(value)

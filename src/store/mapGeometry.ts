@@ -40,9 +40,11 @@ interface MapGeometryStoreState {
   selectEntity: (entityId: string | null) => void
   addEntity: (mapId: string, entity: MapGeometryEntity) => boolean
   updateEntity: (mapId: string, entityId: string, patch: MapGeometryEntityPatch) => void
+  applyAuthorityEntityUpdate: (mapId: string, entityId: string, patch: MapGeometryEntityPatch) => void
   setEntityPoints: (mapId: string, entityId: string, points: MapGeometryPoint[]) => boolean
   removeEntity: (mapId: string, entityId: string) => void
   setDoorState: (mapId: string, doorId: string, state: MapGeometryDoorState) => void
+  applyAuthorityDoorState: (mapId: string, doorId: string, state: MapGeometryDoorState) => void
   setVision: (mapId: string, patch: Partial<MapGeometryVisionSettings>) => void
   setEnvironment: (mapId: string, environment: Dnd5eMapEnvironment) => void
   clearMap: (mapId: string) => void
@@ -65,9 +67,14 @@ function publish(state: Pick<MapGeometryStoreState, 'maps'>): void {
     maps: state.maps.map((map) => ({ ...map, updatedAt })),
     updatedAt,
   }
-  void saveSharedResourceWithResult(MAP_GEOMETRY_RESOURCE, payload).then((result) => {
-    sharedWriteWatermark.settle(ticket, result.status === 'saved')
-  })
+  void saveSharedResourceWithResult(MAP_GEOMETRY_RESOURCE, payload)
+    .then((result) => {
+      sharedWriteWatermark.settle(ticket, result.status === 'saved')
+    })
+    .catch((error) => {
+      sharedWriteWatermark.settle(ticket, false)
+      console.error('地图几何共享保存失败', error)
+    })
 }
 
 function mutateMap(
@@ -272,6 +279,21 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
         })
         publish(get())
       },
+      applyAuthorityEntityUpdate: (mapId, entityId, patch) => {
+        set((state) => {
+          const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          const candidate = replaceEntity(current, entityId, patch)
+          const entity = [
+            ...candidate.walls, ...candidate.doors, ...(candidate.windows ?? []),
+            ...candidate.obstacles, ...(candidate.lights ?? []),
+          ].find((entry) => entry.id === entityId)
+          const next = entity ? replaceEntity(candidate, entityId, canonicalizeEditorEntity(entity)) : candidate
+          if (mapGeometryRelationshipIssues(next).length > 0) return state
+          const maps = mutateMap(state.maps, mapId, () => next)
+          setMapGeometryRuntime(maps)
+          return { maps, ...pushHistory(state, mapId, current) }
+        })
+      },
       setEntityPoints: (mapId, entityId, points) => {
         let applied = false
         set((state) => {
@@ -355,6 +377,24 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           return { maps, ...pushHistory(state, mapId, current) }
         })
         publish(get())
+      },
+      applyAuthorityDoorState: (mapId, doorId, doorState) => {
+        set((state) => {
+          const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          const maps = mutateMap(state.maps, mapId, (map) => ({
+            ...map,
+            doors: map.doors.map((door) => door.id === doorId
+              ? canonicalizeEditorEntity({
+                  ...door,
+                  state: doorState,
+                  openState: doorState === 'open' ? 'open' : 'closed',
+                  lockState: doorState === 'locked' ? 'locked' : 'unlocked',
+                }) as typeof door
+              : door),
+          }))
+          setMapGeometryRuntime(maps)
+          return { maps, ...pushHistory(state, mapId, current) }
+        })
       },
       setVision: (mapId, patch) => {
         set((state) => {

@@ -1540,6 +1540,7 @@ describe('map geometry player projection', () => {
       mapId: 'map-1',
       transactionId: 'attack-1',
       sourceTokenId: 'fighter',
+      targetTokenId: 'goblin',
       actorName: '战士',
       attackName: '长剑',
       attackKind: 'melee',
@@ -1552,6 +1553,7 @@ describe('map geometry player projection', () => {
         ok: true,
         event: {
           actorName: '战士',
+          targetTokenId: 'goblin',
           attackName: '长剑',
           attackKind: 'melee',
           classId: 'fighter',
@@ -1566,6 +1568,11 @@ describe('map geometry player projection', () => {
     )).toMatchObject({ ok: true, event: { attackKind: 'ranged', attackName: '长弓' } })
     expect(normalizeCombatPresentationEvent(
       { ...payload, attackKind: 'magic' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, targetTokenId: '' },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
@@ -2090,6 +2097,27 @@ describe('P0 shared state boundary', () => {
         id: 'move', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }], durationMs: 500, issuedAt: 1,
       } }] }],
     })).toMatchObject({ ok: true })
+    const monsterTurnProgress = {
+      schemaVersion: 1,
+      status: 'starting',
+      combatId: 'combat-1',
+      round: 1,
+      initiativeIndex: 1,
+      initiativeSlotId: 'enemy-slot',
+      tokenId: 'enemy-token',
+      requestId: 'end-turn-1',
+      startedAt: 1,
+      updatedAt: 1,
+      expiresAt: 60_001,
+    }
+    expect(validateSharedStateShape('combat', {
+      active: true,
+      monsterTurnProgress,
+    })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('combat', {
+      active: true,
+      monsterTurnProgress: { ...monsterTurnProgress, expiresAt: 120_002 },
+    })).toMatchObject({ ok: false, reason: 'invalid-monster-turn-progress' })
     expect(validateSharedStateShape('plugin-owned-state', { payload: {} })).toMatchObject({ ok: true })
   })
 
@@ -2504,6 +2532,46 @@ describe('combat interrupt atomic mutation', () => {
       status: 403,
       error: 'ineligible-roll-modifier',
     })
+  })
+
+  it('accepts only a Host-declared d20 adjustment intent and validates the Host die on settlement', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm',
+        payload: {
+          originalValue: 20,
+          eligibleModifiers: [{
+            characterId: 'support', featureId: 'test.plugin:feature', featureLabel: '结果干预',
+            modifierKind: 'adjust-d20', sourceTokenId: 'support-token', dieSides: 6,
+            direction: 'subtract',
+          }],
+        },
+        createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const contributed = mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:support', kind: 'adjust-d20', characterId: 'support', characterName: '支援者',
+        featureId: 'test.plugin:feature', featureLabel: '结果干预', direction: 'subtract', createdAt: 150,
+      },
+    }, 200, 'player', ['support'])
+    expect(contributed).toMatchObject({ ok: true, changed: true })
+    const settlement = {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response: {
+        decision: 'continue', finalValue: 20, acceptedContributionId: 'confirm:support',
+        adjustment: {
+          sourceId: 'support-token', featureId: 'test.plugin:feature', direction: 'subtract', roll: 4,
+        },
+      },
+    }
+    expect(mutateCombatInterruptQueue(contributed.next, settlement, 220, 'dm'))
+      .toMatchObject({ ok: true, changed: true })
+    expect(mutateCombatInterruptQueue(contributed.next, {
+      ...settlement,
+      response: { ...settlement.response, adjustment: { ...settlement.response.adjustment, roll: 7 } },
+    }, 220, 'dm')).toMatchObject({ ok: false, status: 409, error: 'roll-adjustment-conflict' })
   })
 
   it('rejects an eligible roll modifier submitted through a different player identity', () => {

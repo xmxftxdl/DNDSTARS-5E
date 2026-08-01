@@ -90,6 +90,11 @@ interface PlayerCombatHotbarProps {
     movement: { current: number }
   }
   activeActionId?: string
+  grappleEscapes?: readonly {
+    grapplerTokenId: string
+    grapplerLabel: string
+    dc?: number
+  }[]
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
   onCommand: (command: Dnd5eCombatActionCommand, descriptor: Dnd5eCombatActionDescriptorV1) => void
@@ -174,6 +179,7 @@ export default function PlayerCombatHotbar({
   pending,
   turnEconomy,
   activeActionId,
+  grappleEscapes = [],
   selectedSpellSlotLevels,
   onSelectedSpellSlotLevelChange,
   onCommand,
@@ -424,6 +430,7 @@ export default function PlayerCombatHotbar({
       bonusActionRemaining,
       movementRemaining,
       weaponLabel: character.equipment?.mainWeapon?.name,
+      grappleEscapes,
       spells: spellSources,
       features: featureSources,
       items: itemSources,
@@ -434,6 +441,7 @@ export default function PlayerCombatHotbar({
     bonusActionRemaining,
     canAct,
     character,
+    grappleEscapes,
     importedSpells,
     inventory,
     movementRemaining,
@@ -679,6 +687,7 @@ export default function PlayerCombatHotbar({
     return <button
       key={entry.id}
       type="button"
+      data-action-id={entry.id}
       draggable
       onDragStart={() => {
         suppressClickAfterDragRef.current = true

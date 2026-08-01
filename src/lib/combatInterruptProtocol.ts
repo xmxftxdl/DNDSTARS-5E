@@ -210,7 +210,7 @@ export interface DmAdjudicationEffect extends Record<string, unknown> {
 }
 
 export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
-  contextKind?: 'spell' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action'
+  contextKind?: 'spell' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action' | 'post-spell-random-table'
   actionId: string
   casterName: string
   spellId: string
@@ -230,6 +230,10 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   proposedDc?: number
   doorId?: string
   mapInteractionOperation?: string
+  randomTableRoll?: number
+  randomTableFeatureId?: string
+  randomTableOutcomeId?: string
+  sourceSpellId?: string
 }
 
 export type DmDamageAdjustment =
@@ -262,6 +266,10 @@ export type RollConfirmationInterruptPayload = Record<string, unknown> & {
     characterId: string
     featureId: string
     featureLabel: string
+    modifierKind?: 'replace-d20' | 'adjust-d20'
+    sourceTokenId?: string
+    dieSides?: number
+    direction?: 'add' | 'subtract'
   }>
   allowDmOverride?: boolean
   transaction: CombatTransaction
@@ -271,6 +279,12 @@ export type RollConfirmationInterruptResponse = Record<string, unknown> & {
   decision: 'continue' | 'cancelled'
   finalValue?: number
   acceptedContributionId?: string
+  adjustment?: {
+    sourceId: string
+    featureId: string
+    direction: 'add' | 'subtract'
+    roll: number
+  }
   dmOverrideApplied?: boolean
   transaction?: CombatTransaction
 }

@@ -61,7 +61,7 @@ describe('formatDnd5eSavingThrowResolutionTrace', () => {
 
     expect(details).toContain('攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 10 尺（常规射程 80 尺）。')
     expect(details).toContain('空间判定 · 冒险者海拔 40 尺；针刺魔海拔 0 尺；掩护：半身掩护（AC +2）。')
-    expect(details).toContain('攻击骰 · 劣势（2d20 取低）；骰面 18 / 6 → 6；调整值 +5（祝福术 +3）。')
+    expect(details).toContain('攻击骰 · 劣势（2d20 取低）；各骰面 18 / 6；最终采用 6；调整值 +5（祝福术 +3）。')
     expect(details).toContain('结果 · 11 vs AC 15：未命中。')
   })
 

@@ -144,4 +144,48 @@ describe('CombatActionDescriptorV1', () => {
     expect(moveDnd5eCombatHotbarAction(['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'a', 'b'])
     expect(moveDnd5eCombatHotbarAction(['a', 'b'], 'missing', 'a')).toEqual(['a', 'b'])
   })
+
+  it('adds a direct Headless escape command while a source-linked grapple is active', () => {
+    const escape = build({
+      grappleEscapes: [{
+        grapplerTokenId: 'ankheg-token',
+        grapplerLabel: '掘穴虫',
+        dc: 13,
+      }],
+    }).find((entry) => entry.id === 'system:escape-grapple:ankheg-token')
+
+    expect(escape).toMatchObject({
+      label: '挣脱 掘穴虫 的擒抱',
+      economy: 'action',
+      targeting: 'self',
+      enabled: true,
+      resource: { label: 'DC', current: 13 },
+      command: { kind: 'escape-grapple', grapplerTokenId: 'ankheg-token' },
+    })
+
+    const descriptors = build({
+      grappleEscapes: [{
+        grapplerTokenId: 'ankheg-token',
+        grapplerLabel: '掘穴虫',
+        dc: 13,
+      }],
+    })
+    const persistedWithoutEscape = descriptors
+      .filter((entry) => !entry.id.startsWith('system:escape-grapple:'))
+      .map((entry) => entry.id)
+      .reverse()
+    const reconciled = reconcileDnd5eCombatHotbarPreference({
+      schemaVersion: 1,
+      actionIds: persistedWithoutEscape,
+      activePage: 0,
+    }, descriptors)
+    expect(reconciled.actionIds[0]).toBe('system:escape-grapple:ankheg-token')
+
+    const afterEscape = reconcileDnd5eCombatHotbarPreference(
+      reconciled,
+      build(),
+    )
+    expect(afterEscape.actionIds).toEqual(persistedWithoutEscape)
+    expect(afterEscape.actionIds).not.toContain('system:escape-grapple:ankheg-token')
+  })
 })

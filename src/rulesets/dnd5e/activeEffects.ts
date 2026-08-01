@@ -2,6 +2,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import {
   DND5E_STANDARD_CONDITION_IDS,
   DND5E_STANDARD_CONDITIONS,
+  dnd5eConditionRequiresActorSource,
   dnd5eStandardConditionId,
   type Dnd5eStandardConditionId,
 } from './conditions'
@@ -64,6 +65,12 @@ export interface Dnd5eActiveEffectSource {
   magical?: boolean
   label?: string
   pluginId?: string
+}
+
+export interface Dnd5eSourceBoundConditionValidation {
+  ok: boolean
+  effect?: Dnd5eActiveEffectInstance
+  reason?: 'missing-source' | 'self-source' | 'unavailable-source'
 }
 
 export type Dnd5eActiveEffectDuration =
@@ -312,6 +319,63 @@ export interface Dnd5eActiveEffectInstance {
   modifiers?: Dnd5eActiveEffectModifiers
   /** 对应旧 timedEffects 的稳定 ID；迁移期间用于双写和去重。 */
   legacyTimedEffectId?: string
+}
+
+export interface Dnd5eEscapableGrapple {
+  effectId: string
+  grapplerId: string
+  resolution: 'fixed-dc' | 'contest'
+  dc?: number
+}
+
+/**
+ * Returns only authoritative grapple roots that expose the ordinary
+ * action-based escape flow. UI callers use this instead of guessing from the
+ * projected `grappled` condition or nearby tokens.
+ */
+export function dnd5eEscapableGrapples(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): Dnd5eEscapableGrapple[] {
+  const grapples: Dnd5eEscapableGrapple[] = []
+  const seenEffectIds = new Set<string>()
+  for (const effect of effects ?? []) {
+    const grapplerId = effect.source.actorId?.trim()
+    const relation = effect.relation
+    if (
+      effect.standardCondition !== 'grappled' ||
+      effect.dependsOnEffectId != null ||
+      !grapplerId ||
+      relation?.kind !== 'grapple' ||
+      relation.sourceActorId !== grapplerId ||
+      seenEffectIds.has(effect.id)
+    ) continue
+
+    if (effect.escapeCheck?.economy === 'action') {
+      seenEffectIds.add(effect.id)
+      grapples.push({
+        effectId: effect.id,
+        grapplerId,
+        resolution: 'fixed-dc',
+        dc: effect.escapeCheck.dc,
+      })
+      continue
+    }
+
+    const basicGrapple = effect.escapeCheck == null &&
+      effect.source.kind === 'feature' &&
+      effect.source.rulesId === 'basic-action:grapple' &&
+      relation.sourceActionId === 'basic-action:grapple' &&
+      relation.slotGroup === 'free-hand' &&
+      relation.maxDistanceFeet === 5
+    if (!basicGrapple) continue
+    seenEffectIds.add(effect.id)
+    grapples.push({
+      effectId: effect.id,
+      grapplerId,
+      resolution: 'contest',
+    })
+  }
+  return grapples
 }
 
 export interface Dnd5eActiveEffectMutation {
@@ -1733,6 +1797,24 @@ export function dnd5eConditionsFromActiveEffects(
   }
   for (const value of preservedConditions) add(value)
   return conditions
+}
+
+/** Host-side validation for conditions whose mechanics refer to their source. */
+export function validateDnd5eSourceBoundConditions(input: {
+  effects: readonly Dnd5eActiveEffectInstance[]
+  targetActorId: string
+  availableActorIds: ReadonlySet<string>
+}): Dnd5eSourceBoundConditionValidation {
+  for (const effect of input.effects) {
+    if (!dnd5eConditionRequiresActorSource(effect.standardCondition)) continue
+    const sourceActorId = effect.source.actorId?.trim()
+    if (!sourceActorId) return { ok: false, effect, reason: 'missing-source' }
+    if (sourceActorId === input.targetActorId) return { ok: false, effect, reason: 'self-source' }
+    if (!input.availableActorIds.has(sourceActorId)) {
+      return { ok: false, effect, reason: 'unavailable-source' }
+    }
+  }
+  return { ok: true }
 }
 
 /** ActiveEffect 是唯一事实源；所有持久化层均使用此函数同时生成实例与只读投影。 */

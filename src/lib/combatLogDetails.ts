@@ -55,6 +55,8 @@ const CLASS_DAMAGE_LABELS: Record<string, string> = {
 
 const CLASS_STATE_LABELS: Record<string, string> = {
   'shield-spell': '护盾术',
+  'post-spell-random-table-check': '施法后随机表判定',
+  'post-spell-random-table-manual-adjudication': '随机表 DM 裁定',
   dodging: '闪避',
   raging: '狂暴',
   hidden: '隐藏',
@@ -354,7 +356,27 @@ function eventDetails(
     case 'class-state-changed':
       return [`${resolveName(event.actorId)}｜${classStateLabel(event.stateKey)}${event.active ? '生效' : '结束'}${event.value == null ? '' : `｜数值 ${event.value}`}${event.targetId ? `｜目标 ${resolveName(event.targetId)}` : ''}`]
     case 'spell-cast':
-      return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜使用 ${event.slotLevel} 环法术位`]
+      return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜${event.slotConsumed === false ? `按 ${event.slotLevel} 环结算，不消耗法术位` : `使用 ${event.slotLevel} 环法术位`}`]
+    case 'post-spell-random-table-check-required':
+      return [
+        `${resolveName(event.actorId)}｜施法后随机表待判定｜${event.forceTable ? '直接进入结果表' : `掷 d${event.triggerDieSides}，${event.triggerValues.join('、')} 时触发`}`,
+      ]
+    case 'post-spell-random-table-check-resolved':
+      return [
+        `${resolveName(event.actorId)}｜施法后随机表${event.triggered ? '已触发' : '未触发'}${event.triggerRoll == null ? '' : `｜触发骰 ${event.triggerRoll}`}`,
+      ]
+    case 'post-spell-random-table-outcome-resolved':
+      return [
+        `${resolveName(event.actorId)}｜随机表结果 ${event.tableRoll}${event.outcomeId ? `（${event.outcomeId}）` : ''}｜${event.automation === 'full' ? event.spellId ? `自动结算 ${event.spellId}` : '自动结算完成' : '交由 DM 手动裁定'}`,
+      ]
+    case 'post-spell-random-table-manual-adjudication-required':
+      return [
+        `${resolveName(event.actorId)}｜随机表结果 ${event.tableRoll}${event.outcomeId ? `（${event.outcomeId}）` : ''} 未接入自动结算｜战斗结算已暂停，等待 DM 裁定`,
+      ]
+    case 'post-spell-random-table-manual-adjudication-resolved':
+      return [
+        `${resolveName(event.actorId)}｜随机表结果 ${event.tableRoll} 的 DM 裁定已完成｜${event.decision === 'approved' ? `已应用 ${event.effectCount} 项最终效果` : '已跳过该结果'}${event.note ? `｜备注：${event.note}` : ''}`,
+      ]
     case 'sleep-resolved':
       return [`${resolveName(event.actorId)}｜睡眠术生命值池 ${event.hitPointPool}｜影响 ${event.affectedTargetIds.length > 0 ? event.affectedTargetIds.map(resolveName).join('、') : '无'}｜剩余 ${event.remainingHitPoints}`]
     case 'color-spray-resolved':
@@ -434,10 +456,13 @@ export function formatDnd5eCombatLogDetails(
   const resolveName = options.resolveName ?? ((id: string) => id)
   const formatPosition = options.formatPosition ?? ((position) => `(${position.x}, ${position.y})`)
   const correlation = correlateMagicMissileDamageEvents(events)
+  const hasExplicitAttackTrace = (options.extra ?? []).some((line) =>
+    line.startsWith('攻击资格 ·'))
   const semanticSummaryLines: string[] = []
   const regularEventLines: string[] = []
   events.forEach((event, index) => {
     if (correlation.suppressedDamageIndexes.has(index)) return
+    if (hasExplicitAttackTrace && event.type === 'attack-resolved') return
     const lines = eventDetails(
       event,
       resolveName,
@@ -456,7 +481,7 @@ export function formatDnd5eCombatLogDetails(
     ...regularEventLines,
   ]
   const unique = all.filter((line, index) => all.indexOf(line) === index)
-  const limit = Math.max(1, options.limit ?? 14)
+  const limit = Math.max(1, options.limit ?? 32)
   if (unique.length <= limit) return unique
   return [...unique.slice(0, limit), `另有 ${unique.length - limit} 项结算事件未展开`]
 }

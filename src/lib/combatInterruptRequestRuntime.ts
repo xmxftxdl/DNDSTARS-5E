@@ -26,6 +26,8 @@ interface RequestAndWaitForCombatInterruptInput<
   decideExisting?: (existing: SharedCombatInterrupt | undefined) => ExistingCombatInterruptDecision<Value>
   create: () => SharedCombatInterrupt
   publish: (interrupt: SharedCombatInterrupt) => Promise<void>
+  /** null keeps an authoritative DM pause open until it is explicitly resolved. */
+  timeoutMs?: number | null
 }
 
 /**
@@ -41,7 +43,22 @@ export async function requestAndWaitForCombatInterrupt<
   if (decision.type === 'resolve') return decision.value
 
   return new Promise<Value>((resolve, reject) => {
-    input.channel.current = { id: input.id, ...input.metadata, resolve }
+    let settled = false
+    const timer = input.timeoutMs === null
+      ? undefined
+      : globalThis.setTimeout(() => {
+          if (settled) return
+          settled = true
+          if (input.channel.current?.id === input.id) input.channel.current = null
+          reject(new Error(`combat-interrupt-timeout:${input.id}`))
+        }, Math.max(1_000, input.timeoutMs ?? 310_000))
+    const resolveOnce = (value: Value) => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) globalThis.clearTimeout(timer)
+      resolve(value)
+    }
+    input.channel.current = { id: input.id, ...input.metadata, resolve: resolveOnce }
     if (decision.type === 'wait') return
 
     let interrupt: SharedCombatInterrupt
@@ -49,11 +66,15 @@ export async function requestAndWaitForCombatInterrupt<
       interrupt = input.create()
     } catch (error) {
       if (input.channel.current?.id === input.id) input.channel.current = null
+      settled = true
+      if (timer !== undefined) globalThis.clearTimeout(timer)
       reject(error)
       return
     }
     void input.publish(interrupt).catch((error) => {
       if (input.channel.current?.id === input.id) input.channel.current = null
+      settled = true
+      if (timer !== undefined) globalThis.clearTimeout(timer)
       reject(error)
     })
   })

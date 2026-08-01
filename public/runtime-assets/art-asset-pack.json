@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "packId": "astraltrace.dnd5e-2014.art",
-  "version": "content-f77cde56267056bc",
+  "version": "content-479e5475d36662a1",
   "assetBasePath": "/assets/",
   "sourceCatalog": "src/lib/enemyPool.ts",
   "summary": {
-    "totalFiles": 2485,
-    "totalBytes": 3118847951,
-    "runtimeFiles": 1797,
-    "runtimeBytes": 460352475,
+    "totalFiles": 2486,
+    "totalBytes": 3119968618,
+    "runtimeFiles": 1798,
+    "runtimeBytes": 461473142,
     "authoringFiles": 688,
     "authoringBytes": 2658495476,
     "catalogTokenPortraits": 677,
@@ -18,7 +18,7 @@
     "authoringMasters": 426,
     "authoringRaw": 262,
     "icons": 401,
-    "vfx": 20
+    "vfx": 21
   },
   "files": [
     {
@@ -10699,6 +10699,12 @@
       "path": "assets/vfx/burning-hands-fluid.png",
       "bytes": 1839302,
       "sha256": "cbd0b9bfda46f10d62a1364378141a31db99c8e615acb229a6e04b2e31cde1d8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/burning-hands-sprite-v2.png",
+      "bytes": 1120667,
+      "sha256": "23b54c9cd6a60022e988de8fe20bea8a9e7b11cbb517a48559b6973680bc44c7",
       "contentType": "image/png"
     },
     {
@@ -21502,6 +21508,12 @@
           "sha256": "cbd0b9bfda46f10d62a1364378141a31db99c8e615acb229a6e04b2e31cde1d8"
         },
         {
+          "path": "/assets/vfx/burning-hands-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1120667,
+          "sha256": "23b54c9cd6a60022e988de8fe20bea8a9e7b11cbb517a48559b6973680bc44c7"
+        },
+        {
           "path": "/assets/vfx/chill-touch-hand.png",
           "mediaType": "image/png",
           "bytes": 912154,
@@ -25740,5 +25752,5 @@
       ]
     }
   },
-  "contentSha256": "f77cde56267056bc4fa38a7ef7494475ec10475b62898157b0550ebcd4a663e0"
+  "contentSha256": "479e5475d36662a1b9a8eef38cac75c3c8c86939d3b2db62aeb4975f70bc2abd"
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import {
+  getSharedResourceRevisionWatermark,
   loadSharedResource,
   subscribeSharedEvent,
   subscribeSharedResourceInvalidation,
@@ -106,15 +107,60 @@ export async function drainDmPlayerActionQueue(input: {
   return handled
 }
 
-async function waitForAuthoritativePlayerActionSync(appliedAt?: number): Promise<void> {
-  await syncAuthoritativePlayerActionState({
+export async function syncPersistedAcceptedPlayerActionSnapshot(input: {
+  appliedAt?: number
+  syncAuthoritativeState: () => Promise<void>
+  loadCombatState?: () => Promise<void>
+}): Promise<void> {
+  await input.syncAuthoritativeState()
+  if (input.appliedAt != null) await input.loadCombatState?.()
+}
+
+async function waitForAuthoritativePlayerActionSync(
+  appliedAt?: number,
+  authorityRevisions?: Readonly<Record<string, number>>,
+  loadCombatState?: () => Promise<void>,
+): Promise<void> {
+  const expectedCharactersRevision = authorityRevisions?.characters
+  const expectedMapsRevision = authorityRevisions?.maps
+  const expectedCombatRevision = authorityRevisions?.combat
+  if (expectedCharactersRevision || expectedMapsRevision || expectedCombatRevision) {
+    const deadline = Date.now() + 3000
+    do {
+      await Promise.all([
+        useMapStore.getState().loadShared(),
+        useCharacterStore.getState().loadShared(),
+        expectedCombatRevision
+          ? (loadCombatState?.() ?? loadSharedResource('combat').then(() => undefined))
+          : Promise.resolve(),
+      ])
+      const mapsReady = !expectedMapsRevision ||
+        getSharedResourceRevisionWatermark('maps') >= expectedMapsRevision
+      const charactersReady = !expectedCharactersRevision ||
+        getSharedResourceRevisionWatermark('characters') >= expectedCharactersRevision
+      const combatReady = !expectedCombatRevision ||
+        getSharedResourceRevisionWatermark('combat') >= expectedCombatRevision
+      if (mapsReady && charactersReady && combatReady) return
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    } while (Date.now() < deadline)
+    throw new Error('player-action-authoritative-revision-timeout')
+  }
+  await syncPersistedAcceptedPlayerActionSnapshot({
     appliedAt,
-    loadMapsUpdatedAt: async () => (await loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
-    loadCharactersUpdatedAt: async () =>
-      (await loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
-    sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
-    loadMaps: () => useMapStore.getState().loadShared(),
-    loadCharacters: () => useCharacterStore.getState().loadShared(),
+    syncAuthoritativeState: () => syncAuthoritativePlayerActionState({
+      appliedAt,
+      loadMapsUpdatedAt: async () => (await loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
+      loadCharactersUpdatedAt: async () =>
+        (await loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
+      sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+      loadMaps: () => useMapStore.getState().loadShared(),
+      loadCharacters: () => useCharacterStore.getState().loadShared(),
+    }),
+    // Persisted ACK snapshots cannot contain the transaction revisions that are
+    // only known after commit. If the live SSE ACK was missed, explicitly apply
+    // combat too so the accepted next turn / monster-thinking marker is visible
+    // before the player's pending-action lock is released.
+    loadCombatState,
   })
 }
 
@@ -131,6 +177,8 @@ export function useMapsPlayerActionTransport(input: {
   clearPendingAction: () => void
   onActionRejected: (reason: string) => void
   onActionAccepted?: (ack: SharedPlayerActionAckState) => void
+  /** Loads and applies the authoritative combat snapshot before an ACK unlocks the UI. */
+  loadCombatState?: () => Promise<void>
 }): void {
   const {
     isDm,
@@ -145,12 +193,14 @@ export function useMapsPlayerActionTransport(input: {
     clearPendingAction,
     onActionRejected,
     onActionAccepted,
+    loadCombatState,
   } = input
   const actionHandlerRef = useRef(onAction)
   const actionRejectedRef = useRef(onActionRejected)
   const actionAcceptedRef = useRef(onActionAccepted)
   const getCombatIdRef = useRef(getCombatId)
   const clearPendingActionRef = useRef(clearPendingAction)
+  const loadCombatStateRef = useRef(loadCombatState)
 
   useEffect(() => {
     actionHandlerRef.current = onAction
@@ -158,6 +208,7 @@ export function useMapsPlayerActionTransport(input: {
     actionAcceptedRef.current = onActionAccepted
     getCombatIdRef.current = getCombatId
     clearPendingActionRef.current = clearPendingAction
+    loadCombatStateRef.current = loadCombatState
   })
 
   useEffect(() => {
@@ -210,10 +261,18 @@ export function useMapsPlayerActionTransport(input: {
         mapId,
         seenAckIds: seenAckIdsRef.current,
         getPendingAction: () => pendingActionRef.current,
-        waitForAuthoritativeSync: waitForAuthoritativePlayerActionSync,
+        waitForAuthoritativeSync: (appliedAt, authorityRevisions) =>
+          waitForAuthoritativePlayerActionSync(
+            appliedAt,
+            authorityRevisions,
+            loadCombatStateRef.current,
+          ),
         sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
         clearPendingAction: () => clearPendingActionRef.current(),
         isCancelled: () => cancelled,
+        onAuthoritativeSyncError: (error) => {
+          console.error('[player-action] authoritative reload failed after ACK', error)
+        },
       })
     }
     const unsubscribeEvent = subscribeSharedEvent<SharedPlayerActionAckState>(

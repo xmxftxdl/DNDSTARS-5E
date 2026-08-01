@@ -2,6 +2,7 @@ import type {
   Dnd5ePluginAbilityGenerationDefinition,
   Dnd5ePluginBackgroundDefinition,
   Dnd5ePluginFeatureDefinition,
+  Dnd5ePluginFeatDefinition,
   Dnd5ePluginItemDefinition,
   Dnd5ePluginRaceDefinition,
   Dnd5ePluginSpellDefinition,
@@ -16,6 +17,12 @@ import {
   type DeclarativeSubclassDefinitionV1,
   type Dnd5eDeclarativeRulesPackageV1,
 } from './declarativeSubclassAbility'
+import {
+  declarativeClassCompatibilityReportV1,
+  validateDeclarativeClassDefinitionV1,
+  type DeclarativeClassCompatibilityReportV1,
+  type DeclarativeClassDefinitionV1,
+} from './declarativeClass'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
 import type { Dnd5eMonsterStatBlock } from './monsters'
@@ -66,11 +73,13 @@ export interface Dnd5eCustomRulesPluginDraft {
   races: Dnd5ePluginRaceDefinition[]
   backgrounds: Dnd5ePluginBackgroundDefinition[]
   features: Dnd5ePluginFeatureDefinition[]
+  feats?: Dnd5ePluginFeatDefinition[]
   spells: Dnd5ePluginSpellDefinition[]
   items: Dnd5ePluginItemDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   headlessActions?: Dnd5eCustomHeadlessActionDraft[]
   subclasses?: DeclarativeSubclassDefinitionV1[]
+  classes?: DeclarativeClassDefinitionV1[]
   /** 使用怪物工坊生成的完整 stat block；Host 会再次执行 monsterSchema 校验。 */
   monsters?: Dnd5eMonsterStatBlock[]
 }
@@ -86,9 +95,9 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
   if (!manifest.publisher.trim()) errors.push('请填写发布者。')
   if (!manifest.license.trim()) errors.push('请填写许可证。')
   if (
-    draft.races.length + draft.backgrounds.length + draft.features.length + draft.spells.length +
+    draft.races.length + draft.backgrounds.length + draft.features.length + (draft.feats?.length ?? 0) + draft.spells.length +
     draft.items.length + draft.abilityGenerationMethods.length + (draft.subclasses?.length ?? 0) +
-    (draft.monsters?.length ?? 0) === 0
+    (draft.classes?.length ?? 0) + (draft.monsters?.length ?? 0) === 0
   ) errors.push('请至少添加一种规则内容。')
 
   if ((draft.monsters?.length ?? 0) > 128) errors.push('单个扩展最多包含 128 个怪物模板。')
@@ -104,6 +113,17 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
       validateDeclarativeSubclassDefinitionV1(subclass, `子职 ${subclass.name || subclass.id}`)
       if (subclassIds.has(subclass.id)) errors.push(`子职 ID 重复：${subclass.id}`)
       subclassIds.add(subclass.id)
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const classIds = new Set<string>()
+  for (const definition of draft.classes ?? []) {
+    try {
+      validateDeclarativeClassDefinitionV1(definition, `职业 ${definition.name || definition.id}`)
+      if (classIds.has(definition.id)) errors.push(`职业 ID 重复：${definition.id}`)
+      classIds.add(definition.id)
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error))
     }
@@ -211,9 +231,24 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
       !!persistentArea
     )) errors.push(`特性 ${feature.name || feature.id} 的召唤声明无效。`)
   }
+  for (const feat of draft.feats ?? []) {
+    claimId(feat.id, '专长')
+    if (!feat.name.trim() || !feat.summary.trim() || !feat.description.trim()) {
+      errors.push(`专长 ${feat.id || '未命名'} 缺少名称、摘要或正文。`)
+    }
+    if (feat.automation !== 'manual' && !feat.action && !feat.staticModifiers) {
+      errors.push(`自动化专长 ${feat.name || feat.id} 缺少战斗行动或固定效果。`)
+    }
+    if (feat.prerequisite?.minimumLevel != null && (
+      !Number.isInteger(feat.prerequisite.minimumLevel) || feat.prerequisite.minimumLevel < 1 || feat.prerequisite.minimumLevel > 20
+    )) errors.push(`专长 ${feat.name || feat.id} 的最低等级无效。`)
+    if (Object.values(feat.prerequisite?.abilityScores ?? {}).some((score) => !Number.isInteger(score) || score < 1 || score > 30)) {
+      errors.push(`专长 ${feat.name || feat.id} 的属性前提无效。`)
+    }
+  }
   const headlessActionIds = new Set<string>()
   const effectlessMapActionIds = new Set(
-    draft.features.flatMap((feature) => feature.action?.summon || feature.action?.persistentArea ? [feature.action.id] : []),
+    [...draft.features, ...(draft.feats ?? [])].flatMap((feature) => feature.action?.summon || feature.action?.persistentArea ? [feature.action.id] : []),
   )
   for (const action of draft.headlessActions ?? []) {
     if (!ID_PATTERN.test(action.id)) errors.push(`Headless 行动 ID 无效：${action.id || '未填写'}`)
@@ -259,6 +294,9 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
   for (const feature of draft.features) {
     if (feature.action) referencedHeadlessActions.add(feature.action.id)
   }
+  for (const feat of draft.feats ?? []) {
+    if (feat.action) referencedHeadlessActions.add(feat.action.id)
+  }
   for (const spell of draft.spells) {
     if (spell.automation?.mode === 'headless-action') referencedHeadlessActions.add(spell.automation.actionId)
   }
@@ -291,10 +329,14 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
 export function buildDnd5eCustomRulesPluginSource(draft: Dnd5eCustomRulesPluginDraft): string {
   const errors = validateDnd5eCustomRulesPluginDraft(draft)
   if (errors.length > 0) throw new Error(errors.join('\n'))
+  if ((draft.classes?.length ?? 0) > 0) {
+    throw new Error('声明式职业只能导出为纯 JSON .dndstars5e 包，不能降级为旧版 JavaScript 插件。')
+  }
   const manifest = JSON.stringify(draft.manifest, null, 2)
   const races = JSON.stringify(draft.races, null, 2)
   const backgrounds = JSON.stringify(draft.backgrounds, null, 2)
   const features = JSON.stringify(draft.features, null, 2)
+  const feats = JSON.stringify(draft.feats ?? [], null, 2)
   const spells = JSON.stringify(draft.spells, null, 2)
   const items = JSON.stringify(draft.items, null, 2)
   const methods = JSON.stringify(draft.abilityGenerationMethods, null, 2)
@@ -305,6 +347,7 @@ const manifest = ${manifest};
 const races = ${races};
 const backgrounds = ${backgrounds};
 const features = ${features};
+const feats = ${feats};
 const spells = ${spells};
 const items = ${items};
 const abilityGenerationMethods = ${methods};
@@ -363,6 +406,7 @@ const plugin = {
     for (const race of races) api.registerRace(race);
     for (const background of backgrounds) api.registerBackground(background);
     for (const feature of features) api.registerFeature(feature);
+    for (const feat of feats) api.registerFeat(feat);
     for (const spell of spells) api.registerSpell(spell);
     for (const item of items) api.registerItem(item);
     for (const method of abilityGenerationMethods) api.registerAbilityGenerationMethod(method);
@@ -378,7 +422,7 @@ export default plugin;
 export function buildDnd5eCustomRulesPluginPackageV1(draft: Dnd5eCustomRulesPluginDraft): string {
   const errors = validateDnd5eCustomRulesPluginDraft(draft)
   if (errors.length > 0) throw new Error(errors.join('\n'))
-  const legacy: Dnd5eCustomRulesPluginDraft = { ...draft, subclasses: undefined }
+  const legacy: Dnd5eCustomRulesPluginDraft = { ...draft, subclasses: undefined, classes: undefined }
   const value: Dnd5eDeclarativeRulesPackageV1 = {
     format: DND5E_DECLARATIVE_PACKAGE_FORMAT,
     schemaVersion: DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION,
@@ -388,6 +432,7 @@ export function buildDnd5eCustomRulesPluginPackageV1(draft: Dnd5eCustomRulesPlug
       rulesetId: 'dnd5e-2014-srd-5.1',
     },
     subclasses: draft.subclasses ?? [],
+    classes: draft.classes ?? [],
     legacy,
   }
   return JSON.stringify(value, null, 2)
@@ -397,6 +442,12 @@ export function dnd5eCustomPluginAutomationReportV1(
   draft: Pick<Dnd5eCustomRulesPluginDraft, 'subclasses'>,
 ): DeclarativeAbilityCompatibilityReportV1 {
   return declarativeSubclassCompatibilityReportV1(draft.subclasses ?? [])
+}
+
+export function dnd5eCustomClassAutomationReportV1(
+  draft: Pick<Dnd5eCustomRulesPluginDraft, 'classes'>,
+): DeclarativeClassCompatibilityReportV1 {
+  return declarativeClassCompatibilityReportV1(draft.classes ?? [])
 }
 
 export function dnd5eCustomRulesPluginFileName(pluginId: string): string {

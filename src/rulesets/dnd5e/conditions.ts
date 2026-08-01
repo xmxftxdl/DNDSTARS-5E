@@ -116,6 +116,20 @@ export function dnd5eConditionLabel(value: string): string {
   return condition ? DND5E_STANDARD_CONDITIONS[condition].label : value
 }
 
+/**
+ * These conditions cannot be resolved from a bare label. Their SRD rules
+ * explicitly compare the affected creature with the creature that caused the
+ * condition, so every authoritative ActiveEffect must retain that actor.
+ */
+export function dnd5eConditionRequiresActorSource(
+  value: string | Dnd5eStandardConditionId | undefined,
+): boolean {
+  const condition = dnd5eStandardConditionId(value)
+  if (!condition) return false
+  const special = DND5E_STANDARD_CONDITIONS[condition].special ?? []
+  return special.includes('cannot-attack-source') || special.includes('cannot-approach-source')
+}
+
 export function dnd5eHasStandardCondition(
   creature: { conditions?: readonly string[] },
   condition: Dnd5eStandardConditionId,

@@ -660,6 +660,8 @@ export interface Dnd5eMapResultPlan {
   characters: Character[]
   changedTokenIds: readonly string[]
   changedCharacterIds: readonly string[]
+  tokenPatches?: Readonly<Record<string, Partial<Token>>>
+  characterPatches?: Readonly<Record<string, Partial<Character>>>
 }
 
 /**
@@ -750,6 +752,8 @@ export function planDnd5eMapResultApplication(input: {
   })
   const changedTokenIds: string[] = []
   const changedCharacterIds: string[] = []
+  const tokenPatches: Record<string, Partial<Token>> = {}
+  const characterPatches: Record<string, Partial<Character>> = {}
   const tokenById = new Map(input.map.tokens.map((token) => [token.id, token]))
   const map: BattleMap = {
     ...input.map,
@@ -885,6 +889,7 @@ export function planDnd5eMapResultApplication(input: {
         tokenClassStateUnchanged
       ) return token
       changedTokenIds.push(token.id)
+      tokenPatches[token.id] = patch
       return { ...token, ...patch }
     }),
   }
@@ -926,9 +931,7 @@ export function planDnd5eMapResultApplication(input: {
       classStateUnchanged &&
       conditionsUnchanged
     ) return character
-    changedCharacterIds.push(character.id)
-    return {
-      ...character,
+    const patch: Partial<Character> = {
       currentHp: nextCharacterCurrentHp,
       maxHp: combatant.maxHp,
       tempHp: combatant.temporaryHp,
@@ -941,9 +944,12 @@ export function planDnd5eMapResultApplication(input: {
       classResources: nextClassResources,
       dnd5eCombatState: nextClassState,
     }
+    changedCharacterIds.push(character.id)
+    characterPatches[character.id] = patch
+    return { ...character, ...patch }
   })
   for (const tokenId of Object.keys(input.state.combatants)) {
     if (!tokenById.has(tokenId)) throw new Error(`Headless combatant has no map token: ${tokenId}`)
   }
-  return { map, characters, changedTokenIds, changedCharacterIds }
+  return { map, characters, changedTokenIds, changedCharacterIds, tokenPatches, characterPatches }
 }

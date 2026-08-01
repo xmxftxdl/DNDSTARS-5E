@@ -11,11 +11,13 @@ import {
   type Dnd5eCuttingWordsUse,
   type Dnd5eHeadlessCombatState,
   type Dnd5eOptionalBonusDieUse,
+  type Dnd5ePostD20AdjustmentUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 
 export type Dnd5eAbilityCheckRejectReason =
   | 'invalid-action'
@@ -112,6 +114,13 @@ export function prepareDnd5eAbilityCheck(input: {
             active: actorCombatant.classState.helpedAbilityCheckSourceId != null,
             reason: 'help',
           },
+          {
+            active: dnd5eNextD20AdvantageApplies(
+              actorCombatant,
+              'ability-check',
+            ),
+            reason: 'next-d20-advantage',
+          },
         ],
         disadvantage: [
           { active: actorCombatant.exhaustionLevel >= 1, reason: 'exhaustion' },
@@ -143,6 +152,7 @@ function headlessAbilityCheckAction(
     darkOnesOwnLuckRoll?: number
     cuttingWords?: Dnd5eCuttingWordsUse
     optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
+    postD20Adjustment?: Dnd5ePostD20AdjustmentUse
     strokeOfLuck?: boolean
   },
 ) {
@@ -163,8 +173,13 @@ export function previewPreparedDnd5eAbilityCheck(
   prepared: PreparedDnd5eAbilityCheck,
   d20: number,
   d20Second?: number,
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
 ): Extract<Dnd5eCombatEvent, { type: 'ability-check-resolved' }> | undefined {
-  const result = resolveDnd5eHeadlessAction(prepared.state, headlessAbilityCheckAction(prepared, { d20, d20Second }))
+  const result = resolveDnd5eHeadlessAction(prepared.state, headlessAbilityCheckAction(prepared, {
+    d20,
+    d20Second,
+    postD20Adjustment,
+  }))
   return result.events.find((event): event is Extract<Dnd5eCombatEvent, { type: 'ability-check-resolved' }> =>
     event.type === 'ability-check-resolved')
 }
@@ -180,6 +195,7 @@ export function resolvePreparedDnd5eAbilityCheck(input: {
   darkOnesOwnLuckRoll?: number
   cuttingWords?: Dnd5eCuttingWordsUse
   optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse
   strokeOfLuck?: boolean
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const result = resolveDnd5eHeadlessAction(input.prepared.state, headlessAbilityCheckAction(input.prepared, input))

@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import {
   COMBAT_PRESENTATION_CHANNEL,
   EMPTY_COMBAT_PRESENTATION_STATE,
+  combatPresentationAttackTargetEffectsForMap,
   combatPresentationKillStreakForMap,
   combatPresentationAttackBannerForMap,
   combatPresentationProjectilesForMap,
@@ -15,6 +16,7 @@ import {
   type CombatPresentationMapProjectile,
   type CombatPresentationKillStreak,
   type CombatPresentationAttackBanner,
+  type CombatPresentationAttackTargetEffect,
   type CombatPresentationSpellBanner,
   type CombatPresentationSavingThrow,
   type CombatPresentationState,
@@ -27,6 +29,7 @@ const PRESENTATION_PROJECTION_TICK_MS = 125
 export interface CombatPresentationCoordinator {
   state: CombatPresentationState
   projectiles: CombatPresentationMapProjectile[]
+  attackTargetEffects: CombatPresentationAttackTargetEffect[]
   spellBanner: CombatPresentationSpellBanner | null
   killStreak: CombatPresentationKillStreak | null
   attackBanner: CombatPresentationAttackBanner | null
@@ -85,6 +88,20 @@ export function useCombatPresentationCoordinator(
     [clockRevision, map, state],
   )
 
+  const attackTargetEffects = useMemo(
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationAttackTargetEffectsForMap(
+            state,
+            map,
+            combatPresentationServerNow(),
+          )
+        : []
+    },
+    [clockRevision, map, state],
+  )
+
   const spellBanner = useMemo(
     () => {
       void clockRevision
@@ -125,5 +142,13 @@ export function useCombatPresentationCoordinator(
     [clockRevision, map, state],
   )
 
-  return { state, projectiles, spellBanner, killStreak, attackBanner, savingThrow }
+  return {
+    state,
+    projectiles,
+    attackTargetEffects,
+    spellBanner,
+    killStreak,
+    attackBanner,
+    savingThrow,
+  }
 }

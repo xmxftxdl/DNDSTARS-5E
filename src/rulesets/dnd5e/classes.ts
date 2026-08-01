@@ -3,6 +3,10 @@ import type { Character } from '../../types/character'
 import { dnd5eEquippedEffectTotal } from './equipmentEffects'
 import { dnd5eActiveSpeedBonus, dnd5eActiveSpeedPenalty } from './activeEffects'
 import { fighterProgression, fighterRemarkableAthleteRunningLongJumpBonus } from './fighter'
+import {
+  registeredDeclarativeClassDefinitionV1,
+  registeredDeclarativeClassesV1,
+} from './declarativeClass'
 
 export type Dnd5eClassId =
   | 'barbarian'
@@ -680,11 +684,18 @@ const byId = new Map(DND5E_SRD_CLASS_DEFINITIONS.map((definition) => [definition
 const byName = new Map(DND5E_SRD_CLASS_DEFINITIONS.map((definition) => [definition.name, definition]))
 
 export function dnd5eClassDefinition(idOrName: Dnd5eClassId | string): Dnd5eClassDefinition | undefined {
-  return byId.get(idOrName as Dnd5eClassId) ?? byName.get(idOrName)
+  return byId.get(idOrName as Dnd5eClassId) ?? byName.get(idOrName) ?? registeredDeclarativeClassDefinitionV1(idOrName)
 }
 
 export function dnd5eClassDefinitionForCharacter(character: Pick<Character, 'charClass'>): Dnd5eClassDefinition | undefined {
-  return byName.get(character.charClass)
+  return byName.get(character.charClass) ?? registeredDeclarativeClassDefinitionV1(character.charClass)
+}
+
+export function availableDnd5eClassDefinitions(): readonly Dnd5eClassDefinition[] {
+  return [
+    ...DND5E_SRD_CLASS_DEFINITIONS,
+    ...registeredDeclarativeClassesV1().map((entry) => entry.definition),
+  ]
 }
 
 function classLevel(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>, classId: Dnd5eClassId): number {

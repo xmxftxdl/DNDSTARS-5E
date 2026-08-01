@@ -23,6 +23,11 @@ export interface SharedCombatInterruptStore {
   mutateSharedCombatInterrupt?: <T>(mutation: SharedCombatInterruptMutation) => Promise<T | null>
 }
 
+function requireMutationResult<T>(operation: string, result: T | null): T {
+  if (result == null) throw new Error(`combat-interrupt-mutation-rejected:${operation}`)
+  return result
+}
+
 async function loadQueueForMap(
   input: SharedCombatInterruptStore & { mapId: string },
 ): Promise<SharedCombatInterruptQueueState> {
@@ -34,99 +39,80 @@ export async function publishSharedCombatInterrupt(
   input: SharedCombatInterruptStore & { interrupt: SharedCombatInterrupt },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({
+    requireMutationResult('upsert', await input.mutateSharedCombatInterrupt({
       operation: 'upsert',
       mapId: input.interrupt.mapId,
       interrupt: input.interrupt,
-    })
+    }))
     return
   }
   const current = await input.loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-  await input.saveSharedResource<SharedCombatInterruptQueueState>(
-    COMBAT_INTERRUPT_RESOURCE,
-    upsertCombatInterrupt(current, input.interrupt),
-  )
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, upsertCombatInterrupt(current, input.interrupt))
 }
 
 export async function answerSharedCombatInterrupt(
-  input: SharedCombatInterruptStore & {
-    mapId: string
-    id: string
-    response: Record<string, unknown>
-  },
+  input: SharedCombatInterruptStore & { mapId: string; id: string; response: Record<string, unknown> },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({ operation: 'answer', mapId: input.mapId, id: input.id, response: input.response })
+    requireMutationResult('answer', await input.mutateSharedCombatInterrupt({
+      operation: 'answer', mapId: input.mapId, id: input.id, response: input.response,
+    }))
     return
   }
-  const queue = await loadQueueForMap(input)
-  const next = answerCombatInterrupt(queue, input.id, input.response)
-  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  const next = answerCombatInterrupt(await loadQueueForMap(input), input.id, input.response)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('answer', next))
 }
 
 export async function markSharedCombatInterruptRolling(
-  input: SharedCombatInterruptStore & {
-    mapId: string
-    id: string
-    response?: Record<string, unknown>
-  },
+  input: SharedCombatInterruptStore & { mapId: string; id: string; response?: Record<string, unknown> },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({ operation: 'rolling', mapId: input.mapId, id: input.id, response: input.response })
+    requireMutationResult('rolling', await input.mutateSharedCombatInterrupt({
+      operation: 'rolling', mapId: input.mapId, id: input.id, response: input.response,
+    }))
     return
   }
-  const queue = await loadQueueForMap(input)
-  const next = markCombatInterruptRolling(queue, input.id, input.response)
-  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  const next = markCombatInterruptRolling(await loadQueueForMap(input), input.id, input.response)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('rolling', next))
 }
 
 export async function finishSharedCombatInterrupt(
-  input: SharedCombatInterruptStore & {
-    mapId: string
-    id: string
-    response?: Record<string, unknown>
-  },
+  input: SharedCombatInterruptStore & { mapId: string; id: string; response?: Record<string, unknown> },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({ operation: 'finish', mapId: input.mapId, id: input.id, response: input.response })
+    requireMutationResult('finish', await input.mutateSharedCombatInterrupt({
+      operation: 'finish', mapId: input.mapId, id: input.id, response: input.response,
+    }))
     return
   }
-  const queue = await loadQueueForMap(input)
-  const next = finishCombatInterrupt(queue, input.id, input.response)
-  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  const next = finishCombatInterrupt(await loadQueueForMap(input), input.id, input.response)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('finish', next))
 }
 
 export async function contributeSharedCombatInterrupt(
-  input: SharedCombatInterruptStore & {
-    mapId: string
-    id: string
-    contribution: CombatInterruptContribution
-  },
+  input: SharedCombatInterruptStore & { mapId: string; id: string; contribution: CombatInterruptContribution },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({
-      operation: 'contribute',
-      mapId: input.mapId,
-      id: input.id,
-      contribution: input.contribution,
-    })
+    requireMutationResult('contribute', await input.mutateSharedCombatInterrupt({
+      operation: 'contribute', mapId: input.mapId, id: input.id, contribution: input.contribution,
+    }))
     return
   }
-  const queue = await loadQueueForMap(input)
-  const next = contributeCombatInterrupt(queue, input.id, input.contribution)
-  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  const next = contributeCombatInterrupt(await loadQueueForMap(input), input.id, input.contribution)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('contribute', next))
 }
 
 export async function waitSharedCombatInterruptForDm(
   input: SharedCombatInterruptStore & { mapId: string; id: string },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({ operation: 'wait', mapId: input.mapId, id: input.id })
+    requireMutationResult('wait', await input.mutateSharedCombatInterrupt({
+      operation: 'wait', mapId: input.mapId, id: input.id,
+    }))
     return
   }
-  const queue = await loadQueueForMap(input)
-  const next = waitCombatInterruptForDm(queue, input.id)
-  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  const next = waitCombatInterruptForDm(await loadQueueForMap(input), input.id)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('wait', next))
 }
 
 export async function rollbackSharedCombatInterrupt(
@@ -138,13 +124,15 @@ export async function rollbackSharedCombatInterrupt(
   },
 ): Promise<void> {
   if (input.mutateSharedCombatInterrupt) {
-    await input.mutateSharedCombatInterrupt({
-      operation: 'rollback', mapId: input.mapId, id: input.id,
-      response: input.response, rollbackReason: input.reason,
-    })
+    requireMutationResult('rollback', await input.mutateSharedCombatInterrupt({
+      operation: 'rollback',
+      mapId: input.mapId,
+      id: input.id,
+      response: input.response,
+      rollbackReason: input.reason,
+    }))
     return
   }
-  const queue = await loadQueueForMap(input)
-  const next = rollbackCombatInterrupt(queue, input.id, input.response, input.reason)
-  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  const next = rollbackCombatInterrupt(await loadQueueForMap(input), input.id, input.response, input.reason)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('rollback', next))
 }

@@ -72,6 +72,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
   } = props
   const contextKind = sharedDmAdjudicationPrompt?.payload.contextKind
   const isBasicActionAdjudication = contextKind === 'basic-action'
+  const isRandomTableAdjudication = contextKind === 'post-spell-random-table'
   const supportsDirectEffects = contextKind !== 'map-interaction' && !isBasicActionAdjudication
 
   return (
@@ -95,6 +96,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                         ? '地图交互中断'
                         : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
                           ? '其他行动裁定'
+                          : isRandomTableAdjudication
+                            ? '随机表结果裁定'
                         : 'DM 裁定'} · {sharedDmAdjudicationPrompt.payload.spellName}
                   </h3>
                   <p className="mt-1 text-xs text-slate-400">
@@ -104,6 +107,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                         ? 'DM 权威地图事务'
                         : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
                           ? <>玩家声明 · {sharedDmAdjudicationPrompt.payload.castingTime === 'bonus-action' ? '附赠动作' : '动作'}</>
+                        : isRandomTableAdjudication
+                          ? <>d100 结果 {sharedDmAdjudicationPrompt.payload.randomTableRoll ?? '未知'} · 原始法术 {sharedDmAdjudicationPrompt.payload.sourceSpellId ?? '未知'}</>
                       : <>{
                       sharedDmAdjudicationPrompt.payload.spellLevel === 0
                         ? '戏法'
@@ -114,6 +119,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                 <span className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
                   {isBasicActionAdjudication
                     ? `已经消耗${sharedDmAdjudicationPrompt.payload.castingTime === 'bonus-action' ? '附赠动作' : '动作'}`
+                    : isRandomTableAdjudication
+                      ? '战斗结算已暂停'
                     : '未批准前：不消费资源'}
                 </span>
               </div>
@@ -132,6 +139,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                       ? '批准后由 DM Host 使用当前角色与地图快照掷骰和结算。可调整 DC 或直接指定成功／失败；事务完成前玩家无法重复提交。'
                       : isBasicActionAdjudication
                         ? '该行动的动作或附赠动作已由 Host 权威扣除。请根据玩家声明确认是否允许，并在备注中记录检定、DC、结果或后续效果；无论批准或驳回，都不会返还行动资源。'
+                        : isRandomTableAdjudication
+                          ? '该随机表结果没有已审计的 Headless 自动化映射。原始施法与资源消耗已经完成；请填写完成命中、豁免、抗性等裁定后的最终效果，提交后才会恢复战斗。也可以跳过该结果。'
                         : '数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。'}
                   </div>
                   {sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction' && (
@@ -312,6 +321,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                     ? '拒绝交互'
                     : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
                       ? '驳回裁定（不返还）'
+                    : isRandomTableAdjudication
+                      ? '跳过该随机表结果'
                     : '取消施法（不消费）'}
               </button>
               <button
@@ -325,7 +336,11 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                 onClick={() => void handleSharedDmAdjudicationChoice(true)}
                 className="rounded-lg bg-amber-500/25 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-500/35 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isBasicActionAdjudication ? '确认裁定' : '批准并提交 Headless 事务'}
+                {isBasicActionAdjudication
+                  ? '确认裁定'
+                  : isRandomTableAdjudication
+                    ? '提交裁定并继续'
+                    : '批准并提交 Headless 事务'}
               </button>
             </div>
           </div>

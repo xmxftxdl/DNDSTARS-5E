@@ -2,6 +2,10 @@ export interface D20EnemyModifierOption {
   characterId: string
   featureId: string
   featureLabel: string
+  modifierKind?: 'replace-d20' | 'adjust-d20'
+  sourceTokenId?: string
+  dieSides?: number
+  direction?: 'add' | 'subtract'
 }
 
 export type D20ResolvedOutcome = 'success' | 'failure' | 'unknown'
@@ -17,7 +21,16 @@ export function shouldOpenD20RollConfirmation(input: {
   eligibleEnemyModifiers?: readonly D20EnemyModifierOption[]
 }): boolean {
   if (input.visibility === 'dm-only') return true
-  return input.outcome === 'success' && (input.eligibleEnemyModifiers?.length ?? 0) > 0
+  const modifiers = input.eligibleEnemyModifiers ?? []
+  if (input.outcome === 'success') {
+    return modifiers.some((entry) =>
+      entry.modifierKind !== 'adjust-d20' || entry.direction === 'subtract')
+  }
+  if (input.outcome === 'failure') {
+    return modifiers.some((entry) =>
+      entry.modifierKind === 'adjust-d20' && entry.direction === 'add')
+  }
+  return false
 }
 
 export function canBonusDieChangeFailure(input: {

@@ -32,6 +32,7 @@ export type Dnd5eCombatActionCommand =
   | { kind: 'select-move' }
   | { kind: 'select-weapon-target'; options?: Dnd5eWeaponAttackOptions }
   | { kind: 'basic-action'; action: 'dash' | 'hide' }
+  | { kind: 'escape-grapple'; grapplerTokenId: string }
   | { kind: 'dodge' }
   | { kind: 'disengage' }
   | {
@@ -174,6 +175,11 @@ export interface BuildDnd5eCombatActionDescriptorsInput {
   bonusActionRemaining: number
   movementRemaining: number
   weaponLabel?: string
+  grappleEscapes?: readonly {
+    grapplerTokenId: string
+    grapplerLabel: string
+    dc?: number
+  }[]
   spells?: readonly Dnd5eCombatActionSpellSource[]
   features?: readonly Dnd5eCombatActionFeatureSource[]
   items?: readonly Dnd5eCombatActionItemSource[]
@@ -238,6 +244,22 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       icon: dnd5eSystemActionIcon('end-turn', 'arcane'), economy: 'none', targeting: 'none', command: { kind: 'end-turn' },
     }, availability(input, 'none')),
   ]
+
+  for (const grapple of input.grappleEscapes ?? []) {
+    actions.push(descriptor({
+      id: `system:escape-grapple:${encodeURIComponent(grapple.grapplerTokenId)}`,
+      sourceKind: 'system',
+      label: `挣脱 ${grapple.grapplerLabel} 的擒抱`,
+      description: grapple.dc == null
+        ? `消耗一个动作，以力量（运动）或敏捷（体操）对抗 ${grapple.grapplerLabel} 的力量（运动）。`
+        : `消耗一个动作，以力量（运动）或敏捷（体操）中较高者进行 DC ${grapple.dc} 检定。`,
+      icon: dnd5eSystemActionIcon('escape-grapple', 'control'),
+      economy: 'action',
+      targeting: 'self',
+      resource: grapple.dc == null ? undefined : { label: 'DC', current: grapple.dc },
+      command: { kind: 'escape-grapple', grapplerTokenId: grapple.grapplerTokenId },
+    }, availability(input, 'action')))
+  }
 
   for (const spell of input.spells ?? []) {
     actions.push(descriptor({
@@ -305,9 +327,24 @@ export function reconcileDnd5eCombatHotbarPreference(
   descriptors: readonly Dnd5eCombatActionDescriptorV1[],
 ): Dnd5eCombatHotbarPreferenceV1 {
   const availableIds = new Set(descriptors.map((entry) => entry.id))
-  const saved = preference?.actionIds.filter((id, index, values) => availableIds.has(id) && values.indexOf(id) === index) ?? []
+  // Escape is a transient condition response, not a user-customizable shortcut.
+  // Keep it visible ahead of persisted actions so an old localStorage order can
+  // never hide the only legal way to end an active grapple.
+  const priorityIds = descriptors
+    .map((entry) => entry.id)
+    .filter((id) => id.startsWith('system:escape-grapple:'))
+  const priorityIdSet = new Set(priorityIds)
+  const saved = preference?.actionIds.filter((id, index, values) =>
+    availableIds.has(id) && !priorityIdSet.has(id) && values.indexOf(id) === index,
+  ) ?? []
   const savedSet = new Set(saved)
-  const actionIds = [...saved, ...descriptors.map((entry) => entry.id).filter((id) => !savedSet.has(id))]
+  const actionIds = [
+    ...priorityIds,
+    ...saved,
+    ...descriptors.map((entry) => entry.id).filter((id) =>
+      !priorityIdSet.has(id) && !savedSet.has(id),
+    ),
+  ]
   const pageCount = Math.max(1, Math.ceil(actionIds.length / DND5E_COMBAT_HOTBAR_PAGE_SIZE))
   return {
     schemaVersion: DND5E_COMBAT_HOTBAR_SCHEMA_VERSION,

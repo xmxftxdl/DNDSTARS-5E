@@ -14,6 +14,7 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eAttacksPerAttackAction } from './classes'
+import { dnd5eEscapableGrapples } from './activeEffects'
 import {
   cellKey,
   mapCellExtent,
@@ -187,9 +188,12 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const combatant = snapshot.state.combatants[token.id]
   if (actorIndex < 0 || !combatant) return { ok: false, reason: 'combatant-missing' }
   const targetCombatant = targetTokenId ? snapshot.state.combatants[targetTokenId] : undefined
-  const selectedGrappleEffect = payload.kind === 'escape-grapple' && targetCombatant
-    ? combatant.classState.activeEffects?.find((effect) =>
-        effect.standardCondition === 'grappled' && effect.source.actorId === targetCombatant.id)
+  const selectedGrapple = payload.kind === 'escape-grapple' && targetCombatant
+    ? dnd5eEscapableGrapples(combatant.classState.activeEffects).find((grapple) =>
+        grapple.grapplerId === targetCombatant.id)
+    : undefined
+  const selectedGrappleEffect = selectedGrapple
+    ? combatant.classState.activeEffects?.find((effect) => effect.id === selectedGrapple.effectId)
     : undefined
   if (payload.kind === 'escape-grapple' && (!targetCombatant || !selectedGrappleEffect)) {
     return { ok: false, reason: 'invalid-target' }

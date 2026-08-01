@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { publishSharedEvent, sampleSharedServerClock } from './sharedApi'
 import {
   ACID_SPLASH_ANIMATION_DURATION_MS,
+  ATTACK_TARGET_EFFECT_DURATION_MS,
   CHILL_TOUCH_ANIMATION_DURATION_MS,
   ELDRITCH_BLAST_ANIMATION_DURATION_MS,
   COMBAT_PRESENTATION_CHANNEL,
@@ -31,6 +32,7 @@ import {
   SHOCKING_GRASP_ANIMATION_DURATION_MS,
   SPARE_THE_DYING_ANIMATION_DURATION_MS,
   SPELL_BANNER_TOTAL_DURATION_MS,
+  combatPresentationAttackTargetEffectsForMap,
   combatPresentationKillStreakForMap,
   combatPresentationProjectilesForMap,
   combatPresentationSavingThrowForMap,
@@ -671,6 +673,7 @@ describe('combat presentation events', () => {
       mapId: map.id,
       transactionId: 'fighter-longbow',
       sourceTokenId: 'fighter',
+      targetTokenId: 'goblin',
       actorName: '战士',
       attackName: '长弓',
       attackKind: 'ranged',
@@ -679,9 +682,92 @@ describe('combat presentation events', () => {
     const event = vi.mocked(publishSharedEvent).mock.calls.at(-1)?.[1]
     expect(parseCombatPresentationEvent(event)).toEqual(expect.objectContaining({
       type: 'attack-banner',
+      targetTokenId: 'goblin',
       attackKind: 'ranged',
       attackName: '长弓',
     }))
+  })
+
+  it('projects class-colored single-target attack marks at the live target position', () => {
+    const rangedAttack = {
+      schemaVersion: 1 as const,
+      id: 'fighter-longbow:banner',
+      type: 'attack-banner' as const,
+      mapId: map.id,
+      transactionId: 'fighter-longbow',
+      sourceTokenId: 'fighter',
+      targetTokenId: 'goblin',
+      actorName: 'Fighter',
+      attackName: 'Longbow',
+      attackKind: 'ranged' as const,
+      classId: 'fighter',
+      createdAt: 1_000,
+      expiresAt: 4_500,
+    }
+    const meleeAttack = {
+      ...rangedAttack,
+      id: 'wolf-bite:banner',
+      transactionId: 'wolf-bite',
+      sourceTokenId: 'wolf',
+      attackName: 'Bite',
+      attackKind: 'melee' as const,
+      classId: 'monster',
+      createdAt: 1_040,
+    }
+    let state = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      rangedAttack,
+      1_100,
+    )
+    state = reduceCombatPresentationState(state, meleeAttack, 1_100)
+
+    expect(combatPresentationAttackTargetEffectsForMap(state, map, 1_100))
+      .toEqual([
+        expect.objectContaining({
+          targetTokenId: 'goblin',
+          x: 250,
+          y: 100,
+          radiusPx: 25,
+          attackKind: 'ranged',
+          classId: 'fighter',
+          durationMs: ATTACK_TARGET_EFFECT_DURATION_MS,
+        }),
+        expect.objectContaining({
+          targetTokenId: 'goblin',
+          attackKind: 'melee',
+          classId: 'monster',
+        }),
+      ])
+    expect(combatPresentationAttackTargetEffectsForMap(
+      state,
+      map,
+      1_040 + ATTACK_TARGET_EFFECT_DURATION_MS,
+    )).toEqual([])
+  })
+
+  it('keeps legacy attack banners compatible but rejects malformed target IDs', () => {
+    const legacyAttack = {
+      schemaVersion: 1 as const,
+      id: 'legacy-attack:banner',
+      type: 'attack-banner' as const,
+      mapId: map.id,
+      transactionId: 'legacy-attack',
+      sourceTokenId: 'fighter',
+      actorName: 'Fighter',
+      attackName: 'Longsword',
+      attackKind: 'melee' as const,
+      classId: 'fighter',
+      createdAt: 1_000,
+      expiresAt: 4_500,
+    }
+    expect(parseCombatPresentationEvent(legacyAttack)).toEqual(legacyAttack)
+    expect(parseCombatPresentationEvent({ ...legacyAttack, targetTokenId: '' })).toBeNull()
+    const state = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      legacyAttack,
+      1_100,
+    )
+    expect(combatPresentationAttackTargetEffectsForMap(state, map, 1_100)).toEqual([])
   })
 
   it('publishes a complete server-clock event that the receiving parser accepts', async () => {

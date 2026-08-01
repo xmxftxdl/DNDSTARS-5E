@@ -16,6 +16,10 @@ import { getImage } from '../../lib/imageStore'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import type { CombatSettlementMode } from '../../lib/combatSettlementMode'
 import type { Dnd5eMonsterControlStateV1 } from '../../lib/monsterControlState'
+import {
+  dnd5eManualMonsterMultiattackContinuation,
+  type Dnd5eManualMonsterMultiattackContinuation,
+} from '../../lib/monsterManualControl'
 
 function SharedMonsterIcon({
   token,
@@ -139,11 +143,13 @@ export default function DmMonsterControlDock({
   control,
   settlementMode,
   actionUsed,
+  actionPending = false,
   movementRemainingFeet,
   movementMaximumFeet,
   onRequestTakeover,
   onResumeAutomation,
   onSelectAction,
+  onSelectContinuation,
   onEndTurn,
   initialExpanded = false,
 }: {
@@ -152,11 +158,16 @@ export default function DmMonsterControlDock({
   control: Dnd5eMonsterControlStateV1
   settlementMode: CombatSettlementMode
   actionUsed: boolean
+  actionPending?: boolean
   movementRemainingFeet?: number
   movementMaximumFeet?: number
   onRequestTakeover: () => void
   onResumeAutomation: () => void
   onSelectAction: (token: Token, actionIndex: number, actionName: string) => void
+  onSelectContinuation?: (
+    token: Token,
+    continuation: Dnd5eManualMonsterMultiattackContinuation,
+  ) => void
   onEndTurn: () => void
   initialExpanded?: boolean
 }) {
@@ -173,6 +184,9 @@ export default function DmMonsterControlDock({
   const isCurrent = !!selectedToken && selectedToken.id === currentTokenId
   const isManual = control.mode === 'manual'
   const canAct = isManual && isCurrent
+  const multiattackContinuation = canAct
+    ? dnd5eManualMonsterMultiattackContinuation(selectedToken)
+    : undefined
   const maxHp = selectedToken?.maxHp ?? template?.maxHp ?? stats?.maxHp ?? 1
   const hp = selectedToken?.hp ?? maxHp
   const hpPercent = Math.max(0, Math.min(100, maxHp > 0 ? hp / maxHp * 100 : 0))
@@ -304,7 +318,7 @@ export default function DmMonsterControlDock({
                 data-testid="manual-monster-movement-status"
                 className="flex items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100"
               >
-                <span>拖动地图上的当前怪物 Token 进行移动</span>
+                <span>点击当前怪物显示移动范围，再点击地图格移动</span>
                 <span className="shrink-0 font-bold tabular-nums">
                   剩余 {Math.max(0, movementRemainingFeet)}/{Math.max(
                     Math.max(0, movementRemainingFeet),
@@ -312,6 +326,40 @@ export default function DmMonsterControlDock({
                   )} 尺
                 </span>
               </div>
+            ) : null}
+
+            {multiattackContinuation ? (
+              <section
+                data-testid="manual-monster-multiattack-continuation"
+                className="rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-amber-100">继续多重攻击</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-amber-100/70">
+                      {multiattackContinuation.parentActionName} · 第 {multiattackContinuation.occurrenceNumber}/{multiattackContinuation.occurrenceCount} 击：
+                      {multiattackContinuation.actionName}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-200">
+                    Headless 续击
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  data-testid="continue-monster-multiattack"
+                  disabled={actionPending}
+                  onClick={() => onSelectContinuation?.(selectedToken, multiattackContinuation)}
+                  className="mt-2 w-full rounded-lg bg-amber-400/20 px-2 py-1.5 text-[11px] font-semibold text-amber-50 hover:bg-amber-400/30 disabled:cursor-wait disabled:opacity-40"
+                >
+                  {actionPending
+                    ? '正在结算当前攻击…'
+                    : `选择目标 · ${multiattackContinuation.actionName}`}
+                </button>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+                  父动作已消耗；本按钮只结算尚未完成的这一击，不会再次消耗动作。
+                </p>
+              </section>
             ) : null}
 
             {stats ? (

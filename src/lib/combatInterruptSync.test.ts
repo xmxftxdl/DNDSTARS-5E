@@ -47,6 +47,17 @@ describe('combat interrupt sync', () => {
     })
     expect(mutations).toEqual([{ operation: 'upsert', mapId: 'map-1', interrupt }])
   })
+
+  it('fails closed when the server rejects an interrupt mutation', async () => {
+    const interrupt = createCombatInterrupt({
+      id: 'missing-1', mapId: 'map-1', kind: 'dodge', payload: { targetName: 'hero', result: {} }, now: 100,
+    })
+    await expect(publishSharedCombatInterrupt({
+      ...makeStore(),
+      interrupt,
+      mutateSharedCombatInterrupt: async () => null,
+    })).rejects.toThrow('combat-interrupt-mutation-rejected:upsert')
+  })
   it('publishes an interrupt into the shared queue resource', async () => {
     const store = makeStore(emptyCombatInterruptQueue('map-1', 100))
     const interrupt = createCombatInterrupt({

@@ -14,6 +14,7 @@ import {
   recordSharedWrite,
   settleSharedRecovery,
 } from './sharedSyncHealth'
+import type { RoomJournalMutation } from './roomCommunications'
 
 const SHARED_CLIENT_PROTOCOL_VERSION = CLIENT_SHARED_PROTOCOL_VERSION
 export const SHARED_STATE_CLIENT_MAX_BYTES = 8 * 1024 * 1024
@@ -31,6 +32,32 @@ export type SharedResourceSaveResult =
 export interface SharedResourceWriteOptions {
   undoGroupId?: string
   undoLabel?: string
+  /**
+   * DM-authoritative journal side effects that must commit with the supplied
+   * state snapshots. The server validates and applies these mutations while it
+   * holds the same transaction lock; clients never submit a replacement
+   * journal snapshot assembled from stale state.
+   */
+  roomJournalMutations?: readonly RoomJournalMutation[]
+}
+
+export class SharedResourceSaveError extends Error {
+  readonly resource: string
+  readonly result: SharedResourceSaveResult
+
+  constructor(resource: string, result: SharedResourceSaveResult) {
+    super(`shared-resource-save-rejected:${resource}:${result.status}`)
+    this.name = 'SharedResourceSaveError'
+    this.resource = resource
+    this.result = result
+  }
+}
+
+export function requireSharedResourceSaved(
+  resource: string,
+  result: SharedResourceSaveResult,
+): asserts result is Extract<SharedResourceSaveResult, { status: 'saved' }> {
+  if (result.status !== 'saved') throw new SharedResourceSaveError(resource, result)
 }
 
 function sharedSecretHeader(): Record<string, string> {
@@ -52,6 +79,25 @@ function sharedSessionUrl(url: string, includeToken = false): string {
   if (includeToken && session?.memberId) parsed.searchParams.set('member', session.memberId)
   if (includeToken && session?.roomToken) parsed.searchParams.set('roomToken', session.roomToken)
   return parsed.toString()
+}
+
+function sharedResourceRevisionKey(name: string): string {
+  const room = getRoomSession()?.roomId ||
+    (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim() ||
+    '__lobby__'
+  return `${room}:${name}`
+}
+
+function rememberSharedResourceRevisionWatermark(name: string, revision: number): void {
+  if (!Number.isInteger(revision) || revision < 0) return
+  const key = sharedResourceRevisionKey(name)
+  const previous = sharedResourceRevisions.get(key) ?? -1
+  if (revision < previous) return
+  sharedResourceRevisions.set(key, revision)
+}
+
+export function getSharedResourceRevisionWatermark(name: string): number {
+  return sharedResourceRevisions.get(sharedResourceRevisionKey(name)) ?? 0
 }
 
 // exported for the client-sync-layer unit test (dedup/trim/empty-filter of the
@@ -80,8 +126,26 @@ function sameOriginApiBase(): string {
   return sameOrigin
 }
 
+const LOCAL_SPLIT_SHARED_PORTS = new Set(['5273', '5274', '5275', '5276'])
+
+/**
+ * The packaged local preview serves DM/player/spectator clients from separate
+ * processes. They share files but not the in-memory SSE backlog, so all clients
+ * must use the DM process as the event/write authority.
+ */
+function isLocalSplitSharedRuntime(): boolean {
+  if (typeof window === 'undefined') return false
+  const hostname = window.location.hostname.toLowerCase()
+  const isLoopback =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1' ||
+    hostname === '[::1]'
+  return isLoopback && LOCAL_SPLIT_SHARED_PORTS.has(window.location.port)
+}
+
 export function defaultSharedApiCandidates(production = import.meta.env.PROD): string[] {
-  if (production) return [sameOriginApiBase()]
+  if (production && !isLocalSplitSharedRuntime()) return [sameOriginApiBase()]
   return [defaultDmApiBase(), sameOriginApiBase()]
     .filter((value, index, all) => all.indexOf(value) === index)
 }
@@ -117,7 +181,7 @@ function rememberSharedResourceRevision(name: string, value: unknown, response?:
     : Number.NaN
   const revision = Number.isInteger(headerRevision) && headerRevision >= 0 ? headerRevision : bodyRevision
   if (!Number.isInteger(revision) || revision < 0) return
-  sharedResourceRevisions.set(name, revision)
+  rememberSharedResourceRevisionWatermark(name, revision)
   recordSharedRevision(name, revision)
 }
 
@@ -128,10 +192,11 @@ export function sharedLobbyApiCandidates(): string[] {
 
 // state/image WRITES double-send to ALL configured bases (file-backed, idempotent —
 // each process writes the same shared file root). Contrast sharedEventApiCandidates (single canonical).
-export function sharedWriteApiCandidates(): string[] {
+export function sharedWriteApiCandidates(production = import.meta.env.PROD): string[] {
   const configured = configuredApiBases()
   if (configured) return configured
-  return import.meta.env.PROD ? [sameOriginApiBase()] : [defaultDmApiBase()]
+  if (isLocalSplitSharedRuntime()) return [defaultDmApiBase()]
+  return production ? [sameOriginApiBase()] : [defaultDmApiBase()]
 }
 
 // 事件（SSE 订阅 + POST + DELETE）只走单一 canonical 端口（DM），
@@ -139,10 +204,11 @@ export function sharedWriteApiCandidates(): string[] {
 // eventBacklog；若事件分发到多个端口，重连/迟到的一端会回放到另一份/空 backlog（C2 分歧 bug）。
 // 路由到单一 canonical（已配置时取第一个=DM，否则 defaultDmApiBase）后，全端共享同一份 backlog。
 // 注意：故意 NOT 复用 configured 全列表 —— 那正是分歧根因。
-export function sharedEventApiCandidates(): string[] {
+export function sharedEventApiCandidates(production = import.meta.env.PROD): string[] {
   const configured = configuredApiBases()
   if (configured && configured.length > 0) return [configured[0]]
-  return import.meta.env.PROD ? [sameOriginApiBase()] : [defaultDmApiBase()]
+  if (isLocalSplitSharedRuntime()) return [defaultDmApiBase()]
+  return production ? [sameOriginApiBase()] : [defaultDmApiBase()]
 }
 
 async function requestJson<T>(path: string, init?: RequestInit, resourceName?: string): Promise<T | null> {
@@ -164,7 +230,7 @@ async function requestJson<T>(path: string, init?: RequestInit, resourceName?: s
           notFound = true
           const tombstoneRevision = Number(res.headers.get('X-Stars-State-Revision'))
           if (resourceName && Number.isInteger(tombstoneRevision) && tombstoneRevision >= 0) {
-            sharedResourceRevisions.set(resourceName, tombstoneRevision)
+            rememberSharedResourceRevisionWatermark(resourceName, tombstoneRevision)
             recordSharedRevision(resourceName, tombstoneRevision)
             return null
           }
@@ -189,7 +255,7 @@ async function requestJson<T>(path: string, init?: RequestInit, resourceName?: s
     }
   }
   if (resourceName && notFound) {
-    sharedResourceRevisions.set(resourceName, 0)
+    rememberSharedResourceRevisionWatermark(resourceName, 0)
     recordSharedRevision(resourceName, 0)
   }
   return null
@@ -262,8 +328,9 @@ async function performSharedResourceSave<T>(
     })
     return { status: 'too-large' }
   }
-  if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
-  const expectedRevision = sharedResourceRevisions.get(name) ?? 0
+  const revisionKey = sharedResourceRevisionKey(name)
+  if (!sharedResourceRevisions.has(revisionKey)) await requestJson(`/state/${name}`, undefined, name)
+  const expectedRevision = sharedResourceRevisions.get(revisionKey) ?? 0
   for (const api of sharedWriteApiCandidates()) {
     try {
       const response = await fetch(sharedSessionUrl(`${api}/state/${name}`), {
@@ -285,7 +352,7 @@ async function performSharedResourceSave<T>(
         const body = await response.json().catch(() => ({})) as { currentRevision?: number }
         const resolvedCurrent = Number.isInteger(body.currentRevision) ? Number(body.currentRevision) : currentRevision
         const revision = Number.isInteger(resolvedCurrent) && resolvedCurrent >= 0 ? resolvedCurrent : expectedRevision
-        sharedResourceRevisions.set(name, revision)
+        rememberSharedResourceRevisionWatermark(name, revision)
         recordSharedConflict(name, expectedRevision, revision)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
@@ -303,7 +370,7 @@ async function performSharedResourceSave<T>(
       const body = await response.json().catch(() => ({})) as { revision?: number }
       const revision = Number.isInteger(body.revision) ? Number(body.revision) : currentRevision
       if (Number.isInteger(revision) && revision >= 0) {
-        sharedResourceRevisions.set(name, revision)
+        rememberSharedResourceRevisionWatermark(name, revision)
         recordSharedWrite(name, revision)
       }
       return {
@@ -322,14 +389,15 @@ async function performSharedResourceSave<T>(
  * rapid local saves would legitimately share the same expected revision and
  * turn the second local edit into an avoidable CAS conflict.
  */
-function enqueueSharedResourceWrite<T>(name: string, operation: () => Promise<T>): Promise<T> {
-  const previous = sharedResourceWriteChains.get(name) ?? Promise.resolve()
+function enqueueSharedResourceWrite<T>(_name: string, operation: () => Promise<T>): Promise<T> {
+  const key = sharedResourceRevisionKey('__all-writes__')
+  const previous = sharedResourceWriteChains.get(key) ?? Promise.resolve()
   const current = previous
     .catch(() => {})
     .then(operation)
-  sharedResourceWriteChains.set(name, current)
+  sharedResourceWriteChains.set(key, current)
   return current.finally(() => {
-    if (sharedResourceWriteChains.get(name) === current) sharedResourceWriteChains.delete(name)
+    if (sharedResourceWriteChains.get(key) === current) sharedResourceWriteChains.delete(key)
   })
 }
 
@@ -338,7 +406,9 @@ export function saveSharedResource<T>(
   data: T,
   options: SharedResourceWriteOptions = {},
 ): Promise<void> {
-  return saveSharedResourceWithResult(name, data, options).then(() => undefined)
+  return saveSharedResourceWithResult(name, data, options).then((result) => {
+    requireSharedResourceSaved(name, result)
+  })
 }
 
 /**
@@ -353,6 +423,111 @@ export function saveSharedResourceWithResult<T>(
   options: SharedResourceWriteOptions = {},
 ): Promise<SharedResourceSaveResult> {
   return enqueueSharedResourceWrite(name, () => performSharedResourceSave(name, data, options))
+}
+
+export interface SharedResourceTransactionWrite<T = unknown> {
+  name: string
+  data: T
+}
+
+export interface SharedResourceTransactionResult {
+  status: 'committed'
+  transactionId: string
+  revisions: Record<string, number>
+}
+
+/**
+ * Commits coupled authoritative resources behind one server transaction lock.
+ * The endpoint preflights every revision before writing any resource and rolls
+ * back already-written files if an I/O failure occurs.
+ */
+async function performSharedResourcesAtomicSave(
+  writes: readonly SharedResourceTransactionWrite[],
+  options: SharedResourceWriteOptions & { transactionId?: string } = {},
+): Promise<SharedResourceTransactionResult> {
+  if (writes.length < 1) throw new Error('shared-state-transaction-empty')
+  const normalized = writes.map(({ name, data }) => {
+    const validation = validateAndMigrateSharedResource(name, data)
+    if (validation.status === 'invalid') {
+      throw new Error(`shared-state-transaction-invalid:${name}`)
+    }
+    return {
+      name,
+      data: validation.value,
+      expectedRevision: sharedResourceRevisions.get(sharedResourceRevisionKey(name)) ?? 0,
+    }
+  })
+  for (const write of normalized) {
+    const revisionKey = sharedResourceRevisionKey(write.name)
+    if (!sharedResourceRevisions.has(revisionKey)) {
+      await requestJson(`/state/${write.name}`, undefined, write.name)
+      write.expectedRevision = sharedResourceRevisions.get(revisionKey) ?? 0
+    }
+  }
+  const transactionId = options.transactionId ?? globalThis.crypto?.randomUUID?.() ??
+    `state-transaction:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const api = sharedEventApiCandidates()[0]
+  if (!api) throw new Error('shared-state-transaction-unavailable')
+  const response = await fetch(sharedSessionUrl(`${api}/state/transaction`), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...sharedAccessHeaders(),
+      ...sharedMemberHeaders(),
+      ...sharedProtocolHeaders(),
+    },
+    body: JSON.stringify({
+      transactionId,
+      undoGroupId: options.undoGroupId,
+      undoLabel: options.undoLabel,
+      roomJournalMutations: options.roomJournalMutations,
+      writes: normalized,
+    }),
+  })
+  const body = await response.json().catch(() => ({})) as {
+    error?: string
+    revisions?: Record<string, number>
+    conflicts?: Array<{ name: string; currentRevision: number }>
+  }
+  if (!response.ok) {
+    for (const conflict of body.conflicts ?? []) {
+      rememberSharedResourceRevisionWatermark(conflict.name, conflict.currentRevision)
+      recordSharedConflict(conflict.name, normalized.find((write) => write.name === conflict.name)?.expectedRevision ?? 0, conflict.currentRevision)
+    }
+    throw new Error(body.error ?? `shared-state-transaction-${response.status}`)
+  }
+  const revisions = body.revisions ?? {}
+  for (const [name, revision] of Object.entries(revisions)) {
+    rememberSharedResourceRevisionWatermark(name, revision)
+    recordSharedWrite(name, revision)
+  }
+  return { status: 'committed', transactionId, revisions }
+}
+
+export function saveSharedResourcesAtomically(
+  writes: readonly SharedResourceTransactionWrite[],
+  options: SharedResourceWriteOptions & { transactionId?: string } = {},
+): Promise<SharedResourceTransactionResult> {
+  return enqueueSharedResourceWrite('__transaction__', () =>
+    performSharedResourcesAtomicSave(writes, options))
+}
+
+export async function appendSharedPlayerActionRequest<T>(action: T): Promise<void> {
+  const api = sharedEventApiCandidates()[0]
+  if (!api) throw new Error('player-action-append-unavailable')
+  const response = await fetch(sharedSessionUrl(`${api}/state/player-action-requests/append`), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...sharedAccessHeaders(),
+      ...sharedMemberHeaders(),
+      ...sharedProtocolHeaders(),
+    },
+    body: JSON.stringify({ action }),
+  })
+  const body = await response.json().catch(() => ({})) as { error?: string; revision?: number }
+  if (!response.ok) throw new Error(body.error ?? `player-action-append-${response.status}`)
+  if (Number.isInteger(body.revision)) rememberSharedResourceRevisionWatermark('player-action-requests', Number(body.revision))
 }
 
 export interface DmUndoTransactionSummary {
@@ -414,36 +589,50 @@ export async function undoDmTransaction(transactionId?: string): Promise<{
 
 export async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
   if (getRoomSession()?.role === 'spectator') return
-  await Promise.allSettled(
-    sharedEventApiCandidates().map((api) =>
-      fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
+  const candidates = sharedEventApiCandidates()
+  let lastError: unknown = new Error(`shared-event-unavailable:${channel}`)
+  for (const api of candidates) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(data),
-      }),
-    ),
-  )
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? `shared-event-${channel}-${response.status}`)
+      }
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
 }
 
 export async function clearSharedEventBacklog(channels?: string[]): Promise<void> {
   if (getRoomSession()?.role === 'spectator') return
   const targets = channels && channels.length > 0 ? channels : ['_all']
-  await Promise.allSettled(
+  const responses = await Promise.all(
     sharedEventApiCandidates().flatMap((api) =>
-      targets.map((channel) =>
-        fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
+      targets.map(async (channel) => {
+        const response = await fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
           method: 'DELETE',
           headers: { ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
-        }),
-      ),
+        })
+        if (!response.ok) throw new Error(`shared-event-clear-${channel}-${response.status}`)
+        return response
+      }),
     ),
   )
+  if (responses.length < 1) throw new Error('shared-event-clear-unavailable')
 }
 
 async function performClearSharedResource(name: string): Promise<void> {
   if (getRoomSession()?.role === 'spectator') return
-  if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
-  const expectedRevision = sharedResourceRevisions.get(name) ?? 0
+  const revisionKey = sharedResourceRevisionKey(name)
+  if (!sharedResourceRevisions.has(revisionKey)) await requestJson(`/state/${name}`, undefined, name)
+  const expectedRevision = sharedResourceRevisions.get(revisionKey) ?? 0
   for (const api of sharedWriteApiCandidates()) {
     try {
       const response = await fetch(sharedSessionUrl(`${api}/state/${encodeURIComponent(name)}`), {
@@ -460,7 +649,7 @@ async function performClearSharedResource(name: string): Promise<void> {
         const body = await response.json().catch(() => ({})) as { currentRevision?: number }
         const resolvedCurrent = Number.isInteger(body.currentRevision) ? Number(body.currentRevision) : currentRevision
         const revision = Number.isInteger(resolvedCurrent) && resolvedCurrent >= 0 ? resolvedCurrent : expectedRevision
-        sharedResourceRevisions.set(name, revision)
+        rememberSharedResourceRevisionWatermark(name, revision)
         recordSharedConflict(name, expectedRevision, revision)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
@@ -470,7 +659,7 @@ async function performClearSharedResource(name: string): Promise<void> {
       const body = await response.json().catch(() => ({})) as { revision?: number }
       const revision = Number.isInteger(body.revision) ? Number(body.revision) : currentRevision
       if (Number.isInteger(revision) && revision >= 0) {
-        sharedResourceRevisions.set(name, revision)
+        rememberSharedResourceRevisionWatermark(name, revision)
         recordSharedWrite(name, revision)
       }
       return
@@ -536,6 +725,12 @@ interface SharedEventEnvelope {
   sequence?: number
   streamId?: string
   emittedAt?: number
+}
+
+export async function mutateSharedCombatInterruptOrThrow<T>(mutation: SharedCombatInterruptMutation): Promise<T> {
+  const result = await mutateSharedCombatInterrupt<T>(mutation)
+  if (result == null) throw new Error(`combat-interrupt-mutation-rejected:${mutation.operation}`)
+  return result
 }
 
 const sharedEventListeners = new Map<string, Set<(data: unknown) => void>>()
@@ -644,6 +839,8 @@ export function subscribeSharedResourceInvalidation(
         pending = false
         await refresh()
       } while (!disposed && pending)
+    } catch (error) {
+      console.error(`[shared-state] refresh failed for ${name}`, error)
     } finally {
       running = false
       settleSharedRecovery()
@@ -657,7 +854,10 @@ export function subscribeSharedResourceInvalidation(
   )
   if (options.immediate !== false) void run()
   const recoveryMs = Math.max(1_000, options.recoveryMs ?? SHARED_RESOURCE_RECOVERY_MS)
-  const timer = globalThis.setInterval(() => void run(), recoveryMs)
+  const timer = globalThis.setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    void run()
+  }, recoveryMs)
 
   return () => {
     disposed = true

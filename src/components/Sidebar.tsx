@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   Check,
+  ChevronDown,
   Copy,
   Crown,
   LibraryBig,
@@ -10,12 +11,13 @@ import {
   PanelLeftClose,
   Settings,
   Sparkles,
+  WandSparkles,
 } from 'lucide-react'
 import type { AppMode } from '../lib/appMode'
 import type { RoomSession } from '../lib/roomSession'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 import CampaignTimeWidget from './CampaignTimeWidget'
-import { sidebarNavItems } from './sidebarNavigation'
+import { sidebarDmAssistantItems, sidebarNavItems } from './sidebarNavigation'
 
 export default function Sidebar({
   onCollapse,
@@ -32,9 +34,14 @@ export default function Sidebar({
   connection?: 'online' | 'reconnecting'
   onLeaveRoom?: () => void
 }) {
+  const location = useLocation()
   const [copied, setCopied] = useState(false)
+  const dmAssistantActive = location.pathname.includes('/dm-tools/')
+  const [dmAssistantOpen, setDmAssistantOpen] = useState(dmAssistantActive)
   const unreadHandouts = useRoomCommunicationsStore((state) => state.unreadHandoutIds.length)
   const items = sidebarNavItems(mode, roomSession?.role, campaignBasePath)
+  const dmTools = sidebarDmAssistantItems(campaignBasePath)
+  const canUseDmAssistant = roomSession?.role === 'dm' || (!roomSession && mode === 'dm')
   const copyRoomCode = async () => {
     if (!roomSession) return
     await navigator.clipboard?.writeText(roomSession.roomId)
@@ -97,6 +104,47 @@ export default function Sidebar({
             )}
           </NavLink>
         ))}
+        {canUseDmAssistant && (
+          <div className="pt-1">
+            <button
+              type="button"
+              aria-expanded={dmAssistantOpen}
+              onClick={() => setDmAssistantOpen((value) => !value)}
+              className={[
+                'group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
+                dmAssistantActive
+                  ? 'bg-arcane-500/10 text-arcane-200'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
+              ].join(' ')}
+            >
+              <WandSparkles className={[
+                'h-5 w-5 transition-colors',
+                dmAssistantActive ? 'text-arcane-300' : 'text-slate-500 group-hover:text-slate-200',
+              ].join(' ')} />
+              <span className="flex-1 text-left">DM 助手</span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${dmAssistantOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {dmAssistantOpen && (
+              <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-2">
+                {dmTools.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={`${label}:${to}`}
+                    to={to}
+                    className={({ isActive }) => [
+                      'group flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all',
+                      isActive
+                        ? 'bg-arcane-500/15 text-arcane-100'
+                        : 'text-slate-500 hover:bg-white/5 hover:text-slate-200',
+                    ].join(' ')}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </nav>
 
       {roomSession && (

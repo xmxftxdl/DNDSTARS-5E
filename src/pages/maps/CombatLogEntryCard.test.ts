@@ -1,6 +1,5 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import type { Token } from '../../store/maps'
@@ -37,32 +36,28 @@ const entry: CombatLogEntry = {
 }
 
 describe('CombatLogEntryCard identity border', () => {
-  it('keeps the resolved class color and opts into the perimeter-flow class', () => {
+  it('reuses the initiative portrait flow with the resolved class color', () => {
     const html = renderToStaticMarkup(createElement(CombatLogEntryCard, {
       entry,
       tokens: [wizardToken],
       characters: [wizard],
     }))
 
-    expect(html).toContain('combat-log-entry-card')
-    expect(html).toContain('--combat-log-subject-color:#60A5FA')
-    expect(html).toContain('border-color:#60A5FA')
+    expect(html).toContain('initiative-active-ring')
+    expect(html).toContain('combat-log-flow-only')
+    expect(html).toContain('--initiative-turn-color:#60A5FA')
   })
 
-  it('defines an animated edge-only highlight with a reduced-motion fallback', () => {
-    const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
-      .replace(/\r\n?/g, '\n')
-    const flowRuleStart = css.indexOf('.combat-log-entry-card::before')
-    const reducedMotionStart = css.indexOf(
-      '@media (prefers-reduced-motion: reduce)',
-      flowRuleStart,
-    )
-    const reducedMotionEnd = css.indexOf('@keyframes combat-banner-open', reducedMotionStart)
-    const flowRules = css.slice(flowRuleStart, reducedMotionEnd)
+  it('keeps the actor portrait when the log names a spell', () => {
+    const html = renderToStaticMarkup(createElement(CombatLogEntryCard, {
+      entry: { ...entry, text: 'Wizard casts Fireball.' },
+      tokens: [wizardToken],
+      characters: [wizard],
+    }))
 
-    expect(flowRuleStart).toBeGreaterThan(-1)
-    expect(flowRules).toContain('mask-composite: exclude')
-    expect(flowRules).toContain('animation: combat-log-border-flow 5.5s linear infinite')
-    expect(flowRules).toContain('.combat-log-entry-card::before {\n    animation: none')
+    expect(html).toContain('data-testid="combat-log-subject-token"')
+    expect(html).toContain('data-subject-token-id="wizard-token"')
+    expect(html).not.toContain('data-testid="combat-log-spell-token"')
+    expect(html).not.toContain('/assets/icons/fireball-spell-action.png')
   })
 })

@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   canDragMapToken,
-  dmPlayerTokenPlacementBypassesMovementBlockers,
+  dmTokenPlacementBypassesMovementBlockers,
+  resolveOptimisticTokenMovePreview,
   shouldReleaseOptimisticTokenMovePreview,
   shouldValidateMapTokenMoveLocally,
 } from './mapTokenDragPolicy'
 
 const base = {
   isDm: false,
+  combatActive: false,
   token: { id: 'hero-token', type: 'player' as const },
   playerMovableTokenIds: [] as string[],
   measureMode: false,
@@ -54,22 +56,52 @@ describe('map Token drag policy', () => {
     })).toBe(false)
   })
 
-  it('only lets the DM place player Tokens through movement blockers', () => {
-    expect(dmPlayerTokenPlacementBypassesMovementBlockers({
+  it('disables every enemy drag during combat while preserving setup placement', () => {
+    expect(canDragMapToken({
+      ...base,
+      isDm: true,
+      combatActive: false,
+      token: { id: 'current-monster', type: 'enemy' },
+    })).toBe(true)
+
+    // The current manually controlled monster moves by selecting a legal cell,
+    // never by bypassing Headless movement with a placement drag.
+    expect(canDragMapToken({
+      ...base,
+      isDm: true,
+      combatActive: true,
+      token: { id: 'current-monster', type: 'enemy' },
+    })).toBe(false)
+
+    // A monster that has not reached its turn cannot be repositioned either.
+    expect(canDragMapToken({
+      ...base,
+      isDm: true,
+      combatActive: true,
+      token: { id: 'waiting-monster', type: 'enemy' },
+    })).toBe(false)
+  })
+
+  it('lets the DM freely place every Token type through movement blockers', () => {
+    expect(dmTokenPlacementBypassesMovementBlockers({
       isDm: true,
       token: { type: 'player' },
     })).toBe(true)
-    expect(dmPlayerTokenPlacementBypassesMovementBlockers({
+    expect(dmTokenPlacementBypassesMovementBlockers({
       isDm: true,
       token: { type: 'enemy' },
-    })).toBe(false)
-    expect(dmPlayerTokenPlacementBypassesMovementBlockers({
+    })).toBe(true)
+    expect(dmTokenPlacementBypassesMovementBlockers({
+      isDm: true,
+      token: { type: 'npc' },
+    })).toBe(true)
+    expect(dmTokenPlacementBypassesMovementBlockers({
       isDm: false,
       token: { type: 'player' },
     })).toBe(false)
   })
 
-  it('defers only the active authoritative monster movement to Headless', () => {
+  it('skips local collision for DM placement and keeps player movement validated', () => {
     expect(shouldValidateMapTokenMoveLocally({
       isDm: true,
       token: { id: 'active-monster', type: 'enemy' },
@@ -79,7 +111,7 @@ describe('map Token drag policy', () => {
       isDm: true,
       token: { id: 'other-monster', type: 'enemy' },
       authoritativeMovementTokenIds: ['active-monster'],
-    })).toBe(true)
+    })).toBe(false)
     expect(shouldValidateMapTokenMoveLocally({
       isDm: false,
       token: { id: 'hero-token', type: 'player' },
@@ -89,6 +121,12 @@ describe('map Token drag policy', () => {
 
   it('holds the dragged position until authority catches up or rejects it', () => {
     expect(shouldReleaseOptimisticTokenMovePreview({
+      dragActive: true,
+      requestPending: false,
+      authoritative: { x: 10, y: 10 },
+      preview: { x: 10, y: 10 },
+    })).toBe(false)
+    expect(shouldReleaseOptimisticTokenMovePreview({
       requestPending: true,
       authoritative: { x: 10, y: 10 },
       preview: { x: 50, y: 50 },
@@ -97,11 +135,45 @@ describe('map Token drag policy', () => {
       requestPending: true,
       authoritative: { x: 50, y: 50 },
       preview: { x: 50, y: 50 },
-    })).toBe(true)
+    })).toBe(false)
     expect(shouldReleaseOptimisticTokenMovePreview({
       requestPending: false,
       authoritative: { x: 10, y: 10 },
       preview: { x: 50, y: 50 },
     })).toBe(true)
+  })
+
+  it('consumes the matching authority animation instead of replaying it for the mover', () => {
+    expect(resolveOptimisticTokenMovePreview({
+      requestPending: false,
+      authoritative: {
+        x: 50,
+        y: 50,
+        movementAnimation: { id: 'player-move:action-1:hero-token' },
+      },
+      preview: { x: 50, y: 50 },
+    })).toEqual({
+      release: true,
+      suppressMovementAnimationId: 'player-move:action-1:hero-token',
+    })
+
+    expect(resolveOptimisticTokenMovePreview({
+      requestPending: false,
+      authoritative: {
+        x: 45,
+        y: 50,
+        movementAnimation: { id: 'player-move:action-1:hero-token' },
+      },
+      preview: { x: 50, y: 50 },
+    })).toEqual({
+      release: true,
+      suppressMovementAnimationId: 'player-move:action-1:hero-token',
+    })
+
+    expect(resolveOptimisticTokenMovePreview({
+      requestPending: false,
+      authoritative: { x: 10, y: 10 },
+      preview: { x: 50, y: 50 },
+    })).toEqual({ release: true })
   })
 })

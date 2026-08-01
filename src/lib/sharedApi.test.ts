@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   configuredApiBases,
   defaultSharedApiCandidates,
+  loadSharedResource,
   saveSharedResourceWithResult,
   sharedEventApiCandidates,
   sharedWriteApiCandidates,
@@ -59,9 +60,29 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
         origin: 'https://table.dndstars.example',
         protocol: 'https:',
         hostname: 'table.dndstars.example',
+        port: '',
       },
     })
     expect(defaultSharedApiCandidates(true)).toEqual(['https://table.dndstars.example/api'])
+  })
+
+  it('keeps packaged local DM/player builds on the DM real-time authority', () => {
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'http://127.0.0.1:5274',
+        protocol: 'http:',
+        hostname: '127.0.0.1',
+        port: '5274',
+      },
+    })
+    vi.stubEnv('VITE_SHARED_API_BASES', '')
+
+    expect(defaultSharedApiCandidates(true)).toEqual([
+      'http://127.0.0.1:5273/api',
+      'http://127.0.0.1:5274/api',
+    ])
+    expect(sharedWriteApiCandidates(true)).toEqual(['http://127.0.0.1:5273/api'])
+    expect(sharedEventApiCandidates(true)).toEqual(['http://127.0.0.1:5273/api'])
   })
 
   it('returns a saved ACK only after the authoritative PUT succeeds', async () => {
@@ -97,6 +118,31 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     await expect(saveSharedResourceWithResult('test-save-conflict', { updatedAt: 2 })).resolves.toEqual({
       status: 'conflict', expectedRevision: 0, currentRevision: 4,
     })
+  })
+
+  it('does not let a late older GET lower the CAS revision watermark', async () => {
+    const resource = `revision-watermark-${Date.now()}`
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ updatedAt: 5 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '5' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ updatedAt: 3 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '3' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 6 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '6' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loadSharedResource(resource)
+    await loadSharedResource(resource)
+    await saveSharedResourceWithResult(resource, { updatedAt: 6 })
+
+    const putInit = fetchMock.mock.calls[2]?.[1] as RequestInit | undefined
+    expect(new Headers(putInit?.headers).get('X-Stars-Expected-Revision')).toBe('5')
   })
 
   it('persists a player wizard preparation during active combat instead of keeping it only in memory', async () => {

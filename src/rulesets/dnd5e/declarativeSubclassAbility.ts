@@ -3,6 +3,7 @@ import type { Dnd5eClassId } from './classes'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eSpellbookSchoolId, Dnd5eSpellcastingClassId } from './spellbook'
+import { validateDeclarativeClassDefinitionV1 } from './declarativeClass'
 
 export const DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION = 1 as const
 export const DND5E_DECLARATIVE_PACKAGE_FORMAT = 'dndstars5e-declarative' as const
@@ -13,8 +14,10 @@ export type DeclarativeSubclassTriggerV1 =
   | { kind: 'after-attack-roll' }
   | { kind: 'after-attack-hit' }
   | { kind: 'after-attack-miss' }
+  | { kind: 'after-d20-roll' }
   | { kind: 'before-damage-taken' }
   | { kind: 'after-damage-taken' }
+  | { kind: 'after-spell-cast' }
   | { kind: 'turn-start' }
   | { kind: 'turn-end' }
   | { kind: 'short-rest-complete' }
@@ -59,7 +62,7 @@ export interface DeclarativeSubclassPredicatesV1 {
   actorLacksConditions?: readonly Dnd5eStandardConditionId[]
   targetHasConditions?: readonly Dnd5eStandardConditionId[]
   targetLacksConditions?: readonly Dnd5eStandardConditionId[]
-  resources?: readonly { resourceId: string; minimum: number }[]
+  resources?: readonly DeclarativeSubclassResourceRequirementV1[]
   /** Requires a persisted option from this subclass's choice group. */
   subclassChoices?: readonly { groupId: string; optionId: string }[]
   oncePerTurn?: boolean
@@ -68,8 +71,25 @@ export interface DeclarativeSubclassPredicatesV1 {
 export interface DeclarativeSubclassCostV1 {
   economy?: 'action' | 'bonusAction' | 'reaction' | 'none'
   movementFeet?: number
-  resources?: readonly { resourceId: string; amount: number }[]
+  resources?: readonly DeclarativeSubclassResourceCostV1[]
   uses?: number
+}
+
+/**
+ * Declarative packages normally own their resources. `core` is an explicit,
+ * closed escape hatch for a Host-defined class resource already present on the
+ * authoritative combatant snapshot; it never creates or aliases a resource.
+ */
+export interface DeclarativeSubclassResourceRequirementV1 {
+  resourceId: string
+  minimum: number
+  scope?: 'plugin' | 'core'
+}
+
+export interface DeclarativeSubclassResourceCostV1 {
+  resourceId: string
+  amount: number
+  scope?: 'plugin' | 'core'
 }
 
 export type DeclarativeSubclassTargetingV1 =
@@ -79,6 +99,7 @@ export type DeclarativeSubclassTargetingV1 =
       relation?: 'ally' | 'enemy' | 'any'
       rangeFeet?: number
       includeSelf?: boolean
+      requiresSight?: boolean
     }
   | {
       kind: 'multiple-creatures'
@@ -274,6 +295,60 @@ export interface DeclarativeUtilityProjectionAttackAdvantageMechanicV1 {
   maximumDistanceFeet: number
 }
 
+export type DeclarativeNextD20RollKindV1 =
+  | 'attack'
+  | 'ability-check'
+  | 'saving-throw'
+
+/**
+ * Generic player-prearmed advantage for exactly one later d20 roll. The Host
+ * owns the pending marker and consumes it after the first eligible resolution.
+ */
+export interface DeclarativeNextD20AdvantageMechanicV1 {
+  kind: 'next-d20-advantage'
+  rollKinds: readonly DeclarativeNextD20RollKindV1[]
+}
+
+/**
+ * Generic post-result adjustment. The submitted direction is a player choice,
+ * while the die is rolled by the Host and the reaction/resource cost is spent
+ * in the same Headless transaction as the affected d20 resolution.
+ */
+export interface DeclarativePostD20AdjustmentMechanicV1 {
+  kind: 'post-d20-adjustment'
+  rollKinds: readonly DeclarativeNextD20RollKindV1[]
+  dieSides: number
+  directions: readonly ('add' | 'subtract')[]
+}
+
+export interface DeclarativePostSpellRandomTableOutcomeV1 {
+  id: string
+  minimum: number
+  maximum: number
+  effect?: {
+    kind: 'self-centered-core-spell'
+    spellId: string
+    slotLevel: number
+  }
+}
+
+/**
+ * Generic Host-owned random table requested after a qualifying class spell.
+ * Local data may map ranges to audited core-spell effects but never supplies
+ * executable code. Unmapped ranges remain explicit DM adjudication.
+ */
+export interface DeclarativePostSpellRandomTableMechanicV1 {
+  kind: 'post-spell-random-table'
+  spellcastingClassId: Dnd5eClassId
+  minimumSpellLevel: number
+  triggerDieSides: number
+  triggerValues: readonly number[]
+  tableDieSides: number
+  outcomes: readonly DeclarativePostSpellRandomTableOutcomeV1[]
+  forceTableWhenUsesEmptyAbilityId?: string
+  restoreUsesAbilityIdOnTable?: string
+}
+
 /**
  * Pure-data subclass ability protocol. Imported packages never supply a resolver;
  * the Host compiles supported declarations into its whitelisted Headless executor.
@@ -300,6 +375,9 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeHiddenSpellSaveDisadvantageMechanicV1
     | DeclarativeUtilityProjectionControlMechanicV1
     | DeclarativeUtilityProjectionAttackAdvantageMechanicV1
+    | DeclarativeNextD20AdvantageMechanicV1
+    | DeclarativePostD20AdjustmentMechanicV1
+    | DeclarativePostSpellRandomTableMechanicV1
   /**
    * Opens the post-result reaction window when an enemy succeeds on a d20.
    * This is only an eligibility declaration; the Host and DM still validate
@@ -437,6 +515,7 @@ export interface Dnd5eDeclarativeRulesPackageV1 {
     contentCategory?: import('./pluginApi').Dnd5ePluginContentCategory
   }
   subclasses: readonly DeclarativeSubclassDefinitionV1[]
+  classes?: readonly import('./declarativeClass').DeclarativeClassDefinitionV1[]
   /** Existing data-only builder contributions. They are validated by their v2 validators. */
   legacy?: unknown
 }
@@ -612,7 +691,7 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
   assertText(value.name, `${path}名称`, 160)
   assertText(value.description, `${path}说明`)
   if (!finiteInteger(value.level, 1, 20)) throw new Error(`${path}等级无效`)
-  if (!record(value.trigger) || !['active-use', 'before-attack-roll', 'after-attack-roll', 'after-attack-hit', 'after-attack-miss', 'before-damage-taken', 'after-damage-taken', 'turn-start', 'turn-end', 'short-rest-complete', 'long-rest-complete'].includes(String(value.trigger.kind))) throw new Error(`${path}触发器无效`)
+  if (!record(value.trigger) || !['active-use', 'before-attack-roll', 'after-attack-roll', 'after-attack-hit', 'after-attack-miss', 'after-d20-roll', 'before-damage-taken', 'after-damage-taken', 'after-spell-cast', 'turn-start', 'turn-end', 'short-rest-complete', 'long-rest-complete'].includes(String(value.trigger.kind))) throw new Error(`${path}触发器无效`)
   assertKeys(value.trigger, ['kind'], `${path}触发器`)
   if (!AUTOMATION.has(String(value.automation))) throw new Error(`${path}自动化等级无效`)
   if (value.canModifyEnemyD20 != null && typeof value.canModifyEnemyD20 !== 'boolean') {
@@ -705,6 +784,110 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       assertId(value.mechanic.projectionId, `${path} utility projection`)
       if (!finiteInteger(value.mechanic.maximumDistanceFeet, 0, 10_000)) {
         throw new Error(`${path} utility projection distance is invalid`)
+      }
+    } else if (value.mechanic.kind === 'next-d20-advantage') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'rollKinds'],
+        `${path} next-d20-advantage mechanic`,
+      )
+      if (
+        !Array.isArray(value.mechanic.rollKinds) ||
+        value.mechanic.rollKinds.length < 1 ||
+        value.mechanic.rollKinds.length > 3 ||
+        new Set(value.mechanic.rollKinds).size !== value.mechanic.rollKinds.length ||
+        value.mechanic.rollKinds.some((kind) =>
+          !['attack', 'ability-check', 'saving-throw'].includes(String(kind)))
+      ) throw new Error(`${path} next d20 roll kinds are invalid`)
+    } else if (value.mechanic.kind === 'post-d20-adjustment') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'rollKinds', 'dieSides', 'directions'],
+        `${path} post-d20-adjustment mechanic`,
+      )
+      if (
+        !Array.isArray(value.mechanic.rollKinds) ||
+        value.mechanic.rollKinds.length < 1 ||
+        value.mechanic.rollKinds.length > 3 ||
+        new Set(value.mechanic.rollKinds).size !== value.mechanic.rollKinds.length ||
+        value.mechanic.rollKinds.some((kind) =>
+          !['attack', 'ability-check', 'saving-throw'].includes(String(kind))) ||
+        !finiteInteger(value.mechanic.dieSides, 2, 100) ||
+        !Array.isArray(value.mechanic.directions) ||
+        value.mechanic.directions.length < 1 ||
+        value.mechanic.directions.length > 2 ||
+        new Set(value.mechanic.directions).size !== value.mechanic.directions.length ||
+        value.mechanic.directions.some((direction) =>
+          !['add', 'subtract'].includes(String(direction)))
+      ) throw new Error(`${path} post d20 adjustment declaration is invalid`)
+      if (!record(value.cost) || value.cost.economy !== 'reaction') {
+        throw new Error(`${path} post d20 adjustment must consume a reaction`)
+      }
+    } else if (value.mechanic.kind === 'post-spell-random-table') {
+      const mechanic = value.mechanic
+      assertKeys(
+        mechanic,
+        [
+          'kind',
+          'spellcastingClassId',
+          'minimumSpellLevel',
+          'triggerDieSides',
+          'triggerValues',
+          'tableDieSides',
+          'outcomes',
+          'forceTableWhenUsesEmptyAbilityId',
+          'restoreUsesAbilityIdOnTable',
+        ],
+        `${path} post-spell-random-table mechanic`,
+      )
+      if (
+        !CLASS_IDS.has(mechanic.spellcastingClassId as Dnd5eClassId) ||
+        !finiteInteger(mechanic.minimumSpellLevel, 1, 9) ||
+        !finiteInteger(mechanic.triggerDieSides, 2, 100) ||
+        !Array.isArray(mechanic.triggerValues) ||
+        mechanic.triggerValues.length < 1 ||
+        mechanic.triggerValues.length > Number(mechanic.triggerDieSides) ||
+        new Set(mechanic.triggerValues).size !== mechanic.triggerValues.length ||
+        mechanic.triggerValues.some((roll) =>
+          !finiteInteger(roll, 1, Number(mechanic.triggerDieSides))) ||
+        !finiteInteger(mechanic.tableDieSides, 2, 1_000) ||
+        !Array.isArray(mechanic.outcomes) ||
+        mechanic.outcomes.length < 1 ||
+        mechanic.outcomes.length > 200
+      ) throw new Error(`${path} post-spell random table declaration is invalid`)
+      if (mechanic.forceTableWhenUsesEmptyAbilityId != null) {
+        assertId(mechanic.forceTableWhenUsesEmptyAbilityId, `${path} forced table ability`)
+      }
+      if (mechanic.restoreUsesAbilityIdOnTable != null) {
+        assertId(mechanic.restoreUsesAbilityIdOnTable, `${path} restored table ability`)
+      }
+      const outcomeIds = new Set<string>()
+      const covered = new Set<number>()
+      for (const outcome of mechanic.outcomes) {
+        if (!record(outcome)) throw new Error(`${path} random table outcome is invalid`)
+        assertKeys(outcome, ['id', 'minimum', 'maximum', 'effect'], `${path} random table outcome`)
+        assertId(outcome.id, `${path} random table outcome`)
+        if (
+          outcomeIds.has(outcome.id) ||
+          !finiteInteger(outcome.minimum, 1, Number(mechanic.tableDieSides)) ||
+          !finiteInteger(outcome.maximum, Number(outcome.minimum), Number(mechanic.tableDieSides))
+        ) throw new Error(`${path} random table outcome range is invalid`)
+        outcomeIds.add(outcome.id)
+        for (let roll = Number(outcome.minimum); roll <= Number(outcome.maximum); roll += 1) {
+          if (covered.has(roll)) throw new Error(`${path} random table outcome ranges overlap`)
+          covered.add(roll)
+        }
+        if (outcome.effect != null) {
+          if (!record(outcome.effect)) throw new Error(`${path} random table outcome effect is invalid`)
+          assertKeys(outcome.effect, ['kind', 'spellId', 'slotLevel'], `${path} random table outcome effect`)
+          if (outcome.effect.kind !== 'self-centered-core-spell') {
+            throw new Error(`${path} random table outcome effect is unsupported`)
+          }
+          assertId(outcome.effect.spellId, `${path} random table core spell`)
+          if (!finiteInteger(outcome.effect.slotLevel, 0, 9)) {
+            throw new Error(`${path} random table core spell level is invalid`)
+          }
+        }
       }
     } else {
       throw new Error(`${path}机械协议无效`)
@@ -816,8 +999,11 @@ function validateResourceAmounts(value: unknown, label: string, amountKey: 'mini
   if (!Array.isArray(value) || value.length > 32) throw new Error(`${label}无效`)
   for (const entry of value) {
     if (!record(entry)) throw new Error(`${label}无效`)
-    assertKeys(entry, ['resourceId', amountKey], label)
+    assertKeys(entry, ['resourceId', amountKey, 'scope'], label)
     assertId(entry.resourceId, label)
+    if (entry.scope != null && !['plugin', 'core'].includes(String(entry.scope))) {
+      throw new Error(`${label}作用域无效`)
+    }
     if (!finiteInteger(entry[amountKey], 1, 1_000_000)) throw new Error(`${label}数量无效`)
   }
 }
@@ -828,11 +1014,12 @@ function validateTargeting(value: unknown, label: string): asserts value is Decl
     assertKeys(value, ['kind'], label)
     return
   }
-  if (value.kind === 'single-creature') assertKeys(value, ['kind', 'relation', 'rangeFeet', 'includeSelf'], label)
+  if (value.kind === 'single-creature') assertKeys(value, ['kind', 'relation', 'rangeFeet', 'includeSelf', 'requiresSight'], label)
   else if (value.kind === 'multiple-creatures') assertKeys(value, ['kind', 'relation', 'rangeFeet', 'maximumTargets', 'includeSelf'], label)
   else if (value.kind === 'area') assertKeys(value, ['kind', 'relation', 'includeSelf', 'maximumTargets', 'shape', 'rangeFeet', 'radiusFeet', 'lengthFeet', 'widthFeet', 'heightFeet'], label)
   else throw new Error(`${label}类型无效`)
   if (value.relation != null && !['ally', 'enemy', 'any'].includes(String(value.relation))) throw new Error(`${label}关系无效`)
+  if (value.requiresSight != null && typeof value.requiresSight !== 'boolean') throw new Error(`${label}视线要求无效`)
   if (value.includeSelf != null && typeof value.includeSelf !== 'boolean') throw new Error(`${label}自身选项无效`)
   if (value.rangeFeet != null && !finiteInteger(value.rangeFeet, 0, 10_000)) throw new Error(`${label}距离无效`)
   if (value.maximumTargets != null && !finiteInteger(value.maximumTargets, 1, 256)) throw new Error(`${label}数量无效`)
@@ -1137,8 +1324,10 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
       }
     }
     const referenced = [
-      ...(ability.predicates?.resources ?? []).map((entry) => entry.resourceId),
-      ...(ability.cost?.resources ?? []).map((entry) => entry.resourceId),
+      ...(ability.predicates?.resources ?? []).flatMap((entry) =>
+        entry.scope === 'core' ? [] : [entry.resourceId]),
+      ...(ability.cost?.resources ?? []).flatMap((entry) =>
+        entry.scope === 'core' ? [] : [entry.resourceId]),
       ...(ability.rolls ?? []).flatMap((roll) =>
         (roll.kind === 'damage' || roll.kind === 'healing') && roll.hostRoll
           ? [roll.hostRoll.die.resourceId]
@@ -1194,9 +1383,14 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   const auditedUtilityProjection =
     ability.mechanic?.kind === 'utility-projection-control' ||
     ability.mechanic?.kind === 'utility-projection-attack-advantage'
+  const auditedNextD20 = ability.mechanic?.kind === 'next-d20-advantage'
+  const auditedPostD20Adjustment = ability.mechanic?.kind === 'post-d20-adjustment'
+  const auditedPostSpellRandomTable =
+    ability.mechanic?.kind === 'post-spell-random-table'
   const auditedMechanic = auditedBattleMaster || auditedEldritchKnight ||
     auditedTotemWarrior || auditedOpeningAttack || auditedHiddenSpellSave ||
-    auditedUtilityProjection
+    auditedUtilityProjection || auditedNextD20 || auditedPostD20Adjustment ||
+    auditedPostSpellRandomTable
   if (ability.canModifyEnemyD20) {
     reasons.push('改变敌方 d20 需要玩家声明并由 DM 在投掷后 Interrupt 窗口确认')
   }
@@ -1361,7 +1555,7 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
   if (!record(parsed) || parsed.format !== DND5E_DECLARATIVE_PACKAGE_FORMAT) {
     throw new Error('JSON 规则包缺少受支持的声明式格式标识')
   }
-  assertKeys(parsed, ['format', 'schemaVersion', 'manifest', 'subclasses', 'legacy'], '规则包')
+  assertKeys(parsed, ['format', 'schemaVersion', 'manifest', 'subclasses', 'classes', 'legacy'], '规则包')
   if (parsed.schemaVersion !== 1) throw new Error('声明式规则包 schemaVersion 不受支持')
   if (!record(parsed.manifest)) throw new Error('声明式规则包清单无效')
   assertKeys(parsed.manifest, [
@@ -1405,7 +1599,7 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
     'room-distributable', 'room-ephemeral', 'account-entitled', 'local-only',
   ].includes(String(parsed.manifest.distributionPolicy))) throw new Error('规则包分发策略无效')
   if (parsed.manifest.contentCategory != null && ![
-    'rules', 'subclasses', 'spells', 'items', 'monsters', 'adventure', 'mixed',
+    'rules', 'classes', 'subclasses', 'feats', 'spells', 'items', 'monsters', 'adventure', 'mixed',
   ].includes(String(parsed.manifest.contentCategory))) throw new Error('规则包内容分类无效')
   if (!Array.isArray(parsed.subclasses) || parsed.subclasses.length > 64) throw new Error('声明式子职列表无效')
   const subclassIds = new Set<string>()
@@ -1413,6 +1607,15 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
     validateDeclarativeSubclassDefinitionV1(subclass)
     if (subclassIds.has(subclass.id)) throw new Error('声明式子职 ID 重复')
     subclassIds.add(subclass.id)
+  }
+  if (parsed.classes != null) {
+    if (!Array.isArray(parsed.classes) || parsed.classes.length > 32) throw new Error('声明式职业列表无效')
+    const classIds = new Set<string>()
+    for (const definition of parsed.classes) {
+      validateDeclarativeClassDefinitionV1(definition)
+      if (classIds.has(definition.id)) throw new Error('声明式职业 ID 重复')
+      classIds.add(definition.id)
+    }
   }
   return parsed as unknown as Dnd5eDeclarativeRulesPackageV1
 }

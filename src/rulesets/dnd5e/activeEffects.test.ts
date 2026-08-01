@@ -26,10 +26,12 @@ import {
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveWeaponDamageD4Mode,
   dnd5eConditionsFromActiveEffects,
+  dnd5eEscapableGrapples,
   normalizeDnd5eActiveEffects,
   removeDnd5eActiveEffectsByStandardCondition,
   removeDnd5eActiveEffectsForEvent,
   validateDnd5eActiveEffectsStrict,
+  validateDnd5eSourceBoundConditions,
 } from './activeEffects'
 import {
   activeEffectFromDnd5eTimedEffect,
@@ -39,6 +41,33 @@ import {
 } from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
+  it('fails closed when a source-bound condition has no resolvable source creature', () => {
+    const charmed = createDnd5eConditionEffect({
+      condition: 'charmed', targetId: 'target', source: { kind: 'dm' },
+    })
+    const frightened = createDnd5eConditionEffect({
+      condition: 'frightened', targetId: 'target', source: { kind: 'dm', actorId: 'source' },
+    })
+    const blinded = createDnd5eConditionEffect({
+      condition: 'blinded', targetId: 'target', source: { kind: 'dm' },
+    })
+
+    expect(validateDnd5eSourceBoundConditions({
+      effects: [charmed], targetActorId: 'target', availableActorIds: new Set(['source']),
+    })).toMatchObject({ ok: false, reason: 'missing-source' })
+    expect(validateDnd5eSourceBoundConditions({
+      effects: [{ ...frightened, source: { ...frightened.source, actorId: 'target' } }],
+      targetActorId: 'target',
+      availableActorIds: new Set(['target']),
+    })).toMatchObject({ ok: false, reason: 'self-source' })
+    expect(validateDnd5eSourceBoundConditions({
+      effects: [frightened], targetActorId: 'target', availableActorIds: new Set(['source']),
+    })).toEqual({ ok: true })
+    expect(validateDnd5eSourceBoundConditions({
+      effects: [blinded], targetActorId: 'target', availableActorIds: new Set(),
+    })).toEqual({ ok: true })
+  })
+
   it('keeps suspended effects authoritative while excluding their conditions and modifiers', () => {
     const charmed = {
       ...createDnd5eConditionEffect({
@@ -540,6 +569,60 @@ describe('D&D 5e ActiveEffectInstance', () => {
     expect(effect.relation).not.toBe(relation)
     expect(normalizeDnd5eActiveEffects([effect])).toEqual([effect])
     expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+  })
+
+  it('exposes only authoritative grapple roots to player escape controls', () => {
+    const monsterGrapple = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'monster:srd-5.1:ankheg:bite:bite-grapple' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'ankheg',
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const dependentCondition = createDnd5eConditionEffect({
+      id: 'ankheg:bite:restrained:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: monsterGrapple.source,
+      duration: { type: 'permanent' },
+      dependsOnEffectId: monsterGrapple.id,
+    })
+    const ordinaryCondition = createDnd5eConditionEffect({
+      id: 'dm:grappled:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'dm', actorId: 'dm' },
+      duration: { type: 'permanent' },
+    })
+
+    expect(dnd5eEscapableGrapples([
+      monsterGrapple,
+      dependentCondition,
+      ordinaryCondition,
+      monsterGrapple,
+    ])).toEqual([{
+      effectId: monsterGrapple.id,
+      grapplerId: 'ankheg',
+      resolution: 'fixed-dc',
+      dc: 13,
+    }])
   })
 
   it('rejects malformed source-linked relations and mismatched escape skills', () => {

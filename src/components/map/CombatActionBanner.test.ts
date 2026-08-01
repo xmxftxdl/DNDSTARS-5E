@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import CombatActionBanner from './CombatActionBanner'
 
@@ -91,5 +92,21 @@ describe('CombatActionBanner', () => {
     expect(html).toContain('data-combat-banner="spell"')
     expect(html).toContain('Thunderwave')
     expect(html).toContain('href="/assets/icons/thunderwave-spell-action.png"')
+  })
+
+  it('keeps action and kill-streak banners above the combat toolbar stacking layer', () => {
+    const mapsPageSource = readFileSync(new URL('../../pages/MapsPage.tsx', import.meta.url), 'utf8')
+    const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
+
+    expect(mapsPageSource).toContain(
+      'pointer-events-none absolute inset-x-0 top-[3%] z-[130] flex justify-center px-4',
+    )
+    expect(mapsPageSource).toContain(
+      'pointer-events-none absolute inset-x-0 top-5 z-[130] flex justify-center',
+    )
+    expect(mapsPageSource).toContain(
+      'absolute inset-x-2 top-2 z-[80] flex flex-col items-center gap-2',
+    )
+    expect(css).toMatch(/\.kill-streak-presentation\s*{[^}]*z-index:\s*130;/s)
   })
 })

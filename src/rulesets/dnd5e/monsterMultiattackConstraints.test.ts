@@ -241,6 +241,75 @@ describe('monster Multiattack occurrence constraints', () => {
     )).toEqual(['hero-a', 'hero-b'])
   })
 
+  it('keeps the Tyrannosaurus split-target rule across sequential continuation transactions', () => {
+    const state = startDnd5eHeadlessCombat(
+      'tyrannosaurus-sequential-targets',
+      [
+        combatant({
+          id: 'tyrannosaurus',
+          initiative: 20,
+          controller: 'dm',
+          statBlockId: 'srd-5.1:tyrannosaurus-rex',
+        }),
+        combatant({
+          id: 'hero-a',
+          initiative: 10,
+          controller: 'player',
+          x: 5,
+        }),
+        combatant({
+          id: 'hero-b',
+          initiative: 5,
+          controller: 'player',
+          x: 5,
+        }),
+      ],
+    )
+    const first = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: 'tyrannosaurus',
+      actionId: 'multiattack',
+      settleAttackCount: 1,
+      rolls: rolls([
+        { targetId: 'hero-a', d20: 1, damageRolls: [] },
+      ]),
+    })
+    expect(first.ok, first.ok ? undefined : first.reason).toBe(true)
+    if (!first.ok) return
+
+    const continuation = {
+      schemaVersion: 1 as const,
+      parentActionId: 'multiattack',
+      occurrenceIndex: 1,
+    }
+    expect(resolveDnd5eHeadlessAction(first.state, {
+      type: 'monster-action',
+      actorId: 'tyrannosaurus',
+      actionId: 'tail',
+      multiattackContinuation: continuation,
+      rolls: rolls([
+        { targetId: 'hero-a', d20: 1, damageRolls: [] },
+      ]),
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const valid = resolveDnd5eHeadlessAction(first.state, {
+      type: 'monster-action',
+      actorId: 'tyrannosaurus',
+      actionId: 'tail',
+      multiattackContinuation: continuation,
+      rolls: rolls([
+        { targetId: 'hero-b', d20: 1, damageRolls: [] },
+      ]),
+    })
+    expect(valid.ok, valid.ok ? undefined : valid.reason).toBe(true)
+    if (!valid.ok) return
+    expect(valid.state.combatants.tyrannosaurus.turn.actionAvailable).toBe(
+      false,
+    )
+    expect(valid.state.combatants.tyrannosaurus.classState
+      .monsterMultiattackContinuation).toBeUndefined()
+  })
+
   it('only enables the Wyvern claw replacement while airborne', () => {
     const createState = (airborne: boolean) =>
       startDnd5eHeadlessCombat(`wyvern-airborne-${airborne}`, [

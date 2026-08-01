@@ -1,4 +1,7 @@
-import type { BardicInspirationRollType } from '../../lib/combatInterruptProtocol'
+import type {
+  BardicInspirationRollType,
+  DmAdjudicationInterruptResponse,
+} from '../../lib/combatInterruptProtocol'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
@@ -8,6 +11,7 @@ import {
   dnd5eHeldBardicInspirationDie,
   dnd5eHellishRebukeSlotLevel,
   dnd5ePendingMonsterDeathAreaEffects,
+  dnd5ePostSpellRandomTablePlan,
   dnd5eRacialInnateSpellGrant,
   dnd5eSavingThrowMode,
   dnd5eSavingThrowRerollFeature,
@@ -62,6 +66,15 @@ export async function settleDnd5eConcentrationChecks(input: {
     damage: number
     slotLevel: number
   }) => Promise<boolean>
+  requestPostSpellRandomTableAdjudication?: (request: {
+    actor: Dnd5eCombatant
+    featureId: string
+    adjudicationId: string
+    sourceSpellId: string
+    tableRoll: number
+    outcomeId?: string
+    events: Extract<Dnd5eActionResult, { ok: true }>['events']
+  }) => Promise<DmAdjudicationInterruptResponse>
 }): Promise<{ result: Extract<Dnd5eActionResult, { ok: true }>; application: Dnd5eMapResultPlan }> {
   let state = input.result.state
   const events = [...input.result.events]
@@ -79,17 +92,235 @@ export async function settleDnd5eConcentrationChecks(input: {
       ? await input.rollD20(`半身人幸运·${label}重投`, targetName)
       : undefined,
   })
+  const pendingPostSpellRandomTables = input.result.events.filter((event) =>
+    event.type === 'post-spell-random-table-check-required')
+  for (const check of pendingPostSpellRandomTables) {
+    if (check.type !== 'post-spell-random-table-check-required') continue
+    const actor = state.combatants[check.actorId]
+    if (
+      !actor ||
+      actor.classState.postSpellRandomTableCheck?.featureId !== check.featureId
+    ) continue
+    const actorName = input.map.tokens.find((token) => token.id === actor.id)?.label ?? actor.name
+    const triggerRoll = check.forceTable
+      ? undefined
+      : check.triggerDieSides === 20
+        ? await input.rollD20('施法后随机表·触发检定', actorName)
+        : (await input.rollDice(
+            1,
+            check.triggerDieSides,
+            '施法后随机表·触发检定',
+            actorName,
+          ))[0]
+    const triggered = check.forceTable || check.triggerValues.includes(triggerRoll!)
+    const tableRoll = triggered
+      ? (await input.rollDice(
+          1,
+          check.tableDieSides,
+          '施法后随机表·结果',
+          actorName,
+        ))[0]
+      : undefined
+    const plan = dnd5ePostSpellRandomTablePlan(
+      state,
+      actor.id,
+      check.featureId,
+      triggerRoll,
+      tableRoll,
+    )
+    if (!plan) continue
+    let resolution: {
+      schemaVersion: 1
+      targetIds: readonly string[]
+      targetSavingThrows: Dnd5eSpellTargetSavingThrowRoll[]
+      legendaryResistanceTargetIds: string[]
+      effectRolls: number[]
+    } | undefined
+    if (plan.effect) {
+      const targetSavingThrows: Dnd5eSpellTargetSavingThrowRoll[] = []
+      const legendaryResistanceTargetIds: string[] = []
+      for (const targetId of plan.effect.targetIds) {
+        const target = state.combatants[targetId]
+        if (!target) continue
+        const targetName = input.map.tokens.find((token) => token.id === targetId)?.label ?? target.name
+        const mode = dnd5eSavingThrowMode(target, plan.effect.saveAbility, {
+          effectVisible: true,
+          sourceCreatureType: actor.creatureType,
+          sourceIsSpell: true,
+        })
+        const d20 = await input.rollD20(
+          `随机表法术·${plan.effect.saveAbility.toUpperCase()} 豁免 DC ${plan.effect.saveDc}`,
+          targetName,
+        )
+        const d20Second = mode !== 'normal'
+          ? await input.rollD20('随机表法术·豁免（第二枚 d20）', targetName)
+          : undefined
+        const lucky = await rollHalflingLucky(
+          target,
+          d20,
+          d20Second,
+          'random-table spell save',
+          targetName,
+        )
+        const blessRoll = dnd5eCombatantHasConcentrationEffect(state, target.id, 'bless')
+          ? await input.rollD4('Bless: random-table spell save bonus', targetName)
+          : undefined
+        const baneRoll = dnd5eCombatantHasConcentrationEffect(state, target.id, 'bane')
+          ? await input.rollD4('Bane: random-table spell save penalty', targetName)
+          : undefined
+        const modifier = (target.savingThrowBonuses[plan.effect.saveAbility] ??
+          Math.floor((target.abilities[plan.effect.saveAbility] - 10) / 2)) +
+          (blessRoll ?? 0) - (baneRoll ?? 0)
+        const initial = previewDnd5eSavingThrowRoll({
+          rolls: mode === 'normal'
+            ? [lucky.first ?? d20]
+            : [lucky.first ?? d20, lucky.second ?? d20Second ?? 0],
+          mode,
+          modifier,
+          dc: plan.effect.saveDc,
+        })
+        const characterId = input.characterIdByCombatantId[targetId]
+        const targetCharacter = characterId
+          ? input.characters.find((character) => character.id === characterId)
+          : undefined
+        const inspirationDie = dnd5eHeldBardicInspirationDie(target)
+        const bardicInspirationRoll = !initial.success && inspirationDie && input.requestBardicInspiration
+          ? await input.requestBardicInspiration({
+              target: targetCharacter,
+              targetName,
+              dieSides: inspirationDie,
+              rollType: '豁免',
+              total: initial.roll.total,
+              targetNumber: plan.effect.saveDc,
+            })
+          : undefined
+        const afterInspirationSuccess = initial.success ||
+          initial.roll.total + (bardicInspirationRoll ?? 0) >= plan.effect.saveDc
+        const darkOnesOwnLuckRoll = !afterInspirationSuccess &&
+          dnd5eDarkOnesOwnLuckAvailable(target) && input.requestDarkOnesOwnLuck
+          ? await input.requestDarkOnesOwnLuck({
+              target: targetCharacter,
+              targetName,
+              rollType: '豁免',
+              total: initial.roll.total + (bardicInspirationRoll ?? 0),
+              targetNumber: plan.effect.saveDc,
+            })
+          : undefined
+        const afterLuckSuccess = afterInspirationSuccess ||
+          initial.roll.total + (bardicInspirationRoll ?? 0) +
+            (darkOnesOwnLuckRoll ?? 0) >= plan.effect.saveDc
+        const rerollFeature = dnd5eSavingThrowRerollFeature(target)
+        const reroll = !afterLuckSuccess && rerollFeature && targetCharacter &&
+          input.requestSavingThrowReroll
+          ? await input.requestSavingThrowReroll({
+              target: targetCharacter,
+              targetName,
+              featureName: rerollFeature.name,
+              total: initial.roll.total,
+              dc: plan.effect.saveDc,
+              mode,
+            })
+          : undefined
+        if (!afterLuckSuccess && (target.classState.legendaryResistanceUses ?? 0) > 0) {
+          legendaryResistanceTargetIds.push(target.id)
+        }
+        targetSavingThrows.push({
+          targetId,
+          d20,
+          d20Second,
+          halflingLuckyD20: lucky.first,
+          halflingLuckyD20Second: lucky.second,
+          blessRoll,
+          baneRoll,
+          rerollD20: reroll?.d20,
+          rerollD20Second: reroll?.d20Second,
+          bardicInspirationRoll,
+          darkOnesOwnLuckRoll,
+        })
+      }
+      resolution = {
+        schemaVersion: 1,
+        targetIds: plan.effect.targetIds,
+        targetSavingThrows,
+        legendaryResistanceTargetIds,
+        effectRolls: await input.rollDice(
+          plan.effect.damageDice.count,
+          plan.effect.damageDice.sides,
+          '随机表核心法术·伤害',
+          actorName,
+        ),
+      }
+    }
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'resolve-post-spell-random-table',
+      actorId: actor.id,
+      featureId: check.featureId,
+      triggerRoll,
+      tableRoll,
+      resolution,
+    })
+    if (!resolved.ok) continue
+    if (plan.effect) {
+      const nested = await settleDnd5eConcentrationChecks({
+        ...input,
+        result: resolved,
+      })
+      state = nested.result.state
+      events.push(...nested.result.events)
+    } else {
+      state = resolved.state
+      events.push(...resolved.events)
+      const required = resolved.events.find((event) =>
+        event.type === 'post-spell-random-table-manual-adjudication-required')
+      if (
+        required?.type === 'post-spell-random-table-manual-adjudication-required' &&
+        input.requestPostSpellRandomTableAdjudication
+      ) {
+        const response = await input.requestPostSpellRandomTableAdjudication({
+          actor: state.combatants[required.actorId] ?? actor,
+          featureId: required.featureId,
+          adjudicationId: required.adjudicationId,
+          sourceSpellId: required.sourceSpellId,
+          tableRoll: required.tableRoll,
+          outcomeId: required.outcomeId,
+          events: resolved.events,
+        })
+        const adjudicated = resolveDnd5eHeadlessAction(state, {
+          type: 'resolve-post-spell-random-table-manual-adjudication',
+          actorId: required.actorId,
+          adjudicationId: required.adjudicationId,
+          decision: response.decision,
+          effects: response.effects.map((effect) => ({
+            targetId: effect.targetTokenId,
+            operation: effect.operation,
+            amount: effect.amount,
+            addCondition: effect.addCondition,
+            removeCondition: effect.removeCondition,
+          })),
+          note: response.note,
+        })
+        if (adjudicated.ok) {
+          const nested = await settleDnd5eConcentrationChecks({
+            ...input,
+            result: adjudicated,
+          })
+          state = nested.result.state
+          events.push(...nested.result.events)
+        }
+      }
+    }
+  }
   const pendingRelentlessRage = input.result.events.filter((event) => event.type === 'relentless-rage-save-required')
   for (const check of pendingRelentlessRage) {
     const combatant = state.combatants[check.targetId]
     if (!combatant || combatant.currentHp !== 0 || combatant.classState.relentlessRagePendingDc !== check.dc) continue
     const targetName = input.map.tokens.find((token) => token.id === check.targetId)?.label ?? combatant.name
     const d20 = await input.rollD20(`坚韧狂暴·体质豁免 DC ${check.dc}`, targetName)
-    const d20Second = combatant.exhaustionLevel >= 3
-      ? await input.rollD20('坚韧狂暴·体质豁免（劣势）', targetName)
+    const mode = dnd5eSavingThrowMode(combatant, 'con', { effectVisible: true })
+    const d20Second = mode !== 'normal'
+      ? await input.rollD20('坚韧狂暴·体质豁免（第二枚 d20）', targetName)
       : undefined
     const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '坚韧狂暴豁免', targetName)
-    const mode = combatant.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const
     const modifier = combatant.savingThrowBonuses.con ?? Math.floor((combatant.abilities.con - 10) / 2)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
       ? await input.rollD4('祝福术·坚韧狂暴豁免加值', targetName)
@@ -373,11 +604,11 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (!combatant?.concentrating) continue
     const targetName = input.map.tokens.find((token) => token.id === check.targetId)?.label ?? combatant.name
     const d20 = await input.rollD20(`专注·体质豁免 DC ${check.dc}`, targetName)
-    const d20Second = combatant.exhaustionLevel >= 3
-      ? await input.rollD20('专注·体质豁免（劣势）', targetName)
+    const mode = dnd5eSavingThrowMode(combatant, 'con', { effectVisible: true })
+    const d20Second = mode !== 'normal'
+      ? await input.rollD20('专注·体质豁免（第二枚 d20）', targetName)
       : undefined
     const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '专注豁免', targetName)
-    const mode = combatant.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const
     const modifier = combatant.savingThrowBonuses.con ?? Math.floor((combatant.abilities.con - 10) / 2)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
       ? await input.rollD4('祝福术·专注豁免加值', targetName)

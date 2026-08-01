@@ -14,6 +14,7 @@ import {
   type Dnd5ePluginAbilityGenerationDefinition,
   type Dnd5ePluginBackgroundDefinition,
   type Dnd5ePluginFeatureDefinition,
+  type Dnd5ePluginFeatDefinition,
   type Dnd5ePluginContentCategory,
   type Dnd5ePluginDeclaredCapability,
   type Dnd5ePluginDistributionPolicy,
@@ -21,8 +22,10 @@ import {
   type Dnd5ePluginRaceDefinition,
   type Dnd5ePluginSpellDefinition,
   type DeclarativeSubclassDefinitionV1,
+  type DeclarativeClassDefinitionV1,
 } from '../../rulesets/dnd5e'
 import Dnd5eDeclarativeSubclassEditor from './Dnd5eDeclarativeSubclassEditor'
+import Dnd5eDeclarativeClassEditor from './Dnd5eDeclarativeClassEditor'
 import Dnd5eMonsterWorkshopDialog from '../map/Dnd5eMonsterWorkshopDialog'
 import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
 import { dnd5ePluginCapabilityLabel } from '../../rulesets/dnd5e/pluginCapabilityLabels'
@@ -72,6 +75,11 @@ interface FeatureDraft {
   minimumLevel: number
   canModifyEnemyD20: boolean
   headless: HeadlessEffectEditorDraft
+}
+
+interface FeatDraft extends FeatureDraft {
+  prerequisiteAbilities: Record<AbilityKey, number>
+  prerequisiteRaceIds: string
 }
 
 interface PersistentAreaTriggerEditorDraft {
@@ -211,7 +219,7 @@ interface ItemDraft {
   attackRerollResetOn: 'none' | 'short-rest' | 'long-rest' | 'dawn'
 }
 
-type BuilderSection = 'races' | 'backgrounds' | 'features' | 'subclasses' | 'spells' | 'items' | 'monsters' | 'methods'
+type BuilderSection = 'races' | 'backgrounds' | 'features' | 'feats' | 'classes' | 'subclasses' | 'spells' | 'items' | 'monsters' | 'methods'
 
 interface SavedBuilderDraft {
   metadata: {
@@ -231,10 +239,12 @@ interface SavedBuilderDraft {
   races: RaceDraft[]
   backgrounds: BackgroundDraft[]
   features: FeatureDraft[]
+  feats: FeatDraft[]
   spells: SpellDraft[]
   items: ItemDraft[]
   methods: MethodDraft[]
   subclasses: DeclarativeSubclassDefinitionV1[]
+  classes: DeclarativeClassDefinitionV1[]
   monsters: Dnd5eMonsterStatBlock[]
 }
 
@@ -245,7 +255,7 @@ const PLUGIN_DISTRIBUTION_POLICIES = [
   ['local-only', '仅本机使用'],
 ] as const
 const PLUGIN_CONTENT_CATEGORIES = [
-  ['mixed', '混合内容'], ['rules', '规则'], ['subclasses', '子职'], ['spells', '法术'],
+  ['mixed', '混合内容'], ['rules', '规则'], ['classes', '职业'], ['subclasses', '子职'], ['feats', '专长'], ['spells', '法术'],
   ['items', '物品'], ['monsters', '怪物'], ['adventure', '冒险'],
 ] as const
 const PLUGIN_CAPABILITIES: readonly Dnd5ePluginDeclaredCapability[] = [
@@ -305,6 +315,8 @@ interface Props {
   busy?: boolean
   onInstall(file: File): Promise<void>
   installLabel?: string
+  alwaysExpanded?: boolean
+  categoryControl?: 'tabs' | 'select'
 }
 
 const emptyBonuses = (): Record<AbilityKey, number> => ({ str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
@@ -353,6 +365,17 @@ function newFeature(index: number): FeatureDraft {
     summary: '由 DM 提供的自定义特性。', description: '', minimumLevel: 1,
     canModifyEnemyD20: false,
     headless: newHeadlessEffectDraft(),
+  }
+}
+
+function newFeat(index: number): FeatDraft {
+  return {
+    ...newFeature(index),
+    id: `custom-feat-${index}`,
+    name: `自定义专长 ${index}`,
+    summary: '由 DM 提供的自定义专长。',
+    prerequisiteAbilities: emptyBonuses(),
+    prerequisiteRaceIds: '',
   }
 }
 
@@ -421,6 +444,16 @@ function restoreFeatureDraft(value: Partial<FeatureDraft>, index: number): Featu
   return {
     ...fallback,
     ...value,
+    headless: restoreHeadlessEffectDraft(value.headless),
+  }
+}
+
+function restoreFeatDraft(value: Partial<FeatDraft>, index: number): FeatDraft {
+  const fallback = newFeat(index + 1)
+  return {
+    ...fallback,
+    ...value,
+    prerequisiteAbilities: { ...fallback.prerequisiteAbilities, ...value.prerequisiteAbilities },
     headless: restoreHeadlessEffectDraft(value.headless),
   }
 }
@@ -660,6 +693,25 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
   }
 }
 
+function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
+  const { minimumLevel: _minimumLevel, ...feature } = toFeatureDefinition(feat)
+  void _minimumLevel
+  const abilityScores = Object.fromEntries(
+    ABILITIES.flatMap(({ key }) => feat.prerequisiteAbilities[key] > 0
+      ? [[key, feat.prerequisiteAbilities[key]]]
+      : []),
+  ) as Partial<Record<AbilityKey, number>>
+  const raceIds = feat.prerequisiteRaceIds.split(/[，,]+/).map((entry) => entry.trim()).filter(Boolean)
+  return {
+    ...feature,
+    prerequisite: {
+      ...(feat.minimumLevel > 1 ? { minimumLevel: feat.minimumLevel } : {}),
+      ...(Object.keys(abilityScores).length ? { abilityScores } : {}),
+      ...(raceIds.length ? { raceIds } : {}),
+    },
+  }
+}
+
 function toHeadlessActionDraftFromEditor(id: string, name: string, headless: HeadlessEffectEditorDraft): Dnd5eCustomHeadlessActionDraft | undefined {
   if (!headless.enabled) return undefined
   const effects: Dnd5eCustomHeadlessActionDraft['effects'] = []
@@ -830,8 +882,10 @@ export default function Dnd5eCustomPluginBuilder({
   busy = false,
   onInstall,
   installLabel = '保存、启用并发布',
+  alwaysExpanded = false,
+  categoryControl = 'tabs',
 }: Props) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(alwaysExpanded)
   const [activeSection, setActiveSection] = useState<BuilderSection>('races')
   const [metadata, setMetadata] = useState({
     id: 'local.dm.custom-rules',
@@ -850,10 +904,12 @@ export default function Dnd5eCustomPluginBuilder({
   const [races, setRaces] = useState<RaceDraft[]>([])
   const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>([])
   const [features, setFeatures] = useState<FeatureDraft[]>([])
+  const [feats, setFeats] = useState<FeatDraft[]>([])
   const [spells, setSpells] = useState<SpellDraft[]>([])
   const [items, setItems] = useState<ItemDraft[]>([])
   const [methods, setMethods] = useState<MethodDraft[]>([])
   const [subclasses, setSubclasses] = useState<DeclarativeSubclassDefinitionV1[]>([])
+  const [classes, setClasses] = useState<DeclarativeClassDefinitionV1[]>([])
   const [monsters, setMonsters] = useState<Dnd5eMonsterStatBlock[]>([])
   const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -879,6 +935,7 @@ export default function Dnd5eCustomPluginBuilder({
     races: races.map(toRaceDefinition),
     backgrounds: backgrounds.map(toBackgroundDefinition),
     features: features.map(toFeatureDefinition),
+    feats: feats.map(toFeatDefinition),
     spells: spells.map(toSpellDefinition),
     items: items.map(toItemDefinition),
     abilityGenerationMethods: methods.map(toMethodDefinition),
@@ -887,16 +944,21 @@ export default function Dnd5eCustomPluginBuilder({
         const action = toHeadlessActionDraft(feature)
         return action ? [action] : []
       }),
+      ...feats.flatMap((feat) => {
+        const action = toHeadlessActionDraft(feat)
+        return action ? [action] : []
+      }),
       ...spells.flatMap((spell) => {
         const action = toHeadlessActionDraftFromEditor(spell.id, spell.name, { ...spell.headless, healingEnabled: false, interruptEnabled: false })
         return action ? [action] : []
       }),
     ],
     subclasses,
+    classes,
     monsters,
-  }), [backgrounds, features, items, metadata, methods, monsters, races, spells, subclasses])
+  }), [backgrounds, classes, feats, features, items, metadata, methods, monsters, races, spells, subclasses])
 
-  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods, subclasses, monsters })
+  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, feats, spells, items, methods, subclasses, classes, monsters })
 
   const saveDraft = () => {
     try {
@@ -922,10 +984,12 @@ export default function Dnd5eCustomPluginBuilder({
       setFeatures(Array.isArray(saved.features)
         ? saved.features.map((feature, index) => restoreFeatureDraft(feature, index))
         : [])
+      setFeats(Array.isArray(saved.feats) ? saved.feats.map((feat, index) => restoreFeatDraft(feat, index)) : [])
       setSpells(Array.isArray(saved.spells) ? saved.spells.map((spell, index) => restoreSpellDraft(spell, index)) : [])
       setItems(Array.isArray(saved.items) ? saved.items.map((item, index) => restoreItemDraft(item, index)) : [])
       setMethods(saved.methods)
       setSubclasses(Array.isArray(saved.subclasses) ? saved.subclasses : [])
+      setClasses(Array.isArray(saved.classes) ? saved.classes : [])
       setMonsters(Array.isArray(saved.monsters) ? saved.monsters : [])
       setLocalError(null)
       setLocalNotice('已载入当前浏览器保存的草稿。')
@@ -974,6 +1038,8 @@ export default function Dnd5eCustomPluginBuilder({
     current.map((background, itemIndex) => itemIndex === index ? { ...background, ...patch } : background))
   const patchFeature = (index: number, patch: Partial<FeatureDraft>) => setFeatures((current) =>
     current.map((feature, itemIndex) => itemIndex === index ? { ...feature, ...patch } : feature))
+  const patchFeat = (index: number, patch: Partial<FeatDraft>) => setFeats((current) =>
+    current.map((feat, itemIndex) => itemIndex === index ? { ...feat, ...patch } : feat))
   const patchSpell = (index: number, patch: Partial<SpellDraft>) => setSpells((current) =>
     current.map((spell, itemIndex) => itemIndex === index ? { ...spell, ...patch } : spell))
   const patchItem = (index: number, patch: Partial<ItemDraft>) => setItems((current) =>
@@ -989,12 +1055,14 @@ export default function Dnd5eCustomPluginBuilder({
             由 Host 编译为白名单 Headless 事务；不会执行导入包中的 JavaScript。
           </p>
         </div>
-        <button type="button" onClick={() => setOpen((value) => !value)} className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200">
-          {open ? '收起工作室' : '打开扩展工作室'}
-        </button>
+        {!alwaysExpanded && (
+          <button type="button" onClick={() => setOpen((value) => !value)} className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200">
+            {open ? '收起工作室' : '打开扩展工作室'}
+          </button>
+        )}
       </div>
 
-      {open && (
+      {(alwaysExpanded || open) && (
         <div className="mt-5 space-y-5 border-t border-white/8 pt-5">
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {([
@@ -1081,27 +1149,52 @@ export default function Dnd5eCustomPluginBuilder({
             </fieldset>
           </div>
 
-          <nav className="flex flex-wrap gap-2" aria-label="规则内容分类">
-            {([
-              ['races', '种族', races.length], ['backgrounds', '背景', backgrounds.length],
-              ['features', '特性', features.length], ['spells', '法术', spells.length],
-              ['subclasses', '声明式子职', subclasses.length],
-              ['items', '装备／物品', items.length], ['monsters', '怪物', monsters.length],
-              ['methods', '加点规则', methods.length],
-            ] as const).map(([section, label, count]) => (
-              <button
-                key={section}
-                type="button"
-                aria-pressed={activeSection === section}
-                onClick={() => setActiveSection(section)}
-                className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${activeSection === section ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:text-slate-200'}`}
+          {categoryControl === 'select' ? (
+            <label className="block max-w-sm">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-500">内容类型</span>
+              <select
+                aria-label="规则内容分类"
+                value={activeSection}
+                onChange={(event) => setActiveSection(event.target.value as BuilderSection)}
+                className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
               >
-                {label} · {count}
-              </button>
-            ))}
-          </nav>
+                <option value="monsters">怪物 · {monsters.length}</option>
+                <option value="classes">职业 · {classes.length}</option>
+                <option value="subclasses">子职 · {subclasses.length}</option>
+                <option value="races">种族 · {races.length}</option>
+                <option value="backgrounds">背景 · {backgrounds.length}</option>
+                <option value="feats">专长 · {feats.length}</option>
+                <option value="features">特性 · {features.length}</option>
+                <option value="spells">法术 · {spells.length}</option>
+                <option value="items">装备／物品 · {items.length}</option>
+                <option value="methods">加点规则 · {methods.length}</option>
+              </select>
+            </label>
+          ) : (
+            <nav className="flex flex-wrap gap-2" aria-label="规则内容分类">
+              {([
+                ['races', '种族', races.length], ['backgrounds', '背景', backgrounds.length],
+                ['features', '特性', features.length], ['feats', '专长', feats.length],
+                ['classes', '职业', classes.length], ['spells', '法术', spells.length],
+                ['subclasses', '声明式子职', subclasses.length],
+                ['items', '装备／物品', items.length], ['monsters', '怪物', monsters.length],
+                ['methods', '加点规则', methods.length],
+              ] as const).map(([section, label, count]) => (
+                <button
+                  key={section}
+                  type="button"
+                  aria-pressed={activeSection === section}
+                  onClick={() => setActiveSection(section)}
+                  className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${activeSection === section ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:text-slate-200'}`}
+                >
+                  {label} · {count}
+                </button>
+              ))}
+            </nav>
+          )}
 
           {activeSection === 'subclasses' && <Dnd5eDeclarativeSubclassEditor value={subclasses} onChange={setSubclasses} />}
+          {activeSection === 'classes' && <Dnd5eDeclarativeClassEditor value={classes} onChange={setClasses} />}
 
           {activeSection === 'monsters' && (
             <div className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.04] p-5">
@@ -1206,6 +1299,52 @@ export default function Dnd5eCustomPluginBuilder({
                   <BuilderTextarea label="背景特性说明" value={background.featureDescription} onChange={(value) => patchBackground(index, { featureDescription: value })} />
                   <DeleteButton label={`删除背景 ${background.name}`} onClick={() => setBackgrounds((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
                 </div>
+              </article>)}
+            </div>
+          </div>}
+
+          {activeSection === 'feats' && <div>
+            <SectionHeader
+              title="独立专长编辑器"
+              description="专长拥有独立的等级、属性与种族前提；角色选择和 Headless 执行都会由 Host 重新验证。"
+              actionLabel="添加专长"
+              onAdd={() => setFeats((current) => [...current, newFeat(current.length + 1)])}
+            />
+            <div className="space-y-3">
+              {feats.length === 0 && <EmptyState>尚未添加专长。</EmptyState>}
+              {feats.map((feat, index) => <article key={index} className="rounded-2xl border border-amber-400/12 bg-amber-500/[0.025] p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <BuilderInput label="专长 ID" value={feat.id} onChange={(value) => patchFeat(index, { id: value })} />
+                  <BuilderInput label="显示名称" value={feat.name} onChange={(value) => patchFeat(index, { name: value })} />
+                  <BuilderNumber label="最低角色等级" value={feat.minimumLevel} min={1} max={20} onChange={(minimumLevel) => patchFeat(index, { minimumLevel })} />
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <BuilderInput label="摘要" value={feat.summary} onChange={(summary) => patchFeat(index, { summary })} />
+                  <BuilderInput label="限定种族 ID／名称（逗号分隔，可选）" value={feat.prerequisiteRaceIds} onChange={(prerequisiteRaceIds) => patchFeat(index, { prerequisiteRaceIds })} />
+                </div>
+                <div className="mt-3"><BuilderTextarea label="规则正文" value={feat.description} onChange={(description) => patchFeat(index, { description })} /></div>
+                <fieldset className="mt-3 rounded-xl border border-white/8 p-3">
+                  <legend className="px-1 text-xs font-semibold text-slate-500">属性前提（0 表示无前提）</legend>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    {ABILITIES.map((ability) => (
+                      <BuilderNumber
+                        key={ability.key}
+                        label={ability.label}
+                        value={feat.prerequisiteAbilities[ability.key]}
+                        min={0}
+                        max={30}
+                        onChange={(value) => patchFeat(index, {
+                          prerequisiteAbilities: { ...feat.prerequisiteAbilities, [ability.key]: value },
+                        })}
+                      />
+                    ))}
+                  </div>
+                </fieldset>
+                <div className="mt-3">
+                  <Toggle label="可改变敌方 d20 结果" value={feat.canModifyEnemyD20} onChange={(canModifyEnemyD20) => patchFeat(index, { canModifyEnemyD20 })} />
+                </div>
+                <HeadlessEffectEditor title="专长 Headless 效果" value={feat.headless} onChange={(headless) => patchFeat(index, { headless })} />
+                <div className="mt-3 flex justify-end"><DeleteButton label={`删除专长 ${feat.name}`} onClick={() => setFeats((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
               </article>)}
             </div>
           </div>}

@@ -366,4 +366,54 @@ describe('monster area action map authority', () => {
     expect(resolved.application?.characters.find((entry) => entry.id === 'hero-character')?.currentHp)
       .toBe(16)
   })
+
+  it('resolves Ankheg Acid Spray and spends its recharge resource', () => {
+    const ankheg = token({
+      id: 'ankheg',
+      label: 'Ankheg',
+      poolId: 'srd-5.1:ankheg',
+      hp: 39,
+      maxHp: 39,
+      dnd5eCombatState: {
+        monsterRechargeReadyByActionId: { 'acid-spray': true },
+      },
+    })
+    const hero = token({
+      id: 'hero',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero-character',
+      x: 75,
+      y: 25,
+    })
+    const map = battleMap('ankheg-acid-spray', [ankheg, hero])
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: 'combat',
+      map,
+      characters: [character('hero-character')],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: ankheg.id,
+      actionId: 'acid-spray',
+      targetTokenIds: [hero.id],
+      areaTargetCell: { col: 1, row: 0 },
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eMonsterAreaAction({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: hero.id, d20: 1 }],
+        damageRolls: [3, 4, 5],
+        forcedMovements: [],
+      },
+    })
+
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters.find((entry) => entry.id === 'hero-character')?.currentHp)
+      .toBe(28)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === ankheg.id)
+      ?.dnd5eCombatState?.monsterRechargeReadyByActionId?.['acid-spray'])
+      .toBe(false)
+  })
 })

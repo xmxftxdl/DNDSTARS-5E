@@ -7,6 +7,30 @@ import {
 import { formatDnd5eCombatLogDetails } from './combatLogDetails'
 
 describe('formatDnd5eCombatLogDetails', () => {
+  it('does not repeat attack-resolved when a full attack trace is supplied', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'attack-resolved',
+      actorId: 'hero',
+      targetId: 'wolf',
+      d20: 18,
+      total: 23,
+      armorClass: 12,
+      hit: true,
+      critical: false,
+    }], {
+      resolveName: (id) => id,
+      extra: [
+        '攻击资格 · Headless 已验证目标与距离。',
+        '攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +5。',
+        '结果 · 23 vs AC 12：命中。',
+      ],
+    })
+
+    expect(details).toContain('攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +5。')
+    expect(details).toContain('结果 · 23 vs AC 12：命中。')
+    expect(details.some((line) => line.includes('命中检定 d20 18'))).toBe(false)
+  })
+
   const resolveName = (id: string) => ({
     hero: '艾莉雅',
     wizard: '新冒险者',
@@ -314,5 +338,72 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('艾莉雅｜护盾术生效｜数值 1')
     expect(details).toContain('艾莉雅 → 恐狼｜推撞 17 vs 9｜成功｜推开')
     expect(details).toContain('恐狼｜坠落 20 尺｜2d6 = 8 点伤害｜落地倒地')
+  })
+
+  it('records Host random-table checks and distinguishes a no-slot core spell', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'post-spell-random-table-check-required',
+        actorId: 'hero',
+        featureId: 'fixture.table-check',
+        spellId: 'magic-missile',
+        spellLevel: 1,
+        slotLevel: 1,
+        forceTable: false,
+        triggerDieSides: 20,
+        triggerValues: [1],
+        tableDieSides: 100,
+      },
+      {
+        type: 'post-spell-random-table-check-resolved',
+        actorId: 'hero',
+        featureId: 'fixture.table-check',
+        triggerRoll: 1,
+        triggered: true,
+      },
+      {
+        type: 'spell-cast',
+        actorId: 'hero',
+        targetId: 'hero',
+        spellId: 'fireball',
+        slotLevel: 3,
+        slotConsumed: false,
+      },
+      {
+        type: 'post-spell-random-table-outcome-resolved',
+        actorId: 'hero',
+        featureId: 'fixture.table-check',
+        tableRoll: 42,
+        outcomeId: 'synthetic-centered-spell',
+        automation: 'full',
+        spellId: 'fireball',
+        targetIds: ['hero', 'wolf'],
+      },
+      {
+        type: 'post-spell-random-table-manual-adjudication-required',
+        actorId: 'hero',
+        featureId: 'fixture.table-check',
+        adjudicationId: 'adjudication-50',
+        sourceSpellId: 'magic-missile',
+        tableRoll: 50,
+      },
+      {
+        type: 'post-spell-random-table-manual-adjudication-resolved',
+        actorId: 'hero',
+        featureId: 'fixture.table-check',
+        adjudicationId: 'adjudication-50',
+        tableRoll: 50,
+        decision: 'cancelled',
+        effectCount: 0,
+        note: '无需额外效果',
+      },
+    ], { resolveName })
+
+    expect(details).toContain('艾莉雅｜施法后随机表待判定｜掷 d20，1 时触发')
+    expect(details).toContain('艾莉雅｜施法后随机表已触发｜触发骰 1')
+    expect(details).toContain('艾莉雅 → 艾莉雅｜施放 fireball｜按 3 环结算，不消耗法术位')
+    expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜自动结算 fireball')
+    expect(details).toContain('艾莉雅｜随机表结果 50 未接入自动结算｜战斗结算已暂停，等待 DM 裁定')
+    expect(details).toContain('艾莉雅｜随机表结果 50 的 DM 裁定已完成｜已跳过该结果｜备注：无需额外效果')
   })
 })

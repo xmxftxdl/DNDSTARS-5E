@@ -32,6 +32,107 @@ async function hydrateMaps(page: Page) {
   })
 }
 
+test('single-target melee and ranged attacks mark their targets on both clients', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const now = Date.now()
+  const mapId = `attack-target-presentation-${now}`
+  const fighter = {
+    id: 'attack-fighter', label: '战士', x: 105, y: 210,
+    color: '#94a3b8', emoji: '⚔️', size: 1, type: 'player',
+  }
+  const goblin = {
+    id: 'attack-goblin', label: '哥布林', x: 280, y: 210,
+    color: '#ef4444', emoji: '👺', size: 1, type: 'enemy', hp: 7, maxHp: 7,
+  }
+  const archer = {
+    id: 'attack-archer', label: '弓箭手', x: 595, y: 385,
+    color: '#ef4444', emoji: '🏹', size: 1, type: 'enemy', hp: 11, maxHp: 11,
+  }
+  const bard = {
+    id: 'attack-bard', label: '诗人', x: 350, y: 385,
+    color: '#d946ef', emoji: '🎵', size: 1, type: 'player',
+  }
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: '单体攻击目标标记 E2E',
+      width: 700,
+      height: 560,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [fighter, goblin, archer, bard],
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_100, height: 820 } })
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    dm.waitForURL(/\/campaign\/local\/maps$/),
+    player.waitForURL(/\/campaign\/local\/maps$/),
+  ])
+  await Promise.all([hydrateMaps(dm), hydrateMaps(player)])
+  const dmCanvas = dm.getByTestId('map-canvas')
+  const playerCanvas = player.getByTestId('map-canvas')
+  await Promise.all([expect(dmCanvas).toBeVisible(), expect(playerCanvas).toBeVisible()])
+
+  await dm.evaluate(async ({ activeMapId }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    const stamp = Date.now()
+    await Promise.all([
+      presentation.publishAttackBannerPresentation({
+        id: `e2e-fighter-melee-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-fighter-melee-tx-${stamp}`,
+        sourceTokenId: 'attack-fighter',
+        targetTokenId: 'attack-goblin',
+        actorName: '战士',
+        attackName: '长剑',
+        attackKind: 'melee',
+        classId: 'fighter',
+      }),
+      presentation.publishAttackBannerPresentation({
+        id: `e2e-monster-ranged-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-monster-ranged-tx-${stamp}`,
+        sourceTokenId: 'attack-archer',
+        targetTokenId: 'attack-bard',
+        actorName: '弓箭手',
+        attackName: '长弓',
+        attackKind: 'ranged',
+        classId: 'monster',
+      }),
+    ])
+  }, { activeMapId: mapId })
+
+  for (const canvas of [dmCanvas, playerCanvas]) {
+    await expect(canvas).toHaveAttribute('data-attack-target-effect-count', '2')
+    await expect(canvas).toHaveAttribute('data-attack-target-effect-kinds', /melee.*ranged|ranged.*melee/)
+    await expect(canvas).toHaveAttribute('data-attack-target-effect-targets', /attack-goblin.*attack-bard|attack-bard.*attack-goblin/)
+    await expect(canvas).toHaveAttribute('data-attack-target-effect-classes', /fighter.*monster|monster.*fighter/)
+  }
+  await playerCanvas.screenshot({
+    path: process.env.ATTACK_TARGET_EFFECT_SCREENSHOT_PATH ??
+      testInfo.outputPath('single-target-attack-effects.png'),
+  })
+  await expect.poll(async () =>
+    Number(await playerCanvas.getAttribute('data-attack-target-effect-count')),
+  ).toBe(0)
+  await context.close()
+})
+
 test('DM publishes a Fire Bolt presentation through SSE and the player renders it', async ({ browser, request }) => {
   const now = Date.now()
   const mapId = `combat-presentation-${now}`
@@ -765,7 +866,9 @@ test('area spell VFX follow selected map geometry', async ({ browser, request },
       .filter(Boolean)
     return spellKinds.every((kind) => kinds.includes(kind))
   }).toBe(true)
-  await player.waitForTimeout(110)
+  // Capture after short-lived launch particles have cleared enough for the
+  // material body of cone/line effects to be visible as well.
+  await player.waitForTimeout(420)
   await canvas.screenshot({
     path: process.env.AREA_SPELL_VFX_SCREENSHOT_PATH ??
       testInfo.outputPath('area-spell-vfx.png'),

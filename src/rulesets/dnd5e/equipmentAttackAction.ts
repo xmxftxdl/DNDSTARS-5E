@@ -24,6 +24,8 @@ import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from '.
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eDeclarativeBattleMasterManeuverDefinition } from './pluginApi'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
+import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
@@ -40,6 +42,7 @@ import {
   dnd5eIsFavoredEnemy,
   dnd5eSourceLinkedRelations,
   dnd5eWeaponClassDamageDefinitions,
+  previewDnd5ePostD20AdjustedAttack,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
@@ -53,6 +56,7 @@ import {
   type Dnd5eWeaponClassDamageContext,
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eOpeningAttackSavingThrowRoll,
+  type Dnd5ePostD20AdjustmentUse,
 } from './headlessCombatEngine'
 import {
   applyDnd5eAttackCoverOverride,
@@ -390,7 +394,11 @@ export function prepareDnd5eEquipmentAttack(input: {
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
-    (dnd5eTargetGrantsAttackAdvantage(target) || dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
+    (dnd5eTargetGrantsAttackAdvantage(target) ||
+      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) ||
+      dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, target) ||
+      dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
+      actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5) ||
       dnd5eBattleMasterDistractingAdvantage(actorCombatant, target) ||
       dnd5eTotemWolfPackAdvantage(
@@ -531,6 +539,7 @@ export function previewDnd5eEquipmentAttack(
   blessRoll?: number,
   baneRoll?: number,
   additionalAttackBonus = 0,
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
 ) {
   const mode = dnd5ePreparedEquipmentAttackMode(prepared, protectedAttack)
   const magicWeaponBonus = dnd5eActiveMagicWeaponBonus(
@@ -547,7 +556,13 @@ export function previewDnd5eEquipmentAttack(
     targetAc: prepared.targetArmorClass,
   })
   return resolveDnd5eAttackOutcome({
-    attack: resolved,
+    attack: previewDnd5ePostD20AdjustedAttack({
+      state: prepared.state,
+      affectedId: prepared.actorToken.id,
+      targetAc: prepared.targetArmorClass,
+      resolution: resolved,
+      use: postD20Adjustment,
+    }),
     criticalThreshold: prepared.profile.criticalThreshold,
     automaticCritical: dnd5eConditionHitIsAutomaticCritical({
       target: prepared.state.combatants[prepared.targetToken.id],
@@ -588,6 +603,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   strokeOfLuck?: boolean
   cuttingWords?: Dnd5eCuttingWordsUse
   cuttingWordsDamage?: Dnd5eCuttingWordsUse
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse
   protectionReactionActorId?: string
   tranquilitySave?: Dnd5eTranquilitySaveRoll
   shieldSpellReaction?: boolean
@@ -635,6 +651,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     strokeOfLuck: input.strokeOfLuck,
     cuttingWords: input.cuttingWords,
     cuttingWordsDamage: input.cuttingWordsDamage,
+    postD20Adjustment: input.postD20Adjustment,
     protectionReactionActorId: input.protectionReactionActorId,
     tranquilitySave: input.tranquilitySave,
     shieldSpellReaction: input.shieldSpellReaction,

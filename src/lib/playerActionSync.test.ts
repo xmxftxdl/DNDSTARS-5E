@@ -382,6 +382,29 @@ describe('player action sync barrier', () => {
     expect(publishedActionId).toBe(action.id)
   })
 
+  it('uses the server append endpoint without loading or replacing the shared queue', async () => {
+    const action = buildSharedPlayerAction({
+      mapId: 'map-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      now: 1000,
+      patch: { type: 'end-turn' },
+    })
+    const calls: string[] = []
+    await publishPlayerActionRequest({
+      action,
+      appendAction: async () => { calls.push('append') },
+      loadQueue: async () => { calls.push('load'); return null },
+      saveQueue: async () => { calls.push('save') },
+      publishAction: async () => { calls.push('publish') },
+    })
+    expect(calls).toEqual(['append', 'publish'])
+  })
+
   it('locks the pending player action before publishing the request', async () => {
     const action = buildSharedPlayerAction({
       mapId: 'map-1',
@@ -402,6 +425,10 @@ describe('player action sync barrier', () => {
       lockPendingAction: (pending) => {
         calls.push(`lock:${pending.id}:${pending.label}`)
       },
+      getPendingAction: () => ({ id: action.id }),
+      clearPendingAction: () => {
+        calls.push('clear')
+      },
       loadQueue: async () => {
         calls.push('load')
         return null
@@ -416,6 +443,42 @@ describe('player action sync barrier', () => {
     })
 
     expect(calls).toEqual([`lock:${action.id}:结束回合`, 'load', 'save', 'publish'])
+  })
+
+  it('unlocks the matching action when request publication fails', async () => {
+    const action = buildSharedPlayerAction({
+      mapId: 'map-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      now: 1000,
+      patch: { type: 'end-turn' },
+    })
+    let pendingAction: { id: string; label?: string } | null = null
+    const clearPendingAction = vi.fn(() => {
+      pendingAction = null
+    })
+
+    await expect(submitPlayerActionRequestWithLock({
+      action,
+      label: 'End turn',
+      lockPendingAction: (pending) => {
+        pendingAction = pending
+      },
+      getPendingAction: () => pendingAction,
+      clearPendingAction,
+      loadQueue: async () => null,
+      saveQueue: async () => {
+        throw new Error('network-down')
+      },
+      publishAction: async () => undefined,
+    })).rejects.toThrow('network-down')
+
+    expect(clearPendingAction).toHaveBeenCalledOnce()
+    expect(pendingAction).toBeNull()
   })
 
   it('decides whether a player ack should be consumed by the current pending action', () => {
@@ -523,13 +586,14 @@ describe('player action sync barrier', () => {
         appliedAt: 1234,
         round: 1,
         initiativeIndex: 0,
+        authorityRevisions: { characters: 4, maps: 7, combat: 8 },
         updatedAt: 1234,
       },
       mapId: 'map-1',
       seenAckIds,
       getPendingAction: () => pendingAction,
-      waitForAuthoritativeSync: async (appliedAt) => {
-        calls.push(`sync:${appliedAt}`)
+      waitForAuthoritativeSync: async (appliedAt, authorityRevisions) => {
+        calls.push(`sync:${appliedAt}:${authorityRevisions?.combat}`)
       },
       sleep: async (ms) => {
         calls.push(`sleep:${ms}`)
@@ -542,7 +606,7 @@ describe('player action sync barrier', () => {
 
     expect(result).toBe('handled')
     expect([...seenAckIds]).toEqual(['ack-1'])
-    expect(calls).toEqual(['sync:1234', 'sleep:100', 'clear'])
+    expect(calls).toEqual(['sync:1234:8', 'sleep:100', 'clear'])
     expect(pendingAction).toBeNull()
   })
 
@@ -573,6 +637,40 @@ describe('player action sync barrier', () => {
 
     expect(result).toBe('handled')
     expect(clearPendingAction).not.toHaveBeenCalled()
+  })
+
+  it('does not leave a matching action locked when authoritative reload fails', async () => {
+    let pendingAction: { id: string; label?: string } | null = { id: 'action-1' }
+    const syncError = new Error('reload-failed')
+    const onAuthoritativeSyncError = vi.fn()
+
+    const result = await consumePlayerActionAck({
+      ack: {
+        id: 'ack-1',
+        mapId: 'map-1',
+        actionId: 'action-1',
+        status: 'accepted',
+        appliedAt: 1234,
+        round: 1,
+        initiativeIndex: 0,
+        updatedAt: 1234,
+      },
+      mapId: 'map-1',
+      seenAckIds: new Set(),
+      getPendingAction: () => pendingAction,
+      waitForAuthoritativeSync: async () => {
+        throw syncError
+      },
+      sleep: async () => undefined,
+      clearPendingAction: () => {
+        pendingAction = null
+      },
+      onAuthoritativeSyncError,
+    })
+
+    expect(result).toBe('handled')
+    expect(onAuthoritativeSyncError).toHaveBeenCalledWith(syncError)
+    expect(pendingAction).toBeNull()
   })
 
   it('stops ack consumption when the caller is cancelled', async () => {

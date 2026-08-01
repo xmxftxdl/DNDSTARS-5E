@@ -157,3 +157,23 @@ export function dnd5eMonsterManualControlEnabled(
 ): boolean {
   return state.mode === 'manual'
 }
+
+/**
+ * Returns whether a dropped Token must use the current monster's authoritative
+ * Headless movement transaction. Keep this check independent from React's
+ * rendered/selected Token: takeover and initiative snapshots can settle in
+ * different frames, while the initiative refs remain the movement authority.
+ */
+export function dnd5eMonsterManualMovementEnabled(
+  state: Dnd5eMonsterControlStateV1,
+  input: {
+    combatActive: boolean
+    currentTokenId?: string
+    token: { id: string; type: string }
+  },
+): boolean {
+  return input.combatActive &&
+    dnd5eMonsterManualControlEnabled(state) &&
+    input.token.type === 'enemy' &&
+    input.token.id === input.currentTokenId
+}

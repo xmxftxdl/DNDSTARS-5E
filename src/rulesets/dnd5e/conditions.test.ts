@@ -6,6 +6,7 @@ import {
   dnd5eConditionHitIsAutomaticCritical,
   dnd5eConditionImposesAttackDisadvantage,
   dnd5eConditionIncapacitated,
+  dnd5eConditionRequiresActorSource,
   dnd5eConditionSavingThrowAutomaticallyFails,
   dnd5eConditionSavingThrowDisadvantage,
   dnd5eConditionSetsSpeedToZero,
@@ -43,6 +44,13 @@ describe('D&D 5e 2014 standard condition engine', () => {
     expect(dnd5eStandardConditionId('惊惧')).toBe('frightened')
     expect(dnd5eActiveStandardConditions({ conditions: ['目盲', 'blinded', '束缚'] }))
       .toEqual(['blinded', 'restrained'])
+  })
+
+  it('requires an actor source only for conditions whose rules refer to that source', () => {
+    expect(dnd5eConditionRequiresActorSource('charmed')).toBe(true)
+    expect(dnd5eConditionRequiresActorSource('恐慌')).toBe(true)
+    expect(dnd5eConditionRequiresActorSource('blinded')).toBe(false)
+    expect(dnd5eConditionRequiresActorSource('poisoned')).toBe(false)
   })
 
   it('exposes the mechanical flags used by Headless combat', () => {

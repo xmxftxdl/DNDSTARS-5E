@@ -598,6 +598,153 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
   })
 }
 
+const SHARED_STATE_TRANSACTION_MAX_WRITES = 8
+const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
+  'characters',
+  'maps',
+  'combat',
+  'combat-interrupts',
+  'combat-log',
+  'dice-events',
+  'player-action',
+  'player-action-requests',
+  'player-action-ack',
+  'player-action-processed',
+  'map-geometry',
+  'room-journal',
+])
+
+function sharedStateTransactionLockPath(ctx) {
+  return path.join(ctx.stateRoot, '.state-transaction')
+}
+
+function sharedStateTransactionJournalPath(ctx) {
+  return path.join(ctx.stateRoot, '.state-transaction-journal.json')
+}
+
+async function recoverSharedStateTransaction(ctx) {
+  const journalPath = sharedStateTransactionJournalPath(ctx)
+  let journal
+  try {
+    journal = JSON.parse(await readFile(journalPath, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return
+    throw new Error('state-transaction-journal-invalid')
+  }
+  if (journal?.schemaVersion !== 1 || !Array.isArray(journal?.entries)) {
+    throw new Error('state-transaction-journal-invalid')
+  }
+  if (journal.state === 'committed') {
+    await rm(journalPath, { force: true })
+    return
+  }
+  if (journal.state !== 'prepared') throw new Error('state-transaction-journal-invalid')
+  for (const entry of [...journal.entries].reverse()) {
+    const name = safeName(entry?.name)
+    if (!SHARED_STATE_TRANSACTION_RESOURCES.has(name)) {
+      throw new Error('state-transaction-journal-invalid')
+    }
+    const filePath = path.join(ctx.stateRoot, `${name}.json`)
+    if (entry.currentBody == null) await rm(filePath, { force: true })
+    else if (typeof entry.currentBody === 'string') await atomicRename(filePath, entry.currentBody)
+    else throw new Error('state-transaction-journal-invalid')
+  }
+  await rm(journalPath, { force: true })
+}
+
+/**
+ * Preflights every resource revision before the first rename. All regular
+ * authoritative state PUTs take the same room lock, so a transaction cannot
+ * interleave with a HP edit or token move from another request. A runtime I/O
+ * failure restores every file already written before releasing the lock.
+ */
+async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transactionId) {
+  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+    await recoverSharedStateTransaction(ctx)
+    const prepared = []
+    for (const write of writes) {
+      const filePath = path.join(ctx.stateRoot, `${write.name}.json`)
+      let current = null
+      let currentBody = null
+      try {
+        currentBody = await readFile(filePath, 'utf8')
+        current = JSON.parse(currentBody)
+      } catch {
+        current = null
+        currentBody = null
+      }
+      const currentRevision = sharedStateRevision(current)
+      if (write.expectedRevision !== currentRevision) {
+        return {
+          ok: false,
+          conflict: true,
+          conflicts: [{ name: write.name, expectedRevision: write.expectedRevision, currentRevision }],
+        }
+      }
+      const writtenAt = Date.now()
+      const next = {
+        ...write.data,
+        _sync: {
+          schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+          revision: currentRevision + 1,
+          writerId: normalizedLabel(writerId, 120) || 'state-transaction',
+          writtenAt,
+        },
+      }
+      prepared.push({
+        ...write,
+        filePath,
+        current,
+        currentBody,
+        currentRevision,
+        next,
+        nextBody: JSON.stringify(next),
+        revision: currentRevision + 1,
+        writtenAt,
+      })
+    }
+
+    const revisions = Object.fromEntries(prepared.map((entry) => [entry.name, entry.revision]))
+    const ackEntry = prepared.find((entry) => entry.name === 'player-action-ack')
+    if (ackEntry) {
+      ackEntry.next = { ...ackEntry.next, authorityRevisions: revisions }
+      ackEntry.nextBody = JSON.stringify(ackEntry.next)
+    }
+    const journalPath = sharedStateTransactionJournalPath(ctx)
+    const journal = {
+      schemaVersion: 1,
+      state: 'prepared',
+      transactionId: normalizedLabel(transactionId, 180) || randomUUID(),
+      entries: prepared.map((entry) => ({
+        name: entry.name,
+        currentBody: entry.currentBody,
+      })),
+    }
+    await atomicRename(journalPath, JSON.stringify(journal))
+    const written = []
+    try {
+      for (const entry of prepared) {
+        await atomicRename(entry.filePath, entry.nextBody)
+        written.push(entry)
+      }
+      await atomicRename(journalPath, JSON.stringify({ ...journal, state: 'committed' }))
+      await rm(journalPath, { force: true })
+    } catch (error) {
+      for (const entry of [...written].reverse()) {
+        if (entry.currentBody == null) await rm(entry.filePath, { force: true }).catch(() => {})
+        else await atomicRename(entry.filePath, entry.currentBody).catch(() => {})
+      }
+      await rm(journalPath, { force: true }).catch(() => {})
+      throw error
+    }
+    return {
+      ok: true,
+      entries: prepared,
+      revisions,
+    }
+  })
+}
+
 const PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS = Object.freeze([
   'conditions',
   'concentrating',
@@ -1439,6 +1586,61 @@ function mutateCombatLogState(current, mutation, now = Date.now()) {
   }
 }
 
+function mutateDiceEventsState(current, mutation, now, member, accessRole) {
+  if (mutation?.operation !== 'append') {
+    return { ok: false, changed: false, status: 400, error: 'invalid-operation' }
+  }
+  const mapId = boundedText(mutation?.mapId, 180).trim()
+  const submitted = mutation?.event
+  const id = boundedText(submitted?.id, 220).trim()
+  const submittedMapId = boundedText(submitted?.mapId, 180).trim()
+  const values = submitted?.values
+  if (
+    !mapId || submittedMapId !== mapId || !id || !plainObject(submitted) ||
+    !Number.isFinite(Number(submitted.updatedAt)) ||
+    (submitted.status != null && !['rolling', 'result'].includes(submitted.status)) ||
+    (submitted.kind != null && !['d20', 'dice'].includes(submitted.kind)) ||
+    (submitted.sourceMode != null && !['dm', 'player'].includes(submitted.sourceMode)) ||
+    (submitted.visibility != null && !['public', 'dm'].includes(submitted.visibility)) ||
+    (values != null && (
+      !Array.isArray(values) || values.length > 100 ||
+      values.some((value) => !Number.isInteger(value) || value < 1 || value > 100)
+    )) ||
+    (submitted.roll != null && (!plainObject(submitted.roll) || JSON.stringify(submitted.roll).length > 20_000))
+  ) {
+    return { ok: false, changed: false, status: 422, error: 'invalid-dice-event' }
+  }
+  // Local split-port development intentionally runs without a room token. In
+  // that open-only mode the browser port is the authority boundary, so retain
+  // its declared DM/player side. Authenticated rooms always ignore the client
+  // claim and stamp the role from the membership record.
+  const role = member?.role ?? (
+    accessRole === 'open' && submitted.sourceMode === 'player' ? 'player' : accessRole
+  )
+  const event = {
+    ...submitted,
+    id,
+    mapId,
+    sourceMode: role === 'player' ? 'player' : 'dm',
+    visibility: role === 'player' ? 'public' : (submitted.visibility === 'dm' ? 'dm' : 'public'),
+    updatedAt: Number(submitted.updatedAt),
+  }
+  const events = current?.mapId === mapId && Array.isArray(current?.events) ? current.events : []
+  const exists = events.some((candidate) => candidate?.id === id)
+  if (exists) return { ok: true, changed: false, next: current }
+  return {
+    ok: true,
+    changed: true,
+    next: {
+      mapId,
+      events: [...events, event]
+        .sort((left, right) => Number(left?.updatedAt) - Number(right?.updatedAt))
+        .slice(-24),
+      updatedAt: now,
+    },
+  }
+}
+
 export function mutateCombatInterruptQueue(
   queue,
   mutation,
@@ -1547,11 +1749,40 @@ export function mutateCombatInterruptQueue(
     if (response.acceptedContributionId && !acceptedContribution) {
       return { ok: false, status: 409, error: 'roll-contribution-not-found' }
     }
+    const acceptedEligibleModifier = acceptedContribution
+      ? (Array.isArray(current.payload?.eligibleModifiers) ? current.payload.eligibleModifiers : [])
+        .find((entry) =>
+          entry?.characterId === acceptedContribution.characterId &&
+          entry?.featureId === acceptedContribution.featureId &&
+          entry?.featureLabel === acceptedContribution.featureLabel,
+        )
+      : undefined
+    if (acceptedContribution?.kind === 'adjust-d20') {
+      const adjustment = response.adjustment
+      if (
+        !acceptedEligibleModifier || acceptedEligibleModifier.modifierKind !== 'adjust-d20' ||
+        acceptedEligibleModifier.direction !== acceptedContribution.direction ||
+        typeof acceptedEligibleModifier.sourceTokenId !== 'string' || !acceptedEligibleModifier.sourceTokenId ||
+        !Number.isInteger(acceptedEligibleModifier.dieSides) || acceptedEligibleModifier.dieSides < 2 ||
+        acceptedEligibleModifier.dieSides > 100 || !adjustment ||
+        adjustment.sourceId !== acceptedEligibleModifier.sourceTokenId ||
+        adjustment.featureId !== acceptedContribution.featureId ||
+        adjustment.direction !== acceptedContribution.direction ||
+        !Number.isInteger(adjustment.roll) || adjustment.roll < 1 ||
+        adjustment.roll > acceptedEligibleModifier.dieSides
+      ) return { ok: false, status: 409, error: 'roll-adjustment-conflict' }
+    } else if (response.adjustment != null) {
+      return { ok: false, status: 400, error: 'unexpected-roll-adjustment' }
+    }
     const dmOverrideAllowed =
       current.payload?.visibility === 'dm-only' &&
       current.payload?.allowDmOverride === true &&
       !response.acceptedContributionId
-    const expectedValue = dmOverrideAllowed ? response.finalValue : acceptedContribution?.replacementValue ?? originalValue
+    const expectedValue = dmOverrideAllowed
+      ? response.finalValue
+      : acceptedContribution?.kind === 'replace-d20'
+        ? acceptedContribution.replacementValue
+        : originalValue
     if (response.finalValue !== expectedValue) {
       return { ok: false, status: 409, error: 'roll-confirmation-value-conflict' }
     }
@@ -1563,15 +1794,23 @@ export function mutateCombatInterruptQueue(
     ) return { ok: false, status: 409, error: 'invalid-transition' }
     const contribution = mutation?.contribution
     if (
-      !contribution || contribution.kind !== 'replace-d20' ||
+      !contribution || !['replace-d20', 'adjust-d20'].includes(contribution.kind) ||
       typeof contribution.id !== 'string' || !contribution.id ||
       typeof contribution.characterId !== 'string' || !contribution.characterId ||
       typeof contribution.characterName !== 'string' || !contribution.characterName.trim() ||
       typeof contribution.featureLabel !== 'string' || !contribution.featureLabel.trim() ||
-      contribution.dieIndex !== 0 || !Number.isInteger(contribution.replacementValue) ||
-      contribution.replacementValue < 1 || contribution.replacementValue > 20 ||
       !Number.isFinite(contribution.createdAt) ||
       (contribution.featureId != null && typeof contribution.featureId !== 'string')
+    ) return { ok: false, status: 400, error: 'invalid-contribution' }
+    if (
+      (contribution.kind === 'replace-d20' && (
+        contribution.dieIndex !== 0 || !Number.isInteger(contribution.replacementValue) ||
+        contribution.replacementValue < 1 || contribution.replacementValue > 20
+      )) ||
+      (contribution.kind === 'adjust-d20' && (
+        typeof contribution.featureId !== 'string' || !contribution.featureId.trim() ||
+        !['add', 'subtract'].includes(contribution.direction)
+      ))
     ) return { ok: false, status: 400, error: 'invalid-contribution' }
     const eligibleModifiers = Array.isArray(current.payload?.eligibleModifiers)
       ? current.payload.eligibleModifiers
@@ -1579,7 +1818,9 @@ export function mutateCombatInterruptQueue(
     const eligibleModifier = eligibleModifiers.find((entry) =>
       entry?.characterId === contribution.characterId &&
       entry?.featureId === contribution.featureId &&
-      entry?.featureLabel === contribution.featureLabel,
+      entry?.featureLabel === contribution.featureLabel &&
+      (entry?.modifierKind ?? 'replace-d20') === contribution.kind &&
+      (contribution.kind !== 'adjust-d20' || entry?.direction === contribution.direction),
     )
     if (!eligibleModifier) {
       return { ok: false, status: 403, error: 'ineligible-roll-modifier' }
@@ -1596,7 +1837,16 @@ export function mutateCombatInterruptQueue(
     if (contribution.id !== `${current.id}:${contribution.characterId}`) {
       return { ok: false, status: 400, error: 'invalid-contribution-id' }
     }
-    const normalizedContribution = {
+    const normalizedContribution = contribution.kind === 'adjust-d20' ? {
+      id: contribution.id.slice(0, 240),
+      kind: 'adjust-d20',
+      characterId: contribution.characterId.slice(0, 160),
+      characterName: contribution.characterName.trim().slice(0, 80),
+      featureId: contribution.featureId.trim().slice(0, 160),
+      featureLabel: contribution.featureLabel.trim().slice(0, 120),
+      direction: contribution.direction,
+      createdAt: contribution.createdAt,
+    } : {
       id: contribution.id.slice(0, 240),
       kind: 'replace-d20',
       characterId: contribution.characterId.slice(0, 160),
@@ -2122,11 +2372,13 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     const attackName = normalizedLabel(payload?.attackName, 80)
     const attackKind = payload?.attackKind
     const classId = normalizedLabel(payload?.classId, 40)
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     if (
       !actorName ||
       !attackName ||
       (attackKind !== 'melee' && attackKind !== 'ranged') ||
-      !classId
+      !classId ||
+      (payload?.targetTokenId != null && !targetTokenId)
     ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     const { spellId: _unusedSpellId, ...attackCommon } = common
     return {
@@ -2137,6 +2389,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         attackName,
         attackKind,
         classId,
+        ...(targetTokenId ? { targetTokenId } : {}),
         createdAt: now,
         expiresAt: now + SPELL_BANNER_PRESENTATION_LIFETIME_MS,
       },
@@ -4381,6 +4634,25 @@ function validDnd5eEffectiveRulesContext(value) {
     (plugin.stateSchemaVersion == null || Number.isInteger(plugin.stateSchemaVersion)))
 }
 
+function validDnd5eMonsterTurnProgress(value) {
+  if (!plainObject(value) || value.schemaVersion !== 1) return false
+  if (value.status !== 'starting' && value.status !== 'planning') return false
+  if (typeof value.combatId !== 'string' || !value.combatId.trim() || value.combatId.length > 300) return false
+  if (!Number.isInteger(value.round) || value.round < 1) return false
+  if (!Number.isInteger(value.initiativeIndex) || value.initiativeIndex < 0) return false
+  if (
+    typeof value.initiativeSlotId !== 'string' ||
+    !value.initiativeSlotId.trim() ||
+    value.initiativeSlotId.length > 220
+  ) return false
+  if (typeof value.tokenId !== 'string' || !value.tokenId.trim() || value.tokenId.length > 180) return false
+  if (typeof value.requestId !== 'string' || !value.requestId.trim() || value.requestId.length > 300) return false
+  if (!Number.isFinite(value.startedAt) || value.startedAt < 0) return false
+  if (!Number.isFinite(value.updatedAt) || value.updatedAt < value.startedAt) return false
+  if (!Number.isFinite(value.expiresAt) || value.expiresAt <= value.updatedAt) return false
+  return value.expiresAt - value.updatedAt <= 120_000
+}
+
 /**
  * Persistence-boundary validation. The browser performs more detailed
  * migrations, while this deliberately conservative shape check prevents a
@@ -4469,6 +4741,38 @@ export function validateSharedStateShape(name, value) {
       return { ok: false, reason: 'invalid-monster-control' }
     }
   }
+  if (name === 'combat' && value.flowPause != null) {
+    const pause = value.flowPause
+    if (
+      !plainObject(pause) ||
+      pause.schemaVersion !== 1 ||
+      (pause.reason !== 'manual' && pause.reason !== 'dm-adjudication') ||
+      !['paused', 'adjudicating', 'awaiting-resume'].includes(pause.phase) ||
+      !Number.isFinite(pause.pausedAt) ||
+      pause.pausedAt < 0 ||
+      (pause.interruptId != null && (
+        typeof pause.interruptId !== 'string' ||
+        !pause.interruptId.trim() ||
+        pause.interruptId.length > 320
+      )) ||
+      (pause.label != null && (typeof pause.label !== 'string' || pause.label.length > 240)) ||
+      (pause.resolvedAt != null && (!Number.isFinite(pause.resolvedAt) || pause.resolvedAt < 0)) ||
+      (pause.reason === 'manual' && pause.phase !== 'paused') ||
+      (pause.reason === 'dm-adjudication' && (
+        pause.phase === 'paused' ||
+        typeof pause.interruptId !== 'string'
+      ))
+    ) {
+      return { ok: false, reason: 'invalid-combat-flow-pause' }
+    }
+  }
+  if (
+    name === 'combat' &&
+    value.monsterTurnProgress != null &&
+    !validDnd5eMonsterTurnProgress(value.monsterTurnProgress)
+  ) {
+    return { ok: false, reason: 'invalid-monster-turn-progress' }
+  }
   if (name === 'dm-authority-ready' && typeof value.ready !== 'boolean') {
     return { ok: false, reason: 'invalid-ready-state' }
   }
@@ -4544,6 +4848,7 @@ const DM_UNDOABLE_STATE = new Set([
   'campaign-time',
   'scene-orchestration',
   'scene-audio-playback',
+  'room-journal',
 ])
 
 function dmUndoJournalFile(ctx) {
@@ -4685,7 +4990,9 @@ async function readDmUndoJournal(ctx) {
 async function applyDmAuthoritativeUndo(ctx, requestedTransactionId, actorMemberId) {
   const journalPath = dmUndoJournalFile(ctx)
   await mkdir(path.dirname(journalPath), { recursive: true })
-  return withWriteLock(journalPath, async () => {
+  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+    await recoverSharedStateTransaction(ctx)
+    return withWriteLock(journalPath, async () => {
     let journal
     try {
       journal = normalizeDmUndoJournal(JSON.parse(await readFile(journalPath, 'utf8')))
@@ -4801,6 +5108,7 @@ async function applyDmAuthoritativeUndo(ctx, requestedTransactionId, actorMember
         revision: entry.result.revision,
       })),
     }
+    })
   })
 }
 
@@ -4997,26 +5305,35 @@ function snapshotId(bundle) {
 }
 
 async function writeCampaignSnapshot(ctx, kind = 'manual') {
-  const bundle = await buildCampaignBundle(ctx, { kind, includeAssets: false })
-  const id = snapshotId(bundle)
-  const root = snapshotRoot(ctx)
-  await mkdir(root, { recursive: true })
-  await atomicWriteLocked(path.join(root, `${id}.json`), JSON.stringify({ ...bundle, snapshotId: id }))
-  await rotateJsonDirectory(root, CAMPAIGN_SNAPSHOT_LIMIT)
-  return { id, createdAt: bundle.exportedAt, kind, stateCount: Object.keys(bundle.states).length }
+  await mkdir(ctx.stateRoot, { recursive: true })
+  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+    await recoverSharedStateTransaction(ctx)
+    const bundle = await buildCampaignBundle(ctx, { kind, includeAssets: false })
+    const id = snapshotId(bundle)
+    const root = snapshotRoot(ctx)
+    await mkdir(root, { recursive: true })
+    await atomicWriteLocked(path.join(root, `${id}.json`), JSON.stringify({ ...bundle, snapshotId: id }))
+    await rotateJsonDirectory(root, CAMPAIGN_SNAPSHOT_LIMIT)
+    return { id, createdAt: bundle.exportedAt, kind, stateCount: Object.keys(bundle.states).length }
+  })
 }
+
+const pendingAutoSnapshots = new Map()
 
 async function maybeWriteAutoCampaignSnapshot(ctx) {
   const key = `${ctx.roomId ?? 'default'}:${snapshotRoot(ctx)}`
   const now = Date.now()
   if (now - (lastAutoSnapshotAt.get(key) ?? 0) < CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS) return
   lastAutoSnapshotAt.set(key, now)
-  try {
-    await writeCampaignSnapshot(ctx, 'auto')
-  } catch {
-    // A damaged current state is quarantined/reported elsewhere. Never make a
-    // normal state write fail only because its precautionary snapshot failed.
-  }
+  if (pendingAutoSnapshots.has(key)) return
+  const task = Promise.resolve()
+    .then(() => writeCampaignSnapshot(ctx, 'auto'))
+    .catch(() => {
+      // A damaged current state is quarantined/reported elsewhere. Never make a
+      // normal state write fail only because its precautionary snapshot failed.
+    })
+    .finally(() => pendingAutoSnapshots.delete(key))
+  pendingAutoSnapshots.set(key, task)
 }
 
 function validateCampaignBundle(value) {
@@ -10293,6 +10610,241 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
     }
 
+    if (parsed.pathname === '/api/state/transaction' && req.method === 'POST') {
+      const openDefaultAuthority = ctx.accessRole === 'open' && ctx.roomId === 'default'
+      if ((!authenticatedRoomMember || ctx.accessRole !== 'dm') && !openDefaultAuthority) {
+        writeJson(res, 403, { error: 'dm-authority-required' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      let payload
+      try {
+        payload = JSON.parse((await readBody(req)).toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const transactionId = boundedText(payload?.transactionId, 180)
+      const submittedWrites = Array.isArray(payload?.writes) ? payload.writes : []
+      const submittedJournalMutations = payload?.roomJournalMutations == null
+        ? []
+        : payload.roomJournalMutations
+      if (
+        !transactionId ||
+        !/^[a-zA-Z0-9:_-]+$/.test(transactionId) ||
+        submittedWrites.length < 1 ||
+        submittedWrites.length > SHARED_STATE_TRANSACTION_MAX_WRITES ||
+        !Array.isArray(submittedJournalMutations) ||
+        submittedJournalMutations.length > 16
+      ) {
+        writeJson(res, 400, { error: 'invalid-state-transaction' })
+        return true
+      }
+      const names = submittedWrites.map((write) => safeName(write?.name))
+      if (
+        new Set(names).size !== names.length ||
+        (submittedJournalMutations.length > 0 && names.includes('room-journal')) ||
+        names.some((name) => !SHARED_STATE_TRANSACTION_RESOURCES.has(name))
+      ) {
+        writeJson(res, 400, { error: 'invalid-state-transaction-resource' })
+        return true
+      }
+      const writes = []
+      for (let index = 0; index < submittedWrites.length; index += 1) {
+        const submitted = submittedWrites[index]
+        const name = names[index]
+        const expectedRevision = Number(submitted?.expectedRevision)
+        if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+          writeJson(res, 400, { error: 'invalid-expected-revision', name })
+          return true
+        }
+        const data = normalizeDedicatedDnd5eSharedState(name, submitted?.data)
+        if (Buffer.byteLength(JSON.stringify(data), 'utf8') > STATE_MAX_BYTES) {
+          writeJson(res, 413, { error: 'state-too-large', name })
+          return true
+        }
+        const validation = validateSharedStateShape(name, data)
+        if (!validation.ok) {
+          writeJson(res, 422, { error: 'invalid-state', name, reason: validation.reason })
+          return true
+        }
+        writes.push({ name, expectedRevision, data })
+      }
+      if (submittedJournalMutations.length > 0) {
+        let currentJournal = null
+        try {
+          currentJournal = JSON.parse(await readFile(path.join(ctx.stateRoot, 'room-journal.json'), 'utf8'))
+        } catch {
+          currentJournal = null
+        }
+        const expectedRevision = sharedStateRevision(currentJournal)
+        const transactionMember = authenticatedRoomMember ?? {
+          memberId: 'local-dm',
+          displayName: 'DM',
+          role: 'dm',
+        }
+        const transactionRoom = authenticatedRoom ?? {
+          host: transactionMember,
+          players: [],
+        }
+        const now = Date.now()
+        let nextJournal = currentJournal
+        let journalChanged = false
+        for (const mutation of submittedJournalMutations) {
+          if (mutation?.operation === 'add-handout' && mutation?.imageId) {
+            const imageId = boundedText(mutation.imageId, 160)
+            if (!/^[a-zA-Z0-9_-]+$/.test(imageId)) {
+              writeJson(res, 400, { error: 'invalid-handout-image' })
+              return true
+            }
+            try {
+              const metadata = JSON.parse(await readFile(path.join(ctx.imageRoot, `${imageId}.json`), 'utf8'))
+              if (metadata?.purpose !== 'handout') throw new Error('wrong-purpose')
+            } catch {
+              writeJson(res, 400, { error: 'invalid-handout-image' })
+              return true
+            }
+          }
+          const mutationResult = mutateRoomJournalState(
+            nextJournal,
+            mutation,
+            now,
+            transactionMember,
+            {
+              host: transactionRoom.host,
+              playerMemberIds: roomCommunicationPlayerMemberIds(transactionRoom),
+            },
+          )
+          if (!mutationResult?.ok) {
+            writeJson(res, mutationResult?.status ?? 400, {
+              error: mutationResult?.error ?? 'journal-mutation-failed',
+            })
+            return true
+          }
+          nextJournal = mutationResult.next
+          journalChanged ||= mutationResult.changed === true
+        }
+        if (journalChanged) {
+          const data = normalizeDedicatedDnd5eSharedState('room-journal', nextJournal)
+          const validation = validateSharedStateShape('room-journal', data)
+          if (!validation.ok) {
+            writeJson(res, 422, { error: 'invalid-state', name: 'room-journal', reason: validation.reason })
+            return true
+          }
+          writes.push({ name: 'room-journal', expectedRevision, data })
+        }
+      }
+      if (writes.length > SHARED_STATE_TRANSACTION_MAX_WRITES) {
+        writeJson(res, 400, { error: 'state-transaction-too-many-resources' })
+        return true
+      }
+      const result = await atomicWriteSharedStateTransaction(
+        ctx,
+        writes,
+        req?.headers?.['x-stars-writer'],
+        transactionId,
+      )
+      if (result.conflict) {
+        writeJson(res, 409, {
+          error: 'state-transaction-conflict',
+          conflicts: result.conflicts,
+        })
+        return true
+      }
+      const undoLabel = boundedText(payload?.undoLabel, 120) || '战斗权威事务'
+      for (const entry of result.entries) {
+        if (DM_UNDOABLE_STATE.has(entry.name)) {
+          await appendDmUndoChange(ctx, {
+            transactionId,
+            label: undoLabel,
+            actorMemberId: authenticatedRoomMember?.memberId ?? 'local-dm',
+            resource: entry.name,
+            before: entry.current,
+            beforeRevision: entry.currentRevision,
+            afterRevision: entry.revision,
+            changedAt: entry.writtenAt,
+          }).catch(() => {})
+        }
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `state-transaction:${transactionId}:${entry.name}:${entry.writtenAt}`,
+          name: entry.name,
+          updatedAt: Number(entry.data?.updatedAt) || entry.writtenAt,
+        })
+      }
+      writeJson(res, 200, {
+        ok: true,
+        transactionId,
+        revisions: result.revisions,
+      })
+      return true
+    }
+
+    if (parsed.pathname === '/api/state/player-action-requests/append' && req.method === 'POST') {
+      if (!authenticatedRoomMember || ctx.accessRole !== 'player') {
+        writeJson(res, 403, { error: 'player-membership-required' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      let payload
+      try {
+        payload = JSON.parse((await readBody(req)).toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const stampedEnvelope = stampPlayerActionStateForRoomMember(
+        'player-action-requests',
+        { requests: [payload?.action] },
+        authenticatedRoomMember,
+      )
+      const action = stampedEnvelope?.requests?.[0]
+      if (
+        !plainObject(action) ||
+        !boundedText(action.id, 220) ||
+        !boundedText(action.mapId, 180) ||
+        !boundedText(action.actorTokenId, 180) ||
+        !boundedText(action.characterId, 180) ||
+        action.status !== 'pending'
+      ) {
+        writeJson(res, 422, { error: 'invalid-player-action' })
+        return true
+      }
+      const now = Date.now()
+      const result = await atomicMutateJsonStateLocked(
+        path.join(ctx.stateRoot, 'player-action-requests.json'),
+        (current) => {
+          const requests = Array.isArray(current?.requests) ? current.requests : []
+          if (requests.some((candidate) => candidate?.id === action.id)) {
+            return { ok: true, changed: false, next: current }
+          }
+          return {
+            ok: true,
+            changed: true,
+            next: {
+              mapId: action.mapId,
+              combatId: action.combatId,
+              requests: [...requests, action].slice(-96),
+              updatedAt: now,
+            },
+          }
+        },
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'player-action-append-failed' })
+        return true
+      }
+      const revision = sharedStateRevision(result.next)
+      if (result.changed) {
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `player-action-requests:${action.id}:${now}`,
+          name: 'player-action-requests',
+          updatedAt: now,
+        })
+      }
+      writeJson(res, 200, { ok: true, revision })
+      return true
+    }
+
     if (parsed.pathname === '/api/state/combat-log/entry' && req.method === 'PATCH') {
       await mkdir(ctx.stateRoot, { recursive: true })
       let mutation
@@ -10316,6 +10868,43 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         name: 'combat-log',
         updatedAt: now,
       })
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(result.next))
+      return true
+    }
+
+    if (parsed.pathname === '/api/state/dice-events/append' && req.method === 'PATCH') {
+      if (!authenticatedRoomMember && ctx.accessRole !== 'open') {
+        writeJson(res, 403, { error: 'room-membership-required' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      let mutation
+      try {
+        mutation = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const now = Date.now()
+      const result = await atomicMutateJsonStateLocked(
+        path.join(ctx.stateRoot, 'dice-events.json'),
+        (state) => mutateDiceEventsState(state, mutation, now, authenticatedRoomMember, ctx.accessRole),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'dice-event-append-failed' })
+        return true
+      }
+      if (result.changed) {
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `dice-events:${boundedText(mutation?.event?.id, 220)}:${now}`,
+          name: 'dice-events',
+          updatedAt: now,
+        })
+      }
       res.writeHead(200, {
         'Content-Type': 'application/json; charset=utf-8',
         'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
@@ -10446,16 +11035,25 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const room = await readRoomForCampaign(ctx)
       const now = Date.now()
       const filePath = path.join(ctx.stateRoot, 'room-journal.json')
-      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
-        mutateRoomJournalState(state, mutation, now, authenticatedRoomMember, {
-          host: room.host,
-          playerMemberIds: roomCommunicationPlayerMemberIds(room),
-        }),
-      )
+      const result = await withWriteLock(sharedStateTransactionLockPath(ctx), () =>
+        atomicMutateJsonStateLocked(filePath, (state) =>
+          mutateRoomJournalState(state, mutation, now, authenticatedRoomMember, {
+            host: room.host,
+            playerMemberIds: roomCommunicationPlayerMemberIds(room),
+          }),
+        ))
       if (!result?.ok) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
         return true
       }
+      await recordDmUndoMutation(
+        req,
+        ctx,
+        authenticatedRoomMember,
+        'room-journal',
+        result,
+        '修改战役讲义与日志',
+      )
       publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
         id: `room-journal:${now}:${Math.random().toString(36).slice(2)}`,
         name: 'room-journal',
@@ -10845,18 +11443,21 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         const playerCharacterWrite = name === 'characters' && ctx.accessRole === 'player' && authenticatedRoomMember
         const combatActive = playerCharacterWrite ? await sharedCombatIsActiveForAuthority(ctx) : false
-        const writeResult = await atomicWriteJsonStateCasLocked(filePath, parsedBody, {
-          expectedRevision,
-          writerId: req?.headers?.['x-stars-writer'],
-          mergeIncoming: playerCharacterWrite
-            ? (current, incoming) => mergePlayerCharactersStateForAuthority(
-                current,
-                incoming,
-                authenticatedRoomMember.memberId,
-                { combatActive },
-              )
-            : undefined,
-          validateIncoming: (candidate) => validateSharedStateShape(name, candidate),
+        const writeResult = await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+          await recoverSharedStateTransaction(ctx)
+          return atomicWriteJsonStateCasLocked(filePath, parsedBody, {
+            expectedRevision,
+            writerId: req?.headers?.['x-stars-writer'],
+            mergeIncoming: playerCharacterWrite
+              ? (current, incoming) => mergePlayerCharactersStateForAuthority(
+                  current,
+                  incoming,
+                  authenticatedRoomMember.memberId,
+                  { combatActive },
+                )
+              : undefined,
+            validateIncoming: (candidate) => validateSharedStateShape(name, candidate),
+          })
         })
         if (writeResult.conflict) {
           res.writeHead(409, {

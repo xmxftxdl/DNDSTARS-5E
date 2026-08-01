@@ -1185,7 +1185,11 @@ interface CharacterState {
     id: string,
     patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp' | 'hitPointDice'>>,
   ) => void
-  applyAuthorityUpdate: (id: string, patch: Partial<Character>) => void
+  applyAuthorityUpdate: (
+    id: string,
+    patch: Partial<Character>,
+    options?: { protectHitPointsUntilAcknowledged?: boolean },
+  ) => void
   applyInventoryMutation: (mutation: Dnd5eInventoryMutation) => Dnd5eInventoryMutationResult
   applyInventoryGrantBundle: (input: {
     characterId: string
@@ -1578,9 +1582,13 @@ export const useCharacterStore = create<CharacterState>()(
           })
           updateChar(id, () => next)
         },
-        applyAuthorityUpdate: (id, patch) => {
+        applyAuthorityUpdate: (id, patch, options) => {
           if (patch.currentHp != null || patch.maxHp != null || patch.tempHp != null) {
-            clearPendingLocalCharacterHitPointEdit(id)
+            if (options?.protectHitPointsUntilAcknowledged) {
+              markPendingLocalCharacterHitPointEdit(id, patch)
+            } else {
+              clearPendingLocalCharacterHitPointEdit(id)
+            }
           }
           return set((state) => ({
             characters: state.characters.map((character) =>

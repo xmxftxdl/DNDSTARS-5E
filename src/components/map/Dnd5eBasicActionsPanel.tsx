@@ -11,17 +11,26 @@ export interface Dnd5eBasicActionTarget {
   awakenable?: boolean
 }
 
+export interface Dnd5eGrappleEscapeTarget {
+  grapplerTokenId: string
+  dc?: number
+}
+
+const EMPTY_GRAPPLE_ESCAPES: readonly Dnd5eGrappleEscapeTarget[] = []
+
 type BasicActionKind = Dnd5eBasicActionPayload['kind']
 
 export default function Dnd5eBasicActionsPanel({
   canAct,
   pending,
   targets,
+  grappleEscapes = EMPTY_GRAPPLE_ESCAPES,
   onAction,
 }: {
   canAct: boolean
   pending: boolean
   targets: readonly Dnd5eBasicActionTarget[]
+  grappleEscapes?: readonly Dnd5eGrappleEscapeTarget[]
   onAction: (payload: Dnd5eBasicActionPayload) => void
 }) {
   const [kind, setKind] = useState<BasicActionKind>('help')
@@ -33,18 +42,32 @@ export default function Dnd5eBasicActionsPanel({
   const [interactionId, setInteractionId] = useState('')
   const [adjudicationDescription, setAdjudicationDescription] = useState('')
 
+  const grappleEscapeTargetIds = useMemo(
+    () => new Set(grappleEscapes.map((entry) => entry.grapplerTokenId)),
+    [grappleEscapes],
+  )
+  const quickEscapeTargets = useMemo(() => [...new Map(
+    grappleEscapes.map((escape) => [escape.grapplerTokenId, escape] as const),
+  ).values()].flatMap((escape) => {
+    const target = targets.find((candidate) =>
+      candidate.tokenId === escape.grapplerTokenId && candidate.currentHp > 0,
+    )
+    return target ? [{ ...escape, target }] : []
+  }), [grappleEscapes, targets])
   const targetRelation = kind === 'help' && helpKind === 'ability-check' ? 'ally'
     : kind === 'help' || kind === 'grapple' || kind === 'shove' ||
-      kind === 'release-grapple' || kind === 'escape-grapple' ? 'enemy'
+      kind === 'release-grapple' ? 'enemy'
+      : kind === 'escape-grapple' ? 'grappler'
       : kind === 'wake' ? 'sleeping'
       : 'none'
   const targetOptions = useMemo(() => targets.filter((target) => {
     if (target.currentHp <= 0) return false
     if (targetRelation === 'ally') return target.opposed === false
     if (targetRelation === 'enemy') return target.opposed === true && target.distanceFeet <= 5
+    if (targetRelation === 'grappler') return grappleEscapeTargetIds.has(target.tokenId)
     if (targetRelation === 'sleeping') return target.awakenable === true && target.distanceFeet <= 5
     return true
-  }), [targetRelation, targets])
+  }), [grappleEscapeTargetIds, targetRelation, targets])
   const selectedTarget = targetOptions.some((target) => target.tokenId === targetTokenId)
     ? targetTokenId
     : targetOptions[0]?.tokenId ?? ''
@@ -74,6 +97,22 @@ export default function Dnd5eBasicActionsPanel({
 
   return (
     <section className="rounded-xl border border-white/10 bg-void-900/45 p-4">
+      {quickEscapeTargets.length > 0 ? (
+        <div className="mb-3 space-y-2 rounded-xl border border-amber-300/30 bg-amber-500/10 p-3" data-testid="grapple-escape-controls">
+          <p className="text-xs font-semibold text-amber-100">你正被擒抱，挣脱需要消耗一个动作。</p>
+          {quickEscapeTargets.map(({ target, dc }) => (
+            <button
+              key={target.tokenId}
+              type="button"
+              onClick={() => onAction({ kind: 'escape-grapple', targetTokenId: target.tokenId })}
+              disabled={!canAct || pending}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-amber-300/30 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Hand className="h-4 w-4" />挣脱 {target.label} 的擒抱{dc != null ? `（DC ${dc}）` : ''}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <ListChecks className="h-5 w-5 text-cyan-300" />
         <div><h3 className="font-bold text-slate-100">基础动作</h3><p className="text-xs text-slate-500">D&amp;D 5e 2014 · Headless 权威结算</p></div>

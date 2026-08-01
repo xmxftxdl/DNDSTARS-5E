@@ -22,12 +22,14 @@ import {
   dnd5eTargetIsUnseenForAttack,
   dnd5eTranquilityWardCheck,
   dnd5eWeaponClassDamageDefinitions,
+  previewDnd5ePostD20AdjustedAttack,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eClassDamageDefinition,
   type Dnd5eClassDamageRolls,
   type Dnd5eCuttingWordsUse,
   type Dnd5eHeadlessCombatState,
+  type Dnd5ePostD20AdjustmentUse,
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eStandAgainstTideUse,
   type Dnd5eWeaponClassDamageContext,
@@ -37,6 +39,8 @@ import { getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
+import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 
 export function findDnd5eOpportunityAttackersForMove(input: {
   map: BattleMap
@@ -224,6 +228,8 @@ export function prepareDnd5eOpportunityAttack(input: {
   const attackMode = (() => {
     const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) ||
       dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) ||
+      dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, targetCombatant) ||
+      dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
       targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
       dnd5eTotemWolfPackAdvantage(
@@ -275,11 +281,18 @@ export function prepareDnd5eOpportunityAttack(input: {
   }
 }
 
-export function previewDnd5eOpportunityAttack(prepared: PreparedDnd5eOpportunityAttack, d20: number, d20Second?: number, blessRoll?: number, baneRoll?: number) {
+export function previewDnd5eOpportunityAttack(prepared: PreparedDnd5eOpportunityAttack, d20: number, d20Second?: number, blessRoll?: number, baneRoll?: number, postD20Adjustment?: Dnd5ePostD20AdjustmentUse) {
   const rolls = prepared.attackMode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   const resolved = rules.resolveAttack({ rolls, mode: prepared.attackMode, modifier: prepared.attackModifier + (blessRoll ?? 0) - (baneRoll ?? 0), targetAc: prepared.targetArmorClass })
-  const critical = resolved.roll.d20 >= prepared.criticalThreshold
-  return { ...resolved, hit: resolved.hit || critical, critical }
+  const adjusted = previewDnd5ePostD20AdjustedAttack({
+    state: prepared.state,
+    affectedId: prepared.actorToken.id,
+    targetAc: prepared.targetArmorClass,
+    resolution: resolved,
+    use: postD20Adjustment,
+  })
+  const critical = adjusted.roll.d20 >= prepared.criticalThreshold
+  return { ...adjusted, hit: adjusted.hit || critical, critical }
 }
 
 export function dnd5eOpportunityAttackClassDamageDefinitions(
@@ -309,6 +322,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   strokeOfLuck?: boolean
   cuttingWords?: Dnd5eCuttingWordsUse
   cuttingWordsDamage?: Dnd5eCuttingWordsUse
+  postD20Adjustment?: Dnd5ePostD20AdjustmentUse
   shieldSpellReaction?: boolean
   uncannyDodge?: boolean
   tranquilitySave?: Dnd5eTranquilitySaveRoll
@@ -335,6 +349,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     strokeOfLuck: input.strokeOfLuck,
     cuttingWords: input.cuttingWords,
     cuttingWordsDamage: input.cuttingWordsDamage,
+    postD20Adjustment: input.postD20Adjustment,
     shieldSpellReaction: input.shieldSpellReaction,
     uncannyDodge: input.uncannyDodge,
     tranquilitySave: input.tranquilitySave,

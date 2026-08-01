@@ -30,6 +30,8 @@ import {
 import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
 import { isDnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
 import { isDnd5eMonsterControlStateV1 } from './monsterControlState'
+import { normalizeSharedCombatFlowPause } from './sharedCombatSync'
+import { isDnd5eMonsterTurnProgressV1 } from './monsterTurnProgress'
 import {
   SCENE_ORCHESTRATION_RESOURCE,
   validateSharedSceneOrchestration,
@@ -311,14 +313,19 @@ function migrateCombatInterruptEnvelope(input: Record<string, unknown>): {
       } else {
         raw.contributions.forEach((entry, contributionIndex) => {
           const contributionPath = `${path}.contributions[${contributionIndex}]`
+          const contributionShapeValid = isPlainObject(entry) && (
+            (entry.kind === 'replace-d20' && entry.dieIndex === 0 &&
+              Number.isInteger(entry.replacementValue) &&
+              Number(entry.replacementValue) >= 1 && Number(entry.replacementValue) <= 20) ||
+            (entry.kind === 'adjust-d20' && typeof entry.featureId === 'string' && !!entry.featureId.trim() &&
+              (entry.direction === 'add' || entry.direction === 'subtract'))
+          )
           if (
-            !isPlainObject(entry) || entry.kind !== 'replace-d20' ||
+            !isPlainObject(entry) || !contributionShapeValid ||
             typeof entry.id !== 'string' || !entry.id ||
             typeof entry.characterId !== 'string' || !entry.characterId ||
             typeof entry.characterName !== 'string' || !entry.characterName.trim() ||
             typeof entry.featureLabel !== 'string' || !entry.featureLabel.trim() ||
-            entry.dieIndex !== 0 || !Number.isInteger(entry.replacementValue) ||
-            Number(entry.replacementValue) < 1 || Number(entry.replacementValue) > 20 ||
             !Number.isFinite(entry.createdAt)
           ) issues.push(`${contributionPath} 无效`)
         })
@@ -530,6 +537,16 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === 'combat' && input.monsterControl != null && !isDnd5eMonsterControlStateV1(input.monsterControl)) {
     reasons.push('combat.monsterControl 怪物控制状态损坏')
+  }
+  if (name === 'combat' && input.flowPause != null && !normalizeSharedCombatFlowPause(input.flowPause)) {
+    reasons.push('combat.flowPause 战斗暂停状态损坏')
+  }
+  if (
+    name === 'combat' &&
+    input.monsterTurnProgress != null &&
+    !isDnd5eMonsterTurnProgressV1(input.monsterTurnProgress)
+  ) {
+    reasons.push('combat.monsterTurnProgress is invalid')
   }
   if (name === 'dm-authority-ready' && typeof input.ready !== 'boolean') {
     reasons.push('dm-authority-ready.ready 不是布尔值')

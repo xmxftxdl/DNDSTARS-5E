@@ -112,6 +112,11 @@ describe('publishPlayerActionAckWithSnapshots', () => {
         characters: [{ id: 'char-1' } as Character],
         maps: [{ id: 'map-1' } as BattleMap],
         updatedAt: 123,
+        mapGeometry: {
+          schemaVersion: 3,
+          maps: [],
+          updatedAt: 123,
+        },
       },
       saveSharedResource,
       publishAck,
@@ -133,5 +138,113 @@ describe('publishPlayerActionAckWithSnapshots', () => {
     })).rejects.toThrow('authoritative-resource-save-rejected:player-action-ack:failed')
 
     expect(publishAck).not.toHaveBeenCalled()
+  })
+
+  it('includes accepted snapshots and the acknowledgement in one atomic commit', async () => {
+    const ack = makeAck('accepted')
+    const combat = {
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      active: true,
+      round: 1,
+      initiativeIndex: 1,
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: 'Hero', emoji: 'H', color: '#fff', roll: 18 },
+        { tokenId: 'goblin-token', label: 'Goblin', emoji: 'G', color: '#f00', roll: 12 },
+      ],
+      monsterTurnProgress: {
+        schemaVersion: 1 as const,
+        status: 'starting' as const,
+        combatId: 'combat-1',
+        round: 1,
+        initiativeIndex: 1,
+        initiativeSlotId: 'goblin-token',
+        tokenId: 'goblin-token',
+        requestId: ack.actionId,
+        startedAt: 123,
+        updatedAt: 123,
+        expiresAt: 60_123,
+      },
+      updatedAt: 123,
+    }
+    const commitSharedResources = vi.fn(async () => ({
+      status: 'committed' as const,
+      revisions: { characters: 4, maps: 7, combat: 8, 'player-action-ack': 9 },
+    }))
+    const saveSharedResource = vi.fn(async () => ({ status: 'saved' as const, revision: 1 }))
+    const publishAck = vi.fn(async () => undefined)
+    await publishPlayerActionAckWithSnapshots({
+      ack,
+      roomJournalMutations: [{
+        operation: 'add-shared-note',
+        kind: 'task',
+        title: '找到出口',
+        body: '',
+        authorityReceiptId: 'interaction:task:1',
+      }],
+      processed: {
+        mapId: 'map-1',
+        actionIds: ['action-1'],
+        updatedAt: 123,
+      },
+      snapshots: {
+        characters: [{ id: 'char-1' } as Character],
+        maps: [{ id: 'map-1' } as BattleMap],
+        updatedAt: 123,
+        combat,
+        mapGeometry: {
+          schemaVersion: 3,
+          maps: [],
+          updatedAt: 123,
+        },
+      },
+      saveSharedResource,
+      commitSharedResources,
+      publishAck,
+    })
+    expect(commitSharedResources).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'characters' }),
+        expect.objectContaining({ name: 'maps' }),
+        { name: 'combat', data: combat },
+        expect.objectContaining({ name: 'map-geometry' }),
+        expect.objectContaining({ name: 'player-action-processed' }),
+        { name: 'player-action-ack', data: ack },
+      ]),
+      expect.objectContaining({
+        transactionId: 'player-action:action-1',
+        roomJournalMutations: [expect.objectContaining({
+          operation: 'add-shared-note',
+          authorityReceiptId: 'interaction:task:1',
+        })],
+      }),
+    )
+    expect(saveSharedResource).not.toHaveBeenCalled()
+    expect(publishAck).toHaveBeenCalledWith(expect.objectContaining({
+      ...ack,
+      authorityRevisions: { characters: 4, maps: 7, combat: 8, 'player-action-ack': 9 },
+    }))
+  })
+
+  it('commits a rejected acknowledgement and its replay receipt atomically', async () => {
+    const ack = makeAck('rejected')
+    const commitSharedResources = vi.fn(async () => ({
+      revisions: { 'player-action-processed': 3, 'player-action-ack': 4 },
+    }))
+    const publishAck = vi.fn(async () => undefined)
+    await publishPlayerActionAckWithSnapshots({
+      ack,
+      processed: { mapId: 'map-1', actionIds: ['action-1'], updatedAt: 100 },
+      saveSharedResource: vi.fn(),
+      commitSharedResources,
+      publishAck,
+    })
+    expect(commitSharedResources).toHaveBeenCalledWith([
+      expect.objectContaining({ name: 'player-action-processed' }),
+      { name: 'player-action-ack', data: ack },
+    ], expect.objectContaining({ transactionId: 'player-action:action-1' }))
+    expect(publishAck).toHaveBeenCalledWith(expect.objectContaining({
+      authorityRevisions: { 'player-action-processed': 3, 'player-action-ack': 4 },
+    }))
   })
 })

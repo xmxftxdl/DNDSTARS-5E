@@ -6,6 +6,7 @@ import {
   DND5E_STANDARD_CONDITIONS,
   dnd5eActiveStandardConditions,
   dnd5eConditionLabel,
+  dnd5eConditionRequiresActorSource,
   dnd5eStandardConditionId,
 } from '../../rulesets/dnd5e/conditions'
 import {
@@ -119,6 +120,8 @@ export default function Dnd5eConditionEditor({
   const [saveTiming, setSaveTiming] = useState<'target-turn-start' | 'target-turn-end'>('target-turn-end')
   const [breakOn, setBreakOn] = useState<Dnd5eActiveEffectBreakTrigger[]>([])
   const [stackingPolicy, setStackingPolicy] = useState<Dnd5eActiveEffectStackingPolicy>('refresh-duration')
+  const [sourceError, setSourceError] = useState('')
+  const availableSources = sourceOptions.filter((source) => source.id !== targetId)
 
   const commit = (next: readonly Dnd5eActiveEffectInstance[]) => {
     const list = [...next]
@@ -163,9 +166,18 @@ export default function Dnd5eConditionEditor({
               title={disabled ? `${label}：目标免疫` : selected ? `移除全部${label}来源` : `按下方配置附加${label}`}
               onClick={() => {
                 if (selected) {
+                  setSourceError('')
                   commit(removeDnd5eActiveEffectsByStandardCondition({ effects, condition }).effects)
                   return
                 }
+                if (
+                  dnd5eConditionRequiresActorSource(condition) &&
+                  !availableSources.some((source) => source.id === sourceActorId)
+                ) {
+                  setSourceError(`${label}必须指定来源生物，Headless 才能正确判定目标限制、视线与移动。`)
+                  return
+                }
+                setSourceError('')
                 const incoming = createDnd5eConditionEffect({
                   id: `dm:${targetId}:${condition}:${Date.now()}`,
                   condition,
@@ -207,9 +219,12 @@ export default function Dnd5eConditionEditor({
         <summary className="cursor-pointer text-[11px] font-semibold text-slate-300">新状态生命周期配置</summary>
         <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-400">
           <label>来源角色
-            <select value={sourceActorId} onChange={(event) => setSourceActorId(event.target.value)} className="mt-1 w-full rounded border border-white/10 bg-void-950 px-2 py-1 text-slate-200">
+            <select value={sourceActorId} onChange={(event) => {
+              setSourceActorId(event.target.value)
+              setSourceError('')
+            }} className="mt-1 w-full rounded border border-white/10 bg-void-950 px-2 py-1 text-slate-200">
               <option value="">DM / 无角色</option>
-              {sourceOptions.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
+              {availableSources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
             </select>
           </label>
           <label>来源法术 / 特性
@@ -239,6 +254,15 @@ export default function Dnd5eConditionEditor({
             </select>
           </label>
         </div>
+
+        <p className="mt-2 text-[10px] text-slate-500">
+          魅惑与恐慌必须选择来源生物；其他状态可以保留“DM / 无角色”。
+        </p>
+        {sourceError ? (
+          <p role="alert" className="mt-1 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-1.5 text-[10px] text-amber-200">
+            {sourceError}
+          </p>
+        ) : null}
 
         <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
           <input type="checkbox" checked={repeatSave} onChange={(event) => setRepeatSave(event.target.checked)} className="accent-violet-500" />

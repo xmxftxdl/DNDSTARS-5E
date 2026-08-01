@@ -24,6 +24,7 @@ const PublicPricingPage = lazy(() => import('./pages/PublicPricingPage'))
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
+const DmPrepAssistantPage = lazy(() => import('./pages/DmPrepAssistantPage'))
 const MapsPage = lazy(() => import('./pages/MapsPage'))
 const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
@@ -64,6 +65,7 @@ export default function App() {
   const [roomTransition, setRoomTransition] = useState<'leave' | 'new-campaign' | null>(null)
   const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
   const isSpectator = roomSession?.role === 'spectator'
+  const dmToolsAvailable = roomSession?.role === 'dm' || (!roomSession && endpointMode === 'dm')
   const roomReady = !!roomSession || bypassRoomLobby
   const campaignId = roomSession?.campaignId ?? roomSession?.roomId ?? 'local'
   const campaignBasePath = `/campaign/${encodeURIComponent(campaignId)}`
@@ -291,7 +293,7 @@ export default function App() {
       'characters',
       'spellbook',
       'communications',
-      'simulation',
+      'dm-tools',
       'extensions',
       'settings',
     ])
@@ -380,12 +382,28 @@ export default function App() {
                   />
                 ))}
           />
-          {endpointMode !== 'player' && (
+          {dmToolsAvailable && <>
             <Route
-              path="/campaign/:campaignId/simulation"
+              path="/campaign/:campaignId/dm-tools/simulation"
               element={lazyPage('战斗 AI 模拟', <CombatSimulationPage />)}
             />
-          )}
+            <Route
+              path="/campaign/:campaignId/dm-tools/workshop"
+              element={lazyPage('自定义工坊', <RulesPluginsPage view="workshop" />)}
+            />
+            <Route
+              path="/campaign/:campaignId/dm-tools/prep"
+              element={lazyPage('备团助手', <DmPrepAssistantPage />)}
+            />
+            <Route
+              path="/campaign/:campaignId/dm-tools"
+              element={<Navigate to={`${campaignBasePath}/dm-tools/workshop`} replace />}
+            />
+            <Route
+              path="/campaign/:campaignId/simulation"
+              element={<Navigate to={`${campaignBasePath}/dm-tools/simulation`} replace />}
+            />
+          </>}
           <Route path="/campaign/:campaignId/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
           {!isSpectator && <Route path="/campaign/:campaignId/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
@@ -398,7 +416,7 @@ export default function App() {
           <Route path="/characters" element={<Navigate to={`${campaignBasePath}/characters`} replace />} />
           <Route path="/spellbook" element={<Navigate to={`${campaignBasePath}/spellbook`} replace />} />
           <Route path="/communications" element={<Navigate to={`${campaignBasePath}/communications`} replace />} />
-          <Route path="/simulation" element={<Navigate to={`${campaignBasePath}/simulation`} replace />} />
+          <Route path="/simulation" element={<Navigate to={`${campaignBasePath}/dm-tools/simulation`} replace />} />
           <Route path="/settings" element={<Navigate to={`${campaignBasePath}/settings`} replace />} />
           <Route path="*" element={<Navigate to={defaultCampaignPath} replace />} />
         </Routes>

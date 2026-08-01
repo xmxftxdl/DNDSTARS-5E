@@ -1,14 +1,55 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
-import type { Dnd5eTurnEconomyByToken, SharedCombatState } from './sharedCombatTypes'
+import type {
+  Dnd5eTurnEconomyByToken,
+  SharedCombatFlowPauseV1,
+  SharedCombatState,
+} from './sharedCombatTypes'
 import { normalizeCombatSettlementMode, type CombatSettlementMode } from './combatSettlementMode'
 import {
   normalizeDnd5eMonsterControlState,
   type Dnd5eMonsterControlStateV1,
 } from './monsterControlState'
+import {
+  normalizeDnd5eMonsterTurnProgress,
+  type Dnd5eMonsterTurnProgressV1,
+} from './monsterTurnProgress'
 
 export interface SharedCombatStateMigration {
   state: SharedCombatState
   removedLegacyAp: boolean
+}
+
+export function normalizeSharedCombatFlowPause(value: unknown): SharedCombatFlowPauseV1 | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Partial<SharedCombatFlowPauseV1>
+  if (
+    source.schemaVersion !== 1 ||
+    (source.reason !== 'manual' && source.reason !== 'dm-adjudication') ||
+    !['paused', 'adjudicating', 'awaiting-resume'].includes(source.phase ?? '') ||
+    !Number.isFinite(source.pausedAt) ||
+    Number(source.pausedAt) < 0 ||
+    (source.interruptId != null && (
+      typeof source.interruptId !== 'string' ||
+      !source.interruptId.trim() ||
+      source.interruptId.length > 320
+    )) ||
+    (source.label != null && (typeof source.label !== 'string' || source.label.length > 240)) ||
+    (source.resolvedAt != null && (!Number.isFinite(source.resolvedAt) || Number(source.resolvedAt) < 0)) ||
+    (source.reason === 'manual' && source.phase !== 'paused') ||
+    (source.reason === 'dm-adjudication' && (
+      source.phase === 'paused' ||
+      typeof source.interruptId !== 'string'
+    ))
+  ) return undefined
+  return {
+    schemaVersion: 1,
+    reason: source.reason,
+    phase: source.phase as SharedCombatFlowPauseV1['phase'],
+    pausedAt: Number(source.pausedAt),
+    ...(source.interruptId ? { interruptId: source.interruptId } : {}),
+    ...(source.label != null ? { label: source.label } : {}),
+    ...(source.resolvedAt != null ? { resolvedAt: Number(source.resolvedAt) } : {}),
+  }
 }
 
 /**
@@ -63,6 +104,8 @@ export type SharedCombatStateApplyDecision =
       dnd5eTurnEconomyByToken: Dnd5eTurnEconomyByToken
       settlementMode: CombatSettlementMode
       monsterControl: Dnd5eMonsterControlStateV1
+      flowPause?: SharedCombatFlowPauseV1
+      monsterTurnProgress?: Dnd5eMonsterTurnProgressV1
       incomingCombatId: string
       incomingUpdatedAt: number
       snapshot: string
@@ -81,6 +124,8 @@ export function resolveSharedCombatStateApply(input: {
   lastAppliedUpdatedAt: number
   lastSnapshot: string
   isDm: boolean
+  /** Injectable only for deterministic expiry checks in tests. */
+  now?: number
 }): SharedCombatStateApplyDecision {
   const state = input.state
   if (!state) return { status: 'ignored', reason: 'missing-state' }
@@ -114,6 +159,23 @@ export function resolveSharedCombatStateApply(input: {
   const incomingCombatId = state.combatId ?? ''
   const incomingUpdatedAt = state.updatedAt ?? 0
   const settlementMode = normalizeCombatSettlementMode(state.settlementMode)
+  const currentEntry = initiativeOrder[initiativeIndex]
+  const monsterTurnProgress = normalizeDnd5eMonsterTurnProgress(
+    state.monsterTurnProgress,
+    {
+      active,
+      current: active && incomingCombatId && currentEntry
+        ? {
+            combatId: incomingCombatId,
+            round: state.round,
+            initiativeIndex,
+            initiativeSlotId: currentEntry.slotId ?? currentEntry.tokenId,
+            tokenId: currentEntry.tokenId,
+          }
+        : undefined,
+      now: input.now ?? Date.now(),
+    },
+  )
 
   if (
     incomingCombatId === input.lastAppliedCombatId &&
@@ -122,7 +184,13 @@ export function resolveSharedCombatStateApply(input: {
     return { status: 'ignored', reason: 'stale' }
   }
 
-  const snapshot = JSON.stringify({ state, tokenIds: Array.from(combatTokenIds).sort() })
+  // Snapshot the normalized lease, not the raw wire value. Once its deadline
+  // passes, a recovery read must produce a different snapshot and clear a
+  // previously rendered thinking badge even when no newer write arrived.
+  const snapshot = JSON.stringify({
+    state: { ...state, monsterTurnProgress },
+    tokenIds: Array.from(combatTokenIds).sort(),
+  })
   if (snapshot === input.lastSnapshot) return { status: 'ignored', reason: 'unchanged' }
 
   const combatChanged = incomingCombatId !== input.currentCombatId
@@ -139,6 +207,8 @@ export function resolveSharedCombatStateApply(input: {
       settlementMode,
       incomingUpdatedAt,
     ),
+    flowPause: normalizeSharedCombatFlowPause(state.flowPause),
+    monsterTurnProgress,
     incomingCombatId,
     incomingUpdatedAt,
     snapshot,

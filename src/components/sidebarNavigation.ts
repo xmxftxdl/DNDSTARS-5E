@@ -1,8 +1,10 @@
 import {
+  Bot,
   BookOpen,
-  FlaskConical,
+  Hammer,
   LayoutDashboard,
   MessageSquareText,
+  NotebookTabs,
   Swords,
   Users,
 } from 'lucide-react'
@@ -15,7 +17,12 @@ const navItems = [
   { to: '/characters', label: '角色', icon: Users },
   { to: '/spellbook', label: '法术书', icon: BookOpen },
   { to: '/communications', label: '通讯与日志', icon: MessageSquareText },
-  { to: '/simulation', label: '战斗 AI 模拟', icon: FlaskConical },
+]
+
+const dmAssistantItems = [
+  { to: '/dm-tools/simulation', label: '战斗 AI 模拟', icon: Bot },
+  { to: '/dm-tools/workshop', label: '自定义工坊', icon: Hammer },
+  { to: '/dm-tools/prep', label: '备团助手', icon: NotebookTabs },
 ]
 
 const playerNavItems = navItems.filter((item) =>
@@ -37,5 +44,13 @@ export function sidebarNavItems(
     ...item,
     to: item.to === '/' ? `${campaignBasePath}/overview` : `${campaignBasePath}${item.to}`,
     end: item.to === '/',
+  }))
+}
+
+export function sidebarDmAssistantItems(campaignBasePath = '') {
+  if (!campaignBasePath) return dmAssistantItems
+  return dmAssistantItems.map((item) => ({
+    ...item,
+    to: `${campaignBasePath}${item.to}`,
   }))
 }

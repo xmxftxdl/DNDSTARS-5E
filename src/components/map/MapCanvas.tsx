@@ -25,17 +25,25 @@ import {
 } from '../../lib/tokenMovementAnimation'
 import {
   canDragMapToken,
-  shouldReleaseOptimisticTokenMovePreview,
+  resolveOptimisticTokenMovePreview,
   shouldValidateMapTokenMoveLocally,
 } from '../../lib/mapTokenDragPolicy'
 import { planMapTokenDrop } from '../../lib/mapTokenDropPlanner'
+import { createLatestTokenMovePreviewTracker } from '../../lib/latestTokenMovePreview'
+import {
+  setTokenVisualNodesPositionLocked,
+  syncTokenVisualNodes,
+  type TokenVisualNodeLike,
+} from '../../lib/tokenVisualPosition'
 import {
   THUNDERWAVE_ANIMATION_DURATION_MS,
   combatPresentationSavingThrowAbilityLabel,
+  type CombatPresentationAttackTargetEffect,
   type CombatPresentationSavingThrowAbility,
 } from '../../lib/combatPresentation'
 import { cachedBrowserImage, preloadBrowserImage } from '../../lib/browserImageCache'
 import {
+  DND5E_CLASS_ICON_PALETTES,
   dnd5eSpellActionIcon,
   type Dnd5eActionIconSpec,
 } from '../../lib/dnd5eActionIcons'
@@ -520,6 +528,8 @@ export interface SceneInteractionPointOverlay {
 
 interface MapCanvasProps {
   map: BattleMap
+  /** Explicit combat phase; enemy Tokens switch from placement drag to turn movement. */
+  combatActive?: boolean
   selectedTokenId: string | null
   onSelectToken: (id: string | null) => void
   targetSelectTokenIds?: string[]
@@ -548,6 +558,8 @@ interface MapCanvasProps {
   onDnd5ePluginAreaVisibilityToggle?: (areaId: string) => void
   tokenHoverLabels?: Record<string, string>
   projectiles?: MapProjectile[]
+  /** Short-lived marks for explicit single-target weapon and natural attacks. */
+  attackTargetEffects?: CombatPresentationAttackTargetEffect[]
   /** Targets carrying the authoritative Chill Touch no-healing effect. */
   chillTouchTokenIds?: string[]
   /** Targets protected by the authoritative Sanctuary spell. */
@@ -629,13 +641,13 @@ interface MapCanvasProps {
     token: Token,
     position: { x: number; y: number },
     targetElevationFeet: number,
-  ) => boolean | 'pending'
+  ) => boolean | 'pending' | Promise<void>
   /** Commits an already validated direct move through the room command layer. */
   onTokenMoveCommit?: (
     token: Token,
     position: { x: number; y: number },
     targetElevationFeet: number,
-  ) => void
+  ) => void | Promise<void>
   /** Token IDs whose authority requests are still waiting for DM settlement. */
   optimisticTokenMoveIds?: readonly string[]
   /** Player Tokens that the current non-DM client may request to move. */
@@ -2375,6 +2387,7 @@ function TerrainElevationContours({
 
 export default function MapCanvas({
   map,
+  combatActive = false,
   selectedTokenId,
   onSelectToken,
   targetSelectTokenIds = [],
@@ -2399,6 +2412,7 @@ export default function MapCanvas({
   onDnd5ePluginAreaVisibilityToggle,
   tokenHoverLabels = {},
   projectiles = [],
+  attackTargetEffects = [],
   chillTouchTokenIds = [],
   sanctuaryTokenIds = [],
   spellStatusTokenMarks = [],
@@ -2488,7 +2502,17 @@ export default function MapCanvas({
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const [hoveredTokenId, setHoveredTokenId] = useState<string | null>(null)
   const suppressTokenSelectUntilRef = useRef(0)
-  const [dragPreviewPositions, setDragPreviewPositions] = useState<Record<string, Point>>({})
+  const [tokenDragVisualState, setTokenDragVisualState] = useState<{
+    previews: Record<string, Point>
+    suppressedMovementAnimationIds: Record<string, string>
+  }>({
+    previews: {},
+    suppressedMovementAnimationIds: {},
+  })
+  const dragPreviewPositions = tokenDragVisualState.previews
+  const tokenVisualNodesRef = useRef(new Map<string, Set<TokenVisualNodeLike>>())
+  const activeDraggingTokenIdsRef = useRef(new Set<string>())
+  const [directMovePreviewTracker] = useState(createLatestTokenMovePreviewTracker)
   const [deleteDrag, setDeleteDrag] = useState<{ start: Point; current: Point } | null>(null)
   const sceneDragStartRef = useRef<Point | null>(null)
   const [sceneDraft, setSceneDraft] = useState<SceneRegion | null>(null)
@@ -2553,15 +2577,63 @@ export default function MapCanvas({
     return () => window.cancelAnimationFrame(frame)
   }, [tabletopPings])
 
+  const registerTokenVisualNode = useCallback((
+    tokenId: string,
+    node: Konva.Group | null,
+    cancelPositionAnimation: () => void,
+    setPositionLocked: (locked: boolean) => void,
+  ) => {
+    if (!node) return
+    const visualNode: TokenVisualNodeLike = {
+      cancelPositionAnimation,
+      setPositionLocked,
+      position: (point) => node.position(point),
+      getLayer: () => node.getLayer(),
+    }
+    const nodes = tokenVisualNodesRef.current.get(tokenId) ?? new Set<TokenVisualNodeLike>()
+    nodes.add(visualNode)
+    tokenVisualNodesRef.current.set(tokenId, nodes)
+    return () => {
+      const current = tokenVisualNodesRef.current.get(tokenId)
+      current?.delete(visualNode)
+      if (current?.size === 0) tokenVisualNodesRef.current.delete(tokenId)
+    }
+  }, [])
+
+  const syncTokenVisualPosition = useCallback((tokenId: string, x: number, y: number) => {
+    const nodes = tokenVisualNodesRef.current.get(tokenId)
+    if (!nodes?.size) return
+    syncTokenVisualNodes(nodes, { x, y })
+  }, [])
+
+  const setTokenVisualPositionLocked = useCallback((tokenId: string, locked: boolean) => {
+    const nodes = tokenVisualNodesRef.current.get(tokenId)
+    if (!nodes?.size) return
+    setTokenVisualNodesPositionLocked(nodes, locked)
+  }, [])
+
   const displayToken = (token: Token): Token => {
     const preview = dragPreviewPositions[token.id]
-    if (preview) return { ...token, x: preview.x, y: preview.y }
+    const suppressMovementAnimation = !!token.movementAnimation && (
+      !!preview ||
+      tokenDragVisualState.suppressedMovementAnimationIds[token.id] === token.movementAnimation.id
+    )
+    if (preview || suppressMovementAnimation) {
+      return {
+        ...token,
+        ...(preview ? { x: preview.x, y: preview.y } : {}),
+        movementAnimation: undefined,
+      }
+    }
     return token
   }
 
   const canDragToken = (token: Token): boolean =>
     canDragMapToken({
       isDm: isDM,
+      // Enemy movement during combat is handled by click-to-move, never by
+      // Konva placement drag (including the manually controlled monster).
+      combatActive,
       token,
       playerMovableTokenIds,
       measureMode,
@@ -2573,44 +2645,124 @@ export default function MapCanvas({
     })
 
   const previewTokenDrag = (token: Token, x: number, y: number) => {
-    setDragPreviewPositions((prev) => ({
-      ...prev,
-      [token.id]: { x, y },
+    syncTokenVisualPosition(token.id, x, y)
+    setTokenDragVisualState((current) => ({
+      ...current,
+      previews: {
+        ...current.previews,
+        [token.id]: { x, y },
+      },
     }))
   }
 
-  const clearTokenDragPreview = (tokenId: string) => {
-    setDragPreviewPositions((prev) => {
-      if (!prev[tokenId]) return prev
-      const next = { ...prev }
-      delete next[tokenId]
-      return next
+  const beginTokenDrag = (token: Token, x: number, y: number) => {
+    activeDraggingTokenIdsRef.current.add(token.id)
+    setTokenVisualPositionLocked(token.id, true)
+    previewTokenDrag(token, x, y)
+  }
+
+  const previewTokenDragFrame = (token: Token, x: number, y: number) => {
+    // Keep body, name and vitals in one imperative frame without re-rendering
+    // the entire map for every pointer event.
+    syncTokenVisualPosition(token.id, x, y)
+  }
+
+  const releaseTokenDragPreview = (tokenId: string) => {
+    setTokenVisualPositionLocked(tokenId, false)
+    setTokenDragVisualState((current) => {
+      if (!current.previews[tokenId]) return current
+      const previews = { ...current.previews }
+      delete previews[tokenId]
+      return { ...current, previews }
     })
+  }
+
+  const rollbackTokenDragPreview = (tokenId: string) => {
+    const authoritative = map.tokens.find((token) => token.id === tokenId)
+    if (authoritative) {
+      syncTokenVisualPosition(tokenId, authoritative.x, authoritative.y)
+    }
+    releaseTokenDragPreview(tokenId)
+  }
+
+  const cancelTokenDrag = (tokenId: string) => {
+    activeDraggingTokenIdsRef.current.delete(tokenId)
+    rollbackTokenDragPreview(tokenId)
   }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setDragPreviewPositions((current) => {
-        let changed = false
-        const next = { ...current }
-        for (const [tokenId, preview] of Object.entries(current)) {
-          const authoritative = map.tokens.find((token) => token.id === tokenId)
-          if (shouldReleaseOptimisticTokenMovePreview({
-            requestPending: optimisticTokenMoveIds.includes(tokenId),
-            authoritative,
-            preview,
-          })) {
-            delete next[tokenId]
-            changed = true
+      setTokenDragVisualState((current) => {
+        let previewsChanged = false
+        let suppressionsChanged = false
+        const previews = { ...current.previews }
+        const suppressedMovementAnimationIds = {
+          ...current.suppressedMovementAnimationIds,
+        }
+        for (const [tokenId, animationId] of Object.entries(suppressedMovementAnimationIds)) {
+          const animation = map.tokens.find((token) => token.id === tokenId)?.movementAnimation
+          if (animation?.id !== animationId) {
+            delete suppressedMovementAnimationIds[tokenId]
+            suppressionsChanged = true
           }
         }
-        return changed ? next : current
+        for (const [tokenId, preview] of Object.entries(current.previews)) {
+          const authoritative = map.tokens.find((token) => token.id === tokenId)
+          const resolution = resolveOptimisticTokenMovePreview({
+            // Parent renders and map invalidations can arrive while the pointer
+            // is still down. They must not release the preview before submit.
+            dragActive: activeDraggingTokenIdsRef.current.has(tokenId),
+            requestPending:
+              optimisticTokenMoveIds.includes(tokenId) ||
+              directMovePreviewTracker.isPending(tokenId),
+            authoritative,
+            preview,
+          })
+          if (resolution.release) {
+            if (resolution.suppressMovementAnimationId) {
+              if (
+                suppressedMovementAnimationIds[tokenId] !==
+                resolution.suppressMovementAnimationId
+              ) {
+                suppressedMovementAnimationIds[tokenId] = resolution.suppressMovementAnimationId
+                suppressionsChanged = true
+              }
+            }
+            delete previews[tokenId]
+            previewsChanged = true
+          }
+        }
+        if (!previewsChanged && !suppressionsChanged) return current
+        return { previews, suppressedMovementAnimationIds }
       })
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [map.tokens, optimisticTokenMoveIds])
+  }, [directMovePreviewTracker, map.tokens, optimisticTokenMoveIds])
+
+  const monitorDirectTokenMove = (
+    tokenId: string,
+    generation: number,
+    completion: Promise<void>,
+  ) => {
+    void completion.then(
+      () => {
+        if (directMovePreviewTracker.complete(tokenId, generation)) {
+          releaseTokenDragPreview(tokenId)
+        }
+      },
+      (error) => {
+        if (directMovePreviewTracker.complete(tokenId, generation)) {
+          // A rejected authoritative transaction owns no final position. Snap
+          // every visual layer back immediately and release its drag lock.
+          rollbackTokenDragPreview(tokenId)
+        }
+        console.error('[map-token-move] direct commit failed', error)
+      },
+    )
+  }
 
   const commitTokenDrag = (token: Token, x: number, y: number) => {
+    activeDraggingTokenIdsRef.current.delete(token.id)
     const plan = planMapTokenDrop({
       token,
       map,
@@ -2624,23 +2776,52 @@ export default function MapCanvas({
       }),
     })
     if (plan.status === 'blocked') {
-      clearTokenDragPreview(token.id)
+      rollbackTokenDragPreview(token.id)
       onTokenMoveBlocked?.(plan.entityId)
       return
     }
     const { position, elevationFeet } = plan
-    const requestResult = onTokenMoveRequest?.(token, position, elevationFeet)
+    let requestResult: ReturnType<NonNullable<MapCanvasProps['onTokenMoveRequest']>> | undefined
+    try {
+      requestResult = onTokenMoveRequest?.(token, position, elevationFeet)
+    } catch (error) {
+      rollbackTokenDragPreview(token.id)
+      console.error('[map-token-move] authoritative request failed', error)
+      return
+    }
     if (requestResult) {
       if (requestResult === 'pending') {
         previewTokenDrag(token, position.x, position.y)
+      } else if (requestResult instanceof Promise) {
+        const generation = directMovePreviewTracker.begin(token.id)
+        previewTokenDrag(token, position.x, position.y)
+        monitorDirectTokenMove(token.id, generation, requestResult)
       } else {
-        clearTokenDragPreview(token.id)
+        rollbackTokenDragPreview(token.id)
       }
       return
     }
+    const generation = directMovePreviewTracker.begin(token.id)
     previewTokenDrag(token, position.x, position.y)
-    onTokenMoveCommit?.(token, position, elevationFeet)
-    window.requestAnimationFrame(() => clearTokenDragPreview(token.id))
+    let completion: void | Promise<void>
+    try {
+      completion = onTokenMoveCommit?.(token, position, elevationFeet)
+    } catch (error) {
+      if (directMovePreviewTracker.complete(token.id, generation)) {
+        rollbackTokenDragPreview(token.id)
+      }
+      console.error('[map-token-move] direct commit failed', error)
+      return
+    }
+    if (!completion) {
+      window.requestAnimationFrame(() => {
+        if (directMovePreviewTracker.complete(token.id, generation)) {
+          releaseTokenDragPreview(token.id)
+        }
+      })
+      return
+    }
+    monitorDirectTokenMove(token.id, generation, completion)
   }
 
   // Clear measurement lines when leaving measurement mode.
@@ -3516,6 +3697,10 @@ export default function MapCanvas({
       data-combat-projectile-count={projectiles.length}
       data-combat-projectile-ids={projectiles.map((projectile) => projectile.id).join(',')}
       data-combat-projectile-kinds={projectiles.map((projectile) => projectile.kind ?? 'arrow').join(',')}
+      data-attack-target-effect-count={attackTargetEffects.length}
+      data-attack-target-effect-kinds={attackTargetEffects.map((effect) => effect.attackKind).join(',')}
+      data-attack-target-effect-targets={attackTargetEffects.map((effect) => effect.targetTokenId).join(',')}
+      data-attack-target-effect-classes={attackTargetEffects.map((effect) => effect.classId).join(',')}
       data-sanctuary-token-count={sanctuaryTokenIds.length}
       data-spell-status-token-count={spellStatusTokenMarks.length}
       data-spell-status-token-colors={spellStatusTokenMarks
@@ -3938,13 +4123,16 @@ export default function MapCanvas({
               variant="range"
             />
           )}
-          {map.tokens.map((token) => token.movementAnimation ? (
-            <TokenMovementPathLine
-              key={`movement-path-${token.id}-${token.movementAnimation.id}`}
-              animation={token.movementAnimation}
-              viewScale={view.scale}
-            />
-          ) : null)}
+          {map.tokens.map((token) => {
+            const movementAnimation = displayToken(token).movementAnimation
+            return movementAnimation ? (
+              <TokenMovementPathLine
+                key={`movement-path-${token.id}-${movementAnimation.id}`}
+                animation={movementAnimation}
+                viewScale={view.scale}
+              />
+            ) : null
+          })}
           {moveSelectMode && moveCircle && (
             <Circle
               x={moveCircle.centerX}
@@ -3999,11 +4187,13 @@ export default function MapCanvas({
                 onSelectToken(t.id)
               }}
               instantPosition={!!dragPreviewPositions[t.id]}
+              registerPositionNode={registerTokenVisualNode}
+              onDragStart={(x, y) => beginTokenDrag(t, x, y)}
               onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
-              onDragMove={(x, y) => previewTokenDrag(t, x, y)}
+              onDragMove={(x, y) => previewTokenDragFrame(t, x, y)}
               onDragCancel={() => {
                 // Sub-threshold drag: clear preview without writing or broadcasting.
-                clearTokenDragPreview(t.id)
+                cancelTokenDrag(t.id)
               }}
             />
             )
@@ -4121,9 +4311,9 @@ export default function MapCanvas({
                   onSelectToken(t.id)
                 }}
                 instantPosition={!!dragPreviewPositions[t.id]}
+                registerPositionNode={registerTokenVisualNode}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
-                onDragMove={(x, y) => previewTokenDrag(t, x, y)}
-                onDragCancel={() => clearTokenDragPreview(t.id)}
+                onDragCancel={() => cancelTokenDrag(t.id)}
               />
             )
           })}
@@ -4162,9 +4352,9 @@ export default function MapCanvas({
                   onSelectToken(t.id)
                 }}
                 instantPosition={!!dragPreviewPositions[t.id]}
+                registerPositionNode={registerTokenVisualNode}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
-                onDragMove={(x, y) => previewTokenDrag(t, x, y)}
-                onDragCancel={() => clearTokenDragPreview(t.id)}
+                onDragCancel={() => cancelTokenDrag(t.id)}
               />
             )
           })}
@@ -4267,6 +4457,12 @@ export default function MapCanvas({
             <CombatProjectileEffect
               key={projectile.id}
               projectile={projectile}
+            />
+          ))}
+          {attackTargetEffects.map((effect) => (
+            <AttackTargetEffect
+              key={effect.id}
+              effect={effect}
             />
           ))}
         </Layer>
@@ -4940,6 +5136,241 @@ function ViciousMockeryEffect({ projectile }: { projectile: MapProjectile }) {
           perfectDrawEnabled={false}
         />
       ))}
+    </Group>
+  )
+}
+
+function AttackTargetEffect({
+  effect,
+}: {
+  effect: CombatPresentationAttackTargetEffect
+}) {
+  const effectRef = useRef<Konva.Group>(null)
+  const symbolRef = useRef<Konva.Group>(null)
+  const lockRingRef = useRef<Konva.Circle>(null)
+  const palette = DND5E_CLASS_ICON_PALETTES[effect.classId] ??
+    DND5E_CLASS_ICON_PALETTES.monster
+  const accent = palette?.[0] ?? '#7f1d1d'
+  const highlight = palette?.[2] ?? '#fecaca'
+  const glow = palette?.[3] ?? '#ef4444'
+  const radius = Math.max(18, effect.radiusPx * 0.86)
+
+  useEffect(() => {
+    const root = effectRef.current
+    const symbol = symbolRef.current
+    const layer = root?.getLayer()
+    if (!root || !symbol || !layer) return
+    const duration = Math.max(1, effect.durationMs)
+    const initialElapsed = Math.max(0, Date.now() - effect.issuedAt)
+    const drawFrame = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      const enterRaw = Math.min(1, raw / 0.18)
+      const enter = 1 - Math.pow(1 - enterRaw, 3)
+      const fade = raw < 0.7 ? 1 : Math.max(0, (1 - raw) / 0.3)
+      const impactPulse = Math.sin(Math.min(1, raw / 0.34) * Math.PI)
+      root.position({ x: effect.x, y: effect.y })
+      root.opacity(Math.min(1, enterRaw * 1.6) * fade)
+
+      if (effect.attackKind === 'melee') {
+        const scale = 0.72 + enter * 0.28 + impactPulse * 0.1
+        root.scale({ x: scale, y: scale })
+        root.rotation(0)
+        symbol.position({ x: 0, y: 0 })
+      } else {
+        const scale = 1.58 - enter * 0.58 + Math.sin(elapsed * 0.024) * 0.025
+        root.scale({ x: scale, y: scale })
+        root.rotation(0)
+        symbol.position({ x: 0, y: 0 })
+        lockRingRef.current?.rotation((1 - enter) * 24 + raw * 18)
+      }
+      return raw
+    }
+
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    const animation = new Konva.Animation((frame) => {
+      const raw = drawFrame(initialElapsed + (frame?.time ?? 0))
+      if (raw >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [
+    effect.attackKind,
+    effect.durationMs,
+    effect.issuedAt,
+    effect.x,
+    effect.y,
+  ])
+
+  return (
+    <Group
+      ref={effectRef}
+      x={effect.x}
+      y={effect.y}
+      listening={false}
+    >
+      {effect.attackKind === 'melee' ? (
+        <Group ref={symbolRef}>
+          <Line
+            points={[
+              -radius * 0.46, radius * 0.62,
+              -radius * 0.3, radius * 0.28,
+              -radius * 0.36, radius * 0.13,
+              -radius * 0.1, -radius * 0.04,
+              -radius * 0.14, -radius * 0.19,
+              radius * 0.17, -radius * 0.42,
+              radius * 0.23, -radius * 0.68,
+              radius * 0.37, -radius * 0.8,
+              radius * 0.32, -radius * 0.48,
+              radius * 0.11, -radius * 0.27,
+              radius * 0.15, -radius * 0.13,
+              -radius * 0.1, radius * 0.04,
+              -radius * 0.06, radius * 0.18,
+              -radius * 0.3, radius * 0.36,
+              -radius * 0.28, radius * 0.62,
+              -radius * 0.4, radius * 0.79,
+            ]}
+            closed
+            fill="#991b1b"
+            stroke="#1f0507"
+            strokeWidth={Math.max(3.2, radius * 0.13)}
+            lineCap="round"
+            lineJoin="round"
+            shadowColor="#ef4444"
+            shadowBlur={radius * 0.42}
+            shadowOpacity={0.9}
+            perfectDrawEnabled={false}
+          />
+          <Line
+            points={[
+              -radius * 0.38, radius * 0.64,
+              -radius * 0.25, radius * 0.31,
+              -radius * 0.29, radius * 0.17,
+              -radius * 0.04, 0,
+              -radius * 0.08, -radius * 0.15,
+              radius * 0.21, -radius * 0.38,
+              radius * 0.3, -radius * 0.7,
+            ]}
+            stroke="#160305"
+            strokeWidth={Math.max(4.8, radius * 0.19)}
+            lineCap="round"
+            lineJoin="round"
+            perfectDrawEnabled={false}
+          />
+          <Line
+            points={[
+              -radius * 0.39, radius * 0.61,
+              -radius * 0.26, radius * 0.3,
+              -radius * 0.3, radius * 0.16,
+              -radius * 0.05, -radius * 0.01,
+              -radius * 0.09, -radius * 0.16,
+              radius * 0.2, -radius * 0.39,
+              radius * 0.29, -radius * 0.69,
+            ]}
+            stroke="#ef4444"
+            strokeWidth={Math.max(1.8, radius * 0.065)}
+            lineCap="round"
+            lineJoin="round"
+            opacity={0.9}
+            perfectDrawEnabled={false}
+          />
+          <Line
+            x={radius * 0.18}
+            y={radius * 0.16}
+            points={[
+              0, -radius * 0.11,
+              radius * 0.1, radius * 0.08,
+              radius * 0.03, radius * 0.25,
+              -radius * 0.08, radius * 0.09,
+            ]}
+            closed
+            fill="#dc2626"
+            stroke="#3f070b"
+            strokeWidth={Math.max(1.2, radius * 0.045)}
+            lineJoin="round"
+            shadowColor="#ef4444"
+            shadowBlur={7}
+            perfectDrawEnabled={false}
+          />
+          <Line
+            x={-radius * 0.16}
+            y={radius * 0.51}
+            points={[
+              0, -radius * 0.08,
+              radius * 0.08, radius * 0.07,
+              radius * 0.01, radius * 0.2,
+              -radius * 0.07, radius * 0.06,
+            ]}
+            closed
+            fill="#b91c1c"
+            stroke="#3f070b"
+            strokeWidth={Math.max(1.1, radius * 0.04)}
+            lineJoin="round"
+            perfectDrawEnabled={false}
+          />
+          <Circle
+            x={radius * 0.4}
+            y={radius * 0.38}
+            radius={Math.max(1.8, radius * 0.07)}
+            fill="#ef4444"
+            shadowColor="#ef4444"
+            shadowBlur={6}
+            perfectDrawEnabled={false}
+          />
+        </Group>
+      ) : (
+        <Group ref={symbolRef}>
+          <Circle
+            radius={radius * 0.96}
+            fill={accent}
+            opacity={0.11}
+            shadowColor={glow}
+            shadowBlur={radius * 0.75}
+            perfectDrawEnabled={false}
+          />
+          <Circle
+            ref={lockRingRef}
+            radius={radius * 0.72}
+            stroke={glow}
+            strokeWidth={Math.max(2.2, radius * 0.09)}
+            dash={[radius * 0.34, radius * 0.18]}
+            shadowColor={glow}
+            shadowBlur={13}
+            perfectDrawEnabled={false}
+          />
+          <Circle
+            radius={radius * 0.48}
+            stroke={highlight}
+            strokeWidth={Math.max(1.4, radius * 0.055)}
+            opacity={0.9}
+            perfectDrawEnabled={false}
+          />
+          {[0, 90, 180, 270].map((rotation) => (
+            <Line
+              key={rotation}
+              rotation={rotation}
+              points={[radius * 0.48, 0, radius * 0.91, 0]}
+              stroke={glow}
+              strokeWidth={Math.max(2.2, radius * 0.085)}
+              lineCap="round"
+              shadowColor={accent}
+              shadowBlur={9}
+              perfectDrawEnabled={false}
+            />
+          ))}
+          <Circle
+            radius={Math.max(2.8, radius * 0.1)}
+            fill={highlight}
+            stroke={accent}
+            strokeWidth={1.5}
+            shadowColor={glow}
+            shadowBlur={10}
+            perfectDrawEnabled={false}
+          />
+        </Group>
+      )}
     </Group>
   )
 }
@@ -5981,6 +6412,225 @@ function ThunderwaveMaterialEffect({
   )
 }
 
+interface BurningHandsSparkSpec {
+  start: number
+  speed: number
+  vertical: number
+  drift: number
+  radius: number
+  warm: boolean
+}
+
+interface BurningHandsSmokeSpec {
+  start: number
+  x: number
+  y: number
+  drift: number
+  radius: number
+}
+
+function BurningHandsSpriteEffect({
+  projectile,
+  image,
+}: {
+  projectile: MapProjectile
+  image: HTMLImageElement
+}) {
+  const effectRef = useRef<Konva.Group>(null)
+  const spriteRef = useRef<Konva.Image>(null)
+  const launchGlowRef = useRef<Konva.Circle>(null)
+  const frontGlowRef = useRef<Konva.Circle>(null)
+  const sparkRefs = useRef<Array<Konva.Circle | null>>([])
+  const smokeRefs = useRef<Array<Konva.Circle | null>>([])
+  const dx = projectile.to.x - projectile.from.x
+  const dy = projectile.to.y - projectile.from.y
+  const distance = Math.max(1, Math.hypot(dx, dy))
+  const width = distance * 1.14
+  const areaWidth = Math.max(28, projectile.areaWidthPx ?? 70)
+  const height = areaWidth * 1.04
+  const imageX = -distance * 0.055
+  const columns = 4
+  const rows = 4
+  const frameCount = columns * rows
+  const frameWidth = (image.naturalWidth || image.width) / columns
+  const frameHeight = (image.naturalHeight || image.height) / rows
+
+  const sparkSpecs = useMemo(() => {
+    return Array.from({ length: 20 }, (_, index): BurningHandsSparkSpec => {
+      const random = (field: string) => nextAreaRandom(
+        areaSeed(`${projectile.id}:burning-hands:sparks:${index}:${field}`),
+      )[1]
+      const start = 0.08 + random('start') * 0.34
+      const speed = 0.76 + random('speed') * 0.42
+      const vertical = (random('vertical') - 0.5) * height * 0.72
+      const drift = (random('drift') - 0.5) * height * 0.22
+      const radius = Math.max(1.1, height * (0.014 + random('radius') * 0.016))
+      return { start, speed, vertical, drift, radius, warm: index % 3 !== 0 }
+    })
+  }, [height, projectile.id])
+
+  const smokeSpecs = useMemo(() => {
+    return Array.from({ length: 5 }, (_, index): BurningHandsSmokeSpec => {
+      const random = (field: string) => nextAreaRandom(
+        areaSeed(`${projectile.id}:burning-hands:smoke:${index}:${field}`),
+      )[1]
+      const start = 0.48 + random('start') * 0.18
+      const x = width * (0.48 + random('x') * 0.48)
+      const y = (random('y') - 0.5) * height * 0.52
+      const drift = (random('drift') - 0.5) * height * 0.2
+      const radius = height * (0.055 + random('radius') * 0.045)
+      return { start, x, y, drift, radius }
+    })
+  }, [height, projectile.id, width])
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const sprite = spriteRef.current
+    const launchGlow = launchGlowRef.current
+    const frontGlow = frontGlowRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !sprite || !launchGlow || !frontGlow || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_150)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    effect.rotation(Math.atan2(dy, dx) * 180 / Math.PI)
+
+    const drawFrame = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      const spriteRaw = Math.min(1, raw / 0.82)
+      const frameIndex = Math.min(frameCount - 1, Math.floor(spriteRaw * frameCount))
+      const column = frameIndex % columns
+      const row = Math.floor(frameIndex / columns)
+      const fade = raw < 0.78 ? 1 : Math.max(0, (1 - raw) / 0.22)
+      const ignition = Math.min(1, raw / 0.055)
+
+      sprite.crop({
+        x: column * frameWidth,
+        y: row * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      sprite.opacity(ignition * fade)
+      sprite.scaleY(0.985 + Math.sin(elapsed * 0.022) * 0.025)
+
+      launchGlow.radius(height * (0.1 + Math.min(1, raw * 7) * 0.16))
+      launchGlow.opacity(Math.sin(Math.min(1, raw * 6) * Math.PI) * 0.8)
+      const frontRaw = Math.max(0, Math.min(1, (raw - 0.24) / 0.42))
+      frontGlow.position({ x: width * (0.64 + frontRaw * 0.27), y: 0 })
+      frontGlow.scale({ x: 1.5 + frontRaw * 1.2, y: 0.7 + frontRaw * 0.5 })
+      frontGlow.opacity(Math.sin(frontRaw * Math.PI) * 0.3 * fade)
+
+      sparkRefs.current.forEach((spark, index) => {
+        if (!spark) return
+        const spec = sparkSpecs[index]
+        const local = Math.max(0, Math.min(1, (raw - spec.start) / (0.58 - spec.start * 0.25)))
+        const eased = 1 - Math.pow(1 - local, 1.7)
+        spark.position({
+          x: imageX + width * Math.min(1.04, eased * spec.speed),
+          y: spec.vertical * (0.15 + eased * 0.85) + spec.drift * Math.sin(local * Math.PI),
+        })
+        spark.radius(spec.radius * (1 - local * 0.48))
+        spark.opacity(Math.sin(local * Math.PI) * 0.92 * fade)
+      })
+
+      smokeRefs.current.forEach((smoke, index) => {
+        if (!smoke) return
+        const spec = smokeSpecs[index]
+        const local = Math.max(0, Math.min(1, (raw - spec.start) / (1 - spec.start)))
+        smoke.position({
+          x: imageX + spec.x + local * height * 0.14,
+          y: spec.y + spec.drift * local - height * local * 0.08,
+        })
+        smoke.radius(spec.radius * (0.7 + local * 0.8))
+        smoke.opacity(Math.sin(local * Math.PI) * 0.14)
+      })
+
+      effect.opacity(raw < 0.98 ? 1 : Math.max(0, (1 - raw) / 0.02))
+      return raw
+    }
+
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    const animation = new Konva.Animation((frame) => {
+      if (drawFrame(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [
+    columns,
+    dx,
+    dy,
+    frameCount,
+    frameHeight,
+    frameWidth,
+    height,
+    imageX,
+    projectile.durationMs,
+    projectile.issuedAt,
+    smokeSpecs,
+    sparkSpecs,
+    width,
+  ])
+
+  return (
+    <Group ref={effectRef} x={projectile.from.x} y={projectile.from.y} listening={false}>
+      <Circle
+        ref={launchGlowRef}
+        x={0}
+        y={0}
+        fill="#fff7c2"
+        shadowColor="#fb923c"
+        shadowBlur={24}
+        perfectDrawEnabled={false}
+      />
+      <KonvaImage
+        ref={spriteRef}
+        image={image}
+        x={imageX}
+        y={-height / 2}
+        width={width}
+        height={height}
+        shadowColor="#f97316"
+        shadowBlur={24}
+        perfectDrawEnabled={false}
+      />
+      <Circle
+        ref={frontGlowRef}
+        radius={height * 0.12}
+        fill="#fff7c2"
+        shadowColor="#fb923c"
+        shadowBlur={20}
+        perfectDrawEnabled={false}
+      />
+      {sparkSpecs.map((spec, index) => (
+        <Circle
+          key={`burning-hands-spark:${index}`}
+          ref={(node) => { sparkRefs.current[index] = node }}
+          radius={spec.radius}
+          fill={spec.warm ? '#fde68a' : '#fb923c'}
+          shadowColor={spec.warm ? '#facc15' : '#ef4444'}
+          shadowBlur={8}
+          opacity={0}
+          perfectDrawEnabled={false}
+        />
+      ))}
+      {smokeSpecs.map((spec, index) => (
+        <Circle
+          key={`burning-hands-smoke:${index}`}
+          ref={(node) => { smokeRefs.current[index] = node }}
+          radius={spec.radius}
+          fill="#4b2b25"
+          shadowColor="#7c2d12"
+          shadowBlur={16}
+          opacity={0}
+          perfectDrawEnabled={false}
+        />
+      ))}
+    </Group>
+  )
+}
+
 function MaterialAreaSpellEffect({
   projectile,
 }: {
@@ -5988,7 +6638,7 @@ function MaterialAreaSpellEffect({
 }) {
   const isShatter = projectile.kind === 'shatter'
   const asset = projectile.kind === 'burning-hands'
-    ? '/assets/vfx/burning-hands-fluid.png'
+    ? '/assets/vfx/burning-hands-sprite-v2.png'
     : projectile.kind === 'thunderwave'
       ? '/assets/vfx/thunderwave-fluid.webp'
       : isShatter
@@ -5997,6 +6647,9 @@ function MaterialAreaSpellEffect({
   const loadedImage = useTokenBadgeImage(asset)
   const image = loadedImage
   if (!image) return null
+  if (projectile.kind === 'burning-hands') {
+    return <BurningHandsSpriteEffect projectile={projectile} image={image} />
+  }
   if (isShatter) {
     const radius = Math.max(30, projectile.radiusPx ?? 70)
     return (
@@ -6023,9 +6676,6 @@ function MaterialAreaSpellEffect({
       areaWidth={areaWidth}
     />
   }
-  const shadowColor = projectile.kind === 'burning-hands'
-    ? '#f97316'
-    : '#22d3ee'
   return (
     <DirectionalTextureEffect
       projectile={projectile}
@@ -6035,7 +6685,7 @@ function MaterialAreaSpellEffect({
       maxHeight={areaWidth * 1.02}
       revealEnd={projectile.kind === 'lightning-bolt' ? 0.32 : 0.46}
       fadeStart={0.72}
-      shadowColor={shadowColor}
+      shadowColor="#22d3ee"
     />
   )
 }
@@ -7967,9 +8617,11 @@ function TokenNode({
   showName = true,
   onHoverChange,
   onSelect,
+  onDragStart,
   onDragMove,
   onDragEnd,
   onDragCancel,
+  registerPositionNode,
   instantPosition = false,
 }: {
   renderMode?: 'full' | 'body' | 'overlay' | 'label' | 'vitals'
@@ -7993,10 +8645,17 @@ function TokenNode({
   showName?: boolean
   onHoverChange?: (hovered: boolean) => void
   onSelect: () => void
+  onDragStart?: (x: number, y: number) => void
   onDragMove?: (x: number, y: number) => void
   onDragEnd: (x: number, y: number) => void
   /** Cancel sub-threshold drags: clear preview without movement/broadcast. */
   onDragCancel?: () => void
+  registerPositionNode?: (
+    tokenId: string,
+    node: Konva.Group,
+    cancelPositionAnimation: () => void,
+    setPositionLocked: (locked: boolean) => void,
+  ) => void | (() => void)
   instantPosition?: boolean
 }) {
   const groupRef = useRef<Konva.Group>(null)
@@ -8010,12 +8669,33 @@ function TokenNode({
   const movementAnimation = token.movementAnimation
   const latestPositionRef = useRef({ x: token.x, y: token.y })
   const draggingRef = useRef(false)
+  const externalPositionLockedRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
   const prevGridSizeRef = useRef(gridSize)
   // 拖拽起点（用于判断是否超过移动阈值）
   const dragStartRef = useRef<{ x: number; y: number } | null>(null)
   // 当前在途的位置补间，启动新补间前先销毁它
   const reconcileTweenRef = useRef<Konva.Tween | null>(null)
+  const movementFrameRef = useRef(0)
+  const cancelPositionAnimation = useCallback(() => {
+    reconcileTweenRef.current?.destroy()
+    reconcileTweenRef.current = null
+    if (movementFrameRef.current) {
+      window.cancelAnimationFrame(movementFrameRef.current)
+      movementFrameRef.current = 0
+    }
+  }, [])
+  const setPositionLocked = useCallback((locked: boolean) => {
+    externalPositionLockedRef.current = locked
+  }, [])
+
+  useLayoutEffect(() => {
+    const node = groupRef.current
+    if (!node || !registerPositionNode) return
+    return registerPositionNode(token.id, node, cancelPositionAnimation, setPositionLocked)
+  }, [cancelPositionAnimation, registerPositionNode, setPositionLocked, token.id])
+
+  useEffect(() => () => cancelPositionAnimation(), [cancelPositionAnimation])
   const radius = tokenDisplayRadius(gridSize, token.size, builtinGrid)
   const labelSize = Math.max(9, radius * 0.42)
   const labelBarH = Math.max(14, radius * 0.55)
@@ -8056,6 +8736,7 @@ function TokenNode({
   }, [token.x, token.y])
 
   useEffect(() => {
+    if (renderMode !== 'full' && renderMode !== 'body') return
     let disposed = false
     let objectUrl: string | undefined
 
@@ -8084,7 +8765,7 @@ function TokenNode({
       disposed = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [token.tokenPortrait, token.portraitImageId, tokenImageKey])
+  }, [renderMode, token.tokenPortrait, token.portraitImageId, tokenImageKey])
 
   const tokenImageCrop = useMemo(() => {
     if (!tokenImage) return undefined
@@ -8117,11 +8798,13 @@ function TokenNode({
 
     if (prevGridSizeRef.current !== gridSize) {
       prevGridSizeRef.current = gridSize
+      cancelPositionAnimation()
       node.position({ x: token.x, y: token.y })
       return
     }
 
-    if (draggingRef.current || instantPosition) {
+    if (draggingRef.current || externalPositionLockedRef.current || instantPosition) {
+      cancelPositionAnimation()
       node.position({ x: token.x, y: token.y })
       return
     }
@@ -8138,14 +8821,13 @@ function TokenNode({
     const dist = Math.hypot(node.x() - token.x, node.y() - token.y)
     if (dist < 1) {
       // Stop any in-flight tween before repositioning immediately.
-      reconcileTweenRef.current?.destroy()
-      reconcileTweenRef.current = null
+      cancelPositionAnimation()
       node.position({ x: token.x, y: token.y })
       return
     }
 
     // Cancel and destroy previous tween before starting a new one.
-    reconcileTweenRef.current?.destroy()
+    cancelPositionAnimation()
     const tween = new Konva.Tween({
       node,
       x: token.x,
@@ -8158,32 +8840,47 @@ function TokenNode({
     })
     reconcileTweenRef.current = tween
     tween.play()
-  }, [token.x, token.y, gridSize, instantPosition, movementAnimation])
+  }, [cancelPositionAnimation, token.x, token.y, gridSize, instantPosition, movementAnimation])
 
   useEffect(() => {
     const node = groupRef.current
-    if (!node || !movementAnimation || instantPosition) return
+    if (
+      !node ||
+      !movementAnimation ||
+      instantPosition ||
+      externalPositionLockedRef.current
+    ) return
 
-    reconcileTweenRef.current?.destroy()
-    reconcileTweenRef.current = null
-    let frame = 0
+    cancelPositionAnimation()
+    let disposed = false
     const tick = () => {
+      if (disposed || draggingRef.current || externalPositionLockedRef.current) {
+        movementFrameRef.current = 0
+        return
+      }
       const animated = tokenMovementAnimationPosition(
         movementAnimation,
         Date.now() - movementAnimation.issuedAt,
       )
       if (!animated) {
+        movementFrameRef.current = 0
         node.position({ x: token.x, y: token.y })
         node.getLayer()?.batchDraw()
         return
       }
       node.position(animated)
       node.getLayer()?.batchDraw()
-      frame = window.requestAnimationFrame(tick)
+      movementFrameRef.current = window.requestAnimationFrame(tick)
     }
     tick()
-    return () => window.cancelAnimationFrame(frame)
-  }, [instantPosition, movementAnimation, token.x, token.y])
+    return () => {
+      disposed = true
+      if (movementFrameRef.current) {
+        window.cancelAnimationFrame(movementFrameRef.current)
+        movementFrameRef.current = 0
+      }
+    }
+  }, [cancelPositionAnimation, instantPosition, movementAnimation, token.x, token.y])
 
   const nameLayer = showName ? (
     <Group y={radius + 4}>
@@ -8371,8 +9068,10 @@ function TokenNode({
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
       onDragStart={(e) => {
+        cancelPositionAnimation()
         draggingRef.current = true
         dragStartRef.current = { x: e.target.x(), y: e.target.y() }
+        onDragStart?.(e.target.x(), e.target.y())
       }}
       onDragMove={(e) => {
         onDragMove?.(e.target.x(), e.target.y())

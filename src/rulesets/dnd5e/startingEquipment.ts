@@ -2,6 +2,7 @@ import type { CharacterEquipment, EquipmentItem, EquipmentSlot } from '../../typ
 import { DND5E_INVENTORY_SCHEMA_VERSION, type Dnd5eInventory, type Dnd5eInventoryEntry } from '../../types/inventory'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { dnd5eInventoryItemTemplate } from './items'
+import { declarativeClassStartingEquipmentV1 } from './declarativeClass'
 
 export interface Dnd5eStartingEquipmentGrant {
   templateId: string
@@ -331,7 +332,10 @@ function backgroundPlan(background: string): Pick<Dnd5eStartingEquipmentPlan, 'f
 }
 
 export function dnd5eStartingEquipmentPlan(charClass: string, background: string): Dnd5eStartingEquipmentPlan {
-  const fromClass = classPlan(charClass)
+  const declared = declarativeClassStartingEquipmentV1(charClass)
+  const fromClass = declared
+    ? { fixedGrants: [...(declared.fixedGrants ?? [])], groups: [...(declared.groups ?? [])] }
+    : classPlan(charClass)
   const fromBackground = backgroundPlan(background)
   return {
     charClass,

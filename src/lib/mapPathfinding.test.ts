@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import { createEmptyMapGeometry, type MapGeometryState } from './mapGeometry'
-import { findMapGeometryPath } from './mapPathfinding'
+import { createMapGeometryPathTree, findMapGeometryPath } from './mapPathfinding'
 
 const token = (patch: Partial<Token> = {}): Token => ({
   id: 'hero', label: '英雄', x: 25, y: 25, color: '#fff', emoji: 'H', size: 1, type: 'player', ...patch,
@@ -237,5 +237,91 @@ describe('map geometry pathfinding', () => {
     expect(path).toBeDefined()
     expect(path!.cells.map((cell) => cell.col)).toEqual([4, 4, 4, 4])
     expect(path!.distanceFeet).toBe(15)
+  })
+
+  it('reuses one exact weighted tree for many destinations', () => {
+    const hero = token({ x: 25, y: 75 })
+    const map = battleMap({ width: 300, height: 250, tokens: [hero] })
+    const state = geometry()
+    state.walls.push({
+      id: 'divider', kind: 'wall', label: 'Divider',
+      points: [{ x: 125, y: 0 }, { x: 125, y: 150 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    state.obstacles.push({
+      id: 'mud', kind: 'obstacle', label: 'Mud',
+      points: [
+        { x: 50, y: 100 }, { x: 200, y: 100 },
+        { x: 200, y: 200 }, { x: 50, y: 200 },
+      ],
+      blocksVision: false, blocksMovement: false,
+      blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0,
+      terrainCostMultiplier: 2, traversal: 'ground', createdAt: 1,
+    })
+    const tree = createMapGeometryPathTree({
+      map,
+      geometry: state,
+      token: hero,
+    })
+
+    for (let row = 0; row < 5; row += 1) {
+      for (let col = 0; col < 6; col += 1) {
+        const destination = { x: col * 50 + 25, y: row * 50 + 25 }
+        const reference = findMapGeometryPath({
+          map,
+          geometry: state,
+          token: hero,
+          to: destination,
+        })
+        const reused = tree.pathTo(destination)
+        expect(reused?.movementCostFeet).toBe(reference?.movementCostFeet)
+        expect(reused?.cells.at(-1)).toEqual(reference?.cells.at(-1))
+      }
+    }
+    expect(tree.visitedCells).toBeLessThanOrEqual(30)
+    expect(tree.truncated).toBe(false)
+  })
+
+  it('matches a target-directed path for a same-cell vertical flight', () => {
+    const flyer = token({ elevationFeet: 0 })
+    const map = battleMap({ tokens: [flyer] })
+    const state = geometry()
+    const input = {
+      map,
+      geometry: state,
+      token: flyer,
+      canFly: true,
+      targetElevationFeet: 20,
+    }
+    const reference = findMapGeometryPath({
+      ...input,
+      to: { x: flyer.x, y: flyer.y },
+    })
+    const reused = createMapGeometryPathTree(input)
+      .pathTo({ x: flyer.x, y: flyer.y })
+
+    expect(reused).toEqual(reference)
+    expect(reused?.elevationsFeet).toEqual([20])
+  })
+
+  it('reports when the reusable search reaches its visited-cell limit', () => {
+    const hero = token({ x: 505, y: 505 })
+    const map = battleMap({
+      width: 1_000,
+      height: 1_000,
+      gridSize: 10,
+      tokens: [hero],
+    })
+    const tree = createMapGeometryPathTree({
+      map,
+      geometry: geometry(),
+      token: hero,
+      maximumVisited: 100,
+    })
+
+    expect(tree.visitedCells).toBe(100)
+    expect(tree.truncated).toBe(true)
   })
 })

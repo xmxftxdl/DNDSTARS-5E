@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowRight, GraduationCap, LockKeyhole, X } from 'lucide-react'
-import { DND5E_SRD_CLASS_DEFINITIONS, type Dnd5eClassId } from '../../rulesets/dnd5e/classes'
+import { availableDnd5eClassDefinitions, type Dnd5eClassId } from '../../rulesets/dnd5e/classes'
 import {
   dnd5eCharacterClassLevel,
   dnd5eTotalCharacterLevel,
@@ -33,7 +33,8 @@ export default function CharacterCreationAdvancementFlow({
     state.characters.find((candidate) => candidate.id === characterId),
   )
   const update = useCharacterStore((state) => state.update)
-  const primaryClassId = DND5E_SRD_CLASS_DEFINITIONS.find(
+  const classDefinitions = availableDnd5eClassDefinitions()
+  const primaryClassId = classDefinitions.find(
     (definition) => definition.name === character?.charClass,
   )?.id
   const [selectedClassId, setSelectedClassId] = useState<Dnd5eClassId>(primaryClassId ?? 'fighter')
@@ -98,7 +99,7 @@ export default function CharacterCreationAdvancementFlow({
             选择本级提升的职业。继续原职业不需要兼职检定；选择新职业时，Host 会重新检查现有职业和目标职业的属性前提。
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {DND5E_SRD_CLASS_DEFINITIONS.map((definition) => {
+            {classDefinitions.map((definition) => {
               const candidateValidation = validateDnd5eMulticlassLevelGain(character, definition.id)
               const classLevel = dnd5eCharacterClassLevel(character, definition.id)
               const selected = selectedClassId === definition.id

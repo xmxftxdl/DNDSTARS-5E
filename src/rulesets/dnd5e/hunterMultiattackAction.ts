@@ -10,6 +10,8 @@ import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
 import { dnd5eAttackModeWithProtection } from './equipmentAttackAction'
 import { resolveDnd5eRollMode } from './rollMode'
+import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
+import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eMonkMartialArtsEligible,
   dnd5eWeaponAttackProfile,
@@ -181,6 +183,8 @@ export function prepareDnd5eHunterMultiattack(input: {
         !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
         dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) ||
         (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target)) ||
+        dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, target) ||
+        dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
         (targetProne && targetDistance <= 5))
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
       dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, token.id) || actorCombatant.exhaustionLevel >= 3 ||
