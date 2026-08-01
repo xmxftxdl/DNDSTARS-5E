@@ -102,7 +102,15 @@ if grep -q 'filter=lfs' .gitattributes; then
   fi
 fi
 
-node scripts/generate-art-asset-manifest.mjs --check
+if command -v node >/dev/null 2>&1; then
+  node scripts/generate-art-asset-manifest.mjs --check
+else
+  docker run --rm \
+    --volume "$REPO_ROOT:/app:ro" \
+    --workdir /app \
+    node:22-alpine \
+    node scripts/generate-art-asset-manifest.mjs --check
+fi
 
 build_id="$(git rev-parse --short=12 HEAD)"
 STARS_BUILD_ID="$build_id" docker compose --env-file "$ENV_FILE" build dndstars
