@@ -6,6 +6,7 @@ import {
 import {
   mapGeometryLineOfEffectBlocked,
   mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
 import type {
@@ -22,11 +23,15 @@ import {
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
-  resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterAreaActionResolutionV1,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import {
   createDnd5eMapCombatSnapshot,
   planDnd5eMapResultApplication,
@@ -37,6 +42,7 @@ import {
   dnd5eRacialRulesForCharacter,
   type Dnd5eDragonbornAncestry,
 } from './racialAutomation'
+import { dnd5eInstantAoeAffectsTokenVertically } from './verticalCombatGeometry'
 
 export type Dnd5eRacialActionRejectReason =
   | 'invalid-actor'
@@ -170,9 +176,21 @@ export function prepareDnd5eDragonbornBreathAction(input: {
     targetCell.row >= rows ||
     !canPlaceAoe(area, casterCell, targetCell)
   ) return { ok: false, reason: 'invalid-target' }
+  if (
+    action.targetElevationFeet != null &&
+    (!Number.isFinite(action.targetElevationFeet) ||
+      action.targetElevationFeet < -1_000 ||
+      action.targetElevationFeet > 10_000)
+  ) return { ok: false, reason: 'invalid-target' }
 
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const sourceElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
+  const effectAim = {
+    x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
+    y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
+  }
+  const effectAimElevationFeet = action.targetElevationFeet ??
+    mapGeometryTerrainElevationAtPoint(geometry, effectAim)
   const orientFrom = aoeOrientFromCell(area, casterCell, targetCell)
   const authoritativeTargets = tokensInCells(
     input.map,
@@ -181,6 +199,18 @@ export function prepareDnd5eDragonbornBreathAction(input: {
   ).filter((candidate) =>
     candidate.id !== actorToken.id &&
     isPresentCreature(candidate, input.characters) &&
+    dnd5eInstantAoeAffectsTokenVertically({
+      spellId: 'racial:dragonborn-breath',
+      area,
+      map: input.map,
+      geometry,
+      sourceToken: actorToken,
+      targetToken: candidate,
+      effectOrigin: actorToken,
+      effectOriginElevationFeet: sourceElevationFeet,
+      effectAim,
+      effectAimElevationFeet,
+    }) &&
     !mapGeometryLineOfEffectBlocked({
       geometry,
       from: actorToken,
@@ -261,9 +291,14 @@ export function resolvePreparedDnd5eDragonbornBreathAction(input: {
     Dnd5eMonsterAreaActionResolutionV1,
     'schemaVersion' | 'targetIds' | 'variantId' | 'forcedMovements'
   >
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const { prepared } = input
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'dragonborn-breath',
     actorId: prepared.actorToken.id,
     resolution: {
@@ -271,10 +306,11 @@ export function resolvePreparedDnd5eDragonbornBreathAction(input: {
       schemaVersion: 1,
       targetIds: prepared.targetTokens.map((target) => target.id),
     },
-  })
-  if (!result.ok) return { result }
+  }, input.airborneFallDamageRollsByCombatantId)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

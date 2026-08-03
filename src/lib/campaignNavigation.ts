@@ -10,6 +10,16 @@ export function requestedRoomLobbyMode(search: string): RoomLobbyMode | null {
   return mode === 'create' || mode === 'join' ? mode : null
 }
 
+export function isAccountCampaignId(value: string | null | undefined): value is string {
+  return /^[A-HJ-NP-Z2-9]{12}$/.test(String(value ?? '').trim().toUpperCase())
+}
+
+export function nextCampaignRoomPath(campaignId: string): string | null {
+  const normalized = campaignId.trim().toUpperCase()
+  if (!isAccountCampaignId(normalized)) return null
+  return `/app/rooms?mode=create&campaign=${encodeURIComponent(normalized)}`
+}
+
 /**
  * A newly allocated room must not bootstrap itself from the previous room's
  * persisted Zustand snapshots. Account identity and recovery information are

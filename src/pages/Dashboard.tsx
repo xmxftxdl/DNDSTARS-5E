@@ -41,11 +41,11 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
             type="button"
             onClick={onCreateCampaign}
             disabled={!onCreateCampaign || creatingCampaign}
-            aria-label="新建战役"
+            aria-label="建立下一场房间"
             className="glow-arcane flex items-center gap-2 rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600 px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:scale-[1.02] disabled:cursor-wait disabled:opacity-60 disabled:hover:scale-100"
           >
             <Dices className="h-4 w-4" />
-            {creatingCampaign ? '正在退出当前战役…' : '新建战役'}
+            {creatingCampaign ? '正在结束当前房间…' : '建立下一场房间'}
           </button>
         }
       />

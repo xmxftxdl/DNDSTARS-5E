@@ -7,10 +7,12 @@ import {
   dnd5eAbilityCheckRollMode,
   dnd5eBestActiveEffectEscapeOption,
   dnd5eBestGrappleDefense,
+  previewDnd5eUnsupportedAirborneFalls,
   resolveDnd5eHeadlessAction,
   type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eUnsupportedAirborneFallPreview,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eAttacksPerAttackAction } from './classes'
@@ -298,7 +300,12 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   targetHalflingLuckyD20Second?: number
   pushToElevationFeet?: number
   fallingDamageRolls?: readonly number[]
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+} {
   const { prepared, actorD20 = 0, actorD20Second, targetD20 = 0, targetD20Second } = input
   const payload = prepared.payload
   let action: Dnd5eAction
@@ -387,10 +394,19 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
         (payload.kind === 'other-bonus-action' ? '玩家声明一个其他附赠动作。' : '玩家声明一个其他动作。'),
     }; break
   }
+  action = {
+    ...action,
+    airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+  }
+  const fallPreview = input.airborneFallDamageRollsByCombatantId == null
+    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
+    : undefined
+  const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
   const result = resolveDnd5eHeadlessAction(prepared.state, action)
-  if (!result.ok) return { result }
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

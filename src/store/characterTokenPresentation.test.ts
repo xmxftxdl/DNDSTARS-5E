@@ -69,12 +69,12 @@ describe('character token presentation', () => {
     expect(original.darkvisionRangeFeet).toBe(30)
   })
 
-  it('projects racial Darkvision and Devil’s Sight into the same client profile', () => {
+  it('projects resolved character Darkvision and Devil’s Sight into the same client profile', () => {
     const projected = projectCharacterTokenPresentations([token()], [{
       id: 'character-1',
       name: '契术师',
       avatar: 'W',
-      race: '精灵',
+      darkvisionRangeFeet: 60,
       dnd5eClassChoices: {
         classes: {
           warlock: {

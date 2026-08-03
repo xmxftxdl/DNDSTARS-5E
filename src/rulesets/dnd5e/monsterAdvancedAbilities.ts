@@ -33,34 +33,32 @@ export function dnd5eMonsterHasStructuredShapechange(statBlockId: string): boole
   return STRUCTURED_SHAPECHANGE_FORMS.some((forms) => forms.includes(statBlockId))
 }
 
-export interface Dnd5eLegendaryWingAttackRule {
-  rangeFeet: number
-  saveDc: number
-  damage: { count: number; sides: number; bonus: number }
-}
-
-/** Parses only the fixed SRD 5.1 dragon Wing Attack wording. */
-export function parseDnd5eLegendaryWingAttack(
-  actionId: string,
-  description: string,
-): Dnd5eLegendaryWingAttackRule | undefined {
-  if (actionId !== 'wing-attack-costs-2-actions') return undefined
-  const range = /within\s+(\d+)\s*ft\./i.exec(description) ?? /(\d+)\s*尺内/.exec(description)
-  const save = /DC\s+(\d+)\s+Dexterity saving throw/i.exec(description) ?? /DC\s*(\d+).*敏捷豁免/.exec(description)
-  const damage = /take\s+\d+\s+\((\d+)d(\d+)\s*\+\s*(\d+)\)\s+bludgeoning damage/i.exec(description) ??
-    /\((\d+)d(\d+)\s*\+\s*(\d+)\).*钝击伤害/.exec(description)
-  if (!range || !save || !damage) return undefined
-  return {
-    rangeFeet: Number(range[1]),
-    saveDc: Number(save[1]),
-    damage: { count: Number(damage[1]), sides: Number(damage[2]), bonus: Number(damage[3]) },
-  }
-}
-
 export interface Dnd5eMonsterCoreSpellCompatibility {
   automation: 'full' | 'manual'
   reason?: string
 }
+
+const MONSTER_CORE_ACTIVE_EFFECT_SPELL_IDS = new Set([
+  'barkskin',
+  'blur',
+  'fly',
+  'greater-invisibility',
+  'invisibility',
+  'longstrider',
+  'mage-armor',
+  'protection-from-poison',
+])
+
+const MONSTER_CORE_CONTROL_SPELL_IDS = new Set([
+  'banishment',
+  'hold-person',
+])
+
+const MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS = new Set([
+  'blade-barrier',
+  'entangle',
+  'insect-plague',
+])
 
 /**
  * The monster spell path intentionally starts with effects whose target,
@@ -70,6 +68,20 @@ export interface Dnd5eMonsterCoreSpellCompatibility {
 export function dnd5eMonsterCoreSpellCompatibility(
   spell: Dnd5eSrdSpellDefinition,
 ): Dnd5eMonsterCoreSpellCompatibility {
+  const supportedActiveEffect = spell.effect === 'active-effect' &&
+    spell.appliedEffect === spell.id &&
+    MONSTER_CORE_ACTIVE_EFFECT_SPELL_IDS.has(spell.id)
+  if (spell.effect === 'persistent-area') {
+    if (MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS.has(spell.id)) {
+      return { automation: 'full' }
+    }
+    return {
+      automation: 'manual',
+      reason: spell.id === 'cloudkill'
+        ? '毒雾的自动移动、下沉与强风驱散尚未进入共享地图事务'
+        : '该持续区域尚未进入怪物核心法术事务白名单',
+    }
+  }
   if (['blight', 'disintegrate', 'finger-of-death'].includes(spell.id)) {
     return {
       automation: 'manual',
@@ -81,15 +93,21 @@ export function dnd5eMonsterCoreSpellCompatibility(
     }
   }
   if (
-    (spell.concentration && spell.id !== 'magic-weapon') ||
+    (spell.concentration && spell.id !== 'magic-weapon' && !supportedActiveEffect &&
+      !MONSTER_CORE_CONTROL_SPELL_IDS.has(spell.id)) ||
     (spell.appliedEffect &&
       spell.appliedEffect !== 'darkvision' &&
       spell.appliedEffect !== 'see-invisibility' &&
       spell.appliedEffect !== 'warding-bond' &&
       (spell.appliedEffect !== 'sanctuary' || spell.id !== 'sanctuary') &&
-      spell.appliedEffect !== 'magic-weapon') ||
+      spell.appliedEffect !== 'magic-weapon' &&
+      !supportedActiveEffect) ||
     spell.onHitEffect ||
-    (spell.onFailedSaveEffect && spell.onFailedSaveEffect !== 'charm-person') ||
+    (spell.onFailedSaveEffect &&
+      spell.onFailedSaveEffect !== 'charm-person' &&
+      !(spell.id === 'hold-person' && spell.onFailedSaveEffect === 'hold-person') &&
+      !(spell.id === 'banishment' && spell.onFailedSaveEffect === 'banishment') &&
+      !(spell.id === 'thunderwave' && spell.onFailedSaveEffect === 'thunderwave-push')) ||
     spell.sustainedAttack ||
     spell.delayedDamage ||
     spell.spellAttackMissDamage
@@ -105,7 +123,10 @@ export function dnd5eMonsterCoreSpellCompatibility(
     'automatic-damage',
     'healing',
     'stabilize',
+    'remove-condition',
+    'sleep-hit-point-pool',
     'active-effect',
+    'dispel-magic',
     'teleport',
     'power-word-kill',
     'power-word-stun',

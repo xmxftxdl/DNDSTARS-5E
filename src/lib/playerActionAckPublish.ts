@@ -60,6 +60,14 @@ export async function publishPlayerActionAckWithSnapshots({
     undoGroupId: `player-action:${ack.actionId}`,
     undoLabel: '结算玩家行动',
   }
+  const publishAckBestEffort = async (eventAck: SharedPlayerActionAckState): Promise<void> => {
+    try {
+      await publishAck(eventAck)
+    } catch {
+      // The persisted ACK and combat-command receipt are authoritative. Live
+      // delivery may wake polling sooner, but can never invalidate a commit.
+    }
+  }
   const authoritativeWrites: SharedResourceTransactionWrite[] =
     ack.status === 'accepted' && snapshots
       ? [
@@ -93,7 +101,7 @@ export async function publishPlayerActionAckWithSnapshots({
       transactionId: `player-action:${ack.actionId}`,
       roomJournalMutations,
     })
-    await publishAck(committed.revisions
+    await publishAckBestEffort(committed.revisions
       ? { ...ack, authorityRevisions: committed.revisions }
       : ack)
     return
@@ -103,5 +111,5 @@ export async function publishPlayerActionAckWithSnapshots({
     saveSharedResource(write.name, write.data, undoOptions)))
   resources.forEach((result, index) => requireSaved(writes[index].name, result))
   requireSaved('player-action-ack', await saveSharedResource('player-action-ack', ack))
-  await publishAck(ack)
+  await publishAckBestEffort(ack)
 }

@@ -258,9 +258,9 @@ export interface Dnd5eActiveEffectModifiers {
   savingThrowBonusByAbility?: Partial<Record<AbilityKey, number>>
   /** A player-controlled die that is offered only when it can change a failed d20 result. */
   optionalBonusDie?: Dnd5eActiveEffectOptionalBonusDie
-  /** Goading-style penalty: attacks against creatures other than this effect's source have disadvantage. */
+  /** Attacks against creatures other than this effect's source have disadvantage. */
   attackDisadvantageAgainstOthersThanSource?: boolean
-  /** Distracting-style opening: the next attack by a creature other than this effect's source has advantage. */
+  /** The next attack by a creature other than this effect's source has advantage. */
   nextAttackAdvantageByOtherThanSource?: boolean
   resistanceToAllDamage?: boolean
   weaponDamageD4?: 'add' | 'subtract'

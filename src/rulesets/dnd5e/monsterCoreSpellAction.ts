@@ -18,12 +18,14 @@ import {
   dnd5eDirectedCombatantPairKey,
   dnd5eHitIsAutomaticCritical,
   dnd5eMonsterSpellAttackMode,
+  previewDnd5eUnsupportedAirborneFalls,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCounterspellReaction,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterCoreSpellResolutionV1,
   type Dnd5eSpellTeleportDestination,
+  type Dnd5eUnsupportedAirborneFallPreview,
 } from './headlessCombatEngine'
 import {
   createDnd5eMapCombatSnapshot,
@@ -37,6 +39,7 @@ import {
   type Dnd5eMonsterStatBlock,
 } from './monsters'
 import {
+  dnd5eCharmPersonEligibleCreatureType,
   dnd5eSpellAttackDelivery,
   dnd5eSpellDiceCount,
   dnd5eSpellMaximumTargets,
@@ -51,6 +54,20 @@ import {
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
+import {
+  dnd5eInstantAoeAffectsTokenVertically,
+  dnd5eMapTokenDistanceFeet,
+  dnd5eTokenToPointDistanceFeet,
+} from './verticalCombatGeometry'
+import {
+  createDnd5eCoreSpellArea,
+  getDnd5eCoreSpellAreaDeclaration,
+} from './coreSpellAreas'
+import {
+  dnd5eForcedMovementFall,
+  dnd5eForcedPushDestination,
+} from './spellAction'
+import { dnd5eFallingDamageDice } from './traversal'
 
 type ListedMonsterSpell = NonNullable<Dnd5eMonsterSpellcasting['spells']>[number]
 
@@ -82,7 +99,10 @@ export interface PreparedDnd5eMonsterCoreSpell {
   spellAttackMode?: 'normal' | 'advantage' | 'disadvantage'
   spellAttackAutomaticCritical?: boolean
   areaTargetCell?: GridCell
+  areaCells?: readonly GridCell[]
+  areaBaseElevationFeet?: number
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  areaTargetElevationFeet?: number
   teleportDestination?: Dnd5eSpellTeleportDestination
 }
 
@@ -149,6 +169,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   targetTokenIds: readonly string[]
   areaTargetCell?: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  areaTargetElevationFeet?: number
   spellId: string
   slotLevel: number
   turnEconomy?: Dnd5eTurnEconomyCounts
@@ -184,6 +205,9 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   if (targetIds.length !== input.targetTokenIds.length) return { ok: false, reason: 'invalid-target' }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
+  let preparedAreaTargetCell: GridCell | undefined
+  let preparedAreaCells: readonly GridCell[] | undefined
+  let preparedAreaBaseElevationFeet: number | undefined
   if (spell.area) {
     const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
     const targetCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
@@ -220,15 +244,49 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       rectRotation: input.areaTargetOrientation,
     })
     const cells = cellsForAoe(spell.area, orientFrom, targetCell)
-    const effectOrigin = spell.area.origin === 'point'
-      ? {
-          x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
-          y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
-        }
-      : actorToken
+    const effectAim = {
+      x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
+      y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
+    }
+    const effectOrigin = spell.area.origin === 'point' ? effectAim : actorToken
+    if (
+      input.areaTargetElevationFeet != null &&
+      (!Number.isFinite(input.areaTargetElevationFeet) ||
+        input.areaTargetElevationFeet < -1_000 ||
+        input.areaTargetElevationFeet > 10_000)
+    ) return { ok: false, reason: 'invalid-target' }
+    const effectAimElevation = input.areaTargetElevationFeet ??
+      mapGeometryTerrainElevationAtPoint(geometry, effectAim)
     const effectOriginElevation = spell.area.origin === 'point'
-      ? mapGeometryTerrainElevationAtPoint(geometry, effectOrigin)
+      ? effectAimElevation
       : mapGeometryTokenElevation(geometry, actorToken)
+    preparedAreaTargetCell = targetCell
+    preparedAreaCells = cells
+    preparedAreaBaseElevationFeet = effectAimElevation
+    if (spell.area.origin === 'point') {
+      const areaPointToken = {
+        ...actorToken,
+        id: `${actorToken.id}:monster-spell-area-placement`,
+        characterId: undefined,
+        type: 'obstacle' as const,
+        size: 1,
+        ...effectOrigin,
+        elevationFeet: effectOriginElevation,
+      }
+      const horizontalPlacementDistanceFeet = tokenFootprintDistanceCells(
+        actorToken,
+        areaPointToken,
+        input.map,
+      ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      if (dnd5eTokenToPointDistanceFeet({
+        geometry,
+        token: actorToken,
+        pointElevationFeet: effectOriginElevation,
+        horizontalDistanceFeet: horizontalPlacementDistanceFeet,
+      }) > (spell.area.placeRangeFeet ?? spell.rangeFeet) + 1e-4) {
+        return { ok: false, reason: 'target-out-of-range' }
+      }
+    }
     if (
       spell.area.origin === 'point' &&
       (spell.effect === 'teleport'
@@ -279,6 +337,18 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       const opposed = areOpposedCombatTokens(actorToken, candidate)
       if (spell.target === 'hostile' && !opposed) return false
       if (spell.target === 'ally' && opposed) return false
+      if (!dnd5eInstantAoeAffectsTokenVertically({
+        spellId: spell.id,
+        area: spell.area!,
+        map: input.map,
+        geometry,
+        sourceToken: actorToken,
+        targetToken: candidate,
+        effectOrigin,
+        effectOriginElevationFeet: effectOriginElevation,
+        effectAim,
+        effectAimElevationFeet: effectAimElevation,
+      })) return false
       return !mapGeometryLineOfEffectBlocked({
         geometry,
         from: effectOrigin,
@@ -288,19 +358,19 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       })
     })
     if (
-      (spell.effect !== 'teleport' && authoritativeTargets.length < 1) ||
+      (!['teleport', 'persistent-area'].includes(spell.effect) && authoritativeTargets.length < 1) ||
       authoritativeTargets.length > maximumTargets
     ) {
       return { ok: false, reason: 'invalid-target' }
     }
     const supplied = [...targetIds].sort()
-    const authoritative = spell.effect === 'teleport'
+    const authoritative = spell.effect === 'teleport' || spell.effect === 'persistent-area'
       ? []
       : authoritativeTargets.map((target) => target.id).sort()
     if (supplied.length !== authoritative.length || supplied.some((id, index) => id !== authoritative[index])) {
       return { ok: false, reason: 'invalid-target' }
     }
-    targetIds = spell.effect === 'teleport'
+    targetIds = spell.effect === 'teleport' || spell.effect === 'persistent-area'
       ? []
       : authoritativeTargets.map((target) => target.id)
   } else if (targetIds.length < 1 || targetIds.length > maximumTargets) {
@@ -318,10 +388,38 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     return (spell.target === 'hostile' && !opposed) ||
       (spell.target === 'ally' && opposed)
   })) return { ok: false, reason: 'invalid-target' }
-  const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   if (!spell.area && targetTokens.some((target) =>
-    tokenFootprintDistanceCells(actorToken, target!, input.map) * feetPerCell > spell.rangeFeet
+    dnd5eMapTokenDistanceFeet({
+      map: input.map,
+      geometry,
+      left: actorToken,
+      right: target!,
+    }) > spell.rangeFeet
   )) return { ok: false, reason: 'target-out-of-range' }
+  if (
+    !spell.area &&
+    spell.requiresVisibleTarget === true &&
+    targetTokens.some((target) => !mapGeometryCanSeeToken({
+      geometry,
+      map: input.map,
+      viewer: actorToken,
+      target: target!,
+      forceEnabled: true,
+      fallbackRangeFeet: spell.rangeFeet,
+    }))
+  ) return { ok: false, reason: 'invalid-target' }
+  if (
+    spell.maximumTargetSeparationFeet != null &&
+    targetTokens.some((left, leftIndex) => targetTokens.some((right, rightIndex) =>
+      rightIndex > leftIndex &&
+      dnd5eMapTokenDistanceFeet({
+        map: input.map,
+        geometry,
+        left: left!,
+        right: right!,
+      }) > spell.maximumTargetSeparationFeet!,
+    ))
+  ) return { ok: false, reason: 'invalid-target' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
@@ -336,6 +434,12 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     !snapshot.state.combatants[actorToken.id] ||
     targetTokens.some((target) => !snapshot.state.combatants[target!.id])
   ) return { ok: false, reason: 'combatant-missing' }
+  if (
+    spell.id === 'hold-person' &&
+    targetTokens.some((target) => !dnd5eCharmPersonEligibleCreatureType(
+      snapshot.state.combatants[target!.id]?.creatureType,
+    ))
+  ) return { ok: false, reason: 'invalid-target' }
   for (const [tokenId, economy] of Object.entries(input.turnEconomyByToken ?? {})) {
     applyTurnEconomy(snapshot.state, tokenId, economy)
   }
@@ -380,8 +484,11 @@ export function prepareDnd5eMonsterCoreSpell(input: {
             snapshot.state.combatants[targetTokens[0]!.id],
           )
         : undefined,
-      areaTargetCell: input.areaTargetCell,
+      areaTargetCell: preparedAreaTargetCell,
+      areaCells: preparedAreaCells,
+      areaBaseElevationFeet: preparedAreaBaseElevationFeet,
       areaTargetOrientation: input.areaTargetOrientation,
+      areaTargetElevationFeet: input.areaTargetElevationFeet,
       teleportDestination,
     },
   }
@@ -391,9 +498,58 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
   prepared: PreparedDnd5eMonsterCoreSpell
   resolution: Omit<Dnd5eMonsterCoreSpellResolutionV1, 'schemaVersion' | 'targetIds'>
   counterspellReaction?: Dnd5eCounterspellReaction
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+  createdAreaId?: string
+} {
   const { prepared } = input
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  if (
+    prepared.spell.id === 'thunderwave' &&
+    prepared.spell.onFailedSaveEffect === 'thunderwave-push'
+  ) {
+    const supplied = input.resolution.forcedMovements ?? []
+    const byTargetId = new Map(supplied.map((movement) => [movement.targetId, movement]))
+    const geometry = mapGeometryRuntimeForMap(prepared.map.id)
+    const valid = supplied.length === prepared.targetTokens.length &&
+      byTargetId.size === supplied.length &&
+      prepared.targetTokens.every((target) => {
+        const movement = byTargetId.get(target.id)
+        if (!movement) return false
+        const expected = dnd5eForcedPushDestination(
+          prepared.map,
+          prepared.actorToken,
+          target,
+          10,
+        )
+        if (
+          movement.to.x !== expected.to.x ||
+          movement.to.y !== expected.to.y ||
+          movement.distanceFeet !== expected.distanceFeet
+        ) return false
+        const fall = dnd5eForcedMovementFall({
+          geometry,
+          target,
+          to: expected.to,
+        })
+        const expectedFallDice = dnd5eFallingDamageDice(fall.fallDistanceFeet)
+        return movement.toElevationFeet === fall.toElevationFeet &&
+          (movement.fallingDamageRolls?.length ?? 0) === expectedFallDice
+      })
+    if (!valid) {
+      return {
+        result: {
+          ok: false,
+          state: prepared.state,
+          events: [],
+          reason: 'invalid-target',
+        },
+      }
+    }
+  }
+  const action = {
     type: 'monster-core-spell',
     actorId: prepared.actorToken.id,
     spellId: prepared.spell.id,
@@ -405,15 +561,77 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
       targetIds: prepared.targetTokens.map((target) => target.id),
       teleportDestination: prepared.teleportDestination,
     },
+    airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+  } as const
+  const fallPreview = input.airborneFallDamageRollsByCombatantId == null
+    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
+    : undefined
+  const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
+  const result = resolveDnd5eHeadlessAction(prepared.state, action)
+  if (!result.ok) return { result, airborneFalls }
+  const application = planDnd5eMapResultApplication({
+    state: result.state,
+    map: prepared.map,
+    characters: prepared.characters,
+    characterIdByCombatantId: prepared.characterIdByCombatantId,
   })
-  if (!result.ok) return { result }
+  let createdAreaId: string | undefined
+  const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)
+  const counterspelled = result.events.some((event) =>
+    event.type === 'counterspell-resolved' &&
+    event.casterId === prepared.actorToken.id &&
+    event.spellId === prepared.spell.id &&
+    event.success,
+  )
+  if (
+    declaration &&
+    prepared.spell.effect === 'persistent-area' &&
+    prepared.areaCells &&
+    prepared.areaTargetCell &&
+    !counterspelled
+  ) {
+    const sourceSaveDc = prepared.monster.spellcasting?.saveDc
+    if (!Number.isInteger(sourceSaveDc)) {
+      return {
+        result: { ok: false, state: result.state, events: result.events, reason: 'invalid-monster-action' },
+        airborneFalls,
+      }
+    }
+    const actionId = [
+      prepared.state.combatId,
+      prepared.state.round,
+      prepared.actorToken.id,
+      prepared.spell.id,
+      `${prepared.areaTargetCell.col},${prepared.areaTargetCell.row}`,
+    ].join(':')
+    const area = createDnd5eCoreSpellArea({
+      declaration,
+      actionId,
+      sourceCharacterId: prepared.actorToken.characterId ?? prepared.actorToken.id,
+      sourceTokenId: prepared.actorToken.id,
+      slotLevel: prepared.slotLevel,
+      sourceSaveDc: sourceSaveDc!,
+      round: result.state.round,
+      cells: prepared.areaCells,
+      anchorCell: prepared.areaTargetCell,
+      baseElevationFeet: prepared.areaBaseElevationFeet,
+      durationRounds: prepared.spell.concentrationDurationRounds,
+      sourceAlignment: prepared.monster.alignment,
+    })
+    application.map = {
+      ...application.map,
+      dnd5ePluginAreas: [
+        ...(application.map.dnd5ePluginAreas ?? []).filter((candidate) =>
+          candidate.sourceTokenId !== prepared.actorToken.id || !candidate.concentrationId),
+        area,
+      ],
+    }
+    createdAreaId = area.id
+  }
   return {
     result,
-    application: planDnd5eMapResultApplication({
-      state: result.state,
-      map: prepared.map,
-      characters: prepared.characters,
-      characterIdByCombatantId: prepared.characterIdByCombatantId,
-    }),
+    airborneFalls,
+    application,
+    createdAreaId,
   }
 }

@@ -15,15 +15,14 @@ import {
   dnd5eCombatantCanSee,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
-  dnd5eTotemBearGuardianDisadvantage,
-  dnd5eTotemEagleOpportunityDisadvantage,
-  dnd5eTotemWolfPackAdvantage,
+  dnd5eRageAllyProtectionDisadvantage,
+  dnd5eRageOpportunityDisadvantage,
+  dnd5eRageAllyMeleeAdvantage,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eTranquilityWardCheck,
   dnd5eWeaponClassDamageDefinitions,
   previewDnd5ePostD20AdjustedAttack,
-  resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eClassDamageDefinition,
   type Dnd5eClassDamageRolls,
@@ -34,11 +33,18 @@ import {
   type Dnd5eStandAgainstTideUse,
   type Dnd5eWeaponClassDamageContext,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
+import { dnd5eMonsterFlybyPreventsOpportunityAttacks } from './monsterGenericAbilities'
+import type { Dnd5eTraversalMode } from './traversal'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 
@@ -50,8 +56,13 @@ export function findDnd5eOpportunityAttackersForMove(input: {
   path?: Array<{ x: number; y: number }>
   turnEconomyByToken: Dnd5eTurnEconomyByToken
   disengaged?: boolean
+  movementMode?: Dnd5eTraversalMode
 }): Token[] {
   if (input.disengaged) return []
+  const movingMonster = input.movingToken.poolId
+    ? getDnd5eSrdMonster(input.movingToken.poolId)
+    : undefined
+  if (dnd5eMonsterFlybyPreventsOpportunityAttacks(movingMonster, input.movementMode)) return []
   const pathCells = (input.path?.length ? input.path : [input.movingToken, input.to]).map((point) =>
     tokenAnchorCellFromPixel(point.x, point.y, input.movingToken, input.map),
   )
@@ -226,20 +237,24 @@ export function prepareDnd5eOpportunityAttack(input: {
       }
     : undefined
   const attackMode = (() => {
-    const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) ||
+    const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) && (
+      dnd5eTargetGrantsAttackAdvantage(targetCombatant) ||
       dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) ||
       dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, targetCombatant) ||
       dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
-      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
+      actorCombatant.classState.hiddenCheckTotal != null ||
       targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
-      dnd5eTotemWolfPackAdvantage(
+      dnd5eRageAllyMeleeAdvantage(
         snapshot.state,
         actorCombatant,
         targetCombatant,
         true,
       )
+    )
     const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
       (!!actor && dnd5eWearingUnproficientArmor(actor)) ||
+      actorCombatant.exhaustionLevel >= 3 ||
       dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
       dnd5eTargetIsDodging(targetCombatant) ||
       dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
@@ -247,8 +262,8 @@ export function prepareDnd5eOpportunityAttack(input: {
       actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
       (targetCombatant.classId === 'ranger' && targetCombatant.subclassId === 'hunter' &&
         targetCombatant.level >= 7 && targetCombatant.classSelections['defensive-tactics']?.includes('escape-the-horde')) ||
-      dnd5eTotemBearGuardianDisadvantage(snapshot.state, actorCombatant, targetCombatant) ||
-      dnd5eTotemEagleOpportunityDisadvantage(targetCombatant, true)
+      dnd5eRageAllyProtectionDisadvantage(snapshot.state, actorCombatant, targetCombatant) ||
+      dnd5eRageOpportunityDisadvantage(targetCombatant, true)
     return resolveDnd5eRollMode({
       advantage: [{ active: advantage, reason: 'opportunity-attack-advantage' }],
       disadvantage: [{ active: disadvantage, reason: 'opportunity-attack-disadvantage' }],
@@ -291,8 +306,10 @@ export function previewDnd5eOpportunityAttack(prepared: PreparedDnd5eOpportunity
     resolution: resolved,
     use: postD20Adjustment,
   })
-  const critical = adjusted.roll.d20 >= prepared.criticalThreshold
-  return { ...adjusted, hit: adjusted.hit || critical, critical }
+  // Expanded critical thresholds (e.g. Champion 19) only crit on a hit.
+  // Natural 20 still auto-hits via the attack resolver.
+  const critical = adjusted.hit && adjusted.roll.d20 >= prepared.criticalThreshold
+  return { ...adjusted, hit: adjusted.hit, critical }
 }
 
 export function dnd5eOpportunityAttackClassDamageDefinitions(
@@ -331,9 +348,14 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   damageRolls: readonly number[]
   savageAttacksRoll?: number
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const { prepared } = input
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'opportunity-attack',
     actorId: prepared.actorToken.id,
     targetId: prepared.targetToken.id,
@@ -361,10 +383,11 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     savageAttacksRoll: input.savageAttacksRoll,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
-  })
-  if (!result.ok) return { result }
+  }, input.airborneFallDamageRollsByCombatantId)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

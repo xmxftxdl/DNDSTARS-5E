@@ -164,4 +164,85 @@ describe('Dragonborn breath map authority', () => {
       dc: 14,
     })
   })
+
+  it('does not include a creature above the breath volume just because it shares a grid cell', () => {
+    const dragonbornToken = token('dragonborn-token', 'dragonborn', 25)
+    const airborneTarget = {
+      ...token('airborne-target', 'airborne', 75),
+      elevationFeet: 40,
+    }
+    const map = battleMap([dragonbornToken, airborneTarget])
+    const characters = [
+      character('dragonborn', {
+        dnd5eRaceId: 'dragonborn',
+        dnd5eRacialChoices: { dragonbornAncestry: 'blue' },
+      }),
+      character('airborne'),
+    ]
+    const initiativeOrder = map.tokens.map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: entry.emoji ?? '',
+      color: entry.color ?? '',
+      roll: 20 - index,
+    }))
+
+    const prepared = prepareDnd5eDragonbornBreathAction({
+      action: action([]),
+      combatId: 'racial-combat',
+      map,
+      characters,
+      initiativeOrder,
+    })
+
+    expect(prepared).toMatchObject({ ok: true, prepared: { targetTokens: [] } })
+    expect(prepareDnd5eDragonbornBreathAction({
+      action: action([airborneTarget.id]),
+      combatId: 'racial-combat',
+      map,
+      characters,
+      initiativeOrder,
+    })).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('uses the declared aim elevation for a pitched dragonborn breath', () => {
+    const dragonbornToken = token('dragonborn-token', 'dragonborn', 25)
+    const airborneTarget = {
+      ...token('airborne-target', 'airborne', 75),
+      elevationFeet: 20,
+    }
+    const groundedTarget = token('grounded-target', 'grounded', 75)
+    const map = battleMap([dragonbornToken, airborneTarget, groundedTarget])
+    const characters = [
+      character('dragonborn', {
+        dnd5eRaceId: 'dragonborn',
+        dnd5eRacialChoices: { dragonbornAncestry: 'blue' },
+      }),
+      character('airborne'),
+      character('grounded'),
+    ]
+    const pitchedAction = action([airborneTarget.id])
+    pitchedAction.targetCell = { col: 3, row: 0 }
+    pitchedAction.targetElevationFeet = 60
+
+    const prepared = prepareDnd5eDragonbornBreathAction({
+      action: pitchedAction,
+      combatId: 'racial-combat',
+      map,
+      characters,
+      initiativeOrder: map.tokens.map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: entry.emoji ?? '',
+        color: entry.color ?? '',
+        roll: 20 - index,
+      })),
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([
+      airborneTarget.id,
+    ])
+  })
 })

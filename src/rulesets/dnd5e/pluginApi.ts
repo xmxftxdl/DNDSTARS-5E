@@ -55,7 +55,7 @@ import {
   validateDeclarativeSubclassAbilityV1,
   validateDeclarativeSubclassDefinitionV1,
   type DeclarativeSubclassCombatHookV1,
-  type DeclarativeBattleMasterMechanicV1,
+  type DeclarativeCombatManeuverMechanicV1,
   type DeclarativeDiceFormulaV1,
   type DeclarativeEffectTargetV1,
   type DeclarativeSubclassAbilityV1,
@@ -281,6 +281,38 @@ export type Dnd5ePluginActionEconomy = 'action' | 'bonusAction' | 'reaction' | '
 export type Dnd5ePluginAutomationLevel = 'full' | 'partial' | 'manual'
 export type Dnd5ePluginTargetRelation = 'any' | 'ally' | 'enemy'
 
+/**
+ * Authoring-time vertical semantics for a Host-created persistent area.
+ *
+ * The declaration deliberately omits `baseElevationFeet`: the Host captures the
+ * selected map anchor's terrain elevation when the action is committed. Leaving
+ * the declaration absent preserves the pre-V17 unbounded-column behavior.
+ */
+export type Dnd5ePluginPersistentAreaVerticalDeclaration =
+  | { mode: 'ground' }
+  | { mode: 'volume'; heightFeet: number }
+
+/** Strict declaration boundary used by registration and custom-package export. */
+export function normalizeDnd5ePluginPersistentAreaVerticalDeclaration(
+  value: unknown,
+): Dnd5ePluginPersistentAreaVerticalDeclaration | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const vertical = value as Record<string, unknown>
+  const keys = Object.keys(vertical)
+  if (vertical.mode === 'ground' && keys.length === 1 && keys[0] === 'mode') {
+    return { mode: 'ground' }
+  }
+  if (
+    vertical.mode === 'volume' &&
+    keys.length === 2 &&
+    keys.every((key) => key === 'mode' || key === 'heightFeet') &&
+    finiteInteger(vertical.heightFeet, 1, 10_000)
+  ) {
+    return { mode: 'volume', heightFeet: vertical.heightFeet as number }
+  }
+  return undefined
+}
+
 export type Dnd5ePluginTargeting =
   | { kind: 'self' }
   | {
@@ -314,6 +346,7 @@ export interface Dnd5ePluginFeatureAction {
     color?: string
     durationRounds: number
     concentration?: boolean
+    vertical?: Dnd5ePluginPersistentAreaVerticalDeclaration
     /** Whitelisted local renderer; it cannot execute plugin code or affect rules. */
     visual?: Dnd5ePersistentAreaVisual
     triggers?: readonly Dnd5ePersistentAreaTriggerDeclaration[]
@@ -458,6 +491,25 @@ export interface Dnd5ePluginRacialSavingThrowAdvantages {
   magicAbilities?: readonly AbilityKey[]
 }
 
+export type Dnd5ePluginCoreRaceMechanicsId =
+  | 'dwarf'
+  | 'elf'
+  | 'halfling'
+  | 'human'
+  | 'dragonborn'
+  | 'gnome'
+  | 'half-elf'
+  | 'half-orc'
+  | 'tiefling'
+
+export interface Dnd5ePluginRacialInnateSpellGrant {
+  spellId: string
+  minimumLevel: number
+  ability: AbilityKey
+  castAtLevel: number
+  resetOn: 'at-will' | 'long-rest'
+}
+
 export interface Dnd5ePluginRaceDefinition {
   id: string
   name: string
@@ -465,6 +517,8 @@ export interface Dnd5ePluginRaceDefinition {
   iconAssetId?: string
   /** Display-only ancestry link. A subrace remains a complete standalone rules entry. */
   parentRace?: { id: string; name: string }
+  /** Reuse only the public SRD base ancestry mechanics; all variant data remains in this package. */
+  coreRaceMechanicsId?: Dnd5ePluginCoreRaceMechanicsId
   size?: 'small' | 'medium'
   speedFeet: number
   abilityBonuses?: Partial<Record<AbilityKey, number>>
@@ -481,6 +535,10 @@ export interface Dnd5ePluginRaceDefinition {
   featChoiceCount?: number
   /** Added once per total character level to every maximum-HP calculation path. */
   hitPointsPerLevelBonus?: number
+  /** Generic authoritative replacement of a natural 1 on supported d20 rolls. */
+  naturalOneReroll?: boolean
+  /** Generic innate spell grants; the Host validates level, ability, slot level and reset cadence. */
+  innateSpells?: readonly Dnd5ePluginRacialInnateSpellGrant[]
   savingThrowAdvantages?: Dnd5ePluginRacialSavingThrowAdvantages
   traits?: readonly { id: string; name: string; description: string }[]
   staticModifiers?: Dnd5ePluginStaticCombatModifiers
@@ -1007,6 +1065,16 @@ function clonePersistentAreaTriggers(
   })
 }
 
+function clonePluginPersistentAreaVertical(
+  vertical: Dnd5ePluginPersistentAreaVerticalDeclaration | undefined,
+  featureId: string,
+): Dnd5ePluginPersistentAreaVerticalDeclaration | undefined {
+  if (vertical == null) return undefined
+  const normalized = normalizeDnd5ePluginPersistentAreaVerticalDeclaration(vertical)
+  if (!normalized) throw new Error(`Invalid plugin persistent area vertical: ${featureId}`)
+  return normalized
+}
+
 function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined): Dnd5ePluginFeatureAction | undefined {
   if (!action) return undefined
   return {
@@ -1020,6 +1088,7 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
     } : undefined,
     persistentArea: action.persistentArea ? {
       ...action.persistentArea,
+      vertical: action.persistentArea.vertical ? { ...action.persistentArea.vertical } : undefined,
       visual: action.persistentArea.visual ? { ...action.persistentArea.visual } : undefined,
       triggers: action.persistentArea.triggers?.map((trigger) => ({
         ...trigger,
@@ -1727,6 +1796,10 @@ export function registerDnd5eRulesPlugin(
           ? {
               ...definition.action.persistentArea,
               label: definition.action.persistentArea.label.trim(),
+              vertical: clonePluginPersistentAreaVertical(
+                definition.action.persistentArea.vertical,
+                featureId,
+              ),
               visual: definition.action.persistentArea.visual
                 ? normalizeDnd5ePersistentAreaVisual(definition.action.persistentArea.visual)
                 : undefined,
@@ -2035,12 +2108,14 @@ export function registerDnd5eRulesPlugin(
           })
         }
         const hostManagedClosedSubclass =
-          ability.mechanic?.kind === 'eldritch-knight-2014' ||
-          ability.mechanic?.kind === 'totem-warrior-2014' ||
+          ability.mechanic?.kind === 'martial-spell-synergy' ||
+          ability.mechanic?.kind === 'rage-feature' ||
           ability.mechanic?.kind === 'opening-attack' ||
           ability.mechanic?.kind === 'hidden-spell-save-disadvantage' ||
           ability.mechanic?.kind === 'utility-projection-control' ||
-          ability.mechanic?.kind === 'post-spell-random-table'
+          ability.mechanic?.kind === 'post-spell-random-table' ||
+          ability.mechanic?.kind === 'post-spell-random-table-choice' ||
+          ability.mechanic?.kind === 'spell-damage-max-die-bonus'
         const action = compatibility.effective === 'manual' || hostManagedClosedSubclass ? undefined : {
           id: actionLocalId,
           label: ability.name,
@@ -2216,6 +2291,10 @@ export function registerDnd5eRulesPlugin(
         ) throw new Error(`Invalid plugin parent race: ${raceId}`)
         parentRace = { id: definition.parentRace.id, name: definition.parentRace.name.trim() }
       }
+      const coreRaceMechanicsId = definition.coreRaceMechanicsId
+      if (coreRaceMechanicsId != null && ![
+        'dwarf', 'elf', 'halfling', 'human', 'dragonborn', 'gnome', 'half-elf', 'half-orc', 'tiefling',
+      ].includes(coreRaceMechanicsId)) throw new Error(`Invalid plugin core race mechanics: ${raceId}`)
       const iconAssetId = ownedPluginAssetId(id, definition.iconAssetId, raceId)
       const validSkills = new Set(SKILLS.map((skill) => skill.key))
       const skillProficiencies = [...new Set(definition.skillProficiencies ?? [])]
@@ -2251,6 +2330,20 @@ export function registerDnd5eRulesPlugin(
       if (!finiteInteger(definition.hitPointsPerLevelBonus ?? 0, 0, 20)) {
         throw new Error(`Invalid plugin race hit-point bonus: ${raceId}`)
       }
+      if (definition.naturalOneReroll != null && typeof definition.naturalOneReroll !== 'boolean') {
+        throw new Error(`Invalid plugin race natural-one reroll: ${raceId}`)
+      }
+      const innateSpells = definition.innateSpells?.map((grant) => ({ ...grant })) ?? []
+      if (
+        innateSpells.length > 32 ||
+        innateSpells.some((grant) =>
+          !validId(grant.spellId) ||
+          !finiteInteger(grant.minimumLevel, 1, 20) ||
+          !ABILITY_KEYS.includes(grant.ability) ||
+          !finiteInteger(grant.castAtLevel, 0, 9) ||
+          (grant.resetOn !== 'at-will' && grant.resetOn !== 'long-rest')
+        )
+      ) throw new Error(`Invalid plugin race innate spells: ${raceId}`)
       const automation = definition.automation ?? 'full'
       if (!['full', 'partial', 'manual'].includes(automation)) {
         throw new Error(`Invalid plugin race automation level: ${raceId}`)
@@ -2287,6 +2380,7 @@ export function registerDnd5eRulesPlugin(
         name,
         ...(iconAssetId ? { iconAssetId } : {}),
         ...(parentRace ? { parentRace } : {}),
+        ...(coreRaceMechanicsId ? { coreRaceMechanicsId } : {}),
         size: definition.size ?? 'medium',
         speedFeet: definition.speedFeet,
         abilityBonuses: cloneAbilityBonuses(definition.abilityBonuses),
@@ -2307,6 +2401,8 @@ export function registerDnd5eRulesPlugin(
         ...(definition.hitPointsPerLevelBonus ? {
           hitPointsPerLevelBonus: definition.hitPointsPerLevelBonus,
         } : {}),
+        ...(definition.naturalOneReroll ? { naturalOneReroll: true } : {}),
+        ...(innateSpells.length ? { innateSpells } : {}),
         ...(savingThrowAdvantages ? { savingThrowAdvantages } : {}),
         ...(traits?.length ? { traits } : {}),
         ...(staticModifiers ? { staticModifiers } : {}),
@@ -3014,21 +3110,21 @@ export interface Dnd5eDeclarativeAttackIntentDefinition {
   }
 }
 
-export interface Dnd5eDeclarativeBattleMasterManeuverDefinition {
+export interface Dnd5eDeclarativeCombatManeuverDefinition {
   feature: RegisteredDnd5ePluginFeature
-  mechanic: DeclarativeBattleMasterMechanicV1
+  mechanic: DeclarativeCombatManeuverMechanicV1
   resourceId: string
 }
 
-export function dnd5eDeclarativeBattleMasterManeuverDefinition(
+export function dnd5eDeclarativeCombatManeuverDefinition(
   featureId: string,
-): Dnd5eDeclarativeBattleMasterManeuverDefinition | undefined {
+): Dnd5eDeclarativeCombatManeuverDefinition | undefined {
   const feature = pluginFeatures.get(featureId)
   const mechanic = feature?.declarativeAbility?.mechanic
   if (
     !feature ||
     feature.automation !== 'full' ||
-    mechanic?.kind !== 'battle-master-2014'
+    mechanic?.kind !== 'combat-maneuver'
   ) return undefined
   return {
     feature: {
@@ -3205,13 +3301,13 @@ export function dnd5eDeclarativePluginFeatureRollPlan(
   return declarativeFeatureRollPlan(actor, feature, false)
 }
 
-/** Builds authoritative dice declarations for a whitelisted Battle Master mechanic. */
-export function dnd5eDeclarativeBattleMasterRollPlan(
+/** Builds authoritative dice declarations for a whitelisted combat-maneuver operation. */
+export function dnd5eDeclarativeCombatManeuverRollPlan(
   actor: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'classResources'>,
   featureId: string,
   critical = false,
 ): Dnd5eDeclarativeAttackIntentRollPlan {
-  const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)
+  const definition = dnd5eDeclarativeCombatManeuverDefinition(featureId)
   if (!definition) return { ok: false, reason: 'invalid-plugin-action' }
   return declarativeFeatureRollPlan(actor, definition.feature, critical)
 }
@@ -3312,7 +3408,7 @@ export function dnd5eDeclarativeTriggeredActions(
     const ability = feature.declarativeAbility
     if (
       !ability || feature.automation !== 'full' || ability.trigger.kind !== 'after-attack-hit' ||
-      ability.mechanic?.kind === 'battle-master-2014' ||
+      ability.mechanic?.kind === 'combat-maneuver' ||
       !feature.action || !actor.pluginFeatureIds.includes(feature.id)
     ) return []
     const subclass = [...pluginSubclasses.values()].find((entry) =>

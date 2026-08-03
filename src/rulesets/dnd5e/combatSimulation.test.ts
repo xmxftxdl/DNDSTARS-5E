@@ -365,6 +365,86 @@ describe('D&D 5e combat simulator', () => {
     expect(simulateDnd5eCombats(request)).toEqual(result)
   })
 
+  it('uses persistent-area cost for mapped player reachability and Headless movement', () => {
+    const hero = fighter({
+      initiativeBonus: 100,
+      speed: 30,
+      equipment: {},
+    })
+    const monster = inertDefenseMonster('test:persistent-area-movement')
+    const map: BattleMap = {
+      id: 'persistent-area-simulation-map',
+      name: 'Persistent area movement',
+      width: 600,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [{
+        id: 'hero-token',
+        label: hero.name,
+        x: 25,
+        y: 25,
+        color: '#fff',
+        emoji: '',
+        size: 1,
+        type: 'player',
+        characterId: hero.id,
+      }, {
+        id: 'monster-token',
+        label: monster.name,
+        x: 525,
+        y: 25,
+        color: '#f00',
+        emoji: '',
+        size: 1,
+        type: 'enemy',
+        poolId: monster.id,
+        hp: monster.hitPoints.average,
+        maxHp: monster.hitPoints.average,
+      }],
+      dnd5ePluginAreas: [{
+        id: 'grease-area',
+        pluginId: 'srd-5.1',
+        featureId: 'srd-5.1:spell:grease',
+        sourceKind: 'core-spell',
+        coreSpellId: 'grease',
+        label: 'Grease',
+        color: '#fde68a',
+        sourceCharacterId: 'monster',
+        sourceTokenId: 'monster-token',
+        cells: Array.from({ length: 10 }, (_, col) => ({ col, row: 0 })),
+        createdRound: 1,
+        expiresAfterRound: 10,
+        relation: 'any',
+        includeSelf: true,
+        movementCostMultiplier: 2,
+        vertical: { mode: 'ground' },
+      }],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 17,
+      maxRounds: 1,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    })
+    const playerTurn = result.decisionLog.find((entry) => entry.actorName === hero.name)
+
+    expect(playerTurn).toBeDefined()
+    expect((playerTurn?.actorPositionAfter.x ?? 0) - (playerTurn?.actorPositionBefore.x ?? 0))
+      .toBe(300)
+    expect(playerTurn?.executionSteps).toContainEqual(expect.objectContaining({
+      kind: 'resource',
+      text: expect.stringContaining('60'),
+    }))
+  })
+
   it('uses the Bugbear javelin ranged damage in mapped tactical simulation', () => {
     const hero = fighter({
       initiativeBonus: -100,
@@ -2594,6 +2674,167 @@ describe('D&D 5e combat simulator', () => {
     }))
     expect(result.actionUsage.find((entry) => entry.actionId === 'spell:magic-missile:1')
       ?.headlessTransactions).toBeGreaterThan(0)
+  })
+
+  it('runs monster Thunderwave through Headless with authoritative forced movement', () => {
+    const djinni = getDnd5eSrdMonster('srd-5.1:djinni')!
+    const thunderwaveDjinni: Dnd5eMonsterStatBlock = {
+      ...djinni,
+      id: 'dm-custom:thunderwave-djinni',
+      slug: 'thunderwave-djinni',
+      name: 'Thunderwave Djinni',
+      englishName: 'Thunderwave Djinni',
+      source: 'DM 自定义',
+      abilities: { ...djinni.abilities, dex: 30 },
+      speed: { walk: 0 },
+      actions: [],
+      spellcasting: {
+        ...djinni.spellcasting!,
+        spells: djinni.spellcasting!.spells!.filter((spell) => spell.id === 'thunderwave'),
+      },
+    }
+    const first = fighter({ id: 'thunder-target-1', name: 'Thunder Target 1', currentHp: 80, maxHp: 80 })
+    const second = fighter({ id: 'thunder-target-2', name: 'Thunder Target 2', currentHp: 80, maxHp: 80 })
+    const map: BattleMap = {
+      id: 'monster-thunderwave-map', name: 'Monster Thunderwave', width: 500, height: 300,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [
+        { id: 'djinni-token', label: thunderwaveDjinni.name, x: 125, y: 125, color: '#f00', emoji: '', size: 1, type: 'enemy', poolId: thunderwaveDjinni.id, hp: 161, maxHp: 161 },
+        { id: 'thunder-target-token-1', label: first.name, x: 175, y: 125, color: '#fff', emoji: '', size: 1, type: 'player', characterId: first.id },
+        { id: 'thunder-target-token-2', label: second.name, x: 175, y: 175, color: '#fff', emoji: '', size: 1, type: 'player', characterId: second.id },
+      ],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [first, second],
+      monsters: [{ monsterId: thunderwaveDjinni.id, count: 1 }],
+      customMonsters: [thunderwaveDjinni],
+      trials: 6,
+      seed: 1701,
+      maxRounds: 2,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+    })
+
+    const thunderwaveUsage = result.actionUsage.find((entry) => entry.actionId === 'spell:thunderwave:1')
+    expect(thunderwaveUsage, JSON.stringify({ usage: result.actionUsage, log: result.decisionLog })).toBeDefined()
+    expect(thunderwaveUsage!.headlessTransactions).toBeGreaterThan(0)
+    expect(result.decisionLog.some((entry) =>
+      entry.actorName === thunderwaveDjinni.name &&
+      entry.executionSteps.some((step) => step.text.includes('被强制移动')),
+    )).toBe(true)
+
+    const abstractResult = simulateDnd5eCombats({
+      characters: [first],
+      monsters: [{ monsterId: thunderwaveDjinni.id, count: 1 }],
+      customMonsters: [thunderwaveDjinni],
+      trials: 2,
+      seed: 1702,
+      maxRounds: 1,
+      initialDistanceFeet: 10,
+    })
+    expect(abstractResult.actionUsage.find((entry) => entry.actionId === 'spell:thunderwave:1')
+      ?.headlessTransactions).toBeGreaterThan(0)
+  })
+
+  it('runs monster Sleep hit-point pools through Headless', () => {
+    const mephit = getDnd5eSrdMonster('srd-5.1:dust-mephit')!
+    const sleepMephit: Dnd5eMonsterStatBlock = {
+      ...mephit,
+      id: 'dm-custom:sleep-mephit',
+      slug: 'sleep-mephit',
+      name: 'Sleep Mephit',
+      englishName: 'Sleep Mephit',
+      source: 'DM 自定义',
+      abilities: { ...mephit.abilities, dex: 30 },
+      actions: [],
+      spellcasting: {
+        ...mephit.spellcasting!,
+        spells: mephit.spellcasting!.spells!.filter((spell) => spell.id === 'sleep'),
+      },
+    }
+    const target = fighter({ id: 'sleep-target', name: 'Sleep Target', currentHp: 4, maxHp: 52 })
+    const map: BattleMap = {
+      id: 'monster-sleep-map', name: 'Monster Sleep', width: 500, height: 300,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [
+        { id: 'sleep-mephit-token', label: sleepMephit.name, x: 50, y: 100, color: '#f00', emoji: '', size: 1, type: 'enemy', poolId: sleepMephit.id, hp: 17, maxHp: 17 },
+        { id: 'sleep-target-token', label: target.name, x: 300, y: 100, color: '#fff', emoji: '', size: 1, type: 'player', characterId: target.id },
+      ],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [target],
+      monsters: [{ monsterId: sleepMephit.id, count: 1 }],
+      customMonsters: [sleepMephit],
+      trials: 4,
+      seed: 9001,
+      maxRounds: 2,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+    })
+
+    expect(result.actionUsage.find((entry) => entry.actionId === 'spell:sleep:1')
+      ?.headlessTransactions).toBeGreaterThan(0)
+    expect(result.decisionLog.some((entry) =>
+      entry.actorName === sleepMephit.name &&
+      entry.executionSteps.some((step) => step.text.includes('睡眠')),
+    )).toBe(true)
+  })
+
+  it('preserves monster Lesser Restoration condition choices through Headless', () => {
+    const couatl = getDnd5eSrdMonster('srd-5.1:couatl')!
+    const restorationCouatl: Dnd5eMonsterStatBlock = {
+      ...couatl,
+      id: 'dm-custom:restoration-couatl',
+      slug: 'restoration-couatl',
+      name: 'Restoration Couatl',
+      englishName: 'Restoration Couatl',
+      source: 'DM 自定义',
+      abilities: { ...couatl.abilities, dex: 30 },
+      speed: { walk: 0 },
+      actions: [],
+      spellcasting: {
+        ...couatl.spellcasting!,
+        spells: couatl.spellcasting!.spells!.filter((spell) => spell.id === 'lesser-restoration'),
+      },
+    }
+    const paralysis = createDnd5eConditionEffect({
+      id: 'simulation-paralysis',
+      condition: 'paralyzed',
+      targetId: 'restoration-ally-token',
+      source: { kind: 'spell', actorId: 'fighter-token', rulesId: 'hold-person' },
+    })
+    const hero = fighter({ id: 'restoration-enemy', name: 'Restoration Enemy', initiativeBonus: -20 })
+    const map: BattleMap = {
+      id: 'monster-restoration-map', name: 'Monster Restoration', width: 600, height: 300,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [
+        { id: 'restoration-couatl-token', label: restorationCouatl.name, x: 100, y: 100, color: '#f00', emoji: '', size: 1, type: 'enemy', poolId: restorationCouatl.id, hp: 97, maxHp: 97 },
+        {
+          id: 'restoration-ally-token', label: 'Paralyzed Goblin', x: 150, y: 100,
+          color: '#f00', emoji: '', size: 1, type: 'enemy', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7,
+          dnd5eCombatState: { schemaVersion: 2, conditions: ['paralyzed'], activeEffects: [paralysis] },
+        },
+        { id: 'restoration-enemy-token', label: hero.name, x: 450, y: 100, color: '#fff', emoji: '', size: 1, type: 'player', characterId: hero.id },
+      ],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [
+        { monsterId: restorationCouatl.id, count: 1 },
+        { monsterId: 'srd-5.1:goblin', count: 1 },
+      ],
+      customMonsters: [restorationCouatl],
+      trials: 3,
+      seed: 4411,
+      maxRounds: 1,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+    })
+
+    const restorationUsage = result.actionUsage.find((entry) => entry.actionId === 'spell:lesser-restoration:2')
+    expect(restorationUsage, JSON.stringify({ usage: result.actionUsage, log: result.decisionLog })).toBeDefined()
+    expect(restorationUsage!.headlessTransactions).toBeGreaterThan(0)
+    expect(result.decisionLog.some((entry) =>
+      entry.actorName === restorationCouatl.name &&
+      entry.executionSteps.some((step) => step.kind === 'condition'),
+    )).toBe(true)
   })
 
   it('includes Assassin on-hit poison in seeded Headless simulation and remains deterministic', () => {

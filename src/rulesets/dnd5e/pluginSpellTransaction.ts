@@ -13,7 +13,12 @@ import type { Character } from '../../types/character'
 import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
-import { dnd5eAttackerIsUnseenForAttack, dnd5eBlurImposesAttackDisadvantage, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eTargetIsUnseenForAttack, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { dnd5eAttackerIsUnseenForAttack, dnd5eBlurImposesAttackDisadvantage, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eTargetIsUnseenForAttack, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
@@ -35,6 +40,7 @@ import {
   dnd5eSpellComponentsAvailable,
   type Dnd5eSpellComponentCheck,
 } from './spellComponents'
+import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -106,6 +112,7 @@ export interface Dnd5ePluginSpellResolution {
   saveSucceeded?: boolean
   rawDamage?: number
   finalDamage?: number
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 }
 
 /** 当前 Host 事务真正覆盖的插件法术子集；超出能力的声明必须回落到 DM 裁定。 */
@@ -139,6 +146,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
   roomRequiredPlugins?: readonly { id: string; version: string; integrity?: string }[] | null
   now?: number
+  effectiveRules?: Dnd5eEffectiveRulesContextV1 | null
 }): { ok: true; prepared: PreparedDnd5ePluginSpellCast } | { ok: false; reason: Dnd5ePluginSpellRejectReason } {
   const payload = input.action.dnd5eSpellCast
   if (input.action.type !== 'dnd5e-spell-cast' || !payload) return { ok: false, reason: 'invalid-action' }
@@ -153,8 +161,10 @@ export function prepareDnd5ePluginSpellCast(input: {
   }
   const actor = input.characters.find((character) => character.id === input.action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
+  const enforceSpellcastingPrerequisites =
+    input.effectiveRules?.houseRules.spellcastingPrerequisitesEnabled !== false
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  if (dnd5eWearingUnproficientArmor(actor)) {
+  if (enforceSpellcastingPrerequisites && dnd5eWearingUnproficientArmor(actor)) {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
   const castingClassId = dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
@@ -164,7 +174,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   if (!classDefinition?.spellcasting || castingClassLevel < 1) {
     return { ok: false, reason: 'spellcasting-class-unavailable' }
   }
-  if (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18)) {
+  if (enforceSpellcastingPrerequisites && actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18)) {
     return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   }
   if (spell.castingTime.value !== 1 || !['action', 'bonus-action'].includes(spell.castingTime.unit)) {
@@ -175,7 +185,9 @@ export function prepareDnd5ePluginSpellCast(input: {
   if (castingTime === 'bonus-action' && input.turnEconomy && input.turnEconomy.bonusAction.current < 1) return { ok: false, reason: 'bonus-action-unavailable' }
 
   const componentCheck = dnd5ePluginSpellComponentCheck(actor, spell, castingClassId)
-  if (!dnd5eSpellComponentsAvailable(componentCheck)) return { ok: false, reason: 'component-unavailable' }
+  if (enforceSpellcastingPrerequisites && !dnd5eSpellComponentsAvailable(componentCheck)) {
+    return { ok: false, reason: 'component-unavailable' }
+  }
 
   const requestedSlot = Math.floor(payload.slotLevel)
   const slotLevel = spell.level === 0
@@ -309,6 +321,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   prepared: PreparedDnd5ePluginSpellCast
   rolls: Dnd5ePluginSpellResolutionRolls
   now?: number
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): Dnd5ePluginSpellResolution {
   const { prepared, rolls: supplied } = input
   const mechanics = prepared.spell.mechanics!
@@ -400,7 +413,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
       ...dnd5ePluginSpellConditionLifecycle(condition.duration, prepared.saveDc),
     })),
   ]
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'adjudicated-spell',
     actorId: prepared.actorToken.id,
     castingClassId: prepared.castingClassId,
@@ -411,11 +424,11 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     castingTime: prepared.castingTime,
     effects,
     concentrationRounds: prepared.concentrationRounds,
-  }, { transaction, now })
+  }, input.airborneFallDamageRollsByCombatantId, { transaction, now })
   transaction = result.transaction ?? (result.ok
     ? commitCombatTransaction(transaction, now)
     : rollbackCombatTransaction(transaction, result.reason, now))
-  if (!result.ok) return { result, transaction, attackHit, critical, saveSucceeded, rawDamage, finalDamage }
+  if (!result.ok) return { result, transaction, attackHit, critical, saveSucceeded, rawDamage, finalDamage, airborneFalls }
   return {
     result,
     application: planDnd5eMapResultApplication({ state: result.state, map: prepared.map, characters: prepared.characters, characterIdByCombatantId: prepared.characterIdByCombatantId }),
@@ -425,6 +438,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     saveSucceeded,
     rawDamage,
     finalDamage,
+    airborneFalls,
   }
 }
 

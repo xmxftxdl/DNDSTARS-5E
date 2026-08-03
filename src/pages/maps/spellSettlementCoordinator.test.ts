@@ -113,6 +113,13 @@ describe('SpellSettlementCoordinator', () => {
       'hideous-laughter',
       'hold-person',
       'blindness-deafness',
+      'blight',
+      'chain-lightning',
+      'disintegrate',
+      'finger-of-death',
+      'power-word-stun',
+      'power-word-kill',
+      'false-life',
     ]) {
       expect(spellPresentationsBeforeRoll({
         spellId,
@@ -161,6 +168,17 @@ describe('SpellSettlementCoordinator', () => {
         id: 'missile-tx:magic-missile:2',
         targetTokenId: 'goblin',
       }),
+    ])
+    expect(spellPresentationsBeforeRoll({
+      spellId: 'chain-lightning',
+      transactionId: 'chain-tx',
+      mapId: 'map',
+      actorTokenId: 'sorcerer',
+      targetTokenIds: ['primary', 'secondary-a', 'secondary-b'],
+    })).toEqual([
+      expect.objectContaining({ sourceTokenId: 'sorcerer', targetTokenId: 'primary' }),
+      expect.objectContaining({ sourceTokenId: 'primary', targetTokenId: 'secondary-a' }),
+      expect.objectContaining({ sourceTokenId: 'primary', targetTokenId: 'secondary-b' }),
     ])
     expect(spellPresentationsBeforeRoll({
       spellId: 'fire-bolt',
@@ -215,6 +233,169 @@ describe('SpellSettlementCoordinator', () => {
       lengthFeet: 100,
       widthFeet: 5,
     })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'flame-strike',
+    })).toMatchObject({
+      spellId: 'flame-strike',
+      shape: 'circle',
+      radiusFeet: 10,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'sunburst',
+    })).toMatchObject({
+      spellId: 'sunburst',
+      shape: 'circle',
+      radiusFeet: 60,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'cone-of-cold',
+    })).toMatchObject({
+      spellId: 'cone-of-cold',
+      shape: 'cone',
+      lengthFeet: 60,
+      widthFeet: 60,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'circle-of-death',
+    })).toMatchObject({
+      spellId: 'circle-of-death',
+      shape: 'circle',
+      radiusFeet: 60,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'ice-storm',
+    })).toMatchObject({
+      spellId: 'ice-storm',
+      shape: 'circle',
+      radiusFeet: 20,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'freezing-sphere',
+    })).toMatchObject({
+      spellId: 'freezing-sphere',
+      shape: 'circle',
+      radiusFeet: 60,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'color-spray',
+    })).toMatchObject({
+      spellId: 'color-spray',
+      shape: 'cone',
+      lengthFeet: 15,
+      widthFeet: 15,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'faerie-fire',
+    })).toMatchObject({
+      spellId: 'faerie-fire',
+      shape: 'rect',
+      widthFeet: 20,
+      heightFeet: 20,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'sleep',
+    })).toMatchObject({
+      spellId: 'sleep',
+      shape: 'circle',
+      radiusFeet: 20,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'entangle',
+    })).toMatchObject({
+      spellId: 'entangle',
+      shape: 'rect',
+      widthFeet: 20,
+      heightFeet: 20,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'grease',
+    })).toMatchObject({
+      spellId: 'grease',
+      shape: 'rect',
+      widthFeet: 10,
+      heightFeet: 10,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'darkness',
+    })).toMatchObject({
+      spellId: 'darkness',
+      shape: 'circle',
+      radiusFeet: 15,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'flaming-sphere',
+    })).toMatchObject({
+      spellId: 'flaming-sphere',
+      shape: 'circle',
+      radiusFeet: 5,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'moonbeam',
+    })).toMatchObject({
+      spellId: 'moonbeam',
+      shape: 'circle',
+      radiusFeet: 5,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'daylight',
+    })).toMatchObject({ spellId: 'daylight', shape: 'circle', radiusFeet: 120 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'black-tentacles',
+    })).toMatchObject({
+      spellId: 'black-tentacles', shape: 'rect', widthFeet: 20, heightFeet: 20,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'spike-growth',
+    })).toMatchObject({ spellId: 'spike-growth', shape: 'circle', radiusFeet: 20 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'mage-hand',
+    })).toMatchObject({ spellId: 'mage-hand', shape: 'circle', radiusFeet: 0 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'spiritual-weapon',
+    })).toMatchObject({ spellId: 'spiritual-weapon', shape: 'circle', radiusFeet: 5 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'spirit-guardians',
+    })).toMatchObject({ spellId: 'spirit-guardians', shape: 'circle', radiusFeet: 15 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'call-lightning',
+    })).toMatchObject({ spellId: 'call-lightning', shape: 'circle', radiusFeet: 60 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'call-lightning-strike',
+    })).toMatchObject({ spellId: 'call-lightning-strike', shape: 'circle', radiusFeet: 5 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'insect-plague',
+    })).toMatchObject({ spellId: 'insect-plague', shape: 'circle', radiusFeet: 20 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'wall-of-fire',
+    })).toMatchObject({ spellId: 'wall-of-fire', shape: 'rect', widthFeet: 60, heightFeet: 5 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'blade-barrier',
+    })).toMatchObject({ spellId: 'blade-barrier', shape: 'rect', widthFeet: 100, heightFeet: 5 })
     expect(areaSpellPresentationForSettlement({
       ...common,
       spellId: 'fireball',

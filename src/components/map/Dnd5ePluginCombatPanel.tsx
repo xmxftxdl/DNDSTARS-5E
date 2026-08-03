@@ -11,7 +11,7 @@ import {
   dnd5ePluginFeatureDefinition,
   dnd5eCharacterHasPluginFeature,
   dnd5eDeclarativeAttackIntentsForCharacter,
-  dnd5eDeclarativeBattleMasterManeuverDefinition,
+  dnd5eDeclarativeCombatManeuverDefinition,
   dnd5eUtilityProjectionTargetDistanceFeet,
   registeredDnd5ePluginFeatures,
   dnd5eRulesPluginRegistrySnapshot,
@@ -170,9 +170,9 @@ export default function Dnd5ePluginCombatPanel({
         {features.map((feature) => {
           const featureAction = feature.action!
           const targeting = featureAction.targeting
-          const battleMasterManeuver = dnd5eDeclarativeBattleMasterManeuverDefinition(feature.id)
-            ?.mechanic.maneuver
-          const isCommandersStrike = battleMasterManeuver === 'commanders-strike'
+          const combatManeuverOperation = dnd5eDeclarativeCombatManeuverDefinition(feature.id)
+            ?.mechanic.operation
+          const isAllyReactionAttack = combatManeuverOperation === 'ally-reaction-attack'
           const projectionAttackMechanic =
             feature.declarativeAbility?.mechanic?.kind === 'utility-projection-attack-advantage'
               ? feature.declarativeAbility.mechanic
@@ -207,13 +207,13 @@ export default function Dnd5ePluginCombatPanel({
               ? '__area__'
               : targetsByFeature[feature.id] ?? targetOptions[0]?.id ?? ''
           const selectedTargetToken = map.tokens.find((token) => token.id === selectedTargetId)
-          const commanderEnemyOptions = isCommandersStrike && selectedTargetToken
+          const reactionAttackEnemyOptions = isAllyReactionAttack && selectedTargetToken
             ? map.tokens.filter((token) => {
                 return token.type !== 'obstacle' && areOpposedCombatTokens(actorToken, token)
               })
             : []
-          const selectedCommanderEnemyId = isCommandersStrike
-            ? secondaryTargetsByFeature[feature.id] ?? commanderEnemyOptions[0]?.id ?? ''
+          const selectedReactionAttackEnemyId = isAllyReactionAttack
+            ? secondaryTargetsByFeature[feature.id] ?? reactionAttackEnemyOptions[0]?.id ?? ''
             : ''
           const allowedForRoom = !hasRoomSession || (
             roomRules != null && roomAllowsPlugin(feature.ownerPluginId, roomRules)
@@ -221,7 +221,7 @@ export default function Dnd5ePluginCombatPanel({
           const roomReady = !hasRoomSession || roomRules?.member.ready === true
           const disabled = pending || !canAct || !roomReady || !allowedForRoom ||
             !economyAvailable(featureAction.economy, turnEconomy) || !selectedTargetId ||
-            (isCommandersStrike && !selectedCommanderEnemyId)
+            (isAllyReactionAttack && !selectedReactionAttackEnemyId)
           return (
             <article key={feature.id} className="rounded-lg border border-white/8 bg-black/15 p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -247,7 +247,7 @@ export default function Dnd5ePluginCombatPanel({
               {targeting.kind === 'single-creature' && (
                 <label className="mt-3 block">
                   <span className="mb-1 block text-[11px] font-semibold text-slate-500">
-                    {isCommandersStrike ? '受令盟友' : '地图目标'}
+                    {isAllyReactionAttack ? '受令盟友' : '地图目标'}
                   </span>
                   <select
                     data-testid={`dnd5e-plugin-target-${feature.id}`}
@@ -274,20 +274,20 @@ export default function Dnd5ePluginCombatPanel({
                   </select>
                 </label>
               )}
-              {isCommandersStrike && (
+              {isAllyReactionAttack && (
                 <label className="mt-3 block">
                   <span className="mb-1 block text-[11px] font-semibold text-slate-500">被攻击目标</span>
                   <select
                     data-testid={`dnd5e-plugin-secondary-target-${feature.id}`}
-                    value={selectedCommanderEnemyId}
+                    value={selectedReactionAttackEnemyId}
                     onChange={(event) => setSecondaryTargetsByFeature((current) => ({
                       ...current,
                       [feature.id]: event.target.value,
                     }))}
                     className="w-full rounded-lg border border-white/10 bg-void-950/80 px-2 py-1.5 text-xs text-slate-200"
                   >
-                    {commanderEnemyOptions.length === 0 && <option value="">没有符合条件的敌人</option>}
-                    {commanderEnemyOptions.map((token) => (
+                    {reactionAttackEnemyOptions.length === 0 && <option value="">没有符合条件的敌人</option>}
+                    {reactionAttackEnemyOptions.map((token) => (
                       <option key={token.id} value={token.id}>{token.label}</option>
                     ))}
                   </select>
@@ -306,8 +306,8 @@ export default function Dnd5ePluginCombatPanel({
                     targetTokenId: selectedTargetId,
                     payload: {
                       featureId: feature.id,
-                      payload: isCommandersStrike
-                        ? { enemyTargetId: selectedCommanderEnemyId }
+                      payload: isAllyReactionAttack
+                        ? { enemyTargetId: selectedReactionAttackEnemyId }
                         : undefined,
                     },
                   })

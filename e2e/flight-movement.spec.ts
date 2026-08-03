@@ -8,7 +8,8 @@ async function putState(request: APIRequestContext, name: string, payload: unkno
   expect(response.ok(), `${name} should save`).toBeTruthy()
 }
 
-test('player selects flight altitude and the DM commits one 3D path over a wall', async ({ browser, request }) => {
+test('move and end-turn use one idempotent combat command over a 3D path', async ({ browser, request }) => {
+  test.setTimeout(120_000)
   const now = Date.now()
   const mapId = `flight-path-${now}`
   const combatId = `${mapId}:combat`
@@ -24,17 +25,23 @@ test('player selects flight altitude and the DM commits one 3D path over a wall'
     initiativeBonus: 2, saveDC: 15, passivePerception: 11, inspiration: 0,
     conditions: [], notes: '', dmNotes: '', visibleToPlayers: true,
   }
+  const allyCharacter = {
+    ...character,
+    id: 'flight-ally',
+    name: '飞行测试盟友',
+    player: '玩家 2',
+  }
   const heroToken = {
     id: 'flight-hero-token', label: character.name, x: 105, y: 315, elevationFeet: 0,
     color: '#38bdf8', emoji: '🧙', size: 1, type: 'player', characterId: character.id,
   }
   const enemyToken = {
-    id: 'flight-enemy-token', label: '远处敌人', x: 595, y: 595,
-    color: '#ef4444', emoji: '👺', size: 1, type: 'enemy', hp: 7, maxHp: 7,
+    id: 'flight-enemy-token', label: allyCharacter.name, x: 595, y: 595,
+    color: '#ef4444', emoji: '👺', size: 1, type: 'player', characterId: allyCharacter.id,
   }
   const target = { x: 315, y: 315 }
   await request.delete(`${DM}/api/events/_all`)
-  await putState(request, 'characters', { characters: [character], selectedId: character.id, updatedAt: now })
+  await putState(request, 'characters', { characters: [character, allyCharacter], selectedId: character.id, updatedAt: now })
   await putState(request, 'maps', {
     selectedId: mapId, updatedAt: now,
     maps: [{
@@ -71,14 +78,18 @@ test('player selects flight altitude and the DM commits one 3D path over a wall'
     ],
     updatedAt: now,
   })
+  await putState(request, 'dm-authority-ready', {
+    mapId,
+    combatId,
+    ready: true,
+    updatedAt: now,
+  })
 
   const context = await browser.newContext()
-  const dm = await context.newPage()
   const player = await context.newPage()
-  await Promise.all([
-    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
-    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
-  ])
+  const playerPageErrors: string[] = []
+  player.on('pageerror', (error) => playerPageErrors.push(error.message))
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
   await expect(player.getByTestId('player-combat-hotbar')).toBeVisible({ timeout: 20_000 })
   await player.getByRole('button', { name: /移动$/ }).click()
   await player.getByRole('combobox', { name: '移动方式' }).selectOption('fly')
@@ -86,7 +97,35 @@ test('player selects flight altitude and the DM commits one 3D path over a wall'
     await player.getByRole('button', { name: '飞行高度升高 5 尺' }).click()
   }
   await expect(player.getByLabel('飞行目标高度')).toHaveText('海拔 40 尺')
+  const movePutPromise = player.waitForRequest((candidate) =>
+    candidate.method() === 'PUT' && candidate.url().includes('/api/combat/commands/'),
+  )
   await player.getByTestId('map-canvas').click({ position: target })
+  await expect.poll(() => player.evaluate(() =>
+    window.sessionStorage.getItem('stars:pending-combat-commands:v2')),
+  { timeout: 10_000 }).not.toBeNull()
+  const movePut = await movePutPromise
+  const moveEnvelope = movePut.postDataJSON() as {
+    schemaVersion: 1
+    command: { commandId: string; type: string }
+  }
+  expect(moveEnvelope.command.type).toBe('move-token')
+
+  const resumedMovePutPromise = player.waitForRequest((candidate) =>
+    candidate.method() === 'PUT' && candidate.url().includes('/api/combat/commands/'),
+  )
+  await player.reload({ waitUntil: 'domcontentloaded' })
+  // The pending lock intentionally replaces the normal hotbar while authority
+  // is unavailable. The map must still render rather than becoming a blank page.
+  await expect(player.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 })
+  const resumedMovePut = await resumedMovePutPromise
+  expect((resumedMovePut.postDataJSON() as typeof moveEnvelope).command.commandId)
+    .toBe(moveEnvelope.command.commandId)
+
+  // No DM consumer was open while the player refreshed. Starting the authority
+  // now must settle the one durable command, never a replacement command.
+  const dm = await context.newPage()
+  await dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' })
 
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/state/maps`)
@@ -96,5 +135,46 @@ test('player selects flight altitude and the DM commits one 3D path over a wall'
     const token = state.maps?.find((map) => map.id === mapId)?.tokens.find((entry) => entry.id === heroToken.id)
     return token ? { x: token.x, y: token.y, elevationFeet: token.elevationFeet } : null
   }, { timeout: 20_000 }).toEqual({ ...target, elevationFeet: 40 })
+
+  const replayedMove = await request.put(movePut.url(), { data: moveEnvelope })
+  expect(replayedMove.ok()).toBeTruthy()
+  expect(await replayedMove.json()).toMatchObject({
+    replayed: true,
+    receipt: {
+      commandId: moveEnvelope.command.commandId,
+      status: 'committed',
+      authoritative: {
+        acceptedPosition: target,
+        acceptedElevationFeet: 40,
+      },
+    },
+  })
+
+  await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 20_000 })
+  const endTurnPutPromise = player.waitForRequest((candidate) =>
+    candidate.method() === 'PUT' && candidate.url().includes('/api/combat/commands/'),
+  )
+  await player.getByTestId('player-end-turn-top').click()
+  const endTurnPut = await endTurnPutPromise
+  const endTurnEnvelope = endTurnPut.postDataJSON() as {
+    schemaVersion: 1
+    command: { commandId: string; type: string }
+  }
+  expect(endTurnEnvelope.command.type).toBe('end-turn')
+  await expect.poll(async () => {
+    const response = await request.get(`${DM}/api/state/combat`)
+    return (await response.json() as { initiativeIndex?: number }).initiativeIndex
+  }, { timeout: 20_000 }).toBe(1)
+
+  const replayedEndTurn = await request.put(endTurnPut.url(), { data: endTurnEnvelope })
+  expect(replayedEndTurn.ok()).toBeTruthy()
+  expect(await replayedEndTurn.json()).toMatchObject({
+    replayed: true,
+    receipt: { commandId: endTurnEnvelope.command.commandId, status: 'committed' },
+  })
+  await player.waitForTimeout(500)
+  expect((await (await request.get(`${DM}/api/state/combat`)).json() as { initiativeIndex: number }).initiativeIndex)
+    .toBe(1)
+  expect(playerPageErrors).toEqual([])
   await context.close()
 })

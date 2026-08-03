@@ -44,7 +44,8 @@ export type Dnd5eCombatActionCommand =
     }
   | { kind: 'toggle-spell-modifier'; modifier: Dnd5eCombatSpellModifier }
   | { kind: 'use-class-feature'; payload: Dnd5eClassFeaturePayload }
-  | { kind: 'select-arcane-charge-destination' }
+  | { kind: 'select-extra-action-teleport-destination' }
+  | { kind: 'move-persistent-area'; areaId: string }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
   | { kind: 'use-item'; instanceId: string }
   | { kind: 'end-turn' }
@@ -327,12 +328,15 @@ export function reconcileDnd5eCombatHotbarPreference(
   descriptors: readonly Dnd5eCombatActionDescriptorV1[],
 ): Dnd5eCombatHotbarPreferenceV1 {
   const availableIds = new Set(descriptors.map((entry) => entry.id))
-  // Escape is a transient condition response, not a user-customizable shortcut.
-  // Keep it visible ahead of persisted actions so an old localStorage order can
-  // never hide the only legal way to end an active grapple.
+  // Escape and active persistent-area controls are transient responses, not
+  // user-customizable shortcuts. Keep them visible ahead of persisted actions
+  // so an old localStorage order cannot hide the currently legal interaction.
   const priorityIds = descriptors
     .map((entry) => entry.id)
-    .filter((id) => id.startsWith('system:escape-grapple:'))
+    .filter((id) =>
+      id.startsWith('system:escape-grapple:') ||
+      id.startsWith('feature:persistent-area-move:'),
+    )
   const priorityIdSet = new Set(priorityIds)
   const saved = preference?.actionIds.filter((id, index, values) =>
     availableIds.has(id) && !priorityIdSet.has(id) && values.indexOf(id) === index,

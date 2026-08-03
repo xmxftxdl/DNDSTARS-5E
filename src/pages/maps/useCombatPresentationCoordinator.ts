@@ -38,6 +38,10 @@ export interface CombatPresentationCoordinator {
 
 export function useCombatPresentationCoordinator(
   map: BattleMap | null | undefined,
+  options: {
+    bannersEnabled?: boolean
+    spellAnimationsEnabled?: boolean
+  } = {},
 ): CombatPresentationCoordinator {
   const [state, setState] = useState<CombatPresentationState>(EMPTY_COMBAT_PRESENTATION_STATE)
   const [clockRevision, setClockRevision] = useState(0)
@@ -81,11 +85,11 @@ export function useCombatPresentationCoordinator(
   const projectiles = useMemo(
     () => {
       void clockRevision
-      return map
+      return map && options.spellAnimationsEnabled !== false
         ? combatPresentationProjectilesForMap(state, map, combatPresentationServerNow())
         : []
     },
-    [clockRevision, map, state],
+    [clockRevision, map, options.spellAnimationsEnabled, state],
   )
 
   const attackTargetEffects = useMemo(
@@ -105,31 +109,31 @@ export function useCombatPresentationCoordinator(
   const spellBanner = useMemo(
     () => {
       void clockRevision
-      return map
+      return map && options.bannersEnabled !== false
         ? combatPresentationSpellBannerForMap(state, map.id, combatPresentationServerNow())
         : null
     },
-    [clockRevision, map, state],
+    [clockRevision, map, options.bannersEnabled, state],
   )
 
   const killStreak = useMemo(
     () => {
       void clockRevision
-      return map
+      return map && options.bannersEnabled !== false
         ? combatPresentationKillStreakForMap(state, map.id, combatPresentationServerNow())
         : null
     },
-    [clockRevision, map, state],
+    [clockRevision, map, options.bannersEnabled, state],
   )
 
   const attackBanner = useMemo(
     () => {
       void clockRevision
-      return map
+      return map && options.bannersEnabled !== false
         ? combatPresentationAttackBannerForMap(state, map.id, combatPresentationServerNow())
         : null
     },
-    [clockRevision, map, state],
+    [clockRevision, map, options.bannersEnabled, state],
   )
 
   const savingThrow = useMemo(

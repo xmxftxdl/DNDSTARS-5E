@@ -11,7 +11,7 @@ import {
   dnd5eOffHandWeaponAttackProfile,
   dnd5eWalkingSpeed,
   dnd5eWeaponAttackProfile,
-  dnd5eTotemWarriorFeatureForCharacter,
+  dnd5eRageFeatureForCharacter,
   getDnd5eSrdMonster,
   DND5E_SRD_CLASS_DEFINITIONS,
   normalizeDnd5eClassLevels,
@@ -358,22 +358,22 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
     const canFrenzy = subclassId === 'berserker' && character.level >= 3
     const raging = character.dnd5eCombatState?.raging === true
     const frenzying = character.dnd5eCombatState?.frenzying === true
-    const eagleTotem = !!dnd5eTotemWarriorFeatureForCharacter(
+    const rageBonusDashFeature = dnd5eRageFeatureForCharacter(
       character,
-      'totem-spirit-eagle',
+      'rage-mobile-defense',
     )
-    const wolfAttunement = !!dnd5eTotemWarriorFeatureForCharacter(
+    const rageBonusProneFeature = dnd5eRageFeatureForCharacter(
       character,
-      'totemic-attunement-wolf',
+      'bonus-prone-on-hit',
     )
-    const wolfTargetIds = new Set(
-      character.dnd5eCombatState?.totemWarriorWolfAttunementTargetIds ?? [],
+    const bonusProneTargetIds = new Set(
+      character.dnd5eCombatState?.bonusProneEligibleTargetIds ?? [],
     )
-    const wolfTargets = livingTargets.filter((target) =>
-      target.tokenType === 'enemy' && wolfTargetIds.has(target.tokenId),
+    const bonusProneTargets = livingTargets.filter((target) =>
+      target.tokenType === 'enemy' && bonusProneTargetIds.has(target.tokenId),
     )
-    const wolfTarget = wolfTargets.find((entry) => entry.tokenId === selectedTargetId) ??
-      wolfTargets[0]
+    const bonusProneTarget = bonusProneTargets.find((entry) => entry.tokenId === selectedTargetId) ??
+      bonusProneTargets[0]
     const intimidatingTargets = livingTargets.filter((target) => target.tokenType === 'enemy' && target.distanceFeet <= 30)
     const intimidatingTarget = intimidatingTargets.find((entry) => entry.tokenId === selectedTargetId) ?? intimidatingTargets[0]
     controls = <div className="grid gap-2">
@@ -391,22 +391,23 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
           ? { feature: 'barbarian-rage', end: true }
           : { feature: 'barbarian-rage', frenzy: canFrenzy && enterFrenzy })}
       />
-      {eagleTotem ? <FeatureButton
-        label="鹰图腾疾走"
+      {rageBonusDashFeature ? <FeatureButton
+        label="狂暴特性疾走"
         detail="附赠动作 · 狂暴期间增加一份当前步行速度的本回合移动"
-        disabled={disabled || !bonusAvailable || !raging || heavyArmor}
-        onClick={() => onFeature({ feature: 'barbarian-totem-eagle-dash' })}
+        disabled={disabled || !bonusAvailable || !raging ||
+          (rageBonusDashFeature.mechanic.requiresNoHeavyArmor === true && heavyArmor === true)}
+        onClick={() => onFeature({ feature: 'feature-rage-bonus-dash' })}
       /> : null}
-      {wolfAttunement && wolfTargets.length > 0 ? <TargetFeatureControl
-        label="狼图腾击倒"
-        detail="附赠动作 · 选择本回合已被你近战命中的大型或更小目标"
-        targets={wolfTargets}
-        selectedId={wolfTarget?.tokenId ?? ''}
+      {rageBonusProneFeature && bonusProneTargets.length > 0 ? <TargetFeatureControl
+        label="狂暴特性击倒"
+        detail="附赠动作 · 选择本回合已被你近战命中且符合本地特性限制的目标"
+        targets={bonusProneTargets}
+        selectedId={bonusProneTarget?.tokenId ?? ''}
         onSelected={setSelectedTargetId}
-        disabled={disabled || !bonusAvailable || !raging || !wolfTarget}
-        onUse={() => wolfTarget && onFeature({
-          feature: 'barbarian-totem-wolf-knockdown',
-          targetTokenId: wolfTarget.tokenId,
+        disabled={disabled || !bonusAvailable || !raging || !bonusProneTarget}
+        onUse={() => bonusProneTarget && onFeature({
+          feature: 'feature-rage-bonus-prone',
+          targetTokenId: bonusProneTarget.tokenId,
         })}
       /> : null}
       {subclassId === 'berserker' && character.level >= 10 ? <TargetFeatureControl

@@ -10,7 +10,6 @@ import {
   dnd5ePendingTurnStartPeriodicDamage,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
-  resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterMechanicRoll,
@@ -18,6 +17,11 @@ import {
   type Dnd5eTurnStartGazeRequirement,
   type Dnd5eTurnStartGazeResolution,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eIsIncapacitated, dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
@@ -32,7 +36,10 @@ import {
 } from './activeEffects'
 import type { Dnd5eDamageType } from './damageTypes'
 import { getDnd5eSrdMonster } from './monsters'
-import { dnd5eMonsterRechargeActions } from './monsterGenericAbilities'
+import {
+  dnd5eMonsterRechargeActions,
+  dnd5eMonsterTurnStartTraitRollRequirements,
+} from './monsterGenericAbilities'
 import {
   dnd5eEligibleMonsterMechanics,
   dnd5eMonsterMechanicDiceRequirements,
@@ -42,7 +49,7 @@ import {
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
 } from '../../lib/mapGeometry'
-import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
+import { dnd5eRageFeatureForCombatant } from './rageFeature'
 
 export type Dnd5eEndTurnRejectReason = 'invalid-action' | 'invalid-actor' | 'combatant-missing'
 
@@ -99,7 +106,7 @@ export interface PreparedDnd5ePlayerEndTurn {
     }
   }[]
   turnStartGazeRequirements: readonly Dnd5eTurnStartGazeRequirement[]
-  totemEagleFall?: {
+  rageFlightFall?: {
     landingElevationFeet: number
     distanceFeet: number
     fallingDamageDice: number
@@ -199,18 +206,32 @@ export function prepareDnd5ePlayerEndTurn(input: {
   const nextTurnRound = snapshot.state.round +
     (actorIndex + 1 >= snapshot.state.initiativeOrder.length ? 1 : 0)
   const nextMonster = nextCombatant?.statBlockId ? getDnd5eSrdMonster(nextCombatant.statBlockId) : undefined
-  const nextMonsterRechargeRolls = nextCombatant ? dnd5eMonsterRechargeActions(nextMonster).flatMap((monsterAction) => {
-    const usage = monsterAction.usage
-    if (usage?.kind !== 'recharge' || nextCombatant.classState.monsterRechargeReadyByActionId?.[monsterAction.id] !== false) return []
-    return [{
+  const nextMonsterRechargeRolls = nextCombatant ? [
+    ...dnd5eMonsterRechargeActions(nextMonster).flatMap((monsterAction) => {
+      const usage = monsterAction.usage
+      if (usage?.kind !== 'recharge' || nextCombatant.classState.monsterRechargeReadyByActionId?.[monsterAction.id] !== false) return []
+      return [{
+        actorId: nextCombatant.id,
+        actorName: nextCombatant.name,
+        actionId: monsterAction.id,
+        actionName: monsterAction.name,
+        dieSides: usage.dieSides,
+        minimum: usage.minimum,
+      }]
+    }),
+    ...dnd5eMonsterTurnStartTraitRollRequirements({
+      monster: nextMonster,
+      currentHp: nextCombatant.currentHp,
+      berserk: nextCombatant.classState.monsterBerserk === true,
+    }).map((requirement) => ({
       actorId: nextCombatant.id,
       actorName: nextCombatant.name,
-      actionId: monsterAction.id,
-      actionName: monsterAction.name,
-      dieSides: usage.dieSides,
-      minimum: usage.minimum,
-    }]
-  }) : []
+      actionId: requirement.id,
+      actionName: requirement.name,
+      dieSides: requirement.dieSides,
+      minimum: requirement.minimum,
+    })),
+  ] : []
   const currentMonsterMechanicRolls = dnd5eEligibleMonsterMechanics(monster, 'turn-end', {
     combatId: snapshot.state.combatId,
     round: snapshot.state.round,
@@ -339,9 +360,9 @@ export function prepareDnd5ePlayerEndTurn(input: {
       )
     : []
   const eagleAttunement =
-    !!dnd5eTotemWarriorFeatureForCombatant(
+    !!dnd5eRageFeatureForCombatant(
       actorCombatant,
-      'totemic-attunement-eagle',
+      'turn-flight',
     )
   const hasOtherFlight = Math.max(
     actorCombatant.movementSpeeds?.fly ?? 0,
@@ -358,7 +379,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
   const safeFall = eagleFallDistanceFeet <= dnd5eActiveSafeFallFeet(
     actorCombatant.classState.activeEffects,
   ) && !dnd5eIsIncapacitated(actorCombatant)
-  const totemEagleFall =
+  const rageFlightFall =
     eagleAttunement &&
     !hasOtherFlight &&
     actorCombatant.airborne === true
@@ -382,7 +403,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
       turnStartActiveEffectSavingThrows,
       turnStartActiveEffectPeriodicDamage,
       turnStartGazeRequirements,
-      totemEagleFall,
+      rageFlightFall,
       nextTurnSlotId,
       nextMonsterRechargeRolls,
       currentMonsterMechanicRolls,
@@ -403,7 +424,8 @@ export function resolveDnd5ePlayerEndTurn(input: {
   nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
   currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
-  totemEagleFallingDamageRolls?: readonly number[]
+  rageFlightFallingDamageRolls?: readonly number[]
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
   ok: true
   actor?: Character
@@ -411,11 +433,16 @@ export function resolveDnd5ePlayerEndTurn(input: {
   actorToken: Token
   result: Dnd5eActionResult
   application: Dnd5eMapResultPlan
-} | { ok: false; reason: Dnd5eEndTurnRejectReason } {
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} | {
+  ok: false
+  reason: Dnd5eEndTurnRejectReason
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const prepared = prepareDnd5ePlayerEndTurn(input)
   if (!prepared.ok) return prepared
   const { actor, actorName, actorToken, state, characterIdByCombatantId } = prepared.prepared
-  const result = resolveDnd5eHeadlessAction(
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(
     state,
     {
       type: 'end-turn', actorId: actorToken.id,
@@ -428,18 +455,20 @@ export function resolveDnd5ePlayerEndTurn(input: {
       currentMonsterMechanicRolls: input.currentMonsterMechanicRolls,
       nextMonsterRechargeRolls: input.nextMonsterRechargeRolls,
       nextMonsterMechanicRolls: input.nextMonsterMechanicRolls,
-      totemEagleLandingElevationFeet:
-        prepared.prepared.totemEagleFall?.landingElevationFeet,
-      totemEagleFallingDamageRolls: input.totemEagleFallingDamageRolls,
+      rageFlightLandingElevationFeet:
+        prepared.prepared.rageFlightFall?.landingElevationFeet,
+      rageFlightFallingDamageRolls: input.rageFlightFallingDamageRolls,
     },
+    input.airborneFallDamageRollsByCombatantId,
   )
-  if (!result.ok) return { ok: false, reason: 'invalid-action' }
+  if (!result.ok) return { ok: false, reason: 'invalid-action', airborneFalls }
   return {
     ok: true,
     actor,
     actorName,
     actorToken,
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: input.map,

@@ -1,8 +1,8 @@
 import type { Character } from '../../types/character'
 import {
-  DND5E_2014_TOTEM_WARRIOR_FEATURES,
-  type DeclarativeTotemWarriorMechanicV1,
-  type Dnd5e2014TotemWarriorFeatureId,
+  DND5E_RAGE_FEATURE_OPERATIONS,
+  type DeclarativeRageFeatureMechanicV1,
+  type Dnd5eRageFeatureOperation,
 } from './declarativeSubclassAbility'
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { dnd5eCharacterClassLevel } from './multiclass'
@@ -11,59 +11,59 @@ import {
   dnd5ePluginSubclassDefinition,
 } from './pluginApi'
 
-export interface Dnd5eTotemWarriorFeatureDefinition {
+export interface Dnd5eRageFeatureDefinition {
   featureId: string
-  feature: Dnd5e2014TotemWarriorFeatureId
+  operation: Dnd5eRageFeatureOperation
   minimumLevel: number
-  mechanic: DeclarativeTotemWarriorMechanicV1
+  mechanic: DeclarativeRageFeatureMechanicV1
 }
 
 function definitionForSubclass(
   subclassId: string | undefined,
   barbarianLevel: number,
-  feature: Dnd5e2014TotemWarriorFeatureId,
-): Dnd5eTotemWarriorFeatureDefinition | undefined {
+  operation: Dnd5eRageFeatureOperation,
+): Dnd5eRageFeatureDefinition | undefined {
   if (!subclassId || barbarianLevel < 1) return undefined
   const subclass = dnd5ePluginSubclassDefinition(subclassId)
   if (subclass?.classId !== 'barbarian') return undefined
   const registeredFeature = subclass.features.find((candidate) =>
     candidate.level <= barbarianLevel &&
     candidate.automation === 'full' &&
-    candidate.declarativeAbility?.mechanic?.kind === 'totem-warrior-2014' &&
-    candidate.declarativeAbility.mechanic.feature === feature
+    candidate.declarativeAbility?.mechanic?.kind === 'rage-feature' &&
+    candidate.declarativeAbility.mechanic.operation === operation
   )
   const mechanic = registeredFeature?.declarativeAbility?.mechanic
-  if (!registeredFeature || mechanic?.kind !== 'totem-warrior-2014') return undefined
+  if (!registeredFeature || mechanic?.kind !== 'rage-feature') return undefined
   return {
     featureId: registeredFeature.featureId,
-    feature,
+    operation,
     minimumLevel: registeredFeature.level,
     mechanic,
   }
 }
 
-export function dnd5eTotemWarriorFeatureForCharacter(
+export function dnd5eRageFeatureForCharacter(
   character: Character,
-  feature: Dnd5e2014TotemWarriorFeatureId,
-): Dnd5eTotemWarriorFeatureDefinition | undefined {
+  operation: Dnd5eRageFeatureOperation,
+): Dnd5eRageFeatureDefinition | undefined {
   const definition = definitionForSubclass(
     character.dnd5eClassChoices?.classes?.barbarian?.subclass,
     dnd5eCharacterClassLevel(character, 'barbarian'),
-    feature,
+    operation,
   )
   return definition && dnd5eCharacterHasPluginFeature(character, definition.featureId)
     ? definition
     : undefined
 }
 
-export function dnd5eTotemWarriorFeatureForCombatant(
+export function dnd5eRageFeatureForCombatant(
   combatant: Pick<
     Dnd5eCombatant,
     'classId' | 'level' | 'classLevels' | 'subclassIds' | 'pluginFeatureIds'
   >,
-  feature: Dnd5e2014TotemWarriorFeatureId,
-): Dnd5eTotemWarriorFeatureDefinition | undefined {
-  if (!(DND5E_2014_TOTEM_WARRIOR_FEATURES as readonly string[]).includes(feature)) {
+  operation: Dnd5eRageFeatureOperation,
+): Dnd5eRageFeatureDefinition | undefined {
+  if (!(DND5E_RAGE_FEATURE_OPERATIONS as readonly string[]).includes(operation)) {
     return undefined
   }
   const barbarianLevel = combatant.classLevels?.barbarian ??
@@ -71,20 +71,18 @@ export function dnd5eTotemWarriorFeatureForCombatant(
   const definition = definitionForSubclass(
     combatant.subclassIds?.barbarian,
     barbarianLevel,
-    feature,
+    operation,
   )
   return definition && combatant.pluginFeatureIds.includes(definition.featureId)
     ? definition
     : undefined
 }
 
-export function dnd5eTotemWarriorCarryingCapacityMultiplier(
+export function dnd5eRageFeatureCarryingCapacityMultiplier(
   character: Character,
 ): number {
-  return dnd5eTotemWarriorFeatureForCharacter(
+  return dnd5eRageFeatureForCharacter(
     character,
-    'aspect-of-the-beast-bear',
-  )
-    ? 2
-    : 1
+    'object-strength-and-carrying',
+  )?.mechanic.carryingCapacityMultiplier ?? 1
 }

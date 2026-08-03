@@ -6,6 +6,7 @@ import {
   DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
   DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION,
   compileDnd5eLocalContentCollection,
+  prepareDnd5eLocalContentJson,
 } from './localContentCollection'
 import { parseDnd5eContentPackageV2 } from './contentPackageV2'
 
@@ -26,6 +27,103 @@ function localCollectionFiles(directory: string, base = directory): File[] {
 }
 
 describe('本地房间内容合集', () => {
+  it('keeps the public single-file JSON example importable', async () => {
+    const prepared = await prepareDnd5eLocalContentJson(readFileSync(
+      new URL('../../../examples/local-room-rules-single-file.json', import.meta.url),
+      'utf8',
+    ))
+    expect(prepared.sourceKind).toBe('content-shorthand')
+    expect(prepared.package.content.features).toEqual([
+      expect.objectContaining({ id: 'example-room-feature', automation: 'manual' }),
+    ])
+  })
+
+  it('accepts a fenced shorthand JSON document and creates a stable ephemeral package', async () => {
+    const source = {
+      name: 'Portable room rules',
+      races: [{
+        id: 'swiftfolk',
+        name: 'Swiftfolk',
+        speedFeet: 35,
+        size: 'medium',
+        skillProficiencies: [],
+        languages: [],
+        traits: [],
+      }],
+    }
+    const first = await prepareDnd5eLocalContentJson(
+      `\`\`\`json\n${JSON.stringify(source)}\n\`\`\``,
+    )
+    const second = await prepareDnd5eLocalContentJson(JSON.stringify(source))
+    expect(first.sourceKind).toBe('content-shorthand')
+    expect(first.package.manifest).toMatchObject({
+      id: second.package.manifest.id,
+      name: 'Portable room rules',
+      distributionPolicy: 'room-ephemeral',
+    })
+    expect(first.package.content.races).toEqual([
+      expect.objectContaining({ id: 'swiftfolk', speedFeet: 35 }),
+    ])
+  })
+
+  it('accepts a self-contained collection with an embedded AI-generated image', async () => {
+    const prepared = await prepareDnd5eLocalContentJson(JSON.stringify({
+      format: DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
+      schemaVersion: DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION,
+      manifest: {
+        id: 'local.example.portable-json',
+        name: 'Portable JSON',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Local test',
+        license: 'Private local use',
+        contentCategory: 'mixed',
+      },
+      content: {
+        races: [{
+          id: 'emberkin', name: 'Emberkin', speedFeet: 30, size: 'medium',
+          skillProficiencies: [], languages: [], traits: [],
+        }],
+      },
+      images: [{
+        id: 'emberkin-icon',
+        mediaType: 'image/png',
+        dataBase64: ONE_PIXEL_PNG,
+        origin: 'ai-generated',
+        prompt: 'private generation prompt',
+        targets: [{ category: 'race', id: 'emberkin', slot: 'icon' }],
+      }],
+    }))
+    expect(prepared.sourceKind).toBe('local-collection')
+    expect(prepared.audit?.complete).toBe(true)
+    expect(prepared.package.content.races[0]).toMatchObject({
+      id: 'emberkin',
+      iconAssetId: 'emberkin-icon',
+    })
+    expect(prepared.package.assets).toEqual([
+      expect.objectContaining({ id: 'emberkin-icon', mediaType: 'image/png' }),
+    ])
+    expect(new TextDecoder().decode(prepared.bytes)).not.toContain('private generation prompt')
+  })
+
+  it('accepts a previously compiled room-ephemeral V2 JSON as a single file', async () => {
+    const compiled = await prepareDnd5eLocalContentJson(JSON.stringify({
+      name: 'Round trip rules',
+      races: [{
+        id: 'round-trip-race', name: 'Round Trip', speedFeet: 30, size: 'medium',
+        skillProficiencies: [], languages: [], traits: [],
+      }],
+    }))
+    const prepared = await prepareDnd5eLocalContentJson(
+      new TextDecoder().decode(compiled.bytes),
+      'round-trip.json',
+    )
+    expect(prepared.sourceKind).toBe('content-package-v2')
+    expect(prepared.fileName).toBe('round-trip.json')
+    expect(prepared.package.manifest.id).toBe(compiled.package.manifest.id)
+  })
+
   it('merges multiple local JSON tables for the same content category', async () => {
     const collection = {
       format: DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
@@ -99,7 +197,24 @@ describe('本地房间内容合集', () => {
         distributionPolicy: 'room-ephemeral',
       })
       expect(parsed?.content).toMatchObject({
-        races: expect.arrayContaining([expect.objectContaining({ id: 'hill-dwarf' })]),
+        races: expect.arrayContaining([
+          expect.objectContaining({ id: 'hill-dwarf', coreRaceMechanicsId: 'dwarf' }),
+          expect.objectContaining({ id: 'stout-halfling', naturalOneReroll: true }),
+          expect.objectContaining({
+            id: 'drow',
+            coreRaceMechanicsId: 'elf',
+            innateSpells: expect.arrayContaining([
+              expect.objectContaining({ spellId: 'faerie-fire', minimumLevel: 3 }),
+            ]),
+          }),
+          expect.objectContaining({
+            id: 'forest-gnome',
+            coreRaceMechanicsId: 'gnome',
+            innateSpells: expect.arrayContaining([
+              expect.objectContaining({ spellId: 'minor-illusion', minimumLevel: 1 }),
+            ]),
+          }),
+        ]),
         backgrounds: expect.arrayContaining([expect.objectContaining({ id: 'soldier' })]),
         subclasses: expect.arrayContaining([
           expect.objectContaining({ id: 'battle-master-2014' }),

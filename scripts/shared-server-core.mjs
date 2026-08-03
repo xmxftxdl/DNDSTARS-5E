@@ -23,6 +23,14 @@ import {
 import { openSqliteAccountStore } from './account-storage-sqlite.mjs'
 import { openPostgresStorage } from './postgres-storage.mjs'
 import {
+  AI_JOB_LOCAL_LEASE_MS,
+  AI_JOB_MAX_PER_CAMPAIGN,
+  normalizeAiJobCreateRequestV2,
+  normalizeAiJobRecordV2,
+  normalizePdfCampaignAnalysisArtifactV1,
+  publicAiJobV2,
+} from '../shared/ai-job.mjs'
+import {
   compileGeometryCached,
   doorOpenState,
   raycastGeometry,
@@ -33,6 +41,12 @@ import {
   applyDnd5eEffectiveVisionProfile,
   compileDnd5eEffectiveVisionProfile,
 } from '../shared/dnd5e-vision-profile.mjs'
+import {
+  COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
+  isCombatPresentationAreaSpellId,
+  isCombatPresentationProjectileSpellId,
+  isCombatPresentationTargetEffectSpellId,
+} from '../shared/combat-presentation-contract.mjs'
 import {
   analyzeMarketplaceDeclarativePackage,
   MARKETPLACE_CREATOR_NOTICE_VERSION,
@@ -610,9 +624,53 @@ const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
   'player-action-requests',
   'player-action-ack',
   'player-action-processed',
+  'combat-command-receipts',
   'map-geometry',
   'room-journal',
 ])
+
+export const COMBAT_COMMAND_SCHEMA_VERSION = 1
+export const COMBAT_COMMAND_RECEIPT_RESOURCE = 'combat-command-receipts'
+const COMBAT_COMMAND_MAX_ID_LENGTH = 160
+// Commands and receipts form one idempotency record. Keep the same terminal
+// horizon for both halves so GC can never strand a receipt without the payload
+// fingerprint/preconditions needed to settle it.
+const COMBAT_COMMAND_LOG_LIMIT = 1_024
+const COMBAT_COMMAND_RECEIPT_LIMIT = 1_024
+
+/**
+ * Retain every pending command regardless of the terminal-history budget, and
+ * evict terminal entries as command/receipt pairs. The command channel admits
+ * at most one pending command per actor turn, but stale turns may coexist while
+ * a DM is offline; dropping one would turn a durable command into an
+ * unqueryable, non-idempotent legacy ACK.
+ */
+export function compactCombatCommandHistory(commandsInput, receiptsInput) {
+  const commands = Array.isArray(commandsInput) ? commandsInput : []
+  const receipts = Array.isArray(receiptsInput) ? receiptsInput : []
+  const commandById = new Map()
+  for (const command of commands) {
+    if (validCombatCommandId(command?.commandId)) commandById.set(command.commandId, command)
+  }
+  const receiptById = new Map()
+  const orderedIds = []
+  for (const receipt of receipts) {
+    if (!validCombatCommandId(receipt?.commandId)) continue
+    if (!receiptById.has(receipt.commandId)) orderedIds.push(receipt.commandId)
+    receiptById.set(receipt.commandId, receipt)
+  }
+  const pairedIds = orderedIds.filter((commandId) => commandById.has(commandId))
+  const pendingIds = pairedIds.filter((commandId) => receiptById.get(commandId)?.status === 'pending')
+  const terminalIds = pairedIds
+    .filter((commandId) => receiptById.get(commandId)?.status !== 'pending')
+    .slice(-Math.min(COMBAT_COMMAND_LOG_LIMIT, COMBAT_COMMAND_RECEIPT_LIMIT))
+  const retained = new Set([...pendingIds, ...terminalIds])
+  const retainedIds = pairedIds.filter((commandId) => retained.has(commandId))
+  return {
+    commands: retainedIds.map((commandId) => commandById.get(commandId)),
+    receipts: retainedIds.map((commandId) => receiptById.get(commandId)),
+  }
+}
 
 function sharedStateTransactionLockPath(ctx) {
   return path.join(ctx.stateRoot, '.state-transaction')
@@ -658,9 +716,7 @@ async function recoverSharedStateTransaction(ctx) {
  * interleave with a HP edit or token move from another request. A runtime I/O
  * failure restores every file already written before releasing the lock.
  */
-async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transactionId) {
-  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
-    await recoverSharedStateTransaction(ctx)
+async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, transactionId, options = {}) {
     const prepared = []
     for (const write of writes) {
       const filePath = path.join(ctx.stateRoot, `${write.name}.json`)
@@ -705,10 +761,30 @@ async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transact
     }
 
     const revisions = Object.fromEntries(prepared.map((entry) => [entry.name, entry.revision]))
+    const authorityRevisions = Object.fromEntries(
+      Object.entries(revisions).filter(([name]) => name !== COMBAT_COMMAND_RECEIPT_RESOURCE),
+    )
     const ackEntry = prepared.find((entry) => entry.name === 'player-action-ack')
     if (ackEntry) {
-      ackEntry.next = { ...ackEntry.next, authorityRevisions: revisions }
+      ackEntry.next = { ...ackEntry.next, authorityRevisions }
       ackEntry.nextBody = JSON.stringify(ackEntry.next)
+    }
+    const commandReceiptEntry = prepared.find((entry) => entry.name === COMBAT_COMMAND_RECEIPT_RESOURCE)
+    if (commandReceiptEntry && options.commandSettlement) {
+      const settlement = options.commandSettlement
+      commandReceiptEntry.next = {
+        ...commandReceiptEntry.next,
+        receipts: commandReceiptEntry.next.receipts.map((receipt) =>
+          receipt.commandId === settlement.commandId
+            ? {
+                ...receipt,
+                ...(receipt.status === 'committed'
+                  ? { authoritative: { ...receipt.authoritative, revisions: authorityRevisions } }
+                  : {}),
+              }
+            : receipt),
+      }
+      commandReceiptEntry.nextBody = JSON.stringify(commandReceiptEntry.next)
     }
     const journalPath = sharedStateTransactionJournalPath(ctx)
     const journal = {
@@ -742,6 +818,706 @@ async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transact
       entries: prepared,
       revisions,
     }
+}
+
+async function readSharedStateFile(ctx, name) {
+  try {
+    const body = await readFile(path.join(ctx.stateRoot, `${name}.json`), 'utf8')
+    return { body, value: JSON.parse(body) }
+  } catch {
+    return { body: null, value: null }
+  }
+}
+
+function combatCommandSettlementFromAck(ack) {
+  if (!plainObject(ack) || !validCombatCommandId(ack.actionId)) return null
+  if (ack.status !== 'accepted' && ack.status !== 'rejected') return null
+  const mapId = boundedText(ack.mapId, 180)
+  const combatId = boundedText(ack.combatId, 180)
+  if (!mapId || !combatId) return null
+  return {
+    commandId: ack.actionId,
+    status: ack.status === 'accepted' ? 'committed' : 'rejected',
+    mapId,
+    combatId,
+    round: Number.isInteger(ack.round) ? ack.round : 0,
+    initiativeIndex: Number.isInteger(ack.initiativeIndex) ? ack.initiativeIndex : 0,
+    appliedAt: Number.isFinite(ack.appliedAt) ? ack.appliedAt : Date.now(),
+    ...(validCombatCommandPosition(ack.acceptedPosition)
+      ? { acceptedPosition: { x: ack.acceptedPosition.x, y: ack.acceptedPosition.y } }
+      : {}),
+    ...(Number.isFinite(ack.acceptedElevationFeet)
+      ? { acceptedElevationFeet: ack.acceptedElevationFeet }
+      : {}),
+    ...(boundedText(ack.reason, 300) ? { reason: boundedText(ack.reason, 300) } : {}),
+  }
+}
+
+function sameCombatCommandSettlement(receipt, settlement) {
+  if (receipt?.status !== settlement.status || (receipt?.reason ?? '') !== (settlement.reason ?? '')) return false
+  if (settlement.status === 'rejected') return true
+  const authority = receipt?.authoritative
+  return authority?.mapId === settlement.mapId &&
+    (authority?.combatId ?? '') === (settlement.combatId ?? '') &&
+    authority?.round === settlement.round &&
+    authority?.initiativeIndex === settlement.initiativeIndex &&
+    JSON.stringify(authority?.acceptedPosition ?? null) === JSON.stringify(settlement.acceptedPosition ?? null) &&
+    (authority?.acceptedElevationFeet ?? null) === (settlement.acceptedElevationFeet ?? null)
+}
+
+function combatCommandSettlementPreconditionConflict(command, settlement, combat, maps) {
+  if (!plainObject(command) || command.mapId !== settlement.mapId || command.combatId !== settlement.combatId) {
+    return 'combat-command-settlement-identity-conflict'
+  }
+  if (boundedText(maps?.selectedId, 180) !== command.mapId) {
+    return 'combat-command-entity-conflict'
+  }
+  if (!plainObject(combat) || combat.active !== true || combat.mapId !== command.mapId ||
+    combat.combatId !== command.combatId || combat.round !== command.round ||
+    combat.initiativeIndex !== command.initiativeIndex ||
+    combatInitiativeTokenId(combat) !== command.actorTokenId) {
+    return 'combat-command-entity-conflict'
+  }
+  const map = Array.isArray(maps?.maps)
+    ? maps.maps.find((candidate) => candidate?.id === command.mapId)
+    : null
+  const token = Array.isArray(map?.tokens)
+    ? map.tokens.find((candidate) => candidate?.id === command.actorTokenId)
+    : null
+  if (!token) return 'combat-command-actor-missing'
+  if (token.characterId !== command.characterId) return 'combat-command-character-mismatch'
+  if (command.type === 'move-token' && (
+    token.x !== command.expectedPosition?.x || token.y !== command.expectedPosition?.y ||
+    Number(token.elevationFeet ?? 0) !== command.expectedElevationFeet
+  )) return 'combat-command-position-conflict'
+  return null
+}
+
+function combatCommandAuthoritativeMoveOutcome(writes, command) {
+  const mapsWrite = writes.find((write) => write.name === 'maps')
+  const map = Array.isArray(mapsWrite?.data?.maps)
+    ? mapsWrite.data.maps.find((candidate) => candidate?.id === command.mapId)
+    : null
+  const token = Array.isArray(map?.tokens)
+    ? map.tokens.find((candidate) => candidate?.id === command.actorTokenId)
+    : null
+  if (!token || !Number.isFinite(token.x) || !Number.isFinite(token.y)) return null
+  const elevationFeet = Number(token.elevationFeet ?? 0)
+  if (!Number.isFinite(elevationFeet)) return null
+  return {
+    acceptedPosition: { x: token.x, y: token.y },
+    acceptedElevationFeet: elevationFeet,
+  }
+}
+
+async function terminalizeCombatCommandSettlementConflictUnlocked(input) {
+  const {
+    ctx, receiptState, receipts, existing, reason, writerId, transactionId, invalidateResources,
+  } = input
+  const queueState = await readSharedStateFile(ctx, 'player-action-requests')
+  const queued = Array.isArray(queueState.value?.requests) ? queueState.value.requests : []
+  const remaining = queued.filter((action) => action?.id !== existing.commandId)
+  const now = Date.now()
+  const nextReceipt = {
+    ...existing,
+    status: 'conflict',
+    updatedAt: now,
+    reason,
+  }
+  delete nextReceipt.authoritative
+  delete nextReceipt.retryable
+  const storedCommands = Array.isArray(receiptState.value?.commands) ? receiptState.value.commands : []
+  const nextReceipts = receipts.map((receipt) =>
+    receipt?.commandId === existing.commandId ? nextReceipt : receipt)
+  // A pre-upgrade/corrupt state may already contain a receipt whose command
+  // record was lost. Preserve its terminal rejection so the caller can observe
+  // the failure; all well-formed pairs use the normal terminal-only GC.
+  const history = storedCommands.some((record) => record?.commandId === existing.commandId)
+    ? compactCombatCommandHistory(storedCommands, nextReceipts)
+    : { commands: storedCommands, receipts: nextReceipts }
+  const terminalWrites = [{
+    name: COMBAT_COMMAND_RECEIPT_RESOURCE,
+    expectedRevision: sharedStateRevision(receiptState.value),
+    data: {
+      schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+      commands: history.commands,
+      receipts: history.receipts,
+      updatedAt: now,
+    },
+  }]
+  if (remaining.length !== queued.length) {
+    terminalWrites.push({
+      name: 'player-action-requests',
+      expectedRevision: sharedStateRevision(queueState.value),
+      data: {
+        ...queueState.value,
+        requests: remaining,
+        updatedAt: now,
+      },
+    })
+  }
+  const result = await atomicWriteSharedStateTransactionUnlocked(
+    ctx,
+    terminalWrites,
+    writerId,
+    `combat-command-conflict:${transactionId}`,
+  )
+  return {
+    ...result,
+    ok: false,
+    conflict: true,
+    settlementPreconditionConflict: true,
+    conflicts: [],
+    receipt: nextReceipt,
+    invalidateResources,
+    revisions: Object.fromEntries(
+      Object.entries(result.revisions ?? {}).filter(([name]) => name !== COMBAT_COMMAND_RECEIPT_RESOURCE),
+    ),
+  }
+}
+
+async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transactionId) {
+  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+    await recoverSharedStateTransaction(ctx)
+    const ackWrite = writes.find((write) => write.name === 'player-action-ack')
+    let settlement = combatCommandSettlementFromAck(ackWrite?.data)
+    if (!settlement) {
+      return atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, transactionId)
+    }
+
+    const receiptState = await readSharedStateFile(ctx, COMBAT_COMMAND_RECEIPT_RESOURCE)
+    const receipts = Array.isArray(receiptState.value?.receipts) ? receiptState.value.receipts : []
+    const existing = receipts.find((receipt) => receipt?.commandId === settlement.commandId)
+    const commandRecords = Array.isArray(receiptState.value?.commands) ? receiptState.value.commands : []
+    const commandRecord = commandRecords.find((record) => record?.commandId === settlement.commandId)
+    if (!existing) {
+      const queueState = await readSharedStateFile(ctx, 'player-action-requests')
+      const queuedAction = Array.isArray(queueState.value?.requests)
+        ? queueState.value.requests.find((action) => action?.id === settlement.commandId)
+        : null
+      const queuedCombatCommand = queuedAction?.status === 'pending' &&
+        (queuedAction.type === 'move-token' || queuedAction.type === 'end-turn') &&
+        boundedText(queuedAction.combatId, 180)
+      if (commandRecord || queuedCombatCommand) {
+        const commandType = commandRecord?.command?.type === 'move-token' || commandRecord?.command?.type === 'end-turn'
+          ? commandRecord.command.type
+          : queuedAction?.type === 'move-token' || queuedAction?.type === 'end-turn'
+            ? queuedAction.type
+            : null
+        const receipt = commandType
+          ? combatCommandConflictReceipt(
+              { commandId: settlement.commandId, type: commandType },
+              'combat-command-receipt-missing',
+            )
+          : undefined
+        return {
+          ok: false,
+          conflict: true,
+          settlementConflict: true,
+          missingCommandReceipt: true,
+          conflicts: [],
+          ...(receipt ? { receipt } : {}),
+        }
+      }
+      return atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, transactionId)
+    }
+    const command = validCombatCommandRecord(commandRecord) ? commandRecord.command : null
+    const moveOutcome = settlement.status === 'committed' && command?.type === 'move-token'
+      ? combatCommandAuthoritativeMoveOutcome(writes, command)
+      : null
+    if (moveOutcome) {
+      settlement = { ...settlement, ...moveOutcome }
+      ackWrite.data = { ...ackWrite.data, ...moveOutcome }
+    }
+    if (existing.status !== 'pending') {
+      if (!sameCombatCommandSettlement(existing, settlement)) {
+        return { ok: false, conflict: true, settlementConflict: true, conflicts: [] }
+      }
+      return {
+        ok: true,
+        replayed: true,
+        receipt: existing,
+        entries: [],
+        revisions: plainObject(existing.authoritative?.revisions) ? existing.authoritative.revisions : {},
+      }
+    }
+
+    const [combatState, mapsState] = await Promise.all([
+      readSharedStateFile(ctx, 'combat'),
+      readSharedStateFile(ctx, 'maps'),
+    ])
+    const preconditionConflict = command
+      ? combatCommandSettlementPreconditionConflict(
+          command,
+          settlement,
+          combatState.value,
+          mapsState.value,
+        )
+      : 'combat-command-record-missing'
+    if (preconditionConflict) {
+      return terminalizeCombatCommandSettlementConflictUnlocked({
+        ctx,
+        receiptState,
+        receipts,
+        existing,
+        reason: preconditionConflict,
+        writerId,
+        transactionId,
+        invalidateResources: writes
+          .map((write) => write.name)
+          .filter((name) => !['player-action-ack', 'player-action-processed'].includes(name)),
+      })
+    }
+
+    if (settlement.status === 'committed' && command.type === 'move-token') {
+      if (!moveOutcome) {
+        return terminalizeCombatCommandSettlementConflictUnlocked({
+          ctx,
+          receiptState,
+          receipts,
+          existing,
+          reason: 'combat-command-authoritative-move-result-missing',
+          writerId,
+          transactionId,
+          invalidateResources: ['maps'],
+        })
+      }
+    }
+
+    const now = Date.now()
+    const nextReceipt = settlement.status === 'committed'
+      ? {
+          ...existing,
+          status: 'committed',
+          updatedAt: now,
+          authoritative: {
+            appliedAt: settlement.appliedAt,
+            revisions: {},
+            mapId: settlement.mapId,
+            ...(settlement.combatId ? { combatId: settlement.combatId } : {}),
+            round: settlement.round,
+            initiativeIndex: settlement.initiativeIndex,
+            ...(settlement.acceptedPosition ? { acceptedPosition: settlement.acceptedPosition } : {}),
+            ...(settlement.acceptedElevationFeet != null
+              ? { acceptedElevationFeet: settlement.acceptedElevationFeet }
+              : {}),
+          },
+        }
+      : {
+          ...existing,
+          status: 'rejected',
+          updatedAt: now,
+          reason: settlement.reason || 'command-rejected',
+          retryable: false,
+        }
+    const history = compactCombatCommandHistory(
+      Array.isArray(receiptState.value?.commands) ? receiptState.value.commands : [],
+      receipts.map((receipt) => receipt?.commandId === settlement.commandId ? nextReceipt : receipt),
+    )
+    const receiptWrite = {
+      name: COMBAT_COMMAND_RECEIPT_RESOURCE,
+      expectedRevision: sharedStateRevision(receiptState.value),
+      data: {
+        schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+        commands: history.commands,
+        receipts: history.receipts,
+        updatedAt: now,
+      },
+    }
+    const result = await atomicWriteSharedStateTransactionUnlocked(
+      ctx,
+      [...writes, receiptWrite],
+      writerId,
+      transactionId,
+      { commandSettlement: settlement },
+    )
+    const committedReceiptState = result.entries?.find((entry) => entry.name === COMBAT_COMMAND_RECEIPT_RESOURCE)?.next
+    return {
+      ...result,
+      revisions: Object.fromEntries(
+        Object.entries(result.revisions ?? {}).filter(([name]) => name !== COMBAT_COMMAND_RECEIPT_RESOURCE),
+      ),
+      receipt: committedReceiptState?.receipts?.find((receipt) => receipt?.commandId === settlement.commandId),
+    }
+  })
+}
+
+function normalizeCombatCommandSubmission(commandId, command, member, role) {
+  if (!validCombatCommandId(commandId) || !plainObject(command)) return null
+  if (command.schemaVersion !== COMBAT_COMMAND_SCHEMA_VERSION) return null
+  if (command.commandId !== commandId) return null
+  if (command.type !== 'move-token' && command.type !== 'end-turn') return null
+  const baseKeys = new Set([
+    'schemaVersion', 'commandId', 'type', 'mapId', 'combatId', 'actorTokenId', 'characterId',
+    'round', 'initiativeIndex', 'seq', 'expectedRevisions', 'issuedAt',
+  ])
+  const moveKeys = new Set([
+    'expectedPosition', 'expectedElevationFeet', 'targetPosition', 'targetElevationFeet',
+    'dnd5eCarefulMovement', 'dnd5eStandFromProne', 'dnd5eTraversalMode',
+  ])
+  if (Object.keys(command).some((key) => !baseKeys.has(key) && !(command.type === 'move-token' && moveKeys.has(key)))) return null
+  const mapId = boundedText(command.mapId, 180)
+  const combatId = boundedText(command.combatId, 180)
+  const actorTokenId = boundedText(command.actorTokenId, 180)
+  const characterId = boundedText(command.characterId, 180)
+  const round = command.round
+  const initiativeIndex = command.initiativeIndex
+  const seq = command.seq
+  const issuedAt = command.issuedAt
+  if (!mapId || !combatId || !actorTokenId || !Number.isInteger(round) || round < 1 ||
+    !Number.isInteger(initiativeIndex) || initiativeIndex < 0 ||
+    !Number.isInteger(seq) || seq < 0 ||
+    typeof issuedAt !== 'number' || !Number.isFinite(issuedAt) || issuedAt < 0 ||
+    !characterId) return null
+
+  const expectedRevisions = command.expectedRevisions
+  if (!plainObject(expectedRevisions)) return null
+  if (Object.keys(expectedRevisions).some((key) => key !== 'combat' && key !== 'maps')) return null
+  const combatRevision = expectedRevisions.combat
+  const mapsRevision = expectedRevisions.maps
+  if (!Number.isInteger(combatRevision) || combatRevision < 0) return null
+  if (command.type === 'move-token' && (!Number.isInteger(mapsRevision) || mapsRevision < 0)) return null
+  if (mapsRevision != null && (!Number.isInteger(mapsRevision) || mapsRevision < 0)) return null
+
+  let targetPosition
+  let expectedPosition
+  if (command.type === 'move-token') {
+    if (
+      !validCombatCommandPosition(command.targetPosition) ||
+      !validCombatCommandPosition(command.expectedPosition) ||
+      typeof command.expectedElevationFeet !== 'number' ||
+      !Number.isFinite(command.expectedElevationFeet)
+    ) return null
+    targetPosition = { x: command.targetPosition.x, y: command.targetPosition.y }
+    expectedPosition = { x: command.expectedPosition.x, y: command.expectedPosition.y }
+  }
+  if (command.targetElevationFeet != null && (typeof command.targetElevationFeet !== 'number' || !Number.isFinite(command.targetElevationFeet))) return null
+  if (command.dnd5eCarefulMovement != null && typeof command.dnd5eCarefulMovement !== 'boolean') return null
+  if (command.dnd5eStandFromProne != null && typeof command.dnd5eStandFromProne !== 'boolean') return null
+  const traversalModes = new Set(['walk', 'climb', 'swim', 'fly', 'long-jump-running', 'long-jump-standing', 'fall'])
+  if (command.dnd5eTraversalMode != null && !traversalModes.has(command.dnd5eTraversalMode)) return null
+
+  const semantic = {
+    schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+    commandId,
+    issuedAt,
+    type: command.type,
+    mapId,
+    ...(combatId ? { combatId } : {}),
+    actorTokenId,
+    ...(characterId ? { characterId } : {}),
+    round,
+    initiativeIndex,
+    seq,
+    ...(targetPosition ? { targetPosition } : {}),
+    ...(expectedPosition ? { expectedPosition } : {}),
+    ...(command.targetElevationFeet != null ? { targetElevationFeet: command.targetElevationFeet } : {}),
+    ...(command.type === 'move-token' ? { expectedElevationFeet: command.expectedElevationFeet } : {}),
+    ...(command.dnd5eCarefulMovement != null ? { dnd5eCarefulMovement: command.dnd5eCarefulMovement } : {}),
+    ...(command.dnd5eStandFromProne != null ? { dnd5eStandFromProne: command.dnd5eStandFromProne } : {}),
+    ...(command.dnd5eTraversalMode != null ? { dnd5eTraversalMode: command.dnd5eTraversalMode } : {}),
+    expectedRevisions: {
+      combat: combatRevision,
+      ...(mapsRevision != null ? { maps: mapsRevision } : {}),
+    },
+  }
+  const fingerprint = createHash('sha256').update(JSON.stringify(semantic)).digest('hex')
+  return {
+    semantic,
+    fingerprint,
+    action: {
+      id: commandId,
+      mapId,
+      ...(combatId ? { combatId } : {}),
+      ...(member?.openDefaultCombatCommandPlayer === true ? {} : { roomMemberId: member.memberId }),
+      sourceMode: role,
+      status: 'pending',
+      type: command.type,
+      actorTokenId,
+      ...(characterId ? { characterId } : {}),
+      ...(targetPosition ? { targetPosition } : {}),
+      ...(command.targetElevationFeet != null ? { targetElevationFeet: command.targetElevationFeet } : {}),
+      ...(command.dnd5eCarefulMovement != null ? { dnd5eCarefulMovement: command.dnd5eCarefulMovement } : {}),
+      ...(command.dnd5eStandFromProne != null ? { dnd5eStandFromProne: command.dnd5eStandFromProne } : {}),
+      ...(command.dnd5eTraversalMode != null ? { dnd5eTraversalMode: command.dnd5eTraversalMode } : {}),
+      round,
+      initiativeIndex,
+      seq,
+    },
+  }
+}
+
+function combatInitiativeTokenId(combat) {
+  const order = Array.isArray(combat?.initiativeOrder) ? combat.initiativeOrder : []
+  const entry = order[combat?.initiativeIndex]
+  return typeof entry === 'string' ? entry : boundedText(entry?.tokenId, 180)
+}
+
+function combatCommandReceiptVisibleTo(receipt, member, role) {
+  return role === 'dm' || receipt?.submittedByMemberId === member?.memberId
+}
+
+function openDefaultCombatCommandPlayerIdentity(req) {
+  const declared = boundedText(req?.headers?.['x-stars-command-source'], 20).toLowerCase()
+  if (declared === 'player') return true
+  if (declared === 'dm') return false
+  const writerId = boundedText(req?.headers?.['x-stars-writer'], 180)
+  if (writerId.startsWith('player:')) return true
+  if (writerId.startsWith('dm:')) return false
+  const origin = normalizedHttpOrigin(req?.headers?.origin)
+  const host = boundedText(req?.headers?.host, 300)
+  if (!origin || !host) return false
+  try {
+    const originUrl = new URL(origin)
+    const authorityUrl = new URL(`http://${host}`)
+    const loopback = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+    return loopback.has(originUrl.hostname.toLowerCase()) &&
+      loopback.has(authorityUrl.hostname.toLowerCase()) &&
+      originUrl.port !== authorityUrl.port
+  } catch {
+    return false
+  }
+}
+
+function projectCombatCommandReceipt(receipt) {
+  if (!plainObject(receipt)) return null
+  const base = {
+    schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+    receiptId: receipt.receiptId,
+    commandId: receipt.commandId,
+    commandType: receipt.commandType,
+    status: receipt.status,
+    updatedAt: receipt.updatedAt,
+  }
+  if (receipt.status === 'committed') return { ...base, authoritative: receipt.authoritative }
+  if (receipt.status === 'rejected' || receipt.status === 'conflict') {
+    return {
+      ...base,
+      reason: boundedText(receipt.reason, 300) || 'command-rejected',
+      ...(typeof receipt.retryable === 'boolean' ? { retryable: receipt.retryable } : {}),
+    }
+  }
+  return base
+}
+
+function combatCommandConflictReceipt(command, reason, now = Date.now()) {
+  return {
+    schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+    receiptId: command.commandId,
+    commandId: command.commandId,
+    commandType: command.type,
+    status: 'conflict',
+    updatedAt: now,
+    reason,
+  }
+}
+
+async function atomicAppendCombatCommand(ctx, normalized, member, role) {
+  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+    await recoverSharedStateTransaction(ctx)
+    const receiptState = await readSharedStateFile(ctx, COMBAT_COMMAND_RECEIPT_RESOURCE)
+    const receipts = Array.isArray(receiptState.value?.receipts) ? receiptState.value.receipts : []
+    const existing = receipts.find((receipt) => receipt?.commandId === normalized.semantic.commandId)
+    if (existing) {
+      if (!combatCommandReceiptVisibleTo(existing, member, role)) {
+        return { ok: false, status: 403, error: 'forbidden' }
+      }
+      if (existing.fingerprint !== normalized.fingerprint) {
+        const error = 'combat-command-idempotency-conflict'
+        return { ok: false, status: 409, error, receipt: combatCommandConflictReceipt(normalized.semantic, error) }
+      }
+      return { ok: true, replayed: true, receipt: existing, entries: [], revisions: {} }
+    }
+
+    const persistTerminal = async (status, error, httpStatus, extra = {}) => {
+      const now = Date.now()
+      const command = normalized.semantic
+      const record = {
+        schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+        commandId: command.commandId,
+        actionId: command.commandId,
+        fingerprint: normalized.fingerprint,
+        command,
+        submittedByMemberId: member.memberId,
+        submittedByRole: role,
+        submittedAt: now,
+      }
+      const receipt = {
+        schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+        receiptId: command.commandId,
+        commandId: command.commandId,
+        fingerprint: normalized.fingerprint,
+        commandType: command.type,
+        mapId: command.mapId,
+        combatId: command.combatId,
+        actorTokenId: command.actorTokenId,
+        round: command.round,
+        initiativeIndex: command.initiativeIndex,
+        submittedByMemberId: member.memberId,
+        submittedByRole: role,
+        status,
+        updatedAt: now,
+        reason: error,
+        ...(status === 'rejected' ? { retryable: false } : {}),
+      }
+      const history = compactCombatCommandHistory(
+        [...(Array.isArray(receiptState.value?.commands) ? receiptState.value.commands : []), record],
+        [...receipts, receipt],
+      )
+      const result = await atomicWriteSharedStateTransactionUnlocked(ctx, [{
+        name: COMBAT_COMMAND_RECEIPT_RESOURCE,
+        expectedRevision: sharedStateRevision(receiptState.value),
+        data: {
+          schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+          commands: history.commands,
+          receipts: history.receipts,
+          updatedAt: now,
+        },
+      }], member.memberId, `combat-command-terminal:${command.commandId}`)
+      return {
+        ok: false,
+        status: httpStatus,
+        error,
+        receipt,
+        entries: result.entries,
+        revisions: result.revisions,
+        ...extra,
+      }
+    }
+
+    const [combatState, mapsState, charactersState, queueState] = await Promise.all([
+      readSharedStateFile(ctx, 'combat'),
+      readSharedStateFile(ctx, 'maps'),
+      readSharedStateFile(ctx, 'characters'),
+      readSharedStateFile(ctx, 'player-action-requests'),
+    ])
+    const command = normalized.semantic
+    if (role === 'player') {
+      const character = Array.isArray(charactersState.value?.characters)
+        ? charactersState.value.characters.find((candidate) => candidate?.id === command.characterId)
+        : null
+      const openDefaultPlayer = member?.openDefaultCombatCommandPlayer === true
+      if (!character || (!openDefaultPlayer && !characterOwnedByRoomMember(character, member))) {
+        return { ok: false, status: 403, error: 'combat-command-character-forbidden' }
+      }
+    }
+    const pendingSameTurn = receipts.find((receipt) =>
+      receipt?.status === 'pending' &&
+      receipt?.mapId === command.mapId &&
+      receipt?.combatId === command.combatId &&
+      receipt?.actorTokenId === command.actorTokenId &&
+      receipt?.round === command.round &&
+      receipt?.initiativeIndex === command.initiativeIndex)
+    if (pendingSameTurn) {
+      return persistTerminal('conflict', 'combat-command-pending-conflict', 409)
+    }
+    const revisionConflicts = []
+    const currentCombatRevision = sharedStateRevision(combatState.value)
+    if (command.expectedRevisions.combat !== currentCombatRevision) {
+      revisionConflicts.push({ name: 'combat', expectedRevision: command.expectedRevisions.combat, currentRevision: currentCombatRevision })
+    }
+    // The maps watermark remains part of the immutable command payload for
+    // diagnostics, but it is deliberately not a coarse-grained intake CAS.
+    // HP edits, fog updates, or another token changing on the same map all
+    // advance this resource revision without invalidating the actor's move.
+    // The active combat identity/turn and the actor's exact x/y/elevation are
+    // checked below and revalidated again when the DM settles the command.
+    if (revisionConflicts.length > 0) {
+      const error = 'combat-command-revision-conflict'
+      return persistTerminal('conflict', error, 409, { conflicts: revisionConflicts })
+    }
+    const combat = combatState.value
+    if (!plainObject(combat) || combat.active !== true || combat.mapId !== command.mapId ||
+      (command.combatId && combat.combatId !== command.combatId) ||
+      combat.round !== command.round || combat.initiativeIndex !== command.initiativeIndex ||
+      combatInitiativeTokenId(combat) !== command.actorTokenId) {
+      const error = 'combat-command-entity-conflict'
+      return persistTerminal('conflict', error, 409)
+    }
+    const map = Array.isArray(mapsState.value?.maps)
+      ? mapsState.value.maps.find((candidate) => candidate?.id === command.mapId)
+      : null
+    const token = Array.isArray(map?.tokens)
+      ? map.tokens.find((candidate) => candidate?.id === command.actorTokenId)
+      : null
+    if (!token) {
+      const error = 'combat-command-actor-missing'
+      return persistTerminal('conflict', error, 409)
+    }
+    if (token.characterId !== command.characterId) {
+      const error = 'combat-command-character-mismatch'
+      return persistTerminal('conflict', error, 409)
+    }
+    if (command.type === 'move-token' && (
+      token.x !== command.expectedPosition.x || token.y !== command.expectedPosition.y ||
+      Number(token.elevationFeet ?? 0) !== command.expectedElevationFeet
+    )) {
+      const error = 'combat-command-position-conflict'
+      return persistTerminal('conflict', error, 409)
+    }
+    const queued = Array.isArray(queueState.value?.requests) ? queueState.value.requests : []
+    if (queued.some((candidate) => candidate?.id === command.commandId)) {
+      const error = 'combat-command-orphaned-queue-conflict'
+      return persistTerminal('conflict', error, 409)
+    }
+
+    const now = Date.now()
+    const action = { ...normalized.action, updatedAt: now }
+    const record = {
+      schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+      commandId: command.commandId,
+      actionId: command.commandId,
+      fingerprint: normalized.fingerprint,
+      command,
+      submittedByMemberId: member.memberId,
+      submittedByRole: role,
+      submittedAt: now,
+    }
+    const receipt = {
+      schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+      receiptId: command.commandId,
+      commandId: command.commandId,
+      fingerprint: normalized.fingerprint,
+      commandType: command.type,
+      mapId: command.mapId,
+      combatId: command.combatId,
+      actorTokenId: command.actorTokenId,
+      round: command.round,
+      initiativeIndex: command.initiativeIndex,
+      submittedByMemberId: member.memberId,
+      submittedByRole: role,
+      status: 'pending',
+      updatedAt: now,
+    }
+    const history = compactCombatCommandHistory(
+      [...(Array.isArray(receiptState.value?.commands) ? receiptState.value.commands : []), record],
+      [...receipts, receipt],
+    )
+    const receiptData = {
+      schemaVersion: COMBAT_COMMAND_SCHEMA_VERSION,
+      commands: history.commands,
+      receipts: history.receipts,
+      updatedAt: now,
+    }
+    const queueData = {
+      mapId: command.mapId,
+      ...(command.combatId ? { combatId: command.combatId } : {}),
+      requests: [...queued, action].slice(-96),
+      updatedAt: now,
+    }
+    const result = await atomicWriteSharedStateTransactionUnlocked(ctx, [
+      {
+        name: COMBAT_COMMAND_RECEIPT_RESOURCE,
+        expectedRevision: sharedStateRevision(receiptState.value),
+        data: receiptData,
+      },
+      {
+        name: 'player-action-requests',
+        expectedRevision: sharedStateRevision(queueState.value),
+        data: queueData,
+      },
+    ], member.memberId, `combat-command:${command.commandId}`)
+    return { ...result, receipt }
   })
 }
 
@@ -1415,7 +2191,7 @@ export function applyCors(req, res, env = process.env) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, X-Stars-Command-Id, X-Stars-Command-Source, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   return true
 }
@@ -2205,21 +2981,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
 
   if (
     common.type === 'spell-projectile' &&
-    [
-      'fire-bolt',
-      'ray-of-frost',
-      'eldritch-blast',
-      'produce-flame',
-      'acid-splash',
-      'poison-spray',
-      'vicious-mockery',
-      'magic-missile',
-      'scorching-ray',
-      'guiding-bolt',
-      'acid-arrow',
-      'healing-word',
-      'inflict-wounds',
-    ].includes(common.spellId)
+    isCombatPresentationProjectileSpellId(common.spellId)
   ) {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const outcome = payload?.outcome
@@ -2249,43 +3011,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
 
   if (
     common.type === 'spell-target-effect' &&
-    [
-      'shocking-grasp',
-      'guidance',
-      'resistance',
-      'sanctuary',
-      'spare-the-dying',
-      'cure-wounds',
-      'hellish-rebuke',
-      'bless',
-      'bane',
-      'shield-of-faith',
-      'mage-armor',
-      'jump',
-      'darkvision',
-      'see-invisibility',
-      'warding-bond',
-      'fly',
-      'heroism',
-      'enlarge-reduce',
-      'enhance-ability',
-      'divine-favor',
-      'hunters-mark',
-      'magic-weapon',
-      'flame-blade',
-      'invisibility',
-      'blur',
-      'barkskin',
-      'protection-from-poison',
-      'longstrider',
-      'protection-from-energy',
-      'death-ward',
-      'greater-invisibility',
-      'charm-person',
-      'hideous-laughter',
-      'hold-person',
-      'blindness-deafness',
-    ].includes(common.spellId)
+    isCombatPresentationTargetEffectSpellId(common.spellId)
   ) {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const accentColor = payload?.accentColor
@@ -2427,14 +3153,9 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
 
   if (
     common.type === 'spell-area-effect' &&
-    ['burning-hands', 'thunderwave', 'shatter', 'lightning-bolt'].includes(common.spellId)
+    isCombatPresentationAreaSpellId(common.spellId)
   ) {
-    const expected = {
-      'burning-hands': { shape: 'cone', lengthFeet: 15, widthFeet: 15 },
-      thunderwave: { shape: 'line', lengthFeet: 15, widthFeet: 15 },
-      shatter: { shape: 'circle', radiusFeet: 10 },
-      'lightning-bolt': { shape: 'line', lengthFeet: 100, widthFeet: 5 },
-    }[common.spellId]
+    const expected = COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS[common.spellId]
     const col = payload?.targetCell?.col
     const row = payload?.targetCell?.row
     if (
@@ -2442,6 +3163,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
       payload?.shape !== expected.shape ||
       payload?.lengthFeet !== expected.lengthFeet ||
       payload?.widthFeet !== expected.widthFeet ||
+      payload?.heightFeet !== expected.heightFeet ||
       payload?.radiusFeet !== expected.radiusFeet ||
       !Number.isInteger(col) || col < 0 || col > 10_000 ||
       !Number.isInteger(row) || row < 0 || row > 10_000
@@ -2454,6 +3176,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         shape: expected.shape,
         ...(expected.lengthFeet != null ? { lengthFeet: expected.lengthFeet } : {}),
         ...(expected.widthFeet != null ? { widthFeet: expected.widthFeet } : {}),
+        ...(expected.heightFeet != null ? { heightFeet: expected.heightFeet } : {}),
         ...(expected.radiusFeet != null ? { radiusFeet: expected.radiusFeet } : {}),
         createdAt: now,
         expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
@@ -3301,6 +4024,21 @@ function validDnd5ePersistentAreaLighting(value) {
     ))
 }
 
+function validDnd5ePersistentAreaVertical(value) {
+  if (value == null) return true
+  if (!plainObject(value)) return false
+  if (value.mode === 'ground') return Object.keys(value).length === 1
+  const allowed = new Set(['mode', 'baseElevationFeet', 'heightFeet', 'anchorOffsetFeet'])
+  return value.mode === 'volume' && Object.keys(value).every((key) => allowed.has(key)) &&
+    Number.isInteger(value.baseElevationFeet) &&
+    value.baseElevationFeet >= -1_000 && value.baseElevationFeet <= 10_000 &&
+    Number.isInteger(value.heightFeet) && value.heightFeet >= 1 && value.heightFeet <= 10_000 &&
+    (!Object.prototype.hasOwnProperty.call(value, 'anchorOffsetFeet') || (
+      Number.isInteger(value.anchorOffsetFeet) &&
+      value.anchorOffsetFeet >= -1_000 && value.anchorOffsetFeet <= 10_000
+    ))
+}
+
 function validTimedLightState(light) {
   if (!plainObject(light) || typeof light.enabled !== 'boolean' ||
     !Number.isFinite(light.brightRadiusFeet) || light.brightRadiusFeet < 0 || light.brightRadiusFeet > 10_000 ||
@@ -3705,7 +4443,8 @@ function validateDnd5eResourceStates(name, value) {
         for (const area of map.dnd5ePluginAreas) {
           if (
             !validDnd5eRoundLifecycle(area) || typeof area.label !== 'string' || !area.label || area.label.length > 120 ||
-            !validDnd5ePersistentAreaLighting(area.lighting)
+            !validDnd5ePersistentAreaLighting(area.lighting) ||
+            !validDnd5ePersistentAreaVertical(area.vertical)
           ) return 'invalid-dnd5e-plugin-area'
         }
       }
@@ -4369,6 +5108,30 @@ function tokenIsInvisible(token) {
     state?.activeEffects?.some((effect) => effect?.standardCondition === 'invisible') === true
 }
 
+function tokenIsOutlinedByFaerieFire(token) {
+  return token?.dnd5eCombatState?.activeEffects?.some((effect) =>
+    effect?.definitionId === 'srd-5.1:spell:faerie-fire' ||
+    effect?.source?.rulesId === 'faerie-fire' ||
+    effect?.source?.rulesId === 'srd-5.1:spell:faerie-fire',
+  ) === true
+}
+
+function viewerCanSeeInvisible(viewer, characterById) {
+  const character = typeof viewer?.characterId === 'string' ? characterById.get(viewer.characterId) : null
+  const characterEffects = Array.isArray(character?.dnd5eCombatState?.activeEffects)
+    ? character.dnd5eCombatState.activeEffects
+    : []
+  const tokenEffects = Array.isArray(viewer?.dnd5eCombatState?.activeEffects)
+    ? viewer.dnd5eCombatState.activeEffects
+    : []
+  return [...characterEffects, ...tokenEffects].some((effect) =>
+    effect?.modifiers?.seeInvisible === true ||
+    effect?.definitionId === 'srd-5.1:spell:see-invisibility' ||
+    effect?.source?.rulesId === 'see-invisibility' ||
+    effect?.source?.rulesId === 'srd-5.1:spell:see-invisibility',
+  )
+}
+
 function passivePerceptionForViewer(viewer, characterById) {
   const character = typeof viewer?.characterId === 'string' ? characterById.get(viewer.characterId) : null
   if (
@@ -4535,9 +5298,14 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         ) return tremorsenseViewers.length > 0 ? [redactUnseenToken(token)] : []
         const specialSenseSeesInvisible = observingViewers.some((viewer) =>
           playerSpecialSenseRange(viewer, token, 'blindsight', map) ||
-          playerSpecialSenseRange(viewer, token, 'truesight', map),
+          playerSpecialSenseRange(viewer, token, 'truesight', map) ||
+          viewerCanSeeInvisible(viewer, characterById),
         )
-        return [tokenIsInvisible(token) && !specialSenseSeesInvisible ? redactUnseenToken(token) : token]
+        const invisibleButVisible =
+          tokenIsInvisible(token) &&
+          !tokenIsOutlinedByFaerieFire(token) &&
+          !specialSenseSeesInvisible
+        return [invisibleButVisible ? redactUnseenToken(token) : token]
       })
       const visibleIds = new Set(tokens.map((token) => token.id))
       return {
@@ -4653,6 +5421,64 @@ function validDnd5eMonsterTurnProgress(value) {
   return value.expiresAt - value.updatedAt <= 120_000
 }
 
+function validCombatCommandId(value) {
+  return typeof value === 'string' &&
+    value.length > 0 && value.length <= COMBAT_COMMAND_MAX_ID_LENGTH &&
+    /^[a-zA-Z0-9][a-zA-Z0-9:._-]*$/.test(value)
+}
+
+function validCombatCommandPosition(value) {
+  return plainObject(value) && Number.isFinite(value.x) && Number.isFinite(value.y)
+}
+
+function validCombatCommandReceipt(value) {
+  if (!plainObject(value) || value.schemaVersion !== COMBAT_COMMAND_SCHEMA_VERSION) return false
+  if (!validCombatCommandId(value.receiptId) || !validCombatCommandId(value.commandId)) return false
+  if (typeof value.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.fingerprint)) return false
+  if (value.commandType !== 'move-token' && value.commandType !== 'end-turn') return false
+  if (typeof value.mapId !== 'string' || !value.mapId || value.mapId.length > 180) return false
+  if (typeof value.combatId !== 'string' || !value.combatId || value.combatId.length > 180) return false
+  if (typeof value.actorTokenId !== 'string' || !value.actorTokenId || value.actorTokenId.length > 180) return false
+  if (!Number.isInteger(value.round) || value.round < 1) return false
+  if (!Number.isInteger(value.initiativeIndex) || value.initiativeIndex < 0) return false
+  if (typeof value.submittedByMemberId !== 'string' || !value.submittedByMemberId || value.submittedByMemberId.length > 180) return false
+  if (value.submittedByRole !== 'dm' && value.submittedByRole !== 'player') return false
+  if (!['pending', 'committed', 'rejected', 'conflict'].includes(value.status)) return false
+  if (!Number.isFinite(value.updatedAt) || value.updatedAt < 0) return false
+  if (value.reason != null && (typeof value.reason !== 'string' || value.reason.length > 300)) return false
+  if (value.retryable != null && typeof value.retryable !== 'boolean') return false
+  if (value.status === 'committed') {
+    const authority = value.authoritative
+    if (!plainObject(authority) || !Number.isFinite(authority.appliedAt) || authority.appliedAt < 0 ||
+      typeof authority.mapId !== 'string' || !authority.mapId || authority.mapId.length > 180 ||
+      typeof authority.combatId !== 'string' || !authority.combatId || authority.combatId.length > 180 ||
+      !Number.isInteger(authority.round) || authority.round < 0 ||
+      !Number.isInteger(authority.initiativeIndex) || authority.initiativeIndex < 0 ||
+      (authority.acceptedPosition != null && !validCombatCommandPosition(authority.acceptedPosition)) ||
+      (authority.acceptedElevationFeet != null && !Number.isFinite(authority.acceptedElevationFeet)) ||
+      !plainObject(authority.revisions) ||
+      Object.entries(authority.revisions).some(([name, revision]) =>
+      !SHARED_STATE_TRANSACTION_RESOURCES.has(safeName(name)) ||
+      !Number.isInteger(revision) || revision < 0)
+    ) return false
+  } else if (value.authoritative != null) return false
+  if ((value.status === 'rejected' || value.status === 'conflict') && !boundedText(value.reason, 300)) return false
+  return true
+}
+
+function validCombatCommandRecord(value) {
+  return plainObject(value) &&
+    value.schemaVersion === COMBAT_COMMAND_SCHEMA_VERSION &&
+    validCombatCommandId(value.commandId) &&
+    value.actionId === value.commandId &&
+    typeof value.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(value.fingerprint) &&
+    plainObject(value.command) && value.command.commandId === value.commandId &&
+    (value.command.type === 'move-token' || value.command.type === 'end-turn') &&
+    typeof value.submittedByMemberId === 'string' && value.submittedByMemberId.length > 0 &&
+    (value.submittedByRole === 'dm' || value.submittedByRole === 'player') &&
+    Number.isFinite(value.submittedAt) && value.submittedAt >= 0
+}
+
 /**
  * Persistence-boundary validation. The browser performs more detailed
  * migrations, while this deliberately conservative shape check prevents a
@@ -4673,6 +5499,7 @@ export function validateSharedStateShape(name, value) {
     'combat-interrupts': 'interrupts',
     'player-action-requests': 'requests',
     'player-action-processed': 'actionIds',
+    'combat-command-receipts': 'receipts',
     'map-fog': 'maps',
     'map-geometry': 'maps',
     'map-exploration': 'maps',
@@ -4684,6 +5511,34 @@ export function validateSharedStateShape(name, value) {
   if (arrayField && !Array.isArray(value[arrayField])) {
     return { ok: false, reason: `missing-array:${arrayField}` }
   }
+  if (name === COMBAT_COMMAND_RECEIPT_RESOURCE) {
+    const commands = Array.isArray(value.commands) ? value.commands : []
+    const receipts = Array.isArray(value.receipts) ? value.receipts : []
+    const pendingCount = receipts.filter((entry) => entry?.status === 'pending').length
+    const commandIds = commands.map((entry) => entry?.commandId)
+    const receiptIds = receipts.map((entry) => entry?.commandId)
+    const commandById = new Map(commands.map((entry) => [entry?.commandId, entry]))
+    if (
+      value.schemaVersion !== COMBAT_COMMAND_SCHEMA_VERSION ||
+      !Array.isArray(value.commands) ||
+      commands.length > COMBAT_COMMAND_LOG_LIMIT + pendingCount ||
+      receipts.length > COMBAT_COMMAND_RECEIPT_LIMIT + pendingCount ||
+      commands.length !== receipts.length ||
+      new Set(commandIds).size !== commandIds.length ||
+      new Set(receiptIds).size !== receiptIds.length ||
+      commands.some((entry) => !validCombatCommandRecord(entry)) ||
+      receipts.some((entry) => !validCombatCommandReceipt(entry)) ||
+      receipts.some((entry) => {
+        const command = commandById.get(entry.commandId)
+        return !command || command.fingerprint !== entry.fingerprint
+      })
+    ) return { ok: false, reason: 'invalid-combat-command-receipts' }
+  }
+  if (
+    name === 'player-action-ack' &&
+    value.acceptedElevationFeet != null &&
+    !Number.isFinite(value.acceptedElevationFeet)
+  ) return { ok: false, reason: 'invalid-player-action-ack-elevation' }
   if (name === 'room-journal' && (!Array.isArray(value.campaignEntries) || !Array.isArray(value.sharedNotes))) {
     return { ok: false, reason: 'missing-journal-arrays' }
   }
@@ -7013,6 +7868,61 @@ function accountCampaigns(account) {
     Number.isFinite(campaign.updatedAt))
 }
 
+function campaignAiJobs(campaign) {
+  const jobs = Array.isArray(campaign?.aiWorkspace?.jobs) ? campaign.aiWorkspace.jobs : []
+  return jobs.map(normalizeAiJobRecordV2).filter((job) => (
+    job && job.accountId === campaign.ownerAccountId && job.campaignId === campaign.campaignId
+  ))
+}
+
+async function mutateCampaignAiWorkspace(ctx, accountId, campaignId, updater) {
+  let updatedCampaign = null
+  await mutateAccount(ctx, accountId, async (current) => {
+    const campaigns = accountCampaigns(current)
+    const index = campaigns.findIndex((campaign) => campaign.campaignId === campaignId)
+    if (index < 0) throw new RoomProtocolError(404, 'account-campaign-not-found')
+    const now = Date.now()
+    const campaign = campaigns[index]
+    const jobs = campaignAiJobs(campaign)
+    const nextJobs = await updater(jobs, campaign, now)
+    if (!Array.isArray(nextJobs) || nextJobs.some((job) => !normalizeAiJobRecordV2(job))) {
+      throw new RoomProtocolError(400, 'invalid-ai-job-state')
+    }
+    updatedCampaign = {
+      ...campaign,
+      aiWorkspace: {
+        schemaVersion: 1,
+        jobs: nextJobs,
+        updatedAt: now,
+      },
+      updatedAt: now,
+    }
+    return {
+      ...current,
+      campaigns: campaigns.map((candidate, candidateIndex) => candidateIndex === index ? updatedCampaign : candidate),
+      updatedAt: now,
+    }
+  })
+  return updatedCampaign
+}
+
+function aiJobExpectedRevision(value) {
+  const revision = Number(value)
+  return Number.isSafeInteger(revision) && revision >= 1 ? revision : null
+}
+
+function assertAiJobRevision(job, expectedRevision) {
+  if (expectedRevision == null) throw new RoomProtocolError(400, 'invalid-ai-job-revision')
+  if (job.revision !== expectedRevision) throw new RoomProtocolError(409, 'ai-job-revision-conflict')
+}
+
+function aiJobLeaseMatches(job, leaseToken, now) {
+  if (!job.lease || job.lease.expiresAt <= now || typeof leaseToken !== 'string' || leaseToken.length < 32) return false
+  const presented = tokenHash(leaseToken)
+  return presented.length === job.lease.tokenHash.length &&
+    timingSafeEqual(Buffer.from(presented), Buffer.from(job.lease.tokenHash))
+}
+
 async function readLobbyRoomOptional(ctx, roomId) {
   const normalized = normalizeLobbyRoomCode(roomId)
   if (normalized.length !== 6) return null
@@ -7790,6 +8700,10 @@ function normalizeDnd5eHouseRules(value) {
     advantageMode: source.advantageMode === 'stacking-cancel' ? 'stacking-cancel' : 'standard',
     shortRestMinutes: Number.isInteger(shortRestMinutes) && shortRestMinutes >= 1 && shortRestMinutes <= 1440 ? shortRestMinutes : 60,
     longRestHours: Number.isInteger(longRestHours) && longRestHours >= 1 && longRestHours <= 24 ? longRestHours : 8,
+    combatBannersEnabled: source.combatBannersEnabled !== false,
+    spellAnimationsEnabled: source.spellAnimationsEnabled !== false,
+    spellcastingPrerequisitesEnabled: source.spellcastingPrerequisitesEnabled !== false,
+    encumbranceEnabled: source.encumbranceEnabled !== false,
   }
 }
 
@@ -8714,6 +9628,276 @@ async function handleAccountApi(req, res, parsed, ctx) {
       })
       const persisted = accountCampaigns(next).find((campaign) => campaign.campaignId === created?.campaignId)
       writeJson(res, 201, await accountCampaignResponse(ctx, persisted))
+      return true
+    }
+    throw new RoomProtocolError(405, 'method-not-allowed')
+  }
+
+  const accountCampaignAiJobsMatch = parsed.pathname.match(
+    /^\/api\/accounts\/me\/campaigns\/([^/]+)\/ai-jobs$/,
+  )
+  if (accountCampaignAiJobsMatch) {
+    const account = await authenticateAccount(req, ctx)
+    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignAiJobsMatch[1] ?? ''))
+    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
+    const campaign = accountCampaigns(account).find((candidate) => candidate.campaignId === campaignId)
+    if (!campaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
+    if (req.method === 'GET') {
+      const includeArtifact = parsed.searchParams.get('includeArtifact') === '1'
+      writeJson(res, 200, {
+        schemaVersion: 2,
+        jobs: campaignAiJobs(campaign)
+          .sort((left, right) => right.updatedAt - left.updatedAt)
+          .map((job) => publicAiJobV2(job, includeArtifact)),
+      })
+      return true
+    }
+    if (req.method === 'POST') {
+      const payload = await readJsonRequest(req, 128 * 1024)
+      const request = normalizeAiJobCreateRequestV2(payload)
+      if (!request) throw new RoomProtocolError(400, 'invalid-ai-job-request')
+      if (request.executionMode !== 'local-runner') {
+        throw new RoomProtocolError(409, 'ai-provider-not-configured')
+      }
+      let created = null
+      let reused = false
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => {
+        const existing = jobs.find((job) => job.idempotencyKey === request.idempotencyKey)
+        if (existing) {
+          created = existing
+          reused = true
+          return jobs
+        }
+        if (jobs.length >= AI_JOB_MAX_PER_CAMPAIGN) {
+          throw new RoomProtocolError(409, 'ai-job-limit')
+        }
+        created = {
+          ...request,
+          jobId: randomUUID(),
+          accountId: account.accountId,
+          campaignId,
+          status: 'awaiting-local-runner',
+          revision: 1,
+          progress: { stage: 'awaiting-local-runner', current: 0, total: 0, message: '等待本地模型接管任务' },
+          lease: null,
+          artifact: null,
+          failure: null,
+          createdAt: now,
+          updatedAt: now,
+        }
+        return [...jobs, created]
+      })
+      writeJson(res, reused ? 200 : 201, { job: publicAiJobV2(created, true), reused })
+      return true
+    }
+    throw new RoomProtocolError(405, 'method-not-allowed')
+  }
+
+  const accountCampaignAiJobMatch = parsed.pathname.match(
+    /^\/api\/accounts\/me\/campaigns\/([^/]+)\/ai-jobs\/([^/]+)(?:\/(lease|progress|failure|result|artifact|cancel))?$/,
+  )
+  if (accountCampaignAiJobMatch) {
+    const account = await authenticateAccount(req, ctx)
+    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignAiJobMatch[1] ?? ''))
+    const jobId = decodeURIComponent(accountCampaignAiJobMatch[2] ?? '')
+    const action = accountCampaignAiJobMatch[3] ?? ''
+    if (campaignId.length !== 12 || !/^[a-f0-9-]{20,80}$/i.test(jobId)) {
+      throw new RoomProtocolError(400, 'invalid-ai-job-id')
+    }
+    const campaign = accountCampaigns(account).find((candidate) => candidate.campaignId === campaignId)
+    if (!campaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
+    const currentJob = campaignAiJobs(campaign).find((job) => job.jobId === jobId)
+    if (!currentJob) throw new RoomProtocolError(404, 'ai-job-not-found')
+    if (!action && req.method === 'GET') {
+      writeJson(res, 200, { job: publicAiJobV2(currentJob, true) })
+      return true
+    }
+
+    if (!action && req.method === 'DELETE') {
+      const payload = await readJsonRequest(req)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => {
+        const target = jobs.find((job) => job.jobId === jobId)
+        if (!target) throw new RoomProtocolError(404, 'ai-job-not-found')
+        assertAiJobRevision(target, expectedRevision)
+        if (target.status === 'running' && target.lease && target.lease.expiresAt > now) {
+          throw new RoomProtocolError(409, 'ai-job-active')
+        }
+        return jobs.filter((job) => job.jobId !== jobId)
+      })
+      writeJson(res, 200, { deleted: true, jobId })
+      return true
+    }
+
+    if (action === 'lease' && req.method === 'POST') {
+      const payload = await readJsonRequest(req)
+      const runnerId = normalizedLabel(payload?.runnerId, 160)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      if (!runnerId) throw new RoomProtocolError(400, 'invalid-ai-runner')
+      const leaseToken = randomBytes(32).toString('base64url')
+      let updated = null
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
+        if (job.jobId !== jobId) return job
+        assertAiJobRevision(job, expectedRevision)
+        const leaseActive = job.lease && job.lease.expiresAt > now
+        const ownedTakeover = job.status === 'running' && leaseActive && payload?.takeoverOwnedLease === true &&
+          job.lease.runnerId === runnerId
+        if (job.status !== 'awaiting-local-runner' && !(job.status === 'running' && (!leaseActive || ownedTakeover))) {
+          throw new RoomProtocolError(409, 'ai-job-not-leasable')
+        }
+        updated = {
+          ...job,
+          status: 'running',
+          revision: job.revision + 1,
+          progress: { ...job.progress, stage: 'running', message: '本地模型正在分析' },
+          lease: {
+            tokenHash: tokenHash(leaseToken),
+            runnerId,
+            acquiredAt: now,
+            expiresAt: now + AI_JOB_LOCAL_LEASE_MS,
+          },
+          updatedAt: now,
+        }
+        return updated
+      }))
+      writeJson(res, 200, { job: publicAiJobV2(updated, false), leaseToken })
+      return true
+    }
+
+    if (action === 'progress' && req.method === 'POST') {
+      const payload = await readJsonRequest(req)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      let updated = null
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
+        if (job.jobId !== jobId) return job
+        assertAiJobRevision(job, expectedRevision)
+        if (job.status !== 'running' || !aiJobLeaseMatches(job, payload?.leaseToken, now)) {
+          throw new RoomProtocolError(409, 'invalid-ai-job-lease')
+        }
+        const current = Number(payload?.progress?.current)
+        const total = Number(payload?.progress?.total)
+        updated = {
+          ...job,
+          revision: job.revision + 1,
+          progress: {
+            stage: normalizedLabel(payload?.progress?.stage, 80) || 'running',
+            current: Number.isSafeInteger(current) && current >= 0 ? current : job.progress.current,
+            total: Number.isSafeInteger(total) && total >= 0 ? total : job.progress.total,
+            message: normalizedLabel(payload?.progress?.message, 500),
+          },
+          lease: { ...job.lease, expiresAt: now + AI_JOB_LOCAL_LEASE_MS },
+          updatedAt: now,
+        }
+        return updated
+      }))
+      writeJson(res, 200, { job: publicAiJobV2(updated, false) })
+      return true
+    }
+
+    if (action === 'failure' && req.method === 'POST') {
+      const payload = await readJsonRequest(req, 64 * 1024)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      const failureCode = normalizedLabel(payload?.failure?.code, 120) || 'ai-job-failed'
+      const failureMessage = normalizedLabel(payload?.failure?.message, 1_000)
+      let updated = null
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
+        if (job.jobId !== jobId) return job
+        assertAiJobRevision(job, expectedRevision)
+        if (job.status !== 'running' || !aiJobLeaseMatches(job, payload?.leaseToken, now)) {
+          throw new RoomProtocolError(409, 'invalid-ai-job-lease')
+        }
+        updated = {
+          ...job,
+          status: 'failed',
+          revision: job.revision + 1,
+          progress: { ...job.progress, stage: 'failed', message: '本地模型分析失败，可重新选择原始 PDF 后重试' },
+          lease: null,
+          failure: { code: failureCode, message: failureMessage },
+          updatedAt: now,
+          completedAt: now,
+        }
+        return updated
+      }))
+      writeJson(res, 200, { job: publicAiJobV2(updated, false) })
+      return true
+    }
+
+    if (action === 'result' && req.method === 'POST') {
+      const payload = await readJsonRequest(req, 4 * 1024 * 1024)
+      const artifact = normalizePdfCampaignAnalysisArtifactV1(payload?.artifact)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      if (!artifact) throw new RoomProtocolError(400, 'invalid-ai-job-artifact')
+      let updated = null
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
+        if (job.jobId !== jobId) return job
+        assertAiJobRevision(job, expectedRevision)
+        if (job.status !== 'running' || !aiJobLeaseMatches(job, payload?.leaseToken, now)) {
+          throw new RoomProtocolError(409, 'invalid-ai-job-lease')
+        }
+        updated = {
+          ...job,
+          status: 'review-required',
+          revision: job.revision + 1,
+          progress: { stage: 'review-required', current: 1, total: 1, message: '等待 DM 审阅与编辑' },
+          lease: null,
+          artifact,
+          failure: null,
+          updatedAt: now,
+          resultAt: now,
+        }
+        return updated
+      }))
+      writeJson(res, 200, { job: publicAiJobV2(updated, true) })
+      return true
+    }
+
+    if (action === 'artifact' && req.method === 'PUT') {
+      const payload = await readJsonRequest(req, 4 * 1024 * 1024)
+      const artifact = normalizePdfCampaignAnalysisArtifactV1(payload?.artifact)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      if (!artifact) throw new RoomProtocolError(400, 'invalid-ai-job-artifact')
+      let updated = null
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
+        if (job.jobId !== jobId) return job
+        assertAiJobRevision(job, expectedRevision)
+        if (!['review-required', 'completed'].includes(job.status)) {
+          throw new RoomProtocolError(409, 'ai-job-artifact-not-editable')
+        }
+        updated = {
+          ...job,
+          status: 'review-required',
+          revision: job.revision + 1,
+          artifact,
+          updatedAt: now,
+        }
+        return updated
+      }))
+      writeJson(res, 200, { job: publicAiJobV2(updated, true) })
+      return true
+    }
+
+    if (action === 'cancel' && req.method === 'POST') {
+      const payload = await readJsonRequest(req)
+      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
+      let updated = null
+      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
+        if (job.jobId !== jobId) return job
+        assertAiJobRevision(job, expectedRevision)
+        if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+          throw new RoomProtocolError(409, 'ai-job-not-cancellable')
+        }
+        updated = {
+          ...job,
+          status: 'cancelled',
+          revision: job.revision + 1,
+          lease: null,
+          progress: { ...job.progress, stage: 'cancelled', message: '任务已由 DM 取消' },
+          updatedAt: now,
+          completedAt: now,
+        }
+        return updated
+      }))
+      writeJson(res, 200, { job: publicAiJobV2(updated, false) })
       return true
     }
     throw new RoomProtocolError(405, 'method-not-allowed')
@@ -9936,7 +11120,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     return true
   }
 
-  const match = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(join|heartbeat|leave|roster|rules)$/)
+  const match = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(join|heartbeat|leave|close|roster|rules)$/)
   if (!match) throw new RoomProtocolError(404, 'room-not-found')
   const rawRoomId = String(match[1] ?? '').toUpperCase()
   const roomId = normalizeLobbyRoomCode(rawRoomId)
@@ -10047,6 +11231,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           displayName,
           activePlugins,
           lastSeenAt: now,
+          leftAt: undefined,
           roomTokenHash,
         }
         return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
@@ -10093,6 +11278,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           ...room.host,
           activePlugins,
           lastSeenAt: now,
+          leftAt: undefined,
           ...presencePatch(room.host),
         }
         return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
@@ -10131,10 +11317,21 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     return true
   }
 
+  const leavingClosesRoom = match[2] === 'close'
   const leaveResult = await mutateLobbyRoom(ctx, roomId, (room) => {
     const now = Date.now()
     if (room.host?.memberId === memberId) {
       if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
+      if (!leavingClosesRoom) {
+        return {
+          ok: true,
+          next: {
+            ...room,
+            updatedAt: now,
+            host: { ...room.host, lastSeenAt: 0, leftAt: now },
+          },
+        }
+      }
       const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room)
       const withoutEphemeral = withoutRoomEphemeralPlugins(room)
       return {
@@ -10148,6 +11345,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         },
       }
     }
+    if (leavingClosesRoom) return { ok: false, status: 403, error: 'forbidden' }
     const players = Array.isArray(room.players) ? room.players : []
     if (!players.some((player) => player.memberId === memberId)) {
       return { ok: false, status: 404, error: 'member-not-found' }
@@ -10240,6 +11438,16 @@ function publishEvent(ctx, channel, payload) {
       streamId: ctx.serverInstanceId ?? 'legacy-stream',
       emittedAt: Date.now(),
     })
+  }
+}
+
+/** A committed state transaction must not be reported as failed when SSE delivery throws. */
+export function publishEventBestEffort(ctx, channel, payload) {
+  try {
+    publishEvent(ctx, channel, payload)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -10610,6 +11818,106 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
     }
 
+    const combatCommandMatch = parsed.pathname.match(/^\/api\/combat\/commands\/([^/]+)$/)
+    if (combatCommandMatch && (req.method === 'PUT' || req.method === 'GET')) {
+      let commandId
+      try {
+        commandId = decodeURIComponent(combatCommandMatch[1])
+      } catch {
+        writeJson(res, 400, { error: 'invalid-combat-command-id' })
+        return true
+      }
+      const openDefaultAuthority = ctx.accessRole === 'open' && ctx.roomId === 'default'
+      const openDefaultPlayer = openDefaultAuthority && openDefaultCombatCommandPlayerIdentity(req)
+      const openWriterId = boundedText(req?.headers?.['x-stars-writer'], 180)
+      const commandMember = authenticatedRoomMember ?? (openDefaultAuthority
+        ? openDefaultPlayer
+          ? {
+              memberId: openWriterId || 'local-player',
+              displayName: 'Player',
+              role: 'player',
+              openDefaultCombatCommandPlayer: true,
+            }
+          : { memberId: 'local-dm', displayName: 'DM', role: 'dm' }
+        : null)
+      const commandRole = ctx.accessRole === 'player' || openDefaultPlayer ? 'player' : 'dm'
+      if (!commandMember || (ctx.accessRole !== 'dm' && ctx.accessRole !== 'player' && !openDefaultAuthority)) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return true
+      }
+      if (!validCombatCommandId(commandId)) {
+        writeJson(res, 400, { error: 'invalid-combat-command-id' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      if (req.method === 'GET') {
+        const state = await readSharedStateFile(ctx, COMBAT_COMMAND_RECEIPT_RESOURCE)
+        const receipt = Array.isArray(state.value?.receipts)
+          ? state.value.receipts.find((candidate) => candidate?.commandId === commandId)
+          : null
+        if (!receipt || !combatCommandReceiptVisibleTo(receipt, commandMember, commandRole)) {
+          writeJson(res, 404, { error: 'combat-command-not-found' })
+          return true
+        }
+        writeJson(res, 200, { receipt: projectCombatCommandReceipt(receipt) })
+        return true
+      }
+
+      let payload
+      try {
+        payload = JSON.parse((await readBody(req)).toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      if (payload?.schemaVersion !== COMBAT_COMMAND_SCHEMA_VERSION) {
+        writeJson(res, 422, { error: 'unsupported-combat-command-schema' })
+        return true
+      }
+      const normalized = normalizeCombatCommandSubmission(
+        commandId,
+        payload?.command,
+        commandMember,
+        commandRole,
+      )
+      if (!normalized) {
+        writeJson(res, 422, { error: 'invalid-combat-command' })
+        return true
+      }
+      const result = await atomicAppendCombatCommand(ctx, normalized, commandMember, commandRole)
+      if (!result.ok) {
+        for (const entry of result.entries ?? []) {
+          publishEventBestEffort(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `combat-command:${commandId}:${entry.name}:${entry.writtenAt}`,
+            name: entry.name,
+            updatedAt: Number(entry.data?.updatedAt) || entry.writtenAt,
+          })
+        }
+        writeJson(res, result.status ?? 409, {
+          error: result.error ?? 'combat-command-conflict',
+          ...(result.conflicts ? { conflicts: result.conflicts } : {}),
+          ...(result.receipt ? { receipt: projectCombatCommandReceipt(result.receipt) } : {}),
+        })
+        return true
+      }
+      if (!result.replayed) {
+        for (const entry of result.entries ?? []) {
+          publishEventBestEffort(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `combat-command:${commandId}:${entry.name}:${entry.writtenAt}`,
+            name: entry.name,
+            updatedAt: Number(entry.data?.updatedAt) || entry.writtenAt,
+          })
+        }
+      }
+      writeJson(res, result.replayed ? 200 : 202, {
+        ok: true,
+        replayed: result.replayed === true,
+        receipt: projectCombatCommandReceipt(result.receipt),
+        revisions: result.revisions ?? {},
+      })
+      return true
+    }
+
     if (parsed.pathname === '/api/state/transaction' && req.method === 'POST') {
       const openDefaultAuthority = ctx.accessRole === 'open' && ctx.roomId === 'default'
       if ((!authenticatedRoomMember || ctx.accessRole !== 'dm') && !openDefaultAuthority) {
@@ -10631,7 +11939,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         : payload.roomJournalMutations
       if (
         !transactionId ||
-        !/^[a-zA-Z0-9:_-]+$/.test(transactionId) ||
+        !/^[a-zA-Z0-9:._-]+$/.test(transactionId) ||
         submittedWrites.length < 1 ||
         submittedWrites.length > SHARED_STATE_TRANSACTION_MAX_WRITES ||
         !Array.isArray(submittedJournalMutations) ||
@@ -10644,7 +11952,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       if (
         new Set(names).size !== names.length ||
         (submittedJournalMutations.length > 0 && names.includes('room-journal')) ||
-        names.some((name) => !SHARED_STATE_TRANSACTION_RESOURCES.has(name))
+        names.some((name) =>
+          !SHARED_STATE_TRANSACTION_RESOURCES.has(name) || name === COMBAT_COMMAND_RECEIPT_RESOURCE)
       ) {
         writeJson(res, 400, { error: 'invalid-state-transaction-resource' })
         return true
@@ -10745,9 +12054,28 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         transactionId,
       )
       if (result.conflict) {
+        for (const entry of result.entries ?? []) {
+          publishEventBestEffort(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `state-transaction-conflict:${transactionId}:${entry.name}:${entry.writtenAt}`,
+            name: entry.name,
+            updatedAt: Number(entry.data?.updatedAt) || entry.writtenAt,
+          })
+        }
+        for (const name of new Set(result.invalidateResources ?? [])) {
+          publishEventBestEffort(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `state-transaction-reload:${transactionId}:${name}:${Date.now()}`,
+            name,
+            updatedAt: Date.now(),
+          })
+        }
         writeJson(res, 409, {
-          error: 'state-transaction-conflict',
+          error: result.settlementPreconditionConflict
+            ? 'combat-command-settlement-precondition-conflict'
+            : result.settlementConflict
+              ? 'combat-command-settlement-conflict'
+              : 'state-transaction-conflict',
           conflicts: result.conflicts,
+          ...(result.receipt ? { receipt: projectCombatCommandReceipt(result.receipt) } : {}),
         })
         return true
       }
@@ -10765,7 +12093,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             changedAt: entry.writtenAt,
           }).catch(() => {})
         }
-        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+        publishEventBestEffort(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `state-transaction:${transactionId}:${entry.name}:${entry.writtenAt}`,
           name: entry.name,
           updatedAt: Number(entry.data?.updatedAt) || entry.writtenAt,
@@ -10775,6 +12103,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         ok: true,
         transactionId,
         revisions: result.revisions,
+        ...(result.replayed ? { replayed: true } : {}),
+        ...(result.receipt ? { receipt: projectCombatCommandReceipt(result.receipt) } : {}),
       })
       return true
     }
@@ -10810,25 +12140,32 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       const now = Date.now()
-      const result = await atomicMutateJsonStateLocked(
-        path.join(ctx.stateRoot, 'player-action-requests.json'),
-        (current) => {
-          const requests = Array.isArray(current?.requests) ? current.requests : []
-          if (requests.some((candidate) => candidate?.id === action.id)) {
-            return { ok: true, changed: false, next: current }
-          }
-          return {
-            ok: true,
-            changed: true,
-            next: {
-              mapId: action.mapId,
-              combatId: action.combatId,
-              requests: [...requests, action].slice(-96),
-              updatedAt: now,
-            },
-          }
-        },
-      )
+      // Lock order is always room transaction -> resource file. Combat-command
+      // intake/terminalization writes this same queue under the room lock; the
+      // legacy append endpoint must join that lane or its read-modify-write can
+      // overwrite a concurrently appended command (or vice versa).
+      const result = await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+        await recoverSharedStateTransaction(ctx)
+        return atomicMutateJsonStateLocked(
+          path.join(ctx.stateRoot, 'player-action-requests.json'),
+          (current) => {
+            const requests = Array.isArray(current?.requests) ? current.requests : []
+            if (requests.some((candidate) => candidate?.id === action.id)) {
+              return { ok: true, changed: false, next: current }
+            }
+            return {
+              ok: true,
+              changed: true,
+              next: {
+                mapId: action.mapId,
+                combatId: action.combatId,
+                requests: [...requests, action].slice(-96),
+                updatedAt: now,
+              },
+            }
+          },
+        )
+      })
       if (!result?.ok) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'player-action-append-failed' })
         return true
@@ -11233,6 +12570,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     const stateMatch = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)
     if (stateMatch) {
       const name = safeName(stateMatch[1])
+      if (name === COMBAT_COMMAND_RECEIPT_RESOURCE) {
+        writeJson(res, 404, { error: 'resource-private', name })
+        return true
+      }
       if (name === 'group-ability-checks' && ['GET', 'PUT', 'PATCH'].includes(req.method ?? '')) {
         writeJson(res, 410, { error: 'resource-retired', name })
         return true

@@ -29,7 +29,6 @@ import {
   dnd5eTargetArmorClassForAttack,
   dnd5eTranquilityWardCheck,
   dnd5eWeaponClassDamageDefinitions,
-  resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eClassDamageDefinition,
   type Dnd5eClassDamageRolls,
@@ -39,6 +38,11 @@ import {
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 
@@ -182,7 +186,7 @@ export function prepareDnd5eHunterMultiattack(input: {
       (dnd5eTargetGrantsAttackAdvantage(target) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
         !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
         dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) ||
-        (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target)) ||
+        dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) ||
         dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, target) ||
         dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
         (targetProne && targetDistance <= 5))
@@ -315,12 +319,17 @@ export interface Dnd5eHunterMultiattackResolutionRoll {
 export function resolvePreparedDnd5eHunterMultiattack(input: {
   prepared: PreparedDnd5eHunterMultiattack
   rolls: readonly Dnd5eHunterMultiattackResolutionRoll[]
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const { prepared } = input
   if (input.rolls.length !== prepared.targets.length) {
     return { result: { ok: false, state: prepared.state, events: [], reason: 'invalid-dice' } }
   }
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'ranger-hunter-multiattack',
     actorId: prepared.actorToken.id,
     feature: prepared.feature,
@@ -350,10 +359,11 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
       classDamageRolls: roll.classDamageRolls,
       standAgainstTide: roll.standAgainstTide,
     })),
-  })
-  if (!result.ok) return { result }
+  }, input.airborneFallDamageRollsByCombatantId)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

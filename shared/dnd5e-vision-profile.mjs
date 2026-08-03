@@ -63,48 +63,9 @@ export function dnd5eCharacterHasDevilsSight(character) {
     selectionContainsDevilsSight(character.classSelectionsByClass)
 }
 
-export function dnd5eCoreRaceDarkvisionRangeFeet(character) {
+export function dnd5eCharacterDarkvisionRangeFeet(character) {
   if (!plainObject(character)) return 0
-  const identifiers = [
-    normalizedText(character.dnd5eRaceId),
-    normalizedText(character.race),
-  ].filter(Boolean)
-  const coreDarkvisionRaces = new Set([
-    'dwarf',
-    'hill-dwarf',
-    'mountain-dwarf',
-    'elf',
-    'high-elf',
-    'wood-elf',
-    'gnome',
-    'rock-gnome',
-    'forest-gnome',
-    'half-elf',
-    'half-orc',
-    'tiefling',
-    '\u77ee\u4eba',
-    '\u4e18\u9675\u77ee\u4eba',
-    '\u5c71\u5730\u77ee\u4eba',
-    '\u7cbe\u7075',
-    '\u9ad8\u7b49\u7cbe\u7075',
-    '\u6728\u7cbe\u7075',
-    '\u4f8f\u5112',
-    '\u5ca9\u5730\u4f8f\u5112',
-    '\u68ee\u6797\u4f8f\u5112',
-    '\u534a\u7cbe\u7075',
-    '\u534a\u517d\u4eba',
-    '\u63d0\u592b\u6797',
-  ])
-  const superiorDarkvisionRaces = new Set([
-    'drow',
-    'dark-elf',
-    '\u5353\u5c14',
-    '\u9ed1\u6697\u7cbe\u7075',
-  ])
-  if (identifiers.some((identifier) =>
-    [...superiorDarkvisionRaces].some((race) => identifier === race || identifier.endsWith(`:${race}`))
-  )) return 120
-  return identifiers.some((identifier) => coreDarkvisionRaces.has(identifier)) ? 60 : 0
+  return rangeFeet(character.darkvisionRangeFeet)
 }
 
 function monsterSenseRangeFeet(monster, aliases) {
@@ -142,11 +103,12 @@ export function compileDnd5eEffectiveVisionProfile(input = {}) {
   const monster = plainObject(input.monster) ? input.monster : undefined
   const fallbackRangeFeet = rangeFeet(input.fallbackRangeFeet)
   const normalRangeFeet = optionalRangeFeet(token.visionRangeFeet) ?? fallbackRangeFeet
-  const racialDarkvision = dnd5eCoreRaceDarkvisionRangeFeet(character)
+  const characterDarkvision = dnd5eCharacterDarkvisionRangeFeet(character)
   const monsterDarkvision = monsterSenseRangeFeet(monster, ['darkvision', '\u9ed1\u6697\u89c6\u89c9'])
   const darkvisionRangeFeet = Math.max(
     rangeFeet(token.darkvisionRangeFeet),
-    racialDarkvision,
+    rangeFeet(token.dnd5eCharacterDarkvisionRangeFeet),
+    characterDarkvision,
     monsterDarkvision,
     activeEffectDarkvisionRangeFeet(input),
   )

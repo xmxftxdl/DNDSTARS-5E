@@ -65,6 +65,12 @@ describe('formatDnd5eCombatLogDetails', () => {
       finalDamage: 0,
       components: [{
         damageType: 'fire',
+        roll: {
+          sides: 6,
+          rolls: [6, 4, 5],
+          bonus: 0,
+          total: 15,
+        },
         damageBeforeSavingThrow: 15,
         damageAfterSavingThrow: 7,
         finalDamage: 0,
@@ -78,7 +84,34 @@ describe('formatDnd5eCombatLogDetails', () => {
       }],
     }], { resolveName })
 
+    expect(details).toContain('燃烧之手火焰伤害骰 3d6：6 + 4 + 5 = 15')
     expect(details).toContain('燃烧之手伤害 15；豁免成功减半为 7；针刺魔火焰免疫，最终 0')
+  })
+
+  it('展开火球术共享的 8d6 每颗骰面和最终伤害', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-saving-throw-damage-resolved',
+      actorId: 'wizard',
+      targetId: 'target',
+      spellId: 'fireball',
+      ability: 'dex',
+      saveSucceeded: false,
+      successfulSave: 'half',
+      damageBeforeSavingThrow: 32,
+      damageAfterSavingThrow: 32,
+      finalDamage: 32,
+      components: [{
+        damageType: 'fire',
+        roll: { sides: 6, rolls: [6, 5, 4, 3, 2, 1, 6, 5], bonus: 0, total: 32 },
+        damageBeforeSavingThrow: 32,
+        damageAfterSavingThrow: 32,
+        finalDamage: 32,
+        defenses: [],
+      }],
+    }], { resolveName })
+
+    expect(details).toContain('火球术火焰伤害骰 8d6：6 + 5 + 4 + 3 + 2 + 1 + 6 + 5 = 32')
+    expect(details).toContain('火球术伤害 32；豁免失败，伤害为 32；最终 32')
   })
 
   it('展开强化塑能来源以及魔法飞弹的公式、逐枚伤害和总伤害', () => {

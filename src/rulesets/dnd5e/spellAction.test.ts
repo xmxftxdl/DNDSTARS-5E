@@ -27,6 +27,8 @@ import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createDnd5eMechanicalEffect } from './activeEffects'
 import { DND5E_CLUB, DND5E_LEATHER_ARMOR, DND5E_LONGSWORD } from './equipment'
 import { applyDnd5eLongRestBenefits } from './campaignTimeRules'
+import { createDnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -72,16 +74,44 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
   it('prepares and spends a racial innate spell without a casting class or class slot', () => {
-    const drow = character('drow', '战士', {
-      race: '卓尔',
-      dnd5eRaceId: 'drow',
+    const pluginId = 'local.test.innate-spell-race'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId,
+        name: 'Innate spell race fixture',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Tests',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerRace({
+          id: 'shadow-elf',
+          name: 'Shadow Elf',
+          speedFeet: 30,
+          coreRaceMechanicsId: 'elf',
+          innateSpells: [{
+            spellId: 'faerie-fire',
+            minimumLevel: 3,
+            ability: 'cha',
+            castAtLevel: 1,
+            resetOn: 'long-rest',
+          }],
+        })
+      },
+    })
+    try {
+      const localRace = character('local-race', '战士', {
+      race: 'Shadow Elf',
+      dnd5eRaceId: `${pluginId}:shadow-elf`,
       level: 3,
       classResources: {
         'dnd5e-racial-spell-faerie-fire': { current: 1, max: 1 },
       },
     })
     const enemy = token('enemy', 'enemy', 125)
-    const input = fixture(drow, 'faerie-fire', 1, enemy)
+    const input = fixture(localRace, 'faerie-fire', 1, enemy)
     input.action.targetTokenIds = [enemy.id]
     input.action.dnd5eSpellCast = {
       spellId: 'faerie-fire',
@@ -109,12 +139,15 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
     if (!resolved.result.ok) return
     expect(
-      resolved.result.state.combatants['drow-token']
+      resolved.result.state.combatants['local-race-token']
         .classResources['dnd5e-racial-spell-faerie-fire'].current,
     ).toBe(0)
     expect(
-      resolved.result.state.combatants['drow-token'].classResources['dnd5e-spell-slot-1'],
+      resolved.result.state.combatants['local-race-token'].classResources['dnd5e-spell-slot-1'],
     ).toBeUndefined()
+    } finally {
+      dispose()
+    }
   })
 
   it('binds a guessed spell-attack cell to the Host authoritative token snapshot', () => {
@@ -338,7 +371,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
 
     input.action.targetCell = input.action.dnd5eSpellCast.areaTargetCell
     input.action.dnd5eSpellCast.guessedTargetCell = undefined
-    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'invalid-target' })
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'spell-target-count-invalid' })
   })
 
   it('rejects client target IDs and spells that require an actual visible target in guessed-cell mode', () => {
@@ -1023,7 +1056,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       characters: cast.application.characters,
       initiativeOrder: input.initiativeOrder,
       turnEconomy: createDnd5eTurnEconomyCounts('call-lightning-out-of-range'),
-    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+    })).toMatchObject({ ok: false, reason: 'spell-area-target-out-of-range' })
   })
 
   it('does not create a Spiritual Weapon map entity when the spell is countered', () => {
@@ -1687,6 +1720,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       spellId: 'moonbeam', slotLevel: 2, targetTokenId: input.action.actorTokenId,
       targetTokenIds: [], areaTargetCell: { col: 4, row: 2 },
     }
+    input.action.targetElevationFeet = 35
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1701,6 +1735,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       expect.objectContaining({
         sourceKind: 'core-spell', coreSpellId: 'moonbeam', anchorCell: { col: 4, row: 2 },
         concentrationId: 'moonbeam', visual: { preset: 'moonbeam', intensity: 'strong' },
+        vertical: { mode: 'volume', baseElevationFeet: 35, heightFeet: 40 },
       }),
     ])
     if (!resolved.application) return
@@ -1902,7 +1937,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       targetTokenIds: [],
       areaTargetCell: { col: 4, row: 0 },
     }
-    expect(prepareDnd5eSpellCast(callLightning)).toEqual({ ok: false, reason: 'invalid-target' })
+    expect(prepareDnd5eSpellCast(callLightning)).toEqual({ ok: false, reason: 'spell-target-not-visible' })
 
     const tentacleWizard = character('tentacle-wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['black-tentacles'] } } } },
@@ -1916,7 +1951,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       targetTokenIds: [],
       areaTargetCell: { col: 4, row: 0 },
     }
-    expect(prepareDnd5eSpellCast(blackTentacles)).toEqual({ ok: false, reason: 'invalid-target' })
+    expect(prepareDnd5eSpellCast(blackTentacles)).toEqual({ ok: false, reason: 'spell-target-not-visible' })
 
     const fireballWizard = character('fireball-wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['fireball'] } } } },
@@ -2064,6 +2099,95 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       targetTokenId: enemy.id,
       areaId: area.id,
     })).toMatchObject([{ trigger: { id: 'flaming-sphere-impact' }, targetToken: { id: enemy.id } }])
+  })
+
+  it('recasts Flaming Sphere at a higher level by uniquely replacing its area, effect token, and concentration level', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['flaming-sphere'] } } } },
+      classResources: {
+        'dnd5e-spell-slot-3': { current: 1, max: 1 },
+        'dnd5e-spell-slot-4': { current: 1, max: 1 },
+      },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    enemy.y = 125
+    const input = fixture(wizard, 'flaming-sphere', 3, enemy)
+    input.action.targetTokenId = input.action.actorTokenId
+    input.action.targetTokenIds = []
+    input.action.targetCell = { col: 5, row: 2 }
+    input.action.dnd5eSpellCast = {
+      spellId: 'flaming-sphere', slotLevel: 3,
+      targetTokenId: input.action.actorTokenId, targetTokenIds: [],
+      areaTargetCell: { col: 5, row: 2 },
+    }
+    const firstPrepared = prepareDnd5eSpellCast(input)
+    expect(firstPrepared.ok, firstPrepared.ok ? undefined : firstPrepared.reason).toBe(true)
+    if (!firstPrepared.ok) return
+    const first = resolvePreparedDnd5eSpellCast({ prepared: firstPrepared.prepared, effectRolls: [] })
+    expect(first.result.ok, first.result.ok ? undefined : first.result.reason).toBe(true)
+    expect(first.application).toBeDefined()
+    if (!first.result.ok || !first.application) return
+    const oldArea = first.application.map.dnd5ePluginAreas?.find((area) =>
+      area.coreSpellId === 'flaming-sphere')
+    const oldEffectToken = first.application.map.tokens.find((candidate) =>
+      candidate.dnd5eSpellEffect?.spellId === 'flaming-sphere')
+    expect(oldArea).toBeDefined()
+    expect(oldEffectToken).toBeDefined()
+
+    const recastAction: SharedPlayerActionState = {
+      ...input.action,
+      id: 'recast-flaming-sphere',
+      round: 2,
+      seq: 2,
+      targetCell: { col: 8, row: 2 },
+      dnd5eSpellCast: {
+        spellId: 'flaming-sphere', slotLevel: 4,
+        targetTokenId: input.action.actorTokenId, targetTokenIds: [],
+        areaTargetCell: { col: 8, row: 2 },
+      },
+    }
+    const recastPrepared = prepareDnd5eSpellCast({
+      action: recastAction,
+      map: first.application.map,
+      characters: first.application.characters,
+      initiativeOrder: input.initiativeOrder,
+      turnEconomy: createDnd5eTurnEconomyCounts('flaming-sphere-recast-turn'),
+    })
+    expect(recastPrepared.ok, recastPrepared.ok ? undefined : recastPrepared.reason).toBe(true)
+    if (!recastPrepared.ok) return
+    const recast = resolvePreparedDnd5eSpellCast({ prepared: recastPrepared.prepared, effectRolls: [] })
+    expect(recast.result.ok, recast.result.ok ? undefined : recast.result.reason).toBe(true)
+    expect(recast.application).toBeDefined()
+    if (!recast.result.ok || !recast.application) return
+
+    const areas = recast.application.map.dnd5ePluginAreas?.filter((area) =>
+      area.coreSpellId === 'flaming-sphere') ?? []
+    const effectTokens = recast.application.map.tokens.filter((candidate) =>
+      candidate.dnd5eSpellEffect?.spellId === 'flaming-sphere')
+    expect(areas).toHaveLength(1)
+    expect(effectTokens).toHaveLength(1)
+    expect(areas[0]).toMatchObject({
+      slotLevel: 4,
+      anchorCell: { col: 8, row: 2 },
+      anchorTokenId: effectTokens[0].id,
+      triggers: [
+        { damage: { count: 4, sides: 6, type: 'fire' } },
+        { damage: { count: 4, sides: 6, type: 'fire' } },
+      ],
+    })
+    expect(areas[0].id).not.toBe(oldArea?.id)
+    expect(effectTokens[0].id).not.toBe(oldEffectToken?.id)
+    expect(recast.result.state.combatants[input.action.actorTokenId]).toMatchObject({
+      concentrating: true,
+      classState: {
+        concentrationSpellId: 'flaming-sphere',
+        concentrationSpellLevel: 4,
+      },
+      classResources: {
+        'dnd5e-spell-slot-3': { current: 0, max: 1 },
+        'dnd5e-spell-slot-4': { current: 0, max: 1 },
+      },
+    })
   })
 
   it('rejects a zero-point Mass Heal allocation before settlement', () => {
@@ -2532,6 +2656,20 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.application?.map.tokens.find((entry) => entry.id === first.id)?.hp).toBe(1)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === second.id)?.hp).toBe(1)
     expect(resolved.application?.characters.find((entry) => entry.id === bard.id)?.classResources?.['dnd5e-bardic-inspiration']).toEqual({ current: 1, max: 3 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'spell-saving-throw-damage-resolved',
+      spellId: 'fireball',
+      damageBeforeSavingThrow: 29,
+      components: [expect.objectContaining({
+        damageType: 'fire',
+        roll: {
+          sides: 6,
+          rolls: [4, 4, 4, 4, 4, 4, 4, 4],
+          bonus: 0,
+          total: 32,
+        },
+      })],
+    }))
   })
 
   it('applies one shared Burning Hands damage roll at full or half damage for each area save', () => {
@@ -2586,6 +2724,44 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     )
   })
 
+  it('uses a declared elevation to pitch Burning Hands above a ground creature', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['burning-hands'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 2 } },
+    })
+    const airborneTarget = {
+      ...token('airborne-target', 'enemy', 75),
+      elevationFeet: 10,
+    }
+    const groundedTarget = token('grounded-target', 'enemy', 75)
+    const input = fixture(wizard, 'burning-hands', 1, airborneTarget)
+    input.map.tokens.push(groundedTarget)
+    input.initiativeOrder.push({
+      tokenId: groundedTarget.id,
+      label: groundedTarget.label,
+      emoji: '',
+      color: '',
+      roll: 5,
+    })
+    input.action.targetTokenId = airborneTarget.id
+    input.action.targetTokenIds = [airborneTarget.id]
+    input.action.targetElevationFeet = 60
+    input.action.dnd5eSpellCast = {
+      spellId: 'burning-hands',
+      slotLevel: 1,
+      targetTokenId: airborneTarget.id,
+      targetTokenIds: [airborneTarget.id],
+      areaTargetCell: { col: 3, row: 0 },
+    }
+
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([
+      airborneTarget.id,
+    ])
+  })
+
   it('records Burning Hands save reduction before a Barbed Devil fire immunity negates it', () => {
     const wizard = character('wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['burning-hands'] } } } },
@@ -2632,6 +2808,12 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       finalDamage: 0,
       components: [{
         damageType: 'fire',
+        roll: {
+          sides: 6,
+          rolls: [6, 5, 4],
+          bonus: 0,
+          total: 15,
+        },
         damageBeforeSavingThrow: 15,
         damageAfterSavingThrow: 7,
         finalDamage: 0,
@@ -2833,7 +3015,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const enemy = token('enemy', 'enemy', 125)
     const missingChoice = fixture(cleric, 'flame-strike', 6, enemy)
-    expect(prepareDnd5eSpellCast(missingChoice)).toEqual({ ok: false, reason: 'invalid-action' })
+    expect(prepareDnd5eSpellCast(missingChoice)).toEqual({ ok: false, reason: 'spell-option-required' })
 
     const input = fixture(cleric, 'flame-strike', 6, enemy)
     input.action.dnd5eSpellCast!.higherSlotDamageType = 'radiant'
@@ -4263,8 +4445,25 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     const enemy = token('enemy', 'enemy', 125)
     expect(prepareDnd5eSpellCast(fixture(wizard, 'magic-missile', 1, enemy))).toEqual({
       ok: false,
-      reason: 'component-unavailable',
+      reason: 'verbal-component-unavailable',
     })
+  })
+
+  it('can disable spellcasting prerequisites without disabling spell ownership validation', () => {
+    const wizard = character('wizard', '法师', {
+      conditions: ['沉默'],
+      equipment: { armor: DND5E_LEATHER_ARMOR },
+      dnd5eClassChoices: {
+        classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } } },
+      },
+    })
+    const input = fixture(wizard, 'fire-bolt', 0, token('enemy', 'enemy', 125))
+    expect(prepareDnd5eSpellCast({
+      ...input,
+      effectiveRules: createDnd5eEffectiveRulesContextV1({
+        houseRules: { spellcastingPrerequisitesEnabled: false },
+      }),
+    })).toMatchObject({ ok: true })
   })
 
   it('applies Ray of Frost speed reduction until the caster next turn starts', () => {
@@ -4386,7 +4585,12 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const enemy = token('enemy', 'enemy', 75)
     enemy.elevationFeet = 20
-    const prepared = prepareDnd5eSpellCast(fixture(wizard, 'thunderwave', 1, enemy))
+    const input = fixture(wizard, 'thunderwave', 1, enemy)
+    const casterToken = input.map.tokens.find((candidate) =>
+      candidate.id === input.action.actorTokenId)
+    if (!casterToken) throw new Error('missing caster token')
+    casterToken.elevationFeet = 20
+    const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     const cast = resolvePreparedDnd5eSpellCast({

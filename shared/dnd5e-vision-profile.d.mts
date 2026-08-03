@@ -14,7 +14,7 @@ export interface Dnd5eEffectiveVisionProfileV1 {
 export const DND5E_EFFECTIVE_VISION_PROFILE_SCHEMA_VERSION: 1
 
 export function dnd5eCharacterHasDevilsSight(character: unknown): boolean
-export function dnd5eCoreRaceDarkvisionRangeFeet(character: unknown): number
+export function dnd5eCharacterDarkvisionRangeFeet(character: unknown): number
 export function compileDnd5eEffectiveVisionProfile(input?: {
   token?: unknown
   character?: unknown

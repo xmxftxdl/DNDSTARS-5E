@@ -214,6 +214,17 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...validArea, vertical: { mode: 'ground' },
+      }] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...validArea,
+        vertical: { mode: 'volume', baseElevationFeet: 10, heightFeet: 20, anchorOffsetFeet: -5 },
+      }] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         ...validArea, lighting: { kind: 'javascript', code: 'fetch("/")' },
       }] }],
     }).status).toBe('invalid')
@@ -241,6 +252,16 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'remote-script' } }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...validArea, vertical: { mode: 'ground', code: 'fetch("/")' },
+      }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...validArea, vertical: { mode: 'volume', baseElevationFeet: 10, heightFeet: 0 },
+      }] }],
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, cells: [{ col: 2.5, row: 3 }] }] }],

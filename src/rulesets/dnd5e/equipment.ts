@@ -636,10 +636,13 @@ export function dnd5eWeaponProficient(character: Character, weapon: EquipmentIte
   const data = weapon.dnd5e
   if (!data || data.kind !== 'weapon') return false
   const weaponId = (weapon.baseEquipmentId ?? weapon.id).replace(/-offhand$/, '')
-  if (dnd5eCoreRaceMechanics(character.race, character.dnd5eRaceId)
+  const pluginRace = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+  if (dnd5eCoreRaceMechanics(
+    character.race,
+    pluginRace?.coreRaceMechanicsId ?? character.dnd5eRaceId,
+  )
     ?.weaponProficiencies?.includes(weaponId)) return true
-  if (dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
-    ?.weaponProficiencies?.includes(weaponId)) return true
+  if (pluginRace?.weaponProficiencies?.includes(weaponId)) return true
   const classIds = Object.keys(normalizeDnd5eClassLevels(character))
   if (classIds.length === 0) return false
   const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id

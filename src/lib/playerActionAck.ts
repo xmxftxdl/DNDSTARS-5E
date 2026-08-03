@@ -20,6 +20,7 @@ export interface BuildPlayerActionAckInput {
   appliedAt: number
   reason?: string
   acceptedPosition?: { x: number; y: number }
+  acceptedElevationFeet?: number
   dnd5eDeclarativeAttackIntents?: SharedPlayerActionAckState['dnd5eDeclarativeAttackIntents']
   before?: PlayerActionResultBaseline
   after?: PlayerActionResultBaseline
@@ -40,6 +41,8 @@ export function buildPlayerActionAck(input: BuildPlayerActionAckInput): SharedPl
     status: input.status,
     reason: input.reason,
     acceptedPosition: input.acceptedPosition,
+    acceptedElevationFeet:
+      Number.isFinite(input.acceptedElevationFeet) ? input.acceptedElevationFeet : undefined,
     appliedAt: input.status === 'accepted' ? input.appliedAt : undefined,
     result,
     dnd5eDeclarativeAttackIntents:

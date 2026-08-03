@@ -57,6 +57,7 @@ import {
   dnd5eMonsterPackTacticsApplies,
   dnd5eMonsterRechargeActions,
   dnd5eMonsterTraitDamageDefinitions,
+  dnd5eMonsterTurnStartTraitRollRequirements,
   dnd5eMonsterWeaponAttacksAreMagical,
   dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
@@ -125,12 +126,20 @@ import {
   type Dnd5eMonsterSimulationRuntimeCache,
 } from './monsterTurnPlanner'
 import {
+  dnd5ePersistentAreaDifficultTerrainMultiplierAt,
+  dnd5ePersistentAreaSpeedCostMultiplierAt,
+} from './persistentAreaGeometry'
+import {
   createDnd5eCombatant,
   dnd5eAbilityCheckRollMode,
   dnd5eAbilityCheckSuccessProbability,
   dnd5eBestActiveEffectEscapeOption,
   dnd5eBestGrappleDefense,
+  dnd5eCombatantCanSee,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eDispelMagicEffectsOnTarget,
+  dnd5eCounterspellCastingAbility,
+  dnd5eCounterspellSlotLevels,
   dnd5eCombatantPairKey,
   dnd5eDirectedCombatantPairKey,
   dnd5eEffectiveSizeRank,
@@ -140,12 +149,16 @@ import {
   previewDnd5eTurnStartBoundary,
   dnd5eHitIsAutomaticCritical,
   dnd5eTargetArmorClassForAttack,
+  previewDnd5eUnsupportedAirborneFalls,
   resolveDnd5eHeadlessAction,
   replaceDnd5eCombatantActiveEffects,
   reconcileDnd5eSourceLinkedRelations,
   startDnd5eHeadlessCombat,
   type Dnd5eCombatant,
   type Dnd5eCombatEvent,
+  type Dnd5eCounterspellReaction,
+  type Dnd5eAction,
+  type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterMechanicRoll,
   type Dnd5eMonsterRechargeRoll,
@@ -509,8 +522,10 @@ interface SimulationDecision {
   /** One target per runtime action-sequence occurrence, including special children. */
   attackTargetTokenIds?: readonly string[]
   projectileTargetIds?: readonly string[]
+  conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   actionId?: string
   areaAction?: Dnd5eMonsterTurnPlan['areaAction']
+  specialAction?: Dnd5eMonsterTurnPlan['specialAction']
   escapeEffectId?: string
   escapeGrapplerId?: string
   releaseGrappleTargetId?: string
@@ -581,6 +596,30 @@ interface SimulationExecutionResult {
 interface SeededRandom {
   next(): number
   die(sides: number): number
+}
+
+function resolveSimulationHeadlessAction(
+  state: Dnd5eHeadlessCombatState,
+  action: Dnd5eAction,
+  random: SeededRandom,
+  options?: Parameters<typeof resolveDnd5eHeadlessAction>[2],
+): Dnd5eActionResult {
+  const preview = previewDnd5eUnsupportedAirborneFalls(state, action)
+  if (!preview.ok || preview.falls.length === 0) {
+    return resolveDnd5eHeadlessAction(state, action, options)
+  }
+  const airborneFallDamageRollsByCombatantId = Object.fromEntries(
+    preview.falls.flatMap((fall) => fall.fallingDamageDice > 0
+      ? [[
+          fall.combatantId,
+          Array.from({ length: fall.fallingDamageDice }, () => random.die(6)),
+        ] as const]
+      : []),
+  )
+  return resolveDnd5eHeadlessAction(state, {
+    ...action,
+    airborneFallDamageRollsByCombatantId,
+  }, options)
 }
 
 interface SimulationReachablePosition {
@@ -897,9 +936,16 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
     if (
       !spell ||
       dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full' ||
-      spell.onFailedSaveEffect != null ||
-      !['spell-attack', 'saving-throw', 'automatic-damage', 'power-word-kill'].includes(spell.effect) ||
-      !['hostile', 'creature'].includes(spell.target)
+      (spell.onFailedSaveEffect != null && spell.onFailedSaveEffect !== 'thunderwave-push') ||
+      ![
+        'spell-attack',
+        'saving-throw',
+        'automatic-damage',
+        'power-word-kill',
+        'sleep-hit-point-pool',
+        'remove-condition',
+      ].includes(spell.effect) ||
+      !['hostile', 'creature', 'area', 'ally'].includes(spell.target)
     ) return []
     const slotLevels = listedSpell.usage?.kind === 'at-will' || listedSpell.level === 0
       ? [listedSpell.level]
@@ -1901,6 +1947,8 @@ function mappedMonsterDecision(
     ? `spell:${plan.spellCast.spellId}:${plan.spellCast.slotLevel}`
     : plan.areaAction
       ? plan.areaAction.actionId
+    : plan.specialAction
+      ? plan.specialAction.actionId
     : plan.actionIndex != null
       ? actor.monster.actions[plan.actionIndex]?.id
       : undefined
@@ -1926,8 +1974,10 @@ function mappedMonsterDecision(
     targetIds: plan.spellCast?.targetTokenIds ?? plan.areaAction?.targetTokenIds,
     attackTargetTokenIds: plan.attackTargetTokenIds,
     projectileTargetIds: plan.spellCast?.projectileTargetIds,
+    conditionChoice: plan.spellCast?.conditionChoice,
     actionId,
     areaAction: plan.areaAction,
+    specialAction: plan.specialAction,
     escapeEffectId: plan.escapeActiveEffect?.effectId,
     escapeGrapplerId: plan.escapeGrapple?.grapplerId,
     releaseGrappleTargetId: plan.releaseGrapple?.targetId,
@@ -1951,7 +2001,7 @@ function mappedMonsterDecision(
         ? 'area-action'
         : plan.escapeActiveEffect || plan.escapeGrapple || plan.releaseGrapple
         ? 'control'
-        : plan.spellCast ? 'spell' : plan.dodged ? 'dodge' : plan.dashed ? 'dash' : 'attack',
+        : plan.spellCast ? 'spell' : plan.specialAction ? 'heal' : plan.dodged ? 'dodge' : plan.dashed ? 'dash' : 'attack',
       targetId: plan.targetTokenId ?? plan.spellCast?.targetTokenIds[0],
       actionId,
       nextPosition: next,
@@ -2214,6 +2264,37 @@ function playerReachabilityCacheKey(
       `${token.id}:${Math.round(token.x)}:${Math.round(token.y)}:${token.size}:${token.elevationFeet ?? 0}:${token.type}`)
     .sort()
     .join('|')
+  const persistentMovementCosts = (map.dnd5ePluginAreas ?? [])
+    .filter((area) => (area.movementCostMultiplier ?? 1) > 1)
+    .map((area) => {
+      const cells = area.cells
+        .map((cell) => `${cell.col},${cell.row}`)
+        .sort()
+        .join('/')
+      const vertical = area.vertical?.mode === 'volume'
+        ? [
+            'volume',
+            area.vertical.baseElevationFeet,
+            area.vertical.heightFeet,
+            area.vertical.anchorOffsetFeet ?? '',
+          ].join(',')
+        : area.vertical?.mode ?? 'legacy'
+      return [
+        area.id,
+        area.sourceKind ?? 'plugin-feature',
+        area.coreSpellId ?? '',
+        area.movementCostMultiplier,
+        area.sourceTokenId,
+        area.anchorMode ?? 'fixed',
+        area.anchorTokenId ?? '',
+        area.relation ?? 'any',
+        area.includeSelf === true ? 1 : 0,
+        vertical,
+        cells,
+      ].join(':')
+    })
+    .sort()
+    .join('|')
   return [
     actor.id,
     Math.round(actor.position),
@@ -2226,6 +2307,7 @@ function playerReachabilityCacheKey(
     map.gridOffsetX,
     map.gridOffsetY,
     positions,
+    persistentMovementCosts,
   ].join(';')
 }
 
@@ -2329,6 +2411,11 @@ function reachablePlayerPositions(
     elevationFeet: actor.elevationFeet,
     movementFeet: 0,
   }]
+  const actorGroundElevationFeet = mapGeometryTerrainElevationAtPoint(
+    battlefield.geometry,
+    { x: actor.position, y: actor.positionY },
+  )
+  const airborne = actor.elevationFeet > actorGroundElevationFeet + 1e-4
   while (queue.length > 0) {
     const current = popQueue()!
     if (current.movementFeet >= maximumMovementFeet) continue
@@ -2347,21 +2434,50 @@ function reachablePlayerPositions(
           x: map.gridOffsetX + (current.col + 0.5) * map.gridSize,
           y: map.gridOffsetY + (current.row + 0.5) * map.gridSize,
         }
-        const projectedToken = { ...token, x: currentPoint.x, y: currentPoint.y }
+        const terrainElevationFeet = mapGeometryTerrainElevationAtPoint(
+          battlefield.geometry,
+          point,
+        )
+        // The simulation has no explicit player flight/landing action yet.
+        // Preserve an already-airborne actor's authored absolute elevation;
+        // landing remains an explicit future movement-mode decision rather
+        // than an implicit side effect of crossing the first grid edge.
+        const elevationFeet = airborne ? actor.elevationFeet : terrainElevationFeet
+        const projectedToken = {
+          ...token,
+          x: currentPoint.x,
+          y: currentPoint.y,
+          elevationFeet: current.elevationFeet,
+        }
         if (mapGeometryMovementBlocked({
           geometry: battlefield.geometry,
           map,
           token: projectedToken,
           to: point,
+          fromElevationFeet: current.elevationFeet,
+          toElevationFeet: elevationFeet,
         }).blocked) continue
-        const elevationFeet = mapGeometryTerrainElevationAtPoint(
-          battlefield.geometry,
-          point,
-          current.elevationFeet,
-        )
         const elevationDelta = elevationFeet - current.elevationFeet
         if (Math.abs(elevationDelta) > 10) continue
-        const movementFeet = current.movementFeet + feetPerCell + Math.max(0, elevationDelta)
+        const stepToken = { ...token, ...point, elevationFeet }
+        const difficultTerrainMultiplier =
+          dnd5ePersistentAreaDifficultTerrainMultiplierAt({
+            map,
+            token: stepToken,
+            position: point,
+          })
+        const speedCostMultiplier =
+          dnd5ePersistentAreaSpeedCostMultiplierAt({
+            map,
+            token: stepToken,
+            position: point,
+          })
+        const verticalMovementFeet = airborne
+          ? Math.abs(elevationDelta)
+          : Math.max(0, elevationDelta)
+        const movementFeet = current.movementFeet +
+          feetPerCell * difficultTerrainMultiplier * speedCostMultiplier +
+          verticalMovementFeet
         if (
           movementFeet > maximumMovementFeet ||
           (visited.get(nextKey) ?? Number.POSITIVE_INFINITY) <= movementFeet
@@ -2521,8 +2637,8 @@ function thunderwaveEnvironmentalImpact(input: {
 /**
  * Builds the exact forced-movement payload required by the Headless spell
  * transaction.  The decision scorer above only estimates the value; this
- * helper rolls the target's actual save mode and lets Headless validate and
- * resolve both the push and any resulting fall.
+ * helper supplies a legal geometric candidate for every target and lets
+ * Headless decide whether the final authoritative save applies that push.
  */
 function simulationThunderwaveForcedMovements(input: {
   actor: SimulationActor
@@ -2537,10 +2653,18 @@ function simulationThunderwaveForcedMovements(input: {
   if (
     spell?.id !== 'thunderwave' ||
     !spell.saveAbility ||
-    spell.saveDc == null ||
-    !input.battlefield
+    spell.saveDc == null
   ) return []
-  const saveDc = spell.saveDc
+  if (!input.battlefield) {
+    return input.targetSavingThrows.flatMap((saveRoll) => {
+      const target = input.holder.state.combatants[saveRoll.targetId]
+      return target ? [{
+        targetId: target.id,
+        to: { ...target.position },
+        distanceFeet: 0,
+      }] : []
+    })
+  }
   const map = {
     ...input.battlefield.map,
     tokens: input.battlefield.map.tokens.map((token) => {
@@ -2554,25 +2678,17 @@ function simulationThunderwaveForcedMovements(input: {
   const casterToken = map.tokens.find((token) => token.id === input.actor.id)
   if (!caster || !casterToken) return []
   return input.targetSavingThrows.flatMap((saveRoll): Dnd5eSpellForcedMovement[] => {
-    const targetActor = input.actors.find((candidate) => candidate.id === saveRoll.targetId)
     const target = input.holder.state.combatants[saveRoll.targetId]
     const targetToken = map.tokens.find((token) => token.id === saveRoll.targetId)
-    if (!targetActor || !target || !targetToken) return []
-    const saveMode = dnd5eSavingThrowMode(target, spell.saveAbility!, {
-      effectVisible: true,
-      sourceCreatureType: caster.creatureType,
-      sourceIsSpell: true,
-    })
-    const d20 = saveMode === 'advantage'
-      ? Math.max(saveRoll.d20, saveRoll.d20Second ?? 0)
-      : saveMode === 'disadvantage'
-        ? Math.min(saveRoll.d20, saveRoll.d20Second ?? 0)
-        : saveRoll.d20
-    const modifier = target.savingThrowBonuses[spell.saveAbility!] ??
-      rules.abilityModifier(target.abilities[spell.saveAbility!])
-    if (d20 + modifier >= saveDc) return []
+    if (!target || !targetToken) return []
     const push = dnd5eRepellingBlastPushDestination(map, casterToken, targetToken)
-    if (push.distanceFeet <= 0) return []
+    if (push.distanceFeet <= 0) {
+      return [{
+        targetId: target.id,
+        to: { x: targetToken.x, y: targetToken.y },
+        distanceFeet: 0,
+      }]
+    }
     const fall = dnd5eForcedMovementFall({
       geometry: input.battlefield!.geometry,
       target: targetToken,
@@ -2584,7 +2700,7 @@ function simulationThunderwaveForcedMovements(input: {
       ? Array.from({ length: dnd5eFallingDamageDice(fallDistanceFeet) }, () => input.random.die(6))
       : undefined
     return [{
-      targetId: targetActor.id,
+      targetId: target.id,
       to: push.to,
       distanceFeet: push.distanceFeet,
       toElevationFeet,
@@ -2931,6 +3047,14 @@ function synchronizeHeadlessActors(
     replaceDnd5eCombatantActiveEffects(combatant, actor.activeEffects)
     combatant.position = { x: actor.position, y: actor.positionY }
     combatant.elevationFeet = actor.elevationFeet
+    const groundElevationFeet = battlefield
+      ? mapGeometryTerrainElevationAtPoint(
+          battlefield.geometry,
+          { x: actor.position, y: actor.positionY },
+        )
+      : 0
+    combatant.groundElevationFeet = groundElevationFeet
+    combatant.airborne = actor.elevationFeet > groundElevationFeet + 1e-4
   }
   for (let left = 0; left < actors.length; left += 1) {
     for (let right = left + 1; right < actors.length; right += 1) {
@@ -3184,14 +3308,14 @@ function executeHeadlessControlAction(input: {
   combatant.turn.actionAvailable = true
   combatant.turn.bonusActionAvailable = true
   combatant.turn.reactionAvailable = true
-  const result = resolveDnd5eHeadlessAction(holder.state, {
+  const result = resolveSimulationHeadlessAction(holder.state, {
     type: 'monster-special-action',
     actorId: actor.id,
     actionId: action.id,
     targetId: target.id,
     d20: random.die(20),
     d20Second: random.die(20),
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}`,
     now: holder.state.round,
   })
@@ -3247,13 +3371,13 @@ function executeHeadlessEscapeActiveEffect(input: {
   }
   holder.state.initiativeIndex = actorIndex
   combatant.turn.actionAvailable = true
-  const result = resolveDnd5eHeadlessAction(holder.state, {
+  const result = resolveSimulationHeadlessAction(holder.state, {
     type: 'escape-active-effect',
     actorId: actor.id,
     effectId,
     d20: random.die(20),
     d20Second: random.die(20),
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:escape:${effectId}`,
     now: holder.state.round,
   })
@@ -3304,7 +3428,7 @@ function executeHeadlessEscapeGrapple(input: {
   }
   holder.state.initiativeIndex = actorIndex
   combatant.turn.actionAvailable = true
-  const result = resolveDnd5eHeadlessAction(holder.state, {
+  const result = resolveSimulationHeadlessAction(holder.state, {
     type: 'escape-grapple',
     actorId: actor.id,
     grapplerId,
@@ -3312,7 +3436,7 @@ function executeHeadlessEscapeGrapple(input: {
     actorD20Second: random.die(20),
     targetD20: random.die(20),
     targetD20Second: random.die(20),
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:escape-grapple:${grapplerId}`,
     now: holder.state.round,
   })
@@ -3493,7 +3617,7 @@ function executeHeadlessMonsterAreaAction(input: {
   if (rule.forcedMovementOnFailedSave && forcedMovements?.length !== targets.length) {
     return { handled: false, hits: 0, damage: 0, transactions: 0 }
   }
-  const result = resolveDnd5eHeadlessAction(holder.state, {
+  const result = resolveSimulationHeadlessAction(holder.state, {
     type: 'monster-area-action',
     actorId: actor.id,
     actionId: areaAction.actionId,
@@ -3505,7 +3629,7 @@ function executeHeadlessMonsterAreaAction(input: {
       damageRolls,
       forcedMovements,
     },
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:area:${areaAction.actionId}`,
     now: holder.state.round,
   })
@@ -3547,6 +3671,67 @@ function executeHeadlessMonsterAreaAction(input: {
     hits,
     damage,
     specialActionName: areaAction.actionName,
+    transactions: committed ? 1 : 0,
+    steps: input.captureLog
+      ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
+      : undefined,
+  }
+}
+
+function executeHeadlessMonsterHealingTouch(input: {
+  actor: SimulationActor
+  specialAction: Extract<
+    NonNullable<Dnd5eMonsterTurnPlan['specialAction']>,
+    { kind: 'healing-touch' }
+  >
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  captureLog: boolean
+}): SimulationExecutionResult {
+  const { actor, specialAction, actors, holder, random } = input
+  const definition = actor.monster?.actions.find((candidate) =>
+    candidate.id === specialAction.actionId)
+  const rule = definition?.rule
+  const target = actors.find((candidate) =>
+    candidate.id === specialAction.targetTokenId &&
+    candidate.hp > 0 &&
+    !candidate.deathSaves.dead)
+  if (!target || rule?.kind !== 'healing-touch') {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  const hpBefore = target.hp
+  const result = resolveSimulationHeadlessAction(holder.state, {
+    type: 'monster-special-action',
+    actorId: actor.id,
+    actionId: specialAction.actionId,
+    targetId: target.id,
+    damageRolls: Array.from(
+      { length: rule.healing.count },
+      () => random.die(rule.healing.sides),
+    ),
+  }, random, {
+    transactionId:
+      `${holder.state.combatId}:${holder.state.round}:${actor.id}:special:${specialAction.actionId}`,
+    now: holder.state.round,
+  })
+  if (!result.ok) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (!resolved) continue
+    synchronizeSimulationActorFromHeadless(candidate, resolved)
+    for (const [actionId, uses] of Object.entries(
+      resolved.classState.monsterActionUsesByActionId ?? {},
+    )) candidate.perDayUses.set(actionId, uses.current)
+  }
+  const committed = result.transaction?.status === 'committed'
+  return {
+    handled: true,
+    hits: 0,
+    damage: 0,
+    healing: Math.max(0, target.hp - hpBefore),
+    specialActionName: specialAction.actionName,
     transactions: committed ? 1 : 0,
     steps: input.captureLog
       ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
@@ -4542,7 +4727,7 @@ function executeHeadlessWeaponAction(input: {
           randomRepeatRoll,
           rolls: submittedRolls,
         }
-    const result = resolveDnd5eHeadlessAction(holder.state, submittedAction, {
+    const result = resolveSimulationHeadlessAction(holder.state, submittedAction, random, {
       transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}`,
       now: holder.state.round,
     })
@@ -4596,7 +4781,7 @@ function executeHeadlessWeaponAction(input: {
       const d20 = random.die(20)
       const d20Second = rollModes[index]?.requiresSecondD20 ? random.die(20) : undefined
       const damageRolls = Array.from({ length: damage.count }, () => random.die(damage.sides))
-      const result = resolveDnd5eHeadlessAction(state, {
+      const result = resolveSimulationHeadlessAction(state, {
         type: 'attack',
         actorId: actor.id,
         targetId: target.id,
@@ -4611,7 +4796,7 @@ function executeHeadlessWeaponAction(input: {
           rolls: damageRolls,
         },
         classDamageContext,
-      }, {
+      }, random, {
         transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}:${index}`,
         now: holder.state.round,
       })
@@ -4673,6 +4858,7 @@ function executeHeadlessSpellAction(input: {
     battlefield?: SimulationBattlefield
     targetIds?: readonly string[]
     projectileTargetIds?: readonly string[]
+    conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
 }): SimulationExecutionResult {
   const { actor, target, action, actors, holder, random } = input
   const spell = action.spell
@@ -4701,7 +4887,14 @@ function executeHeadlessSpellAction(input: {
   ]))
   const effectRolls = spell.effect === 'automatic-damage'
     ? Array.from({ length: spell.dice.count }, () => [random.die(spell.dice.sides)])
-    : ['spell-attack', 'saving-throw', 'healing', 'fixed-healing', 'temporary-hit-points'].includes(spell.effect)
+    : [
+        'spell-attack',
+        'saving-throw',
+        'healing',
+        'fixed-healing',
+        'temporary-hit-points',
+        'sleep-hit-point-pool',
+      ].includes(spell.effect)
       ? [Array.from({ length: spell.dice.count }, () => random.die(spell.dice.sides))]
       : []
   const targetSavingThrows = spell.effect === 'saving-throw'
@@ -4714,7 +4907,7 @@ function executeHeadlessSpellAction(input: {
   const singleTargetSavingThrow = targetSavingThrows?.length === 1
     ? targetSavingThrows[0]
     : undefined
-  const forcedMovements = !actor.monster && targetSavingThrows
+  const forcedMovements = targetSavingThrows
     ? simulationThunderwaveForcedMovements({
         actor,
         action,
@@ -4725,6 +4918,36 @@ function executeHeadlessSpellAction(input: {
         random,
       })
     : undefined
+  const dispelMagicChecks = spell.effect === 'dispel-magic'
+    ? dnd5eDispelMagicEffectsOnTarget(holder.state, target.id)
+        .filter((effect) => effect.spellLevel > spell.slotLevel)
+        .map((effect) => ({ effectId: effect.effectId, d20: random.die(20) }))
+    : undefined
+  const counterspellReaction: Dnd5eCounterspellReaction | undefined = (() => {
+    if (spell.castingTime === 'reaction') return undefined
+    for (const reactorId of holder.state.initiativeOrder) {
+      const reactor = holder.state.combatants[reactorId]
+      if (
+        !reactor ||
+        reactor.controller === combatant.controller ||
+        reactor.currentHp <= 0 ||
+        !dnd5eCombatantCanSee(holder.state, reactor.id, combatant.id)
+      ) continue
+      const distance = holder.state.distanceFeetByCombatantPair?.[
+        dnd5eCombatantPairKey(reactor.id, combatant.id)
+      ] ?? Number.POSITIVE_INFINITY
+      if (distance > 60) continue
+      const slotLevels = dnd5eCounterspellSlotLevels(reactor)
+      if (slotLevels.length < 1) continue
+      const slotLevel = slotLevels.find((level) => level >= spell.slotLevel) ?? slotLevels[0]
+      const ability = dnd5eCounterspellCastingAbility(reactor, slotLevel)
+      const abilityCheckTotal = slotLevel < spell.slotLevel && ability
+        ? random.die(20) + Math.floor((reactor.abilities[ability] - 10) / 2)
+        : undefined
+      return { actorId: reactor.id, slotLevel, abilityCheckTotal }
+    }
+    return undefined
+  })()
   const resolution = {
       schemaVersion: 1,
       targetIds: resolvedTargetIds,
@@ -4736,13 +4959,17 @@ function executeHeadlessSpellAction(input: {
         ? random.die(20)
         : undefined,
       targetSavingThrows,
+      dispelMagicChecks,
+      forcedMovements: actor.monster ? forcedMovements : undefined,
+      conditionChoice: actor.monster ? input.conditionChoice : undefined,
       effectRolls,
     } as const
-  const result = resolveDnd5eHeadlessAction(holder.state, actor.monster ? {
+  const result = resolveSimulationHeadlessAction(holder.state, actor.monster ? {
     type: 'monster-core-spell',
     actorId: actor.id,
     spellId: spell.id,
     slotLevel: spell.slotLevel,
+    counterspellReaction,
     resolution,
   } : {
     type: 'cast-spell',
@@ -4753,6 +4980,7 @@ function executeHeadlessSpellAction(input: {
     projectileTargetIds: resolution.projectileTargetIds,
     spellId: spell.id,
     slotLevel: spell.slotLevel,
+    counterspellReaction,
     d20: resolution.d20,
     d20Second: resolution.d20Second,
     mode: input.attackMode,
@@ -4761,9 +4989,10 @@ function executeHeadlessSpellAction(input: {
     targetSavingThrows: targetSavingThrows && targetSavingThrows.length > 1
       ? targetSavingThrows
       : undefined,
-    forcedMovements,
+    dispelMagicChecks,
+    forcedMovements: actor.monster ? undefined : forcedMovements,
     effectRolls: effectRolls.flat(),
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}`,
     now: holder.state.round,
   })
@@ -4834,13 +5063,14 @@ function executeHeadlessSpellAction(input: {
   }
 }
 
-function simulationMappedMovementPathIsValid(input: {
+function simulationMappedMovementPathCostFeet(input: {
   actor: SimulationActor
   actors: readonly SimulationActor[]
   battlefield: SimulationBattlefield
   to: { x: number; y: number }
   toElevationFeet: number
-}): boolean {
+  maximumMovementFeet: number
+}): number | undefined {
   const map = {
     ...input.battlefield.map,
     tokens: input.battlefield.map.tokens.map((token) => {
@@ -4856,8 +5086,18 @@ function simulationMappedMovementPathIsValid(input: {
     }),
   }
   const actorToken = map.tokens.find((token) => token.id === input.actor.id)
-  if (!actorToken) return false
-  const usesFlight = input.toElevationFeet !== input.actor.elevationFeet
+  if (!actorToken) return undefined
+  const actorGroundElevationFeet = mapGeometryTerrainElevationAtPoint(
+    input.battlefield.geometry,
+    actorToken,
+  )
+  const targetGroundElevationFeet = mapGeometryTerrainElevationAtPoint(
+    input.battlefield.geometry,
+    input.to,
+  )
+  const usesFlight =
+    input.actor.elevationFeet > actorGroundElevationFeet + 1e-4 ||
+    input.toElevationFeet > targetGroundElevationFeet + 1e-4
   const path = findMapGeometryPath({
     geometry: input.battlefield.geometry,
     map,
@@ -4866,14 +5106,23 @@ function simulationMappedMovementPathIsValid(input: {
     canFly: usesFlight,
     targetElevationFeet: input.toElevationFeet,
     maximumTerrainStepFeet: usesFlight ? 10_000 : 10,
+    additionalDifficultTerrainMultiplier: (token, position) =>
+      dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map, token, position }),
+    additionalSpeedCostMultiplier: (token, position) =>
+      dnd5ePersistentAreaSpeedCostMultiplierAt({ map, token, position }),
   })
-  if (!path) return false
+  if (!path) return undefined
+  const verticalMovementFeet = usesFlight
+    ? Math.abs(input.toElevationFeet - input.actor.elevationFeet)
+    : Math.max(0, input.toElevationFeet - input.actor.elevationFeet)
+  const movementCostFeet = path.movementCostFeet + verticalMovementFeet
+  if (movementCostFeet > input.maximumMovementFeet + 1e-4) return undefined
   const draggedActors = input.actors.filter((candidate) =>
     simulationSourceLinkedGrappleRootEffects(candidate).some((effect) =>
       effect.relation?.movement === 'drag-target' &&
       effect.relation.sourceActorId === input.actor.id &&
       effect.source.actorId === input.actor.id))
-  if (draggedActors.length === 0) return true
+  if (draggedActors.length === 0) return movementCostFeet
 
   const movingIds = new Set([input.actor.id, ...draggedActors.map((actor) => actor.id)])
   const dragMap = {
@@ -4887,7 +5136,7 @@ function simulationMappedMovementPathIsValid(input: {
   const sourceElevationStart = path.elevationsFeet[0] ?? input.actor.elevationFeet
   for (const draggedActor of draggedActors) {
     const draggedToken = map.tokens.find((token) => token.id === draggedActor.id)
-    if (!draggedToken) return false
+    if (!draggedToken) return undefined
     let translatedToken = { ...draggedToken }
     let expectedFrom = { x: draggedActor.position, y: draggedActor.positionY }
     for (let index = 1; index < path.points.length; index += 1) {
@@ -4906,6 +5155,10 @@ function simulationMappedMovementPathIsValid(input: {
         canFly: usesFlight,
         targetElevationFeet: expectedElevation,
         maximumTerrainStepFeet: usesFlight ? 10_000 : 10,
+        additionalDifficultTerrainMultiplier: (token, position) =>
+          dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map, token, position }),
+        additionalSpeedCostMultiplier: (token, position) =>
+          dnd5ePersistentAreaSpeedCostMultiplierAt({ map, token, position }),
       })
       const followsTranslatedSegment = translated?.points.length === 2 &&
         translated.points[0].x === expectedFrom.x &&
@@ -4913,7 +5166,7 @@ function simulationMappedMovementPathIsValid(input: {
         translated.points[1].x === expectedTo.x &&
         translated.points[1].y === expectedTo.y &&
         translated.elevationsFeet.at(-1) === expectedElevation
-      if (!followsTranslatedSegment) return false
+      if (!followsTranslatedSegment) return undefined
       expectedFrom = expectedTo
       translatedToken = {
         ...translatedToken,
@@ -4922,7 +5175,7 @@ function simulationMappedMovementPathIsValid(input: {
       }
     }
   }
-  return true
+  return movementCostFeet
 }
 
 function settleSimulationMonsterDeathAreaEffects(input: {
@@ -5008,7 +5261,7 @@ function settleSimulationMonsterDeathAreaEffects(input: {
           () => input.random.die(rule.damage!.sides),
         )
       : []
-    const result = resolveDnd5eHeadlessAction(input.holder.state, {
+    const result = resolveSimulationHeadlessAction(input.holder.state, {
       type: 'resolve-monster-death-area-effect',
       actorId: source.id,
       snapshotId: snapshot.id,
@@ -5019,7 +5272,7 @@ function settleSimulationMonsterDeathAreaEffects(input: {
         legendaryResistanceTargetIds,
         damageRolls,
       },
-    }, {
+    }, input.random, {
       transactionId:
         `${input.holder.state.combatId}:${input.holder.state.round}:${
           source.id
@@ -5143,27 +5396,28 @@ function executeAction(
     decision.nextPosition - actor.position,
     nextPositionY - actor.positionY,
   ) / battlefieldPixelsPerFoot(battlefield)
-  const chargedMovementFeet = Math.ceil(Math.max(
-    0,
-    decision.metrics?.movementFeet ?? planarMovementFeet,
-  ) - 1e-6)
   const moved = planarMovementFeet > 1e-6 || nextElevationFeet !== actor.elevationFeet
   if (moved && simulationActorMovementLocked(actor)) {
     return { hits: 0, damage: 0, transactions: 0 }
   }
-  if (
-    moved &&
-    battlefield &&
-    !simulationMappedMovementPathIsValid({
+  const mappedMovementCostFeet = moved && battlefield
+    ? simulationMappedMovementPathCostFeet({
       actor,
       actors,
       battlefield,
       to: { x: decision.nextPosition, y: nextPositionY },
       toElevationFeet: nextElevationFeet,
+      maximumMovementFeet: simulationEffectiveSpeed(actor) * (decision.dashes ? 2 : 1),
     })
-  ) {
+    : undefined
+  if (moved && battlefield && mappedMovementCostFeet == null) {
     return { hits: 0, damage: 0, transactions: 0 }
   }
+  const chargedMovementFeet = Math.ceil(Math.max(
+    0,
+    decision.metrics?.movementFeet ?? planarMovementFeet,
+    mappedMovementCostFeet ?? 0,
+  ) - 1e-6)
   if (moved) {
     synchronizeHeadlessActors(headless, actors, battlefield)
     const actorIndex = headless.state.initiativeOrder.indexOf(actor.id)
@@ -5231,6 +5485,22 @@ function executeAction(
       })
     }
   }
+  if (decision.specialAction?.kind === 'healing-touch') {
+    const specialResult = executeHeadlessMonsterHealingTouch({
+      actor,
+      specialAction: decision.specialAction,
+      actors,
+      holder: headless,
+      random,
+      captureLog,
+    })
+    if (specialResult.handled) {
+      return includeMovement({
+        target: actors.find((candidate) => candidate.id === decision.targetId),
+        ...specialResult,
+      })
+    }
+  }
   const declaredAction = actor.actions.find((candidate) => candidate.id === decision.actionId)
   const action = declaredAction
     ? simulationActionWithinAttackCap(actor, declaredAction)
@@ -5269,6 +5539,7 @@ function executeAction(
     battlefield,
     targetIds: decision.targetIds,
     projectileTargetIds: decision.projectileTargetIds,
+    conditionChoice: decision.conditionChoice,
   })
   if (headlessSpellResult.handled) return includeMovement({ action, target, ...headlessSpellResult })
   const headlessResult = executeHeadlessWeaponAction({
@@ -5422,13 +5693,13 @@ function resolveControlRepeatSaves(
     const pendingIds = [...(combatant?.classState.activeEffectDamageSavePendingIds ?? [])]
     for (const effectId of pendingIds) {
       const sourceId = actor.controlledById
-      const result = resolveDnd5eHeadlessAction(headless.state, {
+      const result = resolveSimulationHeadlessAction(headless.state, {
         type: 'active-effect-damage-save',
         actorId: actor.id,
         effectId,
         d20: random.die(20),
         d20Second: random.die(20),
-      }, {
+      }, random, {
         transactionId: `${headless.state.combatId}:${headless.state.round}:${headless.state.initiativeIndex}:${actor.id}:repeat-save:${effectId}`,
         now: headless.state.round,
       })
@@ -5580,18 +5851,29 @@ function simulationMonsterRechargeRolls(
   const actor = state.combatants[actorId]
   const monster = actor?.statBlockId ? getDnd5eSrdMonster(actor.statBlockId) : undefined
   if (!actor || !monster) return []
-  return dnd5eMonsterRechargeActions(monster).flatMap((action) => {
-    const usage = action.usage
-    if (
-      usage?.kind !== 'recharge' ||
-      actor.classState.monsterRechargeReadyByActionId?.[action.id] !== false
-    ) return []
-    return [{
+  return [
+    ...dnd5eMonsterRechargeActions(monster).flatMap((action) => {
+      const usage = action.usage
+      if (
+        usage?.kind !== 'recharge' ||
+        actor.classState.monsterRechargeReadyByActionId?.[action.id] !== false
+      ) return []
+      return [{
+        actorId,
+        actionId: action.id,
+        roll: random.die(usage.dieSides),
+      }]
+    }),
+    ...dnd5eMonsterTurnStartTraitRollRequirements({
+      monster,
+      currentHp: actor.currentHp,
+      berserk: actor.classState.monsterBerserk === true,
+    }).map((requirement) => ({
       actorId,
-      actionId: action.id,
-      roll: random.die(usage.dieSides),
-    }]
-  })
+      actionId: requirement.id,
+      roll: random.die(requirement.dieSides),
+    })),
+  ]
 }
 
 function simulationTurnStartGazeResolutions(
@@ -5671,7 +5953,7 @@ function settleSimulationBeginTurn(input: {
     actorId,
     holder.state.round,
   ) ?? holder.state
-  const result = resolveDnd5eHeadlessAction(holder.state, {
+  const result = resolveSimulationHeadlessAction(holder.state, {
     type: 'begin-turn',
     actorId,
     turnSlotId: actorId,
@@ -5705,7 +5987,7 @@ function settleSimulationBeginTurn(input: {
       actorId,
       random,
     ),
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actorId}:begin-turn`,
     now: holder.state.round,
   })
@@ -5779,7 +6061,7 @@ function settleSimulationEndTurn(input: {
     nextActorId,
     nextRound,
   ) ?? holder.state
-  const result = resolveDnd5eHeadlessAction(holder.state, {
+  const result = resolveSimulationHeadlessAction(holder.state, {
     type: 'end-turn',
     actorId: actor.id,
     activeEffectSavingThrows: simulationActiveEffectSavingThrows(
@@ -5826,7 +6108,7 @@ function settleSimulationEndTurn(input: {
       nextActorId,
       random,
     ),
-  }, {
+  }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:end-turn`,
     now: holder.state.round,
   })
@@ -5952,6 +6234,13 @@ function simulationHeadlessCombatant(
     maxHp: actor.maxHp,
     temporaryHp: 0,
     speed: actor.speed,
+    movementSpeeds: actor.monster ? {
+      walk: actor.monster.speed.walk,
+      climb: actor.monster.speed.climb,
+      swim: actor.monster.speed.swim,
+      fly: actor.monster.speed.fly,
+      hover: actor.monster.speed.hover,
+    } : { walk: actor.speed },
     position: { x: actor.position, y: actor.positionY },
     elevationFeet: actor.elevationFeet,
     sizeRank: actor.sizeRank,

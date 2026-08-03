@@ -127,6 +127,9 @@ const DND5E_PARTIAL_CORE_SPELL_REASONS: Readonly<Record<string, string>> = {
   'freezing-sphere': '立即发射已自动化；延迟发射与冻结水面仍需要 DM 裁定。',
   'finger-of-death': '伤害已自动化；击杀人形生物后的僵尸生成与控制仍需要 DM 裁定。',
   'prayer-of-healing': '多目标治疗、升环以及亡灵与构装体限制已自动化；10分钟施法过程与战斗外时间推进仍需 DM 确认。',
+  'insect-plague': '初始范围伤害、升环、进入与回合结束触发、困难地形和垂直范围已自动化；轻度遮蔽与精确球面边界仍需地图层或 DM 处理。',
+  cloudkill: '进入与回合开始伤害、升环和垂直范围已自动化；重度遮蔽、毒雾自动移动、下沉与强风驱散仍需地图层或 DM 处理。',
+  'blade-barrier': '直墙区域、进入与回合开始伤害、困难地形和垂直范围已自动化；环形墙与墙后四分之三掩护仍需地图层或 DM 处理。',
 }
 
 function dnd5eCoreSpellAutomation(

@@ -416,4 +416,51 @@ describe('monster area action map authority', () => {
       ?.dnd5eCombatState?.monsterRechargeReadyByActionId?.['acid-spray'])
       .toBe(false)
   })
+
+  it('pitches an Ankheg Acid Spray line through an airborne target only', () => {
+    const ankheg = token({
+      id: 'ankheg',
+      label: 'Ankheg',
+      poolId: 'srd-5.1:ankheg',
+      hp: 39,
+      maxHp: 39,
+      dnd5eCombatState: {
+        monsterRechargeReadyByActionId: { 'acid-spray': true },
+      },
+    })
+    const airborne = token({
+      id: 'airborne',
+      label: 'Airborne hero',
+      type: 'player',
+      characterId: 'airborne-character',
+      x: 225,
+      y: 25,
+      elevationFeet: 20,
+    })
+    const grounded = token({
+      id: 'grounded',
+      label: 'Grounded hero',
+      type: 'player',
+      characterId: 'grounded-character',
+      x: 225,
+      y: 25,
+      elevationFeet: 0,
+    })
+    const map = battleMap('pitched-ankheg-acid-spray', [ankheg, airborne, grounded])
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: 'combat',
+      map,
+      characters: [character('airborne-character'), character('grounded-character')],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: ankheg.id,
+      actionId: 'acid-spray',
+      targetTokenIds: [airborne.id],
+      areaTargetCell: { col: 6, row: 0 },
+      areaTargetElevationFeet: 30,
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([airborne.id])
+  })
 })

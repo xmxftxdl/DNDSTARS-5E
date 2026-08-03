@@ -152,7 +152,16 @@ export interface MapGeometryLight {
 }
 
 export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryWindow | MapGeometryObstacle | MapGeometryLight
-export type MapGeometryTool = 'select' | 'wall' | 'door' | 'window' | 'obstacle' | 'elevation' | 'light' | 'delete'
+export type MapGeometryTool =
+  | 'select'
+  | 'wall'
+  | 'door'
+  | 'window'
+  | 'obstacle'
+  | 'difficult-terrain'
+  | 'elevation'
+  | 'light'
+  | 'delete'
 export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBlocking> & {
   label?: string
   points?: MapGeometryPoint[]
@@ -1026,6 +1035,19 @@ function overlapsHeight(baseHeightFeet: number, heightFeet: number, elevationFee
   return elevationFeet < top - 1e-7 && elevationFeet + creatureHeightFeet > baseHeightFeet + 1e-7
 }
 
+/**
+ * A zero-height, ground traversal cost region is painted onto the terrain
+ * surface. It must not become a competing terrain-height region: legacy maps
+ * saved the sampled height in `terrainElevationFeet`, which flattened a single
+ * difficult-terrain polygon when it crossed platforms at different heights.
+ */
+export function mapGeometryObstacleIsGroundSurfaceOverlay(obstacle: MapGeometryObstacle): boolean {
+  return obstacle.terrainRegion !== true &&
+    obstacle.traversal === 'ground' &&
+    (obstacle.terrainCostMultiplier ?? 1) > 1 &&
+    obstacle.heightFeet <= 0
+}
+
 /** 后绘制的区域覆盖先绘制的区域，便于 DM 用较小多边形修正局部标高。 */
 export function mapGeometryTerrainElevationAtPoint(
   geometry: MapGeometryState | undefined,
@@ -1034,6 +1056,7 @@ export function mapGeometryTerrainElevationAtPoint(
 ): number {
   let elevation = fallbackElevationFeet
   for (const obstacle of geometry?.obstacles ?? []) {
+    if (mapGeometryObstacleIsGroundSurfaceOverlay(obstacle)) continue
     if (obstacle.terrainElevationFeet == null || !mapGeometryPointInPolygon(point, obstacle.points)) continue
     elevation = obstacle.terrainElevationFeet
   }
@@ -1197,6 +1220,13 @@ function rayBlocked(input: {
   })?.segment.entityId
 }
 
+function mapGeometryEntityBodyHeightFeet(entity: MapGeometryPoint): number | undefined {
+  const size = (entity as Partial<Pick<Token, 'size'>>).size
+  return Number.isFinite(size)
+    ? Math.max(5, Math.max(1, size!) * 5)
+    : undefined
+}
+
 export function mapGeometryCoverFromPoint(input: {
   geometry?: MapGeometryState
   from: MapGeometryPoint
@@ -1204,14 +1234,19 @@ export function mapGeometryCoverFromPoint(input: {
   elevationFeet?: number
   fromElevationFeet?: number
   toElevationFeet?: number
+  fromEyeHeightFeet?: number
+  toEyeHeightFeet?: number
 }): MapGeometryCoverResult {
   const geometry = input.geometry
   if (!geometry) return { cover: 'none', armorClassBonus: 0, blocksLineOfEffect: false }
   const { from, to } = input
   const fromElevation = input.fromElevationFeet ?? input.elevationFeet ?? 0
   const toElevation = input.toElevationFeet ?? input.elevationFeet ?? fromElevation
+  const fromEyeHeight = input.fromEyeHeightFeet ?? 2.5
+  const toEyeHeight = input.toEyeHeightFeet ?? 2.5
   const lineBlocker = rayBlocked({
     geometry, from, to, fromElevationFeet: fromElevation, toElevationFeet: toElevation,
+    fromEyeHeightFeet: fromEyeHeight, toEyeHeightFeet: toEyeHeight,
     purpose: 'line-of-effect',
   })
   if (lineBlocker) return { cover: 'total', armorClassBonus: 0, blocksLineOfEffect: true, sourceEntityId: lineBlocker }
@@ -1223,7 +1258,9 @@ export function mapGeometryCoverFromPoint(input: {
     const intersects = entitySegments(obstacle).some((segment) => {
       const t = intersectionParameter(from, to, segment.a, segment.b)
       if (t == null || t <= 1e-5) return false
-      const rayHeight = fromElevation + 2.5 + (toElevation - fromElevation) * t
+      const fromSampleElevation = fromElevation + fromEyeHeight
+      const toSampleElevation = toElevation + toEyeHeight
+      const rayHeight = fromSampleElevation + (toSampleElevation - fromSampleElevation) * t
       return rayHeight >= obstacle.baseHeightFeet && rayHeight < obstacle.baseHeightFeet + obstacle.heightFeet
     })
     if (intersects && rank[obstacle.cover] > rank[cover]) {
@@ -1240,7 +1277,9 @@ export function mapGeometryCoverFromPoint(input: {
     if (windowCover === 'none') continue
     const t = intersectionParameter(from, to, window.points[0], window.points[1])
     if (t == null || t <= 1e-5) continue
-    const rayHeight = fromElevation + 2.5 + (toElevation - fromElevation) * t
+    const fromSampleElevation = fromElevation + fromEyeHeight
+    const toSampleElevation = toElevation + toEyeHeight
+    const rayHeight = fromSampleElevation + (toSampleElevation - fromSampleElevation) * t
     if (
       rayHeight >= window.baseHeightFeet && rayHeight < window.baseHeightFeet + window.heightFeet &&
       rank[windowCover] > rank[cover]
@@ -1262,8 +1301,22 @@ export function mapGeometryCoverBetween(
   attacker: Token,
   target: Token,
   map?: Pick<BattleMap, 'gridSize' | 'tokens'>,
+  entityHeights?: {
+    attackerHeightFeet?: number
+    targetHeightFeet?: number
+  },
 ): MapGeometryCoverResult {
   const radius = Math.max(1, (map?.gridSize ?? 50) * Math.max(1, target.size) * 0.4)
+  const attackerHeightFeet = Math.max(
+    0.1,
+    entityHeights?.attackerHeightFeet ?? mapGeometryEntityBodyHeightFeet(attacker) ?? 5,
+  )
+  const targetHeightFeet = Math.max(
+    0.1,
+    entityHeights?.targetHeightFeet ?? mapGeometryEntityBodyHeightFeet(target) ?? 5,
+  )
+  const attackerEyeHeightFeet = attackerHeightFeet / 2
+  const targetEyeHeightFeet = targetHeightFeet / 2
   const samples = [
     { x: target.x - radius, y: target.y - radius },
     { x: target.x + radius, y: target.y - radius },
@@ -1276,6 +1329,8 @@ export function mapGeometryCoverBetween(
       to,
       fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
       toElevationFeet: mapGeometryTokenElevation(geometry, target),
+      fromEyeHeightFeet: attackerEyeHeightFeet,
+      toEyeHeightFeet: targetEyeHeightFeet,
     })
     if (geometryCover.cover !== 'none') return geometryCover
     const creature = map?.tokens.find((candidate) =>
@@ -1287,6 +1342,8 @@ export function mapGeometryCoverBetween(
         candidate,
         map.gridSize,
         mapGeometryTokenElevation(geometry, target),
+        attackerEyeHeightFeet,
+        targetEyeHeightFeet,
       ),
     )
     return creature
@@ -1325,6 +1382,8 @@ function creatureIntersectsCoverRay(
   creature: Token,
   gridSize: number,
   targetElevationFeet: number,
+  fromEyeHeightFeet: number,
+  toEyeHeightFeet: number,
 ): boolean {
   const dx = to.x - from.x
   const dy = to.y - from.y
@@ -1339,7 +1398,9 @@ function creatureIntersectsCoverRay(
   if (Math.hypot(creature.x - closestX, creature.y - closestY) > footprintRadius) return false
 
   const fromElevationFeet = mapGeometryTokenElevation(geometry, from)
-  const rayHeight = fromElevationFeet + 2.5 + (targetElevationFeet - fromElevationFeet) * projection
+  const fromSampleElevation = fromElevationFeet + fromEyeHeightFeet
+  const toSampleElevation = targetElevationFeet + toEyeHeightFeet
+  const rayHeight = fromSampleElevation + (toSampleElevation - fromSampleElevation) * projection
   const creatureBase = mapGeometryTokenElevation(geometry, creature)
   const creatureHeight = Math.max(5, Math.max(1, creature.size) * 5)
   return rayHeight >= creatureBase && rayHeight < creatureBase + creatureHeight
@@ -1364,8 +1425,21 @@ export function mapGeometryLineOfSightBlocked(input: {
   elevationFeet?: number
   fromElevationFeet?: number
   toElevationFeet?: number
+  fromEyeHeightFeet?: number
+  toEyeHeightFeet?: number
 }): boolean {
-  return rayBlocked({ ...input, purpose: 'vision' }) != null
+  const inferredFromHeightFeet = mapGeometryEntityBodyHeightFeet(input.from)
+  const inferredToHeightFeet = mapGeometryEntityBodyHeightFeet(input.to)
+  const fromEyeHeightFeet = input.fromEyeHeightFeet ??
+    (inferredFromHeightFeet == null ? undefined : inferredFromHeightFeet / 2)
+  const toEyeHeightFeet = input.toEyeHeightFeet ??
+    (inferredToHeightFeet == null ? undefined : inferredToHeightFeet / 2)
+  return rayBlocked({
+    ...input,
+    fromEyeHeightFeet,
+    toEyeHeightFeet,
+    purpose: 'vision',
+  }) != null
 }
 
 export function mapGeometryCanSeeToken(input: {
@@ -1376,6 +1450,8 @@ export function mapGeometryCanSeeToken(input: {
   forceEnabled?: boolean
   fallbackRangeFeet?: number
   worldMinute?: number
+  viewerHeightFeet?: number
+  targetHeightFeet?: number
 }): boolean {
   const geometry = input.geometry
   if (!geometry?.vision.enabled && !input.forceEnabled) return true
@@ -1434,8 +1510,14 @@ export function mapGeometryCanSeeToken(input: {
     { x: input.target.x + targetRadiusPx, y: input.target.y + targetRadiusPx },
     { x: input.target.x - targetRadiusPx, y: input.target.y + targetRadiusPx },
   ]
-  const viewerHeightFeet = Math.max(5, Math.max(1, input.viewer.size) * 5)
-  const targetHeightFeet = Math.max(5, Math.max(1, input.target.size) * 5)
+  const viewerHeightFeet = Math.max(
+    0.1,
+    input.viewerHeightFeet ?? mapGeometryEntityBodyHeightFeet(input.viewer) ?? 5,
+  )
+  const targetHeightFeet = Math.max(
+    0.1,
+    input.targetHeightFeet ?? mapGeometryEntityBodyHeightFeet(input.target) ?? 5,
+  )
   return targetSamples.some((sample) => !rayBlocked({
     geometry,
     from: input.viewer,

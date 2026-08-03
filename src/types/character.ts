@@ -323,21 +323,21 @@ export interface Character {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
-    battleMasterDroppedWeaponIds?: string[]
-    /** Weapon IDs bonded by the audited Eldritch Knight protocol (maximum two). */
-    eldritchKnightBondedWeaponIds?: string[]
+    droppedEquipmentIds?: string[]
+    /** Equipment instance IDs linked by an imported feature (Host cap: two). */
+    linkedEquipmentIds?: string[]
     /** Action-cantrip entitlement for the level-7 bonus-action weapon attack. */
-    eldritchKnightWarMagicCantripTurnKey?: string
-    /** Action-spell entitlement for Improved War Magic. */
-    eldritchKnightWarMagicTurnKey?: string
-    /** Source fighter IDs and the source-turn boundary after which the effect expires. */
-    eldritchStrikeBySource?: Record<string, { appliedTurnKey: string; sourceTurnsRemaining: number }>
-    /** Action Surge has opened the level-15 teleport window this turn. */
-    eldritchKnightArcaneChargeTurnKey?: string
-    eldritchKnightArcaneChargeUsedTurnKey?: string
-    /** 14级狼图腾：本回合近战命中后可选择击倒的目标。 */
-    totemWarriorWolfAttunementTargetIds?: string[]
-    totemWarriorWolfAttunementTurnKey?: string
+    cantripBonusWeaponAttackTurnKey?: string
+    /** Current-turn entitlement opened by casting a leveled spell. */
+    spellBonusWeaponAttackTurnKey?: string
+    /** Source IDs and the source-turn boundary after which save pressure expires. */
+    spellSavePressureBySource?: Record<string, { appliedTurnKey: string; sourceTurnsRemaining: number }>
+    /** An extra-action feature has opened a teleport window this turn. */
+    extraActionTeleportTurnKey?: string
+    extraActionTeleportUsedTurnKey?: string
+    /** Targets eligible for an imported rage feature's bonus prone action. */
+    bonusProneEligibleTargetIds?: string[]
+    bonusProneEligibleTurnKey?: string
     /** 成功躲藏后的检定结果；进行攻击时由 Headless 清除。 */
     hiddenCheckTotal?: number
     /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */
@@ -393,6 +393,9 @@ export interface Character {
     monsterFrightfulPresenceImmunityRoundsBySource?: Record<string, number>
     /** 怪物动作免疫，键由来源动作或图鉴动作族稳定派生。 */
     monsterActionImmunityRoundsByKey?: Record<string, number>
+    /** Flesh Golem Damage Aversion presentation state and the combatant that triggered it. */
+    monsterDamageAversionActive?: boolean
+    monsterDamageAversionSourceActorId?: string
     hurlThroughHellReady?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number

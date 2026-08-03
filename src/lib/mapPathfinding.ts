@@ -7,6 +7,7 @@ import {
 } from './gridCombat'
 import {
   mapGeometryObstacleAffectsElevation,
+  mapGeometryObstacleIsGroundSurfaceOverlay,
   mapGeometryDoorLockState,
   mapGeometryDoorOpenState,
   mapGeometryMovementBlocked,
@@ -102,7 +103,12 @@ function terrainMultiplierAtPoint(
   let multiplier = 1
   for (const obstacle of geometry?.obstacles ?? []) {
     if (!mapGeometryPointInPolygon(point, obstacle.points)) continue
-    if (!mapGeometryObstacleAffectsElevation(obstacle, options.elevationFeet, options.tokenHeightFeet)) continue
+    if (mapGeometryObstacleIsGroundSurfaceOverlay(obstacle)) {
+      const surfaceElevation = mapGeometryTerrainElevationAtPoint(geometry, point)
+      if (Math.abs(options.elevationFeet - surfaceElevation) > 1e-4) continue
+    } else if (!mapGeometryObstacleAffectsElevation(obstacle, options.elevationFeet, options.tokenHeightFeet)) {
+      continue
+    }
     const terrainMultiplier = Math.max(1, obstacle.terrainCostMultiplier ?? 1)
     const traversalMultiplier = obstacle.traversal === 'climb' && !options.canClimb
       ? 2
@@ -289,18 +295,19 @@ export function findMapGeometryPath(input: {
         }
       }
       const stepDistanceFeet = feetPerCell
+      const stepToken = { ...input.token, elevationFeet: nextElevation }
       const difficultTerrainMultiplier = Math.max(
         terrainMultiplierAtPoint(pathGeometry, position, {
           ...input,
           elevationFeet: nextElevation,
           tokenHeightFeet,
         }),
-        input.additionalDifficultTerrainMultiplier?.(input.token, position) ?? 1,
+        input.additionalDifficultTerrainMultiplier?.(stepToken, position) ?? 1,
       )
       const speedCostMultiplier = Math.max(
         1,
-        input.additionalSpeedCostMultiplier?.(input.token, position) ?? 1,
-        input.additionalCostMultiplier?.(input.token, position) ?? 1,
+        input.additionalSpeedCostMultiplier?.(stepToken, position) ?? 1,
+        input.additionalCostMultiplier?.(stepToken, position) ?? 1,
       )
       const multiplier = difficultTerrainMultiplier * speedCostMultiplier
       const nextCost = current.cost + stepDistanceFeet * multiplier
@@ -631,18 +638,19 @@ export function createMapGeometryPathTree(
           }).blocked) continue directionLoop
         }
       }
+      const stepToken = { ...input.token, elevationFeet: nextElevation }
       const difficultTerrainMultiplier = Math.max(
         terrainMultiplierAtPoint(pathGeometry, position, {
           ...input,
           elevationFeet: nextElevation,
           tokenHeightFeet,
         }),
-        input.additionalDifficultTerrainMultiplier?.(input.token, position) ?? 1,
+        input.additionalDifficultTerrainMultiplier?.(stepToken, position) ?? 1,
       )
       const speedCostMultiplier = Math.max(
         1,
-        input.additionalSpeedCostMultiplier?.(input.token, position) ?? 1,
-        input.additionalCostMultiplier?.(input.token, position) ?? 1,
+        input.additionalSpeedCostMultiplier?.(stepToken, position) ?? 1,
+        input.additionalCostMultiplier?.(stepToken, position) ?? 1,
       )
       const nextCost = current.cost +
         feetPerCell * difficultTerrainMultiplier * speedCostMultiplier

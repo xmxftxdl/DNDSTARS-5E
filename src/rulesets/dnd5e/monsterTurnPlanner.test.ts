@@ -845,6 +845,80 @@ describe('SRD monster 5e turn planner', () => {
     })
   })
 
+  it('aims a self-origin breath along an airborne hostile line and excludes the ground below it', () => {
+    const dragon = token({
+      id: 'dragon', label: '成年黑龙', poolId: 'srd-5.1:adult-black-dragon',
+      x: 5, y: 45, hp: 195, maxHp: 195,
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { 'acid-breath': true } },
+    })
+    const first = token({
+      id: 'first-airborne', label: '第一名空中英雄', type: 'player',
+      characterId: 'first-airborne-character', x: 45, y: 45, elevationFeet: 20,
+    })
+    const second = token({
+      id: 'second-airborne', label: '第二名空中英雄', type: 'player',
+      characterId: 'second-airborne-character', x: 85, y: 45, elevationFeet: 40,
+    })
+    const grounded = token({
+      id: 'grounded', label: '地面英雄', type: 'player',
+      characterId: 'grounded-character', x: 45, y: 45, elevationFeet: 0,
+    })
+    const plan = planDnd5eMonsterTurn(map([dragon, first, second, grounded]), dragon, [
+      character({ id: first.characterId, currentHp: 120, maxHp: 120 }),
+      character({ id: second.characterId, currentHp: 120, maxHp: 120 }),
+      character({ id: grounded.characterId, currentHp: 120, maxHp: 120 }),
+    ])
+
+    expect(plan.areaAction).toMatchObject({
+      actionId: 'acid-breath',
+      areaTargetElevationFeet: 40,
+      targetTokenIds: expect.arrayContaining([first.id, second.id]),
+    })
+    expect(plan.areaAction?.targetTokenIds).not.toContain(grounded.id)
+  })
+
+  it('aims a point AoE at the elevation of an airborne hostile cluster', () => {
+    const mage = token({
+      id: 'airburst-mage',
+      label: 'Mage',
+      poolId: 'srd-5.1:mage',
+      x: 5,
+      y: 45,
+      dnd5eCombatState: {
+        monsterSpellSlots: { '3': { current: 1, max: 1 } },
+      },
+    })
+    const first = token({
+      id: 'airborne-first',
+      label: 'Airborne First',
+      type: 'player',
+      characterId: 'airborne-first-character',
+      x: 105,
+      y: 45,
+      elevationFeet: 40,
+    })
+    const second = token({
+      id: 'airborne-second',
+      label: 'Airborne Second',
+      type: 'player',
+      characterId: 'airborne-second-character',
+      x: 115,
+      y: 45,
+      elevationFeet: 40,
+    })
+
+    const plan = planDnd5eMonsterTurn(map([mage, first, second]), mage, [
+      character({ id: first.characterId, currentHp: 100, maxHp: 100 }),
+      character({ id: second.characterId, currentHp: 100, maxHp: 100 }),
+    ])
+
+    expect(plan.spellCast).toMatchObject({
+      spellId: 'fireball',
+      targetTokenIds: expect.arrayContaining([first.id, second.id]),
+      areaTargetElevationFeet: 40,
+    })
+  })
+
   it('actively selects the Behir lightning breath when it can cover multiple hostiles', () => {
     const behir = token({
       id: 'behir',
@@ -2203,6 +2277,214 @@ describe('SRD monster 5e turn planner', () => {
     expect(repeated.decision?.candidateId ?? '').not.toContain(':sanctuary:')
   })
 
+  it('offers a legal Fly support spell and does not replace an existing concentration spell', () => {
+    const archmage = token({
+      id: 'archmage', label: 'Archmage', poolId: 'srd-5.1:archmage',
+      x: 5, y: 45, hp: 99, maxHp: 99,
+      dnd5eCombatState: {
+        monsterSpellSlots: { 3: { current: 1, max: 1 } },
+      },
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player', characterId: 'hero',
+      x: 85, y: 45, hp: 100, maxHp: 100,
+    })
+    const preferFly: MonsterDecisionProvider = {
+      id: 'test:prefer-fly-support',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        return {
+          candidateId: candidate.id,
+          score: candidate.id === 'support:archmage:fly:3' ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    }
+
+    const planned = planDnd5eMonsterTurn(
+      map([archmage, hero]),
+      archmage,
+      [character()],
+      { decisionProvider: preferFly },
+    )
+    expect(planned).toMatchObject({
+      attacked: false,
+      targetTokenId: archmage.id,
+      spellCast: {
+        spellId: 'fly',
+        targetTokenIds: [archmage.id],
+        castingTime: 'action',
+      },
+      decision: { candidateId: 'support:archmage:fly:3' },
+    })
+
+    const concentrating = {
+      ...archmage,
+      dnd5eCombatState: {
+        ...archmage.dnd5eCombatState,
+        concentrationSpellId: 'invisibility',
+        concentrationTargetIds: [archmage.id],
+      },
+    }
+    const repeated = planDnd5eMonsterTurn(
+      map([concentrating, hero]),
+      concentrating,
+      [character()],
+      { decisionProvider: preferFly },
+    )
+    expect(repeated.spellCast?.spellId).not.toBe('fly')
+    expect(repeated.decision?.candidateId ?? '').not.toContain(':fly:')
+  })
+
+  it('scores Sleep from its shared HP pool and ignores undead-only placements', () => {
+    const mephit = token({
+      id: 'dust-mephit', label: 'Dust Mephit', poolId: 'srd-5.1:dust-mephit',
+      x: 5, y: 5, hp: 17, maxHp: 17,
+      dnd5eCombatState: {
+        monsterSpellUsesBySpellId: { sleep: { current: 1, max: 1 } },
+      },
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player', characterId: 'hero',
+      x: 65, y: 45, hp: 6, maxHp: 20,
+    })
+    const skeleton = token({
+      id: 'skeleton', label: 'Skeleton', poolId: 'srd-5.1:skeleton',
+      x: 75, y: 45, hp: 4, maxHp: 13,
+    })
+    const seenSleepMetrics: Array<{ affectedEnemyCount?: number; controlValue?: number }> = []
+    const preferSleep: MonsterDecisionProvider = {
+      id: 'test:prefer-sleep',
+      schemaVersion: 1,
+      scoreCandidate(_context, candidate) {
+        if (candidate.id.includes(':sleep:')) seenSleepMetrics.push(candidate.metrics)
+        return {
+          candidateId: candidate.id,
+          score: candidate.id.includes(':sleep:') ? 10_000 : -10_000,
+          reasons: [],
+        }
+      },
+    }
+    const plan = planDnd5eMonsterTurn(
+      map([mephit, hero, skeleton]),
+      mephit,
+      [character({ currentHp: 6, maxHp: 20 })],
+      { decisionProvider: preferSleep },
+    )
+    expect(plan.spellCast).toMatchObject({
+      spellId: 'sleep',
+      targetTokenIds: expect.arrayContaining([hero.id, skeleton.id]),
+      areaTargetCell: expect.any(Object),
+    })
+    expect(plan.decision?.metrics).toMatchObject({
+      affectedEnemyCount: 1,
+      affectedAllyCount: 0,
+      expectedDamage: 0,
+      controlValue: 32,
+    })
+    expect(seenSleepMetrics.length).toBeGreaterThan(0)
+
+    const undeadCandidateIds: string[] = []
+    planDnd5eMonsterTurn(
+      map([mephit, skeleton]),
+      mephit,
+      [],
+      {
+        decisionProvider: {
+          id: 'test:audit-undead-sleep',
+          schemaVersion: 1,
+          scoreCandidate(_context, candidate) {
+            undeadCandidateIds.push(candidate.id)
+            return { candidateId: candidate.id, score: 0, reasons: [] }
+          },
+        },
+      },
+    )
+    expect(undeadCandidateIds.some((id) => id.includes(':sleep:'))).toBe(false)
+  })
+
+  it('offers Lesser Restoration with an explicit condition choice and Thunderwave as an area spell', () => {
+    const couatl = token({
+      id: 'couatl', label: 'Couatl', poolId: 'srd-5.1:couatl',
+      x: 5, y: 45, hp: 97, maxHp: 97,
+      dnd5eCombatState: {
+        monsterSpellUsesBySpellId: { 'lesser-restoration': { current: 1, max: 3 } },
+      },
+    })
+    const ally = token({
+      id: 'ally', label: 'Guard', poolId: 'srd-5.1:guard', x: 15, y: 45,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'paralyzed', targetId: 'ally',
+          source: { kind: 'feature', actorId: 'source', rulesId: 'test-paralysis' },
+        })],
+      },
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player', characterId: 'hero',
+      x: 85, y: 45, hp: 20, maxHp: 20,
+    })
+    const restoration = planDnd5eMonsterTurn(
+      map([couatl, ally, hero]),
+      couatl,
+      [character()],
+      {
+        decisionProvider: {
+          id: 'test:prefer-restoration',
+          schemaVersion: 1,
+          scoreCandidate(_context, candidate) {
+            return {
+              candidateId: candidate.id,
+              score: candidate.id.startsWith('restore:ally:') ? 10_000 : -10_000,
+              reasons: [],
+            }
+          },
+        },
+      },
+    )
+    expect(restoration.spellCast).toMatchObject({
+      spellId: 'lesser-restoration',
+      targetTokenIds: [ally.id],
+      conditionChoice: 'paralyzed',
+    })
+
+    const druid = token({
+      id: 'druid', label: 'Druid', poolId: 'srd-5.1:druid',
+      x: 5, y: 5, hp: 27, maxHp: 27,
+      dnd5eCombatState: { monsterSpellSlots: { 1: { current: 1, max: 1 } } },
+    })
+    const nearbyHero = { ...hero, x: 25, y: 5 }
+    const secondNearbyHero = token({
+      id: 'second-hero-token', label: 'Second Hero', type: 'player',
+      x: 25, y: 15, hp: 20, maxHp: 20,
+    })
+    const thunderwave = planDnd5eMonsterTurn(
+      map([druid, nearbyHero, secondNearbyHero]),
+      druid,
+      [character()],
+      {
+        decisionProvider: {
+          id: 'test:prefer-thunderwave',
+          schemaVersion: 1,
+          scoreCandidate(_context, candidate) {
+            return {
+              candidateId: candidate.id,
+              score: candidate.id.includes(':thunderwave:') ? 10_000 : -10_000,
+              reasons: [],
+            }
+          },
+        },
+      },
+    )
+    expect(thunderwave.spellCast).toMatchObject({
+      spellId: 'thunderwave',
+      targetTokenIds: expect.arrayContaining([nearbyHero.id, secondNearbyHero.id]),
+      areaTargetCell: expect.any(Object),
+      saveAbility: 'con',
+    })
+  })
+
   it('uses Nimble Escape to leave melee reach and make a ranged attack without opportunity risk', () => {
     const goblin = token({
       id: 'goblin', label: '地精', poolId: 'srd-5.1:goblin',
@@ -2563,6 +2845,67 @@ describe('SRD monster 5e turn planner', () => {
       newElevationFeet: 5,
       decision: { metrics: { movementFeet: 5 } },
     })
+  })
+
+  it('disables approximate candidate costs when a persistent area changes movement cost', () => {
+    const wolf = token({
+      id: 'wolf', label: 'Wolf', poolId: 'srd-5.1:wolf',
+      x: 5, y: 5, hp: 11, maxHp: 11,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player',
+      characterId: 'hero', x: 75, y: 5, hp: 20, maxHp: 20,
+    })
+    const battleMap: BattleMap = {
+      ...map([wolf, hero]),
+      width: 100,
+      height: 10,
+      dnd5ePluginAreas: [{
+        id: 'grease-area',
+        pluginId: 'srd-5.1',
+        featureId: 'srd-5.1:spell:grease',
+        sourceKind: 'core-spell',
+        coreSpellId: 'grease',
+        label: 'Grease',
+        color: '#fde68a',
+        sourceCharacterId: 'hero',
+        sourceTokenId: hero.id,
+        cells: Array.from({ length: 7 }, (_, col) => ({ col, row: 0 })),
+        createdRound: 1,
+        expiresAfterRound: 10,
+        relation: 'any',
+        includeSelf: true,
+        movementCostMultiplier: 2,
+        vertical: { mode: 'ground' },
+      }],
+    }
+    const simulationOptimization = {
+      approximateCandidateRoutes: true,
+      skipFinalRouteValidation: true,
+      skipDashWhenAttackAvailable: true,
+    } as const
+
+    const optimized = planDnd5eMonsterTurn(
+      battleMap,
+      wolf,
+      [character()],
+      { simulationOptimization },
+    )
+    const exact = planDnd5eMonsterTurn(
+      battleMap,
+      wolf,
+      [character()],
+      {
+        simulationOptimization: {
+          ...simulationOptimization,
+          approximateCandidateRoutes: false,
+        },
+      },
+    )
+
+    expect(optimized).toEqual(exact)
+    expect(optimized.attacked).toBe(false)
+    expect(optimized.dashed).toBe(true)
   })
 
   it('falls back to per-destination A* when the shared route tree is truncated', () => {

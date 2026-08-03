@@ -5,7 +5,12 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { moveDnd5eCoreSpellArea } from './coreSpellAreas'
-import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import { dnd5eUtilityProjectionMovementEconomy } from './utilityProjection'
 
 export interface PreparedDnd5eCoreSpellAreaMove {
@@ -94,7 +99,12 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
 
 export function resolvePreparedDnd5eCoreSpellAreaMove(input: {
   prepared: PreparedDnd5eCoreSpellAreaMove
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const { prepared } = input
   const moved = moveDnd5eCoreSpellArea({
     map: prepared.map,
@@ -106,13 +116,14 @@ export function resolvePreparedDnd5eCoreSpellAreaMove(input: {
   if (!moved.ok) {
     return { result: { ok: false, state: prepared.state, events: [], reason: 'invalid-class-feature' } }
   }
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'move-persistent-area', actorId: prepared.action.actorTokenId,
     areaId: prepared.areaId, economy: prepared.economy,
-  })
-  if (!result.ok) return { result }
+  }, input.airborneFallDamageRollsByCombatantId)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: moved.map,

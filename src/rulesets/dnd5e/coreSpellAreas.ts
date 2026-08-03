@@ -6,9 +6,16 @@ import {
   tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
-import { mapGeometryMovementBlocked, type MapGeometryState } from '../../lib/mapGeometry'
+import {
+  mapGeometryMovementBlocked,
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+  type MapGeometryState,
+} from '../../lib/mapGeometry'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
+import type { Dnd5eClassId } from './classes'
 import type {
   Dnd5ePersistentAreaAnchorMode,
   Dnd5ePersistentAreaMovementDeclaration,
@@ -51,6 +58,14 @@ export interface Dnd5eCoreSpellAreaDeclaration {
   expiresAtSourceNextTurnEnd?: boolean
   concentration: boolean
   anchorMode: Dnd5ePersistentAreaAnchorMode
+  /**
+   * Z-axis rules are distinct from the template's two-dimensional width/height.
+   * Ground areas use the terrain surface under each affected cell; volumes store
+   * an authoritative absolute base when the area is created.
+   */
+  vertical?:
+    | { mode: 'ground' }
+    | { mode: 'volume'; heightFeet: number; anchorOffsetFeet?: number }
   movement?: Dnd5ePersistentAreaMovementDeclaration
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
@@ -80,7 +95,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     relation: 'any',
     includeSelf: true,
     color: '#a78bfa',
-    visual: { preset: 'arcane', intensity: 'subtle' },
+    visual: { preset: 'mage-hand', intensity: 'subtle' },
     triggers: [],
   },
   {
@@ -127,6 +142,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: false,
     anchorMode: 'fixed',
+    vertical: { mode: 'ground' },
     relation: 'any',
     includeSelf: true,
     movementCostMultiplier: 2,
@@ -161,6 +177,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
+    vertical: { mode: 'ground' },
     relation: 'any',
     includeSelf: true,
     movementCostMultiplier: 2,
@@ -187,6 +204,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
+    vertical: { mode: 'ground' },
     relation: 'any',
     includeSelf: true,
     movementCostMultiplier: 2,
@@ -234,6 +252,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'effect-token',
+    vertical: { mode: 'volume', heightFeet: 10 },
     movement: { economy: 'bonus-action', maximumFeet: 30 },
     relation: 'any',
     includeSelf: true,
@@ -246,14 +265,12 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         oncePerRound: false,
         savingThrow: { ability: 'dex', onSuccess: 'half' },
         damage: { count: 2, sides: 6, perHigherSlot: 1, type: 'fire' },
-        dmAdjustable: true,
       },
       {
         id: 'flaming-sphere-turn-end', label: '炽焰法球·回合结束', timing: 'turn-end',
-        oncePerRound: true,
+        oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'half' },
         damage: { count: 2, sides: 6, perHigherSlot: 1, type: 'fire' },
-        dmAdjustable: true,
       },
     ],
   },
@@ -280,6 +297,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 100,
     concentration: true,
     anchorMode: 'fixed',
+    vertical: { mode: 'ground' },
     relation: 'any',
     includeSelf: true,
     hiddenFromPlayers: true,
@@ -301,6 +319,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 100,
     concentration: true,
     anchorMode: 'source-token',
+    vertical: { mode: 'volume', heightFeet: 30, anchorOffsetFeet: -15 },
     relation: 'enemy',
     includeSelf: false,
     movementCostMultiplier: 2,
@@ -332,6 +351,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 40 },
     movement: { economy: 'action', maximumFeet: 60 },
     relation: 'any',
     includeSelf: true,
@@ -386,6 +406,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 20 },
     relation: 'any',
     includeSelf: true,
     color: '#ef4444',
@@ -418,6 +439,135 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     ],
   },
   {
+    spellId: 'insect-plague',
+    label: '疫病虫群',
+    minimumSlotLevel: 5,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 300 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20 },
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#a3a341',
+    visual: { preset: 'insect-plague', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'insect-plague-create',
+        label: '疫病虫群·虫群出现',
+        timing: 'on-create',
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 4, sides: 10, perHigherSlot: 1, type: 'piercing' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'insect-plague-enter',
+        frequencyGroupId: 'insect-plague-damage',
+        label: '疫病虫群·进入虫群',
+        timing: 'on-enter',
+        oncePerTurn: true,
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 4, sides: 10, perHigherSlot: 1, type: 'piercing' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'insect-plague-turn-end',
+        frequencyGroupId: 'insect-plague-damage',
+        label: '疫病虫群·回合结束',
+        timing: 'turn-end',
+        oncePerTurn: true,
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 4, sides: 10, perHigherSlot: 1, type: 'piercing' },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
+    spellId: 'cloudkill',
+    label: '死云术',
+    minimumSlotLevel: 5,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 120 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20 },
+    relation: 'any',
+    includeSelf: true,
+    color: '#65a30d',
+    visual: { preset: 'toxic-cloud', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'cloudkill-enter',
+        frequencyGroupId: 'cloudkill-damage',
+        label: '死云术·进入毒雾',
+        timing: 'on-enter',
+        oncePerTurn: true,
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'poison' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'cloudkill-turn-start',
+        frequencyGroupId: 'cloudkill-damage',
+        label: '死云术·回合开始',
+        timing: 'turn-start',
+        oncePerTurn: true,
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'poison' },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
+    spellId: 'blade-barrier',
+    label: '剑刃护壁',
+    minimumSlotLevel: 6,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 100, heightFeet: 5,
+      placeRangeFeet: 90, rotatable: true,
+    },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 20 },
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#cbd5e1',
+    visual: { preset: 'blade-barrier', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'blade-barrier-create',
+        label: '剑刃护壁·剑墙出现',
+        timing: 'on-create',
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 6, sides: 10, type: 'slashing' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'blade-barrier-enter',
+        frequencyGroupId: 'blade-barrier-damage',
+        label: '剑刃护壁·进入剑墙',
+        timing: 'on-enter',
+        oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 6, sides: 10, type: 'slashing' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'blade-barrier-turn-start',
+        frequencyGroupId: 'blade-barrier-damage',
+        label: '剑刃护壁·回合开始',
+        timing: 'turn-start',
+        oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 6, sides: 10, type: 'slashing' },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
     spellId: 'ice-storm',
     label: '冰风暴·冰雹地面',
     minimumSlotLevel: 4,
@@ -426,6 +576,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     expiresAtSourceNextTurnEnd: true,
     concentration: false,
     anchorMode: 'fixed',
+    vertical: { mode: 'ground' },
     relation: 'any',
     includeSelf: true,
     movementCostMultiplier: 2,
@@ -439,6 +590,10 @@ export function getDnd5eCoreSpellAreaDeclaration(
   spellId: string,
 ): Dnd5eCoreSpellAreaDeclaration | undefined {
   return DND5E_CORE_SPELL_AREA_DECLARATIONS.find((definition) => definition.spellId === spellId)
+}
+
+function persistentAreaElevationFeet(value: number): number {
+  return Math.max(-1_000, Math.min(10_000, Math.round(value)))
 }
 
 function resolvedTrigger(
@@ -484,12 +639,15 @@ export function createDnd5eCoreSpellArea(input: {
   actionId: string
   sourceCharacterId: string
   sourceTokenId: string
+  castingClassId?: Dnd5eClassId
   slotLevel: number
   sourceSaveDc: number
   round: number
   cells: readonly GridCell[]
   anchorCell: GridCell
   anchorTokenId?: string
+  /** Terrain/token elevation captured by the authoritative caster at creation. */
+  baseElevationFeet?: number
   durationRounds?: number
   sourceAlignment?: string
   triggerCellsById?: Readonly<Record<string, readonly GridCell[]>>
@@ -501,12 +659,30 @@ export function createDnd5eCoreSpellArea(input: {
       ? declaration.damageTypeBySourceAlignment.evil
       : declaration.damageTypeBySourceAlignment.otherwise
     : undefined
+  const baseElevationFeet = Number.isFinite(input.baseElevationFeet)
+    ? persistentAreaElevationFeet(Number(input.baseElevationFeet))
+    : 0
+  const vertical = declaration.vertical?.mode === 'ground'
+    ? { mode: 'ground' as const }
+    : declaration.vertical?.mode === 'volume'
+      ? {
+          mode: 'volume' as const,
+          baseElevationFeet: persistentAreaElevationFeet(
+            baseElevationFeet + (declaration.vertical.anchorOffsetFeet ?? 0),
+          ),
+          heightFeet: declaration.vertical.heightFeet,
+          ...(declaration.vertical.anchorOffsetFeet != null
+            ? { anchorOffsetFeet: declaration.vertical.anchorOffsetFeet }
+            : {}),
+        }
+      : undefined
   return {
     id: `core-spell-area:${input.actionId}`,
     pluginId: 'srd-5.1',
     featureId: `srd-5.1:spell:${declaration.spellId}`,
     sourceKind: 'core-spell',
     coreSpellId: declaration.spellId,
+    castingClassId: input.castingClassId,
     slotLevel: input.slotLevel,
     label: declaration.label,
     color: declaration.color,
@@ -524,6 +700,7 @@ export function createDnd5eCoreSpellArea(input: {
       declaration.anchorMode === 'source-token' ? input.sourceTokenId : undefined
     ),
     anchorCell: { ...input.anchorCell },
+    vertical,
     movement: declaration.movement ? { ...declaration.movement } : undefined,
     movementCostMultiplier: declaration.movementCostMultiplier,
     relation: declaration.relation ?? 'any',
@@ -741,6 +918,29 @@ export function moveDnd5eCoreSpellArea(input: {
   const anchorPosition = anchorToken
     ? tokenCenterForAnchorCell(resolvedTargetCell, anchorToken, input.map)
     : undefined
+  const movedAnchorToken = anchorToken && anchorPosition
+    ? { ...anchorToken, ...anchorPosition }
+    : anchorToken
+  const movementGeometry = input.geometry ?? mapGeometryRuntimeForMap(input.map.id)
+  const movedVolumeBaseElevationFeet = nextArea.vertical?.mode === 'volume'
+    ? movedAnchorToken
+      ? mapGeometryTokenElevation(movementGeometry, movedAnchorToken)
+      : mapGeometryTerrainElevationAtPoint(
+          movementGeometry,
+          tokenCenterForAnchorCell(resolvedTargetCell, { size: 1 }, input.map),
+        )
+    : undefined
+  const resolvedArea = nextArea.vertical?.mode === 'volume' && movedVolumeBaseElevationFeet != null
+    ? {
+        ...nextArea,
+        vertical: {
+          ...nextArea.vertical,
+          baseElevationFeet: persistentAreaElevationFeet(
+            movedVolumeBaseElevationFeet + (nextArea.vertical.anchorOffsetFeet ?? 0),
+          ),
+        },
+      }
+    : nextArea
   const resolvedDistanceFeet = Math.max(
     Math.abs(resolvedTargetCell.col - previous.col),
     Math.abs(resolvedTargetCell.row - previous.row),
@@ -750,13 +950,13 @@ export function moveDnd5eCoreSpellArea(input: {
     map: {
       ...input.map,
       dnd5ePluginAreas: input.map.dnd5ePluginAreas?.map((candidate) =>
-        candidate.id === area.id ? nextArea : candidate,
+        candidate.id === area.id ? resolvedArea : candidate,
       ),
       tokens: anchorToken && anchorPosition
         ? input.map.tokens.map((token) => token.id === anchorToken.id ? { ...token, ...anchorPosition } : token)
         : input.map.tokens,
     },
-    area: nextArea,
+    area: resolvedArea,
     distanceFeet: resolvedDistanceFeet,
     impactTargetId,
   }
@@ -791,18 +991,67 @@ export function mergeDnd5eSpellEffectTokenDelta(input: {
   return merged
 }
 
+export interface Dnd5eSpellEffectRemoval {
+  map: BattleMap
+  token: Token
+  removedAreas: Dnd5ePluginArea[]
+}
+
+/**
+ * Removes a persistent core-spell entity and every area anchored to it as one
+ * in-memory relation update. Persisting only the Token would leave an invalid
+ * `anchorTokenId` reference and the shared-resource boundary would reject it.
+ */
+export function removeDnd5eSpellEffectFromMap(
+  map: BattleMap,
+  tokenId: string,
+): Dnd5eSpellEffectRemoval | undefined {
+  const token = map.tokens.find((candidate) => candidate.id === tokenId)
+  if (!token?.dnd5eSpellEffect) return undefined
+  const removedAreas = (map.dnd5ePluginAreas ?? []).filter((area) =>
+    area.anchorMode === 'effect-token' && area.anchorTokenId === token.id,
+  )
+  const removedAreaIds = new Set(removedAreas.map((area) => area.id))
+  return {
+    token,
+    removedAreas,
+    map: {
+      ...map,
+      tokens: map.tokens.filter((candidate) => candidate.id !== token.id),
+      dnd5ePluginAreas: (map.dnd5ePluginAreas ?? []).filter((area) =>
+        !removedAreaIds.has(area.id),
+      ),
+    },
+  }
+}
+
 export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {
   let changed = false
+  const geometry = mapGeometryRuntimeForMap(map.id)
   const areas = (map.dnd5ePluginAreas ?? []).map((area) => {
     if (area.anchorMode !== 'source-token' && area.anchorMode !== 'effect-token') return area
     const anchorToken = map.tokens.find((token) => token.id === (area.anchorTokenId ?? area.sourceTokenId))
     if (!anchorToken) return area
     const anchorCell = tokenAnchorCellFromPixel(anchorToken.x, anchorToken.y, anchorToken, map)
-    if (anchorCell.col === area.anchorCell?.col && anchorCell.row === area.anchorCell?.row) return area
-    const cells = shiftedCells(area, anchorCell, map)
+    const anchorCellChanged = anchorCell.col !== area.anchorCell?.col || anchorCell.row !== area.anchorCell?.row
+    const anchorElevationFeet = mapGeometryTokenElevation(geometry, anchorToken)
+    const vertical = area.vertical?.mode === 'volume'
+      ? {
+          ...area.vertical,
+          baseElevationFeet: persistentAreaElevationFeet(
+            anchorElevationFeet + (area.vertical.anchorOffsetFeet ?? 0),
+          ),
+        }
+      : area.vertical
+    const verticalChanged = vertical?.mode === 'volume' && (
+      area.vertical?.mode !== 'volume' ||
+      Math.abs(vertical.baseElevationFeet - area.vertical.baseElevationFeet) > 1e-4
+    )
+    if (!anchorCellChanged && !verticalChanged) return area
+    const cells = anchorCellChanged ? shiftedCells(area, anchorCell, map) : area.cells
     if (cells.length < 1) return area
     changed = true
-    return { ...area, cells, anchorCell }
+    return { ...area, cells, anchorCell, vertical }
   })
   return changed ? { ...map, dnd5ePluginAreas: areas } : map
 }

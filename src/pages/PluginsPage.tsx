@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,7 +18,6 @@ import {
   Trash2,
   Upload,
   Users,
-  Wrench,
 } from 'lucide-react'
 import AccountAuthPanel from '../components/AccountAuthPanel'
 import MarketplacePublicationDialog, {
@@ -29,7 +28,6 @@ import CreatorAnalyticsPanel from '../components/marketplace/CreatorAnalyticsPan
 import CreatorEarningsPanel from '../components/marketplace/CreatorEarningsPanel'
 import MarketplaceOrdersPanel from '../components/marketplace/MarketplaceOrdersPanel'
 import PageHeader from '../components/PageHeader'
-import Dnd5eCustomPluginBuilder from '../components/rules/Dnd5eCustomPluginBuilder'
 import {
   accountApiErrorMessage,
   AccountApiError,
@@ -71,6 +69,7 @@ import {
   type PluginModerationQueue,
 } from '../lib/pluginCatalogApi'
 import { formatMarketplacePrice } from '../../shared/marketplace-publication.mjs'
+import { pluginsSectionFromSearch, type PluginsSection } from './pluginsPageSection'
 
 const EMPTY_LIBRARY: AccountPluginLibrary = {
   plugins: [],
@@ -613,6 +612,8 @@ function PluginModerationPanel({
 
 export default function PluginsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const location = useLocation()
+  const navigate = useNavigate()
   const account = useSyncExternalStore(
     subscribeAccountSession,
     getAccountSession,
@@ -624,11 +625,8 @@ export default function PluginsPage() {
     getRoomRulesSnapshot,
   )
   const [roomSession] = useState(() => getRoomSession())
-  const [section, setSection] = useState<
-    'library' | 'catalog' | 'orders' | 'create' | 'creator' | 'moderation'
-  >(() => new URLSearchParams(window.location.search).get('section') === 'orders'
-    ? 'orders'
-    : 'library')
+  const [section, setSection] = useState<PluginsSection>(() =>
+    pluginsSectionFromSearch(window.location.search) ?? (account ? 'library' : 'catalog'))
   const [pluginAdmin, setPluginAdmin] = useState(false)
   const [library, setLibrary] = useState<AccountPluginLibrary>(EMPTY_LIBRARY)
   const [loading, setLoading] = useState(false)
@@ -637,6 +635,21 @@ export default function PluginsPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const host = window.DNDSTARS_5E_RULES_PLUGINS
+
+  const selectSection = (next: PluginsSection) => {
+    setSection(next)
+    const query = new URLSearchParams(location.search)
+    query.set('section', next)
+    void navigate({ pathname: location.pathname, search: `?${query.toString()}` }, { replace: true })
+  }
+
+  useEffect(() => {
+    const requested = pluginsSectionFromSearch(location.search)
+    if (!requested || requested === section) return
+    // Keep browser navigation and legacy redirects in sync with the unified tabs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSection(requested)
+  }, [location.search, section])
 
   const refresh = async () => {
     if (!account) {
@@ -913,8 +926,8 @@ export default function PluginsPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="扩展市场"
-        description="浏览、安装与管理经过审核的扩展；安装后由安全沙箱激活，DM 可同步到当前房间。"
+        title="扩展中心"
+        description="浏览扩展市场并管理账号插件库；自定义内容请在战役内的 DM 助手工坊中创建。"
         actions={account ? (
           <div className="flex flex-wrap gap-2">
             <input
@@ -1016,14 +1029,13 @@ export default function PluginsPage() {
               { id: 'library' as const, label: '我的插件', icon: Puzzle },
               { id: 'catalog' as const, label: '扩展市场', icon: Globe2 },
               { id: 'orders' as const, label: '我的订单', icon: ReceiptText },
-              { id: 'create' as const, label: '创建插件', icon: Wrench },
               { id: 'creator' as const, label: '创作者中心', icon: Users },
               ...(pluginAdmin ? [{ id: 'moderation' as const, label: '审核管理', icon: ShieldCheck }] : []),
             ].map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
-                onClick={() => setSection(id)}
+                onClick={() => selectSection(id)}
                 className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold ${
                   section === id
                     ? 'bg-arcane-500/15 text-arcane-200 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.25)]'
@@ -1070,13 +1082,6 @@ export default function PluginsPage() {
               onNotice={setNotice}
               onSaved={refresh}
               onInstall={installCatalogVersion}
-            />
-          ) : section === 'create' ? (
-            <Dnd5eCustomPluginBuilder
-              defaultPublisher={account.username ?? account.displayName}
-              busy={busyKey != null}
-              onInstall={saveFileToLibrary}
-              installLabel="保存到我的插件库"
             />
           ) : (
             <>
@@ -1137,7 +1142,7 @@ export default function PluginsPage() {
                   <FileUp className="h-10 w-10 text-slate-600" />
                   <h2 className="mt-4 text-lg font-semibold text-slate-200">账号插件库为空</h2>
                   <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
-                    上传你有权使用的 `.dndstars5e` 文件，或者切换到“创建插件”使用声明式规则编辑器。
+                    上传你有权使用的 `.dndstars5e` 文件，或从扩展市场保存经过审核的版本。
                   </p>
                 </div>
               ) : (

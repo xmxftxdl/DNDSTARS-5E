@@ -1,6 +1,7 @@
 import {
   DND5E_CONTENT_PACKAGE_FORMAT,
   DND5E_CONTENT_PACKAGE_SCHEMA_VERSION,
+  DND5E_ROOM_EPHEMERAL_PACKAGE_MAX_BYTES,
   encodeDnd5eContentPackageV2,
   parseDnd5eContentPackageV2,
   type Dnd5eContentPackageContributionsV2,
@@ -31,7 +32,10 @@ interface LocalCollectionImageTarget {
 
 interface LocalCollectionImage {
   id: string
-  file: string
+  /** Directory collections use file; portable single-file collections use mediaType + dataBase64. */
+  file?: string
+  mediaType?: Dnd5ePluginImageMediaType
+  dataBase64?: string
   /**
    * This declaration stays in collection.json and is never copied to the room package.
    * It is an operator assertion, not automatic proof of image rights.
@@ -66,6 +70,10 @@ interface LocalContentCollection {
   }>>
   images?: readonly LocalCollectionImage[]
 }
+
+export type Dnd5eLocalContentCollectionJsonV1 = LocalContentCollection
+export type Dnd5eLocalContentCollectionImageV1 = LocalCollectionImage
+export type Dnd5eLocalContentCollectionImageTargetV1 = LocalCollectionImageTarget
 
 export interface Dnd5eLocalContentCollectionCategoryAudit {
   actual: number
@@ -107,6 +115,14 @@ export interface CompiledDnd5eLocalContentCollection {
   fileName: string
   sourceFileName: string
   audit: Dnd5eLocalContentCollectionAudit
+}
+
+export interface PreparedDnd5eLocalContentJson {
+  package: Dnd5eContentPackageV2
+  bytes: ArrayBuffer
+  fileName: string
+  sourceKind: 'content-package-v2' | 'local-collection' | 'content-shorthand'
+  audit?: Dnd5eLocalContentCollectionAudit
 }
 
 const COLLECTION_KEYS: readonly CollectionKey[] = [
@@ -339,9 +355,13 @@ function bindImageTarget(
   if (slot === 'portrait' || slot === 'initiativePortrait') entry.initiativePortrait = dataUrl
 }
 
-async function readCollectionTextFile(file: File, label: string): Promise<string> {
-  if (file.size > DND5E_LOCAL_COLLECTION_TEXT_FILE_MAX_BYTES) {
-    throw new Error(`${label} 超过 8 MiB 本地文本文件上限`)
+async function readCollectionTextFile(
+  file: File,
+  label: string,
+  maximumBytes = DND5E_LOCAL_COLLECTION_TEXT_FILE_MAX_BYTES,
+): Promise<string> {
+  if (file.size > maximumBytes) {
+    throw new Error(`${label} 超过 ${Math.floor(maximumBytes / 1024 / 1024)} MiB 本地文本文件上限`)
   }
   return file.text()
 }
@@ -466,7 +486,11 @@ export async function compileDnd5eLocalContentCollection(
   const [collectionPath, collectionFile] = collectionCandidates[0]
   let parsed: unknown
   try {
-    parsed = JSON.parse((await readCollectionTextFile(collectionFile, 'collection.json')).replace(/^\uFEFF/, ''))
+    parsed = JSON.parse((await readCollectionTextFile(
+      collectionFile,
+      'collection.json',
+      DND5E_ROOM_EPHEMERAL_PACKAGE_MAX_BYTES,
+    )).replace(/^\uFEFF/, ''))
   } catch {
     throw new Error('collection.json 不是有效 JSON')
   }
@@ -517,13 +541,29 @@ export async function compileDnd5eLocalContentCollection(
     ) throw new Error('collection.json 包含无效的图片声明')
     if (imageIds.has(image.id)) throw new Error(`图片 id 重复：${image.id}`)
     imageIds.add(image.id)
-    const path = resolveCollectionPath(baseDirectory, requiredString(image.file, `图片 ${image.id} 的 file`))
-    const file = files.get(path)
-    if (!file) throw new Error(`找不到图片文件：${image.file}`)
-    const mediaType = mediaTypeForFile(file)
-    const dataBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()))
+    const usesFile = typeof image.file === 'string' && image.file.trim().length > 0
+    const usesEmbeddedData = typeof image.dataBase64 === 'string' && image.dataBase64.length > 0
+    if (usesFile === usesEmbeddedData) {
+      throw new Error(`图片 ${image.id} 必须且只能提供 file 或 dataBase64`)
+    }
+    let mediaType: Dnd5ePluginImageMediaType
+    let dataBase64: string
+    if (usesFile) {
+      const path = resolveCollectionPath(baseDirectory, requiredString(image.file, `图片 ${image.id} 的 file`))
+      const file = files.get(path)
+      if (!file) throw new Error(`找不到图片文件：${image.file}`)
+      mediaType = mediaTypeForFile(file)
+      dataBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()))
+    } else {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(String(image.mediaType))) {
+        throw new Error(`图片 ${image.id} 的 mediaType 无效`)
+      }
+      mediaType = image.mediaType as Dnd5ePluginImageMediaType
+      dataBase64 = image.dataBase64!.replace(/\s+/g, '')
+    }
     const asset = { id: image.id, mediaType, dataBase64 } satisfies Dnd5ePluginImageAssetDefinition
-    validateDnd5ePluginImageAsset(asset)
+    const validatedAsset = validateDnd5ePluginImageAsset(asset)
+    dataBase64 = validatedAsset.dataBase64
     const dataUrl = `data:${mediaType};base64,${dataBase64}`
     let needsRegisteredAsset = false
     for (const target of image.targets) {
@@ -567,4 +607,127 @@ export async function compileDnd5eLocalContentCollection(
     sourceFileName: collectionFile.name,
     audit,
   }
+}
+
+function jsonWithoutMarkdownFence(source: string): string {
+  const trimmed = source.trim().replace(/^\uFEFF/, '')
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  return (fenced?.[1] ?? trimmed).trim()
+}
+
+async function localJsonFingerprint(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(value))
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function shorthandCollectionFromJson(
+  value: Record<string, unknown>,
+): Promise<LocalContentCollection | undefined> {
+  const nested = plainObject(value.content) ? value.content : undefined
+  const content = Object.fromEntries(COLLECTION_KEYS.flatMap((key) => {
+    const entries = nested?.[key] ?? value[key]
+    return Array.isArray(entries) ? [[key, entries]] : []
+  })) as Partial<Dnd5eContentPackageContributionsV2>
+  if (Object.keys(content).length === 0) return undefined
+
+  const fingerprint = await localJsonFingerprint(value)
+  const providedManifest = plainObject(value.manifest) ? value.manifest : {}
+  const providedName = typeof value.name === 'string' && value.name.trim()
+    ? value.name.trim()
+    : '粘贴的房间规则'
+  const providedVersion = typeof value.version === 'string' && value.version.trim()
+    ? value.version.trim()
+    : '1.0.0'
+  return {
+    format: DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
+    schemaVersion: DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION,
+    manifest: {
+      id: `local.room.paste-${fingerprint.slice(0, 16)}`,
+      name: providedName,
+      version: providedVersion,
+      apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      publisher: 'Local DM',
+      license: 'Private local use',
+      contentCategory: 'mixed',
+      ...providedManifest,
+      distributionPolicy: 'room-ephemeral',
+    } as LocalContentCollection['manifest'],
+    provenance: plainObject(value.provenance)
+      ? value.provenance as LocalContentCollection['provenance']
+      : { sourceTitle: providedName },
+    content,
+    expected: plainObject(value.expected)
+      ? value.expected as LocalContentCollection['expected']
+      : undefined,
+    images: Array.isArray(value.images)
+      ? value.images as unknown as readonly LocalCollectionImage[]
+      : undefined,
+  }
+}
+
+/**
+ * Prepares any supported single JSON input for the same room-ephemeral install transaction.
+ * The input may be a V2 package, a self-contained local collection, or shorthand content.
+ */
+export async function prepareDnd5eLocalContentJson(
+  source: string,
+  sourceFileName = 'pasted-room-rules.json',
+): Promise<PreparedDnd5eLocalContentJson> {
+  const json = jsonWithoutMarkdownFence(source)
+  const sourceBytes = new TextEncoder().encode(json)
+  if (sourceBytes.byteLength === 0) throw new Error('请粘贴 JSON，或选择一个 JSON 文件')
+  if (sourceBytes.byteLength > DND5E_ROOM_EPHEMERAL_PACKAGE_MAX_BYTES) {
+    throw new Error('单文件房间规则超过 40 MiB 上限')
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    throw new Error('输入内容不是有效 JSON')
+  }
+  if (!plainObject(parsed)) throw new Error('房间规则 JSON 顶层必须是对象')
+
+  if (parsed.format === DND5E_CONTENT_PACKAGE_FORMAT) {
+    const bytes = sourceBytes.slice().buffer
+    const value = parseDnd5eContentPackageV2(bytes)
+    if (!value) throw new Error('V2 房间规则包校验失败')
+    if (value.manifest.distributionPolicy !== 'room-ephemeral') {
+      throw new Error('此入口只接受 room-ephemeral V2 包；其他包请使用“上传房间规则包”')
+    }
+    return {
+      package: value,
+      bytes,
+      fileName: sourceFileName,
+      sourceKind: 'content-package-v2',
+    }
+  }
+
+  const isCollection = parsed.format === DND5E_LOCAL_CONTENT_COLLECTION_FORMAT
+  const collection = isCollection
+    ? collectionFromJson(parsed)
+    : await shorthandCollectionFromJson(parsed)
+  if (!collection) {
+    throw new Error('未找到可导入的 races、backgrounds、features、feats、spells、items、subclasses、monsters 或其他受支持分类')
+  }
+  const compiled = await compileDnd5eLocalContentCollection([
+    new File([JSON.stringify(collection)], 'collection.json', { type: 'application/json' }),
+  ])
+  return {
+    package: compiled.package,
+    bytes: compiled.bytes,
+    fileName: compiled.fileName,
+    sourceKind: isCollection ? 'local-collection' : 'content-shorthand',
+    audit: compiled.audit,
+  }
+}
+
+export async function prepareDnd5eLocalContentJsonFile(
+  file: File,
+): Promise<PreparedDnd5eLocalContentJson> {
+  if (file.size > DND5E_ROOM_EPHEMERAL_PACKAGE_MAX_BYTES) {
+    throw new Error('单文件房间规则超过 40 MiB 上限')
+  }
+  return prepareDnd5eLocalContentJson(await file.text(), file.name)
 }

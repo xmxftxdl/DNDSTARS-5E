@@ -126,6 +126,37 @@ describe('map geometry pathfinding', () => {
     })).toMatchObject({ elevationsFeet: [20, 20, 20] })
   })
 
+  it('binds legacy difficult-terrain overlays to each cell terrain surface without charging flyers', () => {
+    const grounded = token()
+    const map = battleMap({ height: 50, tokens: [grounded] })
+    const state = geometry()
+    state.obstacles.push({
+      id: 'plateau', kind: 'obstacle', label: 'Plateau',
+      points: [{ x: 0, y: 0 }, { x: 150, y: 0 }, { x: 150, y: 50 }, { x: 0, y: 50 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainRegion: true, terrainElevationFeet: 20, createdAt: 1,
+    }, {
+      id: 'legacy-mud', kind: 'obstacle', label: 'Legacy mud',
+      points: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 0,
+      terrainCostMultiplier: 2, traversal: 'ground', createdAt: 2,
+    })
+
+    expect(findMapGeometryPath({ map, geometry: state, token: grounded, to: { x: 125, y: 25 } }))
+      .toMatchObject({ elevationsFeet: [20, 20, 20], distanceFeet: 10, movementCostFeet: 15 })
+
+    const flyer = { ...grounded, elevationFeet: 40 }
+    expect(findMapGeometryPath({
+      map: { ...map, tokens: [flyer] },
+      geometry: state,
+      token: flyer,
+      to: { x: 125, y: 25 },
+      canFly: true,
+      targetElevationFeet: 40,
+    })).toMatchObject({ elevationsFeet: [40, 40, 40], distanceFeet: 10, movementCostFeet: 10 })
+  })
+
   it('uses the declared target elevation along a three-dimensional flight path', () => {
     const map = battleMap({ height: 50 })
     const state = geometry()
@@ -304,6 +335,62 @@ describe('map geometry pathfinding', () => {
 
     expect(reused).toEqual(reference)
     expect(reused?.elevationsFeet).toEqual([20])
+  })
+
+  it('passes each flight step elevation to additional cost callbacks in A* and path trees', () => {
+    const flyer = token({ elevationFeet: 0 })
+    const map = battleMap({ height: 50, tokens: [flyer] })
+    const directSeen = {
+      difficult: [] as Array<number | undefined>,
+      speed: [] as Array<number | undefined>,
+      legacy: [] as Array<number | undefined>,
+    }
+    const treeSeen = {
+      difficult: [] as Array<number | undefined>,
+      speed: [] as Array<number | undefined>,
+      legacy: [] as Array<number | undefined>,
+    }
+    const callbacks = (seen: typeof directSeen) => ({
+      additionalDifficultTerrainMultiplier: (stepToken: Token) => {
+        seen.difficult.push(stepToken.elevationFeet)
+        return 1
+      },
+      additionalSpeedCostMultiplier: (stepToken: Token) => {
+        seen.speed.push(stepToken.elevationFeet)
+        return 1
+      },
+      additionalCostMultiplier: (stepToken: Token) => {
+        seen.legacy.push(stepToken.elevationFeet)
+        return 1
+      },
+    })
+
+    const direct = findMapGeometryPath({
+      map,
+      geometry: geometry(),
+      token: flyer,
+      to: { x: 125, y: 25 },
+      canFly: true,
+      targetElevationFeet: 20,
+      ...callbacks(directSeen),
+    })
+    const reused = createMapGeometryPathTree({
+      map,
+      geometry: geometry(),
+      token: flyer,
+      canFly: true,
+      targetElevationFeet: 20,
+      ...callbacks(treeSeen),
+    }).pathTo({ x: 125, y: 25 })
+
+    expect(direct).toBeDefined()
+    expect(reused).toBeDefined()
+    for (const seen of [directSeen, treeSeen]) {
+      for (const elevations of Object.values(seen)) {
+        expect(elevations.length).toBeGreaterThan(0)
+        expect(new Set(elevations)).toEqual(new Set([20]))
+      }
+    }
   })
 
   it('reports when the reusable search reaches its visited-cell limit', () => {

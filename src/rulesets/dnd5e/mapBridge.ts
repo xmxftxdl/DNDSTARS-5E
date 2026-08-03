@@ -43,6 +43,7 @@ import {
 } from './effectiveRulesContext'
 import { dnd5eMonsterHasStructuredShapechange } from './monsterAdvancedAbilities'
 import {
+  dnd5eMonsterHasImmutableForm,
   dnd5eMonsterHasMagicResistance,
   dnd5eMonsterLimitedMagicImmunityRule,
 } from './monsterGenericAbilities'
@@ -50,6 +51,10 @@ import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision
 import { dnd5eWeaponDamageSource } from './equipment'
 import type { Dnd5eMoralAlignment } from './damageDefenses'
 import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
+import {
+  dnd5eCreatureHeightFeetForSizeRank,
+  dnd5eMapTokenDistanceFeet,
+} from './verticalCombatGeometry'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -60,6 +65,19 @@ export interface Dnd5eAttackCoverSnapshot {
   cover: Dnd5eAttackCoverOverride
   armorClassBonus: 0 | 2 | 5
   blocksLineOfEffect: boolean
+}
+
+const DND5E_WORN_ARMOR_NOTE_FRAGMENTS = [
+  '皮甲', '兽皮甲', '镶钉皮甲', '链甲衫', '链甲', '鳞甲', '胸甲', '半身板甲',
+  '环甲', '板条甲', '条板甲', '板甲',
+  'padded', 'leather', 'studded leather', 'hide', 'chain shirt', 'scale mail',
+  'breastplate', 'half plate', 'ring mail', 'chain mail', 'splint', 'plate',
+] as const
+
+function dnd5eMonsterArmorClassNoteMeansWornArmor(note: string | undefined): boolean {
+  const normalized = note?.trim().toLowerCase()
+  return !!normalized && DND5E_WORN_ARMOR_NOTE_FRAGMENTS.some((fragment) =>
+    normalized.includes(fragment))
 }
 
 function dnd5eMonsterConditionImmunities(monster: Dnd5eMonsterStatBlock | undefined): readonly string[] | undefined {
@@ -386,6 +404,7 @@ export function createDnd5eMapCombatSnapshot(input: {
         initiative,
         sizeRank: ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? '中型'],
         elevationFeet: mapGeometryTokenElevation(geometry, token),
+        groundElevationFeet: mapGeometryTerrainElevationAtPoint(geometry, token),
         airborne: mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
         darkvisionRangeFeet: visionProfile.darkvisionRangeFeet || undefined,
@@ -445,12 +464,16 @@ export function createDnd5eMapCombatSnapshot(input: {
         climb: monster.speed.climb,
         swim: monster.speed.swim,
         fly: monster.speed.fly,
+        hover: monster.speed.hover,
       } : { walk: 30 },
       position: { x: token.x, y: token.y },
       elevationFeet: mapGeometryTokenElevation(geometry, token),
-      airborne: !!monster?.speed.fly &&
-        mapGeometryTokenElevation(geometry, token) >
-          mapGeometryTerrainElevationAtPoint(geometry, token),
+      groundElevationFeet: mapGeometryTerrainElevationAtPoint(geometry, token),
+      // Elevation is physical state, independent of where the flight speed
+      // came from. A walking monster held aloft by Fly must remain airborne in
+      // the Headless snapshot so losing that effect can trigger a real fall.
+      airborne: mapGeometryTokenElevation(geometry, token) >
+        mapGeometryTerrainElevationAtPoint(geometry, token),
       darkvisionRangeFeet: visionProfile.darkvisionRangeFeet || undefined,
       darknessSightRangeFeet: visionProfile.darknessSightRangeFeet || undefined,
       magicalDarknessSightRangeFeet:
@@ -460,6 +483,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       limitedMagicImmunity: dnd5eMonsterLimitedMagicImmunityRule(monster),
       shapechanger: monster?.capabilities?.shapechanger === true ||
         (!!monster && dnd5eMonsterHasStructuredShapechange(monster.id)),
+      immutableForm: dnd5eMonsterHasImmutableForm(monster),
       weaponAttacksMagical: monster?.traits.some((trait) =>
         trait.rule?.kind === 'magic-weapons' && trait.rule.weaponAttacksMagical
       ),
@@ -493,7 +517,7 @@ export function createDnd5eMapCombatSnapshot(input: {
             : []))
           : undefined),
       },
-      wearingArmor: !!monster?.armorClass.note && !monster.armorClass.note.includes('天生护甲'),
+      wearingArmor: dnd5eMonsterArmorClassNoteMeansWornArmor(monster?.armorClass.note),
       wearingMetalArmor: !!monster?.armorClass.note && [
         '链甲', '鳞甲', '胸甲', '半身板甲', '环甲', '板条甲', '板甲',
         'chain', 'scale', 'breastplate', 'half plate', 'ring mail', 'splint', 'plate',
@@ -601,15 +625,26 @@ export function createDnd5eMapCombatSnapshot(input: {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
       const left = combatantTokens[leftIndex]
       const right = combatantTokens[rightIndex]
-      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] = Math.max(
-        tokenFootprintDistanceCells(left, right, input.map) * feetPerCell,
-        Math.abs(
-          mapGeometryTokenElevation(geometry, left) -
-            mapGeometryTokenElevation(geometry, right),
-        ),
-      )
+      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] =
+        dnd5eMapTokenDistanceFeet({
+          map: input.map,
+          geometry,
+          left,
+          right,
+          leftSizeRank: dnd5eEffectiveSizeRank(state.combatants[left.id]),
+          rightSizeRank: dnd5eEffectiveSizeRank(state.combatants[right.id]),
+        })
       for (const [attacker, target] of [[left, right], [right, left]] as const) {
-        const cover = mapGeometryCoverBetween(geometry, attacker, target, input.map)
+        const attackerHeightFeet = dnd5eCreatureHeightFeetForSizeRank(
+          dnd5eEffectiveSizeRank(state.combatants[attacker.id]),
+        )
+        const targetHeightFeet = dnd5eCreatureHeightFeetForSizeRank(
+          dnd5eEffectiveSizeRank(state.combatants[target.id]),
+        )
+        const cover = mapGeometryCoverBetween(geometry, attacker, target, input.map, {
+          attackerHeightFeet,
+          targetHeightFeet,
+        })
         const directedKey = dnd5eDirectedCombatantPairKey(attacker.id, target.id)
         if (cover.blocksLineOfEffect) state.lineOfEffectBlockedByCombatantPair[directedKey] = true
         else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
@@ -630,8 +665,10 @@ export function createDnd5eMapCombatSnapshot(input: {
           geometry,
           from: effectiveViewer,
           to: target,
-          fromElevationFeet: attacker.elevationFeet ?? 0,
-          toElevationFeet: target.elevationFeet ?? 0,
+          fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
+          toElevationFeet: mapGeometryTokenElevation(geometry, target),
+          fromEyeHeightFeet: attackerHeightFeet / 2,
+          toEyeHeightFeet: targetHeightFeet / 2,
         })
         if (physicalLineOfSightBlocked) state.physicalLineOfSightBlockedByCombatantPair[directedKey] = true
         if (mapGeometryIlluminationAtPoint({
@@ -642,7 +679,14 @@ export function createDnd5eMapCombatSnapshot(input: {
           elevationFeet: target.elevationFeet ?? 0,
         }) === 'magical-darkness') state.magicalDarknessByCombatantPair[directedKey] = true
         const lineOfSightBlocked = physicalLineOfSightBlocked ||
-          !mapGeometryCanSeeToken({ geometry, map: input.map, viewer: effectiveViewer, target })
+          !mapGeometryCanSeeToken({
+            geometry,
+            map: input.map,
+            viewer: effectiveViewer,
+            target,
+            viewerHeightFeet: attackerHeightFeet,
+            targetHeightFeet,
+          })
         if (lineOfSightBlocked) state.lineOfSightBlockedByCombatantPair[directedKey] = true
       }
     }
@@ -718,15 +762,24 @@ export function refreshDnd5eMapSpatialRelations(
     for (let rightIndex = leftIndex + 1; rightIndex < positionedTokens.length; rightIndex += 1) {
       const left = positionedTokens[leftIndex]
       const right = positionedTokens[rightIndex]
-      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] = Math.max(
-        tokenFootprintDistanceCells(left, right, spatialMap) * feetPerCell,
-        Math.abs(
-          mapGeometryTokenElevation(geometry, left) -
-            mapGeometryTokenElevation(geometry, right),
-        ),
-      )
+      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] =
+        dnd5eMapTokenDistanceFeet({
+          map: spatialMap,
+          geometry,
+          left,
+          right,
+          leftSizeRank: dnd5eEffectiveSizeRank(state.combatants[left.id]),
+          rightSizeRank: dnd5eEffectiveSizeRank(state.combatants[right.id]),
+        })
       for (const [source, target] of [[left, right], [right, left]] as const) {
-        const cover = mapGeometryCoverBetween(geometry, source, target, spatialMap)
+        const cover = mapGeometryCoverBetween(geometry, source, target, spatialMap, {
+          attackerHeightFeet: dnd5eCreatureHeightFeetForSizeRank(
+            dnd5eEffectiveSizeRank(state.combatants[source.id]),
+          ),
+          targetHeightFeet: dnd5eCreatureHeightFeetForSizeRank(
+            dnd5eEffectiveSizeRank(state.combatants[target.id]),
+          ),
+        })
         const directedKey = dnd5eDirectedCombatantPairKey(source.id, target.id)
         if (cover.blocksLineOfEffect) {
           state.lineOfEffectBlockedByCombatantPair[directedKey] = true
@@ -823,12 +876,12 @@ export function planDnd5eMapResultApplication(input: {
             openHandNoReactionsAppliedTurnKeysBySource: combatant.classState.openHandNoReactionsAppliedTurnKeysBySource,
             declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
             declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
-            battleMasterDroppedWeaponIds: combatant.classState.battleMasterDroppedWeaponIds,
-            eldritchStrikeBySource: combatant.classState.eldritchStrikeBySource,
-            totemWarriorWolfAttunementTargetIds:
-              combatant.classState.totemWarriorWolfAttunementTargetIds,
-            totemWarriorWolfAttunementTurnKey:
-              combatant.classState.totemWarriorWolfAttunementTurnKey,
+            droppedEquipmentIds: combatant.classState.droppedEquipmentIds,
+            spellSavePressureBySource: combatant.classState.spellSavePressureBySource,
+            bonusProneEligibleTargetIds:
+              combatant.classState.bonusProneEligibleTargetIds,
+            bonusProneEligibleTurnKey:
+              combatant.classState.bonusProneEligibleTurnKey,
             monsterMechanicRollModifiers: combatant.classState.monsterMechanicRollModifiers,
             pendingMonsterMechanicTriggers: combatant.classState.pendingMonsterMechanicTriggers,
             monsterMechanicTriggerSequence: combatant.classState.monsterMechanicTriggerSequence,
@@ -854,6 +907,9 @@ export function planDnd5eMapResultApplication(input: {
             monsterShapechangeFormId: combatant.classState.monsterShapechangeFormId,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
             monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
+            monsterBerserk: combatant.classState.monsterBerserk,
+            monsterDamageAversionActive: combatant.classState.monsterDamageAversionActive,
+            monsterDamageAversionSourceActorId: combatant.classState.monsterDamageAversionSourceActorId,
             monsterHydraHeadCount: combatant.classState.monsterHydraHeadCount,
             monsterHydraHeadsLostSinceLastTurn: combatant.classState.monsterHydraHeadsLostSinceLastTurn,
             monsterHydraDamageTurnKey: combatant.classState.monsterHydraDamageTurnKey,

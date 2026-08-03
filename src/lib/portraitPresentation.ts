@@ -24,3 +24,12 @@ export function resolveInitiativePortrait(
 ): string | undefined {
   return character?.initiativePortrait ?? character?.portrait ?? token?.portrait
 }
+
+/** Pick the first usable portrait candidate after browser image-load failures. */
+export function resolveAvailablePortraitSource(
+  preferred: string | undefined,
+  shared: string | undefined,
+  failedSources: readonly string[],
+): string | undefined {
+  return [preferred, shared].find((candidate) => candidate && !failedSources.includes(candidate))
+}

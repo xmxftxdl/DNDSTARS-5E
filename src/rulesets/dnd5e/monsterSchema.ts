@@ -939,6 +939,9 @@ function areaTargetingIsValid(raw: unknown): boolean {
 
 function areaSavingThrowEffectIsValid(raw: unknown): boolean {
   if (!isRecord(raw)) return false
+  const targetCreatureTypeExclusions = Array.isArray(raw.targetCreatureTypeExclusions)
+    ? raw.targetCreatureTypeExclusions
+    : undefined
   const forcedMovement = raw.forcedMovementOnFailedSave
   const forcedMovementIsValid = forcedMovement == null || (
     isRecord(forcedMovement) &&
@@ -998,6 +1001,16 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
   )
   return areaTargetingIsValid(raw.area) &&
     (raw.target === 'hostile' || raw.target === 'all-creatures-except-self') &&
+    (
+      targetCreatureTypeExclusions == null ||
+      (
+        targetCreatureTypeExclusions.length > 0 &&
+        targetCreatureTypeExclusions.length <= 3 &&
+        new Set(targetCreatureTypeExclusions).size === targetCreatureTypeExclusions.length &&
+        targetCreatureTypeExclusions.every((entry) =>
+          entry === 'aberration' || entry === 'demon' || entry === 'undead')
+      )
+    ) &&
     ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
     finiteInteger(raw.dc, 1, 100) &&
     (raw.magical == null || typeof raw.magical === 'boolean') &&
@@ -1008,6 +1021,10 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
     (
       raw.requiresTargetCanSeeSource == null ||
       typeof raw.requiresTargetCanSeeSource === 'boolean'
+    ) &&
+    (
+      raw.requiresTargetCanHearSource == null ||
+      typeof raw.requiresTargetCanHearSource === 'boolean'
     ) &&
     (raw.damage == null || validateDamage(raw.damage)) &&
     !(raw.damage == null && raw.damageOnSuccessfulSave != null) &&
@@ -1142,6 +1159,11 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     } else return false
   }
   if (action.legendaryCost != null && !finiteInteger(action.legendaryCost, 1, 10)) return false
+  if (
+    action.economy != null &&
+    action.economy !== 'action' &&
+    action.economy !== 'bonus-action'
+  ) return false
   if (action.referencedActionId != null && !requiredText(action.referencedActionId, 120)) return false
   if (action.relationRequirement != null) {
     if (
@@ -1166,6 +1188,57 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
       if (
         !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
         (action.rule.skillKey != null && !requiredText(action.rule.skillKey, 120))
+      ) return false
+    } else if (action.rule.kind === 'teleport') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'target' ||
+          key === 'rangeFeet' ||
+          key === 'requiresVisibleDestination' ||
+          key === 'requiresUnoccupiedDestination') ||
+        action.rule.target !== 'self' ||
+        !finiteInteger(action.rule.rangeFeet, 1, 100_000) ||
+        action.rule.requiresVisibleDestination !== true ||
+        action.rule.requiresUnoccupiedDestination !== true
+      ) return false
+    } else if (action.rule.kind === 'invisibility') {
+      const breakOn = Array.isArray(action.rule.breakOn)
+        ? action.rule.breakOn
+        : undefined
+      const breakOnMonsterAbilityIds = Array.isArray(action.rule.breakOnMonsterAbilityIds)
+        ? action.rule.breakOnMonsterAbilityIds
+        : undefined
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'target' ||
+          key === 'concentration' ||
+          key === 'maximumDurationRounds' ||
+          key === 'breakOn' ||
+          key === 'breakOnMonsterAbilityIds') ||
+        action.rule.target !== 'self' ||
+        action.rule.concentration !== true ||
+        (
+          action.rule.maximumDurationRounds != null &&
+          !finiteInteger(action.rule.maximumDurationRounds, 1, 1_000_000)
+        ) ||
+        !breakOn ||
+        breakOn.length < 1 ||
+        breakOn.length > 2 ||
+        new Set(breakOn).size !== breakOn.length ||
+        breakOn.some((trigger) => trigger !== 'makes-attack' && trigger !== 'casts-spell') ||
+        (
+          breakOnMonsterAbilityIds != null &&
+          (
+            breakOnMonsterAbilityIds.length < 1 ||
+            breakOnMonsterAbilityIds.length > 16 ||
+            new Set(breakOnMonsterAbilityIds).size !== breakOnMonsterAbilityIds.length ||
+            breakOnMonsterAbilityIds.some((abilityId) =>
+              !requiredText(abilityId, 120) ||
+              !/^[a-z][a-z0-9-]*$/.test(String(abilityId)))
+          )
+        )
       ) return false
     } else if (action.rule.kind === 'saving-throw-condition') {
       if (
@@ -1231,6 +1304,42 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         !STANDARD_CONDITIONS.has(String(action.rule.requiredCondition)) ||
         typeof action.rule.requireSameSource !== 'boolean' ||
         !validateDamage(action.rule.damage)
+      ) return false
+    } else if (action.rule.kind === 'healing-touch') {
+      const healing = isRecord(action.rule.healing)
+        ? action.rule.healing
+        : undefined
+      const removes = Array.isArray(action.rule.removes)
+        ? action.rule.removes
+        : undefined
+      const allowedRemovals = new Set([
+        'curse',
+        'disease',
+        'poisoned',
+        'blinded',
+        'deafened',
+      ])
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'rangeFeet' ||
+          key === 'target' ||
+          key === 'healing' ||
+          key === 'removes') ||
+        action.rule.rangeFeet !== 5 ||
+        action.rule.target !== 'another-living-creature' ||
+        !healing ||
+        !Object.keys(healing).every((key) =>
+          key === 'count' || key === 'sides' || key === 'bonus') ||
+        !finiteInteger(healing.count, 1, 100) ||
+        !finiteInteger(healing.sides, 2, 1_000) ||
+        !finiteInteger(healing.bonus, 0, 1_000) ||
+        !removes ||
+        removes.length < 1 ||
+        removes.length > allowedRemovals.size ||
+        new Set(removes).size !== removes.length ||
+        removes.some((condition) =>
+          typeof condition !== 'string' || !allowedRemovals.has(condition))
       ) return false
     } else if (action.rule.kind === 'source-linked-reel') {
       if (
@@ -1314,6 +1423,37 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         action.rule.duration !== 'until-target-turn-end' ||
         action.rule.magical !== true ||
         action.rule.requiresMutualVisualSight !== true
+      ) return false
+    } else if (action.rule.kind === 'legendary-wing-attack') {
+      const followUpMovement = action.rule.followUpMovement
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'rangeFeet' ||
+          key === 'target' ||
+          key === 'ability' ||
+          key === 'dc' ||
+          key === 'damage' ||
+          key === 'damageOnSuccessfulSave' ||
+          key === 'conditionOnFailedSave' ||
+          key === 'followUpMovement') ||
+        !finiteInteger(action.rule.rangeFeet, 1, 100_000) ||
+        action.rule.target !== 'all-creatures-except-self' ||
+        action.rule.ability !== 'dex' ||
+        !finiteInteger(action.rule.dc, 1, 100) ||
+        !isRecord(action.rule.damage) ||
+        !validateDamage(action.rule.damage) ||
+        action.rule.damage.type !== 'bludgeoning' ||
+        action.rule.damageOnSuccessfulSave !== 'none' ||
+        action.rule.conditionOnFailedSave !== 'prone' ||
+        !isRecord(followUpMovement) ||
+        !Object.keys(followUpMovement).every((key) =>
+          key === 'kind' || key === 'maximumSpeedFraction') ||
+        followUpMovement.kind !== 'grant-fly-movement' ||
+        typeof followUpMovement.maximumSpeedFraction !== 'number' ||
+        !Number.isFinite(followUpMovement.maximumSpeedFraction) ||
+        followUpMovement.maximumSpeedFraction <= 0 ||
+        followUpMovement.maximumSpeedFraction > 1
       ) return false
     } else if (action.rule.kind === 'area-saving-throw') {
       if (action.rule.variants != null) {
@@ -1427,6 +1567,12 @@ function traitShapeIsValid(raw: unknown): boolean {
       raw.rule.bonusActionOptions.length === 2 &&
       raw.rule.bonusActionOptions[0] === 'disengage' &&
       raw.rule.bonusActionOptions[1] === 'hide'
+  }
+  if (raw.rule.kind === 'flyby') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' || key === 'movementMode' || key === 'provokesOpportunityAttacks') &&
+      raw.rule.movementMode === 'fly' &&
+      raw.rule.provokesOpportunityAttacks === false
   }
   if (raw.rule.kind === 'keen-sense') {
     return ['smell', 'hearing', 'sight'].includes(String(raw.rule.sense)) &&
@@ -1550,6 +1696,43 @@ function traitShapeIsValid(raw: unknown): boolean {
   }
   if (raw.rule.kind === 'magic-weapons') {
     return raw.rule.weaponAttacksMagical === true
+  }
+  if (raw.rule.kind === 'berserk') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' ||
+      key === 'hitPointThreshold' ||
+      key === 'dieSides' ||
+      key === 'minimum' ||
+      key === 'target' ||
+      key === 'endsWhenFullyHealed') &&
+      finiteInteger(raw.rule.hitPointThreshold, 1, 1_000_000) &&
+      finiteInteger(raw.rule.dieSides, 2, 1_000) &&
+      finiteInteger(raw.rule.minimum, 1, Number(raw.rule.dieSides)) &&
+      raw.rule.target === 'nearest-visible-creature' &&
+      raw.rule.endsWhenFullyHealed === true
+  }
+  if (raw.rule.kind === 'damage-aversion') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' ||
+      key === 'damageType' ||
+      key === 'attackRollMode' ||
+      key === 'abilityCheckRollMode' ||
+      key === 'duration') &&
+      DAMAGE_TYPE_VALUES.has(String(raw.rule.damageType)) &&
+      raw.rule.attackRollMode === 'disadvantage' &&
+      raw.rule.abilityCheckRollMode === 'disadvantage' &&
+      raw.rule.duration === 'until-end-of-next-turn'
+  }
+  if (raw.rule.kind === 'immutable-form') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' || key === 'immuneToFormAlteringEffects') &&
+      raw.rule.immuneToFormAlteringEffects === true
+  }
+  if (raw.rule.kind === 'damage-absorption') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' || key === 'damageType' || key === 'healing') &&
+      DAMAGE_TYPE_VALUES.has(String(raw.rule.damageType)) &&
+      raw.rule.healing === 'damage-taken'
   }
   if (raw.rule.kind === 'pack-tactics') {
     return finiteInteger(raw.rule.allyDistanceFeet, 1, 100_000) &&

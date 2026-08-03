@@ -1,11 +1,8 @@
 import {
-  cellKey,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
-  tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
-import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eMovementPathCells } from './itemAreas'
@@ -13,8 +10,22 @@ import type {
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaTriggerTiming,
 } from './persistentAreaTypes'
-import { reconcileDnd5ePersistentAreaAnchors } from './coreSpellAreas'
+import {
+  getDnd5eCoreSpellAreaDeclaration,
+  reconcileDnd5ePersistentAreaAnchors,
+} from './coreSpellAreas'
 import { normalizeDnd5eActiveEffects } from './activeEffects'
+import {
+  dnd5ePersistentAreaAllowsTarget,
+  dnd5eTokenIntersectsPersistentAreaAt,
+} from './persistentAreaGeometry'
+
+export {
+  dnd5ePersistentAreaAffectsTokenVerticallyAt,
+  dnd5ePersistentAreaDifficultTerrainMultiplierAt,
+  dnd5ePersistentAreaMovementCostMultiplierAt,
+  dnd5ePersistentAreaSpeedCostMultiplierAt,
+} from './persistentAreaGeometry'
 
 export interface Dnd5ePersistentAreaTriggerCandidate {
   area: Dnd5ePluginArea
@@ -26,78 +37,8 @@ export interface Dnd5ePersistentAreaTriggerCandidate {
   turnKey?: string
 }
 
-function tokenIntersectsAreaAt(
-  token: Token,
-  map: BattleMap,
-  area: Dnd5ePluginArea,
-  position: { x: number; y: number },
-  cells: readonly GridCell[] = area.cells,
-): boolean {
-  const areaCells = new Set(cells.map(cellKey))
-  return tokenOccupiedCellsAt(token, map, position).some((cell) => areaCells.has(cellKey(cell)))
-}
-
-function areaAllowsTarget(area: Dnd5ePluginArea, target: Token, map: BattleMap): boolean {
-  if (target.type === 'obstacle') return false
-  if (target.id === area.sourceTokenId && area.includeSelf !== true) return false
-  const source = map.tokens.find((token) => token.id === area.sourceTokenId)
-  if (!source || area.relation === 'any' || !area.relation) return true
-  const opposed = areOpposedCombatTokens(source, target)
-  return area.relation === 'enemy' ? opposed : !opposed
-}
-
-export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
-  map: BattleMap
-  token: Token
-  position: { x: number; y: number }
-}): number {
-  let multiplier = 1
-  for (const area of input.map.dnd5ePluginAreas ?? []) {
-    if (
-      (area.movementCostMultiplier ?? 1) <= 1 ||
-      !areaAllowsTarget(area, input.token, input.map) ||
-      !tokenIntersectsAreaAt(input.token, input.map, area, input.position)
-    ) continue
-    multiplier = Math.max(multiplier, area.movementCostMultiplier ?? 1)
-  }
-  return multiplier
-}
-
-export function dnd5ePersistentAreaDifficultTerrainMultiplierAt(input: {
-  map: BattleMap
-  token: Token
-  position: { x: number; y: number }
-}): number {
-  let multiplier = 1
-  for (const area of input.map.dnd5ePluginAreas ?? []) {
-    if (
-      area.coreSpellId === 'spirit-guardians' ||
-      (area.movementCostMultiplier ?? 1) <= 1 ||
-      !areaAllowsTarget(area, input.token, input.map) ||
-      !tokenIntersectsAreaAt(input.token, input.map, area, input.position)
-    ) continue
-    multiplier = Math.max(multiplier, area.movementCostMultiplier ?? 1)
-  }
-  return multiplier
-}
-
-export function dnd5ePersistentAreaSpeedCostMultiplierAt(input: {
-  map: BattleMap
-  token: Token
-  position: { x: number; y: number }
-}): number {
-  let multiplier = 1
-  for (const area of input.map.dnd5ePluginAreas ?? []) {
-    if (
-      area.coreSpellId !== 'spirit-guardians' ||
-      (area.movementCostMultiplier ?? 1) <= 1 ||
-      !areaAllowsTarget(area, input.token, input.map) ||
-      !tokenIntersectsAreaAt(input.token, input.map, area, input.position)
-    ) continue
-    multiplier = Math.max(multiplier, area.movementCostMultiplier ?? 1)
-  }
-  return multiplier
-}
+const tokenIntersectsAreaAt = dnd5eTokenIntersectsPersistentAreaAt
+const areaAllowsTarget = dnd5ePersistentAreaAllowsTarget
 
 function alreadyTriggered(
   area: Dnd5ePluginArea,
@@ -129,15 +70,129 @@ function candidate(
   pathIndex?: number,
   turnKey?: string,
 ): Dnd5ePersistentAreaTriggerCandidate {
+  const runtimeTrigger = normalizeDnd5ePersistentAreaTriggerForRuntime(area, trigger)
   return {
     area,
-    trigger,
+    trigger: runtimeTrigger,
     targetToken,
-    transactionId: `area-trigger:${area.id}:${trigger.id}:${targetToken.id}:${round}:${turnKey ?? 'round'}:${occurrence}`,
+    transactionId: `area-trigger:${area.id}:${runtimeTrigger.id}:${targetToken.id}:${round}:${turnKey ?? 'round'}:${occurrence}`,
     enteredAt,
     pathIndex,
     turnKey,
   }
+}
+
+/**
+ * Core spell areas persist an immutable trigger snapshot on the map. Older
+ * Flaming Sphere snapshots required a separate DM adjudication and stored its
+ * turn-end frequency as once per round. Narrowly reconcile those two built-in
+ * triggers at execution time; custom/plugin areas remain untouched.
+ */
+export function normalizeDnd5ePersistentAreaTriggerForRuntime(
+  area: Dnd5ePluginArea,
+  trigger: Dnd5ePersistentAreaTriggerSnapshot,
+): Dnd5ePersistentAreaTriggerSnapshot {
+  if (
+    area.sourceKind !== 'core-spell' ||
+    area.coreSpellId !== 'flaming-sphere' ||
+    (trigger.id !== 'flaming-sphere-impact' && trigger.id !== 'flaming-sphere-turn-end')
+  ) return trigger
+  const declaration = getDnd5eCoreSpellAreaDeclaration('flaming-sphere')
+  const declaredTrigger = declaration?.triggers.find((candidate) => candidate.id === trigger.id)
+  if (!declaredTrigger) return trigger
+  const dmAdjustable = declaredTrigger.dmAdjustable === true
+    ? trigger.dmAdjustable
+    : undefined
+  const oncePerTurn = declaredTrigger.oncePerTurn === true
+    ? true
+    : trigger.oncePerTurn
+  const oncePerRound = declaredTrigger.oncePerTurn === true
+    ? false
+    : trigger.oncePerRound
+  if (
+    dmAdjustable === trigger.dmAdjustable &&
+    oncePerTurn === trigger.oncePerTurn &&
+    oncePerRound === trigger.oncePerRound
+  ) return trigger
+  return { ...trigger, dmAdjustable, oncePerTurn, oncePerRound }
+}
+
+/**
+ * When a source-token aura (e.g. Spirit Guardians) moves with its caster onto
+ * stationary creatures, those creatures newly enter the area and should receive
+ * on-enter triggers. Fixed/movable beams such as Moonbeam are intentionally
+ * excluded (2014 errata: relocating the area onto a creature is not "entering").
+ */
+export function collectDnd5ePersistentAreaTriggersForSourceMove(input: {
+  beforeMap: BattleMap
+  afterMap: BattleMap
+  sourceTokenId: string
+  round: number
+  turnKey?: string
+}): Dnd5ePersistentAreaTriggerCandidate[] {
+  const beforeAreas = new Map(
+    (input.beforeMap.dnd5ePluginAreas ?? [])
+      .filter((area) =>
+        area.anchorMode === 'source-token' &&
+        (area.anchorTokenId ?? area.sourceTokenId) === input.sourceTokenId)
+      .map((area) => [area.id, area]),
+  )
+  if (beforeAreas.size === 0) return []
+  const out: Dnd5ePersistentAreaTriggerCandidate[] = []
+  const queuedLimited = new Set<string>()
+  const mayQueue = (
+    area: Dnd5ePluginArea,
+    trigger: Dnd5ePersistentAreaTriggerSnapshot,
+    targetTokenId: string,
+  ) => {
+    const runtimeTrigger = normalizeDnd5ePersistentAreaTriggerForRuntime(area, trigger)
+    if (alreadyTriggered(area, runtimeTrigger, targetTokenId, input.round, input.turnKey)) return false
+    if (runtimeTrigger.oncePerRound === false && runtimeTrigger.oncePerTurn !== true) return true
+    const frequencyKey = runtimeTrigger.oncePerTurn === true ? input.turnKey : input.round
+    const key = `${area.id}\u0000${runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id}\u0000${targetTokenId}\u0000${frequencyKey}`
+    if (queuedLimited.has(key)) return false
+    queuedLimited.add(key)
+    return true
+  }
+  for (const afterArea of input.afterMap.dnd5ePluginAreas ?? []) {
+    if (afterArea.anchorMode !== 'source-token') continue
+    if ((afterArea.anchorTokenId ?? afterArea.sourceTokenId) !== input.sourceTokenId) continue
+    const beforeArea = beforeAreas.get(afterArea.id)
+    if (!beforeArea) continue
+    for (const trigger of afterArea.triggers ?? []) {
+      if (trigger.timing !== 'on-enter') continue
+      for (const target of input.afterMap.tokens) {
+        if (target.id === input.sourceTokenId) continue
+        if (!areaAllowsTarget(afterArea, target, input.afterMap)) continue
+        const wasInside = tokenIntersectsAreaAt(
+          target,
+          input.beforeMap,
+          beforeArea,
+          target,
+          trigger.cells ?? beforeArea.cells,
+        )
+        const nowInside = tokenIntersectsAreaAt(
+          target,
+          input.afterMap,
+          afterArea,
+          target,
+          trigger.cells ?? afterArea.cells,
+        )
+        if (wasInside || !nowInside || !mayQueue(afterArea, trigger, target.id)) continue
+        out.push(candidate(
+          afterArea,
+          trigger,
+          target,
+          input.round,
+          `source-move-enter`,
+          undefined,
+          undefined,
+          input.turnKey,
+        ))
+      }
+    }
+  }
+  return out
 }
 
 export function collectDnd5ePersistentAreaTriggers(input: {
@@ -153,6 +208,8 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     to: { x: number; y: number }
     /** 权威移动规划器生成的完整折线路径；缺省时才回退为起终点直线。 */
     path?: readonly { x: number; y: number }[]
+    /** 与 path 一一对应的绝对高度；用于飞越地面效果和进入三维体积。 */
+    pathElevationsFeet?: readonly number[]
   }
 }): Dnd5ePersistentAreaTriggerCandidate[] {
   const areas = (input.map.dnd5ePluginAreas ?? []).filter((area) => !input.areaId || area.id === input.areaId)
@@ -164,10 +221,11 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     trigger: Dnd5ePersistentAreaTriggerSnapshot,
     targetTokenId: string,
   ) => {
-    if (alreadyTriggered(area, trigger, targetTokenId, input.round, input.turnKey)) return false
-    if (trigger.oncePerRound === false && trigger.oncePerTurn !== true) return true
-    const frequencyKey = trigger.oncePerTurn === true ? input.turnKey : input.round
-    const key = `${area.id}\u0000${trigger.frequencyGroupId ?? trigger.id}\u0000${targetTokenId}\u0000${frequencyKey}`
+    const runtimeTrigger = normalizeDnd5ePersistentAreaTriggerForRuntime(area, trigger)
+    if (alreadyTriggered(area, runtimeTrigger, targetTokenId, input.round, input.turnKey)) return false
+    if (runtimeTrigger.oncePerRound === false && runtimeTrigger.oncePerTurn !== true) return true
+    const frequencyKey = runtimeTrigger.oncePerTurn === true ? input.turnKey : input.round
+    const key = `${area.id}\u0000${runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id}\u0000${targetTokenId}\u0000${frequencyKey}`
     if (queuedLimited.has(key)) return false
     queuedLimited.add(key)
     return true
@@ -179,25 +237,64 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     const target = movement.token
     const from = tokenAnchorCellFromPixel(target.x, target.y, target, input.map)
     const to = tokenAnchorCellFromPixel(movement.to.x, movement.to.y, target, input.map)
-    const declaredPath = movement.path?.map((point) =>
-      tokenAnchorCellFromPixel(point.x, point.y, target, input.map),
-    ) ?? []
-    const path = declaredPath.length > 0
-      ? [from, ...declaredPath, to].filter((cell, index, cells) =>
-          index === 0 || cell.col !== cells[index - 1].col || cell.row !== cells[index - 1].row,
+    const declaredPath = movement.path?.map((point, index) => ({
+      cell: tokenAnchorCellFromPixel(point.x, point.y, target, input.map),
+      elevationFeet: movement.pathElevationsFeet?.[index],
+    })) ?? []
+    const rawPath = declaredPath.length > 0
+      ? [
+          { cell: from, elevationFeet: target.elevationFeet },
+          ...declaredPath,
+          { cell: to, elevationFeet: movement.pathElevationsFeet?.at(-1) },
+        ]
+      : dnd5eMovementPathCells(from, to).map((cell) => ({
+          cell,
+          elevationFeet: cell.col === from.col && cell.row === from.row
+            ? target.elevationFeet
+            : undefined,
+        }))
+    const path: Array<{ cell: GridCell; elevationFeet?: number }> = []
+    for (const step of rawPath) {
+      const previous = path.at(-1)
+      if (
+        previous &&
+        previous.cell.col === step.cell.col &&
+        previous.cell.row === step.cell.row &&
+        (
+          step.elevationFeet == null ||
+          previous.elevationFeet === step.elevationFeet
         )
-      : dnd5eMovementPathCells(from, to)
+      ) {
+        if (step.elevationFeet != null) previous.elevationFeet = step.elevationFeet
+        continue
+      }
+      path.push({ cell: step.cell, elevationFeet: step.elevationFeet })
+    }
     for (const area of areas) {
       if (!areaAllowsTarget(area, target, input.map)) continue
       if (input.timing === 'on-enter') {
         for (const trigger of area.triggers ?? []) {
           if (trigger.timing !== 'on-enter') continue
           const triggerCells = trigger.cells ?? area.cells
-          let inside = tokenIntersectsAreaAt(target, input.map, area, target, triggerCells)
+          let inside = tokenIntersectsAreaAt(
+            target,
+            input.map,
+            area,
+            target,
+            triggerCells,
+            path[0]?.elevationFeet,
+          )
           let occurrence = 0
           for (let pathIndex = 1; pathIndex < path.length; pathIndex += 1) {
-            const position = tokenCenterForAnchorCell(path[pathIndex], target, input.map)
-            const nextInside = tokenIntersectsAreaAt(target, input.map, area, position, triggerCells)
+            const position = tokenCenterForAnchorCell(path[pathIndex].cell, target, input.map)
+            const nextInside = tokenIntersectsAreaAt(
+              target,
+              input.map,
+              area,
+              position,
+              triggerCells,
+              path[pathIndex].elevationFeet,
+            )
             if (!inside && nextInside && mayQueue(area, trigger, target.id)) {
               out.push(candidate(
                 area,
@@ -205,7 +302,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
                 target,
                 input.round,
                 `enter-${pathIndex}-${occurrence}`,
-                path[pathIndex],
+                path[pathIndex].cell,
                 pathIndex,
                 input.turnKey,
               ))
@@ -220,13 +317,20 @@ export function collectDnd5ePersistentAreaTriggers(input: {
       let distanceInsideFeet = 0
       const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
       for (let pathIndex = 1; pathIndex < path.length; pathIndex += 1) {
-        const position = tokenCenterForAnchorCell(path[pathIndex], target, input.map)
-        const nextInside = tokenIntersectsAreaAt(target, input.map, area, position)
+        const position = tokenCenterForAnchorCell(path[pathIndex].cell, target, input.map)
+        const nextInside = tokenIntersectsAreaAt(
+          target,
+          input.map,
+          area,
+          position,
+          area.cells,
+          path[pathIndex].elevationFeet,
+        )
         if (input.timing === 'on-move-distance' && nextInside) {
-          const previousCell = path[pathIndex - 1]
+          const previousCell = path[pathIndex - 1].cell
           const stepCells = Math.max(
-            Math.abs(path[pathIndex].col - previousCell.col),
-            Math.abs(path[pathIndex].row - previousCell.row),
+            Math.abs(path[pathIndex].cell.col - previousCell.col),
+            Math.abs(path[pathIndex].cell.row - previousCell.row),
           )
           distanceInsideFeet += stepCells * feetPerCell
           for (const trigger of area.triggers ?? []) {
@@ -241,7 +345,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
                   target,
                   input.round,
                   `move-${pathIndex}-${occurrence}`,
-                  path[pathIndex],
+                  path[pathIndex].cell,
                   pathIndex,
                   input.turnKey,
                 ))
@@ -297,8 +401,10 @@ export function reconcileDnd5ePluginAreas(
   areas: readonly Dnd5ePluginArea[] | undefined,
   characters: readonly Character[],
   round: number,
+  tokens: readonly Token[] = [],
 ): Dnd5ePluginArea[] {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
+  const tokensById = new Map(tokens.map((token) => [token.id, token]))
   return (areas ?? []).filter((area) => {
     if (round > area.expiresAfterRound) return false
     const source = charactersById.get(area.sourceCharacterId)
@@ -311,7 +417,12 @@ export function reconcileDnd5ePluginAreas(
       )
     }
     if (!area.concentrationId) return true
-    return !!source?.concentrating && source.dnd5eCombatState?.concentrationSpellId === area.concentrationId
+    if (source) {
+      return !!source.concentrating &&
+        source.dnd5eCombatState?.concentrationSpellId === area.concentrationId
+    }
+    const sourceToken = tokensById.get(area.sourceTokenId)
+    return sourceToken?.dnd5eCombatState?.concentrationSpellId === area.concentrationId
   }).map((area) => {
     if (!area.triggerReceipts) return area
     const triggerReceipts = area.triggerReceipts.filter((receipt) => receipt.round >= round - 2)
@@ -327,7 +438,12 @@ export function reconcileDnd5ePluginAreasOnMap(
   round: number,
 ): BattleMap {
   const anchoredMap = reconcileDnd5ePersistentAreaAnchors(map)
-  const next = reconcileDnd5ePluginAreas(anchoredMap.dnd5ePluginAreas, characters, round)
+  const next = reconcileDnd5ePluginAreas(
+    anchoredMap.dnd5ePluginAreas,
+    characters,
+    round,
+    anchoredMap.tokens,
+  )
   const previous = anchoredMap.dnd5ePluginAreas ?? []
   const liveEffectTokenIds = new Set(next.flatMap((area) =>
     area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : [],

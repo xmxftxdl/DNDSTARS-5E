@@ -19,7 +19,7 @@ import {
 } from './mapBridge'
 import { dnd5ePluginSubclassDefinition, registerDnd5eRulesPlugin } from './pluginApi'
 import { dnd5eSelectedSpellIdsForClass } from './spells'
-import { dnd5eEldritchKnightFeatureForCombatant } from './eldritchKnight'
+import { dnd5eMartialSpellSynergyForCombatant } from './martialSpellSynergy'
 import { FIGHTER_RESOURCE_KEYS } from './fighter'
 import { prepareDnd5eAdjudicatedSpell } from './adjudicatedSpellAction'
 import {
@@ -133,7 +133,7 @@ function combatant(level: number) {
       longsword: { magical: false },
     },
     classState: level >= 3
-      ? { eldritchKnightBondedWeaponIds: ['longsword'] }
+      ? { linkedEquipmentIds: ['longsword'] }
       : undefined,
     classSelections: {
       [`${SUBCLASS_ID}/spell-cantrips`]: ['fire-bolt', 'acid-splash'],
@@ -196,14 +196,14 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
       }))).toContainEqual(expect.objectContaining({
         featureId: `${PLUGIN_ID}:eldritch-knight-2014.war-magic`,
         automation: 'full',
-        mechanic: { kind: 'eldritch-knight-2014', feature: 'war-magic' },
+        mechanic: { kind: 'martial-spell-synergy', operation: 'cantrip-then-bonus-attack' },
       }))
       expect(state.combatants.fighter.pluginFeatureIds).toContain(
         `${PLUGIN_ID}:eldritch-knight-2014.war-magic`,
       )
-      expect(dnd5eEldritchKnightFeatureForCombatant(
+      expect(dnd5eMartialSpellSynergyForCombatant(
         state.combatants.fighter,
-        'war-magic',
+        'cantrip-then-bonus-attack',
       )).toBeTruthy()
       const cast = resolveDnd5eHeadlessAction(state, {
         type: 'cast-spell',
@@ -217,7 +217,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
       })
       expect(cast.ok).toBe(true)
       if (!cast.ok) return
-      expect(cast.state.combatants.fighter.classState.eldritchKnightWarMagicCantripTurnKey).toBeTruthy()
+      expect(cast.state.combatants.fighter.classState.cantripBonusWeaponAttackTurnKey).toBeTruthy()
       const attack = resolveDnd5eHeadlessAction(cast.state, {
         type: 'attack',
         actorId: 'fighter',
@@ -226,7 +226,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
         d20: 12,
         spendAction: false,
         spendBonusAction: true,
-        eldritchKnightWarMagicAttack: true,
+        featureBonusWeaponAttack: true,
         damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
         classDamageContext: {
           mode: 'melee',
@@ -240,7 +240,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
       expect(attack.ok).toBe(true)
       if (!attack.ok) return
       expect(attack.state.combatants.fighter.turn.bonusActionAvailable).toBe(false)
-      expect(attack.state.combatants.fighter.classState.eldritchKnightWarMagicCantripTurnKey).toBeUndefined()
+      expect(attack.state.combatants.fighter.classState.cantripBonusWeaponAttackTurnKey).toBeUndefined()
     } finally {
       dispose()
     }
@@ -268,7 +268,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
       })
       expect(attack.ok).toBe(true)
       if (!attack.ok) return
-      expect(attack.state.combatants.enemy.classState.eldritchStrikeBySource?.fighter).toBeTruthy()
+      expect(attack.state.combatants.enemy.classState.spellSavePressureBySource?.fighter).toBeTruthy()
       attack.state.combatants.fighter.turn.actionAvailable = true
       const cast = resolveDnd5eHeadlessAction(attack.state, {
         type: 'cast-spell',
@@ -288,7 +288,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
         targetId: 'enemy',
         d20: 2,
       }))
-      expect(cast.state.combatants.enemy.classState.eldritchStrikeBySource).toBeUndefined()
+      expect(cast.state.combatants.enemy.classState.spellSavePressureBySource).toBeUndefined()
     } finally {
       dispose()
     }
@@ -385,7 +385,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
         characterIdByCombatantId: snapshot.characterIdByCombatantId,
       })
       const persistedTarget = application.map.tokens.find((token) => token.id === enemyToken.id)
-      expect(persistedTarget?.dnd5eCombatState?.eldritchStrikeBySource?.[actorToken.id]).toBeTruthy()
+      expect(persistedTarget?.dnd5eCombatState?.spellSavePressureBySource?.[actorToken.id]).toBeTruthy()
 
       const restored = createDnd5eMapCombatSnapshot({
         combatId: 'eldritch-strike-map-bridge',
@@ -396,7 +396,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
         initiativeOrder,
       })
       expect(restored.state.combatants[enemyToken.id].classState
-        .eldritchStrikeBySource?.[actorToken.id]).toBeTruthy()
+        .spellSavePressureBySource?.[actorToken.id]).toBeTruthy()
     } finally {
       dispose()
     }
@@ -414,11 +414,11 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
       })
       expect(surge.ok).toBe(true)
       if (!surge.ok) return
-      const turnKey = surge.state.combatants.fighter.classState.eldritchKnightArcaneChargeTurnKey
+      const turnKey = surge.state.combatants.fighter.classState.extraActionTeleportTurnKey
       expect(turnKey).toBeTruthy()
 
       const teleport = resolveDnd5eHeadlessAction(surge.state, {
-        type: 'eldritch-knight-arcane-charge',
+        type: 'feature-extra-action-teleport',
         actorId: 'fighter',
         to: { x: 30, y: 0 },
         distanceFeet: 30,
@@ -429,11 +429,11 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
       expect(teleport.events).toContainEqual(expect.objectContaining({
         type: 'teleported',
         actorId: 'fighter',
-        spellId: 'eldritch-knight:arcane-charge',
+        spellId: 'martial-spell-synergy:extra-action-teleport',
       }))
 
       const repeat = resolveDnd5eHeadlessAction(teleport.state, {
-        type: 'eldritch-knight-arcane-charge',
+        type: 'feature-extra-action-teleport',
         actorId: 'fighter',
         to: { x: 40, y: 0 },
         distanceFeet: 10,
@@ -448,19 +448,19 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Eldritch Knight local Ho
     const dispose = register()
     try {
       const fighter = combatant(3)
-      fighter.classState.battleMasterDroppedWeaponIds = ['longsword']
+      fighter.classState.droppedEquipmentIds = ['longsword']
       const state = startDnd5eHeadlessCombat('ek-weapon-bond', [fighter, enemy()])
       const summon = resolveDnd5eHeadlessAction(state, {
-        type: 'eldritch-knight-summon-bonded-weapon',
+        type: 'linked-equipment-recall',
         actorId: 'fighter',
         weaponId: 'longsword',
       })
       expect(summon.ok).toBe(true)
       if (!summon.ok) return
       expect(summon.state.combatants.fighter.turn.bonusActionAvailable).toBe(false)
-      expect(summon.state.combatants.fighter.classState.battleMasterDroppedWeaponIds).toBeUndefined()
+      expect(summon.state.combatants.fighter.classState.droppedEquipmentIds).toBeUndefined()
       expect(summon.events).toContainEqual({
-        type: 'eldritch-knight-weapon-summoned',
+        type: 'linked-equipment-recalled',
         actorId: 'fighter',
         weaponId: 'longsword',
       })

@@ -22,6 +22,24 @@ function monsterToken(patch: Partial<Token> = {}): Token {
 }
 
 describe('EnemyDetailPanel monster thumbnail', () => {
+  it('marks implemented monster traits as HEADLESS', () => {
+    const markup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken({
+          id: 'flesh-golem-token',
+          label: '血肉魔像',
+          poolId: 'srd-5.1:flesh-golem',
+          hp: 93,
+          maxHp: 93,
+        })}
+        onClose={() => {}}
+      />,
+    )
+
+    expect(markup.match(/HEADLESS/g)).toHaveLength(6)
+    expect(markup).not.toContain('DM 裁定')
+  })
+
   it('uses the bundled monster Token portrait instead of the legacy emoji', () => {
     const markup = renderToStaticMarkup(
       <EnemyDetailPanel token={monsterToken()} onClose={() => {}} />,

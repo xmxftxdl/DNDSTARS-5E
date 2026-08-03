@@ -1,6 +1,6 @@
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import { isMovementLocked } from '../../lib/combatStatus'
-import type { Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
+import type { Dnd5eAbilityCheckPayload, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
 import type { AttackResolution, D20RollMode, SavingThrowResolution, TurnEconomy, TurnResource } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { DND5E_TOTAL_COVER_ARMOR_CLASS, resolveDnd5eAttackOutcome } from './attackResolution'
@@ -19,8 +19,8 @@ import {
   registeredDnd5ePluginFeatures,
   dnd5eDeclarativeAttackIntentDefinition,
   dnd5eDeclarativeAttackIntentRollPlan,
-  dnd5eDeclarativeBattleMasterManeuverDefinition,
-  dnd5eDeclarativeBattleMasterRollPlan,
+  dnd5eDeclarativeCombatManeuverDefinition,
+  dnd5eDeclarativeCombatManeuverRollPlan,
   dnd5eDeclarativePluginFeatureRollPlan,
   dnd5eDeclarativeTriggeredActions,
   type Dnd5ePluginAction,
@@ -31,7 +31,7 @@ import {
 import type {
   DeclarativePostSpellRandomTableOutcomeV1,
   DeclarativeNextD20RollKindV1,
-  Dnd5e2014BattleMasterManeuverId,
+  Dnd5eCombatManeuverOperation,
 } from './declarativeSubclassAbility'
 import type { Dnd5eSandboxCapabilityOperation } from './pluginSandbox'
 import type { Dnd5ePersistentAreaSourceKind, Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
@@ -77,6 +77,11 @@ import {
   dnd5eNormalizedHydraHeadCount,
 } from './monsterDynamicMultiattack'
 import {
+  DND5E_MONSTER_BERSERK_TURN_START_ROLL_ID,
+  dnd5eMonsterBerserkRule,
+  dnd5eMonsterDamageAbsorptionRule,
+  dnd5eMonsterDamageAversionRule,
+  dnd5eMonsterHasImmutableForm,
   dnd5eMonsterAssassinateAutomaticCritical,
   dnd5eMonsterAttackTraitAdvantage,
   dnd5eMonsterEffectiveWeaponAttack,
@@ -91,6 +96,7 @@ import {
   dnd5eMonsterRecklessRule,
   dnd5eMonsterRegenerationRule,
   dnd5eMonsterTraitDamageDefinitions,
+  dnd5eMonsterTurnStartTraitRollRequirements,
   dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
   dnd5eMonsterWeaponAttackAgainstConditions,
@@ -107,7 +113,6 @@ import {
   dnd5eMonsterCoreSpellCompatibility,
   dnd5eMonsterHasStructuredShapechange,
   dnd5eMonsterShapechangeFormIds,
-  parseDnd5eLegendaryWingAttack,
 } from './monsterAdvancedAbilities'
 import { dnd5eBardicInspirationDie, dnd5eMonkMartialArtsDie, dnd5ePactSlotLevel, dnd5eRogueSneakAttackDice, type Dnd5eClassId } from './classes'
 import {
@@ -130,10 +135,10 @@ import {
   dnd5eSubclassUnrestrictedSpellLimit,
 } from './subclassSpellcasting'
 import {
-  dnd5eEldritchKnightFeatureForCombatant,
-  dnd5eEldritchStrikeApplies,
-} from './eldritchKnight'
-import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
+  dnd5eMartialSpellSynergyForCombatant,
+  dnd5eSpellSavePressureApplies,
+} from './martialSpellSynergy'
+import { dnd5eRageFeatureForCombatant } from './rageFeature'
 import {
   dnd5eOpeningAttackHasAdvantage,
   dnd5eOpeningAttackIsAutomaticCritical,
@@ -238,7 +243,15 @@ import {
   dnd5eTremorsenseDetects,
   type Dnd5eSpecialSense,
 } from './specialSenses'
-import { dnd5eTraversalMovementCost, resolveDnd5eFallingDamage, type Dnd5eTraversalMode } from './traversal'
+import {
+  dnd5eFallingDamageDice,
+  dnd5eTraversalMovementCost,
+  resolveDnd5eFallingDamage,
+  type Dnd5eTraversalMode,
+} from './traversal'
+import {
+  dnd5eCombatantVerticalDistanceFeet,
+} from './verticalCombatGeometry'
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
 import {
@@ -279,9 +292,11 @@ export interface Dnd5eCombatant {
   temporaryHp: number
   exhaustionLevel: number
   speed: number
-  movementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number }
+  movementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number; hover?: boolean }
   position: { x: number; y: number }
   elevationFeet?: number
+  /** Terrain/support surface beneath the token in the authoritative map snapshot. */
+  groundElevationFeet?: number
   airborne?: boolean
   /** Innate or equipment-provided darkvision before temporary ActiveEffects. */
   darkvisionRangeFeet?: number
@@ -297,6 +312,8 @@ export interface Dnd5eCombatant {
   /** Authoritative per-combat snapshot; spell resolution does not re-read mutable catalogs. */
   limitedMagicImmunity?: Dnd5eLimitedMagicImmunityRule
   shapechanger?: boolean
+  /** Immutable Form: immune to external form-altering spells and effects. */
+  immutableForm?: boolean
   turn: TurnEconomy
   dodging: boolean
   disengaged: boolean
@@ -420,20 +437,20 @@ export interface Dnd5eCombatant {
     /** Host-owned replay protection and per-turn usage ledger for declarative abilities. */
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
-    /** Weapon instance IDs dropped by an authoritative Disarming Attack. */
-    battleMasterDroppedWeaponIds?: string[]
-    eldritchKnightBondedWeaponIds?: string[]
-    eldritchKnightWarMagicCantripTurnKey?: string
-    eldritchKnightWarMagicTurnKey?: string
-    eldritchStrikeBySource?: Record<string, {
+    /** Equipment instance IDs dropped by an authoritative combat operation. */
+    droppedEquipmentIds?: string[]
+    linkedEquipmentIds?: string[]
+    cantripBonusWeaponAttackTurnKey?: string
+    spellBonusWeaponAttackTurnKey?: string
+    spellSavePressureBySource?: Record<string, {
       appliedTurnKey: string
       sourceTurnsRemaining: number
     }>
-    eldritchKnightArcaneChargeTurnKey?: string
-    eldritchKnightArcaneChargeUsedTurnKey?: string
-    /** Level-14 Wolf attunement: eligible melee-hit targets from this turn. */
-    totemWarriorWolfAttunementTargetIds?: string[]
-    totemWarriorWolfAttunementTurnKey?: string
+    extraActionTeleportTurnKey?: string
+    extraActionTeleportUsedTurnKey?: string
+    /** Current-turn targets eligible for an imported bonus-prone operation. */
+    bonusProneEligibleTargetIds?: string[]
+    bonusProneEligibleTurnKey?: string
     monsterMechanicRollModifiers?: Array<{
       id: string
       mechanicOwnerId: string
@@ -465,6 +482,10 @@ export interface Dnd5eCombatant {
       slotLevel: number
       castingClassId: Dnd5eClassId
       forceTable: boolean
+      tableRollChoice?: {
+        featureId: string
+        rollCount: number
+      }
     }
     /** Combat is paused while the DM adjudicates an unmapped random-table result. */
     postSpellRandomTableManualAdjudication?: {
@@ -501,6 +522,12 @@ export interface Dnd5eCombatant {
     monsterShapechangeFormId?: string
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
+    /** Flesh Golem Berserk persists until the golem is restored to full HP. */
+    monsterBerserk?: boolean
+    /** Damage Aversion disadvantage, cleared at the end of the creature's next turn. */
+    monsterDamageAversionActive?: boolean
+    /** Combatant whose damage most recently triggered Damage Aversion; used by Token presentation. */
+    monsterDamageAversionSourceActorId?: string
     /** Hydra: authoritative current head count used by its Multiattack. */
     monsterHydraHeadCount?: number
     /** Hydra: heads severed after its previous end-turn regrowth boundary. */
@@ -1041,41 +1068,43 @@ function dnd5eAttackDistanceFeet(
   return Number.isFinite(fallback) && fallback! >= 0 ? fallback! : Number.POSITIVE_INFINITY
 }
 
-export function dnd5eTotemWolfPackAdvantage(
+export function dnd5eRageAllyMeleeAdvantage(
   state: Dnd5eHeadlessCombatState,
   attacker: Dnd5eCombatant,
   target: Dnd5eCombatant,
   meleeAttack: boolean,
 ): boolean {
   if (!meleeAttack) return false
-  return Object.values(state.combatants).some((source) =>
-    source.id !== attacker.id &&
-    source.currentHp > 0 &&
-    source.controller === attacker.controller &&
-    source.controller !== target.controller &&
-    source.classState.raging === true &&
-    !!dnd5eTotemWarriorFeatureForCombatant(source, 'totem-spirit-wolf') &&
-    dnd5eAttackDistanceFeet(state, source.id, target.id) <= 5
-  )
+  return Object.values(state.combatants).some((source) => {
+    const feature = dnd5eRageFeatureForCombatant(source, 'ally-melee-advantage-aura')
+    return source.id !== attacker.id &&
+      source.currentHp > 0 &&
+      source.controller === attacker.controller &&
+      source.controller !== target.controller &&
+      source.classState.raging === true &&
+      !!feature &&
+      dnd5eAttackDistanceFeet(state, source.id, target.id) <= feature.mechanic.radiusFeet!
+  })
 }
 
-export function dnd5eTotemBearGuardianDisadvantage(
+export function dnd5eRageAllyProtectionDisadvantage(
   state: Dnd5eHeadlessCombatState,
   attacker: Dnd5eCombatant,
   target: Dnd5eCombatant,
 ): boolean {
-  if (dnd5eTotemWarriorFeatureForCombatant(target, 'totemic-attunement-bear')) {
+  if (dnd5eRageFeatureForCombatant(target, 'ally-protection-aura')) {
     return false
   }
   return Object.values(state.combatants).some((source) => {
+    const feature = dnd5eRageFeatureForCombatant(source, 'ally-protection-aura')
     if (
       source.id === target.id ||
       source.currentHp <= 0 ||
       source.controller === attacker.controller ||
       source.controller !== target.controller ||
       source.classState.raging !== true ||
-      !dnd5eTotemWarriorFeatureForCombatant(source, 'totemic-attunement-bear') ||
-      dnd5eAttackDistanceFeet(state, source.id, attacker.id) > 5 ||
+      !feature ||
+      dnd5eAttackDistanceFeet(state, source.id, attacker.id) > feature.mechanic.radiusFeet! ||
       dnd5eConditionImmuneFromSource(attacker, 'frightened', source)
     ) return false
     const deafened = dnd5eHasStandardCondition(attacker, 'deafened')
@@ -1083,14 +1112,15 @@ export function dnd5eTotemBearGuardianDisadvantage(
   })
 }
 
-export function dnd5eTotemEagleOpportunityDisadvantage(
+export function dnd5eRageOpportunityDisadvantage(
   target: Dnd5eCombatant,
   opportunityAttack: boolean,
 ): boolean {
+  const feature = dnd5eRageFeatureForCombatant(target, 'rage-mobile-defense')
   return opportunityAttack &&
     target.classState.raging === true &&
-    !target.wearingHeavyArmor &&
-    !!dnd5eTotemWarriorFeatureForCombatant(target, 'totem-spirit-eagle')
+    !!feature &&
+    (!feature.mechanic.requiresNoHeavyArmor || !target.wearingHeavyArmor)
 }
 
 /**
@@ -1186,7 +1216,7 @@ export function dnd5eHelpAttackApplies(
   return !!source && source.controller === attacker.controller && target.controller !== attacker.controller
 }
 
-export function dnd5eBattleMasterDistractingAdvantage(
+export function dnd5ePendingAllyAttackAdvantage(
   attacker: Dnd5eCombatant,
   target: Dnd5eCombatant,
 ): boolean {
@@ -1197,7 +1227,7 @@ export function dnd5eBattleMasterDistractingAdvantage(
   )
 }
 
-export function dnd5eBattleMasterGoadingDisadvantage(
+export function dnd5eSourceMarkedAttackDisadvantage(
   attacker: Dnd5eCombatant,
   target: Dnd5eCombatant,
 ): boolean {
@@ -1208,7 +1238,7 @@ export function dnd5eBattleMasterGoadingDisadvantage(
   )
 }
 
-function consumeDnd5eBattleMasterDistractingAttack(
+function consumeDnd5ePendingAllyAttackAdvantage(
   attacker: Dnd5eCombatant,
   target: Dnd5eCombatant,
   events: Dnd5eCombatEvent[],
@@ -1272,16 +1302,29 @@ export function dnd5eMonsterSpellAttackMode(
   const actor = state.combatants[actorId]
   const target = state.combatants[targetId]
   if (!actor || !target) return 'normal'
+  const distanceFeet = dnd5eAttackDistanceFeet(state, actor.id, target.id)
+  const targetProne = target.conditions.some((condition) =>
+    ['prone', '倒地'].includes(condition.toLowerCase()))
+  const actorProne = actor.conditions.some((condition) =>
+    ['prone', '倒地'].includes(condition.toLowerCase()))
   const hasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) ||
       !!target.classState.recklessAttackTurnKey ||
-      dnd5eBattleMasterDistractingAdvantage(actor, target) ||
-      dnd5eTotemWolfPackAdvantage(state, actor, target, attackDelivery === 'melee') ||
+      !!target.classState.stunnedByActorId ||
+      dnd5eHelpAttackApplies(state, actor, target) ||
+      dnd5ePendingAllyAttackAdvantage(actor, target) ||
+      dnd5eRageAllyMeleeAdvantage(state, actor, target, attackDelivery === 'melee') ||
       dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) ||
+      (targetProne && distanceFeet <= 5 && attackDelivery === 'melee') ||
       dnd5eOpeningAttackHasAdvantage(state, actor, target))
   const hasDisadvantage = dnd5eTargetIsDodging(target) ||
-    dnd5eBattleMasterGoadingDisadvantage(actor, target) ||
-    dnd5eTotemBearGuardianDisadvantage(state, actor, target) ||
+    dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
+    actor.classState.monsterDamageAversionActive === true ||
+    actor.exhaustionLevel >= 3 ||
+    actorProne ||
+    (targetProne && (attackDelivery === 'ranged' || distanceFeet > 5)) ||
+    dnd5eSourceMarkedAttackDisadvantage(actor, target) ||
+    dnd5eRageAllyProtectionDisadvantage(state, actor, target) ||
     dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) ||
     (attackDelivery === 'ranged' && dnd5eHostileWithinFiveFeet(state, actor)) ||
     dnd5eFrightenedAttackDisadvantage(state, actor)
@@ -1481,6 +1524,8 @@ export interface Dnd5eSpellTeleportDestination {
   to: { x: number; y: number }
   distanceFeet: number
   toElevationFeet?: number
+  /** Authoritative terrain/support height at the destination. */
+  toGroundElevationFeet?: number
 }
 
 export interface Dnd5eSpellTargetAttackRoll {
@@ -1516,6 +1561,25 @@ export interface Dnd5eEmpoweredSpellReroll {
   attackIndex?: number
   dieIndex: number
   reroll: number
+}
+
+export type Dnd5eSpellDamageMaxDieBonusGroup =
+  | 'effect'
+  | 'additional-effect'
+  | 'delayed-effect'
+  | 'target-attack'
+  | 'projectile'
+  | 'persistent-area'
+
+export interface Dnd5eSpellDamageMaxDieBonusUse {
+  featureId: string
+  group: Dnd5eSpellDamageMaxDieBonusGroup
+  targetId?: string
+  attackIndex?: number
+  componentIndex?: number
+  projectileIndex?: number
+  dieIndex: number
+  bonusRolls: readonly number[]
 }
 
 export interface Dnd5eAdjudicatedSpellEffect {
@@ -1603,6 +1667,60 @@ export interface Dnd5eDispelMagicCheck {
   d20: number
 }
 
+export interface Dnd5eDispelMagicEffect {
+  effectId: string
+  spellId: string
+  spellLevel: number
+  sourceActorId?: string
+}
+
+/**
+ * Canonical spell-effect inventory used by both player and monster Dispel
+ * Magic paths.  In particular this preserves the actual slot level stored on
+ * an active effect or its concentrating source instead of falling back to the
+ * spell catalogue's base level in the UI.
+ */
+export function dnd5eDispelMagicEffectsOnTarget(
+  state: Dnd5eHeadlessCombatState,
+  targetId: string,
+): Dnd5eDispelMagicEffect[] {
+  const target = state.combatants[targetId]
+  if (!target) return []
+  const spellEffects = new Map<string, Dnd5eDispelMagicEffect>()
+  for (const effect of target.classState.activeEffects ?? []) {
+    if (effect.source.kind !== 'spell' || !effect.source.rulesId) continue
+    const catalog = getDnd5eSrdSpellCatalogEntry(effect.source.rulesId)
+    if (!catalog) continue
+    const key = `${effect.source.actorId ?? 'unknown'}\u0000${catalog.id}`
+    if (!spellEffects.has(key)) {
+      spellEffects.set(key, {
+        spellId: catalog.id,
+        spellLevel: effect.source.spellLevel ?? catalog.level,
+        effectId: effect.id,
+        sourceActorId: effect.source.actorId,
+      })
+    }
+  }
+  for (const [sourceActorId, spellId] of Object.entries(
+    target.classState.concentrationEffectsBySource ?? {},
+  )) {
+    const catalog = getDnd5eSrdSpellCatalogEntry(spellId)
+    if (!catalog) continue
+    const key = `${sourceActorId}\u0000${catalog.id}`
+    if (spellEffects.has(key)) continue
+    const source = state.combatants[sourceActorId]
+    spellEffects.set(key, {
+      spellId: catalog.id,
+      spellLevel: source?.classState.concentrationSpellId === catalog.id
+        ? source.classState.concentrationSpellLevel ?? catalog.level
+        : catalog.level,
+      effectId: `concentration:${sourceActorId}:${catalog.id}`,
+      sourceActorId,
+    })
+  }
+  return [...spellEffects.values()]
+}
+
 export type Dnd5eSceneInteractionOutcomeStep =
   | {
       id: string
@@ -1632,6 +1750,12 @@ export interface Dnd5eMonsterCoreSpellResolutionV1 {
   attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse
   targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]
   legendaryResistanceTargetIds?: readonly string[]
+  /** One Host-authored d20 for every target spell above Dispel Magic's slot. */
+  dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]
+  /** Host-validated destinations for forced movement riders such as Thunderwave. */
+  forcedMovements?: readonly Dnd5eSpellForcedMovement[]
+  /** Structured choice for condition-removal spells such as Lesser Restoration. */
+  conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   /** One roll group for each SRD damage/healing component. */
   effectRolls: readonly (readonly number[])[]
 }
@@ -1711,7 +1835,7 @@ export interface Dnd5eTargetTranquilitySaveRoll {
   save: Dnd5eTranquilitySaveRoll
 }
 
-export interface Dnd5eBattleMasterSavingThrowRoll {
+export interface Dnd5eCombatManeuverSavingThrowRoll {
   d20: number
   d20Second?: number
   halflingLuckyD20?: number
@@ -1726,18 +1850,18 @@ export interface Dnd5eBattleMasterSavingThrowRoll {
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse
 }
 
-export interface Dnd5eBattleMasterAttackIntentPayload {
-  savingThrow?: Dnd5eBattleMasterSavingThrowRoll
-  /** Host-validated creature selected for Sweeping or Maneuvering Attack. */
+export interface Dnd5eCombatManeuverAttackIntentPayload {
+  savingThrow?: Dnd5eCombatManeuverSavingThrowRoll
+  /** Host-validated secondary creature selected by the operation. */
   secondaryTargetId?: string
-  /** Geometry-authoritative destination for Pushing or Maneuvering Attack. */
+  /** Geometry-authoritative destination selected by the operation. */
   destination?: { x: number; y: number }
   distanceFeet?: number
-  /** Host-authorized opportunity attacks triggered along a Maneuvering Attack path. */
-  opportunityAttacks?: readonly Dnd5eBattleMasterOpportunityAttack[]
+  /** Host-authorized opportunity attacks triggered along an ally movement path. */
+  opportunityAttacks?: readonly Dnd5eCombatManeuverOpportunityAttack[]
 }
 
-export interface Dnd5eBattleMasterReactionWeaponAttack {
+export interface Dnd5eCombatManeuverReactionWeaponAttack {
   attackModifier: number
   criticalThreshold?: number
   d20: number
@@ -1760,15 +1884,15 @@ export interface Dnd5eBattleMasterReactionWeaponAttack {
   openingAttackSavingThrow?: Dnd5eOpeningAttackSavingThrowRoll
 }
 
-export interface Dnd5eBattleMasterOpportunityAttack {
+export interface Dnd5eCombatManeuverOpportunityAttack {
   actorId: string
-  weaponAttack: Dnd5eBattleMasterReactionWeaponAttack
+  weaponAttack: Dnd5eCombatManeuverReactionWeaponAttack
 }
 
-export interface Dnd5eBattleMasterTargetReaction {
+export interface Dnd5eCombatManeuverTargetReaction {
   featureId: string
   rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>>
-  weaponAttack?: Dnd5eBattleMasterReactionWeaponAttack
+  weaponAttack?: Dnd5eCombatManeuverReactionWeaponAttack
 }
 
 export interface Dnd5eOptionalBonusDieUse {
@@ -1792,7 +1916,7 @@ export interface Dnd5eMonsterMultiattackContinuationV1 {
 }
 
 export type Dnd5eAction = (
-  | { type: 'attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savageAttacksRoll?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; postD20Adjustment?: Dnd5ePostD20AdjustmentUse; mode?: D20RollMode; spendAction?: boolean; spendBonusAction?: boolean; eldritchKnightWarMagicAttack?: boolean; protectionReactionActorId?: string; shieldSpellReaction?: boolean; uncannyDodge?: boolean; deflectMissilesD10?: number; tranquilitySave?: Dnd5eTranquilitySaveRoll; stunningStrikeSaveD20?: number; stunningStrikeSaveD20Second?: number; stunningStrikeSaveHalflingLuckyD20?: number; stunningStrikeSaveHalflingLuckyD20Second?: number; stunningStrikeSaveBlessRoll?: number; stunningStrikeSaveBaneRoll?: number; stunningStrikeSaveRerollD20?: number; stunningStrikeSaveRerollD20Second?: number; stunningStrikeBardicInspirationRoll?: number; stunningStrikeDarkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; standAgainstTide?: Dnd5eStandAgainstTideUse; declarativeIntentFeatureIds?: readonly string[]; declarativeIntentRolls?: Readonly<Record<string, Readonly<Record<string, Dnd5ePluginDiceRollResult>>>>; declarativeIntentPayloads?: Readonly<Record<string, Dnd5eBattleMasterAttackIntentPayload>>; declarativeTargetReaction?: Dnd5eBattleMasterTargetReaction; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType }; classDamageContext?: Dnd5eWeaponClassDamageContext; classDamageRolls?: readonly Dnd5eClassDamageRolls[] }
+  | { type: 'attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savageAttacksRoll?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; postD20Adjustment?: Dnd5ePostD20AdjustmentUse; mode?: D20RollMode; spendAction?: boolean; spendBonusAction?: boolean; featureBonusWeaponAttack?: boolean; protectionReactionActorId?: string; shieldSpellReaction?: boolean; uncannyDodge?: boolean; deflectMissilesD10?: number; tranquilitySave?: Dnd5eTranquilitySaveRoll; stunningStrikeSaveD20?: number; stunningStrikeSaveD20Second?: number; stunningStrikeSaveHalflingLuckyD20?: number; stunningStrikeSaveHalflingLuckyD20Second?: number; stunningStrikeSaveBlessRoll?: number; stunningStrikeSaveBaneRoll?: number; stunningStrikeSaveRerollD20?: number; stunningStrikeSaveRerollD20Second?: number; stunningStrikeBardicInspirationRoll?: number; stunningStrikeDarkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; standAgainstTide?: Dnd5eStandAgainstTideUse; declarativeIntentFeatureIds?: readonly string[]; declarativeIntentRolls?: Readonly<Record<string, Readonly<Record<string, Dnd5ePluginDiceRollResult>>>>; declarativeIntentPayloads?: Readonly<Record<string, Dnd5eCombatManeuverAttackIntentPayload>>; declarativeTargetReaction?: Dnd5eCombatManeuverTargetReaction; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType }; classDamageContext?: Dnd5eWeaponClassDamageContext; classDamageRolls?: readonly Dnd5eClassDamageRolls[] }
   | {
       type: 'monster-action'
       actorId: string
@@ -1826,8 +1950,8 @@ export type Dnd5eAction = (
       randomRepeatRoll?: number
       settleAttackCount?: number
     }
-  | { type: 'monster-special-action'; actorId: string; actionId: string; targetId?: string; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; legendaryResistance?: boolean; damageRolls?: readonly number[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[] }
-  | { type: 'monster-legendary-special-action'; actorId: string; actionId: string; targetId?: string; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; legendaryResistance?: boolean; damageRolls?: readonly number[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[] }
+  | { type: 'monster-special-action'; actorId: string; actionId: string; targetId?: string; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; legendaryResistance?: boolean; damageRolls?: readonly number[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination }
+  | { type: 'monster-legendary-special-action'; actorId: string; actionId: string; targetId?: string; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; legendaryResistance?: boolean; damageRolls?: readonly number[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination }
   | { type: 'monster-adjudicated-action'; actorId: string; actionId: string; legendary?: boolean; effects: readonly Dnd5eMonsterAdjudicatedEffect[]; d20?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; damageRolls?: readonly number[] }
   | { type: 'monster-lair-action'; actorId: string; actionId: string; effects: readonly Dnd5eMonsterAdjudicatedEffect[] }
   | { type: 'monster-spell'; actorId: string; spellId: string; slotLevel: number; effects: readonly Dnd5eMonsterAdjudicatedEffect[] }
@@ -1854,7 +1978,7 @@ export type Dnd5eAction = (
   | { type: 'active-effect-damage-save'; actorId: string; effectId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'dismiss-warding-bond'; actorId: string }
   | { type: 'ranger-hunter-multiattack'; actorId: string; feature: 'volley' | 'whirlwind-attack'; weaponMode: 'melee' | 'ranged'; attackModifier: number; criticalThreshold?: number; damage: { count: number; sides: number; bonus: number; type?: Dnd5eDamageType }; attacks: readonly Dnd5eHunterMultiattackRoll[] }
-  | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; movementCostIncludesDrag?: boolean; standFromProne?: boolean; carefulMovement?: boolean; traversalMode?: Dnd5eTraversalMode; toElevationFeet?: number; fallingDamageRolls?: readonly number[]; fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>> }
+  | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; movementCostIncludesDrag?: boolean; standFromProne?: boolean; carefulMovement?: boolean; traversalMode?: Dnd5eTraversalMode; toElevationFeet?: number; toGroundElevationFeet?: number; fallingDamageRolls?: readonly number[]; fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>> }
   | { type: 'move-persistent-area'; actorId: string; areaId: string; economy: 'action' | 'bonusAction' }
   | { type: 'item-area-trigger'; actorId: string; areaId: string; areaKind: 'ball-bearings' | 'caltrops' | 'hunting-trap'; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; damageRolls?: readonly number[] }
   | { type: 'dash'; actorId: string }
@@ -1880,21 +2004,21 @@ export type Dnd5eAction = (
       interactionId: string
       steps: readonly Dnd5eSceneInteractionOutcomeStep[]
     }
-  | { type: 'ability-check'; actorId: string; ability: AbilityKey; skill?: string; context?: 'push-pull-lift-break'; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; mode?: D20RollMode; dc?: number; spendAction?: boolean; bardicInspirationRoll?: number; peerlessSkillRoll?: number; darkOnesOwnLuckRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; postD20Adjustment?: Dnd5ePostD20AdjustmentUse; strokeOfLuck?: boolean }
+  | { type: 'ability-check'; actorId: string; ability: AbilityKey; skill?: string; context?: Dnd5eAbilityCheckPayload['context']; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; mode?: D20RollMode; dc?: number; spendAction?: boolean; bardicInspirationRoll?: number; peerlessSkillRoll?: number; darkOnesOwnLuckRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; postD20Adjustment?: Dnd5ePostD20AdjustmentUse; strokeOfLuck?: boolean }
   | { type: 'death-save'; actorId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'death-save-turn'; actorId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]; turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]; nextTurnSlotId?: string; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]; nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[] }
-  | { type: 'resolve-post-spell-random-table'; actorId: string; featureId: string; triggerRoll?: number; tableRoll?: number; resolution?: Dnd5ePostSpellRandomTableResolutionV1 }
+  | { type: 'resolve-post-spell-random-table'; actorId: string; featureId: string; triggerRoll?: number; tableRoll?: number; tableRollCandidates?: readonly number[]; selectedTableRollIndex?: number; resolution?: Dnd5ePostSpellRandomTableResolutionV1 }
   | { type: 'resolve-post-spell-random-table-manual-adjudication'; actorId: string; adjudicationId: string; decision: 'approved' | 'cancelled'; effects: readonly Dnd5ePostSpellRandomTableManualEffectV1[]; note?: string }
   | { type: 'concentration-save'; actorId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; dc: number }
   | { type: 'barbarian-relentless-rage-save'; actorId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; dc: number }
   | { type: 'fighter-second-wind'; actorId: string; resourceKey: string; d10: number }
   | { type: 'fighter-action-surge'; actorId: string; resourceKey: string; alreadyUsedThisTurn: boolean }
-  | { type: 'eldritch-knight-arcane-charge'; actorId: string; to: { x: number; y: number }; distanceFeet: number; toElevationFeet?: number }
-  | { type: 'eldritch-knight-summon-bonded-weapon'; actorId: string; weaponId: string }
+  | { type: 'feature-extra-action-teleport'; actorId: string; to: { x: number; y: number }; distanceFeet: number; toElevationFeet?: number }
+  | { type: 'linked-equipment-recall'; actorId: string; weaponId: string }
   | { type: 'class-resource-use'; actorId: string; resourceKey: string; amount?: number; turnResource?: 'action' | 'bonusAction' | 'reaction' }
   | { type: 'barbarian-rage'; actorId: string; frenzy?: boolean; end?: boolean }
-  | { type: 'barbarian-totem-eagle-dash'; actorId: string }
-  | { type: 'barbarian-totem-wolf-knockdown'; actorId: string; targetId: string }
+  | { type: 'feature-rage-bonus-dash'; actorId: string }
+  | { type: 'feature-rage-bonus-prone'; actorId: string; targetId: string }
   | { type: 'barbarian-intimidating-presence'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'rogue-cunning-action'; actorId: string; option: 'dash' | 'disengage' | 'hide'; hideAllowed?: boolean; d20?: number; d20Second?: number }
   | { type: 'monster-nimble-escape'; actorId: string; option: 'disengage' }
@@ -1911,7 +2035,7 @@ export type Dnd5eAction = (
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; racialInnate?: boolean; targetId: string; targetIds?: readonly string[]; blindTargetMiss?: boolean; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; enlargeReduceChoice?: 'enlarge' | 'reduce'; enhanceAbilityChoice?: 'bear-endurance' | 'bull-strength' | 'cat-grace' | 'eagle-splendor' | 'fox-cunning' | 'owl-wisdom'; sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'; sustainedEffectAreaId?: string; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
+  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; racialInnate?: boolean; targetId: string; targetIds?: readonly string[]; blindTargetMiss?: boolean; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; enlargeReduceChoice?: 'enlarge' | 'reduce'; enhanceAbilityChoice?: 'bear-endurance' | 'bull-strength' | 'cat-grace' | 'eagle-splendor' | 'fox-cunning' | 'owl-wisdom'; sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'; sustainedEffectAreaId?: string; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
   | { type: 'hellish-rebuke'; actorId: string; targetId: string; racialInnate?: boolean; slotLevel: number; triggerDamageAmount: number; savingThrowD20: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; effectRolls: readonly number[] }
   | { type: 'dragonborn-breath'; actorId: string; resolution: Dnd5eMonsterAreaActionResolutionV1 }
   | { type: 'adjudicated-spell'; actorId: string; castingClassId?: Dnd5eClassId; spellId: string; spellName: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action'; effects: readonly Dnd5eAdjudicatedSpellEffect[]; concentrationRounds?: number }
@@ -1936,12 +2060,14 @@ export type Dnd5eAction = (
   | { type: 'druid-end-wild-shape'; actorId: string }
   | { type: 'warlock-hurl-through-hell-ready'; actorId: string; active: boolean }
   | Dnd5ePluginAction
-  | { type: 'end-turn'; actorId: string; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]; turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]; nextTurnSlotId?: string; currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]; nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]; totemEagleLandingElevationFeet?: number; totemEagleFallingDamageRolls?: readonly number[] }
-  | { type: 'opportunity-attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savageAttacksRoll?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; postD20Adjustment?: Dnd5ePostD20AdjustmentUse; shieldSpellReaction?: boolean; uncannyDodge?: boolean; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; reactionFeature?: 'berserker-retaliation' | 'hunter-giant-killer' | 'battle-master-riposte' | 'battle-master-commanders-strike'; tranquilitySave?: Dnd5eTranquilitySaveRoll; hurlThroughHellDamageRolls?: readonly number[]; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType }; classDamageContext?: Dnd5eWeaponClassDamageContext; classDamageRolls?: readonly Dnd5eClassDamageRolls[] }
+  | { type: 'end-turn'; actorId: string; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]; turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]; nextTurnSlotId?: string; currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]; nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]; rageFlightLandingElevationFeet?: number; rageFlightFallingDamageRolls?: readonly number[] }
+  | { type: 'opportunity-attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savageAttacksRoll?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; postD20Adjustment?: Dnd5ePostD20AdjustmentUse; shieldSpellReaction?: boolean; uncannyDodge?: boolean; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; reactionFeature?: 'berserker-retaliation' | 'hunter-giant-killer' | 'combat-maneuver-reaction-counterattack' | 'combat-maneuver-ally-reaction-attack'; tranquilitySave?: Dnd5eTranquilitySaveRoll; hurlThroughHellDamageRolls?: readonly number[]; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType }; classDamageContext?: Dnd5eWeaponClassDamageContext; classDamageRolls?: readonly Dnd5eClassDamageRolls[] }
 ) & {
   optionalBonusDice?: readonly Dnd5eOptionalBonusDieUse[]
   /** Host-provided save for a registered automatic opening-attack mechanic. */
   openingAttackSavingThrow?: Dnd5eOpeningAttackSavingThrowRoll
+  /** Host-provided d6 rolls for falls caused indirectly by this transaction. */
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
 }
 
 export interface Dnd5eMonsterActionRoll {
@@ -2047,6 +2173,11 @@ export type Dnd5eCombatEvent =
     }
   | { type: 'monster-regenerated'; actorId: string; amount: number; hpAfter: number }
   | { type: 'monster-regeneration-suppressed'; actorId: string; damageTypes: readonly Dnd5eDamageType[]; died: boolean }
+  | { type: 'monster-berserk-resolved'; actorId: string; roll: number; berserk: boolean }
+  | { type: 'monster-berserk-ended'; actorId: string; reason: 'fully-healed' }
+  | { type: 'monster-damage-aversion-triggered'; actorId: string; damageType: Dnd5eDamageType }
+  | { type: 'monster-damage-aversion-ended'; actorId: string }
+  | { type: 'monster-damage-absorbed'; actorId: string; damageType: Dnd5eDamageType; amount: number; healing: number }
   | { type: 'monster-hydra-head-severed'; actorId: string; turnKey: string; damageTakenThisTurn: number; headCount: number }
   | { type: 'monster-hydra-heads-regrown'; actorId: string; headsRegrown: number; headCount: number; healing: number; hpAfter: number }
   | { type: 'monster-hydra-regrowth-suppressed'; actorId: string; headsLost: number; headCount: number; damageType: 'fire' }
@@ -2134,18 +2265,18 @@ export type Dnd5eCombatEvent =
   | { type: 'declarative-subclass-ability-resolved'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[] }
   | { type: 'declarative-subclass-trigger-rejected'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[]; reason: Dnd5eActionFailure }
   | {
-      type: 'battle-master-maneuver-resolved'
+      type: 'combat-maneuver-resolved'
       actorId: string
       targetId?: string
       secondaryTargetId?: string
       featureId: string
-      maneuver: Dnd5e2014BattleMasterManeuverId
+      maneuver: Dnd5eCombatManeuverOperation
       superiorityDie: number
       saveDc?: number
       saveSucceeded?: boolean
       value?: number
     }
-  | { type: 'battle-master-weapon-dropped'; actorId: string; targetId: string; weaponId: string }
+  | { type: 'combat-maneuver-weapon-dropped'; actorId: string; targetId: string; weaponId: string }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-refreshed'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'invalid-relation' | 'out-of-range' | 'harmful-action' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' | 'escaped' | 'released' | 'triggered' | 'consumed' | 'manual-removal' }
@@ -2161,12 +2292,14 @@ export type Dnd5eCombatEvent =
   | { type: 'monster-parry-used'; actorId: string; attackerId: string; armorClassBonus: number; armorClass: number }
   | { type: 'monster-reactive-refreshed'; actorId: string; turnKey: string }
   | { type: 'spell-cast'; actorId: string; targetId: string; spellId: string; slotLevel: number; slotConsumed?: boolean }
-  | { type: 'post-spell-random-table-check-required'; actorId: string; featureId: string; spellId: string; spellLevel: number; slotLevel: number; forceTable: boolean; triggerDieSides: number; triggerValues: readonly number[]; tableDieSides: number }
+  | { type: 'post-spell-random-table-check-required'; actorId: string; featureId: string; spellId: string; spellLevel: number; slotLevel: number; forceTable: boolean; triggerDieSides: number; triggerValues: readonly number[]; tableDieSides: number; tableRollCount?: number; tableRollChoiceFeatureId?: string }
   | { type: 'post-spell-random-table-check-resolved'; actorId: string; featureId: string; triggerRoll?: number; triggered: boolean }
+  | { type: 'post-spell-random-table-choice-resolved'; actorId: string; featureId: string; choiceFeatureId: string; rolls: readonly number[]; selectedIndex: number; selectedRoll: number }
   | { type: 'post-spell-random-table-outcome-resolved'; actorId: string; featureId: string; tableRoll: number; outcomeId?: string; automation: 'full' | 'manual'; spellId?: string; targetIds?: readonly string[] }
   | { type: 'post-spell-random-table-manual-adjudication-required'; actorId: string; featureId: string; adjudicationId: string; sourceSpellId: string; tableRoll: number; outcomeId?: string }
   | { type: 'post-spell-random-table-manual-adjudication-resolved'; actorId: string; featureId: string; adjudicationId: string; tableRoll: number; decision: 'approved' | 'cancelled'; effectCount: number; note?: string }
   | { type: 'post-d20-adjustment-applied'; actorId: string; targetId: string; featureId: string; rollKind: DeclarativeNextD20RollKindV1; direction: 'add' | 'subtract'; roll: number; amount: number }
+  | { type: 'spell-damage-max-die-bonus-applied'; actorId: string; spellId: string; featureId: string; group: Dnd5eSpellDamageMaxDieBonusGroup; targetId?: string; attackIndex?: number; componentIndex?: number; projectileIndex?: number; dieSides: number; rolls: readonly number[]; amount: number }
   | { type: 'counterspell-resolved'; actorId: string; casterId: string; spellId: string; spellLevel: number; slotLevel: number; dc?: number; abilityCheckTotal?: number; success: boolean }
   | { type: 'spell-dispelled'; actorId: string; targetId: string; spellId: string; spellLevel: number; effectId: string; dc?: number; total?: number; success: boolean }
   | { type: 'hellish-rebuke-resolved'; actorId: string; targetId: string; slotLevel: number; dc: number; saveTotal: number; success: boolean; damage: number }
@@ -2213,6 +2346,12 @@ export type Dnd5eCombatEvent =
       finalDamage: number
       components: readonly {
         damageType?: Dnd5eDamageType
+        roll?: {
+          sides: number
+          rolls: readonly number[]
+          bonus: number
+          total: number
+        }
         damageBeforeSavingThrow: number
         damageAfterSavingThrow: number
         finalDamage: number
@@ -2221,7 +2360,7 @@ export type Dnd5eCombatEvent =
     }
   | { type: 'damage-resistance-gained'; actorId: string; damageType: Dnd5eDamageType; source: 'draconic-elemental-affinity'; rounds: number }
   | { type: 'action-surge-granted'; actorId: string }
-  | { type: 'eldritch-knight-weapon-summoned'; actorId: string; weaponId: string }
+  | { type: 'linked-equipment-recalled'; actorId: string; weaponId: string }
   | { type: 'damage-applied'; sourceId?: string; targetId: string; amount: number; hpBefore: number; hpAfter: number; temporaryHpBefore: number; temporaryHpAfter: number; damageTypes?: readonly Dnd5eDamageType[]; suppressAfterDealtDamageTrigger?: boolean }
   | { type: 'warding-bond-damage-transferred'; targetId: string; sourceActorId: string; amount: number }
   | { type: 'hit-points-reduced-to-zero'; sourceId: string; targetId: string; hpBefore: number }
@@ -2280,6 +2419,7 @@ type Dnd5eHeadlessResolutionObserver = (observation: Dnd5eHeadlessResolutionObse
 
 let headlessResolutionObserver: Dnd5eHeadlessResolutionObserver | undefined
 let headlessResolutionDepth = 0
+let headlessAirborneFallPreviewDepth = 0
 
 export function setDnd5eHeadlessResolutionObserver(
   observer: Dnd5eHeadlessResolutionObserver | undefined,
@@ -2388,7 +2528,12 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
             }
           : undefined,
         postSpellRandomTableCheck: combatant.classState.postSpellRandomTableCheck
-          ? { ...combatant.classState.postSpellRandomTableCheck }
+          ? {
+              ...combatant.classState.postSpellRandomTableCheck,
+              tableRollChoice: combatant.classState.postSpellRandomTableCheck.tableRollChoice
+                ? { ...combatant.classState.postSpellRandomTableCheck.tableRollChoice }
+                : undefined,
+            }
           : undefined,
         postSpellRandomTableManualAdjudication:
           combatant.classState.postSpellRandomTableManualAdjudication
@@ -2403,17 +2548,17 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
         declarativeTransactionIds: combatant.classState.declarativeTransactionIds
           ? [...combatant.classState.declarativeTransactionIds]
           : undefined,
-        battleMasterDroppedWeaponIds: combatant.classState.battleMasterDroppedWeaponIds
-          ? [...combatant.classState.battleMasterDroppedWeaponIds]
+        droppedEquipmentIds: combatant.classState.droppedEquipmentIds
+          ? [...combatant.classState.droppedEquipmentIds]
           : undefined,
-        eldritchKnightBondedWeaponIds: combatant.classState.eldritchKnightBondedWeaponIds
-          ? [...combatant.classState.eldritchKnightBondedWeaponIds]
+        linkedEquipmentIds: combatant.classState.linkedEquipmentIds
+          ? [...combatant.classState.linkedEquipmentIds]
           : undefined,
-        totemWarriorWolfAttunementTargetIds: combatant.classState.totemWarriorWolfAttunementTargetIds
-          ? [...combatant.classState.totemWarriorWolfAttunementTargetIds]
+        bonusProneEligibleTargetIds: combatant.classState.bonusProneEligibleTargetIds
+          ? [...combatant.classState.bonusProneEligibleTargetIds]
           : undefined,
-        eldritchStrikeBySource: combatant.classState.eldritchStrikeBySource
-          ? Object.fromEntries(Object.entries(combatant.classState.eldritchStrikeBySource)
+        spellSavePressureBySource: combatant.classState.spellSavePressureBySource
+          ? Object.fromEntries(Object.entries(combatant.classState.spellSavePressureBySource)
             .map(([sourceId, strike]) => [sourceId, { ...strike }]))
           : undefined,
         monsterMechanicRollModifiers: combatant.classState.monsterMechanicRollModifiers
@@ -2637,6 +2782,7 @@ export function createDnd5eCombatant(
     limitedMagicImmunity: limitedMagicImmunity
       ? { ...limitedMagicImmunity }
       : undefined,
+    immutableForm: input.immutableForm ?? dnd5eMonsterHasImmutableForm(monster),
     classResources: Object.fromEntries(Object.entries(input.classResources ?? {}).map(([key, resource]) => [key, { ...resource }])),
     racialRules: input.racialRules ? structuredClone(input.racialRules) : undefined,
     classSelections: Object.fromEntries(Object.entries(input.classSelections ?? {}).map(([key, values]) => [key, [...values]])),
@@ -2736,18 +2882,25 @@ export function dnd5eEffectiveFlySpeed(
   combatant: Pick<
     Dnd5eCombatant,
     'speed' | 'movementSpeeds' | 'classState' | 'classId' | 'level' |
-    'classLevels' | 'subclassIds' | 'pluginFeatureIds'
+    'classLevels' | 'subclassIds' | 'pluginFeatureIds' | 'conditions'
   >,
 ): number | undefined {
-  const totemWarriorFlight = combatant.classState.raging &&
-    dnd5eTotemWarriorFeatureForCombatant(combatant, 'totemic-attunement-eagle')
-    ? dnd5eEffectiveSpeed(combatant)
+  if (dnd5eConditionSetsSpeedToZero(combatant)) return undefined
+  const rageFlightFeature = combatant.classState.raging
+    ? dnd5eRageFeatureForCombatant(combatant, 'turn-flight')
+    : undefined
+  const rageFeatureFlight = rageFlightFeature
+    ? dnd5eEffectiveSpeed(combatant) * rageFlightFeature.mechanic.speedMultiplier!
     : 0
   const otherFlightSpeed = Math.floor(Math.max(
-    combatant.movementSpeeds?.fly ?? 0,
-    dnd5eActiveFlySpeed(combatant.classState.activeEffects) ?? 0,
+    0,
+    Math.max(
+      combatant.movementSpeeds?.fly ?? 0,
+      dnd5eActiveFlySpeed(combatant.classState.activeEffects) ?? 0,
+    ) - dnd5eActiveSpeedPenalty(combatant.classState.activeEffects) +
+      dnd5eActiveSpeedBonus(combatant.classState.activeEffects),
   ) * dnd5eActiveSpeedMultiplier(combatant.classState.activeEffects))
-  const speed = Math.max(otherFlightSpeed, totemWarriorFlight)
+  const speed = Math.max(otherFlightSpeed, rageFeatureFlight)
   return speed > 0 ? speed : undefined
 }
 
@@ -3277,7 +3430,7 @@ function emitDnd5eAttackResolved(
     if (attacker) endCharmPersonForHarmfulAction(state, attacker, target, events)
     triggerDnd5eActiveEffectBreak(target, 'targeted-by-attack', events, state)
     if (event.hit) triggerDnd5eActiveEffectBreak(target, 'hit-by-attack', events, state)
-    if (attacker) consumeDnd5eBattleMasterDistractingAttack(attacker, target, events)
+    if (attacker) consumeDnd5ePendingAllyAttackAdvantage(attacker, target, events)
   }
 }
 
@@ -3323,6 +3476,55 @@ function postSpellRandomTableFeature(
   })
 }
 
+function postSpellRandomTableChoiceFeature(
+  actor: Dnd5eCombatant,
+  tableFeature: ReturnType<typeof dnd5ePluginFeatureDefinition>,
+) {
+  const tableAbilityId = tableFeature?.declarativeAbility?.id
+  if (!tableFeature || !tableAbilityId || !tableFeature.sourceSubclassId) return undefined
+  return registeredDnd5ePluginFeatures().find((feature) => {
+    const mechanic = feature.declarativeAbility?.mechanic
+    return actor.pluginFeatureIds.includes(feature.id) &&
+      feature.automation === 'full' &&
+      feature.ownerPluginId === tableFeature.ownerPluginId &&
+      feature.sourceSubclassId === tableFeature.sourceSubclassId &&
+      feature.declarativeAbility?.trigger.kind === 'after-spell-cast' &&
+      mechanic?.kind === 'post-spell-random-table-choice' &&
+      mechanic.tableAbilityId === tableAbilityId &&
+      (!feature.sourceClassId ||
+        dnd5eCombatantClassLevel(actor, feature.sourceClassId) >= (feature.minimumLevel ?? 1)) &&
+      (!feature.sourceClassId ||
+        dnd5eCombatantHasSubclass(actor, feature.sourceClassId, feature.sourceSubclassId!))
+  })
+}
+
+export function dnd5eSpellDamageMaxDieBonusFeature(
+  state: Dnd5eHeadlessCombatState,
+  actorId: string,
+  castingClassId: Dnd5eClassId | undefined,
+  featureId?: string,
+) {
+  const actor = state.combatants[actorId]
+  if (!actor || !castingClassId) return undefined
+  const turnKey = classFeatureTurnKey(state, actor.id)
+  return registeredDnd5ePluginFeatures().find((feature) => {
+    const ability = feature.declarativeAbility
+    const mechanic = ability?.mechanic
+    return (!featureId || feature.id === featureId) &&
+      actor.pluginFeatureIds.includes(feature.id) &&
+      feature.automation === 'full' &&
+      ability?.trigger.kind === 'after-spell-cast' &&
+      mechanic?.kind === 'spell-damage-max-die-bonus' &&
+      mechanic.spellcastingClassId === castingClassId &&
+      (!feature.sourceClassId ||
+        dnd5eCombatantClassLevel(actor, feature.sourceClassId) >= (feature.minimumLevel ?? 1)) &&
+      (!feature.sourceClassId || !feature.sourceSubclassId ||
+        dnd5eCombatantHasSubclass(actor, feature.sourceClassId, feature.sourceSubclassId)) &&
+      (!ability.limits?.oncePerTurn ||
+        actor.classState.declarativeUsedTurnKeys?.[feature.id] !== turnKey)
+  })
+}
+
 function armDnd5ePostSpellRandomTableCheck(input: {
   actor: Dnd5eCombatant
   castingClassId: Dnd5eClassId
@@ -3344,6 +3546,11 @@ function armDnd5ePostSpellRandomTableCheck(input: {
   )
   const forceTable = !!forcedResourceId &&
     input.actor.classResources[forcedResourceId]?.current === 0
+  const choiceFeature = postSpellRandomTableChoiceFeature(input.actor, feature)
+  const choiceMechanic = choiceFeature?.declarativeAbility?.mechanic
+  const tableRollChoice = choiceFeature && choiceMechanic?.kind === 'post-spell-random-table-choice'
+    ? { featureId: choiceFeature.id, rollCount: choiceMechanic.rollCount }
+    : undefined
   input.actor.classState.postSpellRandomTableCheck = {
     featureId: feature.id,
     spellId: input.spellId,
@@ -3351,6 +3558,7 @@ function armDnd5ePostSpellRandomTableCheck(input: {
     slotLevel: input.slotLevel,
     castingClassId: input.castingClassId,
     forceTable,
+    tableRollChoice,
   }
   input.events.push({
     type: 'post-spell-random-table-check-required',
@@ -3363,6 +3571,8 @@ function armDnd5ePostSpellRandomTableCheck(input: {
     triggerDieSides: mechanic.triggerDieSides,
     triggerValues: [...mechanic.triggerValues],
     tableDieSides: mechanic.tableDieSides,
+    tableRollCount: tableRollChoice?.rollCount ?? 1,
+    tableRollChoiceFeatureId: tableRollChoice?.featureId,
   })
 }
 
@@ -3399,6 +3609,8 @@ export interface Dnd5ePostSpellRandomTablePlan {
   triggered: boolean
   triggerDieSides: number
   tableDieSides: number
+  tableRollCount: number
+  tableRollChoiceFeatureId?: string
   outcome?: DeclarativePostSpellRandomTableOutcomeV1
   effect?: {
     spellId: string
@@ -3444,6 +3656,8 @@ export function dnd5ePostSpellRandomTablePlan(
     triggered,
     triggerDieSides: mechanic.triggerDieSides,
     tableDieSides: mechanic.tableDieSides,
+    tableRollCount: pending.tableRollChoice?.rollCount ?? 1,
+    tableRollChoiceFeatureId: pending.tableRollChoice?.featureId,
   }
   if (!triggered) return tableRoll == null ? base : undefined
   if (!Number.isInteger(tableRoll) || tableRoll! < 1 || tableRoll! > mechanic.tableDieSides) {
@@ -3502,6 +3716,29 @@ function resolveDnd5ePostSpellRandomTable(
   if (!actor || mechanic?.kind !== 'post-spell-random-table' || !plan) {
     return fail(state, events, 'invalid-plugin-action')
   }
+  const choice = pendingCheck?.tableRollChoice
+  const candidates = action.tableRollCandidates
+  const selectedIndex = action.selectedTableRollIndex
+  const currentChoiceFeature = choice
+    ? postSpellRandomTableChoiceFeature(actor, feature)
+    : undefined
+  if (
+    plan.triggered
+      ? choice
+        ? (
+            currentChoiceFeature?.id !== choice.featureId ||
+            !Array.isArray(candidates) ||
+            candidates.length !== choice.rollCount ||
+            candidates.some((roll) =>
+              !Number.isInteger(roll) || roll < 1 || roll > mechanic.tableDieSides) ||
+            !Number.isInteger(selectedIndex) ||
+            selectedIndex! < 0 ||
+            selectedIndex! >= candidates.length ||
+            action.tableRoll !== candidates[selectedIndex!]
+          )
+        : candidates != null || selectedIndex != null
+      : candidates != null || selectedIndex != null
+  ) return fail(state, events, 'invalid-plugin-action')
   actor.classState.postSpellRandomTableCheck = undefined
   events.push({
     type: 'class-state-changed',
@@ -3516,6 +3753,17 @@ function resolveDnd5ePostSpellRandomTable(
     triggerRoll: action.triggerRoll,
     triggered: plan.triggered,
   })
+  if (plan.triggered && choice && candidates && selectedIndex != null) {
+    events.push({
+      type: 'post-spell-random-table-choice-resolved',
+      actorId: actor.id,
+      featureId: action.featureId,
+      choiceFeatureId: choice.featureId,
+      rolls: [...candidates],
+      selectedIndex,
+      selectedRoll: candidates[selectedIndex]!,
+    })
+  }
   if (!plan.triggered) {
     if (action.resolution != null) return fail(state, events, 'invalid-plugin-action')
     return { ok: true, state, events }
@@ -3608,7 +3856,7 @@ function resolveDnd5ePostSpellRandomTable(
     sides: plan.effect.damageDice.sides,
     bonus: spell.dice.bonus,
     rolls: resolution.effectRolls,
-  }).total
+  })
   const targets = plan.effect.targetIds.map((targetId) => state.combatants[targetId])
   const limitedMagicImmunityTargetIds = dnd5eLimitedMagicImmunityTargetIds({
     actor,
@@ -3684,7 +3932,16 @@ function resolveDnd5ePostSpellRandomTable(
         ability: spell.saveAbility,
         success: save.success,
         successfulSave: spell.damageOnSuccessfulSave ?? 'none',
-        components: [{ total: damage, type: spell.damageType }],
+        components: [{
+          total: damage.total,
+          type: spell.damageType,
+          roll: {
+            sides: plan.effect.damageDice.sides,
+            rolls: [...damage.rolls],
+            bonus: damage.bonus,
+            total: damage.diceTotal + damage.bonus,
+          },
+        }],
         damageSource,
         events,
       })
@@ -4978,9 +5235,120 @@ function spendClassResource(combatant: Dnd5eCombatant, resourceKey: string, even
   return true
 }
 
+type Dnd5eReactionSpellResource =
+  | { kind: 'class'; resourceKey: string }
+  | { kind: 'monster-slot'; slotLevel: number }
+  | { kind: 'monster-use'; spellId: string }
+
+interface Dnd5eReactionSpellCastingSource {
+  level: number
+  resource?: Dnd5eReactionSpellResource
+  classId?: Extract<Dnd5eClassId, 'sorcerer' | 'warlock' | 'wizard'>
+  ability: AbilityKey
+}
+
+type Dnd5eReactionSpellCombatant = Pick<
+  Dnd5eCombatant,
+  | 'classId'
+  | 'classLevels'
+  | 'classSelections'
+  | 'classSelectionsByClass'
+  | 'classResources'
+  | 'classState'
+  | 'currentHp'
+  | 'turn'
+  | 'conditions'
+  | 'level'
+  | 'exhaustionLevel'
+  | 'subclassId'
+  | 'statBlockId'
+>
+
+function dnd5eMonsterReactionSpellCastingSource(
+  combatant: Dnd5eReactionSpellCombatant,
+  spellId: 'shield' | 'counterspell',
+  requestedSlotLevel?: number,
+): Dnd5eReactionSpellCastingSource | undefined {
+  if (!combatant.statBlockId) return undefined
+  const monster = getDnd5eSrdMonster(combatant.statBlockId)
+  const listedSpell = monster?.spellcasting?.spells?.find((spell) => spell.id === spellId)
+  const ability = monster?.spellcasting?.ability
+  if (!listedSpell || !ability) return undefined
+  const slotLevel = requestedSlotLevel ?? listedSpell.level
+  if (
+    !Number.isInteger(slotLevel) || slotLevel < listedSpell.level || slotLevel > 9 ||
+    combatant.currentHp <= 0 || !combatant.turn.reactionAvailable ||
+    dnd5eIsIncapacitated(combatant) || dnd5eReactionsPrevented(combatant)
+  ) return undefined
+  if (listedSpell.usage?.kind === 'per-day') {
+    const uses = combatant.classState.monsterSpellUsesBySpellId?.[spellId]
+    return slotLevel === listedSpell.level && (uses?.current ?? 0) > 0
+      ? {
+          level: slotLevel,
+          resource: { kind: 'monster-use', spellId },
+          ability,
+        }
+      : undefined
+  }
+  if (listedSpell.usage?.kind === 'at-will' || listedSpell.level === 0) {
+    return slotLevel === listedSpell.level ? { level: slotLevel, ability } : undefined
+  }
+  const slot = combatant.classState.monsterSpellSlots?.[String(slotLevel)]
+  return (slot?.current ?? 0) > 0
+    ? {
+        level: slotLevel,
+        resource: { kind: 'monster-slot', slotLevel },
+        ability,
+      }
+    : undefined
+}
+
+function spendDnd5eReactionSpellResource(
+  combatant: Dnd5eCombatant,
+  source: Dnd5eReactionSpellCastingSource,
+  events: Dnd5eCombatEvent[],
+): boolean {
+  if (!source.resource) return true
+  if (source.resource.kind === 'class') {
+    return spendClassResource(combatant, source.resource.resourceKey, events)
+  }
+  if (source.resource.kind === 'monster-slot') {
+    const slot = combatant.classState.monsterSpellSlots?.[String(source.resource.slotLevel)]
+    if (!slot || slot.current < 1) return false
+    slot.current -= 1
+    events.push({
+      type: 'class-resource-spent',
+      actorId: combatant.id,
+      resourceKey: `monster-spell-slot-${source.resource.slotLevel}`,
+      current: slot.current,
+      max: slot.max,
+    })
+    return true
+  }
+  const uses = combatant.classState.monsterSpellUsesBySpellId?.[source.resource.spellId]
+  if (!uses || uses.current < 1) return false
+  uses.current -= 1
+  events.push({
+    type: 'class-resource-spent',
+    actorId: combatant.id,
+    resourceKey: `monster-spell-use-${source.resource.spellId}`,
+    current: uses.current,
+    max: uses.max,
+  })
+  return true
+}
+
 function dnd5eShieldSpellCastingSource(
-  combatant: Pick<Dnd5eCombatant, 'classId' | 'classLevels' | 'classSelections' | 'classSelectionsByClass' | 'classResources' | 'classState' | 'currentHp' | 'turn' | 'conditions' | 'level' | 'exhaustionLevel' | 'subclassId'>,
-): { level: number; resourceKey?: string; classId: Extract<Dnd5eClassId, 'sorcerer' | 'wizard'> } | undefined {
+  combatant: Dnd5eReactionSpellCombatant,
+): Dnd5eReactionSpellCastingSource | undefined {
+  if (combatant.classState.shieldSpellActive) return undefined
+  if (combatant.statBlockId) {
+    for (let level = 1; level <= 9; level += 1) {
+      const source = dnd5eMonsterReactionSpellCastingSource(combatant, 'shield', level)
+      if (source) return source
+    }
+    return undefined
+  }
   const sorcererSelections = combatant.classSelectionsByClass?.sorcerer ?? combatant.classSelections
   const wizardSelections = combatant.classSelectionsByClass?.wizard ?? combatant.classSelections
   const selectedBySorcerer =
@@ -4991,7 +5359,7 @@ function dnd5eShieldSpellCastingSource(
   const selectedBySpellMastery = dnd5eCombatantClassLevel(combatant, 'wizard') >= 18 &&
     wizardSelections['spell-mastery-1']?.includes('shield')
   if (
-    combatant.currentHp <= 0 || combatant.classState.shieldSpellActive ||
+    combatant.currentHp <= 0 ||
     (dnd5eCombatantClassLevel(combatant, 'sorcerer') < 1 && dnd5eCombatantClassLevel(combatant, 'wizard') < 1) ||
     (!selectedNormally && !selectedBySpellMastery) ||
     !combatant.turn.reactionAvailable || dnd5eIsIncapacitated(combatant) || dnd5eReactionsPrevented(combatant)
@@ -5003,7 +5371,7 @@ function dnd5eShieldSpellCastingSource(
     level: dnd5eCombatantClassLevel(combatant, 'wizard'),
     classSelections: wizardSelections,
   }, spell, 1)?.kind === 'spell-mastery') {
-    return { level: 1, classId: 'wizard' }
+    return { level: 1, classId: 'wizard', ability: 'int' }
   }
   const classId = selectedBySorcerer && (combatant.classId === 'sorcerer' || !selectedByWizard)
     ? 'sorcerer'
@@ -5011,7 +5379,12 @@ function dnd5eShieldSpellCastingSource(
   for (let level = 1; level <= 9; level += 1) {
     const resourceKey = `dnd5e-spell-slot-${level}`
     if ((combatant.classResources[resourceKey]?.current ?? 0) > 0) {
-      return { level, resourceKey, classId }
+      return {
+        level,
+        resource: { kind: 'class', resourceKey },
+        classId,
+        ability: classId === 'wizard' ? 'int' : 'cha',
+      }
     }
   }
   return undefined
@@ -5030,10 +5403,16 @@ export function dnd5eCanCastShieldSpell(
 }
 
 function dnd5eCounterspellCastingSource(
-  combatant: Pick<Dnd5eCombatant, 'classId' | 'classLevels' | 'classSelections' | 'classSelectionsByClass' | 'classResources' | 'currentHp' | 'turn' | 'conditions' | 'level' | 'exhaustionLevel' | 'subclassId' | 'classState'>,
+  combatant: Dnd5eReactionSpellCombatant,
   requestedSlotLevel: number,
-): { level: number; resourceKey: string; classId: Extract<Dnd5eClassId, 'sorcerer' | 'warlock' | 'wizard'>; ability: Extract<AbilityKey, 'cha' | 'int'> } | undefined {
+): Dnd5eReactionSpellCastingSource | undefined {
   if (!Number.isInteger(requestedSlotLevel) || requestedSlotLevel < 3 || requestedSlotLevel > 9) return undefined
+  const monsterSource = dnd5eMonsterReactionSpellCastingSource(
+    combatant,
+    'counterspell',
+    requestedSlotLevel,
+  )
+  if (monsterSource) return monsterSource
   const selectedClasses = (['wizard', 'sorcerer', 'warlock'] as const).filter((classId) => {
     if (dnd5eCombatantClassLevel(combatant, classId) < 1) return false
     const selections = combatant.classSelectionsByClass?.[classId] ?? combatant.classSelections
@@ -5051,7 +5430,7 @@ function dnd5eCounterspellCastingSource(
     if (requestedSlotLevel === pactLevel && (resource?.current ?? 0) > 0) {
       return {
         level: pactLevel,
-        resourceKey: 'dnd5e-pact-slot',
+        resource: { kind: 'class', resourceKey: 'dnd5e-pact-slot' },
         classId: selectedClassId,
         ability: selectedClassId === 'wizard' ? 'int' : 'cha',
       }
@@ -5059,14 +5438,19 @@ function dnd5eCounterspellCastingSource(
   }
   const resourceKey = `dnd5e-spell-slot-${requestedSlotLevel}`
   return (combatant.classResources[resourceKey]?.current ?? 0) > 0
-    ? { level: requestedSlotLevel, resourceKey, classId: selectedClassId, ability: selectedClassId === 'wizard' ? 'int' : 'cha' }
+    ? {
+        level: requestedSlotLevel,
+        resource: { kind: 'class', resourceKey },
+        classId: selectedClassId,
+        ability: selectedClassId === 'wizard' ? 'int' : 'cha',
+      }
     : undefined
 }
 
 export function dnd5eCounterspellCastingAbility(
   combatant: Parameters<typeof dnd5eCounterspellCastingSource>[0],
   requestedSlotLevel: number,
-): Extract<AbilityKey, 'cha' | 'int'> | undefined {
+): AbilityKey | undefined {
   return dnd5eCounterspellCastingSource(combatant, requestedSlotLevel)?.ability
 }
 
@@ -5225,7 +5609,10 @@ function applyCounterspellReaction(input: {
   const requiresCheck = source.level < input.spellLevel
   if (requiresCheck && !Number.isInteger(input.reaction.abilityCheckTotal)) return undefined
   if (!requiresCheck && input.reaction.abilityCheckTotal != null) return undefined
-  if (!spendReaction(reactor, input.events) || !spendClassResource(reactor, source.resourceKey, input.events)) return undefined
+  if (
+    !spendReaction(reactor, input.events) ||
+    !spendDnd5eReactionSpellResource(reactor, source, input.events)
+  ) return undefined
   reactor.classState.leveledSpellTurnKey = classFeatureTurnKey(input.state, reactor.id)
   input.events.push({ type: 'turn-resource-spent', actorId: reactor.id, resource: 'reaction' })
   emitDnd5eSpellCast(input.state, {
@@ -5258,15 +5645,26 @@ function applyShieldSpellReaction(
   requested: boolean | undefined,
   triggeringHit: boolean,
   events: Dnd5eCombatEvent[],
+  triggeringAttack?: {
+    total: number
+    armorClass: number
+    critical: boolean
+  },
 ): boolean | undefined {
-  if (!requested) return false
   const castingSource = dnd5eShieldSpellCastingSource(target)
+  const automaticMonsterReaction = !!target.statBlockId &&
+    !!castingSource &&
+    triggeringHit &&
+    !!triggeringAttack &&
+    !triggeringAttack.critical &&
+    triggeringAttack.total < triggeringAttack.armorClass + 5
+  if (!requested && !automaticMonsterReaction) return false
   if (
     !triggeringHit || !castingSource ||
     target.classState.bonusActionSpellTurnKey === classFeatureTurnKey(state, target.id) ||
     !spendReaction(target, events)
   ) return undefined
-  if (castingSource.resourceKey && !spendClassResource(target, castingSource.resourceKey, events)) return undefined
+  if (!spendDnd5eReactionSpellResource(target, castingSource, events)) return undefined
   target.classState.leveledSpellTurnKey = classFeatureTurnKey(state, target.id)
   target.classState.shieldSpellActive = true
   events.push({ type: 'turn-resource-spent', actorId: target.id, resource: 'reaction' })
@@ -5329,7 +5727,7 @@ function applyDnd5eMonsterParryReaction(input: {
     }
   }
   const droppedWeaponIds = new Set(
-    input.target.classState.battleMasterDroppedWeaponIds ?? [],
+    input.target.classState.droppedEquipmentIds ?? [],
   )
   const wieldingMeleeWeapon = monster?.actions.some((action) =>
     action.attack != null &&
@@ -6333,6 +6731,14 @@ function applyHealing(
     target.classState.caltropsSpeedPenaltyFeet = undefined
     events.push({ type: 'class-state-changed', actorId: target.id, stateKey: 'caltrops-speed-penalty', active: false })
   }
+  if (
+    target.currentHp === target.maxHp &&
+    target.classState.monsterBerserk === true &&
+    dnd5eMonsterBerserkRule(monster)?.endsWhenFullyHealed === true
+  ) {
+    target.classState.monsterBerserk = undefined
+    events.push({ type: 'monster-berserk-ended', actorId: target.id, reason: 'fully-healed' })
+  }
   events.push({ type: 'healing-applied', targetId: target.id, amount: healed, hpBefore, hpAfter: target.currentHp })
   return healed
 }
@@ -6521,6 +6927,8 @@ function applyDnd5eForcedMovementElevation(
     toElevationFeet > fromElevationFeet
   ) return false
   target.elevationFeet = toElevationFeet
+  target.groundElevationFeet = toElevationFeet
+  target.airborne = false
   if (toElevationFeet !== fromElevationFeet) {
     events.push({ type: 'elevation-changed', actorId: target.id, fromElevationFeet, toElevationFeet, mode: 'fall' })
   }
@@ -6531,6 +6939,141 @@ function applyDnd5eForcedMovementElevation(
     fallingDamageRolls,
     events,
   )
+}
+
+function dnd5eCombatantIsMagicallyHeldAloft(target: Dnd5eCombatant): boolean {
+  // Fall discovery compares the immutable source snapshot with a provisional
+  // result. Reconciliation mutates conditions/schema, so use the pure active
+  // view here; suspended spell effects must not keep a creature aloft either.
+  return effectiveDnd5eActiveEffects(target.classState.activeEffects).some((effect) =>
+    (effect.modifiers?.flySpeedFeet ?? 0) > 0 && effect.source.kind === 'spell')
+}
+
+function dnd5eCombatantCanRemainAirborne(target: Dnd5eCombatant): boolean {
+  if (target.movementSpeeds?.hover === true || dnd5eCombatantIsMagicallyHeldAloft(target)) {
+    return true
+  }
+  if (dnd5eHasStandardCondition(target, 'prone')) return false
+  return (dnd5eEffectiveFlySpeed(target) ?? 0) > 0
+}
+
+export interface Dnd5eUnsupportedAirborneFallPreview {
+  combatantId: string
+  fromElevationFeet: number
+  groundElevationFeet: number
+  fallDistanceFeet: number
+  fallingDamageDice: number
+}
+
+function dnd5eNewUnsupportedAirborneFallCandidates(
+  source: Dnd5eHeadlessCombatState,
+  state: Dnd5eHeadlessCombatState,
+  action?: Dnd5eAction,
+): Dnd5eUnsupportedAirborneFallPreview[] {
+  return Object.values(state.combatants).flatMap((target) => {
+    const previous = source.combatants[target.id]
+    const groundElevationFeet = target.groundElevationFeet ?? 0
+    const fromElevationFeet = target.elevationFeet ?? groundElevationFeet
+    const aboveGround = fromElevationFeet > groundElevationFeet + 1e-4
+    if (!aboveGround || (previous?.airborne !== true && target.airborne !== true)) return []
+    const unsupportedNow = !dnd5eCombatantCanRemainAirborne(target)
+    const unsupportedBefore = !!previous && previous.airborne === true &&
+      (previous.elevationFeet ?? previous.groundElevationFeet ?? 0) >
+        (previous.groundElevationFeet ?? 0) + 1e-4 &&
+      !dnd5eCombatantCanRemainAirborne(previous)
+    if (!unsupportedNow || unsupportedBefore) return []
+    // Eagle Attunement has an existing, explicit end-of-turn landing
+    // transaction. Voluntarily ending Rage must preserve that pending landing
+    // instead of making the Rage action ask for a second set of falling dice.
+    // Involuntary Rage loss (damage, unconsciousness, etc.) still uses this
+    // general unsupported-flight boundary immediately.
+    if (
+      action?.type === 'barbarian-rage' &&
+      action.end === true &&
+      action.actorId === target.id &&
+      !!dnd5eRageFeatureForCombatant(target, 'turn-flight')
+    ) return []
+    const fallDistanceFeet = Math.max(0, fromElevationFeet - groundElevationFeet)
+    return [{
+      combatantId: target.id,
+      fromElevationFeet,
+      groundElevationFeet,
+      fallDistanceFeet,
+      fallingDamageDice: dnd5eFallingDamageDice(fallDistanceFeet),
+    }]
+  }).sort((left, right) => left.combatantId.localeCompare(right.combatantId))
+}
+
+/**
+ * Runs the complete deterministic action pipeline without committing its
+ * indirect falls, so an authoritative Host can roll exactly the required d6s
+ * and then submit the same action with `airborneFallDamageRollsByCombatantId`.
+ */
+export function previewDnd5eUnsupportedAirborneFalls(
+  source: Dnd5eHeadlessCombatState,
+  action: Dnd5eAction,
+): { ok: true; falls: readonly Dnd5eUnsupportedAirborneFallPreview[] } | {
+  ok: false
+  reason: string
+} {
+  const hasElevatedAirborneCombatant = Object.values(source.combatants).some((combatant) => {
+    const ground = combatant.groundElevationFeet ?? 0
+    return combatant.airborne === true && (combatant.elevationFeet ?? ground) > ground + 1e-4
+  })
+  const monsterTeleportCanCreateAirborne =
+    (action.type === 'monster-special-action' ||
+      action.type === 'monster-legendary-special-action') &&
+    action.teleportDestination?.toElevationFeet != null &&
+    action.teleportDestination.toGroundElevationFeet != null &&
+    action.teleportDestination.toElevationFeet >
+      action.teleportDestination.toGroundElevationFeet + 1e-4
+  if (!hasElevatedAirborneCombatant && !monsterTeleportCanCreateAirborne) {
+    return { ok: true, falls: [] }
+  }
+  headlessAirborneFallPreviewDepth += 1
+  try {
+    const result = resolveDnd5eHeadlessAction(source, {
+      ...action,
+      airborneFallDamageRollsByCombatantId: undefined,
+    })
+    if (!result.ok) return { ok: false, reason: result.reason }
+    return {
+      ok: true,
+      falls: dnd5eNewUnsupportedAirborneFallCandidates(source, result.state, action),
+    }
+  } finally {
+    headlessAirborneFallPreviewDepth -= 1
+  }
+}
+
+/**
+ * One transaction-boundary hook owns indirect falls. This catches every
+ * condition/effect writer, including monster, spell, plugin and class paths,
+ * without allowing one of them to forget the airborne rule.
+ */
+function resolveDnd5eNewUnsupportedAirborneFalls(
+  source: Dnd5eHeadlessCombatState,
+  state: Dnd5eHeadlessCombatState,
+  action: Dnd5eAction,
+  suppliedByCombatantId: Readonly<Record<string, readonly number[]>> | undefined,
+  events: Dnd5eCombatEvent[],
+): boolean {
+  const candidates = dnd5eNewUnsupportedAirborneFallCandidates(source, state, action)
+  const candidateIds = new Set(candidates.map((candidate) => candidate.combatantId))
+  if (Object.keys(suppliedByCombatantId ?? {}).some((id) => !candidateIds.has(id))) return false
+  for (const candidate of candidates) {
+    const target = state.combatants[candidate.combatantId]
+    const supplied = suppliedByCombatantId?.[candidate.combatantId]
+    if (candidate.fallingDamageDice > 0 && supplied == null) return false
+    if (!applyDnd5eForcedMovementElevation(
+      state,
+      target,
+      candidate.groundElevationFeet,
+      supplied,
+      events,
+    )) return false
+  }
+  return true
 }
 
 function clearTurnUndead(target: Dnd5eCombatant, events: Dnd5eCombatEvent[]): void {
@@ -6659,8 +7202,8 @@ function endBarbarianRage(actor: Dnd5eCombatant, events: Dnd5eCombatEvent[]): bo
     frenzying: undefined,
     frenzyStartedTurnKey: undefined,
     relentlessRagePendingDc: undefined,
-    totemWarriorWolfAttunementTargetIds: undefined,
-    totemWarriorWolfAttunementTurnKey: undefined,
+    bonusProneEligibleTargetIds: undefined,
+    bonusProneEligibleTurnKey: undefined,
   }
   if (frenzyEnded) {
     actor.exhaustionLevel = Math.min(6, actor.exhaustionLevel + 1)
@@ -6846,6 +7389,43 @@ function applyDamage(
 ): void {
   const hpBefore = target.currentHp
   const targetMonster = target.statBlockId ? getDnd5eSrdMonster(target.statBlockId) : undefined
+  const singleDamageType = damageTypes.length === 1 ? damageTypes[0] : undefined
+  const absorption = dnd5eMonsterDamageAbsorptionRule(targetMonster, singleDamageType)
+  if (amount > 0 && singleDamageType && absorption) {
+    const healing = applyHealing(target, amount, events)
+    events.push({
+      type: 'monster-damage-absorbed',
+      actorId: target.id,
+      damageType: singleDamageType,
+      amount,
+      healing,
+    })
+    events.push({
+      type: 'damage-applied',
+      sourceId: source?.id,
+      targetId: target.id,
+      amount: 0,
+      hpBefore,
+      hpAfter: target.currentHp,
+      temporaryHpBefore: target.temporaryHp,
+      temporaryHpAfter: target.temporaryHp,
+      damageTypes: [singleDamageType],
+      ...(suppressAfterDealtDamageTrigger ? { suppressAfterDealtDamageTrigger: true } : {}),
+    })
+    return
+  }
+  const aversion = damageTypes
+    .map((damageType) => dnd5eMonsterDamageAversionRule(targetMonster, damageType))
+    .find((rule) => rule != null)
+  if (amount > 0 && aversion) {
+    target.classState.monsterDamageAversionActive = true
+    target.classState.monsterDamageAversionSourceActorId = source?.id
+    events.push({
+      type: 'monster-damage-aversion-triggered',
+      actorId: target.id,
+      damageType: aversion.damageType,
+    })
+  }
   const regenerationRule = dnd5eMonsterRegenerationRule(targetMonster)
   const suppressingDamageTypes = regenerationRule
     ? damageTypes.filter((type) => regenerationRule.suppressedByDamageTypes.includes(type))
@@ -7068,6 +7648,7 @@ function applyDamage(
     } else if (massiveDamage) {
       target.classState.undeadFortitudePending = undefined
       target.classState.monsterOnHitSavePending = undefined
+      target.classState.monsterRegenerationPendingAtZero = undefined
       target.deathSaves = { successes: 0, failures: 3, stable: false, dead: true }
       removeZeroHitPointUnconscious(target, 'death', events)
       events.push({ type: 'instant-death', sourceId: source?.id ?? target.id, targetId: target.id, hpBefore })
@@ -7276,7 +7857,7 @@ function beginDnd5eConcentration(
   actor: Dnd5eCombatant,
   spellId: string,
   targetIds: readonly string[],
-  rounds: number,
+  rounds: number | undefined,
   events: Dnd5eCombatEvent[],
   spellLevel?: number,
 ): void {
@@ -7290,7 +7871,9 @@ function beginDnd5eConcentration(
     ? spellLevel
     : undefined
   actor.classState.concentrationTargetIds = uniqueTargetIds
-  actor.classState.concentrationRoundsRemaining = Math.max(1, Math.floor(rounds))
+  actor.classState.concentrationRoundsRemaining = rounds == null
+    ? undefined
+    : Math.max(1, Math.floor(rounds))
   for (const targetId of uniqueTargetIds) {
     const target = state.combatants[targetId]
     if (!target) continue
@@ -7473,10 +8056,13 @@ function resolveDamageDefensesForTarget(
       }],
     }
   }
-  const bearTotemResistance = target.classState.raging && type !== 'psychic' &&
-    !!dnd5eTotemWarriorFeatureForCombatant(target, 'totem-spirit-bear')
+  const broadRageResistanceFeature = target.classState.raging
+    ? dnd5eRageFeatureForCombatant(target, 'broad-rage-resistance')
+    : undefined
+  const broadRageResistance = !!broadRageResistanceFeature &&
+    !broadRageResistanceFeature.mechanic.excludedDamageTypes?.includes(type)
   const rageResistance = target.classState.raging &&
-    (bearTotemResistance || type === 'bludgeoning' || type === 'piercing' || type === 'slashing')
+    (broadRageResistance || type === 'bludgeoning' || type === 'piercing' || type === 'slashing')
   const emptyBodyResistance = (target.classState.emptyBodyRoundsRemaining ?? 0) > 0 && type !== 'force'
   const fiendishResilience = dnd5eCombatantClassLevel(target, 'warlock') >= 10 && dnd5eCombatantHasSubclass(target, 'warlock', 'fiend') &&
     target.classSelections['fiendish-resilience']?.includes(type)
@@ -7519,6 +8105,12 @@ interface Dnd5eDamageComponent {
   total: number
   type?: Dnd5eDamageType
   source?: Dnd5eClassDamageSource
+  roll?: {
+    sides: number
+    rolls: readonly number[]
+    bonus: number
+    total: number
+  }
 }
 
 interface Dnd5eSourcedDamageComponent extends Dnd5eDamageComponent {
@@ -7616,6 +8208,9 @@ function resolveDnd5eSavingThrowSpellDamage(input: {
     )
     return {
       damageType: component.type,
+      roll: component.roll
+        ? { ...component.roll, rolls: [...component.roll.rolls] }
+        : undefined,
       damageBeforeSavingThrow: Math.max(0, Math.floor(input.components[index]?.total ?? 0)),
       damageAfterSavingThrow: component.total,
       finalDamage: defense.finalDamage,
@@ -7651,24 +8246,24 @@ function classFeatureTurnKey(state: Dnd5eHeadlessCombatState, actorId: string): 
   }`
 }
 
-function consumeDnd5eEldritchStrikeSavingThrow(
+function consumeDnd5eSpellSavePressure(
   caster: Dnd5eCombatant,
   target: Dnd5eCombatant,
   mode: D20RollMode,
   events: Dnd5eCombatEvent[],
 ): D20RollMode {
-  if (!dnd5eEldritchStrikeApplies(caster, target)) return mode
-  const remaining = { ...(target.classState.eldritchStrikeBySource ?? {}) }
+  if (!dnd5eSpellSavePressureApplies(caster, target)) return mode
+  const remaining = { ...(target.classState.spellSavePressureBySource ?? {}) }
   delete remaining[caster.id]
-  target.classState.eldritchStrikeBySource =
+  target.classState.spellSavePressureBySource =
     Object.keys(remaining).length > 0 ? remaining : undefined
   events.push({
     type: 'class-state-changed',
     actorId: target.id,
-    stateKey: `eldritch-strike:${caster.id}`,
+    stateKey: `weapon-hit-save-pressure:${caster.id}`,
     active: false,
   })
-  return imposeDnd5eRollDisadvantage(mode, 'eldritch-strike').mode
+  return imposeDnd5eRollDisadvantage(mode, 'weapon-hit-save-pressure').mode
 }
 
 function dnd5eCanMakeAttacks(
@@ -7920,6 +8515,7 @@ export function dnd5eAbilityCheckRollMode(
     strengthFlags.advantage
   const disadvantage =
     input.requestedMode === 'disadvantage' ||
+    actor.classState.monsterDamageAversionActive === true ||
     actor.exhaustionLevel >= 1 ||
     dnd5eConditionAbilityCheckDisadvantage(actor) ||
     dnd5eActiveAbilityCheckDisadvantages(actor.classState.activeEffects)
@@ -8035,13 +8631,21 @@ function resolveGeneralAbilityCheck(
 ): true | undefined {
   const skill = action.skill ? SKILLS.find((candidate) => candidate.key === action.skill) : undefined
   if (action.skill && (!skill || skill.ability !== action.ability)) return undefined
+  const bearAspectContext = action.context === 'push-pull-lift-break'
+  const draconicAncestryContext = action.context === 'interact-with-dragons'
   if (
     action.context != null &&
-    (
-      action.context !== 'push-pull-lift-break' ||
-      action.ability !== 'str' ||
-      action.skill != null ||
-      !dnd5eTotemWarriorFeatureForCombatant(actor, 'aspect-of-the-beast-bear')
+    !(
+      bearAspectContext &&
+      action.ability === 'str' &&
+      action.skill == null &&
+      dnd5eRageFeatureForCombatant(actor, 'object-strength-and-carrying')
+    ) &&
+    !(
+      draconicAncestryContext &&
+      action.ability === 'cha' &&
+      dnd5eCombatantClassLevel(actor, 'sorcerer') >= 1 &&
+      dnd5eCombatantHasSubclass(actor, 'sorcerer', 'draconic')
     )
   ) return undefined
   if (action.dc != null && (!Number.isInteger(action.dc) || action.dc < 0 || action.dc > 100)) return undefined
@@ -8058,7 +8662,7 @@ function resolveGeneralAbilityCheck(
     requestedMode: baseMode,
     advantage: [{
       active: action.context === 'push-pull-lift-break',
-      reason: 'totem-warrior-bear-aspect',
+      reason: 'rage-feature-carrying',
     }],
   }).mode
   const suppliedRolls = applyDnd5eHalflingLucky(
@@ -8067,7 +8671,8 @@ function resolveGeneralAbilityCheck(
     { first: action.halflingLuckyD20, second: action.halflingLuckyD20Second },
     events,
   )
-  const rank = abilityCheckProficiencyRank(actor, action.skill)
+  const baseRank = abilityCheckProficiencyRank(actor, action.skill)
+  const rank = draconicAncestryContext && baseRank === 1 ? 2 : baseRank
   const reliableTalent = dnd5eCombatantClassLevel(actor, 'rogue') >= 11 && rank > 0
   const rolls = reliableTalent ? suppliedRolls.map((roll) => Math.max(10, roll)) : suppliedRolls
   const hideInPlainSightApplied = action.skill === 'stealth' && actor.classState.hideInPlainSightPrepared === true
@@ -8195,7 +8800,8 @@ function resolveRogueDexterityCheck(input: {
 }) {
   const rank = rogueCheckProficiencyRank(input.actor, input.skill)
   const advantage = input.advantage === true
-  const disadvantage = input.actor.exhaustionLevel >= 1 ||
+  const disadvantage = input.actor.classState.monsterDamageAversionActive === true ||
+    input.actor.exhaustionLevel >= 1 ||
     dnd5eConditionAbilityCheckDisadvantage(input.actor) ||
     input.actor.wearingUnproficientArmor ||
     (input.actor.armorStealthDisadvantage && input.skill === 'stealth')
@@ -8314,14 +8920,16 @@ export function dnd5eRepeatedMeleeAttackMode(
       dnd5eHelpAttackApplies(state, attacker, target) ||
       dnd5eUtilityProjectionAttackAdvantageApplies(state, attacker, target) ||
       dnd5eNextD20AdvantageApplies(attacker, 'attack') ||
-      dnd5eBattleMasterDistractingAdvantage(attacker, target) ||
-      dnd5eTotemWolfPackAdvantage(state, attacker, target, true) ||
+      dnd5ePendingAllyAttackAdvantage(attacker, target) ||
+      dnd5eRageAllyMeleeAdvantage(state, attacker, target, true) ||
       dnd5eOpeningAttackHasAdvantage(state, attacker, target))
-  const hasDisadvantage = requestedMode === 'disadvantage' || attackerProne || dnd5eFrightenedAttackDisadvantage(state, attacker) ||
+  const hasDisadvantage = requestedMode === 'disadvantage' || attackerProne ||
+    attacker.classState.monsterDamageAversionActive === true ||
+    dnd5eFrightenedAttackDisadvantage(state, attacker) ||
     dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, attacker.id, target.id) ||
     dnd5eTargetIsUnseenForAttack(state, attacker.id, target.id) ||
-    dnd5eBattleMasterGoadingDisadvantage(attacker, target) ||
-    dnd5eTotemBearGuardianDisadvantage(state, attacker, target)
+    dnd5eSourceMarkedAttackDisadvantage(attacker, target) ||
+    dnd5eRageAllyProtectionDisadvantage(state, attacker, target)
   return resolveDnd5eRollMode({
     advantage: [{ active: hasAdvantage, reason: 'melee-attack-advantage' }],
     disadvantage: [{ active: hasDisadvantage, reason: 'melee-attack-disadvantage' }],
@@ -8600,7 +9208,14 @@ function resolveStandAgainstTideRepeat(input: {
     forceHit: use.strokeOfLuck === true,
   })
   let { hit, critical } = attackOutcome
-  const shieldSpellApplied = applyShieldSpellReaction(state, redirectTarget, use.shieldSpellReaction, hit, events)
+  const shieldSpellApplied = applyShieldSpellReaction(
+    state,
+    redirectTarget,
+    use.shieldSpellReaction,
+    hit,
+    events,
+    { total: attack.roll.total, armorClass: targetArmorClass, critical },
+  )
   if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
   if (shieldSpellApplied) {
     targetArmorClass = dnd5eTargetArmorClassForAttack(state, attacker.id, redirectTarget.id)
@@ -8763,26 +9378,26 @@ function resolveStandAgainstTideRepeat(input: {
   return { ok: true, state, events }
 }
 
-type Dnd5eBattleMasterAttackAction = Extract<Dnd5eAction, { type: 'attack' }>
+type Dnd5eCombatManeuverAttackAction = Extract<Dnd5eAction, { type: 'attack' }>
 
-function dnd5eBattleMasterSaveDc(actor: Dnd5eCombatant): number {
+function dnd5eCombatManeuverSaveDc(actor: Dnd5eCombatant): number {
   return 8 + actor.proficiencyBonus + Math.max(
     rules.abilityModifier(actor.abilities.str),
     rules.abilityModifier(actor.abilities.dex),
   )
 }
 
-function resolveDnd5eBattleMasterSavingThrow(input: {
+function resolveDnd5eCombatManeuverSavingThrow(input: {
   state: Dnd5eHeadlessCombatState
   source: Dnd5eCombatant
   target: Dnd5eCombatant
   ability: 'str' | 'wis'
   condition?: Dnd5eStandardConditionId
-  roll: Dnd5eBattleMasterSavingThrowRoll | undefined
+  roll: Dnd5eCombatManeuverSavingThrowRoll | undefined
   events: Dnd5eCombatEvent[]
 }): { success: boolean; dc: number } | undefined {
   if (!input.roll) return undefined
-  const dc = dnd5eBattleMasterSaveDc(input.source)
+  const dc = dnd5eCombatManeuverSaveDc(input.source)
   const mode = dnd5eSavingThrowMode(input.target, input.ability, {
     effectVisible: true,
     condition: input.condition,
@@ -8830,13 +9445,13 @@ function resolveDnd5eBattleMasterSavingThrow(input: {
   }
 }
 
-function dnd5eBattleMasterSuperiorityTotal(input: {
+function dnd5eCombatManeuverSuperiorityTotal(input: {
   actor: Dnd5eCombatant
   featureId: string
   rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>> | undefined
   critical: boolean
 }): number | undefined {
-  const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(input.featureId)
+  const definition = dnd5eDeclarativeCombatManeuverDefinition(input.featureId)
   if (!definition) return undefined
   const plan = dnd5eDeclarativeAttackIntentRollPlan(input.actor, input.featureId, input.critical)
   if (!plan.ok || !validateDnd5ePluginDiceRolls({ rolls: plan.declarations }, input.rolls)) {
@@ -8846,13 +9461,13 @@ function dnd5eBattleMasterSuperiorityTotal(input: {
   return roll?.values.reduce((sum, value) => sum + value, 0)
 }
 
-function spendDnd5eBattleMasterAttackCost(input: {
+function spendDnd5eCombatManeuverAttackCost(input: {
   actor: Dnd5eCombatant
   featureId: string
   spendEconomy: boolean
   events: Dnd5eCombatEvent[]
 }): boolean {
-  const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(input.featureId)
+  const definition = dnd5eDeclarativeCombatManeuverDefinition(input.featureId)
   const ability = definition?.feature.declarativeAbility
   if (!definition || !ability) return false
   const resource = input.actor.classResources[definition.resourceId]
@@ -8868,7 +9483,7 @@ function spendDnd5eBattleMasterAttackCost(input: {
   return spendClassResource(input.actor, definition.resourceId, input.events)
 }
 
-function applyDnd5eBattleMasterDamage(
+function applyDnd5eCombatManeuverDamage(
   state: Dnd5eHeadlessCombatState,
   actor: Dnd5eCombatant,
   target: Dnd5eCombatant,
@@ -8887,33 +9502,33 @@ function applyDnd5eBattleMasterDamage(
   applyDamage(target, adjusted, false, events, actor, state, [damageType])
 }
 
-function applyDnd5eBattleMasterAfterHit(input: {
+function applyDnd5eCombatManeuverAfterHit(input: {
   state: Dnd5eHeadlessCombatState
   actor: Dnd5eCombatant
   target: Dnd5eCombatant
-  action: Dnd5eBattleMasterAttackAction
+  action: Dnd5eCombatManeuverAttackAction
   featureId: string
   superiorityDie: number
   critical: boolean
   events: Dnd5eCombatEvent[]
 }): boolean {
-  const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(input.featureId)
+  const definition = dnd5eDeclarativeCombatManeuverDefinition(input.featureId)
   if (!definition) return false
-  const maneuver = definition.mechanic.maneuver
+  const maneuver = definition.mechanic.operation
   const payload = input.action.declarativeIntentPayloads?.[input.featureId]
-  const damageManeuvers = new Set<Dnd5e2014BattleMasterManeuverId>([
-    'disarming-attack',
-    'distracting-strike',
-    'feinting-attack',
-    'goading-attack',
-    'lunging-attack',
-    'maneuvering-attack',
-    'menacing-attack',
-    'pushing-attack',
-    'trip-attack',
+  const damageManeuvers = new Set<Dnd5eCombatManeuverOperation>([
+    'drop-held-item',
+    'next-ally-advantage',
+    'next-attack-advantage',
+    'target-attack-disadvantage',
+    'extended-reach',
+    'ally-reposition',
+    'frighten-on-hit',
+    'push-on-hit',
+    'prone-on-hit',
   ])
   if (damageManeuvers.has(maneuver)) {
-    applyDnd5eBattleMasterDamage(
+    applyDnd5eCombatManeuverDamage(
       input.state,
       input.actor,
       input.target,
@@ -8925,24 +9540,24 @@ function applyDnd5eBattleMasterAfterHit(input: {
   }
 
   let saveResult: { success: boolean; dc: number } | undefined
-  if (maneuver === 'disarming-attack' || maneuver === 'pushing-attack' || maneuver === 'trip-attack') {
-    saveResult = resolveDnd5eBattleMasterSavingThrow({
+  if (maneuver === 'drop-held-item' || maneuver === 'push-on-hit' || maneuver === 'prone-on-hit') {
+    saveResult = resolveDnd5eCombatManeuverSavingThrow({
       state: input.state,
       source: input.actor,
       target: input.target,
       ability: 'str',
-      condition: maneuver === 'trip-attack' ? 'prone' : undefined,
+      condition: maneuver === 'prone-on-hit' ? 'prone' : undefined,
       roll: payload?.savingThrow,
       events: input.events,
     })
     if (!saveResult) return false
-  } else if (maneuver === 'goading-attack' || maneuver === 'menacing-attack') {
-    saveResult = resolveDnd5eBattleMasterSavingThrow({
+  } else if (maneuver === 'target-attack-disadvantage' || maneuver === 'frighten-on-hit') {
+    saveResult = resolveDnd5eCombatManeuverSavingThrow({
       state: input.state,
       source: input.actor,
       target: input.target,
       ability: 'wis',
-      condition: maneuver === 'menacing-attack' ? 'frightened' : undefined,
+      condition: maneuver === 'frighten-on-hit' ? 'frightened' : undefined,
       roll: payload?.savingThrow,
       events: input.events,
     })
@@ -8951,29 +9566,29 @@ function applyDnd5eBattleMasterAfterHit(input: {
 
   const appliedTurnKey = classFeatureTurnKey(input.state, input.actor.id)
   if (
-    maneuver === 'disarming-attack' &&
+    maneuver === 'drop-held-item' &&
     saveResult?.success === false &&
     input.target.mainWeaponId &&
     (
-      !input.target.classState.eldritchKnightBondedWeaponIds?.includes(input.target.mainWeaponId) ||
+      !input.target.classState.linkedEquipmentIds?.includes(input.target.mainWeaponId) ||
       dnd5eIsIncapacitated(input.target)
     )
   ) {
     const weaponId = input.target.mainWeaponId
-    input.target.classState.battleMasterDroppedWeaponIds = [...new Set([
-      ...(input.target.classState.battleMasterDroppedWeaponIds ?? []),
+    input.target.classState.droppedEquipmentIds = [...new Set([
+      ...(input.target.classState.droppedEquipmentIds ?? []),
       weaponId,
     ])]
     input.events.push({
-      type: 'battle-master-weapon-dropped',
+      type: 'combat-maneuver-weapon-dropped',
       actorId: input.actor.id,
       targetId: input.target.id,
       weaponId,
     })
-  } else if (maneuver === 'distracting-strike') {
+  } else if (maneuver === 'next-ally-advantage') {
     applyDnd5eMechanicalStatusEffect(input.target, input.actor, {
-      definitionId: `${definition.feature.ownerPluginId}:battle-master:distracting-strike`,
-      label: 'Distracting Strike',
+      definitionId: `${definition.feature.ownerPluginId}:combat-maneuver:next-ally-advantage`,
+      label: definition.feature.name,
       duration: {
         type: 'until-turn-boundary',
         boundary: 'source-turn-start',
@@ -8983,10 +9598,10 @@ function applyDnd5eBattleMasterAfterHit(input: {
       sourceKind: 'plugin',
       stackingPolicy: 'refresh-duration',
     }, input.events)
-  } else if (maneuver === 'goading-attack' && saveResult?.success === false) {
+  } else if (maneuver === 'target-attack-disadvantage' && saveResult?.success === false) {
     applyDnd5eMechanicalStatusEffect(input.target, input.actor, {
-      definitionId: `${definition.feature.ownerPluginId}:battle-master:goading-attack`,
-      label: 'Goading Attack',
+      definitionId: `${definition.feature.ownerPluginId}:combat-maneuver:target-attack-disadvantage`,
+      label: definition.feature.name,
       duration: {
         type: 'until-turn-boundary',
         boundary: 'source-turn-end',
@@ -8996,7 +9611,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
       sourceKind: 'plugin',
       stackingPolicy: 'refresh-duration',
     }, input.events)
-  } else if (maneuver === 'maneuvering-attack') {
+  } else if (maneuver === 'ally-reposition') {
     const ally = payload?.secondaryTargetId
       ? input.state.combatants[payload.secondaryTargetId]
       : undefined
@@ -9062,9 +9677,9 @@ function applyDnd5eBattleMasterAfterHit(input: {
       ally.position = { ...payload.destination }
       input.events.push({ type: 'moved', actorId: ally.id, from, to: ally.position, distance: distance! })
     }
-  } else if (maneuver === 'menacing-attack' && saveResult?.success === false) {
+  } else if (maneuver === 'frighten-on-hit' && saveResult?.success === false) {
     applyDnd5eStandardConditionEffect(input.target, input.actor, {
-      rulesId: `${definition.feature.ownerPluginId}:battle-master:menacing-attack`,
+      rulesId: `${definition.feature.ownerPluginId}:combat-maneuver:frighten-on-hit`,
       condition: 'frightened',
       duration: {
         type: 'until-turn-boundary',
@@ -9074,7 +9689,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
       sourceKind: 'plugin',
       pluginId: definition.feature.ownerPluginId,
     }, input.events)
-  } else if (maneuver === 'pushing-attack' && saveResult?.success === false) {
+  } else if (maneuver === 'push-on-hit' && saveResult?.success === false) {
     if (
       !payload?.destination ||
       !Number.isFinite(payload.destination.x) ||
@@ -9092,7 +9707,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
       to: input.target.position,
       distance: payload.distanceFeet!,
     })
-  } else if (maneuver === 'sweeping-attack') {
+  } else if (maneuver === 'secondary-target-damage') {
     const secondary = payload?.secondaryTargetId
       ? input.state.combatants[payload.secondaryTargetId]
       : undefined
@@ -9107,7 +9722,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
         (input.action.classDamageContext?.reachFeet ?? 5)
     ) return false
     if (input.superiorityDie >= dnd5eTargetArmorClassForAttack(input.state, input.actor.id, secondary.id)) {
-      applyDnd5eBattleMasterDamage(
+      applyDnd5eCombatManeuverDamage(
         input.state,
         input.actor,
         secondary,
@@ -9118,7 +9733,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
       )
     }
     input.events.push({
-      type: 'battle-master-maneuver-resolved',
+      type: 'combat-maneuver-resolved',
       actorId: input.actor.id,
       targetId: input.target.id,
       secondaryTargetId: secondary.id,
@@ -9128,9 +9743,9 @@ function applyDnd5eBattleMasterAfterHit(input: {
       value: input.superiorityDie,
     })
     return true
-  } else if (maneuver === 'trip-attack' && saveResult?.success === false) {
+  } else if (maneuver === 'prone-on-hit' && saveResult?.success === false) {
     applyDnd5eStandardConditionEffect(input.target, input.actor, {
-      rulesId: `${definition.feature.ownerPluginId}:battle-master:trip-attack`,
+      rulesId: `${definition.feature.ownerPluginId}:combat-maneuver:prone-on-hit`,
       condition: 'prone',
       duration: { type: 'permanent' },
       sourceKind: 'plugin',
@@ -9139,7 +9754,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
   }
 
   input.events.push({
-    type: 'battle-master-maneuver-resolved',
+    type: 'combat-maneuver-resolved',
     actorId: input.actor.id,
     targetId: input.target.id,
     secondaryTargetId: payload?.secondaryTargetId,
@@ -9211,33 +9826,33 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       Object.keys(declarativeIntentPayloads).length > 16 ||
       Object.keys(declarativeIntentPayloads).some((featureId) =>
         !declarativeIntentFeatureIds.includes(featureId) ||
-        !dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)
+        !dnd5eDeclarativeCombatManeuverDefinition(featureId)
       )
     )
   ) return fail(state, events, 'invalid-plugin-action')
-  const battleMasterIntents = declarativeIntentFeatureIds.flatMap((featureId) => {
-    const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)
+  const combatManeuverIntents = declarativeIntentFeatureIds.flatMap((featureId) => {
+    const definition = dnd5eDeclarativeCombatManeuverDefinition(featureId)
     return definition ? [{ featureId, definition }] : []
   })
-  if (battleMasterIntents.length > 1) return fail(state, events, 'invalid-plugin-action')
-  const battleMasterIntent = battleMasterIntents[0]
-  const battleMasterManeuver = battleMasterIntent?.definition.mechanic.maneuver
-  const battleMasterHook = battleMasterIntent
-    ? dnd5eDeclarativeAttackIntentDefinition(battleMasterIntent.featureId)?.hook
+  if (combatManeuverIntents.length > 1) return fail(state, events, 'invalid-plugin-action')
+  const combatManeuverIntent = combatManeuverIntents[0]
+  const combatManeuverOperation = combatManeuverIntent?.definition.mechanic.operation
+  const combatManeuverHook = combatManeuverIntent
+    ? dnd5eDeclarativeAttackIntentDefinition(combatManeuverIntent.featureId)?.hook
     : undefined
-  if (battleMasterIntent && !battleMasterHook) return fail(state, events, 'invalid-plugin-action')
+  if (combatManeuverIntent && !combatManeuverHook) return fail(state, events, 'invalid-plugin-action')
   if (
     action.classDamageContext?.weaponId &&
-    actor.classState.battleMasterDroppedWeaponIds?.includes(action.classDamageContext.weaponId)
+    actor.classState.droppedEquipmentIds?.includes(action.classDamageContext.weaponId)
   ) return fail(state, events, 'invalid-class-feature')
   if (
-    battleMasterManeuver &&
-    ['feinting-attack', 'lunging-attack', 'sweeping-attack'].includes(battleMasterManeuver) &&
+    combatManeuverOperation &&
+    ['next-attack-advantage', 'extended-reach', 'secondary-target-damage'].includes(combatManeuverOperation) &&
     action.classDamageContext?.mode !== 'melee'
   ) return fail(state, events, 'invalid-plugin-action')
   if (
-    battleMasterManeuver &&
-    ['pushing-attack', 'trip-attack'].includes(battleMasterManeuver) &&
+    combatManeuverOperation &&
+    ['push-on-hit', 'prone-on-hit'].includes(combatManeuverOperation) &&
     dnd5eEffectiveSizeRank(target) > 3
   ) return fail(state, events, 'invalid-target')
   if (action.classDamageContext?.mode === 'melee') {
@@ -9248,13 +9863,13 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       action.classDamageContext.distanceFeet,
     )
     const meleeReach = (action.classDamageContext.reachFeet ?? 5) +
-      (battleMasterManeuver === 'lunging-attack' ? 5 : 0)
+      (combatManeuverOperation === 'extended-reach' ? 5 : 0)
     if (Number.isFinite(meleeDistance) && meleeDistance > meleeReach) {
       return fail(state, events, 'invalid-target')
     }
   }
   if (
-    battleMasterManeuver === 'feinting-attack' &&
+    combatManeuverOperation === 'next-attack-advantage' &&
     dnd5eAttackDistanceFeet(state, actor.id, target.id) > 5
   ) return fail(state, events, 'invalid-target')
   if (action.type === 'opportunity-attack') {
@@ -9313,13 +9928,13 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       actor.classState.weaponAttackActionTurnKey !== turnKey
     ) return fail(state, events, 'invalid-class-feature')
   }
-  if (action.type === 'attack' && action.eldritchKnightWarMagicAttack) {
+  if (action.type === 'attack' && action.featureBonusWeaponAttack) {
     const turnKey = classFeatureTurnKey(state, actor.id)
-    const improved = dnd5eEldritchKnightFeatureForCombatant(actor, 'improved-war-magic')
-    const standard = dnd5eEldritchKnightFeatureForCombatant(actor, 'war-magic')
+    const improved = dnd5eMartialSpellSynergyForCombatant(actor, 'spell-then-bonus-attack')
+    const standard = dnd5eMartialSpellSynergyForCombatant(actor, 'cantrip-then-bonus-attack')
     const entitled = improved
-      ? actor.classState.eldritchKnightWarMagicTurnKey === turnKey
-      : !!standard && actor.classState.eldritchKnightWarMagicCantripTurnKey === turnKey
+      ? actor.classState.spellBonusWeaponAttackTurnKey === turnKey
+      : !!standard && actor.classState.cantripBonusWeaponAttackTurnKey === turnKey
     if (
       !entitled || action.spendAction !== false || action.spendBonusAction !== true
     ) return fail(state, events, 'invalid-class-feature')
@@ -9393,13 +10008,13 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       active: false,
     })
   }
-  if (action.type === 'attack' && action.eldritchKnightWarMagicAttack) {
-    actor.classState.eldritchKnightWarMagicCantripTurnKey = undefined
-    actor.classState.eldritchKnightWarMagicTurnKey = undefined
+  if (action.type === 'attack' && action.featureBonusWeaponAttack) {
+    actor.classState.cantripBonusWeaponAttackTurnKey = undefined
+    actor.classState.spellBonusWeaponAttackTurnKey = undefined
     events.push({
       type: 'class-state-changed',
       actorId: actor.id,
-      stateKey: 'eldritch-knight-war-magic',
+      stateKey: 'martial-spell-synergy-cantrip-then-bonus-attack',
       active: false,
     })
   }
@@ -9420,23 +10035,23 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   if (!spendProtectionReaction(state, actor, target, action.type === 'attack' ? action.protectionReactionActorId : undefined, events)) {
     return fail(state, events, 'invalid-class-feature')
   }
-  let battleMasterPrecisionBonus = 0
-  if (battleMasterManeuver === 'precision-attack' && battleMasterIntent) {
-    const total = dnd5eBattleMasterSuperiorityTotal({
+  let combatManeuverAttackRollBonus = 0
+  if (combatManeuverOperation === 'attack-roll-bonus' && combatManeuverIntent) {
+    const total = dnd5eCombatManeuverSuperiorityTotal({
       actor,
-      featureId: battleMasterIntent.featureId,
-      rolls: declarativeIntentRolls?.[battleMasterIntent.featureId],
+      featureId: combatManeuverIntent.featureId,
+      rolls: declarativeIntentRolls?.[combatManeuverIntent.featureId],
       critical: false,
     })
     if (total == null) return fail(state, events, 'invalid-dice')
-    battleMasterPrecisionBonus = total
+    combatManeuverAttackRollBonus = total
   }
   if (
-    battleMasterIntent &&
-    (battleMasterHook?.timing === 'before-attack-roll' || battleMasterHook?.timing === 'after-attack-roll') &&
-    !spendDnd5eBattleMasterAttackCost({
+    combatManeuverIntent &&
+    (combatManeuverHook?.timing === 'before-attack-roll' || combatManeuverHook?.timing === 'after-attack-roll') &&
+    !spendDnd5eCombatManeuverAttackCost({
       actor,
-      featureId: battleMasterIntent.featureId,
+      featureId: combatManeuverIntent.featureId,
       spendEconomy: true,
       events,
     })
@@ -9475,18 +10090,19 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       dnd5eUtilityProjectionAttackAdvantageApplies(state, actor, target) ||
       dnd5eNextD20AdvantageApplies(actor, 'attack') ||
       strengthRollEffect.advantage ||
-      dnd5eBattleMasterDistractingAdvantage(actor, target) ||
-      battleMasterManeuver === 'feinting-attack' ||
-      dnd5eTotemWolfPackAdvantage(state, actor, target, meleeWeaponAttack) ||
+      dnd5ePendingAllyAttackAdvantage(actor, target) ||
+      combatManeuverOperation === 'next-attack-advantage' ||
+      dnd5eRageAllyMeleeAdvantage(state, actor, target, meleeWeaponAttack) ||
       dnd5eOpeningAttackHasAdvantage(state, actor, target))
   const hasDisadvantage = requestedMode === 'disadvantage' || rangedDisadvantage || viciousMockeryDisadvantage || escapeTheHorde ||
+    actor.classState.monsterDamageAversionActive === true ||
     (actor.wearingUnproficientArmor && action.classDamageContext != null) ||
     (action.type === 'attack' && action.protectionReactionActorId != null) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
     dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
-    dnd5eBattleMasterGoadingDisadvantage(actor, target) ||
+    dnd5eSourceMarkedAttackDisadvantage(actor, target) ||
     dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) || strengthRollEffect.disadvantage ||
-    dnd5eTotemBearGuardianDisadvantage(state, actor, target) ||
-    dnd5eTotemEagleOpportunityDisadvantage(target, action.type === 'opportunity-attack')
+    dnd5eRageAllyProtectionDisadvantage(state, actor, target) ||
+    dnd5eRageOpportunityDisadvantage(target, action.type === 'opportunity-attack')
   const mode = resolveDnd5eRollMode({
     advantage: [{ active: hasAdvantage, reason: 'attack-advantage' }],
     disadvantage: [{ active: hasDisadvantage, reason: 'attack-disadvantage' }],
@@ -9508,7 +10124,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
         modifier: action.attackModifier + magicWeaponBonus +
           resolveDnd5eBlessRoll(state, actor, action.blessRoll) -
           resolveDnd5eBaneRoll(state, actor, action.baneRoll) +
-          battleMasterPrecisionBonus +
+          combatManeuverAttackRollBonus +
           (action.type === 'attack' && action.classDamageContext?.foeSlayer === 'attack' ? foeSlayerAttackBonus : 0),
         targetAc: targetArmorClass,
       }),
@@ -9542,7 +10158,14 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     forceHit: action.strokeOfLuck === true,
   })
   let { hit, critical } = attackOutcome
-  const shieldSpellApplied = applyShieldSpellReaction(state, target, action.shieldSpellReaction, hit, events)
+  const shieldSpellApplied = applyShieldSpellReaction(
+    state,
+    target,
+    action.shieldSpellReaction,
+    hit,
+    events,
+    { total: attack.roll.total, armorClass: targetArmorClass, critical },
+  )
   if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
   if (shieldSpellApplied) {
     targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -9574,43 +10197,43 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     critical,
     armorClass: targetArmorClass,
   } = monsterParry)
-  let battleMasterParryReduction = 0
-  let battleMasterParryDie = 0
-  let battleMasterParryFeatureId: string | undefined
-  const battleMasterReaction = action.type === 'attack'
+  let combatManeuverDamageReduction = 0
+  let combatManeuverDamageReductionDie = 0
+  let combatManeuverDamageReductionFeatureId: string | undefined
+  const combatManeuverReaction = action.type === 'attack'
     ? action.declarativeTargetReaction
     : undefined
-  if (battleMasterReaction) {
-    const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(battleMasterReaction.featureId)
-    const maneuver = definition?.mechanic.maneuver
+  if (combatManeuverReaction) {
+    const definition = dnd5eDeclarativeCombatManeuverDefinition(combatManeuverReaction.featureId)
+    const maneuver = definition?.mechanic.operation
     if (
       !definition ||
-      !target.pluginFeatureIds.includes(battleMasterReaction.featureId) ||
-      (hit ? maneuver !== 'parry' : maneuver !== 'riposte') ||
+      !target.pluginFeatureIds.includes(combatManeuverReaction.featureId) ||
+      (hit ? maneuver !== 'reaction-damage-reduction' : maneuver !== 'reaction-counterattack') ||
       action.classDamageContext?.mode !== 'melee'
     ) return fail(state, events, 'invalid-plugin-action')
-    if (maneuver === 'parry') {
-      if (battleMasterReaction.weaponAttack != null) return fail(state, events, 'invalid-plugin-action')
-      const plan = dnd5eDeclarativeBattleMasterRollPlan(target, battleMasterReaction.featureId)
+    if (maneuver === 'reaction-damage-reduction') {
+      if (combatManeuverReaction.weaponAttack != null) return fail(state, events, 'invalid-plugin-action')
+      const plan = dnd5eDeclarativeCombatManeuverRollPlan(target, combatManeuverReaction.featureId)
       if (!plan.ok || !validateDnd5ePluginDiceRolls(
         { rolls: plan.declarations },
-        battleMasterReaction.rolls,
+        combatManeuverReaction.rolls,
       )) return fail(state, events, 'invalid-dice')
-      const die = battleMasterReaction.rolls[definition.mechanic.superiorityRollId]
+      const die = combatManeuverReaction.rolls[definition.mechanic.superiorityRollId]
         ?.values.reduce((sum, value) => sum + value, 0)
-      if (!die || !spendDnd5eBattleMasterAttackCost({
+      if (!die || !spendDnd5eCombatManeuverAttackCost({
         actor: target,
-        featureId: battleMasterReaction.featureId,
+        featureId: combatManeuverReaction.featureId,
         spendEconomy: true,
         events,
       })) return fail(state, events, 'reaction-unavailable')
-      battleMasterParryReduction = Math.max(
+      combatManeuverDamageReduction = Math.max(
         0,
         die + rules.abilityModifier(target.abilities.dex),
       )
-      battleMasterParryDie = die
-      battleMasterParryFeatureId = battleMasterReaction.featureId
-    } else if (!battleMasterReaction.weaponAttack) {
+      combatManeuverDamageReductionDie = die
+      combatManeuverDamageReductionFeatureId = combatManeuverReaction.featureId
+    } else if (!combatManeuverReaction.weaponAttack) {
       return fail(state, events, 'invalid-plugin-action')
     }
   }
@@ -9621,8 +10244,8 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     const expectedRollFeatureIds = new Set<string>()
     const validatedRolls: Record<string, Record<string, Dnd5ePluginDiceRollResult>> = {}
     for (const featureId of declarativeIntentFeatureIds) {
-      const battleMaster = dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)
-      const rollOnMiss = battleMaster?.mechanic.maneuver === 'precision-attack'
+      const combatManeuver = dnd5eDeclarativeCombatManeuverDefinition(featureId)
+      const rollOnMiss = combatManeuver?.mechanic.operation === 'attack-roll-bonus'
       if (!hit && !rollOnMiss) continue
       const plan = dnd5eDeclarativeAttackIntentRollPlan(actor, featureId, critical)
       if (!plan.ok) return fail(state, events, plan.reason)
@@ -9671,13 +10294,16 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     return fail(state, events, 'invalid-class-feature')
   }
   if (hit && action.standAgainstTide) return fail(state, events, 'invalid-class-feature')
+  const bonusProneFeature = action.type === 'attack'
+    ? dnd5eRageFeatureForCombatant(actor, 'bonus-prone-on-hit')
+    : undefined
   if (
     hit &&
     action.type === 'attack' &&
-    dnd5eEldritchKnightFeatureForCombatant(actor, 'eldritch-strike')
+    dnd5eMartialSpellSynergyForCombatant(actor, 'weapon-hit-save-pressure')
   ) {
-    target.classState.eldritchStrikeBySource = {
-      ...(target.classState.eldritchStrikeBySource ?? {}),
+    target.classState.spellSavePressureBySource = {
+      ...(target.classState.spellSavePressureBySource ?? {}),
       [actor.id]: {
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
         sourceTurnsRemaining: currentActorId(state) === actor.id ? 2 : 1,
@@ -9686,7 +10312,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     events.push({
       type: 'class-state-changed',
       actorId: target.id,
-      stateKey: `eldritch-strike:${actor.id}`,
+      stateKey: `weapon-hit-save-pressure:${actor.id}`,
       active: true,
     })
   }
@@ -9696,14 +10322,14 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     action.classDamageContext?.mode === 'melee' &&
     actor.classState.raging === true &&
     actor.controller !== target.controller &&
-    dnd5eEffectiveSizeRank(target) <= 3 &&
-    dnd5eTotemWarriorFeatureForCombatant(actor, 'totemic-attunement-wolf')
+    !!bonusProneFeature &&
+    dnd5eEffectiveSizeRank(target) <= bonusProneFeature.mechanic.maximumTargetSizeRank!
   ) {
     const turnKey = classFeatureTurnKey(state, actor.id)
-    actor.classState.totemWarriorWolfAttunementTurnKey = turnKey
-    actor.classState.totemWarriorWolfAttunementTargetIds = [
+    actor.classState.bonusProneEligibleTurnKey = turnKey
+    actor.classState.bonusProneEligibleTargetIds = [
       ...new Set([
-        ...(actor.classState.totemWarriorWolfAttunementTargetIds ?? []),
+        ...(actor.classState.bonusProneEligibleTargetIds ?? []),
         target.id,
       ]),
     ]
@@ -9711,7 +10337,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       type: 'class-state-changed',
       actorId: actor.id,
       targetId: target.id,
-      stateKey: 'totem-warrior-wolf-attunement',
+      stateKey: 'rage-feature-bonus-prone',
       active: true,
     })
   }
@@ -9887,10 +10513,10 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
         events,
       )
       if (deflectedDamage == null) return fail(state, events, 'invalid-class-feature')
-      const parriedDamage = Math.max(0, deflectedDamage - battleMasterParryReduction)
+      const reducedDamage = Math.max(0, deflectedDamage - combatManeuverDamageReduction)
       damageComponents = adjustDnd5eDamageComponents(
         target,
-        scaleDnd5eDamageComponents(damageComponents, parriedDamage),
+        scaleDnd5eDamageComponents(damageComponents, reducedDamage),
         dnd5ePlayerWeaponDamageSource(actor, action.classDamageContext),
       )
       for (const component of damageComponents) {
@@ -9905,20 +10531,20 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
         ...(action.damage.type ? [action.damage.type] : []),
         ...resolvedClassDamage.map((entry) => entry.definition.type),
       ])
-      if (battleMasterParryFeatureId) {
+      if (combatManeuverDamageReductionFeatureId) {
         events.push({
-          type: 'battle-master-maneuver-resolved',
+          type: 'combat-maneuver-resolved',
           actorId: target.id,
           targetId: actor.id,
-          featureId: battleMasterParryFeatureId,
-          maneuver: 'parry',
-          superiorityDie: battleMasterParryDie,
-          value: battleMasterParryReduction,
+          featureId: combatManeuverDamageReductionFeatureId,
+          maneuver: 'reaction-damage-reduction',
+          superiorityDie: combatManeuverDamageReductionDie,
+          value: combatManeuverDamageReduction,
         })
         events.push({
           type: 'declarative-subclass-ability-resolved',
           actorId: target.id,
-          abilityId: battleMasterParryFeatureId,
+          abilityId: combatManeuverDamageReductionFeatureId,
           trigger: 'before-damage-taken',
           targetIds: [target.id],
         })
@@ -9954,15 +10580,15 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   if (
     action.type === 'attack' &&
     !hit &&
-    battleMasterReaction
+    combatManeuverReaction
   ) {
-    const definition = dnd5eDeclarativeBattleMasterManeuverDefinition(
-      battleMasterReaction.featureId,
+    const definition = dnd5eDeclarativeCombatManeuverDefinition(
+      combatManeuverReaction.featureId,
     )
-    const weaponAttack = battleMasterReaction.weaponAttack
+    const weaponAttack = combatManeuverReaction.weaponAttack
     if (
       !definition ||
-      definition.mechanic.maneuver !== 'riposte' ||
+      definition.mechanic.operation !== 'reaction-counterattack' ||
       !weaponAttack ||
       !target.classResources[definition.resourceId] ||
       target.classResources[definition.resourceId].current < 1
@@ -9970,12 +10596,12 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     if (!spendClassResource(target, definition.resourceId, events)) {
       return fail(state, events, 'class-resource-unavailable')
     }
-    const beforeRiposteEvents = events.length
-    const riposte = resolveWeaponAttack(state, {
+    const beforeCounterattackEvents = events.length
+    const reactionCounterattack = resolveWeaponAttack(state, {
       type: 'opportunity-attack',
       actorId: target.id,
       targetId: actor.id,
-      reactionFeature: 'battle-master-riposte',
+      reactionFeature: 'combat-maneuver-reaction-counterattack',
       attackModifier: weaponAttack.attackModifier,
       criticalThreshold: weaponAttack.criticalThreshold,
       d20: weaponAttack.d20,
@@ -9991,30 +10617,30 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       classDamageRolls: weaponAttack.classDamageRolls,
       openingAttackSavingThrow: weaponAttack.openingAttackSavingThrow,
     }, events)
-    if (!riposte.ok) return riposte
-    const riposteAttack = events.slice(beforeRiposteEvents).find((event) =>
+    if (!reactionCounterattack.ok) return reactionCounterattack
+    const reactionCounterattackAttack = events.slice(beforeCounterattackEvents).find((event) =>
       event.type === 'attack-resolved' &&
       event.actorId === target.id &&
       event.targetId === actor.id,
     )
-    if (!riposteAttack || riposteAttack.type !== 'attack-resolved') {
+    if (!reactionCounterattackAttack || reactionCounterattackAttack.type !== 'attack-resolved') {
       return fail(state, events, 'invalid-plugin-action')
     }
     let superiorityDie = 0
-    if (riposteAttack.hit) {
-      const plan = dnd5eDeclarativeBattleMasterRollPlan(
+    if (reactionCounterattackAttack.hit) {
+      const plan = dnd5eDeclarativeCombatManeuverRollPlan(
         target,
-        battleMasterReaction.featureId,
-        riposteAttack.critical,
+        combatManeuverReaction.featureId,
+        reactionCounterattackAttack.critical,
       )
       if (!plan.ok || !validateDnd5ePluginDiceRolls(
         { rolls: plan.declarations },
-        battleMasterReaction.rolls,
+        combatManeuverReaction.rolls,
       )) return fail(state, events, 'invalid-dice')
-      superiorityDie = battleMasterReaction.rolls[definition.mechanic.superiorityRollId]
+      superiorityDie = combatManeuverReaction.rolls[definition.mechanic.superiorityRollId]
         ?.values.reduce((sum, value) => sum + value, 0) ?? 0
       if (superiorityDie < 1) return fail(state, events, 'invalid-dice')
-      applyDnd5eBattleMasterDamage(
+      applyDnd5eCombatManeuverDamage(
         state,
         target,
         actor,
@@ -10023,74 +10649,74 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
         weaponAttack.classDamageContext,
         events,
       )
-    } else if (Object.keys(battleMasterReaction.rolls).length > 0) {
+    } else if (Object.keys(combatManeuverReaction.rolls).length > 0) {
       return fail(state, events, 'invalid-dice')
     }
     events.push({
-      type: 'battle-master-maneuver-resolved',
+      type: 'combat-maneuver-resolved',
       actorId: target.id,
       targetId: actor.id,
-      featureId: battleMasterReaction.featureId,
-      maneuver: 'riposte',
+      featureId: combatManeuverReaction.featureId,
+      maneuver: 'reaction-counterattack',
       superiorityDie,
       value: superiorityDie,
     })
     events.push({
       type: 'declarative-subclass-ability-resolved',
       actorId: target.id,
-      abilityId: battleMasterReaction.featureId,
+      abilityId: combatManeuverReaction.featureId,
       trigger: 'after-attack-miss',
       targetIds: [actor.id],
     })
   }
-  if (action.type === 'attack' && battleMasterIntent && battleMasterManeuver) {
+  if (action.type === 'attack' && combatManeuverIntent && combatManeuverOperation) {
     if (hit) {
       if (
-        battleMasterHook?.timing === 'after-attack-hit' &&
-        !spendDnd5eBattleMasterAttackCost({
+        combatManeuverHook?.timing === 'after-attack-hit' &&
+        !spendDnd5eCombatManeuverAttackCost({
           actor,
-          featureId: battleMasterIntent.featureId,
+          featureId: combatManeuverIntent.featureId,
           spendEconomy: true,
           events,
         })
       ) return fail(state, events, 'class-resource-unavailable')
-      const superiorityDie = dnd5eBattleMasterSuperiorityTotal({
+      const superiorityDie = dnd5eCombatManeuverSuperiorityTotal({
         actor,
-        featureId: battleMasterIntent.featureId,
-        rolls: declarativeIntentRolls?.[battleMasterIntent.featureId],
+        featureId: combatManeuverIntent.featureId,
+        rolls: declarativeIntentRolls?.[combatManeuverIntent.featureId],
         critical,
       })
       if (superiorityDie == null) return fail(state, events, 'invalid-dice')
-      if (battleMasterManeuver === 'precision-attack') {
+      if (combatManeuverOperation === 'attack-roll-bonus') {
         events.push({
-          type: 'battle-master-maneuver-resolved',
+          type: 'combat-maneuver-resolved',
           actorId: actor.id,
           targetId: target.id,
-          featureId: battleMasterIntent.featureId,
-          maneuver: battleMasterManeuver,
+          featureId: combatManeuverIntent.featureId,
+          maneuver: combatManeuverOperation,
           superiorityDie,
-          value: battleMasterPrecisionBonus,
+          value: combatManeuverAttackRollBonus,
         })
-      } else if (!applyDnd5eBattleMasterAfterHit({
+      } else if (!applyDnd5eCombatManeuverAfterHit({
         state,
         actor,
         target,
         action,
-        featureId: battleMasterIntent.featureId,
+        featureId: combatManeuverIntent.featureId,
         superiorityDie,
         critical,
         events,
       })) return fail(state, events, 'invalid-plugin-action')
     } else {
-      const superiorityDie = battleMasterManeuver === 'precision-attack'
-        ? battleMasterPrecisionBonus
+      const superiorityDie = combatManeuverOperation === 'attack-roll-bonus'
+        ? combatManeuverAttackRollBonus
         : 0
       events.push({
-        type: 'battle-master-maneuver-resolved',
+        type: 'combat-maneuver-resolved',
         actorId: actor.id,
         targetId: target.id,
-        featureId: battleMasterIntent.featureId,
-        maneuver: battleMasterManeuver,
+        featureId: combatManeuverIntent.featureId,
+        maneuver: combatManeuverOperation,
         superiorityDie,
         value: superiorityDie,
       })
@@ -10098,8 +10724,8 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     events.push({
       type: 'declarative-subclass-ability-resolved',
       actorId: actor.id,
-      abilityId: battleMasterIntent.featureId,
-      trigger: battleMasterHook?.timing ?? 'attack',
+      abilityId: combatManeuverIntent.featureId,
+      trigger: combatManeuverHook?.timing ?? 'attack',
       targetIds: [target.id],
     })
   }
@@ -10662,20 +11288,20 @@ function resolveSpellCast(
   if (!sustainedAttack && effectiveCastingTime === 'bonus-action') actor.classState.bonusActionSpellTurnKey = turnKey
   if (!sustainedAttack && spell.level > 0) actor.classState.leveledSpellTurnKey = turnKey
   if (!sustainedAttack && effectiveCastingTime === 'action') {
-    if (dnd5eEldritchKnightFeatureForCombatant(actor, 'improved-war-magic')) {
-      actor.classState.eldritchKnightWarMagicTurnKey = turnKey
+    if (dnd5eMartialSpellSynergyForCombatant(actor, 'spell-then-bonus-attack')) {
+      actor.classState.spellBonusWeaponAttackTurnKey = turnKey
       events.push({
         type: 'class-state-changed', actorId: actor.id,
-        stateKey: 'eldritch-knight-war-magic', active: true,
+        stateKey: 'martial-spell-synergy-cantrip-then-bonus-attack', active: true,
       })
     } else if (
       spell.level === 0 &&
-      dnd5eEldritchKnightFeatureForCombatant(actor, 'war-magic')
+      dnd5eMartialSpellSynergyForCombatant(actor, 'cantrip-then-bonus-attack')
     ) {
-      actor.classState.eldritchKnightWarMagicCantripTurnKey = turnKey
+      actor.classState.cantripBonusWeaponAttackTurnKey = turnKey
       events.push({
         type: 'class-state-changed', actorId: actor.id,
-        stateKey: 'eldritch-knight-war-magic-cantrip', active: true,
+        stateKey: 'martial-spell-synergy-cantrip-then-bonus-attack-cantrip', active: true,
       })
     }
   }
@@ -10704,6 +11330,7 @@ function resolveSpellCast(
   const suppliedDamageCuttingWordsCount = (action.cuttingWordsDamage ? 1 : 0) +
     (action.targetAttacks?.filter((attack) => attack.cuttingWordsDamage).length ?? 0)
   let consumedDamageCuttingWordsCount = 0
+  let spellDamageMaxDieBonusConsumed = false
   const consumeSpellDamageCuttingWords = (use: Dnd5eCuttingWordsUse | undefined) => {
     const reduction = consumeCuttingWords(state, actor, use, events)
     if (use && reduction != null) consumedDamageCuttingWordsCount += 1
@@ -10712,6 +11339,15 @@ function resolveSpellCast(
   const finishSpellCast = (): Dnd5eActionResult => {
     if (consumedDamageCuttingWordsCount !== suppliedDamageCuttingWordsCount) {
       return fail(state, events, 'invalid-class-feature')
+    }
+    if ((action.spellDamageMaxDieBonus != null) !== spellDamageMaxDieBonusConsumed) {
+      return fail(state, events, 'invalid-class-feature')
+    }
+    if (spellDamageMaxDieBonusConsumed && action.spellDamageMaxDieBonus) {
+      actor.classState.declarativeUsedTurnKeys = {
+        ...actor.classState.declarativeUsedTurnKeys,
+        [action.spellDamageMaxDieBonus.featureId]: turnKey,
+      }
     }
     if (!sustainedAttack && spell.sustainedAttack?.origin === 'persistent-area') {
       if (actor.classState.concentrationSpellId !== spell.id) {
@@ -10939,38 +11575,8 @@ function resolveSpellCast(
 
   if (spell.effect === 'dispel-magic') {
     if (action.effectRolls.length > 0 || requestedTargetIds.length !== 1) return fail(state, events, 'invalid-dice')
-    const spellEffects = new Map<string, { spellId: string; spellLevel: number; effectId: string; sourceActorId?: string }>()
-    for (const effect of target.classState.activeEffects ?? []) {
-      if (effect.source.kind !== 'spell' || !effect.source.rulesId) continue
-      const catalog = getDnd5eSrdSpellCatalogEntry(effect.source.rulesId)
-      if (!catalog) continue
-      const key = `${effect.source.actorId ?? 'unknown'}\u0000${catalog.id}`
-      if (!spellEffects.has(key)) {
-        spellEffects.set(key, {
-          spellId: catalog.id,
-          spellLevel: effect.source.spellLevel ?? catalog.level,
-          effectId: effect.id,
-          sourceActorId: effect.source.actorId,
-        })
-      }
-    }
-    for (const [sourceActorId, spellId] of Object.entries(target.classState.concentrationEffectsBySource ?? {})) {
-      const catalog = getDnd5eSrdSpellCatalogEntry(spellId)
-      if (!catalog) continue
-      const key = `${sourceActorId}\u0000${catalog.id}`
-      if (!spellEffects.has(key)) {
-        const source = state.combatants[sourceActorId]
-        spellEffects.set(key, {
-          spellId: catalog.id,
-          spellLevel: source?.classState.concentrationSpellId === catalog.id
-            ? source.classState.concentrationSpellLevel ?? catalog.level
-            : catalog.level,
-          effectId: `concentration:${sourceActorId}:${catalog.id}`,
-          sourceActorId,
-        })
-      }
-    }
-    const higherLevelEffects = [...spellEffects.values()].filter((entry) => entry.spellLevel > action.slotLevel)
+    const spellEffects = dnd5eDispelMagicEffectsOnTarget(state, target.id)
+    const higherLevelEffects = spellEffects.filter((entry) => entry.spellLevel > action.slotLevel)
     const suppliedChecks = action.dispelMagicChecks ?? []
     if (
       suppliedChecks.length !== higherLevelEffects.length ||
@@ -10978,7 +11584,7 @@ function resolveSpellCast(
       suppliedChecks.some((check) => !higherLevelEffects.some((entry) => entry.effectId === check.effectId))
     ) return fail(state, events, 'invalid-dice')
     const castingModifier = rules.abilityModifier(actor.abilities[spellcasting.ability])
-    for (const entry of spellEffects.values()) {
+    for (const entry of spellEffects) {
       const check = suppliedChecks.find((candidate) => candidate.effectId === entry.effectId)
       if (check && (!Number.isInteger(check.d20) || check.d20 < 1 || check.d20 > 20)) {
         return fail(state, events, 'invalid-dice')
@@ -11104,7 +11710,7 @@ function resolveSpellCast(
           heightenedTargetId === affectedTarget!.id ||
             hiddenSpellSaveDisadvantage,
         )
-        saveMode = consumeDnd5eEldritchStrikeSavingThrow(actor, affectedTarget!, saveMode, events)
+        saveMode = consumeDnd5eSpellSavePressure(actor, affectedTarget!, saveMode, events)
         const rolls = saveMode === 'normal'
           ? [supplied.d20]
           : [supplied.d20, supplied.d20Second ?? 0]
@@ -11198,7 +11804,7 @@ function resolveSpellCast(
             heightenedTargetId === affectedTarget.id ||
               hiddenSpellSaveDisadvantage,
           )
-          saveMode = consumeDnd5eEldritchStrikeSavingThrow(actor, affectedTarget, saveMode, events)
+          saveMode = consumeDnd5eSpellSavePressure(actor, affectedTarget, saveMode, events)
           const rolls = saveMode === 'normal'
             ? [action.savingThrowD20 ?? 0]
             : [action.savingThrowD20 ?? 0, action.savingThrowD20Second ?? 0]
@@ -11253,7 +11859,7 @@ function resolveSpellCast(
               heightenedTargetId === affectedTarget.id ||
                 hiddenSpellSaveDisadvantage,
             )
-            saveMode = consumeDnd5eEldritchStrikeSavingThrow(actor, affectedTarget, saveMode, events)
+            saveMode = consumeDnd5eSpellSavePressure(actor, affectedTarget, saveMode, events)
             const rolls = saveMode === 'normal'
               ? [supplied.d20]
               : [supplied.d20, supplied.d20Second ?? 0]
@@ -11654,16 +12260,153 @@ function resolveSpellCast(
     return next
   }
   const empoweredEffectRolls = applyEmpoweredRerolls('effect', undefined, action.effectRolls)
+  const spellDamageMaxDieBonus = action.spellDamageMaxDieBonus
+  const spellDamageMaxDieBonusFeature = spellDamageMaxDieBonus
+    ? dnd5eSpellDamageMaxDieBonusFeature(
+        state,
+        actor.id,
+        spellcastingClassId,
+        spellDamageMaxDieBonus.featureId,
+      )
+    : undefined
+  const spellDamageMaxDieBonusMechanic =
+    spellDamageMaxDieBonusFeature?.declarativeAbility?.mechanic
+  let spellDamageMaxDieBonusSides: number | undefined
+  let spellDamageMaxDieBonusSourceRolls: readonly number[] | undefined
+  if (spellDamageMaxDieBonus) {
+    const invalidCommonFields =
+      !spellDamageMaxDieBonusFeature ||
+      spellDamageMaxDieBonusMechanic?.kind !== 'spell-damage-max-die-bonus' ||
+      !Number.isInteger(spellDamageMaxDieBonus.dieIndex) ||
+      spellDamageMaxDieBonus.dieIndex < 0 ||
+      spellDamageMaxDieBonus.bonusRolls.length !== spellDamageMaxDieBonusMechanic?.additionalDice ||
+      overchannel ||
+      spell.damageType == null ||
+      ['healing', 'fixed-healing', 'healing-pool'].includes(spell.effect)
+    if (invalidCommonFields) return fail(state, events, 'invalid-class-feature')
+    if (spellDamageMaxDieBonus.group === 'effect') {
+      if (
+        spell.id === 'magic-missile' ||
+        spellDamageMaxDieBonus.targetId != null ||
+        spellDamageMaxDieBonus.attackIndex != null ||
+        spellDamageMaxDieBonus.componentIndex != null ||
+        spellDamageMaxDieBonus.projectileIndex != null
+      ) return fail(state, events, 'invalid-dice')
+      spellDamageMaxDieBonusSides = spell.dice.sides
+      spellDamageMaxDieBonusSourceRolls = empoweredEffectRolls
+    } else if (spellDamageMaxDieBonus.group === 'additional-effect') {
+      const componentIndex = spellDamageMaxDieBonus.componentIndex
+      if (
+        !Number.isInteger(componentIndex) || componentIndex! < 0 ||
+        spellDamageMaxDieBonus.targetId != null ||
+        spellDamageMaxDieBonus.attackIndex != null ||
+        spellDamageMaxDieBonus.projectileIndex != null
+      ) return fail(state, events, 'invalid-dice')
+      const component = additionalDamageComponents[componentIndex!]
+      spellDamageMaxDieBonusSides = component?.dice.sides
+      spellDamageMaxDieBonusSourceRolls = additionalEffectRolls[componentIndex!]
+    } else if (spellDamageMaxDieBonus.group === 'delayed-effect') {
+      if (
+        spellDamageMaxDieBonus.targetId != null ||
+        spellDamageMaxDieBonus.attackIndex != null ||
+        spellDamageMaxDieBonus.componentIndex != null ||
+        spellDamageMaxDieBonus.projectileIndex != null
+      ) return fail(state, events, 'invalid-dice')
+      spellDamageMaxDieBonusSides = spell.delayedDamage?.dice.sides
+      spellDamageMaxDieBonusSourceRolls = delayedEffectRolls
+    } else if (spellDamageMaxDieBonus.group === 'target-attack') {
+      const attackIndex = spellDamageMaxDieBonus.attackIndex
+      if (
+        !Number.isInteger(attackIndex) || attackIndex! < 0 ||
+        !spellDamageMaxDieBonus.targetId ||
+        spellDamageMaxDieBonus.componentIndex != null ||
+        spellDamageMaxDieBonus.projectileIndex != null
+      ) return fail(state, events, 'invalid-dice')
+      const targetAttack = action.targetAttacks?.[attackIndex!]
+      if (targetAttack?.targetId !== spellDamageMaxDieBonus.targetId) {
+        return fail(state, events, 'invalid-dice')
+      }
+      spellDamageMaxDieBonusSides = spell.dice.sides
+      spellDamageMaxDieBonusSourceRolls = applyEmpoweredRerolls(
+        'target-attack',
+        targetAttack.targetId,
+        targetAttack.effectRolls,
+        attackIndex!,
+      )
+    } else if (spellDamageMaxDieBonus.group === 'projectile') {
+      const projectileIndex = spellDamageMaxDieBonus.projectileIndex
+      if (
+        spell.id !== 'magic-missile' ||
+        !Number.isInteger(projectileIndex) || projectileIndex! < 0 ||
+        spellDamageMaxDieBonus.targetId == null ||
+        spellDamageMaxDieBonus.attackIndex != null ||
+        spellDamageMaxDieBonus.componentIndex != null ||
+        spellDamageMaxDieBonus.dieIndex !== projectileIndex ||
+        projectileTargetIds[projectileIndex!] !== spellDamageMaxDieBonus.targetId
+      ) return fail(state, events, 'invalid-dice')
+      spellDamageMaxDieBonusSides = spell.dice.sides
+      spellDamageMaxDieBonusSourceRolls = empoweredEffectRolls
+    }
+    if (
+      !spellDamageMaxDieBonusSides ||
+      !spellDamageMaxDieBonusSourceRolls ||
+      spellDamageMaxDieBonus.dieIndex >= spellDamageMaxDieBonusSourceRolls.length ||
+      spellDamageMaxDieBonusSourceRolls[spellDamageMaxDieBonus.dieIndex] !== spellDamageMaxDieBonusSides ||
+      spellDamageMaxDieBonus.bonusRolls.some((roll) =>
+        !Number.isInteger(roll) || roll < 1 || roll > spellDamageMaxDieBonusSides!
+      )
+    ) return fail(state, events, 'invalid-dice')
+  }
+  const spellDamageMaxDieBonusAmount = spellDamageMaxDieBonus?.bonusRolls.reduce(
+    (sum, roll) => sum + roll,
+    0,
+  ) ?? 0
+  const spellDamageMaxDieBonusFor = (input: {
+    group: Dnd5eSpellDamageMaxDieBonusGroup
+    targetId?: string
+    attackIndex?: number
+    componentIndex?: number
+    projectileIndex?: number
+  }): number => {
+    if (
+      !spellDamageMaxDieBonus ||
+      spellDamageMaxDieBonus.group !== input.group ||
+      spellDamageMaxDieBonus.targetId !== input.targetId ||
+      spellDamageMaxDieBonus.attackIndex !== input.attackIndex ||
+      spellDamageMaxDieBonus.componentIndex !== input.componentIndex ||
+      spellDamageMaxDieBonus.projectileIndex !== input.projectileIndex
+    ) return 0
+    if (!spellDamageMaxDieBonusConsumed) {
+      spellDamageMaxDieBonusConsumed = true
+      events.push({
+        type: 'spell-damage-max-die-bonus-applied',
+        actorId: actor.id,
+        spellId: spell.id,
+        featureId: spellDamageMaxDieBonus.featureId,
+        group: spellDamageMaxDieBonus.group,
+        targetId: spellDamageMaxDieBonus.targetId,
+        attackIndex: spellDamageMaxDieBonus.attackIndex,
+        componentIndex: spellDamageMaxDieBonus.componentIndex,
+        projectileIndex: spellDamageMaxDieBonus.projectileIndex,
+        dieSides: spellDamageMaxDieBonusSides!,
+        rolls: [...spellDamageMaxDieBonus.bonusRolls],
+        amount: spellDamageMaxDieBonusAmount,
+      })
+    }
+    return spellDamageMaxDieBonusAmount
+  }
   const damageOrHealing = (
     critical = false,
     effectRolls: readonly number[] = empoweredEffectRolls,
     effectDiceCount = diceCount,
     effectBonus = baseEffectBonus,
     classDamageBonus = draconicAffinityBonus + empoweredEvocationBonus,
+    bonusGroup: Parameters<typeof spellDamageMaxDieBonusFor>[0] = { group: 'effect' },
   ) => rules.resolveDamage({
     count: effectDiceCount,
     sides: spell.dice.sides,
-    bonus: effectBonus + (spell.effect === 'healing' ? 0 : classDamageBonus),
+    bonus: effectBonus + (spell.effect === 'healing' ? 0 : classDamageBonus) +
+      spellDamageMaxDieBonusFor(bonusGroup),
     rolls: overchannel
       ? Array.from({ length: effectDiceCount * (critical ? 2 : 1) }, () => spell.dice.sides)
       : effectRolls,
@@ -11676,8 +12419,16 @@ function resolveSpellCast(
     effectDiceCount = diceCount,
     effectBonus = baseEffectBonus,
     classDamageBonus = draconicAffinityBonus + empoweredEvocationBonus,
+    bonusGroup: Parameters<typeof spellDamageMaxDieBonusFor>[0] = { group: 'effect' },
   ) => {
-    const damage = damageOrHealing(critical, effectRolls, effectDiceCount, effectBonus, classDamageBonus)
+    const damage = damageOrHealing(
+      critical,
+      effectRolls,
+      effectDiceCount,
+      effectBonus,
+      classDamageBonus,
+      bonusGroup,
+    )
     const reduction = consumeSpellDamageCuttingWords(use)
     return reduction == null ? undefined : { ...damage, total: Math.max(0, damage.total - reduction) }
   }
@@ -11687,17 +12438,38 @@ function resolveSpellCast(
     if (additionalDamageComponents.length < 1) return undefined
     if (additionalEffectRolls.length !== additionalDamageComponents.length) throw new RangeError('missing spell damage component rolls')
     const primary = damageOrHealing(false)
-    const components: Dnd5eDamageComponent[] = [{ total: primary.total, type: spell.damageType }]
+    const components: Dnd5eDamageComponent[] = [{
+      total: primary.total,
+      type: spell.damageType,
+      roll: {
+        sides: spell.dice.sides,
+        rolls: [...primary.rolls],
+        bonus: primary.bonus,
+        total: primary.diceTotal + primary.bonus,
+      },
+    }]
     for (let index = 0; index < additionalDamageComponents.length; index += 1) {
       const definition = additionalDamageComponents[index]
       const count = damageDiceCounts[index + 1]
       const resolved = rules.resolveDamage({
         count,
         sides: definition.dice.sides,
-        bonus: definition.dice.bonus,
+        bonus: definition.dice.bonus + spellDamageMaxDieBonusFor({
+          group: 'additional-effect',
+          componentIndex: index,
+        }),
         rolls: additionalEffectRolls[index],
       })
-      components.push({ total: resolved.total, type: definition.damageType })
+      components.push({
+        total: resolved.total,
+        type: definition.damageType,
+        roll: {
+          sides: definition.dice.sides,
+          rolls: [...resolved.rolls],
+          bonus: resolved.bonus,
+          total: resolved.diceTotal + resolved.bonus,
+        },
+      })
     }
     const reduction = consumeSpellDamageCuttingWords(use)
     if (reduction == null) return undefined
@@ -11717,7 +12489,8 @@ function resolveSpellCast(
   }
   const blightDamageTotal = (combatant: Dnd5eCombatant, rolledTotal: number) =>
     spell.id === 'blight' && isPlantTarget(combatant)
-      ? diceCount * spell.dice.sides + baseEffectBonus + draconicAffinityBonus + empoweredEvocationBonus
+      ? diceCount * spell.dice.sides + baseEffectBonus + draconicAffinityBonus + empoweredEvocationBonus +
+        spellDamageMaxDieBonusFor({ group: 'effect' })
       : rolledTotal
   const applySpellDamage = (
     combatant: Dnd5eCombatant,
@@ -11829,7 +12602,7 @@ function resolveSpellCast(
     const damage = rules.resolveDamage({
       count: delayedDamageDiceCount,
       sides: delayed.dice.sides,
-      bonus: delayed.dice.bonus,
+      bonus: delayed.dice.bonus + spellDamageMaxDieBonusFor({ group: 'delayed-effect' }),
       rolls: overchannel
         ? Array.from({ length: delayedDamageDiceCount }, () => delayed.dice.sides)
         : delayedEffectRolls,
@@ -12178,11 +12951,11 @@ function resolveSpellCast(
       const amount = (spell.fixedHealing ?? 0) +
         Math.max(0, action.slotLevel - spell.level) * (spell.fixedHealingPerHigherSlot ?? 0)
       const lifeDomain = dnd5eCombatantClassLevel(actor, 'cleric') >= 1 && dnd5eCombatantHasSubclass(actor, 'cleric', 'life')
-      const domainBonus = lifeDomain ? 2 + spell.level : 0
+      const domainBonus = lifeDomain ? 2 + action.slotLevel : 0
       const restored = applyHealing(target, amount + domainBonus, events, true)
       cureHealAilments(target)
       if (lifeDomain && dnd5eCombatantClassLevel(actor, 'cleric') >= 6 && target.id !== actor.id && restored > 0) {
-        applyHealing(actor, 2 + spell.level, events, true)
+        applyHealing(actor, 2 + action.slotLevel, events, true)
       }
       return finishSpellCast()
     }
@@ -12192,13 +12965,13 @@ function resolveSpellCast(
       let restoredOtherCreature = false
       for (const allocation of healingAllocations) {
         const affectedTarget = state.combatants[allocation.targetId]!
-        const domainBonus = lifeDomain ? 2 + spell.level : 0
+        const domainBonus = lifeDomain ? 2 + action.slotLevel : 0
         const restored = applyHealing(affectedTarget, allocation.amount + domainBonus, events, true)
         cureHealAilments(affectedTarget)
         if (affectedTarget.id !== actor.id && restored > 0) restoredOtherCreature = true
       }
       if (lifeDomain && dnd5eCombatantClassLevel(actor, 'cleric') >= 6 && restoredOtherCreature) {
-        applyHealing(actor, 2 + spell.level, events, true)
+        applyHealing(actor, 2 + action.slotLevel, events, true)
       }
       return finishSpellCast()
     }
@@ -12208,14 +12981,14 @@ function resolveSpellCast(
       const maximumHealing = lifeDomain && dnd5eCombatantClassLevel(actor, 'cleric') >= 17
         ? diceCount * spell.dice.sides + baseEffectBonus
         : healing.total
-      const domainBonus = lifeDomain && spell.level > 0 ? 2 + spell.level : 0
+      const domainBonus = lifeDomain && spell.level > 0 ? 2 + action.slotLevel : 0
       let restoredOtherCreature = false
       for (const affectedTarget of targets) {
         const restored = applyHealing(affectedTarget!, maximumHealing + domainBonus, events, true)
         if (affectedTarget!.id !== actor.id && restored > 0) restoredOtherCreature = true
       }
       if (lifeDomain && dnd5eCombatantClassLevel(actor, 'cleric') >= 6 && spell.level > 0 && restoredOtherCreature) {
-        applyHealing(actor, 2 + spell.level, events, true)
+        applyHealing(actor, 2 + action.slotLevel, events, true)
       }
       return finishSpellCast()
     }
@@ -12224,7 +12997,13 @@ function resolveSpellCast(
         if ((!overchannel && action.effectRolls.length !== projectileTargetIds.length) || (overchannel && action.effectRolls.length > 0)) {
           return fail(state, events, 'invalid-dice')
         }
-        for (const shieldTargetId of shieldSpellReactionTargetIds) {
+        const resolvedShieldTargetIds = new Set(shieldSpellReactionTargetIds)
+        for (const candidate of targets) {
+          if (candidate?.statBlockId && dnd5eCanCastShieldSpell(candidate)) {
+            resolvedShieldTargetIds.add(candidate.id)
+          }
+        }
+        for (const shieldTargetId of resolvedShieldTargetIds) {
           if (!allowedHostileTargetIds.has(shieldTargetId)) continue
           const shieldTarget = state.combatants[shieldTargetId]
           if (!shieldTarget || applyShieldSpellReaction(state, shieldTarget, true, true, events) !== true) {
@@ -12282,7 +13061,11 @@ function resolveSpellCast(
           const damage = rules.resolveDamage({
             count: 1,
             sides: spell.dice.sides,
-            bonus: 1 + featureBonus,
+            bonus: 1 + featureBonus + spellDamageMaxDieBonusFor({
+              group: 'projectile',
+              targetId: projectileTargetId,
+              projectileIndex,
+            }),
             rolls: [dieRoll],
           })
           const reduction = Math.min(damage.total, cuttingWordsReduction)
@@ -12435,7 +13218,7 @@ function resolveSpellCast(
           if (spell.id === 'sunburst' && dnd5eSunburstSavingThrowDisadvantage(affectedTarget!)) {
             saveMode = imposeDnd5eDisadvantage(saveMode)
           }
-          saveMode = consumeDnd5eEldritchStrikeSavingThrow(actor, affectedTarget!, saveMode, events)
+          saveMode = consumeDnd5eSpellSavePressure(actor, affectedTarget!, saveMode, events)
           const rolls = saveMode === 'normal'
             ? [supplied.d20]
             : [supplied.d20, supplied.d20Second ?? 0]
@@ -12490,6 +13273,12 @@ function resolveSpellCast(
               components: damageComponents ?? [{
                 total: blightDamageTotal(resolvedTarget.target, damage!.total),
                 type: spell.damageType,
+                roll: {
+                  sides: spell.dice.sides,
+                  rolls: [...damage!.rolls],
+                  bonus: damage!.bonus,
+                  total: damage!.diceTotal + damage!.bonus,
+                },
               }],
               damageSource: spellDamageSource,
               events,
@@ -12544,7 +13333,7 @@ function resolveSpellCast(
       if (spell.id === 'sunburst' && dnd5eSunburstSavingThrowDisadvantage(target)) {
         saveMode = imposeDnd5eDisadvantage(saveMode)
       }
-      saveMode = consumeDnd5eEldritchStrikeSavingThrow(actor, target, saveMode, events)
+      saveMode = consumeDnd5eSpellSavePressure(actor, target, saveMode, events)
       const rolls = saveMode === 'normal'
         ? [action.savingThrowD20 ?? 0]
         : [action.savingThrowD20 ?? 0, action.savingThrowD20Second ?? 0]
@@ -12596,6 +13385,12 @@ function resolveSpellCast(
               components: damageComponents ?? [{
                 total: blightDamageTotal(target, damage!.total),
                 type: spell.damageType,
+                roll: {
+                  sides: spell.dice.sides,
+                  rolls: [...damage!.rolls],
+                  bonus: damage!.bonus,
+                  total: damage!.diceTotal + damage!.bonus,
+                },
               }],
               damageSource: spellDamageSource,
               events,
@@ -12682,8 +13477,8 @@ function resolveSpellCast(
             dnd5eHelpAttackApplies(state, actor, affectedTarget) ||
             dnd5eUtilityProjectionAttackAdvantageApplies(state, actor, affectedTarget) ||
             dnd5eNextD20AdvantageApplies(actor, 'attack') ||
-            dnd5eBattleMasterDistractingAdvantage(actor, affectedTarget) ||
-            dnd5eTotemWolfPackAdvantage(state, actor, affectedTarget, spellAttackDelivery === 'melee') ||
+            dnd5ePendingAllyAttackAdvantage(actor, affectedTarget) ||
+            dnd5eRageAllyMeleeAdvantage(state, actor, affectedTarget, spellAttackDelivery === 'melee') ||
             dnd5eOpeningAttackHasAdvantage(state, actor, affectedTarget))
         const actorHasDisadvantage = requestedMode === 'disadvantage' || supplied.protectionReactionActorId != null ||
           (spellAttackDelivery === 'ranged' && dnd5eHostileWithinFiveFeet(state, actor)) ||
@@ -12691,8 +13486,8 @@ function resolveSpellCast(
           dnd5eFrightenedAttackDisadvantage(state, actor) || dnd5eTargetIsDodging(affectedTarget) ||
           dnd5eBlurImposesAttackDisadvantage(state, actor.id, affectedTarget.id) ||
           dnd5eTargetIsUnseenForAttack(state, actor.id, affectedTarget.id) ||
-          dnd5eBattleMasterGoadingDisadvantage(actor, affectedTarget) ||
-          dnd5eTotemBearGuardianDisadvantage(state, actor, affectedTarget)
+          dnd5eSourceMarkedAttackDisadvantage(actor, affectedTarget) ||
+          dnd5eRageAllyProtectionDisadvantage(state, actor, affectedTarget)
         const mode = resolveDnd5eRollMode({
           advantage: [{ active: targetGrantsAdvantage, reason: 'spell-attack-advantage' }],
           disadvantage: [{ active: actorHasDisadvantage, reason: 'spell-attack-disadvantage' }],
@@ -12743,7 +13538,14 @@ function resolveSpellCast(
           automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, affectedTarget),
         })
         let { hit, critical } = attackOutcome
-        const shieldSpellApplied = applyShieldSpellReaction(state, affectedTarget, supplied.shieldSpellReaction, hit, events)
+        const shieldSpellApplied = applyShieldSpellReaction(
+          state,
+          affectedTarget,
+          supplied.shieldSpellReaction,
+          hit,
+          events,
+          { total: attack.roll.total, armorClass: targetArmorClass, critical },
+        )
         if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
         if (shieldSpellApplied) {
           targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, affectedTarget.id)
@@ -12786,6 +13588,11 @@ function resolveSpellCast(
             spell.id === 'eldritch-blast' ? 1 : diceCount,
             baseEffectBonus,
             sequencedSpellAttack && attackIndex > 0 ? 0 : draconicAffinityBonus + empoweredEvocationBonus,
+            {
+              group: 'target-attack',
+              targetId: supplied.targetId,
+              attackIndex,
+            },
           )
           if (!damage) return fail(state, events, 'invalid-class-feature')
           let openingAttackDamageMultiplier = 1
@@ -12908,8 +13715,8 @@ function resolveSpellCast(
         dnd5eHelpAttackApplies(state, actor, target) ||
         dnd5eUtilityProjectionAttackAdvantageApplies(state, actor, target) ||
         dnd5eNextD20AdvantageApplies(actor, 'attack') ||
-        dnd5eBattleMasterDistractingAdvantage(actor, target) ||
-        dnd5eTotemWolfPackAdvantage(state, actor, target, spellAttackDelivery === 'melee') ||
+        dnd5ePendingAllyAttackAdvantage(actor, target) ||
+        dnd5eRageAllyMeleeAdvantage(state, actor, target, spellAttackDelivery === 'melee') ||
         dnd5eOpeningAttackHasAdvantage(state, actor, target))
     const actorHasDisadvantage = requestedMode === 'disadvantage' || action.protectionReactionActorId != null ||
       (spellAttackDelivery === 'ranged' && dnd5eHostileWithinFiveFeet(state, actor)) ||
@@ -12917,8 +13724,8 @@ function resolveSpellCast(
       dnd5eFrightenedAttackDisadvantage(state, actor) || dnd5eTargetIsDodging(target) ||
       dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
       dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) ||
-      dnd5eBattleMasterGoadingDisadvantage(actor, target) ||
-      dnd5eTotemBearGuardianDisadvantage(state, actor, target)
+      dnd5eSourceMarkedAttackDisadvantage(actor, target) ||
+      dnd5eRageAllyProtectionDisadvantage(state, actor, target)
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: targetGrantsAdvantage, reason: 'spell-attack-advantage' }],
       disadvantage: [{ active: actorHasDisadvantage, reason: 'spell-attack-disadvantage' }],
@@ -12969,7 +13776,14 @@ function resolveSpellCast(
       automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, target),
     })
     let { hit, critical } = attackOutcome
-    const shieldSpellApplied = applyShieldSpellReaction(state, target, action.shieldSpellReaction, hit, events)
+    const shieldSpellApplied = applyShieldSpellReaction(
+      state,
+      target,
+      action.shieldSpellReaction,
+      hit,
+      events,
+      { total: attack.roll.total, armorClass: targetArmorClass, critical },
+    )
     if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
     if (shieldSpellApplied) {
       targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -13450,12 +14264,12 @@ function resolveDnd5ePendingMonsterMechanicTrigger(
         const mode = resolveDnd5eRollMode({
           advantage: [{
             active: attackModifier.advantage ||
-              dnd5eTotemWolfPackAdvantage(state, owner, target, (effect.attackMode ?? 'melee') === 'melee'),
+              dnd5eRageAllyMeleeAdvantage(state, owner, target, (effect.attackMode ?? 'melee') === 'melee'),
             reason: 'monster-mechanic-attack-advantage',
           }],
           disadvantage: [{
             active: attackModifier.disadvantage ||
-              dnd5eTotemBearGuardianDisadvantage(state, owner, target),
+              dnd5eRageAllyProtectionDisadvantage(state, owner, target),
             reason: 'monster-mechanic-attack-disadvantage',
           }],
         }).mode
@@ -13936,6 +14750,7 @@ function applyDnd5eMonsterFailedSaveConditions(input: {
             dc: input.dc,
             timing: 'target-turn-end',
             onSuccess: 'remove',
+            onFailureTransition: condition.onRepeatSaveFailureTransition,
           }
         : undefined,
       breakOn: condition.breakOnDamage ? ['takes-damage'] : undefined,
@@ -15529,9 +16344,9 @@ function resolveMonsterAction(
         dnd5eHelpAttackApplies(state, actor, target) ||
         dnd5eUtilityProjectionAttackAdvantageApplies(state, actor, target) ||
         dnd5eNextD20AdvantageApplies(actor, 'attack') ||
-        dnd5eBattleMasterDistractingAdvantage(actor, target) ||
+        dnd5ePendingAllyAttackAdvantage(actor, target) ||
         dnd5eMonsterPackTacticsAdvantage(state, monster, actor, target) ||
-        dnd5eTotemWolfPackAdvantage(state, actor, target, !usesRangedAttack) ||
+        dnd5eRageAllyMeleeAdvantage(state, actor, target, !usesRangedAttack) ||
         dnd5eOpeningAttackHasAdvantage(state, actor, target) ||
         dnd5eMonsterAttackTraitAdvantage(
           monster,
@@ -15550,11 +16365,12 @@ function resolveMonsterAction(
       distanceFeet > (attackDefinition.rangeFeet?.normal ?? 0) || dnd5eHostileWithinFiveFeet(state, actor)
     )
     const hasDisadvantage = requestedMode === 'disadvantage' || supplied.protectionReactionActorId != null ||
+      actor.classState.monsterDamageAversionActive === true ||
       rangedDisadvantage || viciousMockeryDisadvantage || dnd5eFrightenedAttackDisadvantage(state, actor) ||
       dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
       dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) || mechanicAttackModifier.disadvantage ||
-      strengthRollEffect.disadvantage || dnd5eBattleMasterGoadingDisadvantage(actor, target) ||
-      dnd5eTotemBearGuardianDisadvantage(state, actor, target)
+      strengthRollEffect.disadvantage || dnd5eSourceMarkedAttackDisadvantage(actor, target) ||
+      dnd5eRageAllyProtectionDisadvantage(state, actor, target)
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: hasAdvantage, reason: 'monster-attack-advantage' }],
       disadvantage: [{ active: hasDisadvantage, reason: 'monster-attack-disadvantage' }],
@@ -15615,6 +16431,7 @@ function resolveMonsterAction(
           supplied.shieldSpellReaction,
           hit,
           events,
+          { total: attack.roll.total, armorClass: targetArmorClass, critical },
         )
     if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
     if (shieldSpellApplied) {
@@ -16407,6 +17224,52 @@ function resolveMonsterSourceLinkedEngulfAction(
   return { ok: true, state, events }
 }
 
+function monsterSpecialActionHasUnexpectedInput(
+  action: Extract<Dnd5eAction, { type: 'monster-special-action' | 'monster-legendary-special-action' }>,
+  options: { allowTeleportDestination?: boolean } = {},
+): boolean {
+  return action.targetId != null ||
+    action.d20 != null || action.d20Second != null ||
+    action.halflingLuckyD20 != null || action.halflingLuckyD20Second != null ||
+    action.blessRoll != null || action.baneRoll != null ||
+    action.rerollD20 != null || action.rerollD20Second != null ||
+    action.bardicInspirationRoll != null || action.darkOnesOwnLuckRoll != null ||
+    action.legendaryResistance != null ||
+    (action.damageRolls?.length ?? 0) > 0 ||
+    (action.forcedMovements?.length ?? 0) > 0 ||
+    (!options.allowTeleportDestination && action.teleportDestination != null)
+}
+
+function triggerDnd5eMonsterAbilityEffectBreak(
+  state: Dnd5eHeadlessCombatState,
+  actor: Dnd5eCombatant,
+  monster: Dnd5eMonsterStatBlock,
+  abilityId: string,
+  events: Dnd5eCombatEvent[],
+): void {
+  const matchingRulesIds = new Set(monster.actions.flatMap((candidate) => {
+    if (
+      candidate.rule?.kind !== 'invisibility' ||
+      !candidate.rule.breakOnMonsterAbilityIds?.includes(abilityId)
+    ) return []
+    return [`monster:${monster.id}:${candidate.id}`]
+  }))
+  if (matchingRulesIds.size === 0) return
+  const removed = removeDnd5eEffectsByPredicate(
+    actor,
+    (effect) => effect.standardCondition === 'invisible' &&
+      effect.source.actorId === actor.id &&
+      effect.source.rulesId != null &&
+      matchingRulesIds.has(effect.source.rulesId),
+    'triggered',
+    events,
+    state,
+  )
+  if (removed.some((effect) => effect.duration.type === 'concentration')) {
+    endDnd5eConcentration(state, actor, events)
+  }
+}
+
 function resolveMonsterSpecialAction(
   state: Dnd5eHeadlessCombatState,
   action: Extract<Dnd5eAction, { type: 'monster-special-action' | 'monster-legendary-special-action' }>,
@@ -16472,6 +17335,34 @@ function resolveMonsterSpecialAction(
       action.bardicInspirationRoll != null || action.darkOnesOwnLuckRoll != null ||
       action.legendaryResistance != null
     ) return fail(state, events, 'invalid-dice')
+  } else if (rule.kind === 'teleport') {
+    const destination = action.teleportDestination
+    const fromElevationFeet = actor.elevationFeet ?? 0
+    const toElevationFeet = destination?.toElevationFeet ?? fromElevationFeet
+    const toGroundElevationFeet = destination?.toGroundElevationFeet ?? toElevationFeet
+    const submittedDistanceFeet = destination
+      ? Math.max(
+          dnd5eSubmittedStraightDisplacementFeet(state, actor.position, destination.to),
+          Math.abs(toElevationFeet - fromElevationFeet),
+        )
+      : Number.POSITIVE_INFINITY
+    if (
+      monsterSpecialActionHasUnexpectedInput(action, { allowTeleportDestination: true }) ||
+      !destination ||
+      !Number.isFinite(destination.to.x) ||
+      !Number.isFinite(destination.to.y) ||
+      !Number.isFinite(destination.distanceFeet) ||
+      destination.distanceFeet < 0 ||
+      !Number.isFinite(toElevationFeet) ||
+      !Number.isFinite(toGroundElevationFeet) ||
+      toElevationFeet < toGroundElevationFeet - 1e-4 ||
+      submittedDistanceFeet > rule.rangeFeet + 1e-4 ||
+      Math.abs(destination.distanceFeet - submittedDistanceFeet) > 1e-4
+    ) return fail(state, events, 'invalid-target')
+  } else if (rule.kind === 'invisibility') {
+    if (monsterSpecialActionHasUnexpectedInput(action)) {
+      return fail(state, events, 'invalid-dice')
+    }
   } else if (rule.kind === 'saving-throw-condition') {
     const distanceFeet = target ? dnd5eAttackDistanceFeet(state, actor.id, target.id) : Number.POSITIVE_INFINITY
     const immunity = dnd5eMonsterActionImmunityRule(definition)
@@ -16503,6 +17394,38 @@ function resolveMonsterSpecialAction(
       action.damageRolls?.some((roll) =>
         !Number.isInteger(roll) || roll < 1 || roll > rule.damage.sides)
     ) return fail(state, events, 'invalid-dice')
+  } else if (rule.kind === 'healing-touch') {
+    const distanceFeet = target
+      ? dnd5eAttackDistanceFeet(state, actor.id, target.id)
+      : Number.POSITIVE_INFINITY
+    if (
+      !target ||
+      target.id === actor.id ||
+      target.currentHp <= 0 ||
+      target.deathSaves.dead ||
+      dnd5eCombatantIsBanished(target) ||
+      distanceFeet > rule.rangeFeet ||
+      state.lineOfEffectBlockedByCombatantPair?.[
+        dnd5eDirectedCombatantPairKey(actor.id, target.id)
+      ] === true
+    ) return fail(state, events, 'invalid-target')
+    if (
+      action.d20 != null ||
+      action.d20Second != null ||
+      action.halflingLuckyD20 != null ||
+      action.halflingLuckyD20Second != null ||
+      action.blessRoll != null ||
+      action.baneRoll != null ||
+      action.rerollD20 != null ||
+      action.rerollD20Second != null ||
+      action.bardicInspirationRoll != null ||
+      action.darkOnesOwnLuckRoll != null ||
+      action.legendaryResistance != null ||
+      action.damageRolls?.length !== rule.healing.count ||
+      action.damageRolls.some((roll) =>
+        !Number.isInteger(roll) || roll < 1 || roll > rule.healing.sides) ||
+      (action.forcedMovements?.length ?? 0) > 0
+    ) return fail(state, events, 'invalid-dice')
   }
 
   if (
@@ -16513,6 +17436,11 @@ function resolveMonsterSpecialAction(
     definition.usage?.kind === 'per-day' &&
     (actor.classState.monsterActionUsesByActionId?.[definition.id]?.current ?? 0) < 1
   ) return fail(state, events, 'class-resource-unavailable')
+
+  // A valid use of a specifically declared monster ability ends any matching
+  // invisibility before the new action resolves. Failed/replayed commands do
+  // not mutate the source state because the engine resolves against a clone.
+  triggerDnd5eMonsterAbilityEffectBreak(state, actor, monster, definition.id, events)
 
   if (legendary) {
     const cost = Math.max(1, definition.legendaryCost ?? 1)
@@ -16537,6 +17465,68 @@ function resolveMonsterSpecialAction(
     const resource = actor.classState.monsterActionUsesByActionId?.[definition.id]
     if (!resource) return fail(state, events, 'class-resource-unavailable')
     resource.current -= 1
+  }
+
+  if (rule.kind === 'teleport') {
+    const destination = action.teleportDestination!
+    const from = { ...actor.position }
+    const fromElevationFeet = actor.elevationFeet ?? 0
+    const toElevationFeet = destination.toElevationFeet ?? fromElevationFeet
+    const toGroundElevationFeet = destination.toGroundElevationFeet ?? toElevationFeet
+    actor.position = { ...destination.to }
+    actor.elevationFeet = toElevationFeet
+    actor.groundElevationFeet = toGroundElevationFeet
+    actor.airborne = toElevationFeet > toGroundElevationFeet + 1e-4
+    events.push({
+      type: 'teleported',
+      actorId: actor.id,
+      spellId: `monster:${monster.id}:${definition.id}`,
+      from,
+      to: actor.position,
+      distanceFeet: destination.distanceFeet,
+      fromElevationFeet,
+      toElevationFeet,
+    })
+    events.push({
+      type: 'monster-special-action-resolved',
+      actorId: actor.id,
+      actionId: definition.id,
+      legendary,
+    })
+    return { ok: true, state, events }
+  }
+
+  if (rule.kind === 'invisibility') {
+    const rulesId = `monster:${monster.id}:${definition.id}`
+    beginDnd5eConcentration(
+      state,
+      actor,
+      rulesId,
+      [actor.id],
+      rule.maximumDurationRounds,
+      events,
+    )
+    const applied = applyDnd5eStandardConditionEffect(actor, actor, {
+      rulesId,
+      condition: 'invisible',
+      duration: {
+        type: 'concentration',
+        sourceActorId: actor.id,
+        concentrationId: rulesId,
+        remainingRounds: rule.maximumDurationRounds,
+      },
+      breakOn: [...rule.breakOn],
+      sourceKind: 'monster',
+      magical: true,
+    }, events)
+    events.push({
+      type: 'monster-special-action-resolved',
+      actorId: actor.id,
+      actionId: definition.id,
+      legendary,
+      success: applied,
+    })
+    return { ok: true, state, events }
   }
 
   if (rule.kind === 'ability-check') {
@@ -16681,6 +17671,46 @@ function resolveMonsterSpecialAction(
     events.push({
       type: 'monster-special-action-resolved', actorId: actor.id, actionId: definition.id,
       legendary, targetId: targetCombatant.id, success: save.success,
+    })
+    return { ok: true, state, events }
+  }
+
+  if (rule.kind === 'healing-touch') {
+    const targetCombatant = target!
+    let healingTotal: number
+    try {
+      healingTotal = rules.resolveDamage({
+        count: rule.healing.count,
+        sides: rule.healing.sides,
+        bonus: rule.healing.bonus,
+        rolls: action.damageRolls!,
+      }).total
+    } catch {
+      return fail(state, events, 'invalid-dice')
+    }
+    const healing = applyHealing(targetCombatant, healingTotal, events)
+    const aliasesByRemoval = {
+      curse: ['curse', 'cursed', '诅咒'],
+      disease: ['disease', 'diseased', '疾病'],
+      poisoned: ['poison', 'poisoned', '中毒'],
+      blinded: ['blindness', 'blinded', '目盲'],
+      deafened: ['deafness', 'deafened', '耳聋'],
+    } as const
+    for (const removal of rule.removes) {
+      removeDnd5eConditionEffects(
+        targetCombatant,
+        aliasesByRemoval[removal],
+        'healed',
+        events,
+      )
+    }
+    events.push({
+      type: 'monster-special-action-resolved',
+      actorId: actor.id,
+      actionId: definition.id,
+      legendary,
+      targetId: targetCombatant.id,
+      healing,
     })
     return { ok: true, state, events }
   }
@@ -17013,11 +18043,14 @@ function resolveDnd5eLegendaryWingAttack(
   action: Extract<Dnd5eAction, { type: 'monster-adjudicated-action' }>,
   events: Dnd5eCombatEvent[],
 ): boolean {
-  const rule = parseDnd5eLegendaryWingAttack(definition.id, definition.description)
-  if (!rule || action.effects.length !== 0 || action.d20 != null) return false
+  const rule = definition.rule
+  if (
+    rule?.kind !== 'legendary-wing-attack' ||
+    action.effects.length !== 0 ||
+    action.d20 != null
+  ) return false
   const expectedTargets = Object.values(state.combatants).filter((candidate) =>
     candidate.id !== actor.id &&
-    candidate.controller !== actor.controller &&
     candidate.currentHp > 0 &&
     !candidate.deathSaves.dead &&
     !dnd5eCombatantIsBanished(candidate) &&
@@ -17058,7 +18091,7 @@ function resolveDnd5eLegendaryWingAttack(
         darkOnesOwnLuckRoll: roll.darkOnesOwnLuckRoll,
         mode,
         modifier,
-        dc: rule.saveDc,
+        dc: rule.dc,
         events,
         legendaryResistance: roll.legendaryResistance,
       })
@@ -17069,18 +18102,18 @@ function resolveDnd5eLegendaryWingAttack(
         d20: save.roll.d20,
         modifier,
         total: save.roll.total,
-        dc: rule.saveDc,
+        dc: rule.dc,
         success: save.success,
       })
       if (save.success) continue
       applyDamage(
         target,
-        adjustDamageForTarget(target, damage, 'bludgeoning'),
+        adjustDamageForTarget(target, damage, rule.damage.type),
         false,
         events,
         actor,
         state,
-        ['bludgeoning'],
+        [rule.damage.type],
       )
       applyDnd5eRulesCondition(target, actor, {
         condition: 'prone',
@@ -17089,7 +18122,9 @@ function resolveDnd5eLegendaryWingAttack(
         duration: { type: 'permanent' },
       }, events)
     }
-    const movementGranted = Math.max(0, Math.floor((monster.speed.fly ?? 0) / 2))
+    const movementGranted = Math.max(0, Math.floor(
+      (monster.speed.fly ?? 0) * rule.followUpMovement.maximumSpeedFraction,
+    ))
     actor.turn.movementRemaining += movementGranted
     if (movementGranted > 0) {
       events.push({ type: 'movement-granted', actorId: actor.id, amount: movementGranted })
@@ -17119,13 +18154,22 @@ function resolveMonsterAdjudicatedAction(
   const definition = legendary
     ? monster?.legendaryActions?.find((candidate) => candidate.id === action.actionId)
     : monster?.actions.find((candidate) => candidate.id === action.actionId)
+  const automation = definition
+    ? dnd5eMonsterActionAutomation(definition)
+    : 'invalid'
+  const structuredLegendaryWingAttack =
+    legendary && definition?.rule?.kind === 'legendary-wing-attack'
   if (
     !actor || actor.currentHp <= 0 || !monster || !definition ||
-    dnd5eMonsterActionAutomation(definition) !== 'dm-adjudication' ||
+    (
+      automation !== 'dm-adjudication' &&
+      !(structuredLegendaryWingAttack && automation === 'headless')
+    ) ||
     !dnd5eMonsterRelationRequirementAllows(state, action.actorId, definition)
   ) {
     return fail(state, events, 'invalid-monster-action')
   }
+  triggerDnd5eMonsterAbilityEffectBreak(state, actor, monster, definition.id, events)
   if (legendary) {
     if (state.initiativeOrder[state.initiativeIndex] === actor.id) return fail(state, events, 'invalid-monster-action')
     const cost = Math.max(1, definition.legendaryCost ?? 1)
@@ -17137,8 +18181,13 @@ function resolveMonsterAdjudicatedAction(
       cost, remaining: actor.classState.monsterLegendaryActionPoints,
     })
   } else {
-    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
-    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    const economy = definition.economy === 'bonus-action' ? 'bonusAction' : 'action'
+    if (!spend(actor, economy)) {
+      return fail(state, events, economy === 'bonusAction'
+        ? 'bonus-action-unavailable'
+        : 'action-unavailable')
+    }
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: economy })
   }
   if (definition.usage?.kind === 'recharge') {
     if (actor.classState.monsterRechargeReadyByActionId?.[definition.id] === false) {
@@ -17293,6 +18342,54 @@ function isUndeadOrConstructMonsterSpellTarget(target: Dnd5eCombatant): boolean 
     creatureType === 'construct' || creatureType.includes('构装')
 }
 
+function dnd5eMonsterCoreForcedMovementIsValid(input: {
+  state: Dnd5eHeadlessCombatState
+  actor: Dnd5eCombatant
+  target: Dnd5eCombatant
+  movement: Dnd5eSpellForcedMovement
+  maximumDistanceFeet: number
+}): boolean {
+  const { state, actor, target, movement, maximumDistanceFeet } = input
+  const from = target.position
+  const samePosition = movement.to.x === from.x && movement.to.y === from.y
+  const deltaX = movement.to.x - from.x
+  const deltaY = movement.to.y - from.y
+  const sourceDirectionX = Math.sign(from.x - actor.position.x)
+  const sourceDirectionY = Math.sign(from.y - actor.position.y)
+  const movementDirectionX = Math.sign(deltaX)
+  const movementDirectionY = Math.sign(deltaY)
+  const grid = state.gridDistance
+  const usesGrid = !!grid &&
+    Number.isFinite(grid.cellUnits) && grid.cellUnits > 0 &&
+    Number.isFinite(grid.feetPerCell) && grid.feetPerCell > 0
+  const actualDistanceFeet = usesGrid
+    ? Math.max(Math.abs(deltaX), Math.abs(deltaY)) / grid!.cellUnits * grid!.feetPerCell
+    : Math.max(Math.abs(deltaX), Math.abs(deltaY)) /
+      (Number.isFinite(state.coordinateUnitsPerFoot) && (state.coordinateUnitsPerFoot ?? 0) > 0
+        ? state.coordinateUnitsPerFoot!
+        : 1)
+  const directionMatches = (
+    (sourceDirectionX !== 0 || sourceDirectionY !== 0) &&
+    movementDirectionX === sourceDirectionX &&
+    movementDirectionY === sourceDirectionY &&
+    (
+      sourceDirectionX === 0 ||
+      sourceDirectionY === 0 ||
+      Math.abs(Math.abs(deltaX) - Math.abs(deltaY)) <= 1e-6
+    )
+  )
+  return Number.isFinite(movement.to.x) &&
+    Number.isFinite(movement.to.y) &&
+    Number.isFinite(movement.distanceFeet) &&
+    movement.distanceFeet >= 0 &&
+    movement.distanceFeet <= maximumDistanceFeet &&
+    (movement.distanceFeet === 0
+      ? samePosition && movement.toElevationFeet == null &&
+        (movement.fallingDamageRolls?.length ?? 0) === 0
+      : !samePosition && directionMatches &&
+        Math.abs(actualDistanceFeet - movement.distanceFeet) <= 1e-6)
+}
+
 function resolveMonsterCoreSpell(
   state: Dnd5eHeadlessCombatState,
   action: Extract<Dnd5eAction, { type: 'monster-core-spell' }>,
@@ -17316,7 +18413,7 @@ function resolveMonsterCoreSpell(
     compatibility?.automation !== 'full' ||
     resolution?.schemaVersion !== 1 ||
     targetIds.length !== resolution.targetIds.length ||
-    (spell.effect !== 'teleport' && targetIds.length < 1) ||
+    (!['teleport', 'persistent-area'].includes(spell.effect) && targetIds.length < 1) ||
     targetIds.length > dnd5eSpellMaximumTargets(spell, action.slotLevel, casterLevel) ||
     targets.some((target) => !target || target.deathSaves.dead || dnd5eCombatantIsBanished(target)) ||
     !Number.isInteger(action.slotLevel) ||
@@ -17360,11 +18457,21 @@ function resolveMonsterCoreSpell(
       isUndeadOrConstructMonsterSpellTarget(target!)
     ) return true
     if (
-      spell.id === 'charm-person' &&
+      (spell.id === 'charm-person' || spell.id === 'hold-person') &&
       !dnd5eCharmPersonEligibleCreatureType(target!.creatureType)
     ) return true
     return spell.target === 'hostile' && dnd5eTranquilityWardCheck(actor, target!, state) != null
   })) return fail(state, events, 'invalid-target')
+  if (
+    spell.requiresVisibleTarget === true &&
+    targets.some((target) => !dnd5eCombatantCanSee(state, actor.id, target!.id))
+  ) return fail(state, events, 'invalid-target')
+  if (spell.maximumTargetSeparationFeet != null && targets.some((left, leftIndex) =>
+    targets.some((right, rightIndex) =>
+      rightIndex > leftIndex &&
+      dnd5eAttackDistanceFeet(state, left!.id, right!.id) > spell.maximumTargetSeparationFeet!,
+    ),
+  )) return fail(state, events, 'invalid-target')
   const legendaryResistanceTargetIds = new Set(resolution.legendaryResistanceTargetIds ?? [])
   if (
     legendaryResistanceTargetIds.size !== (resolution.legendaryResistanceTargetIds?.length ?? 0) ||
@@ -17391,7 +18498,7 @@ function resolveMonsterCoreSpell(
     shieldSpellReactionTargetIds.some((targetId) => !targetIds.includes(targetId))
   ) return fail(state, events, 'invalid-dice')
   const expectedRollGroups = (
-    ['spell-attack', 'healing'].includes(spell.effect) ||
+    ['spell-attack', 'healing', 'sleep-hit-point-pool'].includes(spell.effect) ||
     (spell.effect === 'saving-throw' && expectedDiceCount > 0)
   ) ? 1 : 0
   const suppliedPrimaryRollCount = resolution.effectRolls[0]?.length ?? 0
@@ -17402,8 +18509,42 @@ function resolveMonsterCoreSpell(
         ? suppliedPrimaryRollCount !== expectedDiceCount && suppliedPrimaryRollCount !== expectedDiceCount * 2
         : suppliedPrimaryRollCount !== expectedDiceCount) ||
       resolution.effectRolls[0].some((roll) => !Number.isInteger(roll) || roll < 1 || roll > spell.dice.sides)
-    ))
+    )) ||
+    (spell.effect !== 'saving-throw' && (resolution.targetSavingThrows?.length ?? 0) > 0) ||
+    (spell.effect !== 'spell-attack' && (
+      resolution.d20 != null || resolution.d20Second != null || resolution.attackPostD20Adjustment != null
+    )) ||
+    (spell.effect !== 'saving-throw' && legendaryResistanceTargetIds.size > 0)
   ) return fail(state, events, 'invalid-dice')
+  if (
+    spell.effect === 'dispel-magic'
+      ? resolution.effectRolls.length > 0 || (resolution.targetSavingThrows?.length ?? 0) > 0
+      : (resolution.dispelMagicChecks?.length ?? 0) > 0
+  ) return fail(state, events, 'invalid-dice')
+  const forcedMovements = resolution.forcedMovements ?? []
+  const usesThunderwavePush = spell.id === 'thunderwave' &&
+    spell.onFailedSaveEffect === 'thunderwave-push'
+  if (
+    (!usesThunderwavePush && forcedMovements.length > 0) ||
+    (usesThunderwavePush && (
+      forcedMovements.length !== targetIds.length ||
+      new Set(forcedMovements.map((movement) => movement.targetId)).size !== forcedMovements.length ||
+      forcedMovements.some((movement) => !targetIds.includes(movement.targetId)) ||
+      forcedMovements.some((movement) => {
+        const target = state.combatants[movement.targetId]
+        return !target || !dnd5eMonsterCoreForcedMovementIsValid({
+          state,
+          actor,
+          target,
+          movement,
+          maximumDistanceFeet: 10,
+        })
+      })
+    )) ||
+    (spell.effect === 'remove-condition'
+      ? !resolution.conditionChoice || !spell.conditionOptions?.includes(resolution.conditionChoice)
+      : resolution.conditionChoice != null)
+  ) return fail(state, events, 'invalid-target')
   if (!spendDnd5eMonsterSpellEconomy(actor, spell.castingTime, events)) {
     return fail(state, events, spell.castingTime === 'reaction'
       ? 'reaction-unavailable'
@@ -17479,10 +18620,83 @@ function resolveMonsterCoreSpell(
         fromElevationFeet,
         toElevationFeet,
       })
+    } else if (spell.effect === 'dispel-magic') {
+      if (targets.length !== 1 || !monster.spellcasting.ability) {
+        return fail(state, events, 'invalid-target')
+      }
+      const dispelTarget = targets[0]!
+      const spellEffects = dnd5eDispelMagicEffectsOnTarget(state, dispelTarget.id)
+      const higherLevelEffects = spellEffects.filter((entry) => entry.spellLevel > action.slotLevel)
+      const suppliedChecks = resolution.dispelMagicChecks ?? []
+      if (
+        suppliedChecks.length !== higherLevelEffects.length ||
+        new Set(suppliedChecks.map((check) => check.effectId)).size !== suppliedChecks.length ||
+        suppliedChecks.some((check) =>
+          !higherLevelEffects.some((entry) => entry.effectId === check.effectId) ||
+          !Number.isInteger(check.d20) || check.d20 < 1 || check.d20 > 20)
+      ) return fail(state, events, 'invalid-dice')
+      const castingModifier = rules.abilityModifier(monster.abilities[monster.spellcasting.ability])
+      for (const entry of spellEffects) {
+        const check = suppliedChecks.find((candidate) => candidate.effectId === entry.effectId)
+        const dc = entry.spellLevel > action.slotLevel ? 10 + entry.spellLevel : undefined
+        const total = check ? check.d20 + castingModifier : undefined
+        const success = dc == null || (total ?? 0) >= dc
+        if (success) {
+          const source = entry.sourceActorId ? state.combatants[entry.sourceActorId] : undefined
+          const endedConcentrationTarget = source
+            ? endDnd5eSpellEffectOnTarget(state, source, dispelTarget, entry.spellId, events)
+            : false
+          if (!endedConcentrationTarget) {
+            removeDnd5eEffectsByPredicate(
+              dispelTarget,
+              (effect) => effect.source.kind === 'spell' &&
+                effect.source.rulesId === entry.spellId &&
+                effect.source.actorId === entry.sourceActorId,
+              'dm',
+              events,
+            )
+          }
+        }
+        events.push({
+          type: 'spell-dispelled', actorId: actor.id, targetId: dispelTarget.id,
+          spellId: entry.spellId, spellLevel: entry.spellLevel, effectId: entry.effectId,
+          dc, total, success,
+        })
+      }
+    } else if (spell.effect === 'persistent-area') {
+      if (
+        targetIds.length !== 0 ||
+        resolution.effectRolls.length !== 0 ||
+        (resolution.targetSavingThrows?.length ?? 0) !== 0 ||
+        !spell.concentration
+      ) return fail(state, events, 'invalid-monster-action')
+      beginDnd5eConcentration(
+        state,
+        actor,
+        spell.id,
+        [],
+        spell.concentrationDurationRounds ?? 100,
+        events,
+        action.slotLevel,
+      )
+      events.push({
+        type: 'class-state-changed',
+        actorId: actor.id,
+        stateKey: `persistent-area:${spell.id}`,
+        active: true,
+      })
     } else if (spell.effect === 'stabilize') {
       if (targets.length !== 1 || targets[0]!.currentHp !== 0) return fail(state, events, 'invalid-target')
       targets[0]!.deathSaves = { successes: 0, failures: 0, stable: true, dead: false }
       events.push({ type: 'creature-stabilized', actorId: actor.id, targetId: targets[0]!.id })
+    } else if (spell.effect === 'remove-condition') {
+      if (targets.length !== 1 || !resolution.conditionChoice) {
+        return fail(state, events, 'invalid-target')
+      }
+      const aliases = resolution.conditionChoice === 'disease'
+        ? ['disease', '疾病']
+        : [resolution.conditionChoice]
+      removeDnd5eConditionEffects(targets[0]!, aliases, 'healed', events)
     } else if (spell.effect === 'healing') {
       const ability = monster.spellcasting.ability
       const bonus = spell.dice.bonus + (spell.addSpellcastingModifier && ability
@@ -17578,6 +18792,169 @@ function resolveMonsterCoreSpell(
           bonus,
         },
       }, events)
+    } else if (
+      spell.effect === 'active-effect' &&
+      spell.appliedEffect &&
+      [
+        'barkskin',
+        'blur',
+        'fly',
+        'greater-invisibility',
+        'invisibility',
+        'longstrider',
+        'mage-armor',
+        'protection-from-poison',
+      ].includes(spell.appliedEffect)
+    ) {
+      if (
+        targets.length < 1 ||
+        (spell.rangeFeet === 0 && targets.some((target) => target!.id !== actor.id)) ||
+        (spell.appliedEffect === 'mage-armor' && targets.some((target) => target!.wearingArmor))
+      ) return fail(state, events, 'invalid-target')
+      const affectedTargets = targets.filter((target): target is Dnd5eCombatant =>
+        target != null && !limitedMagicImmunityTargetIds.has(target.id))
+      const durationRounds = spell.concentration
+        ? spell.concentrationDurationRounds ?? 10
+        : spell.effectDurationRounds ?? 1
+      if (spell.concentration) {
+        beginDnd5eConcentration(
+          state,
+          actor,
+          spell.id,
+          affectedTargets.map((target) => target.id),
+          durationRounds,
+          events,
+          action.slotLevel,
+        )
+      }
+      for (const affected of affectedTargets) {
+        const duration = spell.concentration
+          ? {
+              type: 'concentration' as const,
+              sourceActorId: actor.id,
+              concentrationId: spell.id,
+              remainingRounds: durationRounds,
+            }
+          : {
+              type: 'rounds' as const,
+              remainingRounds: Math.max(1, durationRounds),
+              tickOn: 'target-turn-end' as const,
+            }
+        if (spell.appliedEffect === 'invisibility' || spell.appliedEffect === 'greater-invisibility') {
+          applyDnd5eStandardConditionEffect(affected, actor, {
+            id: dnd5eActiveEffectId(
+              `srd-5.1:spell:${spell.id}:invisible`,
+              actor.id,
+              affected.id,
+            ),
+            rulesId: spell.id,
+            appliedTurnKey: classFeatureTurnKey(state, actor.id),
+            spellLevel: action.slotLevel,
+            condition: 'invisible',
+            duration,
+            breakOn: spell.appliedEffect === 'invisibility'
+              ? ['makes-attack', 'casts-spell']
+              : undefined,
+          }, events)
+        } else {
+          const appliedEffect = spell.appliedEffect
+          if (appliedEffect === 'protection-from-poison') {
+            removeDnd5eConditionEffects(affected, ['poisoned', '中毒'], 'healed', events)
+          }
+          const label = appliedEffect === 'barkskin'
+            ? '树肤术：AC不低于16'
+            : appliedEffect === 'blur'
+              ? '朦胧术：依赖视觉的攻击具有劣势'
+              : appliedEffect === 'fly'
+                ? '飞行术：获得60尺飞行速度'
+                : appliedEffect === 'longstrider'
+                  ? '大步奔行：速度+10尺'
+                  : appliedEffect === 'mage-armor'
+                    ? '法师护甲：基础 AC 为 13＋敏捷调整值'
+                    : appliedEffect === 'protection-from-poison'
+                      ? '防护毒素：毒素抗性'
+                      : undefined
+          if (!label) return fail(state, events, 'invalid-monster-action')
+          applyDnd5eMechanicalStatusEffect(affected, actor, {
+            definitionId: `srd-5.1:spell:${appliedEffect}`,
+            rulesId: spell.id,
+            label,
+            appliedTurnKey: classFeatureTurnKey(state, actor.id),
+            spellLevel: action.slotLevel,
+            duration,
+            speedBonusFeet: appliedEffect === 'longstrider' ? 10 : undefined,
+            flySpeedFeet: appliedEffect === 'fly' ? 60 : undefined,
+          }, events)
+        }
+        events.push({
+          type: 'class-state-changed',
+          actorId: actor.id,
+          targetId: affected.id,
+          stateKey: spell.id,
+          active: true,
+        })
+      }
+    } else if (spell.effect === 'sleep-hit-point-pool') {
+      const hitPointPool = resolution.effectRolls[0].reduce(
+        (sum, roll) => sum + roll,
+        spell.dice.bonus,
+      )
+      let remainingHitPoints = hitPointPool
+      const initiativeRank = new Map(state.initiativeOrder.map((id, index) => [id, index]))
+      const eligibleTargets = targets
+        .filter((target): target is Dnd5eCombatant => {
+          if (!target || target.currentHp <= 0 || target.deathSaves.dead) return false
+          if (dnd5eHasStandardCondition(target, 'unconscious')) return false
+          const creatureType = (target.creatureType ?? '').trim().toLowerCase()
+          if (creatureType === 'undead' || creatureType.includes('亡灵')) return false
+          return !target.conditionImmunities.some((condition) =>
+            dnd5eStandardConditionId(condition) === 'charmed' ||
+            ['magical-sleep', '魔法睡眠'].includes(condition.trim().toLowerCase()))
+        })
+        .sort((left, right) =>
+          left.currentHp - right.currentHp ||
+          (initiativeRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+            (initiativeRank.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+          left.id.localeCompare(right.id))
+      const affectedTargetIds: string[] = []
+      for (const affected of eligibleTargets) {
+        if (affected.currentHp > remainingHitPoints) break
+        const appliedTurnKey = classFeatureTurnKey(state, actor.id)
+        const applied = applyDnd5eStandardConditionEffect(affected, actor, {
+          id: dnd5eActiveEffectId('srd-5.1:spell:sleep:unconscious', actor.id, affected.id),
+          definitionId: 'srd-5.1:spell:sleep:unconscious',
+          rulesId: 'sleep',
+          spellLevel: action.slotLevel,
+          condition: 'unconscious',
+          duration: {
+            type: 'rounds',
+            remainingRounds: Math.max(1, spell.effectDurationRounds ?? 10),
+            tickOn: 'target-turn-end',
+          },
+          appliedTurnKey,
+          breakOn: ['takes-damage'],
+        }, events)
+        if (!applied) continue
+        applyDnd5eStandardConditionEffect(affected, actor, {
+          id: dnd5eActiveEffectId('srd-5.1:spell:sleep:fall-prone', actor.id, affected.id),
+          definitionId: 'srd-5.1:spell:sleep:fall-prone',
+          rulesId: 'sleep-fall-prone',
+          spellLevel: action.slotLevel,
+          condition: 'prone',
+          duration: { type: 'permanent' },
+          appliedTurnKey,
+        }, events)
+        remainingHitPoints -= affected.currentHp
+        affectedTargetIds.push(affected.id)
+      }
+      events.push({
+        type: 'sleep-resolved',
+        actorId: actor.id,
+        spellId: 'sleep',
+        hitPointPool,
+        remainingHitPoints,
+        affectedTargetIds,
+      })
     } else if (spell.effect === 'spell-attack') {
       if (targets.length !== 1 || monster.spellcasting.attackBonus == null || resolution.d20 == null) {
         return fail(state, events, 'invalid-monster-action')
@@ -17674,7 +19051,8 @@ function resolveMonsterCoreSpell(
         sides: spell.dice.sides,
         bonus: spell.dice.bonus,
         rolls: resolution.effectRolls[0] ?? [],
-      }).total
+      })
+      const failedEffectTargets: Dnd5eCombatant[] = []
       for (const target of targets) {
         if (limitedMagicImmunityTargetIds.has(target!.id)) continue
         const suppliedRoll = supplied.find((roll) => roll.targetId === target!.id)!
@@ -17731,7 +19109,16 @@ function resolveMonsterCoreSpell(
           ability: spell.saveAbility,
           success: save.success,
           successfulSave: spell.damageOnSuccessfulSave ?? 'none',
-          components: [{ total: damage, type: spell.damageType }],
+          components: [{
+            total: damage.total,
+            type: spell.damageType,
+            roll: {
+              sides: spell.dice.sides,
+              rolls: [...damage.rolls],
+              bonus: damage.bonus,
+              total: damage.diceTotal + damage.bonus,
+            },
+          }],
           damageSource: spellDamageSource,
           events,
         })
@@ -17760,9 +19147,108 @@ function resolveMonsterCoreSpell(
             },
           }, events)
         }
+        if (
+          !save.success &&
+          (spell.onFailedSaveEffect === 'hold-person' || spell.onFailedSaveEffect === 'banishment')
+        ) failedEffectTargets.push(target!)
+        if (!save.success && usesThunderwavePush) {
+          const movement = forcedMovements.find((candidate) => candidate.targetId === target!.id)!
+          if (movement.distanceFeet > 0) {
+            const from = { ...target!.position }
+            target!.position = { ...movement.to }
+            events.push({
+              type: 'moved',
+              actorId: target!.id,
+              from,
+              to: target!.position,
+              distance: movement.distanceFeet,
+            })
+            if (!applyDnd5eForcedMovementElevation(
+              state,
+              target!,
+              movement.toElevationFeet,
+              movement.fallingDamageRolls,
+              events,
+            )) return fail(state, events, 'invalid-dice')
+          }
+        }
+      }
+      if (failedEffectTargets.length > 0 && spell.concentration) {
+        const durationRounds = spell.concentrationDurationRounds ?? 10
+        beginDnd5eConcentration(
+          state,
+          actor,
+          spell.id,
+          failedEffectTargets.map((target) => target.id),
+          durationRounds,
+          events,
+          action.slotLevel,
+        )
+        for (const affectedTarget of failedEffectTargets) {
+          const duration: Dnd5eActiveEffectDuration = {
+            type: 'concentration',
+            sourceActorId: actor.id,
+            concentrationId: spell.id,
+            remainingRounds: durationRounds,
+          }
+          if (spell.onFailedSaveEffect === 'hold-person') {
+            applyDnd5eStandardConditionEffect(affectedTarget, actor, {
+              id: dnd5eActiveEffectId(
+                `srd-5.1:spell:${spell.id}:paralyzed`,
+                actor.id,
+                affectedTarget.id,
+              ),
+              rulesId: spell.id,
+              appliedTurnKey: classFeatureTurnKey(state, actor.id),
+              spellLevel: action.slotLevel,
+              condition: 'paralyzed',
+              duration,
+              repeatSave: {
+                ability: 'wis',
+                dc: monster.spellcasting.saveDc!,
+                timing: 'target-turn-end',
+                onSuccess: 'remove',
+              },
+            }, events)
+          } else if (spell.onFailedSaveEffect === 'banishment') {
+            applyDnd5eRulesCondition(affectedTarget, actor, {
+              condition: 'banished',
+              rulesId: spell.id,
+              sourceKind: 'spell',
+              appliedTurnKey: classFeatureTurnKey(state, actor.id),
+              spellLevel: action.slotLevel,
+              duration,
+            }, events)
+            applyDnd5eStandardConditionEffect(affectedTarget, actor, {
+              id: dnd5eActiveEffectId(
+                `srd-5.1:spell:${spell.id}:incapacitated`,
+                actor.id,
+                affectedTarget.id,
+              ),
+              rulesId: spell.id,
+              appliedTurnKey: classFeatureTurnKey(state, actor.id),
+              spellLevel: action.slotLevel,
+              condition: 'incapacitated',
+              duration,
+            }, events)
+            events.push({
+              type: 'class-state-changed',
+              actorId: actor.id,
+              targetId: affectedTarget.id,
+              stateKey: 'banishment',
+              active: true,
+            })
+          }
+        }
       }
     } else if (spell.effect === 'automatic-damage' && spell.id === 'magic-missile') {
-      for (const shieldTargetId of shieldSpellReactionTargetIds) {
+      const resolvedShieldTargetIds = new Set(shieldSpellReactionTargetIds)
+      for (const candidate of targets) {
+        if (candidate?.statBlockId && dnd5eCanCastShieldSpell(candidate)) {
+          resolvedShieldTargetIds.add(candidate.id)
+        }
+      }
+      for (const shieldTargetId of resolvedShieldTargetIds) {
         const shieldTarget = state.combatants[shieldTargetId]
         if (!shieldTarget || applyShieldSpellReaction(state, shieldTarget, true, true, events) !== true) {
           return fail(state, events, 'invalid-class-feature')
@@ -17897,6 +19383,36 @@ function resolveMonsterCoreSpell(
   return { ok: true, state, events }
 }
 
+function dnd5eMonsterAreaTargetCreatureTypeIsExcluded(
+  target: Dnd5eCombatant,
+  exclusions: readonly ('aberration' | 'demon' | 'undead')[] | undefined,
+): boolean {
+  if (!exclusions?.length) return false
+  const creatureType = (target.creatureType ?? '').trim().toLowerCase()
+  return exclusions.some((excluded) => {
+    if (excluded === 'aberration') {
+      return creatureType.includes('aberration') || creatureType.includes('异怪')
+    }
+    if (excluded === 'demon') {
+      return creatureType.includes('demon') || creatureType.includes('恶魔')
+    }
+    return creatureType.includes('undead') || creatureType.includes('亡灵')
+  })
+}
+
+function dnd5eMonsterAreaTargetCanHearSource(
+  source: Dnd5eCombatant,
+  target: Dnd5eCombatant,
+): boolean {
+  if (
+    dnd5eHasStandardCondition(target, 'deafened') ||
+    target.conditions.some((condition) =>
+      ['deafened', '耳聋'].includes(condition.trim().toLowerCase()))
+  ) return false
+  return !source.conditions.some((condition) =>
+    ['silenced', '沉默'].includes(condition.trim().toLowerCase()))
+}
+
 function resolveMonsterAreaAction(
   state: Dnd5eHeadlessCombatState,
   action: Extract<Dnd5eAction, { type: 'monster-area-action' }>,
@@ -17932,6 +19448,12 @@ function resolveMonsterAreaAction(
       ? target!.controller === actor.controller || dnd5eCannotAttackSource(actor, target!.id)
       : target!.id === actor.id || dnd5eCannotAttackSource(actor, target!.id)) ||
     targets.some((target) =>
+      dnd5eMonsterAreaTargetCreatureTypeIsExcluded(
+        target!,
+        rule.targetCreatureTypeExclusions,
+      ) ||
+      (rule.requiresTargetCanHearSource &&
+        !dnd5eMonsterAreaTargetCanHearSource(actor, target!)) ||
       (rule.requiresSourceCanSeeTarget &&
         !dnd5eCombatantCanSee(state, actor.id, target!.id)) ||
       (rule.requiresTargetCanSeeSource &&
@@ -18903,6 +20425,7 @@ function applyDnd5eMonsterShapechangeForm(
     fly: form.speed.fly,
     swim: form.speed.swim,
     climb: form.speed.climb,
+    hover: form.speed.hover,
   }
   actor.turn.movementRemaining = Math.min(actor.turn.movementRemaining, actor.speed)
   actor.sizeRank = ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[form.size]
@@ -19107,16 +20630,16 @@ function resolveMonkUnarmedBonus(
         dnd5eHelpAttackApplies(state, actor, target) ||
         dnd5eUtilityProjectionAttackAdvantageApplies(state, actor, target) ||
         dnd5eNextD20AdvantageApplies(actor, 'attack') ||
-        dnd5eBattleMasterDistractingAdvantage(actor, target) ||
-        dnd5eTotemWolfPackAdvantage(state, actor, target, true) ||
+        dnd5ePendingAllyAttackAdvantage(actor, target) ||
+        dnd5eRageAllyMeleeAdvantage(state, actor, target, true) ||
         dnd5eOpeningAttackHasAdvantage(state, actor, target))
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
       dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) || viciousMockeryDisadvantage ||
       actor.exhaustionLevel >= 3 || dnd5eFrightenedAttackDisadvantage(state, actor) ||
       dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) || actorProne ||
-      dnd5eBattleMasterGoadingDisadvantage(actor, target) ||
-      dnd5eTotemBearGuardianDisadvantage(state, actor, target)
+      dnd5eSourceMarkedAttackDisadvantage(actor, target) ||
+      dnd5eRageAllyProtectionDisadvantage(state, actor, target)
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: targetGrantsAdvantage, reason: 'unarmed-attack-advantage' }],
       disadvantage: [{ active: targetImposesDisadvantage, reason: 'unarmed-attack-disadvantage' }],
@@ -19163,7 +20686,14 @@ function resolveMonkUnarmedBonus(
       automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, target),
     })
     let { hit, critical } = attackOutcome
-    const shieldSpellApplied = applyShieldSpellReaction(state, target, supplied.shieldSpellReaction, hit, events)
+    const shieldSpellApplied = applyShieldSpellReaction(
+      state,
+      target,
+      supplied.shieldSpellReaction,
+      hit,
+      events,
+      { total: attack.roll.total, armorClass: targetArmorClass, critical },
+    )
     if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
     if (shieldSpellApplied) {
       targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -19468,14 +20998,14 @@ function resolveMonkDeflectMissilesReturn(
       dnd5eHelpAttackApplies(state, actor, target) ||
       dnd5eUtilityProjectionAttackAdvantageApplies(state, actor, target) ||
       dnd5eNextD20AdvantageApplies(actor, 'attack') ||
-      dnd5eBattleMasterDistractingAdvantage(actor, target) ||
+      dnd5ePendingAllyAttackAdvantage(actor, target) ||
       dnd5eOpeningAttackHasAdvantage(state, actor, target))
   const actorHasDisadvantage = requestedMode === 'disadvantage' || action.distanceFeet > 20 || actor.exhaustionLevel >= 3 ||
     actor.wearingUnproficientArmor ||
     dnd5eHasViciousMockeryAttackDisadvantage(actor) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
     dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
     dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) ||
-    dnd5eBattleMasterGoadingDisadvantage(actor, target)
+    dnd5eSourceMarkedAttackDisadvantage(actor, target)
   const mode = resolveDnd5eRollMode({
     advantage: [{ active: targetGrantsAdvantage, reason: 'returned-missile-advantage' }],
     disadvantage: [{ active: actorHasDisadvantage, reason: 'returned-missile-disadvantage' }],
@@ -19738,13 +21268,13 @@ function resolveAdjudicatedSpell(
   if (action.castingTime === 'bonus-action') actor.classState.bonusActionSpellTurnKey = turnKey
   if (action.spellLevel > 0) actor.classState.leveledSpellTurnKey = turnKey
   if (action.castingTime === 'action') {
-    if (dnd5eEldritchKnightFeatureForCombatant(actor, 'improved-war-magic')) {
-      actor.classState.eldritchKnightWarMagicTurnKey = turnKey
+    if (dnd5eMartialSpellSynergyForCombatant(actor, 'spell-then-bonus-attack')) {
+      actor.classState.spellBonusWeaponAttackTurnKey = turnKey
     } else if (
       action.spellLevel === 0 &&
-      dnd5eEldritchKnightFeatureForCombatant(actor, 'war-magic')
+      dnd5eMartialSpellSynergyForCombatant(actor, 'cantrip-then-bonus-attack')
     ) {
-      actor.classState.eldritchKnightWarMagicCantripTurnKey = turnKey
+      actor.classState.cantripBonusWeaponAttackTurnKey = turnKey
     }
   }
   const affectedTargetIds = [...new Set(action.effects.map((effect) => effect.targetId))]
@@ -19887,7 +21417,10 @@ export function resolveDnd5eSandboxedPluginCapabilities(
   source: Dnd5eHeadlessCombatState,
   action: Dnd5ePluginAction,
   operations: readonly Dnd5eSandboxCapabilityOperation[],
-): Dnd5eActionResult {
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>,
+): Dnd5eActionResult & {
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+} {
   const state = clone(source)
   const events: Dnd5eCombatEvent[] = []
   if (operations.length > 64) return fail(state, events, 'invalid-plugin-action')
@@ -20088,7 +21621,25 @@ export function resolveDnd5eSandboxedPluginCapabilities(
       return fail(state, events, 'invalid-plugin-action')
     }
   }
-  return { ok: true, state, events }
+  const actionWithFallRolls: Dnd5eAction = {
+    ...action,
+    airborneFallDamageRollsByCombatantId,
+  }
+  const airborneFalls = airborneFallDamageRollsByCombatantId == null
+    ? dnd5eNewUnsupportedAirborneFallCandidates(source, state, actionWithFallRolls)
+    : []
+  if (!resolveDnd5eNewUnsupportedAirborneFalls(
+    source,
+    state,
+    actionWithFallRolls,
+    airborneFallDamageRollsByCombatantId,
+    events,
+  )) {
+    const failure = fail(state, events, 'invalid-dice')
+    return airborneFalls.length > 0 ? { ...failure, airborneFalls } : failure
+  }
+  const result: Dnd5eActionResult = { ok: true, state, events }
+  return airborneFalls.length > 0 ? { ...result, airborneFalls } : result
 }
 
 export interface Dnd5ePersistentAreaDmAdjustment {
@@ -20120,6 +21671,7 @@ export function resolveDnd5ePersistentAreaTrigger(
     areaId: string
     areaSourceKind?: Dnd5ePersistentAreaSourceKind
     coreSpellId?: string
+    castingClassId?: Dnd5eClassId
     sourceId: string
     targetId: string
     trigger: Dnd5ePersistentAreaTriggerSnapshot
@@ -20128,6 +21680,7 @@ export function resolveDnd5ePersistentAreaTrigger(
     blessRoll?: number
     baneRoll?: number
     damageRolls?: readonly number[]
+    spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse
     dmAdjustment?: Dnd5ePersistentAreaDmAdjustment
   },
 ): Dnd5eActionResult {
@@ -20143,6 +21696,73 @@ export function resolveDnd5ePersistentAreaTrigger(
     : undefined
   if (input.areaSourceKind === 'core-spell' && coreSpell?.effect !== 'persistent-area') {
     return fail(state, events, 'invalid-plugin-action')
+  }
+  const maxDieBonusUse = input.spellDamageMaxDieBonus
+  const maxDieBonusFeature = maxDieBonusUse
+    ? dnd5eSpellDamageMaxDieBonusFeature(
+        state,
+        actor.id,
+        input.castingClassId,
+        maxDieBonusUse.featureId,
+      )
+    : undefined
+  const maxDieBonusMechanic = maxDieBonusFeature?.declarativeAbility?.mechanic
+  const damageDeclaration = input.trigger.damage
+  const damageRolls = input.damageRolls ?? []
+  if (maxDieBonusUse) {
+    if (
+      !coreSpell ||
+      !damageDeclaration ||
+      !maxDieBonusFeature ||
+      maxDieBonusMechanic?.kind !== 'spell-damage-max-die-bonus' ||
+      maxDieBonusUse.group !== 'persistent-area' ||
+      maxDieBonusUse.targetId !== target.id ||
+      maxDieBonusUse.attackIndex != null ||
+      maxDieBonusUse.componentIndex != null ||
+      maxDieBonusUse.projectileIndex != null ||
+      !Number.isInteger(maxDieBonusUse.dieIndex) ||
+      maxDieBonusUse.dieIndex < 0 ||
+      maxDieBonusUse.dieIndex >= damageRolls.length ||
+      damageRolls[maxDieBonusUse.dieIndex] !== damageDeclaration.sides ||
+      maxDieBonusUse.bonusRolls.length !== maxDieBonusMechanic.additionalDice ||
+      maxDieBonusUse.bonusRolls.some((roll) =>
+        !Number.isInteger(roll) || roll < 1 || roll > damageDeclaration.sides
+      )
+    ) return fail(state, events, 'invalid-dice')
+  }
+  const maxDieBonusAmount = maxDieBonusUse?.bonusRolls.reduce((sum, roll) => sum + roll, 0) ?? 0
+  let maxDieBonusConsumed = false
+  const consumeMaxDieBonus = () => {
+    if (!maxDieBonusUse || !damageDeclaration) return 0
+    if (!maxDieBonusConsumed) {
+      maxDieBonusConsumed = true
+      actor.classState.declarativeUsedTurnKeys = {
+        ...actor.classState.declarativeUsedTurnKeys,
+        [maxDieBonusUse.featureId]: classFeatureTurnKey(state, actor.id),
+      }
+      events.push({
+        type: 'spell-damage-max-die-bonus-applied',
+        actorId: actor.id,
+        spellId: coreSpell!.id,
+        featureId: maxDieBonusUse.featureId,
+        group: 'persistent-area',
+        targetId: target.id,
+        dieSides: damageDeclaration.sides,
+        rolls: [...maxDieBonusUse.bonusRolls],
+        amount: maxDieBonusAmount,
+      })
+    }
+    return maxDieBonusAmount
+  }
+  if (coreSpell?.concentration) {
+    // Do not settle lingering area damage after concentration already ended.
+    // Map reconcile may lag behind the Headless concentration clear.
+    if (
+      !actor.concentrating ||
+      actor.classState.concentrationSpellId !== coreSpell.id
+    ) {
+      return fail(state, events, 'invalid-plugin-action')
+    }
   }
   if (coreSpell) {
     const spellLevel = actor.classState.concentrationSpellId === coreSpell.id
@@ -20161,6 +21781,7 @@ export function resolveDnd5ePersistentAreaTrigger(
         spellId: coreSpell.id,
         spellLevel,
       })
+      consumeMaxDieBonus()
       return { ok: true, state, events }
     }
   }
@@ -20219,7 +21840,7 @@ export function resolveDnd5ePersistentAreaTrigger(
   let appliedDamage = 0
   if (input.trigger.damage) {
     const damage = input.trigger.damage
-    const rolls = input.damageRolls ?? []
+    const rolls = damageRolls
     if (
       rolls.length !== damage.count ||
       rolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > damage.sides)
@@ -20227,13 +21848,21 @@ export function resolveDnd5ePersistentAreaTrigger(
     let amount = rules.resolveDamage({
       count: damage.count,
       sides: damage.sides,
-      bonus: damage.modifier ?? 0,
+      bonus: (damage.modifier ?? 0) + consumeMaxDieBonus(),
       rolls,
     }).total
     if (saveSuccess) {
       amount = savingThrow?.onSuccess === 'half' ? Math.floor(amount / 2) : 0
     }
-    appliedDamage = adjustDamageForTarget(target, amount, damage.type)
+    const spellLevel = coreSpell
+      ? (actor.classState.concentrationSpellLevel ?? coreSpell.level)
+      : 0
+    appliedDamage = adjustDamageForTarget(
+      target,
+      amount,
+      damage.type,
+      coreSpell ? dnd5eSpellDamageSource(actor, spellLevel) : { delivery: 'other', magical: true },
+    )
     appliedDamage = adjustedPersistentAreaDamage(appliedDamage, input.dmAdjustment?.damage)
     applyDamage(target, appliedDamage, false, events, actor, state, [damage.type])
   } else if ((input.damageRolls?.length ?? 0) > 0 || input.dmAdjustment?.damage) {
@@ -20330,6 +21959,36 @@ function resolveDnd5eMonsterTurnStartLifecycle(input: {
     events: input.events,
   })) return false
 
+  const traitRollRequirements = dnd5eMonsterTurnStartTraitRollRequirements({
+    monster,
+    currentHp: input.actor.currentHp,
+    berserk: input.actor.classState.monsterBerserk === true,
+  })
+  const suppliedTurnStartRolls = input.action.nextMonsterRechargeRolls ?? []
+  const suppliedTraitRolls = suppliedTurnStartRolls.filter((roll) =>
+    roll.actionId === DND5E_MONSTER_BERSERK_TURN_START_ROLL_ID)
+  if (
+    suppliedTraitRolls.length !== traitRollRequirements.length ||
+    suppliedTraitRolls.some((roll) => roll.actorId !== input.actor.id)
+  ) return false
+  for (const requirement of traitRollRequirements) {
+    const supplied = suppliedTraitRolls.find((roll) => roll.actionId === requirement.id)
+    if (
+      !supplied ||
+      !Number.isInteger(supplied.roll) ||
+      supplied.roll < 1 ||
+      supplied.roll > requirement.dieSides
+    ) return false
+    const berserk = supplied.roll >= requirement.minimum
+    if (berserk) input.actor.classState.monsterBerserk = true
+    input.events.push({
+      type: 'monster-berserk-resolved',
+      actorId: input.actor.id,
+      roll: supplied.roll,
+      berserk,
+    })
+  }
+
   resolveDnd5eMonsterRegenerationAtTurnStart({
     state: input.state,
     actor: input.actor,
@@ -20346,7 +22005,8 @@ function resolveDnd5eMonsterTurnStartLifecycle(input: {
   const rechargeActions = dnd5eMonsterRechargeActions(monster).filter((action) =>
     input.actor.classState.monsterRechargeReadyByActionId?.[action.id] === false,
   )
-  const supplied = input.action.nextMonsterRechargeRolls ?? []
+  const supplied = suppliedTurnStartRolls.filter((roll) =>
+    roll.actionId !== DND5E_MONSTER_BERSERK_TURN_START_ROLL_ID)
   if (
     supplied.length !== rechargeActions.length ||
     supplied.some((roll) => roll.actorId !== input.actor.id) ||
@@ -20782,11 +22442,11 @@ function resolveDnd5eHeadlessActionInternal(
     if (pluginAction.execution === 'worker' || typeof pluginAction.resolve !== 'function') {
       return fail(state, events, 'invalid-plugin-action')
     }
-    const battleMaster = action.featureId
-      ? dnd5eDeclarativeBattleMasterManeuverDefinition(action.featureId)
+    const combatManeuver = action.featureId
+      ? dnd5eDeclarativeCombatManeuverDefinition(action.featureId)
       : undefined
     const defersRollValidationUntilCommandedAttack =
-      battleMaster?.mechanic.maneuver === 'commanders-strike'
+      combatManeuver?.mechanic.operation === 'ally-reaction-attack'
     let authoritativeRollDeclarations = options.authoritativePluginRollDeclarations
     const usesDeclarativeHostRoll = pluginFeature?.declarativeAbility?.rolls?.some((roll) =>
       (roll.kind === 'damage' || roll.kind === 'healing') && roll.hostRoll != null
@@ -20983,15 +22643,15 @@ function resolveDnd5eHeadlessActionInternal(
       if (result.state.rulesetId !== rules.id || result.state.combatId !== source.combatId) {
         return fail(state, events, 'invalid-plugin-action')
       }
-      if (result.ok && battleMaster?.mechanic.maneuver === 'evasive-footwork') {
-        const rolled = action.rolls?.[battleMaster.mechanic.superiorityRollId]
+      if (result.ok && combatManeuver?.mechanic.operation === 'movement-defense') {
+        const rolled = action.rolls?.[combatManeuver.mechanic.superiorityRollId]
         const armorClassBonus = rolled?.values.reduce((sum, value) => sum + value, 0)
         if (!armorClassBonus || armorClassBonus < 1 || armorClassBonus > 20) {
           return fail(state, events, 'invalid-dice')
         }
         applyDnd5eMechanicalStatusEffect(actor, actor, {
-          definitionId: `${battleMaster.feature.ownerPluginId}:battle-master:evasive-footwork`,
-          label: 'Evasive Footwork',
+          definitionId: `${combatManeuver.feature.ownerPluginId}:combat-maneuver:movement-defense`,
+          label: combatManeuver.feature.name,
           duration: { type: 'permanent' },
           armorClassBonus,
           sourceKind: 'plugin',
@@ -20999,16 +22659,16 @@ function resolveDnd5eHeadlessActionInternal(
           breakOn: ['moves'],
         }, events)
         events.push({
-          type: 'battle-master-maneuver-resolved',
+          type: 'combat-maneuver-resolved',
           actorId: actor.id,
           targetId: actor.id,
-          featureId: battleMaster.feature.id,
-          maneuver: 'evasive-footwork',
+          featureId: combatManeuver.feature.id,
+          maneuver: 'movement-defense',
           superiorityDie: armorClassBonus,
           value: armorClassBonus,
         })
         result = { ...result, state, events }
-      } else if (result.ok && battleMaster?.mechanic.maneuver === 'commanders-strike') {
+      } else if (result.ok && combatManeuver?.mechanic.operation === 'ally-reaction-attack') {
         const payload = action.payload
         if (
           !payload ||
@@ -21021,7 +22681,7 @@ function resolveDnd5eHeadlessActionInternal(
         ) return fail(state, events, 'invalid-plugin-action')
         const ally = pluginTarget
         const enemy = state.combatants[payload.enemyTargetId]
-        const weaponAttack = payload.weaponAttack as unknown as Dnd5eBattleMasterReactionWeaponAttack
+        const weaponAttack = payload.weaponAttack as unknown as Dnd5eCombatManeuverReactionWeaponAttack
         if (
           !ally ||
           !enemy ||
@@ -21044,7 +22704,7 @@ function resolveDnd5eHeadlessActionInternal(
           type: 'opportunity-attack',
           actorId: ally.id,
           targetId: enemy.id,
-          reactionFeature: 'battle-master-commanders-strike',
+          reactionFeature: 'combat-maneuver-ally-reaction-attack',
           attackModifier: weaponAttack.attackModifier,
           criticalThreshold: weaponAttack.criticalThreshold,
           d20: weaponAttack.d20,
@@ -21066,20 +22726,20 @@ function resolveDnd5eHeadlessActionInternal(
           event.actorId === ally.id &&
           event.targetId === enemy.id,
         )
-        const commanderRollPlan = dnd5eDeclarativeBattleMasterRollPlan(
+        const allyReactionRollPlan = dnd5eDeclarativeCombatManeuverRollPlan(
           actor,
-          battleMaster.feature.id,
+          combatManeuver.feature.id,
           attackEvent?.type === 'attack-resolved' && attackEvent.critical,
         )
-        if (!commanderRollPlan.ok || !validateDnd5ePluginDiceRolls(
-          { rolls: commanderRollPlan.declarations },
+        if (!allyReactionRollPlan.ok || !validateDnd5ePluginDiceRolls(
+          { rolls: allyReactionRollPlan.declarations },
           action.rolls,
         )) return fail(state, events, 'invalid-dice')
-        const superiorityDie = action.rolls?.[battleMaster.mechanic.superiorityRollId]
+        const superiorityDie = action.rolls?.[combatManeuver.mechanic.superiorityRollId]
           ?.values.reduce((sum, value) => sum + value, 0)
         if (!superiorityDie) return fail(state, events, 'invalid-dice')
         if (attackEvent?.type === 'attack-resolved' && attackEvent.hit) {
-          applyDnd5eBattleMasterDamage(
+          applyDnd5eCombatManeuverDamage(
             state,
             ally,
             enemy,
@@ -21090,12 +22750,12 @@ function resolveDnd5eHeadlessActionInternal(
           )
         }
         events.push({
-          type: 'battle-master-maneuver-resolved',
+          type: 'combat-maneuver-resolved',
           actorId: actor.id,
           targetId: enemy.id,
           secondaryTargetId: ally.id,
-          featureId: battleMaster.feature.id,
-          maneuver: 'commanders-strike',
+          featureId: combatManeuver.feature.id,
+          maneuver: 'ally-reaction-attack',
           superiorityDie,
           value: attackEvent?.type === 'attack-resolved' && attackEvent.hit ? superiorityDie : 0,
         })
@@ -21632,33 +23292,34 @@ function resolveDnd5eHeadlessActionInternal(
     if (action.alreadyUsedThisTurn) return fail(state, events, 'feature-already-used')
     if (!spendClassResource(actor, action.resourceKey, events)) return fail(state, events, 'class-resource-unavailable')
     actor.turn = { ...actor.turn, actionAvailable: true }
-    if (dnd5eEldritchKnightFeatureForCombatant(actor, 'arcane-charge')) {
+    if (dnd5eMartialSpellSynergyForCombatant(actor, 'extra-action-teleport')) {
       const turnKey = classFeatureTurnKey(state, actor.id)
-      actor.classState.eldritchKnightArcaneChargeTurnKey = turnKey
-      actor.classState.eldritchKnightArcaneChargeUsedTurnKey = undefined
+      actor.classState.extraActionTeleportTurnKey = turnKey
+      actor.classState.extraActionTeleportUsedTurnKey = undefined
       events.push({
         type: 'class-state-changed',
         actorId: actor.id,
-        stateKey: 'eldritch-knight-arcane-charge',
+        stateKey: 'feature-extra-action-teleport',
         active: true,
       })
     }
     events.push({ type: 'action-surge-granted', actorId: actor.id })
     return { ok: true, state, events }
   }
-  if (action.type === 'eldritch-knight-arcane-charge') {
+  if (action.type === 'feature-extra-action-teleport') {
     const turnKey = classFeatureTurnKey(state, actor.id)
+    const teleportFeature = dnd5eMartialSpellSynergyForCombatant(actor, 'extra-action-teleport')
     if (
-      !dnd5eEldritchKnightFeatureForCombatant(actor, 'arcane-charge') ||
-      actor.classState.eldritchKnightArcaneChargeTurnKey !== turnKey ||
-      actor.classState.eldritchKnightArcaneChargeUsedTurnKey === turnKey
+      !teleportFeature ||
+      actor.classState.extraActionTeleportTurnKey !== turnKey ||
+      actor.classState.extraActionTeleportUsedTurnKey === turnKey
     ) return fail(state, events, 'invalid-class-feature')
     if (
       !Number.isFinite(action.to.x) ||
       !Number.isFinite(action.to.y) ||
       !Number.isFinite(action.distanceFeet) ||
       action.distanceFeet < 0 ||
-      action.distanceFeet > 30 ||
+      action.distanceFeet > teleportFeature.mechanic.teleportRangeFeet! ||
       (action.toElevationFeet != null && !Number.isFinite(action.toElevationFeet))
     ) return fail(state, events, 'invalid-target')
     const from = { ...actor.position }
@@ -21667,11 +23328,11 @@ function resolveDnd5eHeadlessActionInternal(
     actor.position = { ...action.to }
     actor.elevationFeet = toElevationFeet
     actor.airborne = toElevationFeet > 0 && actor.airborne
-    actor.classState.eldritchKnightArcaneChargeUsedTurnKey = turnKey
+    actor.classState.extraActionTeleportUsedTurnKey = turnKey
     events.push({
       type: 'teleported',
       actorId: actor.id,
-      spellId: 'eldritch-knight:arcane-charge',
+      spellId: 'martial-spell-synergy:extra-action-teleport',
       from,
       to: actor.position,
       distanceFeet: action.distanceFeet,
@@ -21681,29 +23342,31 @@ function resolveDnd5eHeadlessActionInternal(
     events.push({
       type: 'class-state-changed',
       actorId: actor.id,
-      stateKey: 'eldritch-knight-arcane-charge',
+      stateKey: 'feature-extra-action-teleport',
       active: false,
     })
     return { ok: true, state, events }
   }
-  if (action.type === 'eldritch-knight-summon-bonded-weapon') {
+  if (action.type === 'linked-equipment-recall') {
+    const linkedEquipmentFeature = dnd5eMartialSpellSynergyForCombatant(actor, 'linked-equipment')
     if (
-      !dnd5eEldritchKnightFeatureForCombatant(actor, 'weapon-bond') ||
+      !linkedEquipmentFeature ||
       typeof action.weaponId !== 'string' ||
       action.weaponId.length < 1 ||
       action.weaponId.length > 160 ||
-      !actor.classState.eldritchKnightBondedWeaponIds?.includes(action.weaponId) ||
+      !actor.classState.linkedEquipmentIds?.includes(action.weaponId) ||
       actor.mainWeaponId !== action.weaponId ||
       !actor.weaponDamageSources?.[action.weaponId]
     ) return fail(state, events, 'invalid-class-feature')
-    if (!spend(actor, 'bonusAction')) return fail(state, events, 'bonus-action-unavailable')
-    const remainingDroppedWeaponIds = (actor.classState.battleMasterDroppedWeaponIds ?? [])
+    const recallEconomy = linkedEquipmentFeature.mechanic.recallEconomy!
+    if (!spend(actor, recallEconomy)) return fail(state, events, 'bonus-action-unavailable')
+    const remainingDroppedWeaponIds = (actor.classState.droppedEquipmentIds ?? [])
       .filter((weaponId) => weaponId !== action.weaponId)
-    actor.classState.battleMasterDroppedWeaponIds =
+    actor.classState.droppedEquipmentIds =
       remainingDroppedWeaponIds.length > 0 ? remainingDroppedWeaponIds : undefined
-    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'bonusAction' })
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: recallEconomy })
     events.push({
-      type: 'eldritch-knight-weapon-summoned',
+      type: 'linked-equipment-recalled',
       actorId: actor.id,
       weaponId: action.weaponId,
     })
@@ -21842,14 +23505,15 @@ function resolveDnd5eHeadlessActionInternal(
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'rage', active: true, value: 10 })
     return { ok: true, state, events }
   }
-  if (action.type === 'barbarian-totem-eagle-dash') {
+  if (action.type === 'feature-rage-bonus-dash') {
+    const feature = dnd5eRageFeatureForCombatant(actor, 'rage-mobile-defense')
     if (
       actor.classState.raging !== true ||
-      actor.wearingHeavyArmor ||
-      !dnd5eTotemWarriorFeatureForCombatant(actor, 'totem-spirit-eagle')
+      !feature ||
+      (feature.mechanic.requiresNoHeavyArmor && actor.wearingHeavyArmor)
     ) return fail(state, events, 'invalid-class-feature')
     if (!spend(actor, 'bonusAction')) return fail(state, events, 'bonus-action-unavailable')
-    const effectiveSpeed = dnd5eEffectiveSpeed(actor)
+    const effectiveSpeed = dnd5eEffectiveSpeed(actor) * feature.mechanic.speedMultiplier!
     actor.turn = {
       ...actor.turn,
       movementRemaining: actor.turn.movementRemaining + effectiveSpeed,
@@ -21858,35 +23522,36 @@ function resolveDnd5eHeadlessActionInternal(
     events.push({ type: 'movement-granted', actorId: actor.id, amount: effectiveSpeed })
     return { ok: true, state, events }
   }
-  if (action.type === 'barbarian-totem-wolf-knockdown') {
+  if (action.type === 'feature-rage-bonus-prone') {
     const target = state.combatants[action.targetId]
     const turnKey = classFeatureTurnKey(state, actor.id)
+    const feature = dnd5eRageFeatureForCombatant(actor, 'bonus-prone-on-hit')
     if (
       actor.classState.raging !== true ||
-      actor.classState.totemWarriorWolfAttunementTurnKey !== turnKey ||
-      !actor.classState.totemWarriorWolfAttunementTargetIds?.includes(action.targetId) ||
-      !dnd5eTotemWarriorFeatureForCombatant(actor, 'totemic-attunement-wolf') ||
+      actor.classState.bonusProneEligibleTurnKey !== turnKey ||
+      !actor.classState.bonusProneEligibleTargetIds?.includes(action.targetId) ||
+      !feature ||
       !target ||
       target.currentHp <= 0 ||
       target.controller === actor.controller ||
-      dnd5eEffectiveSizeRank(target) > 3
+      dnd5eEffectiveSizeRank(target) > feature.mechanic.maximumTargetSizeRank!
     ) return fail(state, events, 'invalid-class-feature')
     if (!spend(actor, 'bonusAction')) return fail(state, events, 'bonus-action-unavailable')
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'bonusAction' })
     applyDnd5eStandardConditionEffect(target, actor, {
-      id: dnd5eActiveEffectId('totem-warrior:wolf-attunement', actor.id, target.id),
-      rulesId: 'totem-warrior:wolf-attunement',
+      id: dnd5eActiveEffectId('rage-feature:bonus-prone', actor.id, target.id),
+      rulesId: 'rage-feature:bonus-prone',
       condition: 'prone',
       duration: { type: 'permanent' },
       sourceKind: 'feature',
     }, events)
-    actor.classState.totemWarriorWolfAttunementTargetIds = undefined
-    actor.classState.totemWarriorWolfAttunementTurnKey = undefined
+    actor.classState.bonusProneEligibleTargetIds = undefined
+    actor.classState.bonusProneEligibleTurnKey = undefined
     events.push({
       type: 'class-state-changed',
       actorId: actor.id,
       targetId: target.id,
-      stateKey: 'totem-warrior-wolf-attunement',
+      stateKey: 'rage-feature-bonus-prone',
       active: false,
     })
     return { ok: true, state, events }
@@ -22695,6 +24360,11 @@ function resolveDnd5eHeadlessActionInternal(
     const traversalMode = action.traversalMode ?? 'walk'
     const fromElevationFeet = actor.elevationFeet ?? 0
     const toElevationFeet = Number.isFinite(action.toElevationFeet) ? Math.floor(action.toElevationFeet!) : fromElevationFeet
+    const destinationGroundElevationFeet = Number.isFinite(action.toGroundElevationFeet)
+      ? Math.max(-1_000, Math.min(10_000, Math.floor(action.toGroundElevationFeet!)))
+      : traversalMode === 'fly'
+        ? actor.groundElevationFeet ?? 0
+        : toElevationFeet
     const elevationGainFeet = Math.max(0, toElevationFeet - fromElevationFeet)
     const traversal = dnd5eTraversalMovementCost({
       distanceFeet: action.distance,
@@ -22780,7 +24450,8 @@ function resolveDnd5eHeadlessActionInternal(
     const elevationDeltaFeet = toElevationFeet - fromElevationFeet
     actor.position = { ...action.to }
     actor.elevationFeet = toElevationFeet
-    actor.airborne = traversalMode === 'fly' && toElevationFeet > 0
+    actor.groundElevationFeet = destinationGroundElevationFeet
+    actor.airborne = traversalMode === 'fly' && toElevationFeet > destinationGroundElevationFeet + 1e-4
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'movement', amount: movementCost })
     events.push({ type: 'moved', actorId: actor.id, from, to: actor.position, distance: action.distance })
     if (toElevationFeet !== fromElevationFeet) {
@@ -22794,6 +24465,8 @@ function resolveDnd5eHeadlessActionInternal(
         y: coupledMover.position.y + delta.y,
       }
       coupledMover.elevationFeet = draggedFromElevationFeet + elevationDeltaFeet
+      coupledMover.groundElevationFeet = destinationGroundElevationFeet
+      coupledMover.airborne = coupledMover.elevationFeet > destinationGroundElevationFeet + 1e-4
       events.push({
         type: 'moved',
         actorId: coupledMover.id,
@@ -23423,6 +25096,11 @@ function resolveDnd5eHeadlessActionInternal(
 
   if (action.type === 'end-turn') {
     actor.classState.monsterMultiattackContinuation = undefined
+    if (actor.classState.monsterDamageAversionActive === true) {
+      actor.classState.monsterDamageAversionActive = undefined
+      actor.classState.monsterDamageAversionSourceActorId = undefined
+      events.push({ type: 'monster-damage-aversion-ended', actorId: actor.id })
+    }
   }
 
   if (action.type === 'end-turn' && !resolveDnd5eMonsterMechanics({
@@ -23453,14 +25131,14 @@ function resolveDnd5eHeadlessActionInternal(
   })) return fail(state, events, 'invalid-dice')
 
   if (action.type === 'end-turn') {
-    const eagleAttunement =
-      !!dnd5eTotemWarriorFeatureForCombatant(actor, 'totemic-attunement-eagle')
+    const rageFlightFeature =
+      !!dnd5eRageFeatureForCombatant(actor, 'turn-flight')
     const hasOtherFlight = Math.max(
       actor.movementSpeeds?.fly ?? 0,
       dnd5eActiveFlySpeed(actor.classState.activeEffects) ?? 0,
     ) > 0
-    const landingElevation = action.totemEagleLandingElevationFeet
-    const needsLanding = eagleAttunement && !hasOtherFlight && actor.airborne === true
+    const landingElevation = action.rageFlightLandingElevationFeet
+    const needsLanding = rageFlightFeature && !hasOtherFlight && actor.airborne === true
     if (needsLanding) {
       if (
         landingElevation == null ||
@@ -23468,26 +25146,26 @@ function resolveDnd5eHeadlessActionInternal(
           state,
           actor,
           landingElevation,
-          action.totemEagleFallingDamageRolls,
+          action.rageFlightFallingDamageRolls,
           events,
         )
       ) return fail(state, events, 'invalid-dice')
       actor.airborne = false
     } else if (
       landingElevation != null ||
-      (action.totemEagleFallingDamageRolls?.length ?? 0) > 0
+      (action.rageFlightFallingDamageRolls?.length ?? 0) > 0
     ) return fail(state, events, 'invalid-dice')
 
     if (
-      actor.classState.totemWarriorWolfAttunementTurnKey ||
-      actor.classState.totemWarriorWolfAttunementTargetIds
+      actor.classState.bonusProneEligibleTurnKey ||
+      actor.classState.bonusProneEligibleTargetIds
     ) {
-      actor.classState.totemWarriorWolfAttunementTurnKey = undefined
-      actor.classState.totemWarriorWolfAttunementTargetIds = undefined
+      actor.classState.bonusProneEligibleTurnKey = undefined
+      actor.classState.bonusProneEligibleTargetIds = undefined
       events.push({
         type: 'class-state-changed',
         actorId: actor.id,
-        stateKey: 'totem-warrior-wolf-attunement',
+        stateKey: 'rage-feature-bonus-prone',
         active: false,
       })
     }
@@ -23620,20 +25298,20 @@ function resolveDnd5eHeadlessActionInternal(
       })
     }
     for (const target of Object.values(state.combatants)) {
-      const strikes = target.classState.eldritchStrikeBySource
+      const strikes = target.classState.spellSavePressureBySource
       const strike = strikes?.[actor.id]
       if (!strike) continue
       const nextTurns = Math.max(0, strike.sourceTurnsRemaining - 1)
       const remaining = { ...strikes }
       if (nextTurns > 0) remaining[actor.id] = { ...strike, sourceTurnsRemaining: nextTurns }
       else delete remaining[actor.id]
-      target.classState.eldritchStrikeBySource =
+      target.classState.spellSavePressureBySource =
         Object.keys(remaining).length > 0 ? remaining : undefined
       if (nextTurns === 0) {
         events.push({
           type: 'class-state-changed',
           actorId: target.id,
-          stateKey: `eldritch-strike:${actor.id}`,
+          stateKey: `weapon-hit-save-pressure:${actor.id}`,
           active: false,
         })
       }
@@ -24138,7 +25816,10 @@ function refreshDnd5eSourceLinkedRelationDistances(
     )
     return Math.max(
       horizontalCells * gridDistance.feetPerCell,
-      Math.abs((left.elevationFeet ?? 0) - (right.elevationFeet ?? 0)),
+      dnd5eCombatantVerticalDistanceFeet(
+        { ...left, sizeRank: dnd5eEffectiveSizeRank(left) },
+        { ...right, sizeRank: dnd5eEffectiveSizeRank(right) },
+      ),
     )
   }
   for (const target of Object.values(next.combatants)) {
@@ -24158,7 +25839,10 @@ function refreshDnd5eSourceLinkedRelationDistances(
       ): number => Math.hypot(
         (left.position.x - right.position.x) / unitsPerFoot,
         (left.position.y - right.position.y) / unitsPerFoot,
-        (left.elevationFeet ?? 0) - (right.elevationFeet ?? 0),
+        dnd5eCombatantVerticalDistanceFeet(
+          { ...left, sizeRank: dnd5eEffectiveSizeRank(left) },
+          { ...right, sizeRank: dnd5eEffectiveSizeRank(right) },
+        ),
       )
       const key = dnd5eCombatantPairKey(source.id, target.id)
       const exactGridDistance = gridFootprintDistanceFeet(source, target)
@@ -24576,7 +26260,7 @@ export function resolveDnd5eHeadlessAction(
   transactionOptions: Dnd5eHeadlessTransactionOptions = {},
 ): Dnd5eActionResult {
   const isRootResolution = headlessResolutionDepth === 0
-  const transaction = isRootResolution
+  const transaction = isRootResolution && headlessAirborneFallPreviewDepth === 0
     ? beginDnd5eHeadlessActionTransaction(source, action, transactionOptions)
     : undefined
   headlessResolutionDepth += 1
@@ -24635,7 +26319,26 @@ export function resolveDnd5eHeadlessAction(
           triggeredEvents.push(...triggered.events)
         }
       }
+      for (const combatant of Object.values(triggeredState.combatants)) {
+        if (
+          (combatant.concentrating || combatant.classState.concentrationSpellId) &&
+          dnd5eIsIncapacitated(combatant)
+        ) {
+          endDnd5eConcentration(triggeredState, combatant, triggeredEvents)
+        }
+      }
       result = { ...result, state: triggeredState, events: triggeredEvents }
+      if (headlessAirborneFallPreviewDepth === 0 && !resolveDnd5eNewUnsupportedAirborneFalls(
+        source,
+        result.state,
+        action,
+        action.airborneFallDamageRollsByCombatantId,
+        triggeredEvents,
+      )) {
+        result = fail(result.state, triggeredEvents, 'invalid-dice')
+      }
+    }
+    if (result.ok) {
       const mechanicEvents = [...result.events]
       enqueueDnd5eMonsterMechanicTriggerSnapshots(
         result.state,
@@ -24690,7 +26393,7 @@ export function resolveDnd5eHeadlessAction(
       transaction: settleDnd5eHeadlessActionTransaction(transaction, finalResult!, transactionOptions.now),
     }
   }
-  if (isRootResolution && headlessResolutionObserver) {
+  if (isRootResolution && headlessAirborneFallPreviewDepth === 0 && headlessResolutionObserver) {
     try {
       headlessResolutionObserver({ source, action, result: finalResult! })
     } catch {

@@ -76,4 +76,37 @@ describe('移动路径触发', () => {
     expect(dnd5eMovementPathCells({ col: 0, row: 0 }, { col: 5, row: 0 })).toHaveLength(6)
     expect(dnd5eItemAreasEnteredByMove({ map: areaMap, token: moving, to: { x: 275, y: 25 } }).map((entry) => entry.area.id)).toEqual(['a', 'b'])
   })
+
+  it('does not trigger ground item hazards while flying over their cells', () => {
+    const areaMap: BattleMap = {
+      ...map,
+      tokens: [{ ...token, x: 25, y: 25, elevationFeet: 15 }],
+      dnd5eItemAreas: [{
+        id: 'ground-caltrops',
+        kind: 'caltrops',
+        sourceCharacterId: 'x',
+        sourceTokenId: 'x',
+        sourceItemTemplateId: 'x',
+        sourceItemName: 'Caltrops',
+        cells: [{ col: 2, row: 0 }],
+        createdAt: 1,
+        armed: true,
+      }],
+    }
+    const moving = areaMap.tokens[0]
+    expect(dnd5eItemAreasEnteredByMove({
+      map: areaMap,
+      token: moving,
+      to: { x: 175, y: 25 },
+      pathElevationsFeet: [15, 15, 15, 15],
+    })).toEqual([])
+
+    expect(dnd5eItemAreasEnteredByMove({
+      map: areaMap,
+      token: moving,
+      to: { x: 125, y: 25 },
+      path: [{ x: 125, y: 25 }, { x: 125, y: 25 }],
+      pathElevationsFeet: [15, 0],
+    }).map((entry) => entry.area.id)).toEqual(['ground-caltrops'])
+  })
 })

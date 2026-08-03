@@ -48,6 +48,7 @@ import {
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
   normalizeDnd5ePersistentAreaLighting,
+  normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   type Dnd5ePersistentAreaAnchorMode,
@@ -57,7 +58,12 @@ import {
   type Dnd5ePersistentAreaVisual,
   type Dnd5ePersistentAreaTriggerReceipt,
   type Dnd5ePersistentAreaTriggerSnapshot,
+  type Dnd5ePersistentAreaVerticalSnapshot,
 } from '../rulesets/dnd5e/persistentAreaTypes'
+import {
+  getDnd5eCoreSpellAreaDeclaration,
+  reconcileDnd5ePersistentAreaAnchors,
+} from '../rulesets/dnd5e/coreSpellAreas'
 import {
   creatureSizeToTokenSize,
   normalizeCreatureSize,
@@ -426,10 +432,11 @@ function applyTokenPatchToSharedMaps(
   tokenId: string,
   patch: Partial<Token>,
 ): BattleMap[] | null {
+  const updatesAnchorGeometry = tokenPatchUpdatesPersistentAreaAnchor(patch)
   let matched = false
   const nextMaps = maps.map((map) => {
     if (map.id !== mapId) return map
-    return {
+    const patchedMap = {
       ...map,
       tokens: map.tokens.map((token) => {
         if (token.id !== tokenId) return token
@@ -441,8 +448,91 @@ function applyTokenPatchToSharedMaps(
         }
       }),
     }
+    return updatesAnchorGeometry
+      ? reconcilePersistentAreasAnchoredToToken(patchedMap, tokenId)
+      : patchedMap
   })
   return matched ? nextMaps : null
+}
+
+function tokenPatchUpdatesPersistentAreaAnchor(patch: Partial<Token>): boolean {
+  return (['x', 'y', 'elevationFeet', 'size'] as const).some((key) =>
+    Object.prototype.hasOwnProperty.call(patch, key),
+  )
+}
+
+function persistentAreaAnchoredToToken(area: Dnd5ePluginArea, tokenId: string): boolean {
+  return (
+    area.anchorMode === 'source-token' || area.anchorMode === 'effect-token'
+  ) && (area.anchorTokenId ?? area.sourceTokenId) === tokenId
+}
+
+/**
+ * Re-anchor only the persistent areas owned by this Token patch. The general
+ * reconciler deliberately understands terrain elevation and the exact grid
+ * semantics; filtering its result here prevents one unrelated Token patch
+ * from silently changing another Token's area.
+ */
+function reconcilePersistentAreasAnchoredToToken(map: BattleMap, tokenId: string): BattleMap {
+  const areas = map.dnd5ePluginAreas ?? []
+  if (!areas.some((area) => persistentAreaAnchoredToToken(area, tokenId))) return map
+  const reconciled = reconcileDnd5ePersistentAreaAnchors(map)
+  const reconciledById = new Map((reconciled.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
+  return {
+    ...map,
+    dnd5ePluginAreas: areas.map((area) =>
+      persistentAreaAnchoredToToken(area, tokenId)
+        ? reconciledById.get(area.id) ?? area
+        : area,
+    ),
+  }
+}
+
+/**
+ * Projects the exact Token fields and linked persistent areas from the maps
+ * payload that won CAS. They must land in one Store update: projecting only
+ * the invisible effect Token briefly exposes the old area anchor when the
+ * drag preview is released, which looks like Flaming Sphere jumping back.
+ */
+export function committedTokenAnchorProjectionFromSharedMaps(
+  currentMap: BattleMap,
+  committedMaps: BattleMap[],
+  tokenId: string,
+  patch: Partial<Token>,
+): Pick<BattleMap, 'tokens' | 'dnd5ePluginAreas'> | null {
+  const committedMap = committedMaps.find((map) => map.id === currentMap.id)
+  const committedPatch = committedTokenPatchFromSharedMaps(
+    committedMaps,
+    currentMap.id,
+    tokenId,
+    patch,
+  )
+  if (!committedMap || !committedPatch) return null
+
+  const tokens = currentMap.tokens.map((token) =>
+    token.id === tokenId ? { ...token, ...committedPatch } : token,
+  )
+  if (!tokenPatchUpdatesPersistentAreaAnchor(patch)) {
+    return { tokens, dnd5ePluginAreas: currentMap.dnd5ePluginAreas }
+  }
+
+  const committedAnchors = (committedMap.dnd5ePluginAreas ?? [])
+    .filter((area) => persistentAreaAnchoredToToken(area, tokenId))
+  const committedAnchorById = new Map(committedAnchors.map((area) => [area.id, area]))
+  const currentAnchorIds = new Set(
+    (currentMap.dnd5ePluginAreas ?? [])
+      .filter((area) => persistentAreaAnchoredToToken(area, tokenId))
+      .map((area) => area.id),
+  )
+  const dnd5ePluginAreas = [
+    ...(currentMap.dnd5ePluginAreas ?? []).flatMap((area) => {
+      if (!persistentAreaAnchoredToToken(area, tokenId)) return [area]
+      const committed = committedAnchorById.get(area.id)
+      return committed ? [committed] : []
+    }),
+    ...committedAnchors.filter((area) => !currentAnchorIds.has(area.id)),
+  ]
+  return { tokens, dnd5ePluginAreas }
 }
 
 /**
@@ -749,13 +839,13 @@ export interface Token {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
-    /** 奥法打击：按来源战士记录标记及其来源回合失效边界。 */
-    eldritchStrikeBySource?: Record<string, {
+    /** Imported save-pressure markers keyed by source combatant. */
+    spellSavePressureBySource?: Record<string, {
       appliedTurnKey: string
       sourceTurnsRemaining: number
     }>
-    totemWarriorWolfAttunementTargetIds?: string[]
-    totemWarriorWolfAttunementTurnKey?: string
+    bonusProneEligibleTargetIds?: string[]
+    bonusProneEligibleTurnKey?: string
     monsterMechanicRollModifiers?: Array<{
       id: string
       mechanicOwnerId: string
@@ -824,6 +914,9 @@ export interface Token {
     monsterShapechangeFormId?: string
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
+    monsterBerserk?: boolean
+    monsterDamageAversionActive?: boolean
+    monsterDamageAversionSourceActorId?: string
     monsterHydraHeadCount?: number
     monsterHydraHeadsLostSinceLastTurn?: number
     monsterHydraDamageTurnKey?: string
@@ -843,6 +936,8 @@ export interface Token {
   visionRangeFeet?: number
   /** 2014 规则中的黑暗视觉距离；0 或缺失表示没有黑暗视觉。 */
   darkvisionRangeFeet?: number
+  /** Room-scoped rules projection; stores only a resolved number, never source content. */
+  dnd5eCharacterDarkvisionRangeFeet?: number
   /** Sees normally in nonmagical darkness, such as Devil's Sight. */
   darknessSightRangeFeet?: number
   /** Sees normally through magical darkness, such as Devil's Sight. */
@@ -938,6 +1033,8 @@ export interface Dnd5ePluginArea {
   /** 旧存档缺省为 plugin-feature；核心 SRD 法术使用 core-spell。 */
   sourceKind?: Dnd5ePersistentAreaSourceKind
   coreSpellId?: string
+  /** Core spellcasting source captured when the area was created. */
+  castingClassId?: Dnd5eClassId
   slotLevel?: number
   label: string
   color: string
@@ -953,6 +1050,8 @@ export interface Dnd5ePluginArea {
   anchorMode?: Dnd5ePersistentAreaAnchorMode
   anchorTokenId?: string
   anchorCell?: { col: number; row: number }
+  /** Authoritative vertical extent; absent preserves legacy unbounded-column behavior. */
+  vertical?: Dnd5ePersistentAreaVerticalSnapshot
   movement?: Dnd5ePersistentAreaMovementDeclaration
   /** 区域内移动成本倍数；例如灵体卫士为 2。 */
   movementCostMultiplier?: number
@@ -967,8 +1066,8 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V16：未关联角色的 0 HP 生物可持久保存 Headless 的稳定/存活结算。 */
-export const MAPS_PERSIST_VERSION = 16
+/** 地图存档 V17：规范化可选、受限的持久区域垂直快照。 */
+export const MAPS_PERSIST_VERSION = 17
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -1109,6 +1208,9 @@ function normalizeToken(raw: unknown): Token {
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
+    dnd5eCharacterDarkvisionRangeFeet: Number.isFinite(t.dnd5eCharacterDarkvisionRangeFeet)
+      ? Math.max(0, Math.min(10_000, t.dnd5eCharacterDarkvisionRangeFeet as number))
+      : undefined,
     darknessSightRangeFeet: Number.isFinite(t.darknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.darknessSightRangeFeet as number)) : undefined,
     magicalDarknessSightRangeFeet: Number.isFinite(t.magicalDarknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.magicalDarknessSightRangeFeet as number)) : undefined,
     blindsightRangeFeet: Number.isFinite(t.blindsightRangeFeet) ? Math.max(0, Math.min(10_000, t.blindsightRangeFeet as number)) : undefined,
@@ -1243,6 +1345,12 @@ function normalizeMap(raw: unknown): BattleMap {
           ? area.coreSpellId
           : undefined
         if (sourceKind === 'core-spell' && !coreSpellId) return []
+        const castingClassId = sourceKind === 'core-spell' && [
+          'barbarian', 'bard', 'cleric', 'druid', 'fighter', 'monk',
+          'paladin', 'ranger', 'rogue', 'sorcerer', 'warlock', 'wizard',
+        ].includes(String(area.castingClassId))
+          ? area.castingClassId as Dnd5eClassId
+          : undefined
         const anchorMode: Dnd5ePersistentAreaAnchorMode =
           area.anchorMode === 'source-token' || area.anchorMode === 'effect-token'
             ? area.anchorMode
@@ -1260,12 +1368,25 @@ function normalizeMap(raw: unknown): BattleMap {
           : undefined
         const lighting = area.lighting ? normalizeDnd5ePersistentAreaLighting(area.lighting) : undefined
         if (area.lighting != null && !lighting) return []
+        const vertical = area.vertical != null
+          ? normalizeDnd5ePersistentAreaVerticalSnapshot(area.vertical)
+          : undefined
+        if (area.vertical != null && !vertical) return []
+        const normalizedVisual = area.visual
+          ? normalizeDnd5ePersistentAreaVisual(area.visual)
+          : undefined
+        const visual = normalizedVisual ?? (
+          sourceKind === 'core-spell' && coreSpellId
+            ? getDnd5eCoreSpellAreaDeclaration(coreSpellId)?.visual
+            : undefined
+        )
         return [{
           id: area.id,
           pluginId: area.pluginId,
           featureId: area.featureId,
           sourceKind,
           coreSpellId,
+          castingClassId,
           slotLevel: Number.isInteger(area.slotLevel) && Number(area.slotLevel) >= 0 && Number(area.slotLevel) <= 9
             ? Number(area.slotLevel)
             : undefined,
@@ -1288,6 +1409,7 @@ function normalizeMap(raw: unknown): BattleMap {
             ? area.anchorTokenId
             : anchorMode === 'source-token' ? area.sourceTokenId : undefined,
           anchorCell,
+          vertical,
           movement,
           movementCostMultiplier: Number.isFinite(area.movementCostMultiplier) &&
             Number(area.movementCostMultiplier) >= 1 && Number(area.movementCostMultiplier) <= 10
@@ -1297,7 +1419,7 @@ function normalizeMap(raw: unknown): BattleMap {
           includeSelf: area.includeSelf === true,
           hiddenFromPlayers: area.hiddenFromPlayers === true,
           lighting,
-          visual: area.visual ? normalizeDnd5ePersistentAreaVisual(area.visual) : undefined,
+          visual: visual ? { ...visual } : undefined,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
         } satisfies Dnd5ePluginArea]
@@ -1361,6 +1483,7 @@ type CharacterTokenPresentation = {
   tokenPortrait?: string
   race?: string
   dnd5eRaceId?: string
+  darkvisionRangeFeet?: number
   dnd5eClassChoices?: unknown
   dnd5eCombatState?: {
     activeEffects?: Dnd5eActiveEffectInstance[]
@@ -1481,7 +1604,13 @@ interface MapState {
   addEncounterFromPool: (mapId: string, entries: readonly Dnd5eEncounterEntry[]) => string[]
   addCharacterToken: (
     mapId: string,
-    payload: { characterId: string; name: string; emoji: string; type?: Token['type'] },
+    payload: {
+      characterId: string
+      name: string
+      emoji: string
+      type?: Token['type']
+      dnd5eCharacterDarkvisionRangeFeet?: number
+    },
   ) => void
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   applyAuthorityTokenUpdate: (
@@ -1575,18 +1704,21 @@ export const useMapStore = create<MapState>()(
         lastLocalMapsWriteAt = saved.payload.updatedAt ?? updatedAt
         lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? updatedAt
         lastSharedMapsSnapshot = JSON.stringify(saved.payload)
-        const committedPatch = committedTokenPatchFromSharedMaps(
-          saved.payload.maps,
-          mapId,
-          tokenId,
-          patch,
-        )
-        if (!committedPatch) throw new Error('maps-token-patch-committed-target-missing')
+        const currentMap = get().maps.find((map) => map.id === mapId)
+        const committedProjection = currentMap
+          ? committedTokenAnchorProjectionFromSharedMaps(
+              currentMap,
+              saved.payload.maps,
+              tokenId,
+              patch,
+            )
+          : null
+        if (!committedProjection) throw new Error('maps-token-patch-committed-target-missing')
         // Re-project the payload that actually won CAS before the command
-        // promise resolves. Otherwise an older SSE snapshot received during
-        // the save can become visible as soon as MapCanvas releases its drag
-        // preview, which looks like the monster jumping back.
-        get().applyAuthorityTokenUpdate(mapId, tokenId, committedPatch)
+        // promise resolves. The effect Token and any linked source/effect-token
+        // areas are committed in one Store update so releasing MapCanvas's drag
+        // preview cannot expose an older visible anchor.
+        get().applyAuthorityMapUpdate(mapId, committedProjection)
       },
       select: (id) => set({ selectedId: id }),
 
@@ -1752,7 +1884,10 @@ export const useMapStore = create<MapState>()(
         publishMapsState(get())
         return tokens.map((token) => token.id)
       },
-      addCharacterToken: (mapId, { characterId, name, emoji, type = 'player' }) => {
+      addCharacterToken: (
+        mapId,
+        { characterId, name, emoji, type = 'player', dnd5eCharacterDarkvisionRangeFeet },
+      ) => {
         const map = get().maps.find((m) => m.id === mapId)
         if (!map) return
         const preset = TOKEN_PRESETS[type]
@@ -1768,6 +1903,7 @@ export const useMapStore = create<MapState>()(
           size: tokenSize,
           type,
           characterId,
+          dnd5eCharacterDarkvisionRangeFeet,
         }
         set((s) => ({
           maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
@@ -1780,21 +1916,10 @@ export const useMapStore = create<MapState>()(
           Object.prototype.hasOwnProperty.call(patch, 'hp') ||
           Object.prototype.hasOwnProperty.call(patch, 'maxHp')
         markPendingLocalTokenHitPointEdit(mapId, tokenId, patch)
-        set((s) => ({
-          maps: s.maps.map((m) =>
-            m.id === mapId
-              ? {
-                  ...m,
-                  tokens: m.tokens.map((t) => {
-                    if (t.id !== tokenId) return t
-                    const next = { ...t, ...patch }
-                    const position = clampTokenPositionToMap(next, next, m)
-                    return { ...next, ...position }
-                  }),
-                }
-              : m,
-          ),
-        }))
+        set((state) => {
+          const maps = applyTokenPatchToSharedMaps(state.maps, mapId, tokenId, patch)
+          return maps ? { maps } : state
+        })
         publishMapsState(get(), { retryPendingHitPoints: updatesHitPoints })
       },
 
@@ -1812,21 +1937,10 @@ export const useMapStore = create<MapState>()(
             clearPendingLocalTokenHitPointEdit(mapId, tokenId)
           }
         }
-        set((state) => ({
-          maps: state.maps.map((map) =>
-            map.id === mapId
-              ? {
-                  ...map,
-                  tokens: map.tokens.map((token) => {
-                    if (token.id !== tokenId) return token
-                    const next = { ...token, ...patch }
-                    const position = clampTokenPositionToMap(next, next, map)
-                    return { ...next, ...position }
-                  }),
-                }
-              : map,
-          ),
-        }))
+        set((state) => {
+          const maps = applyTokenPatchToSharedMaps(state.maps, mapId, tokenId, patch)
+          return maps ? { maps } : state
+        })
       },
 
       applyAuthorityMapUpdate: (mapId, patch) => {

@@ -6,6 +6,11 @@ import {
   type GridCell,
 } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import {
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+} from '../../lib/mapGeometry'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import type {
   Dnd5eTurnEconomyCounts,
@@ -19,15 +24,20 @@ import {
   dnd5ePluginHeadlessActionDefinition,
   missingDnd5eRulesPluginRequirements,
   type Dnd5ePluginAction,
+  type Dnd5ePluginPersistentAreaVerticalDeclaration,
   type RegisteredDnd5ePluginFeature,
 } from './pluginApi'
 import {
-  resolveDnd5eHeadlessAction,
   resolveDnd5eSandboxedPluginCapabilities,
   type Dnd5eActionFailure,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import { resolveDnd5eSandboxedPluginAction } from './pluginSandbox'
 import {
   createDnd5eMapCombatSnapshot,
@@ -35,6 +45,11 @@ import {
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { planDnd5eSummonedCreature } from './summonedCreatures'
+import type { Dnd5ePersistentAreaVerticalSnapshot } from './persistentAreaTypes'
+import {
+  dnd5eInstantAoeAffectsTokenVertically,
+  dnd5eTokenToPointDistanceFeet,
+} from './verticalCombatGeometry'
 
 export type Dnd5ePluginFeatureActionRejectReason =
   | 'invalid-action'
@@ -65,6 +80,7 @@ export interface PreparedDnd5ePluginFeatureAction {
   targetTokens: Token[]
   targetCells: GridCell[]
   targetCell?: GridCell
+  areaTargetElevationFeet?: number
   feature: RegisteredDnd5ePluginFeature
   distanceFeet: number
   headlessAction: Dnd5ePluginAction
@@ -224,6 +240,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
   let targetTokens: Token[]
   let targetCell: GridCell | undefined
   let targetCells: GridCell[] = []
+  let areaTargetElevationFeet: number | undefined
   let distanceFeet = 0
   if (feature.action.targeting.kind === 'self') {
     if (action.targetTokenId && action.targetTokenId !== actorToken.id) {
@@ -255,6 +272,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
     targetTokens = [targetToken]
   } else {
     const targeting = feature.action.targeting
+    const geometry = mapGeometryRuntimeForMap(input.map.id)
     const casterCell = pixelToCell(actorToken.x, actorToken.y, input.map)
     targetCell = action.targetCell ?? (targeting.template.shape === 'circle' && targeting.template.origin === 'self'
       ? casterCell
@@ -272,6 +290,47 @@ export function prepareDnd5ePluginFeatureAction(input: {
     })
     const cells = cellsForAoe(targeting.template, orientFrom, targetCell)
     targetCells = cells
+    const effectAim = {
+      x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
+      y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
+    }
+    const effectOrigin = targeting.template.origin === 'point' ? effectAim : actorToken
+    if (
+      action.targetElevationFeet != null &&
+      (!Number.isFinite(action.targetElevationFeet) ||
+        action.targetElevationFeet < -1_000 ||
+        action.targetElevationFeet > 10_000)
+    ) return { ok: false, reason: 'invalid-target' }
+    const effectAimElevationFeet = action.targetElevationFeet ??
+      mapGeometryTerrainElevationAtPoint(geometry, effectAim)
+    areaTargetElevationFeet = targeting.template.origin === 'point'
+      ? effectAimElevationFeet
+      : mapGeometryTokenElevation(geometry, actorToken)
+    if (targeting.template.origin === 'point') {
+      const areaPointToken: Token = {
+        ...actorToken,
+        id: `${actorToken.id}:plugin-area-placement`,
+        characterId: undefined,
+        type: 'obstacle',
+        size: 1,
+        ...effectOrigin,
+        elevationFeet: areaTargetElevationFeet,
+      }
+      const horizontalDistanceFeet = tokenFootprintDistanceCells(
+        actorToken,
+        areaPointToken,
+        input.map,
+      ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      if (
+        targeting.template.placeRangeFeet != null &&
+        dnd5eTokenToPointDistanceFeet({
+          geometry,
+          token: actorToken,
+          pointElevationFeet: areaTargetElevationFeet,
+          horizontalDistanceFeet,
+        }) > targeting.template.placeRangeFeet + 1e-4
+      ) return { ok: false, reason: 'target-out-of-range' }
+    }
     targetTokens = tokensInCells(input.map, input.map.tokens, cells)
       .filter((token) => {
         if (token.type === 'obstacle') return false
@@ -279,7 +338,18 @@ export function prepareDnd5ePluginFeatureAction(input: {
         const opposed = areOpposedCombatTokens(actorToken, token)
         if (targeting.relation === 'ally' && opposed) return false
         if (targeting.relation === 'enemy' && !opposed) return false
-        return true
+        return dnd5eInstantAoeAffectsTokenVertically({
+          spellId: `plugin:${feature.id}`,
+          area: targeting.template,
+          map: input.map,
+          geometry,
+          sourceToken: actorToken,
+          targetToken: token,
+          effectOrigin,
+          effectOriginElevationFeet: areaTargetElevationFeet!,
+          effectAim,
+          effectAimElevationFeet,
+        })
       })
       .slice(0, targeting.maximumTargets ?? 64)
     targetToken = targetTokens[0]
@@ -346,6 +416,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
       targetTokens,
       targetCells,
       targetCell,
+      areaTargetElevationFeet,
       feature,
       distanceFeet,
       headlessAction: {
@@ -389,6 +460,33 @@ function pluginFailure(reason: string): Dnd5eActionFailure {
     : 'invalid-plugin-action'
 }
 
+function pluginPersistentAreaVerticalSnapshot(input: {
+  map: BattleMap
+  anchorCell: GridCell
+  baseElevationFeet?: number
+  declaration?: Dnd5ePluginPersistentAreaVerticalDeclaration
+}): Dnd5ePersistentAreaVerticalSnapshot | undefined {
+  const { declaration } = input
+  if (!declaration) return undefined
+  if (declaration.mode === 'ground') return { mode: 'ground' }
+  const gridSize = Math.max(1, input.map.gridSize)
+  const anchorPoint = {
+    x: (input.map.gridOffsetX ?? 0) + (input.anchorCell.col + 0.5) * gridSize,
+    y: (input.map.gridOffsetY ?? 0) + (input.anchorCell.row + 0.5) * gridSize,
+  }
+  const requestedBaseElevationFeet = Number.isFinite(input.baseElevationFeet)
+    ? Number(input.baseElevationFeet)
+    : mapGeometryTerrainElevationAtPoint(mapGeometryRuntimeForMap(input.map.id), anchorPoint)
+  const baseElevationFeet = Math.max(-1_000, Math.min(10_000, Math.round(
+    requestedBaseElevationFeet,
+  )))
+  return {
+    mode: 'volume',
+    baseElevationFeet,
+    heightFeet: declaration.heightFeet,
+  }
+}
+
 export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   prepared: PreparedDnd5ePluginFeatureAction
   rolls?: Dnd5ePluginAction['rolls']
@@ -396,10 +494,12 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   authoritativePayload?: Dnd5ePluginAction['payload']
   interruptChoiceId?: string
   summonInitiativeD20?: number
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): Promise<{
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
   summonedInitiativeEntries?: InitiativeEntry[]
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 }> {
   const summon = input.prepared.feature.action?.summon
   const summonPlan = summon && input.prepared.targetCell
@@ -437,6 +537,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
     interruptChoiceId: input.interruptChoiceId,
   }
   let result: Dnd5eActionResult
+  let airborneFalls: readonly Dnd5eAirborneFallPreview[] | undefined
   if (definition?.execution === 'worker') {
     const actor = input.prepared.state.combatants[headlessAction.actorId]
     const target = headlessAction.targetId
@@ -454,26 +555,37 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
           target,
           targets,
         })
-        result = sandbox.ok
-          ? resolveDnd5eSandboxedPluginCapabilities(
-              input.prepared.state,
-              headlessAction,
-              sandbox.operations,
-            )
-          : {
+        if (sandbox.ok) {
+          const sandboxResult = resolveDnd5eSandboxedPluginCapabilities(
+            input.prepared.state,
+            headlessAction,
+            sandbox.operations,
+            input.airborneFallDamageRollsByCombatantId,
+          )
+          result = sandboxResult
+          airborneFalls = sandboxResult.airborneFalls
+        } else {
+          result = {
               ok: false,
               state: input.prepared.state,
               events: [],
               reason: pluginFailure(sandbox.reason),
             }
+        }
       } catch {
         result = { ok: false, state: input.prepared.state, events: [], reason: 'invalid-plugin-action' }
       }
     }
   } else {
-    result = resolveDnd5eHeadlessAction(input.prepared.state, headlessAction)
+    const resolved = resolveDnd5eActionWithAirborneFallPreview(
+      input.prepared.state,
+      headlessAction,
+      input.airborneFallDamageRollsByCombatantId,
+    )
+    result = resolved.result
+    airborneFalls = resolved.airborneFalls
   }
-  if (!result.ok) return { result }
+  if (!result.ok) return { result, airborneFalls }
   const application = planDnd5eMapResultApplication({
     state: result.state,
     map: input.prepared.map,
@@ -484,6 +596,12 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   if (persistentArea && input.prepared.targetCells.length > 0) {
     const id = `plugin-area:${input.prepared.action.id}`
     const targeting = input.prepared.feature.action!.targeting
+    const vertical = pluginPersistentAreaVerticalSnapshot({
+      map: application.map,
+      anchorCell: input.prepared.targetCell ?? input.prepared.targetCells[0],
+      baseElevationFeet: input.prepared.areaTargetElevationFeet,
+      declaration: persistentArea.vertical,
+    })
     const triggers = persistentArea.triggers?.map((trigger) => ({
       ...trigger,
       savingThrow: trigger.savingThrow
@@ -512,6 +630,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
           sourceCharacterId: input.prepared.actor.id,
           sourceTokenId: input.prepared.actorToken.id,
           cells: input.prepared.targetCells.map((cell) => ({ ...cell })),
+          vertical,
           createdRound: input.prepared.action.round,
           expiresAfterRound: input.prepared.action.round + persistentArea.durationRounds - 1,
           concentrationId: persistentArea.concentration ? `plugin-area:${input.prepared.action.id}` : undefined,
@@ -538,6 +657,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   return {
     result,
     application,
+    airborneFalls,
     summonedInitiativeEntries: summonPlan?.ok ? [summonPlan.plan.initiativeEntry] : undefined,
   }
 }

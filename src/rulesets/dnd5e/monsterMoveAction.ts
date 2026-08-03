@@ -10,6 +10,7 @@ import {
 } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import {
+  dnd5eEffectiveFlySpeed,
   dnd5eEffectiveSpeed,
   dnd5eGrappleDragExtraMovementFeet,
   resolveDnd5eHeadlessAction,
@@ -18,7 +19,8 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster } from './monsters'
-import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
+import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './persistentAreaGeometry'
+import { dnd5eTraversalMovementCost } from './traversal'
 
 export interface Dnd5eMonsterMapMovementTrace {
   tokenId: string
@@ -40,7 +42,7 @@ export function resolveDnd5eMonsterMapMove(input: {
   nimbleEscape?: 'disengage'
   turnEconomy?: Dnd5eTurnEconomyCounts
   fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
-}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[]; movementTraces?: readonly Dnd5eMonsterMapMovementTrace[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-locked' | 'movement-blocked' | 'object-interaction-unavailable' } {
+}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[]; traversalMode?: 'walk' | 'fly'; movementTraces?: readonly Dnd5eMonsterMapMovementTrace[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-locked' | 'movement-blocked' | 'object-interaction-unavailable' } {
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type === 'enemy')
   const monster = actorToken?.poolId ? getDnd5eSrdMonster(actorToken.poolId) : undefined
   if (!actorToken || !monster) return { ok: false, reason: 'invalid-actor' }
@@ -79,11 +81,13 @@ export function resolveDnd5eMonsterMapMove(input: {
     : actorElevationFeet > actorGroundElevationFeet
       ? Math.max(targetGroundElevationFeet, actorElevationFeet)
       : targetGroundElevationFeet
-  const actorCanFly = (monster.speed.fly ?? 0) > 0
+  const effectiveFlySpeed = dnd5eEffectiveFlySpeed(actorCombatant)
+  const actorCanFly = (effectiveFlySpeed ?? 0) > 0
   const usesFlight = actorCanFly && (
     actorElevationFeet > actorGroundElevationFeet ||
     targetElevationFeet > targetGroundElevationFeet
   )
+  const traversalMode = usesFlight ? 'fly' as const : 'walk' as const
   const path = findMapGeometryPath({
     geometry, map: pathfindingMap, token: actorToken, to: input.to,
     allowOpenUnlockedDoors: true,
@@ -221,7 +225,29 @@ export function resolveDnd5eMonsterMapMove(input: {
   // instead crawl (or choose another action), never lose its whole move to an
   // opaque invalid-class-feature rejection.
   const standFromProne = isProne && !standingPrevented && dnd5eEffectiveSpeed(actorCombatant) > 0
-  const locomotionCostFeet = path.movementCostFeet + verticalDistanceFeet +
+  // Use the same authoritative movement pool that Headless validates below.
+  // Monsters with a faster fly speed expose that speed as their combat turn
+  // movement; using only their walk speed here would underquote flight cost and
+  // make an otherwise legal move roll back as invalid-class-feature.
+  const walkSpeed = Math.max(1, dnd5eEffectiveSpeed(actorCombatant))
+  const traversal = dnd5eTraversalMovementCost({
+    distanceFeet: path.distanceFeet,
+    baseMovementCostFeet: path.movementCostFeet,
+    elevationGainFeet: usesFlight
+      ? Math.abs(finalElevationFeet - actorElevationFeet)
+      : Math.max(0, finalElevationFeet - actorElevationFeet),
+    mode: traversalMode,
+    profile: {
+      strengthScore: actorCombatant.abilities.str,
+      strengthModifier: Math.floor((actorCombatant.abilities.str - 10) / 2),
+      walkSpeed,
+      climbSpeed: monster.speed.climb,
+      swimSpeed: monster.speed.swim,
+      flySpeed: effectiveFlySpeed,
+    },
+  })
+  if (!traversal.ok) return { ok: false, reason: 'movement-blocked' }
+  const locomotionCostFeet = traversal.movementCostFeet +
     (isProne && !standFromProne ? path.distanceFeet : 0)
   const movementCostFeet = locomotionCostFeet +
     (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0) +
@@ -231,8 +257,9 @@ export function resolveDnd5eMonsterMapMove(input: {
     {
       type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet,
       movementCost: movementCostFeet, movementCostIncludesDrag: true,
-      traversalMode: usesFlight ? 'fly' : 'walk',
+      traversalMode,
       toElevationFeet: finalElevationFeet,
+      toGroundElevationFeet: mapGeometryTerrainElevationAtPoint(geometry, input.to),
       standFromProne,
       fallingDamageRollsByCombatantId: input.fallingDamageRollsByCombatantId,
     },
@@ -248,6 +275,7 @@ export function resolveDnd5eMonsterMapMove(input: {
     distanceFeet,
     path: path.points,
     doorsToOpen: path.doorsToOpen,
+    traversalMode,
     movementTraces: [
       {
         tokenId: actorToken.id,

@@ -1,0 +1,20 @@
+{
+  "name": "我的单房间规则",
+  "version": "1.0.0",
+  "features": [
+    {
+      "id": "example-room-feature",
+      "name": "示例房间特性",
+      "summary": "用于演示单文件 JSON 导入。",
+      "description": "请用你自己有权使用的结构化规则替换此示例。",
+      "automation": "manual"
+    }
+  ],
+  "races": [],
+  "backgrounds": [],
+  "feats": [],
+  "spells": [],
+  "items": [],
+  "subclasses": [],
+  "monsters": []
+}

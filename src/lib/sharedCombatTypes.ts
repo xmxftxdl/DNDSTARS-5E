@@ -50,8 +50,8 @@ export interface SharedCombatFlowPauseV1 {
 
 export type Dnd5eClassFeaturePayload =
   | { feature: 'barbarian-rage'; frenzy?: boolean; end?: boolean }
-  | { feature: 'barbarian-totem-eagle-dash' }
-  | { feature: 'barbarian-totem-wolf-knockdown'; targetTokenId: string }
+  | { feature: 'feature-rage-bonus-dash' }
+  | { feature: 'feature-rage-bonus-prone'; targetTokenId: string }
   | { feature: 'barbarian-intimidating-presence'; targetTokenId: string }
   | { feature: 'rogue-cunning-action'; option: 'dash' | 'disengage' | 'hide' }
   | { feature: 'rogue-fast-hands'; option: 'sleight-of-hand' | 'thieves-tools' | 'use-object' }
@@ -95,14 +95,14 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'druid-wild-shape'; formId: string }
   | { feature: 'druid-end-wild-shape' }
   | { feature: 'warlock-hurl-through-hell-ready'; active: boolean }
-  | { feature: 'eldritch-knight-summon-bonded-weapon'; weaponId: string }
-  | { feature: 'eldritch-knight-arcane-charge'; targetCell: GridCell }
+  | { feature: 'linked-equipment-recall'; weaponId: string }
+  | { feature: 'feature-extra-action-teleport'; targetCell: GridCell }
 
 export interface Dnd5eAbilityCheckPayload {
   ability: AbilityKey
   skill?: string
-  /** Explicit non-skill Strength task eligible for Totem Warrior Bear Aspect. */
-  context?: 'push-pull-lift-break'
+  /** Host-validated situational feature context selected before this check. */
+  context?: 'push-pull-lift-break' | 'interact-with-dragons'
   mode?: 'normal' | 'advantage' | 'disadvantage'
   dc: number
   /** 部分检定由 DM 判定为一个动作；关闭时只进行检定，不消耗行动经济。 */
@@ -148,8 +148,8 @@ export interface Dnd5eWeaponAttackOptions {
   frenzyAttack?: boolean
   /** 2014 双武器战斗：完成轻型近战武器的攻击动作后，以附赠动作用另一把轻型近战武器攻击。 */
   offHandAttack?: boolean
-  /** Audited Eldritch Knight War Magic/Improved War Magic bonus-action attack. */
-  eldritchKnightWarMagicAttack?: boolean
+  /** Bonus-action weapon attack entitlement opened by an imported feature. */
+  featureBonusWeaponAttack?: boolean
   /** 猎人“灭群者”在同回合对原目标 5 尺内另一生物进行的免费攻击。 */
   hordeBreakerAttack?: boolean
   /** 猎人 11 级多重攻击；点击的 Token 作为万箭齐发中心或旋风攻击的目标确认点。 */
@@ -372,6 +372,8 @@ export interface SharedPlayerActionAckState {
   status: 'accepted' | 'rejected'
   reason?: string
   acceptedPosition?: { x: number; y: number }
+  /** Final authoritative token elevation after a successful movement settlement. */
+  acceptedElevationFeet?: number
   appliedAt?: number
   /** Revisions committed atomically with an accepted action ACK. */
   authorityRevisions?: Readonly<Record<string, number>>

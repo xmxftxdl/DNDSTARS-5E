@@ -46,6 +46,14 @@ function isTokenFinallyDefeated(token: Token, characters: Character[]): boolean 
   if (token.type === 'player' && character && character.currentHp === 0) {
     return Math.max(0, character.deathSaveFailures ?? 0) >= 3
   }
+  // Regeneration / Undead Fortitude pending means the creature is at 0 HP but not
+  // yet finally destroyed — combat must wait for that save or start-of-turn resolve.
+  if (
+    token.dnd5eCombatState?.monsterRegenerationPendingAtZero === true ||
+    token.dnd5eCombatState?.undeadFortitudePending != null
+  ) {
+    return false
+  }
   return !isTokenAlive(token, characters)
 }
 

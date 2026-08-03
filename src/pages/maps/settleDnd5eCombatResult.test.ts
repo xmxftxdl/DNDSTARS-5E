@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eConditionEffect,
   createDnd5eCombatant,
+  createDnd5eMechanicalEffect,
   dnd5eConditionsFromActiveEffects,
   registerDnd5eRulesPlugin,
   startDnd5eHeadlessCombat,
@@ -129,6 +130,65 @@ describe('地图战斗结果结算器', () => {
     }))
   })
 
+  it('uses Host d6 rolls when a failed Fly concentration save causes a fall', async () => {
+    const hero = combatant('hero', 20, true, {
+      elevationFeet: 30,
+      groundElevationFeet: 0,
+      airborne: true,
+      movementSpeeds: { walk: 30 },
+    })
+    hero.classState.concentrationSpellId = 'fly'
+    hero.classState.concentrationTargetIds = ['hero']
+    hero.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'fly-effect',
+      definitionId: 'srd-5.1:spell:fly',
+      label: 'Fly',
+      targetId: hero.id,
+      source: { kind: 'spell', actorId: hero.id, rulesId: 'fly' },
+      duration: { type: 'concentration', sourceActorId: hero.id, concentrationId: 'fly' },
+      modifiers: { flySpeedFeet: 60 },
+    })]
+    const state = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10)])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = {
+      ok: true,
+      state,
+      events: [{ type: 'concentration-check-required', targetId: 'hero', dc: 10 }],
+    }
+    const battleMap = map()
+    battleMap.tokens = battleMap.tokens.map((entry) =>
+      entry.id === hero.id ? { ...entry, elevationFeet: 30 } : entry)
+    const rollDice = vi.fn(async () => [2, 3, 4])
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: battleMap,
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20: async () => 1,
+      rollD4: unusedRoll,
+      rollDice,
+    })
+
+    expect(rollDice).toHaveBeenCalledWith(
+      3,
+      6,
+      '失去飞行支撑·坠落伤害',
+      'hero',
+    )
+    expect(settled.result.state.combatants.hero).toMatchObject({
+      currentHp: 11,
+      concentrating: false,
+      elevationFeet: 0,
+      groundElevationFeet: 0,
+      airborne: false,
+    })
+    expect(settled.result.events).toContainEqual(expect.objectContaining({
+      type: 'falling-damage-resolved',
+      actorId: 'hero',
+      damage: 9,
+    }))
+  })
+
   it('自动掷出受伤触发的优势豁免并解除狂笑术', async () => {
     const caster = combatant('hero', 20, true)
     caster.classState.concentrationSpellId = 'hideous-laughter'
@@ -186,6 +246,7 @@ describe('地图战斗结果结算器', () => {
     const pluginId = 'com.example.settle-post-spell-table'
     const subclassId = `${pluginId}:random-caster`
     const featureId = `${subclassId}.table-check`
+    const choiceFeatureId = `${subclassId}.table-choice`
     const definition: DeclarativeSubclassDefinitionV1 = {
       schemaVersion: 1,
       id: 'random-caster',
@@ -220,6 +281,21 @@ describe('地图战斗结果结算器', () => {
         },
         effects: [],
         automation: 'partial',
+      }, {
+        schemaVersion: 1,
+        id: 'table-choice',
+        name: 'Table Choice',
+        description: 'Synthetic settlement choice fixture.',
+        level: 4,
+        trigger: { kind: 'after-spell-cast' },
+        targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'post-spell-random-table-choice',
+          tableAbilityId: 'table-check',
+          rollCount: 3,
+        },
+        effects: [],
+        automation: 'full',
       }],
     }
     const dispose = registerDnd5eRulesPlugin({
@@ -391,6 +467,77 @@ describe('地图战斗结果结算器', () => {
         decision: 'approved',
         effectCount: 1,
       }))
+
+      const choiceHero = combatant('hero', 20, false, {
+        level: 5,
+        classId: 'sorcerer',
+        subclassId,
+        classLevels: { sorcerer: 5 },
+        subclassIds: { sorcerer: subclassId },
+        pluginFeatureIds: [featureId, choiceFeatureId],
+        abilities: { ...abilities, cha: 18 },
+        proficiencyBonus: 3,
+      })
+      choiceHero.classState.postSpellRandomTableCheck = {
+        featureId,
+        spellId: 'magic-missile',
+        spellLevel: 1,
+        slotLevel: 1,
+        castingClassId: 'sorcerer',
+        forceTable: false,
+        tableRollChoice: { featureId: choiceFeatureId, rollCount: 3 },
+      }
+      const choiceState = startDnd5eHeadlessCombat('post-spell-table-choice', [
+        choiceHero,
+        combatant('enemy', 10),
+      ])
+      choiceState.distanceFeetByCombatantPair = { ['enemy\u0000hero']: 5 }
+      const choiceResult: Extract<Dnd5eActionResult, { ok: true }> = {
+        ok: true,
+        state: choiceState,
+        events: [{
+          type: 'post-spell-random-table-check-required',
+          actorId: 'hero',
+          featureId,
+          spellId: 'magic-missile',
+          spellLevel: 1,
+          slotLevel: 1,
+          forceTable: false,
+          triggerDieSides: 20,
+          triggerValues: [1],
+          tableDieSides: 100,
+          tableRollCount: 3,
+          tableRollChoiceFeatureId: choiceFeatureId,
+        }],
+      }
+      const requestTableChoice = vi.fn(async () => 1)
+      const choiceD20s = [1, 20, 20]
+      const choiceSettled = await settleDnd5eConcentrationChecks({
+        result: choiceResult,
+        map: map(),
+        characters: [],
+        characterIdByCombatantId: {},
+        rollD20: async () => choiceD20s.shift() ?? 20,
+        rollD4: unusedRoll,
+        rollDice: async (count, sides) => sides === 100
+          ? [50, 42, 60]
+          : Array(count).fill(1),
+        requestPostSpellRandomTableChoice: requestTableChoice,
+      })
+      expect(requestTableChoice).toHaveBeenCalledWith(expect.objectContaining({
+        actor: expect.objectContaining({ id: 'hero' }),
+        tableFeatureId: featureId,
+        choiceFeatureId,
+        tableRolls: [50, 42, 60],
+      }))
+      expect(choiceSettled.result.events).toContainEqual(expect.objectContaining({
+        type: 'post-spell-random-table-choice-resolved',
+        rolls: [50, 42, 60],
+        selectedIndex: 1,
+        selectedRoll: 42,
+      }))
+      expect(choiceSettled.result.state.combatants.hero.currentHp).toBe(16)
+      expect(choiceSettled.result.state.combatants.enemy.currentHp).toBe(16)
     } finally {
       dispose()
     }

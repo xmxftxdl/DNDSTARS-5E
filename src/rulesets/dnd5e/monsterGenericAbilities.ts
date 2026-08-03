@@ -76,6 +76,29 @@ export function dnd5eMonsterRegenerationRule(
     Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined
 }
 
+export type Dnd5eMonsterFlybyRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'flyby' }
+>
+
+export function dnd5eMonsterFlybyRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterFlybyRule | undefined {
+  return monster?.traits
+    .map((trait) => trait.rule)
+    .find((rule): rule is Dnd5eMonsterFlybyRule => rule?.kind === 'flyby')
+}
+
+export function dnd5eMonsterFlybyPreventsOpportunityAttacks(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  movementMode: string | undefined,
+): boolean {
+  const rule = dnd5eMonsterFlybyRule(monster)
+  if (!rule) return false
+  return rule.movementMode === movementMode &&
+    rule.provokesOpportunityAttacks === false
+}
+
 export type Dnd5eMonsterPackTacticsRule = Extract<
   NonNullable<Dnd5eMonsterTrait['rule']>,
   { kind: 'pack-tactics' }
@@ -405,6 +428,84 @@ export function dnd5eMonsterWeaponAttacksAreMagical(
     trait.rule?.kind === 'magic-weapons' ||
     /^(?:魔法武器|天使武器|地狱武器|炼狱武器|magic weapons|angelic weapons|hellish weapons)$/i
       .test(trait.name.trim())) === true
+}
+
+export type Dnd5eMonsterBerserkRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'berserk' }
+>
+
+export const DND5E_MONSTER_BERSERK_TURN_START_ROLL_ID = 'trait:berserk'
+
+export function dnd5eMonsterBerserkRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterBerserkRule | undefined {
+  return monster?.traits
+    .map((trait) => trait.rule)
+    .find((rule): rule is Dnd5eMonsterBerserkRule => rule?.kind === 'berserk')
+}
+
+export type Dnd5eMonsterDamageAversionRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'damage-aversion' }
+>
+
+export function dnd5eMonsterDamageAversionRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  damageType?: Dnd5eDamageType,
+): Dnd5eMonsterDamageAversionRule | undefined {
+  return monster?.traits
+    .map((trait) => trait.rule)
+    .find((rule): rule is Dnd5eMonsterDamageAversionRule =>
+      rule?.kind === 'damage-aversion' &&
+      (damageType == null || rule.damageType === damageType))
+}
+
+export type Dnd5eMonsterDamageAbsorptionRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'damage-absorption' }
+>
+
+export function dnd5eMonsterDamageAbsorptionRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  damageType?: Dnd5eDamageType,
+): Dnd5eMonsterDamageAbsorptionRule | undefined {
+  return monster?.traits
+    .map((trait) => trait.rule)
+    .find((rule): rule is Dnd5eMonsterDamageAbsorptionRule =>
+      rule?.kind === 'damage-absorption' &&
+      (damageType == null || rule.damageType === damageType))
+}
+
+export function dnd5eMonsterHasImmutableForm(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.rule?.kind === 'immutable-form' &&
+    trait.rule.immuneToFormAlteringEffects) === true
+}
+
+export interface Dnd5eMonsterTurnStartTraitRollRequirement {
+  id: typeof DND5E_MONSTER_BERSERK_TURN_START_ROLL_ID
+  name: string
+  dieSides: number
+  minimum: number
+}
+
+export function dnd5eMonsterTurnStartTraitRollRequirements(input: {
+  monster: Dnd5eMonsterStatBlock | undefined
+  currentHp: number
+  berserk: boolean
+}): readonly Dnd5eMonsterTurnStartTraitRollRequirement[] {
+  const rule = dnd5eMonsterBerserkRule(input.monster)
+  if (!rule || input.berserk || input.currentHp > rule.hitPointThreshold) return []
+  const trait = input.monster?.traits.find((candidate) => candidate.rule === rule)
+  return [{
+    id: DND5E_MONSTER_BERSERK_TURN_START_ROLL_ID,
+    name: trait?.name ?? 'Berserk',
+    dieSides: rule.dieSides,
+    minimum: rule.minimum,
+  }]
 }
 
 export function dnd5eMonsterWeaponAttackAgainstConditions(

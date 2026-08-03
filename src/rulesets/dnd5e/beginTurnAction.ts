@@ -8,7 +8,6 @@ import {
   dnd5ePendingTurnStartPeriodicDamage,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
-  resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterMechanicRoll,
@@ -16,6 +15,11 @@ import {
   type Dnd5eTurnStartGazeRequirement,
   type Dnd5eTurnStartGazeResolution,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import {
   createDnd5eMapCombatSnapshot,
   planDnd5eMapResultApplication,
@@ -29,7 +33,10 @@ import {
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import type { Dnd5eDamageType } from './damageTypes'
 import { getDnd5eSrdMonster } from './monsters'
-import { dnd5eMonsterRechargeActions } from './monsterGenericAbilities'
+import {
+  dnd5eMonsterRechargeActions,
+  dnd5eMonsterTurnStartTraitRollRequirements,
+} from './monsterGenericAbilities'
 import {
   dnd5eEligibleMonsterMechanics,
   dnd5eMonsterMechanicDiceRequirements,
@@ -261,7 +268,7 @@ export function prepareDnd5eBeginTurn(
       )
   const monsterRechargeRolls = alreadyResolved
     ? []
-    : dnd5eMonsterRechargeActions(monster).flatMap((action) => {
+    : [...dnd5eMonsterRechargeActions(monster).flatMap((action) => {
         const usage = action.usage
         if (
           usage?.kind !== 'recharge' ||
@@ -275,7 +282,18 @@ export function prepareDnd5eBeginTurn(
           dieSides: usage.dieSides,
           minimum: usage.minimum,
         }]
-      })
+      }), ...dnd5eMonsterTurnStartTraitRollRequirements({
+        monster,
+        currentHp: previewActor.currentHp,
+        berserk: previewActor.classState.monsterBerserk === true,
+      }).map((requirement) => ({
+        actorId: previewActor.id,
+        actorName: previewActor.name,
+        actionId: requirement.id,
+        actionName: requirement.name,
+        dieSides: requirement.dieSides,
+        minimum: requirement.minimum,
+      }))]
   const monsterMechanicRolls = alreadyResolved
     ? []
     : dnd5eEligibleMonsterMechanics(monster, 'turn-start', {
@@ -318,6 +336,7 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
   turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
   monsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
   monsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
   ok: true
   actor?: Character
@@ -325,7 +344,12 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
   actorToken: Token
   result: Dnd5eActionResult
   application: Dnd5eMapResultPlan
-} | { ok: false; reason: Dnd5eBeginTurnRejectReason } {
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} | {
+  ok: false
+  reason: Dnd5eBeginTurnRejectReason
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const prepared = prepareDnd5eBeginTurn(input)
   if (!prepared.ok) return prepared
   const {
@@ -336,7 +360,7 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     characterIdByCombatantId,
     turnSlotId,
   } = prepared.prepared
-  const result = resolveDnd5eHeadlessAction(state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(state, {
     type: 'begin-turn',
     actorId: actorToken.id,
     turnSlotId,
@@ -346,14 +370,15 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     turnStartGazeResolutions: input.turnStartGazeResolutions,
     nextMonsterRechargeRolls: input.monsterRechargeRolls,
     nextMonsterMechanicRolls: input.monsterMechanicRolls,
-  })
-  if (!result.ok) return { ok: false, reason: 'invalid-action' }
+  }, input.airborneFallDamageRollsByCombatantId)
+  if (!result.ok) return { ok: false, reason: 'invalid-action', airborneFalls }
   return {
     ok: true,
     actor,
     actorName,
     actorToken,
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: input.map,

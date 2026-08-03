@@ -130,6 +130,36 @@ export interface Dnd5ePluginSandboxSession {
 }
 
 const activeSessions = new Map<string, Dnd5ePluginSandboxSession>()
+const replayCacheBySession = new WeakMap<
+  Dnd5ePluginSandboxSession,
+  Map<string, { fingerprint: string; resolution: Promise<Dnd5eSandboxResolution> }>
+>()
+const MAX_REPLAY_CACHE_ENTRIES = 256
+
+function cloneSandboxResolution(resolution: Dnd5eSandboxResolution): Dnd5eSandboxResolution {
+  return resolution.ok
+    ? { ok: true, operations: structuredClone(resolution.operations) }
+    : { ok: false, reason: resolution.reason }
+}
+
+function sandboxReplayFingerprint(action: Dnd5ePluginAction): string {
+  return JSON.stringify({
+    type: action.type,
+    pluginId: action.pluginId,
+    actionId: action.actionId,
+    transactionId: action.transactionId,
+    featureId: action.featureId,
+    actorId: action.actorId,
+    targetId: action.targetId,
+    targetIds: action.targetIds,
+    targetCell: action.targetCell,
+    targetOrientation: action.targetOrientation,
+    distanceFeet: action.distanceFeet,
+    rolls: action.rolls,
+    interruptChoiceId: action.interruptChoiceId,
+    payload: action.payload,
+  })
+}
 
 function cloneCombatantForSandbox(combatant: Dnd5eCombatant): Record<string, unknown> {
   return {
@@ -424,7 +454,37 @@ export async function resolveDnd5eSandboxedPluginAction(input: {
 }): Promise<Dnd5eSandboxResolution> {
   const session = activeSessions.get(input.action.pluginId)
   if (!session) throw new Error(`规则包 ${input.action.pluginId} 的 Worker 未激活`)
-  return session.resolve(input)
+  const transactionId = input.action.transactionId
+  if (!transactionId) return session.resolve(input)
+  let replayCache = replayCacheBySession.get(session)
+  if (!replayCache) {
+    replayCache = new Map()
+    replayCacheBySession.set(session, replayCache)
+  }
+  const replayKey = `${input.action.actionId}:${transactionId}`
+  const fingerprint = sandboxReplayFingerprint(input.action)
+  const cached = replayCache.get(replayKey)
+  if (cached) {
+    return cached.fingerprint === fingerprint
+      ? cloneSandboxResolution(await cached.resolution)
+      : { ok: false, reason: 'plugin-replay-conflict' }
+  }
+  const resolution = session.resolve(input).then(cloneSandboxResolution)
+  replayCache.set(replayKey, {
+    fingerprint,
+    resolution,
+  })
+  while (replayCache.size > MAX_REPLAY_CACHE_ENTRIES) {
+    const oldestKey = replayCache.keys().next().value
+    if (oldestKey == null) break
+    replayCache.delete(oldestKey)
+  }
+  try {
+    return cloneSandboxResolution(await resolution)
+  } catch (error) {
+    replayCache.delete(replayKey)
+    throw error
+  }
 }
 
 export function terminateDnd5ePluginSandbox(pluginId: string): void {

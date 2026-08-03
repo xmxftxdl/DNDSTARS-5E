@@ -4,7 +4,7 @@ import { AlertTriangle, Clock3, Eye, MoonStar, RefreshCw, ShieldCheck, UserRound
 import { roomCharactersOwnedByMembers } from '../../lib/playerView'
 import { loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
 import { getRoomSession } from '../../lib/roomSession'
-import { useCampaignTimeStore } from '../../store/campaignTime'
+import { completeDnd5eCampaignLongRest } from '../../store/campaignLongRest'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
 import CharacterSheet from './CharacterSheet'
@@ -18,14 +18,12 @@ export default function DMRoster() {
   const [inspectedCharacterId, setInspectedCharacterId] = useState<string | null>(null)
   const [longRestBusy, setLongRestBusy] = useState(false)
   const [longRestMessage, setLongRestMessage] = useState('')
-  const mutateCampaignTime = useCampaignTimeStore((state) => state.mutate)
-
   const completeLongRest = async () => {
     if (longRestBusy) return
     setLongRestBusy(true)
     setLongRestMessage('')
     try {
-      await mutateCampaignTime({ operation: 'long-rest', reason: 'DM 在角色栏发起全队长休' })
+      await completeDnd5eCampaignLongRest('DM 在角色栏发起全队长休')
       setLongRestMessage('长休结算完成：已推进 8 小时，并恢复符合条件角色的生命值、法术位和长休资源。')
     } catch (cause) {
       setLongRestMessage(cause instanceof Error ? cause.message : '长休结算失败，请稍后重试。')

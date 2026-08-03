@@ -227,7 +227,7 @@ export default function EnemyDetailPanel({
   }
 
   return (
-    <div data-testid="enemy-detail-panel" className="glass absolute bottom-3 right-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+    <div data-testid="enemy-detail-panel" className="glass absolute bottom-3 right-3 z-[90] flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
           className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-2xl"
@@ -684,7 +684,7 @@ export default function EnemyDetailPanel({
                 <ul className="space-y-2">
                   {stats.traits.map((t) => (
                     <li key={t.name} className="rounded-xl bg-violet-500/10 px-3 py-2">
-                      <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-violet-200">{t.name}</p>{t.automation === 'dm-adjudication' && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">DM 裁定</span>}</div>
+                      <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-violet-200">{t.name}</p>{t.automation && <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${t.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{t.automation === 'headless' ? 'HEADLESS' : 'DM 裁定'}</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{t.description}</p>
                     </li>
                   ))}

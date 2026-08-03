@@ -8,6 +8,7 @@ import {
   dnd5ePluginAbilityGenerationMethod,
   dnd5ePluginBackgroundDefinition,
   dnd5ePluginFeatureDefinition,
+  normalizeDnd5ePluginPersistentAreaVerticalDeclaration,
   dnd5ePluginRaceDefinition,
   registerDnd5eRulesPlugin,
   roomActiveDnd5eRulesPluginRequirements,
@@ -118,6 +119,51 @@ describe('D&D 5e rules plugin API', () => {
         })
       },
     })).toThrow('Invalid plugin summon')
+  })
+
+  it('strictly validates and clones persistent-area vertical declarations', () => {
+    const pluginId = 'com.example.vertical-area'
+    const vertical = { mode: 'volume' as const, heightFeet: 30 }
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Vertical Area', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'cloud', resolve: ({ succeed }) => succeed() })
+        api.registerFeature({
+          id: 'cloud', name: 'Cloud', summary: 'Volume.', description: 'Volume.', automation: 'full',
+          action: {
+            id: 'cloud', label: 'Place cloud', economy: 'action',
+            targeting: {
+              kind: 'area', template: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 60 },
+            },
+            persistentArea: { label: 'Cloud', durationRounds: 10, vertical },
+          },
+        })
+      },
+    })
+    try {
+      vertical.heightFeet = 90
+      const first = dnd5ePluginFeatureDefinition(`${pluginId}:cloud`)
+      expect(first?.action?.persistentArea?.vertical).toEqual({ mode: 'volume', heightFeet: 30 })
+      if (first?.action?.persistentArea?.vertical?.mode === 'volume') {
+        first.action.persistentArea.vertical.heightFeet = 120
+      }
+      expect(dnd5ePluginFeatureDefinition(`${pluginId}:cloud`)?.action?.persistentArea?.vertical)
+        .toEqual({ mode: 'volume', heightFeet: 30 })
+    } finally {
+      dispose()
+    }
+
+    expect(normalizeDnd5ePluginPersistentAreaVerticalDeclaration({ mode: 'ground' }))
+      .toEqual({ mode: 'ground' })
+    expect(normalizeDnd5ePluginPersistentAreaVerticalDeclaration({
+      mode: 'volume', heightFeet: 0,
+    })).toBeUndefined()
+    expect(normalizeDnd5ePluginPersistentAreaVerticalDeclaration({
+      mode: 'ground', baseElevationFeet: 10,
+    })).toBeUndefined()
   })
 
   it('preserves the declared pre-roll Interrupt cancellation option', () => {

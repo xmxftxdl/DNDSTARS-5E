@@ -89,6 +89,19 @@ function actionRollLedgerEntries(state: Dnd5eHeadlessCombatState, action: Dnd5eA
   const actionKey = `${action.actorId}:${action.type}`
   collectNamedDice(action, actionKey, add)
   collectStructuredDice(action, actionKey, add)
+  for (const [combatantId, values] of Object.entries(
+    action.airborneFallDamageRollsByCombatantId ?? {},
+  ).sort(([left], [right]) => left.localeCompare(right))) {
+    add({
+      id: `${actionKey}:unsupported-airborne-fall:${combatantId}`,
+      kind: 'damage',
+      label: 'unsupported airborne fall',
+      sides: 6,
+      values,
+      sourceId: action.actorId,
+      targetId: combatantId,
+    })
+  }
 
   if (action.type === 'cast-spell') {
     const spell = getDnd5eSrdCombatSpell(action.spellId)

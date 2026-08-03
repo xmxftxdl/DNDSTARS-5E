@@ -33,6 +33,7 @@ import {
 } from './characters'
 import {
   clearPendingLocalTokenHitPointEditsForTest,
+  committedTokenAnchorProjectionFromSharedMaps,
   createLatestMapsPublishPump,
   committedTokenPatchFromSharedMaps,
   markPendingLocalTokenHitPointEdit,
@@ -42,6 +43,7 @@ import {
   saveMapsStateWithPendingHitPointRetry,
   saveMapsStateWithTokenPatchRetry,
   type BattleMap,
+  type Dnd5ePluginArea,
   type Token,
   useMapStore,
 } from './maps'
@@ -92,6 +94,29 @@ function map(patch: Partial<BattleMap>): BattleMap {
   }
 }
 
+function anchoredArea(patch: Partial<Dnd5ePluginArea> = {}): Dnd5ePluginArea {
+  return {
+    id: 'sphere-area',
+    pluginId: 'srd-5.1',
+    featureId: 'srd-5.1:spell:flaming-sphere',
+    sourceKind: 'core-spell',
+    coreSpellId: 'flaming-sphere',
+    label: '炽焰法球',
+    color: '#f97316',
+    sourceCharacterId: 'wizard',
+    sourceTokenId: 'wizard-token',
+    cells: [{ col: 1, row: 1 }],
+    createdRound: 1,
+    expiresAfterRound: 11,
+    concentrationId: 'flaming-sphere',
+    anchorMode: 'effect-token',
+    anchorTokenId: 'sphere',
+    anchorCell: { col: 1, row: 1 },
+    vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 },
+    ...patch,
+  }
+}
+
 describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', () => {
   it('restores authoritative active effects after a player reconnects with stale local combat state', () => {
     const effect = createDnd5eConditionEffect({
@@ -121,6 +146,31 @@ describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', (
 
     const merged = mergePlayerWritableCharacter(local, shared)
     expect(merged.classResources?.fighterSecondWind).toEqual({ current: 0, max: 1 })
+  })
+
+  it('keeps the shared concentration boolean aligned with its authoritative combat state', () => {
+    const started = mergePlayerWritableCharacter(
+      char({ concentrating: false, dnd5eCombatState: undefined }),
+      char({
+        concentrating: true,
+        dnd5eCombatState: { concentrationSpellId: 'flaming-sphere' },
+      }),
+    )
+    expect(started.concentrating).toBe(true)
+    expect(started.dnd5eCombatState?.concentrationSpellId).toBe('flaming-sphere')
+
+    const ended = mergePlayerWritableCharacter(
+      started,
+      char({ concentrating: false, dnd5eCombatState: {} }),
+    )
+    expect(ended.concentrating).toBe(false)
+    expect(ended.dnd5eCombatState?.concentrationSpellId).toBeUndefined()
+
+    const manual = mergePlayerWritableCharacter(
+      char({ concentrating: true, dnd5eCombatState: {} }),
+      char({ concentrating: false, dnd5eCombatState: {} }),
+    )
+    expect(manual.concentrating).toBe(true)
   })
 
   it('does NOT clobber non-whitelisted local fields (only the whitelist comes from shared)', () => {
@@ -821,6 +871,108 @@ describe('地图 Token 权威补丁重试', () => {
     expect(committed).not.toHaveProperty('hp')
   })
 
+  it('普通 Token 移动不会重写无关的持续区域', async () => {
+    const unrelatedArea = anchoredArea()
+    const save = vi.fn(async () => ({ status: 'saved' as const, revision: 2 }))
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [
+            token({ id: 'monster', type: 'enemy', x: 75, y: 75 }),
+            token({ id: 'sphere', type: 'obstacle', x: 75, y: 75 }),
+          ],
+          dnd5ePluginAreas: [unrelatedArea],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_000,
+      },
+      mapId: 'map-1',
+      tokenId: 'monster',
+      patch: { x: 225, y: 175 },
+      save,
+      load: vi.fn(async () => null),
+    })
+
+    expect(outcome.payload.maps[0].tokens.find((candidate) => candidate.id === 'monster'))
+      .toMatchObject({ x: 225, y: 175 })
+    expect(outcome.payload.maps[0].dnd5ePluginAreas).toEqual([unrelatedArea])
+  })
+
+  it('首次保存效果 Token 移动时原子重锚区域并投影胜出快照', async () => {
+    const sphereEffect = {
+      schemaVersion: 1 as const,
+      spellId: 'flaming-sphere',
+      sourceCharacterId: 'wizard',
+      sourceTokenId: 'wizard-token',
+      createdRound: 1,
+      expiresAfterRound: 11,
+      concentrationId: 'flaming-sphere',
+    }
+    const original = map({
+      id: 'map-1',
+      tokens: [token({
+        id: 'sphere', type: 'obstacle', x: 75, y: 75, elevationFeet: 0,
+        dnd5eSpellEffect: sphereEffect,
+      })],
+      dnd5ePluginAreas: [anchoredArea()],
+    })
+    const save = vi.fn(async () => ({ status: 'saved' as const, revision: 3 }))
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: { maps: [original], selectedId: 'map-1', updatedAt: 1_000 },
+      mapId: 'map-1',
+      tokenId: 'sphere',
+      patch: { x: 225, y: 175, elevationFeet: 20 },
+      save,
+      load: vi.fn(async () => null),
+    })
+
+    const committedMap = outcome.payload.maps[0]
+    expect(committedMap.tokens[0]).toMatchObject({ x: 225, y: 175, elevationFeet: 20 })
+    expect(committedMap.dnd5ePluginAreas?.[0]).toMatchObject({
+      anchorCell: { col: 4, row: 3 },
+      cells: [{ col: 4, row: 3 }],
+      vertical: { mode: 'volume', baseElevationFeet: 20, heightFeet: 10 },
+    })
+
+    const projection = committedTokenAnchorProjectionFromSharedMaps(
+      original,
+      outcome.payload.maps,
+      'sphere',
+      { x: 225, y: 175, elevationFeet: 20 },
+    )
+    expect(projection?.tokens[0]).toMatchObject({ x: 225, y: 175, elevationFeet: 20 })
+    expect(projection?.dnd5ePluginAreas?.[0]).toMatchObject({
+      anchorCell: { col: 4, row: 3 },
+      cells: [{ col: 4, row: 3 }],
+    })
+  })
+
+  it('本地权威位置投影在保存完成前已同步效果 Token 与区域', () => {
+    useMapStore.setState({
+      maps: [map({
+        id: 'map-1',
+        tokens: [token({ id: 'sphere', type: 'obstacle', x: 75, y: 75 })],
+        dnd5ePluginAreas: [anchoredArea()],
+      })],
+      selectedId: 'map-1',
+    })
+
+    useMapStore.getState().applyAuthorityTokenUpdate('map-1', 'sphere', {
+      x: 275,
+      y: 125,
+      elevationFeet: 10,
+    })
+
+    const current = useMapStore.getState().maps[0]
+    expect(current.tokens[0]).toMatchObject({ x: 275, y: 125, elevationFeet: 10 })
+    expect(current.dnd5ePluginAreas?.[0]).toMatchObject({
+      anchorCell: { col: 5, row: 2 },
+      cells: [{ col: 5, row: 2 }],
+      vertical: { mode: 'volume', baseElevationFeet: 10, heightFeet: 10 },
+    })
+  })
+
   it('CAS 冲突后保留服务端其它 Token 的移动并重放当前移动', async () => {
     const writes: Array<{ maps: BattleMap[]; selectedId: string | null; updatedAt?: number }> = []
     const save = vi.fn(async (payload) => {
@@ -868,6 +1020,71 @@ describe('地图 Token 权威补丁重试', () => {
       expect.objectContaining({ id: 'player', x: 425, y: 325 }),
       expect.objectContaining({ id: 'monster', x: 575, y: 325 }),
     ]))
+  })
+
+  it('效果 Token 在 CAS 冲突重试后按服务端最新区域再次重锚', async () => {
+    const writes: Array<{ maps: BattleMap[]; selectedId: string | null; updatedAt?: number }> = []
+    const save = vi.fn(async (payload) => {
+      writes.push(payload)
+      return writes.length === 1
+        ? { status: 'conflict' as const, expectedRevision: 10, currentRevision: 11 }
+        : { status: 'saved' as const, revision: 12 }
+    })
+    const remoteArea = anchoredArea({
+      anchorCell: { col: 3, row: 2 },
+      cells: [{ col: 3, row: 2 }, { col: 4, row: 2 }],
+      triggerReceipts: [{
+        triggerId: 'remote-trigger', targetTokenId: 'player', round: 2,
+        transactionId: 'remote-transaction',
+      }],
+    })
+    const load = vi.fn(async () => ({
+      maps: [map({
+        id: 'map-1',
+        tokens: [
+          token({ id: 'player', type: 'player', x: 425, y: 325 }),
+          token({ id: 'sphere', type: 'obstacle', x: 175, y: 125, elevationFeet: 5 }),
+        ],
+        dnd5ePluginAreas: [remoteArea],
+      })],
+      selectedId: 'map-1',
+      updatedAt: 2_000,
+    }))
+
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [token({ id: 'sphere', type: 'obstacle', x: 75, y: 75 })],
+          dnd5ePluginAreas: [anchoredArea()],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_000,
+      },
+      mapId: 'map-1',
+      tokenId: 'sphere',
+      patch: { x: 325, y: 225, elevationFeet: 15 },
+      save,
+      load,
+      now: () => 2_001,
+    })
+
+    expect(outcome.result).toMatchObject({ status: 'saved', revision: 12 })
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(writes[1].maps[0].tokens).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'player', x: 425, y: 325 }),
+      expect.objectContaining({ id: 'sphere', x: 325, y: 225, elevationFeet: 15 }),
+    ]))
+    expect(writes[1].maps[0].dnd5ePluginAreas?.[0]).toMatchObject({
+      anchorCell: { col: 6, row: 4 },
+      cells: [{ col: 6, row: 4 }, { col: 7, row: 4 }],
+      triggerReceipts: [{
+        triggerId: 'remote-trigger', targetTokenId: 'player', round: 2,
+        transactionId: 'remote-transaction',
+      }],
+      vertical: { mode: 'volume', baseElevationFeet: 15, heightFeet: 10 },
+    })
   })
 
   it('目标已被服务端删除时 fail closed，不会重新创建 Token', async () => {

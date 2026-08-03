@@ -39,7 +39,31 @@ describe('MapSpellsPanel spell slot selection', () => {
     })).toEqual({
       selectedSlot: 4,
       selectedSlotAvailable: false,
-      unavailableMessage: undefined,
+      unavailableMessage: '已固定的 4 环位已耗尽；请选择/右键固定 3 环',
+    })
+  })
+
+  it('固定环位耗尽时保持原环位并明确提示可固定的更高环', () => {
+    expect(resolveMapSpellSlotSelection({
+      spellLevel: 2,
+      availableLevels: [5, 4],
+      pinnedSlotLevel: 3,
+    })).toEqual({
+      selectedSlot: 3,
+      selectedSlotAvailable: false,
+      unavailableMessage: '已固定的 3 环位已耗尽；请选择/右键固定 4 环',
+    })
+  })
+
+  it('固定环位耗尽且没有其他法术位时给出终态提示', () => {
+    expect(resolveMapSpellSlotSelection({
+      spellLevel: 2,
+      availableLevels: [],
+      pinnedSlotLevel: 3,
+    })).toEqual({
+      selectedSlot: 3,
+      selectedSlotAvailable: false,
+      unavailableMessage: '已固定的 3 环位已耗尽；当前没有可用法术位',
     })
   })
 

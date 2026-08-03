@@ -91,4 +91,30 @@ describe('combat token liveness', () => {
     expect(getTokenCombatSide(npc)).toBe('ally')
     expect(checkCombatOutcome([npc, defeatedEnemy], [])).toMatchObject({ ended: true, winner: 'ally' })
   })
+
+  it('does not end combat while enemies are pending regeneration or undead fortitude', () => {
+    const hero = token({ id: 'hero', type: 'player', characterId: 'hero', hp: 12, maxHp: 12 })
+    const regenerating = token({
+      id: 'troll',
+      type: 'enemy',
+      hp: 0,
+      maxHp: 84,
+      dnd5eCombatState: { monsterRegenerationPendingAtZero: true },
+    })
+    const fortitude = token({
+      id: 'zombie',
+      type: 'enemy',
+      hp: 0,
+      maxHp: 22,
+      dnd5eCombatState: { undeadFortitudePending: { dc: 10, damage: 5 } },
+    })
+    const characters = [{ id: 'hero', currentHp: 12, deathSaveFailures: 0, deathSaveStable: false }] as Character[]
+
+    expect(checkCombatOutcome([hero, regenerating], characters)).toEqual({ ended: false })
+    expect(checkCombatOutcome([hero, fortitude], characters)).toEqual({ ended: false })
+    expect(checkCombatOutcome(
+      [hero, token({ id: 'dead', type: 'enemy', hp: 0, maxHp: 10 })],
+      characters,
+    )).toMatchObject({ ended: true, reason: 'enemies-defeated' })
+  })
 })

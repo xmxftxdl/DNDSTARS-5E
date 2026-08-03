@@ -67,6 +67,22 @@ describe('D&D 5e opportunity attack bridge', () => {
     expect(resolved.application?.characters[0].currentHp).toBeLessThan(30)
   })
 
+  it('does not treat an expanded critical miss as a preview hit', () => {
+    const { character, map, initiativeOrder } = fixture()
+    const prepared = prepareDnd5eOpportunityAttack({
+      combatId: 'combat', map, characters: [character], initiativeOrder,
+      actorTokenId: 'kobold', targetTokenId: 'hero-token',
+      turnEconomy: createDnd5eTurnEconomyCounts('kobold-turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    prepared.prepared.criticalThreshold = 19
+    prepared.prepared.targetArmorClass = 30
+    const preview = previewDnd5eOpportunityAttack(prepared.prepared, 19)
+    expect(preview.hit).toBe(false)
+    expect(preview.critical).toBe(false)
+  })
+
   it('forces disadvantage on opportunity attacks against a Hunter with Escape the Horde', () => {
     const { character, map, initiativeOrder } = fixture()
     const ranger: Character = {

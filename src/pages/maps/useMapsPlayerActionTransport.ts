@@ -36,6 +36,18 @@ export interface PlayerActionRejectionNotice {
 
 const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejectionNotice>> = {
   'component-unavailable': { title: '施法成分不可用', message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术需要尚未结构化管理的贵重／消耗材料。' },
+  'verbal-component-unavailable': { title: '无法说出咒语', message: '角色处于沉默效果中，而该法术需要言语成分，本次施法未结算。' },
+  'material-component-unavailable': { title: '缺少施法材料', message: '该法术需要材料成分，但角色没有可用的材料包或对应职业施法法器，本次施法未结算。' },
+  'costly-material-unavailable': { title: '缺少特殊材料', message: '该法术需要具有标价或会被消耗的材料；当前库存尚不能证明角色持有该材料，本次施法未结算。' },
+  'spell-reaction-only': { title: '只能作为反应施放', message: '该法术的施法时间是反应，不能从普通动作法术栏直接发动；请等待对应触发条件。' },
+  'spell-option-required': { title: '施法选项不完整', message: '该法术需要先选择伤害类型、效果分支或其他施法选项；当前选择缺失或已失效。' },
+  'spell-target-count-invalid': { title: '目标数量不正确', message: '当前选择的目标数量不符合该法术或升环后的目标数量规则，本次施法未结算。' },
+  'spell-area-target-required': { title: '尚未选择施法点', message: '该法术需要在地图上选择一个有效的范围中心或起点；当前没有收到有效格点。' },
+  'spell-area-target-out-of-bounds': { title: '施法点超出地图', message: '所选范围中心位于当前地图边界之外，请在地图内重新选择。' },
+  'spell-area-target-out-of-range': { title: '施法点超出射程', message: '所选范围中心超出该法术允许的施法距离；请在角色射程内重新选择。' },
+  'spell-area-orientation-invalid': { title: '范围方向无效', message: '该法术的范围方向或旋转参数无效，请重新放置法术模板。' },
+  'spell-target-not-visible': { title: '必须看见目标点', message: '该法术要求施法者看见目标或范围中心，但当前视线被黑暗、墙体或其他遮挡阻断。' },
+  'invalid-dice': { title: '骰子数据无效', message: '提交的骰子数量、骰面或目标对应关系与该法术不一致；本次结算已安全取消，请重新施放。' },
   'target-out-of-range': { title: '距离不足', message: '目标已经超出该行动的有效距离，本次行动未消耗。' },
   'ammunition-unavailable': { title: '弹药不足', message: '当前武器没有可用弹药，本次攻击未结算。' },
   'action-unavailable': { title: '动作已用尽', message: '本回合已没有可用动作，本次行动未结算。' },
@@ -116,7 +128,7 @@ export async function syncPersistedAcceptedPlayerActionSnapshot(input: {
   if (input.appliedAt != null) await input.loadCombatState?.()
 }
 
-async function waitForAuthoritativePlayerActionSync(
+export async function waitForAuthoritativePlayerActionSync(
   appliedAt?: number,
   authorityRevisions?: Readonly<Record<string, number>>,
   loadCombatState?: () => Promise<void>,
@@ -164,6 +176,19 @@ async function waitForAuthoritativePlayerActionSync(
   })
 }
 
+export function playerActionAckMustWaitForCombatReceipt(input: {
+  ack: SharedPlayerActionAckState | null
+  mapId: string
+  pendingActionId?: string
+  isReceiptAuthoritativeAction?: (actionId: string) => boolean
+}): boolean {
+  const { ack } = input
+  return !!ack &&
+    ack.mapId === input.mapId &&
+    ack.actionId === input.pendingActionId &&
+    input.isReceiptAuthoritativeAction?.(ack.actionId) === true
+}
+
 export function useMapsPlayerActionTransport(input: {
   isDm: boolean
   mode: 'dm' | 'player' | null
@@ -177,6 +202,11 @@ export function useMapsPlayerActionTransport(input: {
   clearPendingAction: () => void
   onActionRejected: (reason: string) => void
   onActionAccepted?: (ack: SharedPlayerActionAckState) => void
+  /**
+   * These actions are settled only by the durable combat-command receipt.
+   * Their legacy ACK remains a wake hint and must never unlock the UI.
+   */
+  isReceiptAuthoritativeAction?: (actionId: string) => boolean
   /** Loads and applies the authoritative combat snapshot before an ACK unlocks the UI. */
   loadCombatState?: () => Promise<void>
 }): void {
@@ -193,6 +223,7 @@ export function useMapsPlayerActionTransport(input: {
     clearPendingAction,
     onActionRejected,
     onActionAccepted,
+    isReceiptAuthoritativeAction,
     loadCombatState,
   } = input
   const actionHandlerRef = useRef(onAction)
@@ -201,6 +232,7 @@ export function useMapsPlayerActionTransport(input: {
   const getCombatIdRef = useRef(getCombatId)
   const clearPendingActionRef = useRef(clearPendingAction)
   const loadCombatStateRef = useRef(loadCombatState)
+  const isReceiptAuthoritativeActionRef = useRef(isReceiptAuthoritativeAction)
 
   useEffect(() => {
     actionHandlerRef.current = onAction
@@ -209,6 +241,7 @@ export function useMapsPlayerActionTransport(input: {
     getCombatIdRef.current = getCombatId
     clearPendingActionRef.current = clearPendingAction
     loadCombatStateRef.current = loadCombatState
+    isReceiptAuthoritativeActionRef.current = isReceiptAuthoritativeAction
   })
 
   useEffect(() => {
@@ -235,7 +268,11 @@ export function useMapsPlayerActionTransport(input: {
         isCancelled: () => cancelled,
       })
     }
-    const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load)
+    const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load, {
+      recoveryMs: 2_000,
+      recoverWhenHidden: true,
+      refreshOnVisibilityRestore: true,
+    })
     return () => {
       cancelled = true
       unsubscribeEvent()
@@ -248,6 +285,18 @@ export function useMapsPlayerActionTransport(input: {
     const mapId = activeMapId
     let cancelled = false
     const applyAck = (ack: SharedPlayerActionAckState | null) => {
+      if (playerActionAckMustWaitForCombatReceipt({
+        ack,
+        mapId,
+        pendingActionId: pendingActionRef.current?.id,
+        isReceiptAuthoritativeAction: isReceiptAuthoritativeActionRef.current,
+      })) {
+        // The command transaction persists its terminal receipt before publishing
+        // this compatibility ACK. Remember the hint, but leave the lock and the
+        // authoritative reload to the receipt polling path.
+        seenAckIdsRef.current.add(ack!.id)
+        return
+      }
       if (
         ack &&
         pendingActionRef.current?.id === ack.actionId &&

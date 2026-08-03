@@ -22,11 +22,12 @@ test('monster workshop keeps a viewport-sized scroll region and can reach the la
     localStorage.setItem(key, JSON.stringify(session))
   }, [ACCOUNT_SESSION_KEY, account] as const)
 
-  await page.goto(`${DM}/app/extensions`, { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '创建插件' }).click()
+  await page.goto(`${DM}/campaign/local/dm-tools/workshop`, { waitUntil: 'domcontentloaded' })
+  await expect(page.getByTestId('local-room-json-paste')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '粘贴规则 → AI 转换 → DM 确认' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'AI 转换为待确认草稿' })).toBeVisible()
   const builder = page.getByTestId('custom-rules-plugin-builder')
-  await builder.getByRole('button', { name: '打开扩展工作室' }).click()
-  await builder.getByRole('button', { name: /^怪物/ }).click()
+  await builder.getByRole('tab', { name: /^怪物/ }).click()
   await builder.getByRole('button', { name: '打开怪物工坊' }).click()
 
   const dialog = page.getByTestId('monster-workshop-dialog')
@@ -79,4 +80,16 @@ Scimitar. Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 +
     return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 2
   })
   expect(reachedBottom).toBe(true)
+
+  await dialog.locator('..').click({ position: { x: 3, y: 3 } })
+  await expect(dialog).toBeHidden()
+
+  await page.goto(`${DM}/campaign/local/extensions`, { waitUntil: 'domcontentloaded' })
+  await expect(page.getByTestId('active-rules-extensions-page')).toBeVisible()
+  await expect(page.getByText('D&D 5e 2014 · SRD 5.1 核心规则')).toBeVisible()
+  await expect(page.getByText('当前没有额外激活的扩展')).toBeVisible()
+  await expect(page.getByRole('link', { name: '打开自定义工坊' })).toHaveAttribute(
+    'href',
+    '/campaign/local/dm-tools/workshop',
+  )
 })

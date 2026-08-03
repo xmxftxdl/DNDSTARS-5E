@@ -14,14 +14,9 @@ const distRoot = path.resolve(
   root,
   distArgumentIndex >= 0 ? process.argv[distArgumentIndex + 1] ?? 'dist' : 'dist',
 )
-const forbiddenExampleDirectories = [
-  'battle-master-local-collection',
-  'eldritch-knight-local-collection',
-  'totem-warrior-local-collection',
-]
 
 function fail(message) {
-  console.error(`本地内容部署边界审计失败：${message}`)
+  console.error(`Local-content deployment boundary audit failed: ${message}`)
   process.exit(1)
 }
 
@@ -35,21 +30,15 @@ function filesBelow(directory) {
 
 function requiresIgnore(fileName, pattern) {
   const filePath = path.join(root, fileName)
-  if (!existsSync(filePath)) fail(`缺少 ${fileName}`)
+  if (!existsSync(filePath)) fail(`missing ${fileName}`)
   const lines = readFileSync(filePath, 'utf8')
     .split(/\r?\n/)
     .map((line) => line.trim())
-  if (!lines.includes(pattern)) fail(`${fileName} 必须明确包含 ${pattern}`)
+  if (!lines.includes(pattern)) fail(`${fileName} must explicitly include ${pattern}`)
 }
 
 requiresIgnore('.gitignore', 'local-content/')
 requiresIgnore('.dockerignore', 'local-content')
-
-for (const directory of forbiddenExampleDirectories) {
-  if (existsSync(path.join(root, 'examples', directory))) {
-    fail(`已填写的本地合集仍位于 examples/${directory}`)
-  }
-}
 
 try {
   const tracked = execFileSync(
@@ -57,24 +46,13 @@ try {
     ['ls-files', '--', 'local-content'],
     { cwd: root, encoding: 'utf8', windowsHide: true },
   ).trim()
-  if (tracked) fail(`local-content 中存在被 Git 跟踪的文件：${tracked.split(/\r?\n/)[0]}`)
+  if (tracked) fail(`local-content contains a tracked file: ${tracked.split(/\r?\n/)[0]}`)
 } catch (error) {
   if (error?.status === 1) throw error
 }
 
-const deployableSourceFiles = filesBelow(path.join(root, 'src')).filter((file) =>
-  /\.(?:ts|tsx|js|jsx|json)$/.test(file) &&
-  !/\.test\.[^.]+$/.test(file) &&
-  !file.includes(`${path.sep}testFixtures${path.sep}`),
-)
-for (const file of deployableSourceFiles) {
-  const source = readFileSync(file, 'utf8')
-  if (/local-content[\\/]/.test(source)) {
-    fail(`${path.relative(root, file)} 引用了 local-content`)
-  }
-}
-
 const privateManifestIds = new Set()
+const privateContentIds = new Set()
 for (const file of filesBelow(localRoot).filter((entry) => entry.endsWith('.json'))) {
   let value
   try {
@@ -86,21 +64,73 @@ for (const file of filesBelow(localRoot).filter((entry) => entry.endsWith('.json
   if (typeof manifestId === 'string' && manifestId.length >= 8) {
     privateManifestIds.add(manifestId)
   }
-}
-
-if (!existsSync(distRoot) || !statSync(distRoot).isDirectory()) {
-  fail(`找不到生产构建目录：${path.relative(root, distRoot)}`)
-}
-for (const file of filesBelow(distRoot)) {
-  if (!/\.(?:html|js|css|json|map|txt)$/.test(file)) continue
-  const content = readFileSync(file, 'utf8')
-  for (const manifestId of privateManifestIds) {
-    if (content.includes(manifestId)) {
-      fail(`生产产物 ${path.relative(root, file)} 包含本地 manifest id：${manifestId}`)
+  if (path.basename(file) !== 'collection.json' || value?.format !== 'dndstars5e-local-collection') {
+    continue
+  }
+  for (const [category, descriptor] of Object.entries(value?.expected ?? {})) {
+    if (!Array.isArray(descriptor?.ids)) continue
+    for (const id of descriptor.ids) {
+      if (typeof id !== 'string') continue
+      const isStablePrivateId =
+        category === 'subclasses' ||
+        category === 'features' ||
+        (category === 'races' && id.includes('-'))
+      if (isStablePrivateId) privateContentIds.add(id)
     }
   }
 }
 
+function firstPrivateMarker(content) {
+  for (const marker of [...privateManifestIds, ...privateContentIds]) {
+    if (content.includes(marker)) return marker
+  }
+  return undefined
+}
+
+const deployableServerFiles = [
+  'account-storage-sqlite.mjs',
+  'art-asset-server.mjs',
+  'postgres-storage.mjs',
+  'server-observability.mjs',
+  'shared-server-core.mjs',
+  'shared-server-system-routes.mjs',
+  'static-server.mjs',
+  'tencent-verification-provider.mjs',
+  'vite-server.mjs',
+].map((file) => path.join(root, 'scripts', file)).filter(existsSync)
+
+const deployableSourceFiles = [
+  ...filesBelow(path.join(root, 'src')),
+  ...filesBelow(path.join(root, 'shared')),
+  ...deployableServerFiles,
+].filter((file) =>
+  /\.(?:ts|tsx|js|jsx|mjs|mts|json)$/.test(file) &&
+  !/\.test\.[^.]+$/.test(file) &&
+  !file.includes(`${path.sep}testFixtures${path.sep}`),
+)
+for (const file of deployableSourceFiles) {
+  const source = readFileSync(file, 'utf8')
+  if (/local-content[\\/]/.test(source)) {
+    fail(`${path.relative(root, file)} imports local-content`)
+  }
+  const marker = firstPrivateMarker(source)
+  if (marker) {
+    fail(`${path.relative(root, file)} contains private content id: ${marker}`)
+  }
+}
+
+if (!existsSync(distRoot) || !statSync(distRoot).isDirectory()) {
+  fail(`production build directory not found: ${path.relative(root, distRoot)}`)
+}
+for (const file of filesBelow(distRoot)) {
+  if (!/\.(?:html|js|css|json|map|txt)$/.test(file)) continue
+  const content = readFileSync(file, 'utf8')
+  const marker = firstPrivateMarker(content)
+  if (marker) {
+    fail(`production artifact ${path.relative(root, file)} contains private marker: ${marker}`)
+  }
+}
+
 console.log(
-  `本地内容部署边界审计通过：local-content 未被跟踪、引用或打入 ${path.relative(root, distRoot)}。`,
+  `Local-content boundary audit passed: private files and identifiers are absent from ${path.relative(root, distRoot)}.`,
 )

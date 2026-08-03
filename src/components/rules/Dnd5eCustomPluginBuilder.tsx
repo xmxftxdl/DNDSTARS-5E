@@ -6,6 +6,8 @@ import {
   DND5E_DAMAGE_TYPES,
   DND5E_SRD_MONSTERS,
   DND5E_STANDARD_CONDITIONS,
+  dnd5eCustomClassAutomationReportV1,
+  dnd5eCustomPluginAutomationReportV1,
   dnd5eCustomRulesPluginFileName,
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomHeadlessActionDraft,
@@ -29,6 +31,12 @@ import Dnd5eDeclarativeClassEditor from './Dnd5eDeclarativeClassEditor'
 import Dnd5eMonsterWorkshopDialog from '../map/Dnd5eMonsterWorkshopDialog'
 import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
 import { dnd5ePluginCapabilityLabel } from '../../rulesets/dnd5e/pluginCapabilityLabels'
+import Dnd5eBuilderResourceInventory from './Dnd5eBuilderResourceInventory'
+import {
+  type Dnd5eBuilderAutomationCounts,
+  type Dnd5eBuilderAutomationStatus,
+  type Dnd5eBuilderResourceInventoryEntry,
+} from './dnd5eBuilderResourceInventoryModel'
 
 interface RaceDraft {
   id: string
@@ -126,6 +134,8 @@ interface HeadlessEffectEditorDraft {
   persistentAreaColor: string
   persistentAreaDurationRounds: number
   persistentAreaConcentration: boolean
+  persistentAreaVerticalMode: 'legacy' | 'ground' | 'volume'
+  persistentAreaHeightFeet: number
   persistentAreaVisualPreset: 'arcane' | 'toxic-cloud'
   persistentAreaVisualIntensity: 'subtle' | 'normal' | 'strong'
   persistentAreaTriggers: PersistentAreaTriggerEditorDraft[]
@@ -220,6 +230,38 @@ interface ItemDraft {
 }
 
 type BuilderSection = 'races' | 'backgrounds' | 'features' | 'feats' | 'classes' | 'subclasses' | 'spells' | 'items' | 'monsters' | 'methods'
+
+const BUILDER_SECTIONS: readonly { id: BuilderSection; label: string }[] = [
+  { id: 'monsters', label: '怪物' },
+  { id: 'classes', label: '职业' },
+  { id: 'subclasses', label: '子职' },
+  { id: 'races', label: '种族' },
+  { id: 'backgrounds', label: '背景' },
+  { id: 'feats', label: '专长' },
+  { id: 'features', label: '特性' },
+  { id: 'spells', label: '法术' },
+  { id: 'items', label: '装备／物品' },
+  { id: 'methods', label: '加点规则' },
+]
+
+function automationCountsFromStatuses(
+  statuses: readonly Dnd5eBuilderAutomationStatus[],
+): Dnd5eBuilderAutomationCounts {
+  return {
+    full: statuses.filter((status) => status === 'full').length,
+    partial: statuses.filter((status) => status === 'partial').length,
+    manual: statuses.filter((status) => status === 'manual').length,
+    referenceOnly: statuses.filter((status) => status === 'reference-only').length,
+  }
+}
+
+function singleAutomationCount(status: Dnd5eBuilderAutomationStatus): Dnd5eBuilderAutomationCounts {
+  return automationCountsFromStatuses([status])
+}
+
+function builderSectionLabel(section: BuilderSection): string {
+  return BUILDER_SECTIONS.find((entry) => entry.id === section)?.label ?? '资源'
+}
 
 interface SavedBuilderDraft {
   metadata: {
@@ -388,6 +430,7 @@ function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
       areaLengthFeet: 30, maximumTargets: 16,
       persistentAreaEnabled: false, persistentAreaLabel: '持续区域', persistentAreaColor: '#8b5cf6',
       persistentAreaDurationRounds: 10, persistentAreaConcentration: false,
+      persistentAreaVerticalMode: 'ground', persistentAreaHeightFeet: 10,
       persistentAreaVisualPreset: 'arcane', persistentAreaVisualIntensity: 'normal',
       persistentAreaTriggers: [],
       summonEnabled: false, summonMonsterId: 'srd-5.1:wolf', summonLabel: '',
@@ -433,6 +476,8 @@ function restoreHeadlessEffectDraft(value: Partial<HeadlessEffectEditorDraft> | 
   return {
     ...fallback,
     ...value,
+    // Drafts saved before vertical authoring must retain their old infinite-column behavior.
+    persistentAreaVerticalMode: value?.persistentAreaVerticalMode ?? 'legacy',
     persistentAreaTriggers: Array.isArray(value?.persistentAreaTriggers)
       ? value.persistentAreaTriggers.map((trigger, index) => ({ ...newPersistentAreaTrigger(index + 1), ...trigger }))
       : [],
@@ -634,6 +679,14 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
           color: feature.headless.persistentAreaColor,
           durationRounds: feature.headless.persistentAreaDurationRounds,
           concentration: feature.headless.persistentAreaConcentration,
+          ...(feature.headless.persistentAreaVerticalMode === 'legacy' ? {} : {
+            vertical: feature.headless.persistentAreaVerticalMode === 'ground'
+              ? { mode: 'ground' as const }
+              : {
+                  mode: 'volume' as const,
+                  heightFeet: feature.headless.persistentAreaHeightFeet,
+                },
+          }),
           visual: {
             preset: feature.headless.persistentAreaVisualPreset,
             intensity: feature.headless.persistentAreaVisualIntensity,
@@ -886,7 +939,7 @@ export default function Dnd5eCustomPluginBuilder({
   categoryControl = 'tabs',
 }: Props) {
   const [open, setOpen] = useState(alwaysExpanded)
-  const [activeSection, setActiveSection] = useState<BuilderSection>('races')
+  const [activeSection, setActiveSection] = useState<BuilderSection>('monsters')
   const [metadata, setMetadata] = useState({
     id: 'local.dm.custom-rules',
     name: '房间自定义规则',
@@ -957,6 +1010,124 @@ export default function Dnd5eCustomPluginBuilder({
     classes,
     monsters,
   }), [backgrounds, classes, feats, features, items, metadata, methods, monsters, races, spells, subclasses])
+
+  const sectionCounts = useMemo<Record<BuilderSection, number>>(() => ({
+    monsters: monsters.length,
+    classes: classes.length,
+    subclasses: subclasses.length,
+    races: races.length,
+    backgrounds: backgrounds.length,
+    feats: feats.length,
+    features: features.length,
+    spells: spells.length,
+    items: items.length,
+    methods: methods.length,
+  }), [backgrounds.length, classes.length, feats.length, features.length, items.length, methods.length, monsters.length, races.length, spells.length, subclasses.length])
+
+  const resourceInventoryEntries = useMemo<readonly Dnd5eBuilderResourceInventoryEntry[]>(() => {
+    if (activeSection === 'classes') return classes.map((definition) => {
+      const report = dnd5eCustomClassAutomationReportV1({ classes: [definition] })
+      const reasons = [...new Set(report.features.flatMap((feature) => feature.reasons))]
+      return {
+        id: definition.id,
+        name: definition.name,
+        summary: definition.summary,
+        automation: report.features.length > 0
+          ? { full: report.full, partial: report.partial, manual: report.manual, referenceOnly: 0 }
+          : singleAutomationCount('reference-only'),
+        ...(reasons.length > 0 ? { reasons } : {}),
+      }
+    })
+    if (activeSection === 'subclasses') return subclasses.map((subclass) => {
+      const report = dnd5eCustomPluginAutomationReportV1({ subclasses: [subclass] })
+      const reasons = [...new Set(report.abilities.flatMap((ability) => ability.reasons))]
+      return {
+        id: subclass.id,
+        name: subclass.name,
+        summary: subclass.summary,
+        automation: report.abilities.length > 0
+          ? { full: report.full, partial: report.partial, manual: report.manual, referenceOnly: 0 }
+          : singleAutomationCount('reference-only'),
+        ...(reasons.length > 0 ? { reasons } : {}),
+      }
+    })
+    if (activeSection === 'monsters') return monsters.map((monster) => {
+      const actions = [
+        ...monster.actions,
+        ...(monster.bonusActions ?? []),
+        ...(monster.reactions ?? []),
+        ...(monster.legendaryActions ?? []),
+        ...(monster.lairActions ?? []),
+      ]
+      const statuses: Dnd5eBuilderAutomationStatus[] = [
+        ...monster.traits.map((trait) => trait.automation === 'headless' ? 'full' as const : 'manual' as const),
+        ...actions.map((action) => action.automation === 'headless' ? 'full' as const : 'manual' as const),
+        ...(monster.spellcasting
+          ? [monster.spellcasting.automation === 'headless' ? 'full' as const : 'manual' as const]
+          : []),
+        ...(monster.headlessMechanics ?? []).map((mechanic) => mechanic.schemaVersion === 1
+          ? 'full' as const
+          : mechanic.automation),
+      ]
+      const automation = statuses.length > 0
+        ? automationCountsFromStatuses(statuses)
+        : singleAutomationCount('reference-only')
+      const manualCount = automation.manual + automation.referenceOnly
+      return {
+        id: monster.id,
+        name: monster.name,
+        summary: `CR ${monster.challenge.rating} · AC ${monster.armorClass.value} · HP ${monster.hitPoints.average}`,
+        automation,
+        ...(manualCount > 0 ? { reasons: [`仍有 ${manualCount} 项能力或机制需要 DM 裁定或仅作资料展示`] } : {}),
+      }
+    })
+    if (activeSection === 'races') return races.map((race) => ({
+      id: race.id,
+      name: race.name,
+      summary: race.description,
+      automation: singleAutomationCount('full'),
+    }))
+    if (activeSection === 'backgrounds') return backgrounds.map((background) => ({
+      id: background.id,
+      name: background.name,
+      summary: background.description,
+      automation: singleAutomationCount('full'),
+    }))
+    if (activeSection === 'features') return features.map((feature) => ({
+      id: feature.id,
+      name: feature.name,
+      summary: feature.summary,
+      automation: singleAutomationCount(feature.headless.enabled ? 'full' : 'manual'),
+      ...(!feature.headless.enabled ? { reasons: ['尚未启用声明式 Headless 效果，由 DM 依据规则正文裁定'] } : {}),
+    }))
+    if (activeSection === 'feats') return feats.map((feat) => ({
+      id: feat.id,
+      name: feat.name,
+      summary: feat.summary,
+      automation: singleAutomationCount(feat.headless.enabled ? 'full' : 'manual'),
+      ...(!feat.headless.enabled ? { reasons: ['尚未启用声明式 Headless 效果，由 DM 依据规则正文裁定'] } : {}),
+    }))
+    if (activeSection === 'spells') return spells.map((spell) => ({
+      id: spell.id,
+      name: spell.name,
+      summary: `${spell.level === 0 ? '戏法' : `${spell.level} 环`} · ${spell.school}`,
+      automation: singleAutomationCount(spell.headless.enabled ? 'full' : 'reference-only'),
+      ...(!spell.headless.enabled ? { reasons: ['只接入法术资料，尚未声明可由 Host 安全执行的机械效果'] } : {}),
+    }))
+    if (activeSection === 'items') return items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      summary: item.description,
+      automation: singleAutomationCount('full'),
+    }))
+    if (activeSection === 'methods') return methods.map((method) => ({
+      id: method.id,
+      name: method.name,
+      summary: method.summary,
+      automation: singleAutomationCount('full'),
+    }))
+    return []
+  }, [activeSection, backgrounds, classes, feats, features, items, methods, monsters, races, spells, subclasses])
 
   const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, feats, spells, items, methods, subclasses, classes, monsters })
 
@@ -1158,36 +1329,23 @@ export default function Dnd5eCustomPluginBuilder({
                 onChange={(event) => setActiveSection(event.target.value as BuilderSection)}
                 className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
               >
-                <option value="monsters">怪物 · {monsters.length}</option>
-                <option value="classes">职业 · {classes.length}</option>
-                <option value="subclasses">子职 · {subclasses.length}</option>
-                <option value="races">种族 · {races.length}</option>
-                <option value="backgrounds">背景 · {backgrounds.length}</option>
-                <option value="feats">专长 · {feats.length}</option>
-                <option value="features">特性 · {features.length}</option>
-                <option value="spells">法术 · {spells.length}</option>
-                <option value="items">装备／物品 · {items.length}</option>
-                <option value="methods">加点规则 · {methods.length}</option>
+                {BUILDER_SECTIONS.map((section) => (
+                  <option key={section.id} value={section.id}>{section.label} · {sectionCounts[section.id]}</option>
+                ))}
               </select>
             </label>
           ) : (
-            <nav className="flex flex-wrap gap-2" aria-label="规则内容分类">
-              {([
-                ['races', '种族', races.length], ['backgrounds', '背景', backgrounds.length],
-                ['features', '特性', features.length], ['feats', '专长', feats.length],
-                ['classes', '职业', classes.length], ['spells', '法术', spells.length],
-                ['subclasses', '声明式子职', subclasses.length],
-                ['items', '装备／物品', items.length], ['monsters', '怪物', monsters.length],
-                ['methods', '加点规则', methods.length],
-              ] as const).map(([section, label, count]) => (
+            <nav className="grid grid-cols-2 gap-2 rounded-2xl border border-white/8 bg-black/10 p-2 sm:grid-cols-3 lg:grid-cols-5" aria-label="规则内容分类" role="tablist">
+              {BUILDER_SECTIONS.map((section) => (
                 <button
-                  key={section}
+                  key={section.id}
                   type="button"
-                  aria-pressed={activeSection === section}
-                  onClick={() => setActiveSection(section)}
-                  className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${activeSection === section ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:text-slate-200'}`}
+                  role="tab"
+                  aria-selected={activeSection === section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${activeSection === section.id ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100 shadow-[0_0_24px_rgba(139,92,246,0.08)]' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:border-white/15 hover:text-slate-200'}`}
                 >
-                  {label} · {count}
+                  {section.label} · {sectionCounts[section.id]}
                 </button>
               ))}
             </nav>
@@ -1506,6 +1664,12 @@ export default function Dnd5eCustomPluginBuilder({
             </div>
           </div>}
 
+          <Dnd5eBuilderResourceInventory
+            key={activeSection}
+            sectionLabel={builderSectionLabel(activeSection)}
+            entries={resourceInventoryEntries}
+          />
+
           {localError && <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">{localError}</p>}
           {localNotice && <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">{localNotice}</p>}
           <div className="flex flex-wrap justify-end gap-2">
@@ -1599,7 +1763,8 @@ function HeadlessEffectEditor({
                     persistentAreaEnabled: true, persistentAreaLabel: '毒云伤害区域示例',
                     persistentAreaColor: '#65a30d', persistentAreaDurationRounds: 10,
                     persistentAreaConcentration: true, persistentAreaVisualPreset: 'toxic-cloud',
-                    persistentAreaVisualIntensity: 'normal', summonEnabled: false,
+                    persistentAreaVisualIntensity: 'normal', persistentAreaVerticalMode: 'volume',
+                    persistentAreaHeightFeet: 20, summonEnabled: false,
                     damageEnabled: false, healingEnabled: false, conditionEnabled: false,
                     persistentAreaTriggers: [{
                       ...newPersistentAreaTrigger(1),
@@ -1626,6 +1791,21 @@ function HeadlessEffectEditor({
               <BuilderInput label="区域名称" value={value.persistentAreaLabel} onChange={(persistentAreaLabel) => patch({ persistentAreaLabel })} />
               <BuilderInput label="区域颜色（#RRGGBB）" value={value.persistentAreaColor} onChange={(persistentAreaColor) => patch({ persistentAreaColor })} />
               <BuilderNumber label="持续轮数" value={value.persistentAreaDurationRounds} min={1} max={14400} onChange={(persistentAreaDurationRounds) => patch({ persistentAreaDurationRounds })} />
+              <BuilderSelect
+                label="垂直范围"
+                value={value.persistentAreaVerticalMode}
+                options={[["legacy", "旧版无限柱"], ["ground", "贴地"], ["volume", "立体体积"]]}
+                onChange={(persistentAreaVerticalMode) => patch({
+                  persistentAreaVerticalMode: persistentAreaVerticalMode as HeadlessEffectEditorDraft['persistentAreaVerticalMode'],
+                })}
+              />
+              {value.persistentAreaVerticalMode === 'volume' && <BuilderNumber
+                label="区域高度（尺）"
+                value={value.persistentAreaHeightFeet}
+                min={1}
+                max={10000}
+                onChange={(persistentAreaHeightFeet) => patch({ persistentAreaHeightFeet })}
+              />}
               <BuilderSelect label="动画预设" value={value.persistentAreaVisualPreset} options={[["arcane", "奥术边界"], ["toxic-cloud", "毒云漂移"]]} onChange={(persistentAreaVisualPreset) => patch({ persistentAreaVisualPreset: persistentAreaVisualPreset as HeadlessEffectEditorDraft['persistentAreaVisualPreset'] })} />
               <BuilderSelect label="动画强度" value={value.persistentAreaVisualIntensity} options={[["subtle", "轻微"], ["normal", "标准"], ["strong", "强烈"]]} onChange={(persistentAreaVisualIntensity) => patch({ persistentAreaVisualIntensity: persistentAreaVisualIntensity as HeadlessEffectEditorDraft['persistentAreaVisualIntensity'] })} />
               <div className="self-end pb-0.5"><Toggle label="需要专注" value={value.persistentAreaConcentration} onChange={(persistentAreaConcentration) => patch({ persistentAreaConcentration })} /></div>

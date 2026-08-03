@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Dnd5ePluginArea } from '../../store/maps'
 import type { Character } from '../../types/character'
+import type { Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
 import {
   collectDnd5ePersistentAreaTriggers,
+  collectDnd5ePersistentAreaTriggersForSourceMove,
+  dnd5ePersistentAreaAffectsTokenVerticallyAt,
+  dnd5ePersistentAreaDifficultTerrainMultiplierAt,
   expireDnd5ePluginAreasAtTurnBoundary,
+  normalizeDnd5ePersistentAreaTriggerForRuntime,
   recordDnd5ePersistentAreaTrigger,
   reconcileDnd5ePluginAreas,
   reconcileDnd5ePluginAreasOnMap,
@@ -29,6 +34,139 @@ const character = (patch: Partial<Character> = {}): Character => ({
 })
 
 describe('D&D 5e plugin persistent areas', () => {
+  it('only upgrades legacy Flaming Sphere core snapshots at runtime', () => {
+    const legacyTrigger: Dnd5ePersistentAreaTriggerSnapshot = {
+      id: 'flaming-sphere-turn-end',
+      label: 'Flaming Sphere turn end',
+      timing: 'turn-end',
+      oncePerRound: true,
+      oncePerTurn: false,
+      savingThrow: { ability: 'dex', dc: 16, onSuccess: 'half' },
+      damage: { count: 2, sides: 6, modifier: 0, type: 'fire' },
+      dmAdjustable: true,
+    }
+    expect(normalizeDnd5ePersistentAreaTriggerForRuntime(area({
+      sourceKind: 'core-spell',
+      coreSpellId: 'flaming-sphere',
+    }), legacyTrigger)).toMatchObject({
+      dmAdjustable: undefined,
+      oncePerRound: false,
+      oncePerTurn: true,
+    })
+
+    const customArea = area({
+      sourceKind: 'plugin-feature',
+      coreSpellId: 'flaming-sphere',
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerForRuntime(customArea, legacyTrigger))
+      .toBe(legacyTrigger)
+  })
+
+  it('charges legacy and explicit ground difficult terrain only while the token is on the surface', () => {
+    const grease = area({
+      sourceKind: 'core-spell',
+      coreSpellId: 'grease',
+      movementCostMultiplier: 2,
+      relation: 'any',
+      includeSelf: true,
+    })
+    const map = {
+      id: 'vertical-ground-map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [], dnd5ePluginAreas: [grease],
+    }
+    const token = {
+      id: 'target-token', label: 'target', x: 75, y: 75, color: '#fff', emoji: 'T', size: 1,
+      type: 'player' as const, characterId: 'target',
+    }
+    expect(dnd5ePersistentAreaDifficultTerrainMultiplierAt({
+      map, token, position: { x: 75, y: 75 },
+    })).toBe(2)
+    expect(dnd5ePersistentAreaDifficultTerrainMultiplierAt({
+      map, token: { ...token, elevationFeet: 10 }, position: { x: 75, y: 75 },
+    })).toBe(1)
+    expect(dnd5ePersistentAreaDifficultTerrainMultiplierAt({
+      map: { ...map, dnd5ePluginAreas: [{ ...grease, vertical: { mode: 'ground' } }] },
+      token: { ...token, elevationFeet: 10 }, position: { x: 75, y: 75 },
+    })).toBe(1)
+  })
+
+  it('uses strict token-height overlap for bounded volume areas', () => {
+    const volume = area({
+      vertical: { mode: 'volume', baseElevationFeet: 10, heightFeet: 20 },
+    })
+    const map = {
+      id: 'vertical-volume-map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [], dnd5ePluginAreas: [volume],
+    }
+    const token = {
+      id: 'target-token', label: 'target', x: 75, y: 75, color: '#fff', emoji: 'T', size: 1,
+      type: 'player' as const, characterId: 'target',
+    }
+    expect(dnd5ePersistentAreaAffectsTokenVerticallyAt({
+      area: volume, map, token, position: token, elevationFeet: 0,
+    })).toBe(false)
+    expect(dnd5ePersistentAreaAffectsTokenVerticallyAt({
+      area: volume, map, token, position: token, elevationFeet: 8,
+    })).toBe(true)
+    expect(dnd5ePersistentAreaAffectsTokenVerticallyAt({
+      area: volume, map, token, position: token, elevationFeet: 30,
+    })).toBe(false)
+  })
+
+  it('does not trigger a ground area while flying across it and detects a same-cell descent into a volume', () => {
+    const moving = {
+      id: 'target-token', label: 'target', x: 25, y: 25, color: '#fff', emoji: 'T', size: 1,
+      type: 'player' as const, characterId: 'target', elevationFeet: 20,
+    }
+    const onEnter = {
+      id: 'entry', label: 'entry', timing: 'on-enter' as const, oncePerRound: false,
+      damage: { count: 1, sides: 6, modifier: 0, type: 'fire' as const },
+    }
+    const map = {
+      id: 'vertical-trigger-map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [moving],
+      dnd5ePluginAreas: [area({
+        cells: [{ col: 1, row: 0 }], vertical: { mode: 'ground' }, triggers: [onEnter],
+      })],
+    }
+    expect(collectDnd5ePersistentAreaTriggers({
+      map,
+      timing: 'on-enter',
+      round: 2,
+      movement: {
+        token: moving,
+        to: { x: 125, y: 25 },
+        path: [{ x: 25, y: 25 }, { x: 75, y: 25 }, { x: 125, y: 25 }],
+        pathElevationsFeet: [20, 20, 20],
+      },
+    })).toHaveLength(0)
+
+    const volumeMap = {
+      ...map,
+      dnd5ePluginAreas: [area({
+        cells: [{ col: 0, row: 0 }],
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 },
+        triggers: [onEnter],
+      })],
+    }
+    const descended = collectDnd5ePersistentAreaTriggers({
+      map: volumeMap,
+      timing: 'on-enter',
+      round: 2,
+      movement: {
+        token: moving,
+        to: { x: 25, y: 25 },
+        path: [{ x: 25, y: 25 }, { x: 25, y: 25 }],
+        pathElevationsFeet: [20, 5],
+      },
+    })
+    expect(descended).toHaveLength(1)
+    expect(descended[0]).toMatchObject({ pathIndex: 1, enteredAt: { col: 0, row: 0 } })
+  })
+
   it('expires finite areas after their declared round', () => {
     expect(reconcileDnd5ePluginAreas([area()], [character()], 3)).toHaveLength(1)
     expect(reconcileDnd5ePluginAreas([area()], [character()], 4)).toHaveLength(0)
@@ -174,6 +312,55 @@ describe('D&D 5e plugin persistent areas', () => {
       map: withReceipt, timing: 'on-enter', round: 2,
       movement: { token: moving, to: { x: 225, y: 25 } },
     })).toHaveLength(0)
+  })
+
+  it('collects on-enter when a source-token aura moves onto a stationary creature', () => {
+    const source = {
+      id: 'caster-token', label: 'caster', x: 25, y: 25, color: '#fff', emoji: 'C', size: 1,
+      type: 'player' as const, characterId: 'caster',
+    }
+    const enemy = {
+      id: 'enemy-token', label: 'enemy', x: 275, y: 25, color: '#fff', emoji: 'E', size: 1,
+      type: 'enemy' as const,
+    }
+    const aura = area({
+      id: 'spirit',
+      sourceKind: 'core-spell',
+      coreSpellId: 'spirit-guardians',
+      anchorMode: 'source-token',
+      anchorTokenId: 'caster-token',
+      anchorCell: { col: 0, row: 0 },
+      relation: 'enemy',
+      cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }],
+      triggers: [{
+        id: 'spirit-enter', label: '灵体卫士·进入', timing: 'on-enter', oncePerTurn: true,
+        damage: { count: 3, sides: 8, type: 'radiant' },
+      }],
+    })
+    const beforeMap = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, enemy], dnd5ePluginAreas: [aura],
+    }
+    const afterMap = {
+      ...beforeMap,
+      tokens: [{ ...source, x: 225, y: 25 }, enemy],
+      dnd5ePluginAreas: [{
+        ...aura,
+        anchorCell: { col: 4, row: 0 },
+        cells: [{ col: 4, row: 0 }, { col: 5, row: 0 }],
+      }],
+    }
+    expect(collectDnd5ePersistentAreaTriggersForSourceMove({
+      beforeMap,
+      afterMap,
+      sourceTokenId: source.id,
+      round: 1,
+      turnKey: '1:caster-token',
+    })).toMatchObject([{
+      trigger: { id: 'spirit-enter' },
+      targetToken: { id: enemy.id },
+    }])
   })
 
   it('collects creation, turn-start and turn-end triggers only for tokens inside the area', () => {

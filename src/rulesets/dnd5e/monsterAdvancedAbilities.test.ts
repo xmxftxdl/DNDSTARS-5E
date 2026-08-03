@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   dnd5eMonsterCoreSpellCompatibility,
   dnd5eMonsterShapechangeFormIds,
-  parseDnd5eLegendaryWingAttack,
 } from './monsterAdvancedAbilities'
 import { getDnd5eSrdCombatSpell } from './spells'
 
@@ -26,22 +25,26 @@ describe('advanced monster Headless declarations', () => {
     ])
   })
 
-  it('parses the trusted SRD dragon wing attack declaration', () => {
-    expect(parseDnd5eLegendaryWingAttack(
-      'wing-attack-costs-2-actions',
-      'Each creature within 15 ft. of the dragon must succeed on a DC 23 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone.',
-    )).toEqual({
-      rangeFeet: 15,
-      saveDc: 23,
-      damage: { count: 2, sides: 6, bonus: 8 },
-    })
-  })
-
   it('reports only safely supported monster spell effects as fully automated', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fire-bolt')!).automation).toBe('full')
-    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fly')!)).toMatchObject({
-      automation: 'manual',
-    })
+    for (const spellId of [
+      'barkskin',
+      'blur',
+      'fly',
+      'greater-invisibility',
+      'invisibility',
+      'longstrider',
+      'mage-armor',
+      'protection-from-poison',
+    ]) {
+      expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toEqual({
+        automation: 'full',
+      })
+    }
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('enlarge-reduce')!))
+      .toMatchObject({ automation: 'manual' })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('shillelagh')!))
+      .toMatchObject({ automation: 'manual' })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fireball')!)).toMatchObject({
       automation: 'full',
     })
@@ -63,6 +66,19 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('magic-weapon')!)).toMatchObject({
       automation: 'full',
     })
+    for (const spellId of [
+      'banishment',
+      'dispel-magic',
+      'entangle',
+      'hold-person',
+      'lesser-restoration',
+      'sleep',
+      'thunderwave',
+    ]) {
+      expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toEqual({
+        automation: 'full',
+      })
+    }
     const sanctuary = getDnd5eSrdCombatSpell('sanctuary')!
     expect(dnd5eMonsterCoreSpellCompatibility(sanctuary)).toMatchObject({
       automation: 'full',
@@ -76,6 +92,11 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('bless')!)).toMatchObject({
       automation: 'manual',
     })
+    for (const spellId of ['counterspell', 'darkness', 'shield']) {
+      expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toMatchObject({
+        automation: 'manual',
+      })
+    }
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('blight')!)).toMatchObject({
       automation: 'manual',
       reason: expect.stringContaining('亡灵'),

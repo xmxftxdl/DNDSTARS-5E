@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  resolveAvailablePortraitSource,
   resolveInitiativePortrait,
   resolveMapTokenPortrait,
 } from './portraitPresentation'
@@ -25,5 +26,11 @@ describe('portrait presentation resolution', () => {
     expect(resolveInitiativePortrait(character, token)).toBe('character-initiative.png')
     expect(resolveInitiativePortrait({ portrait: character.portrait }, token)).toBe('character-full.png')
     expect(resolveInitiativePortrait(undefined, token)).toBe('token-initiative.png')
+  })
+
+  it('falls back from a failed catalog portrait to a shared image and then to no image', () => {
+    expect(resolveAvailablePortraitSource('catalog.png', 'blob:shared', [])).toBe('catalog.png')
+    expect(resolveAvailablePortraitSource('catalog.png', 'blob:shared', ['catalog.png'])).toBe('blob:shared')
+    expect(resolveAvailablePortraitSource('catalog.png', 'blob:shared', ['catalog.png', 'blob:shared'])).toBeUndefined()
   })
 })

@@ -3,7 +3,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { createDnd5eConditionEffect, dnd5eActiveEffectId } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect, dnd5eActiveEffectId } from './activeEffects'
 import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
 
 function character(patch: Partial<Character> = {}): Character {
@@ -140,6 +140,173 @@ function ankhegDragFixture() {
 
 describe('D&D 5e monster map movement', () => {
   afterEach(() => setMapGeometryRuntime([]))
+
+  it('charges Grease on the ground but not while flying over the same cells', () => {
+    const snake = token({
+      id: 'flying-snake',
+      label: 'Flying Snake',
+      poolId: 'srd-5.1:flying-snake',
+      x: 5,
+      y: 5,
+      hp: 5,
+      maxHp: 5,
+    })
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token',
+      label: hero.name,
+      type: 'player',
+      characterId: hero.id,
+      x: 85,
+      y: 85,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const greaseMap: BattleMap = {
+      id: 'map',
+      name: 'Map',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [snake, heroToken],
+      dnd5ePluginAreas: [{
+        id: 'grease', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:grease',
+        sourceKind: 'core-spell', coreSpellId: 'grease', label: 'Grease', color: '#facc15',
+        sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+        cells: Array.from({ length: 10 }, (_, row) => [
+          { col: 1, row },
+          { col: 2, row },
+        ]).flat(),
+        createdRound: 1, expiresAfterRound: 100,
+        vertical: { mode: 'ground' }, relation: 'any', includeSelf: true,
+        movementCostMultiplier: 2,
+      }],
+    }
+    const initiativeOrder = [
+      { tokenId: snake.id, label: snake.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const grounded = resolveDnd5eMonsterMapMove({
+      combatId: 'combat',
+      map: greaseMap,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: snake.id,
+      to: { x: 25, y: 5 },
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+    expect(grounded.ok).toBe(true)
+    if (!grounded.ok) return
+    expect(grounded.traversalMode).toBe('walk')
+    expect(grounded.path).toEqual([{ x: 5, y: 5 }, { x: 15, y: 5 }, { x: 25, y: 5 }])
+    expect(grounded.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent',
+      actorId: snake.id,
+      resource: 'movement',
+      amount: 20,
+    }))
+
+    const flyingMap: BattleMap = {
+      ...greaseMap,
+      tokens: [{ ...snake, elevationFeet: 10 }, heroToken],
+    }
+    const airborne = resolveDnd5eMonsterMapMove({
+      combatId: 'combat',
+      map: flyingMap,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: snake.id,
+      to: { x: 25, y: 5 },
+      targetElevationFeet: 10,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+    expect(airborne.ok).toBe(true)
+    if (!airborne.ok) return
+    expect(airborne.traversalMode).toBe('fly')
+    expect(airborne.path).toEqual(grounded.path)
+    expect(airborne.movementTraces?.[0]?.pathElevationsFeet).toEqual([10, 10, 10])
+    expect(airborne.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent',
+      actorId: snake.id,
+      resource: 'movement',
+      amount: 10,
+    }))
+  })
+
+  it('uses a Fly active effect when a walking monster plans airborne movement', () => {
+    const fly = createDnd5eMechanicalEffect({
+      id: 'walking-monster-fly',
+      definitionId: 'srd-5.1:spell:fly',
+      label: 'Fly',
+      targetId: 'walking-monster',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'fly' },
+      duration: { type: 'concentration', sourceActorId: 'caster', concentrationId: 'fly' },
+      modifiers: { flySpeedFeet: 60 },
+    })
+    const walker = token({
+      id: 'walking-monster',
+      label: 'Walking Monster',
+      poolId: 'srd-5.1:goblin',
+      x: 5,
+      y: 5,
+      elevationFeet: 10,
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [fly] },
+    })
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token',
+      label: hero.name,
+      type: 'player',
+      characterId: hero.id,
+      x: 85,
+      y: 85,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'fly-effect-map',
+      name: 'Fly effect map',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [walker, heroToken],
+    }
+    const result = resolveDnd5eMonsterMapMove({
+      combatId: 'combat',
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: walker.id, label: walker.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: walker.id,
+      to: { x: 25, y: 5 },
+      targetElevationFeet: 20,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
+    expect(result.movementTraces?.[0]).toMatchObject({
+      tokenId: walker.id,
+      to: { x: 25, y: 5 },
+    })
+    expect(result.movementTraces?.[0]?.pathElevationsFeet.at(-1)).toBe(20)
+    expect(result.application?.map.tokens.find((entry) => entry.id === walker.id)).toMatchObject({
+      x: 25,
+      y: 5,
+      elevationFeet: 20,
+    })
+  })
 
   it('moves a grappled target with the monster and spends double movement', () => {
     const { ankheg, hero, heroToken, map, initiativeOrder } = ankhegDragFixture()

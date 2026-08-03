@@ -16,6 +16,7 @@ import { registerDnd5eRulesPlugin } from './pluginApi'
 const PLUGIN_ID = 'com.example.post-spell-table'
 const SUBCLASS_ID = `${PLUGIN_ID}:anomaly-caster`
 const TABLE_FEATURE_ID = `${SUBCLASS_ID}.table-check`
+const TABLE_CHOICE_FEATURE_ID = `${SUBCLASS_ID}.table-choice`
 const LINKED_USE_RESOURCE_ID = `${PLUGIN_ID}:decl-anomaly-caster-fortune-uses`
 
 const definition: DeclarativeSubclassDefinitionV1 = {
@@ -71,6 +72,21 @@ const definition: DeclarativeSubclassDefinitionV1 = {
       reset: 'long-rest',
       uses: { kind: 'fixed', value: 1 },
     },
+    automation: 'full',
+  }, {
+    schemaVersion: 1,
+    id: 'table-choice',
+    name: 'Table Choice',
+    description: 'Synthetic multiple-result selection fixture.',
+    level: 4,
+    trigger: { kind: 'after-spell-cast' },
+    targeting: { kind: 'self' },
+    mechanic: {
+      kind: 'post-spell-random-table-choice',
+      tableAbilityId: 'table-check',
+      rollCount: 3,
+    },
+    effects: [],
     automation: 'full',
   }],
 }
@@ -252,6 +268,72 @@ describe('Host-authoritative post-spell random table', () => {
       type: 'post-spell-random-table-check-resolved',
       triggered: false,
     }))
+  })
+
+  it('snapshots an owned table-choice modifier and validates every Host candidate', () => {
+    const input = state()
+    input.combatants.actor.pluginFeatureIds = [
+      ...input.combatants.actor.pluginFeatureIds,
+      TABLE_CHOICE_FEATURE_ID,
+    ]
+    const cast = resolveDnd5eHeadlessAction(input, {
+      type: 'cast-spell',
+      actorId: 'actor',
+      targetId: 'nearby',
+      targetIds: ['nearby'],
+      projectileTargetIds: ['nearby', 'nearby', 'nearby'],
+      spellId: 'magic-missile',
+      slotLevel: 1,
+      effectRolls: [1, 1, 1],
+    })
+    expect(cast.ok, cast.ok ? undefined : cast.reason).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.actor.classState.postSpellRandomTableCheck)
+      .toMatchObject({
+        tableRollChoice: {
+          featureId: TABLE_CHOICE_FEATURE_ID,
+          rollCount: 3,
+        },
+      })
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'post-spell-random-table-check-required',
+      tableRollCount: 3,
+      tableRollChoiceFeatureId: TABLE_CHOICE_FEATURE_ID,
+    }))
+
+    const forged = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'resolve-post-spell-random-table',
+      actorId: 'actor',
+      featureId: TABLE_FEATURE_ID,
+      triggerRoll: 1,
+      tableRollCandidates: [42, 50, 60],
+      selectedTableRollIndex: 1,
+      tableRoll: 42,
+    })
+    expect(forged).toMatchObject({ ok: false, reason: 'invalid-plugin-action' })
+    expect(forged.state.combatants.actor.classState.postSpellRandomTableCheck)
+      .toBeDefined()
+
+    const selected = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'resolve-post-spell-random-table',
+      actorId: 'actor',
+      featureId: TABLE_FEATURE_ID,
+      triggerRoll: 1,
+      tableRollCandidates: [42, 50, 60],
+      selectedTableRollIndex: 1,
+      tableRoll: 50,
+    })
+    expect(selected.ok, selected.ok ? undefined : selected.reason).toBe(true)
+    if (!selected.ok) return
+    expect(selected.events).toContainEqual(expect.objectContaining({
+      type: 'post-spell-random-table-choice-resolved',
+      choiceFeatureId: TABLE_CHOICE_FEATURE_ID,
+      rolls: [42, 50, 60],
+      selectedIndex: 1,
+      selectedRoll: 50,
+    }))
+    expect(selected.state.combatants.actor.classState.postSpellRandomTableManualAdjudication)
+      .toMatchObject({ tableRoll: 50 })
   })
 
   it('arms and resolves off turn after a Sorcerer counterspell reaction', () => {

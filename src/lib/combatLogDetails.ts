@@ -317,6 +317,18 @@ function eventDetails(
       return magicMissileDetails(event, resolveName, correlatedDamageEvents)
     case 'spell-saving-throw-damage-resolved': {
       const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      const rollDetails = event.components.flatMap((component, index) => {
+        if (!component.roll) return []
+        const damageType = component.damageType
+          ? DND5E_DAMAGE_TYPE_LABELS[component.damageType]
+          : event.components.length > 1 ? `第 ${index + 1} 组` : ''
+        const formula = `${component.roll.rolls.length}d${component.roll.sides}${component.roll.bonus === 0 ? '' : signed(component.roll.bonus)}`
+        const faces = component.roll.rolls.join(' + ')
+        const adjustment = component.roll.total === component.damageBeforeSavingThrow
+          ? ''
+          : `；规则调整后 ${component.damageBeforeSavingThrow}`
+        return [`${spellName}${damageType}伤害骰 ${formula}：${faces}${component.roll.bonus === 0 ? '' : ` ${signed(component.roll.bonus)}`} = ${component.roll.total}${adjustment}`]
+      })
       const saveResult = event.saveSucceeded
         ? event.successfulSave === 'half'
           ? `豁免成功减半为 ${event.damageAfterSavingThrow}`
@@ -340,6 +352,7 @@ function eventDetails(
         ? `${resolveName(event.targetId)}${[...new Set(defenses)].join('、')}，最终 ${event.finalDamage}`
         : `最终 ${event.finalDamage}`
       return [
+        ...rollDetails,
         `${spellName}伤害 ${event.damageBeforeSavingThrow}；${saveResult}；${defenseResult}`,
       ]
     }

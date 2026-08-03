@@ -109,6 +109,76 @@ describe('D&D 5e player map movement', () => {
     expect(prepared.prepared.path.at(-1)).toEqual({ x: 25, y: 5 })
   })
 
+  it('routes ground exploration around Grease but lets an airborne Token fly over it', () => {
+    const blockers = [1, 2, 3, 4, 5].flatMap((col) => [1, 3].map((row) => ({
+      id: `blocker-${col}-${row}`,
+      label: 'Blocker',
+      x: col * 10 + 5,
+      y: row * 10 + 5,
+      color: '',
+      emoji: '',
+      size: 1,
+      type: 'obstacle' as const,
+    })))
+    const greaseMap: BattleMap = {
+      ...map,
+      width: 70,
+      height: 50,
+      tokens: [
+        { ...map.tokens[0], x: 5, y: 25 },
+        ...blockers,
+      ],
+      dnd5ePluginAreas: [{
+        id: 'grease-area',
+        pluginId: 'srd-5.1',
+        featureId: 'srd-5.1:spell:grease',
+        sourceKind: 'core-spell',
+        coreSpellId: 'grease',
+        label: 'Grease',
+        color: '#fde68a',
+        sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token',
+        cells: [1, 2, 3, 4, 5].map((col) => ({ col, row: 2 })),
+        createdRound: 1,
+        expiresAfterRound: 10,
+        relation: 'any',
+        includeSelf: true,
+        movementCostMultiplier: 2,
+        vertical: { mode: 'ground' },
+      }],
+    }
+    const explorationAction: SharedPlayerActionState = {
+      ...action,
+      combatId: undefined,
+      targetPosition: { x: 65, y: 25 },
+    }
+
+    const grounded = prepareDnd5eExplorationMove({
+      action: explorationAction,
+      map: greaseMap,
+      characters: [character()],
+    })
+    const airborne = prepareDnd5eExplorationMove({
+      action: explorationAction,
+      map: {
+        ...greaseMap,
+        tokens: greaseMap.tokens.map((candidate) =>
+          candidate.id === 'hero-token'
+            ? { ...candidate, elevationFeet: 10 }
+            : candidate),
+      },
+      characters: [character()],
+    })
+
+    expect(grounded.ok).toBe(true)
+    expect(airborne.ok).toBe(true)
+    if (!grounded.ok || !airborne.ok) return
+    expect(grounded.prepared.path.some((point) => point.y !== 25)).toBe(true)
+    expect(airborne.prepared.path).toHaveLength(7)
+    expect(airborne.prepared.path.every((point) => point.y === 25)).toBe(true)
+    expect(airborne.prepared.pathElevationsFeet.every((elevation) => elevation === 10)).toBe(true)
+  })
+
   it('rejects exploration movement for a combat envelope, a defeated actor, or another Token', () => {
     expect(prepareDnd5eExplorationMove({
       action,
@@ -663,7 +733,72 @@ describe('D&D 5e player map movement', () => {
     }))
   })
 
-  it('charges double movement while an enemy crosses Spirit Guardians', () => {
+  it('charges Grease on the ground but not while flying over the same cells', () => {
+    const greaseMap: BattleMap = {
+      ...map,
+      dnd5ePluginAreas: [{
+        id: 'grease', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:grease',
+        sourceKind: 'core-spell', coreSpellId: 'grease', label: 'Grease', color: '#facc15',
+        sourceCharacterId: 'enemy', sourceTokenId: 'enemy-token',
+        cells: Array.from({ length: 20 }, (_, row) => [
+          { col: 1, row },
+          { col: 2, row },
+        ]).flat(),
+        createdRound: 1, expiresAfterRound: 100,
+        vertical: { mode: 'ground' }, relation: 'any', includeSelf: true,
+        movementCostMultiplier: 2,
+      }],
+    }
+    const hero = character()
+    hero.speed = 60
+    hero.dnd5eMovementSpeeds = { fly: 60 }
+    const initiativeOrder = [
+      { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+      { tokenId: 'enemy-token', label: 'Enemy', emoji: '', color: '', roll: 10 },
+    ]
+    const grounded = prepareDnd5ePlayerMove({
+      action,
+      map: greaseMap,
+      characters: [hero],
+      initiativeOrder,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+    expect(grounded.ok).toBe(true)
+    if (!grounded.ok) return
+    expect(grounded.prepared).toMatchObject({
+      distanceFeet: 10,
+      movementCostFeet: 20,
+      pathElevationsFeet: [0, 0, 0],
+    })
+
+    const flyingMap: BattleMap = {
+      ...greaseMap,
+      tokens: greaseMap.tokens.map((entry) => entry.id === 'hero-token'
+        ? { ...entry, elevationFeet: 10 }
+        : entry),
+    }
+    const airborne = prepareDnd5ePlayerMove({
+      action: {
+        ...action,
+        dnd5eTraversalMode: 'fly',
+        targetElevationFeet: 10,
+      },
+      map: flyingMap,
+      characters: [hero],
+      initiativeOrder,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+    expect(airborne.ok).toBe(true)
+    if (!airborne.ok) return
+    expect(airborne.prepared.path).toEqual(grounded.prepared.path)
+    expect(airborne.prepared).toMatchObject({
+      distanceFeet: 10,
+      movementCostFeet: 10,
+      pathElevationsFeet: [10, 10, 10],
+    })
+  })
+
+  it('charges Spirit Guardians inside its volume but not above it', () => {
     const guardedMap: BattleMap = {
       ...map,
       dnd5ePluginAreas: [{
@@ -671,6 +806,8 @@ describe('D&D 5e player map movement', () => {
         sourceKind: 'core-spell', coreSpellId: 'spirit-guardians', label: '灵体卫士', color: '#fef3c7',
         sourceCharacterId: 'enemy', sourceTokenId: 'enemy-token', cells: [{ col: 1, row: 0 }, { col: 2, row: 0 }],
         createdRound: 1, expiresAfterRound: 100, relation: 'enemy', includeSelf: false,
+        anchorMode: 'source-token', anchorTokenId: 'enemy-token',
+        vertical: { mode: 'volume', baseElevationFeet: -15, heightFeet: 30, anchorOffsetFeet: -15 },
         movementCostMultiplier: 2,
       }],
     }
@@ -687,6 +824,36 @@ describe('D&D 5e player map movement', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+
+    const hero = character()
+    hero.speed = 60
+    hero.dnd5eMovementSpeeds = { fly: 60 }
+    const airborne = prepareDnd5ePlayerMove({
+      action: {
+        ...action,
+        dnd5eTraversalMode: 'fly',
+        targetElevationFeet: 20,
+      },
+      map: {
+        ...guardedMap,
+        tokens: guardedMap.tokens.map((entry) => entry.id === 'hero-token'
+          ? { ...entry, elevationFeet: 20 }
+          : entry),
+      },
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: 'Enemy', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+    expect(airborne.ok).toBe(true)
+    if (!airborne.ok) return
+    expect(airborne.prepared).toMatchObject({
+      distanceFeet: 10,
+      movementCostFeet: 10,
+      pathElevationsFeet: [20, 20, 20],
+    })
   })
 
   it('charges double movement through Ice Storm difficult terrain', () => {
