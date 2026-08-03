@@ -50,6 +50,7 @@ export default function CharacterDetailPanel({
     maxHp: number
   } | null>(null)
   const hitPointRequestIdRef = useRef(0)
+  const submittedHitPointsRef = useRef<{ currentHp: number; maxHp: number } | null>(null)
   const displayedHitPoints = resolveHitPointDisplay({
     currentHp: character.currentHp,
     maxHp: character.maxHp,
@@ -71,7 +72,10 @@ export default function CharacterDetailPanel({
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
     const nextHp = Math.max(0, Math.min(maxHp, hp))
+    const submitted = submittedHitPointsRef.current
+    if (submitted?.currentHp === nextHp && submitted.maxHp === maxHp) return
     const requestId = ++hitPointRequestIdRef.current
+    submittedHitPointsRef.current = { currentHp: nextHp, maxHp }
     setPendingHitPoints({ currentHp: nextHp, maxHp })
     const result = onSetHitPoints({
       currentHp: nextHp,
@@ -80,11 +84,17 @@ export default function CharacterDetailPanel({
       manuallySetMaximum,
     })
     if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
-      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+      if (hitPointRequestIdRef.current === requestId) {
+        submittedHitPointsRef.current = null
+        setPendingHitPoints(null)
+      }
       return
     }
     const clearPendingRequest = () => {
-      if (hitPointRequestIdRef.current === requestId) setPendingHitPoints(null)
+      if (hitPointRequestIdRef.current === requestId) {
+        submittedHitPointsRef.current = null
+        setPendingHitPoints(null)
+      }
     }
     void Promise.resolve(result).then(clearPendingRequest, clearPendingRequest)
   }
@@ -127,7 +137,7 @@ export default function CharacterDetailPanel({
     <div
       data-testid="character-detail-panel"
       data-defeated={defeated || undefined}
-      className={`glass absolute bottom-3 left-3 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl ${defeated ? 'z-[70]' : 'z-40'}`}
+      className="glass absolute bottom-3 left-3 z-[90] flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl"
     >
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span

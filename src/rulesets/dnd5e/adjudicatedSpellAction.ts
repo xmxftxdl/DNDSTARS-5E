@@ -12,10 +12,14 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
-  resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
+import {
+  resolveDnd5eActionWithAirborneFallPreview,
+  type Dnd5eAirborneFallDamageRolls,
+  type Dnd5eAirborneFallPreview,
+} from './airborneFallActionResolution'
 import {
   createDnd5eMapCombatSnapshot,
   planDnd5eMapResultApplication,
@@ -39,6 +43,7 @@ import {
   dnd5eSubclassSpellSchoolAllowed,
   dnd5eSubclassUnrestrictedSpellLimit,
 } from './subclassSpellcasting'
+import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 
 export type Dnd5eAdjudicatedSpellRejectReason =
   | 'invalid-action'
@@ -133,6 +138,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   initiativeOrder: readonly InitiativeEntry[]
   turnEconomy?: Dnd5eTurnEconomyCounts
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
+  effectiveRules?: Dnd5eEffectiveRulesContextV1 | null
 }): { ok: true; prepared: PreparedDnd5eAdjudicatedSpell } | { ok: false; reason: Dnd5eAdjudicatedSpellRejectReason } {
   const payload = input.action.dnd5eAdjudicatedSpell
   if (input.action.type !== 'dnd5e-adjudicated-spell' || !payload || !input.spell || input.spell.headless) {
@@ -146,8 +152,10 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   const actorToken = input.map.tokens.find((token) =>
     token.id === input.action.actorTokenId && token.characterId === input.action.characterId,
   )
+  const enforceSpellcastingPrerequisites =
+    input.effectiveRules?.houseRules.spellcastingPrerequisitesEnabled !== false
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  if (dnd5eWearingUnproficientArmor(actor)) {
+  if (enforceSpellcastingPrerequisites && dnd5eWearingUnproficientArmor(actor)) {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
   const castingClassId = dnd5eSpellcastingClassIdForSpell(
@@ -166,7 +174,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   if (!definition?.spellcasting || castingClassLevel < 1) {
     return { ok: false, reason: 'spellcasting-class-unavailable' }
   }
-  if (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18)) {
+  if (enforceSpellcastingPrerequisites && actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18)) {
     return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   }
   const importedComponents = input.spell.imported?.components
@@ -178,7 +186,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     consumedMaterial: importedComponents.materialConsumed === true,
   } : dnd5eCoreSpellComponentRequirements(input.spell.id)
   const componentCheck = dnd5eSpellComponentCheck(actor, componentRequirements, castingClassId)
-  if (!dnd5eSpellComponentsAvailable(componentCheck)) {
+  if (enforceSpellcastingPrerequisites && !dnd5eSpellComponentsAvailable(componentCheck)) {
     return { ok: false, reason: 'component-unavailable' }
   }
   const castingTime = dnd5eSpellbookEntryCastingTime(input.spell)
@@ -297,7 +305,12 @@ function sanitizeEffects(
 export function resolvePreparedDnd5eAdjudicatedSpell(input: {
   prepared: PreparedDnd5eAdjudicatedSpell
   response: DmAdjudicationInterruptResponse
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+} {
   const { prepared, response } = input
   if (response.decision !== 'approved') {
     return {
@@ -318,7 +331,7 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
   const concentrationRounds = prepared.concentration && response.concentrationRounds != null
     ? response.concentrationRounds
     : undefined
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'adjudicated-spell',
     actorId: prepared.actorToken.id,
     castingClassId: prepared.castingClassId,
@@ -329,10 +342,11 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
     castingTime: prepared.castingTime,
     effects,
     concentrationRounds,
-  })
-  if (!result.ok) return { result }
+  }, input.airborneFallDamageRollsByCombatantId)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
+import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import {
+  activateDnd5ePluginSandbox,
+  type Dnd5ePluginSandboxSession,
+} from './pluginSandbox'
 import {
   prepareDnd5ePluginFeatureAction,
   rebaseDnd5ePluginFeatureApplication,
@@ -87,6 +92,116 @@ function action(featureId: string): SharedPlayerActionState {
 }
 
 describe('D&D 5e plugin feature authority action', () => {
+  it('replays a Worker condition with Host-provided airborne fall dice', async () => {
+    const pluginId = 'com.example.worker-airborne'
+    const featureId = `${pluginId}:drop-flyer`
+    const manifest = {
+      id: pluginId, name: 'Worker airborne', version: '1.0.0', apiVersion: 2 as const,
+      rulesetId: 'dnd5e-2014-srd-5.1' as const, publisher: 'Tests', license: 'CC0-1.0',
+    }
+    const feature = {
+      id: 'drop-flyer', name: 'Drop Flyer', summary: 'Drop Flyer',
+      description: 'Drops a non-hover flyer.', automation: 'full' as const,
+      action: {
+        id: 'drop-flyer', label: 'Drop Flyer', economy: 'action' as const,
+        targeting: {
+          kind: 'single-creature' as const,
+          relation: 'enemy' as const,
+          rangeFeet: 120,
+        },
+      },
+    }
+    let workerResolveCount = 0
+    const session: Dnd5ePluginSandboxSession = {
+      manifest,
+      features: [feature],
+      feats: [],
+      actions: [{ id: 'drop-flyer' }],
+      races: [],
+      backgrounds: [],
+      abilityGenerationMethods: [],
+      spells: [],
+      items: [],
+      monsters: [],
+      resources: [],
+      subclasses: [],
+      migrations: [],
+      async resolve() {
+        workerResolveCount += 1
+        return {
+          ok: true,
+          operations: [{
+            kind: 'apply-standard-condition',
+            targetId: 'enemy-token',
+            condition: 'prone',
+            duration: { expiresAt: 'target-turn-end', remainingRounds: 1 },
+          }],
+        }
+      },
+      async migrateState(fromVersion, state) {
+        return { state, fromVersion, toVersion: fromVersion }
+      },
+      terminate() {},
+    }
+    const dispose = registerDnd5eRulesPlugin(activateDnd5ePluginSandbox(session))
+    try {
+      const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
+      const enemy = character('enemy', { dnd5eMovementSpeeds: { fly: 60 } })
+      const heroToken = token('hero-token', hero.id, 25)
+      const enemyToken = {
+        ...token('enemy-token', enemy.id, 125, 'enemy'),
+        elevationFeet: 30,
+      }
+      const map: BattleMap = {
+        id: 'map-1', name: 'Worker airborne map', width: 500, height: 500,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [heroToken, enemyToken],
+      }
+      const initiativeOrder: InitiativeEntry[] = [
+        { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+        { slotId: 'enemy-token:normal', tokenId: enemyToken.id, label: enemy.name, emoji: 'E', color: '#f00', roll: 10 },
+      ]
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: { ...action(featureId), targetTokenId: enemyToken.id },
+        map,
+        characters: [hero, enemy],
+        initiativeOrder,
+      })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+
+      const preview = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+      })
+      expect(preview.result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+      expect(preview.application).toBeUndefined()
+      expect(preview.airborneFalls).toEqual([{
+        combatantId: enemyToken.id,
+        fromElevationFeet: 30,
+        groundElevationFeet: 0,
+        fallDistanceFeet: 30,
+        fallingDamageDice: 3,
+      }])
+
+      const settled = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+        airborneFallDamageRollsByCombatantId: { [enemyToken.id]: [2, 3, 4] },
+      })
+      expect(settled.result.ok, settled.result.ok ? undefined : settled.result.reason).toBe(true)
+      expect(settled.airborneFalls).toBeUndefined()
+      expect(settled.application?.characters.find((candidate) => candidate.id === enemy.id)).toMatchObject({
+        currentHp: 11,
+        conditions: expect.arrayContaining(['prone']),
+      })
+      expect(settled.application?.map.tokens.find((candidate) => candidate.id === enemyToken.id)).toMatchObject({
+        elevationFeet: 0,
+      })
+      expect(workerResolveCount).toBe(1)
+    } finally {
+      dispose()
+    }
+  })
+
   it('creates a declared summon, joins initiative, and starts concentration', async () => {
     let featureId = ''
     const dispose = registerDnd5eRulesPlugin({
@@ -168,6 +283,7 @@ describe('D&D 5e plugin feature authority action', () => {
             },
             persistentArea: {
               label: '守护区域', color: '#22c55e', durationRounds: 3, concentration: true,
+              vertical: { mode: 'volume', heightFeet: 20 },
               visual: { preset: 'toxic-cloud', intensity: 'strong' },
             },
           },
@@ -187,6 +303,14 @@ describe('D&D 5e plugin feature authority action', () => {
           token('enemy-token', enemy.id, 125, 'enemy'),
         ],
       }
+      const geometry = createEmptyMapGeometry(map.id, 1)
+      geometry.obstacles.push({
+        id: 'raised-anchor', kind: 'obstacle', label: 'Raised anchor',
+        points: [{ x: 200, y: 0 }, { x: 250, y: 0 }, { x: 250, y: 50 }, { x: 200, y: 50 }],
+        blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+        baseHeightFeet: 0, heightFeet: 0, terrainRegion: true, terrainElevationFeet: 35, createdAt: 1,
+      })
+      setMapGeometryRuntime([geometry])
       const initiativeOrder: InitiativeEntry[] = [
         { slotId: 'hero-token:normal', tokenId: 'hero-token', label: 'hero', emoji: '●', color: '#fff', roll: 20 },
         { slotId: 'ally-token:normal', tokenId: 'ally-token', label: 'ally', emoji: '●', color: '#fff', roll: 15 },
@@ -198,6 +322,7 @@ describe('D&D 5e plugin feature authority action', () => {
           targetTokenId: undefined,
           targetTokenIds: ['enemy-token'],
           targetCell: { col: 4, row: 0 },
+          targetElevationFeet: 30,
         },
         map,
         characters: [hero, ally, enemy],
@@ -216,12 +341,88 @@ describe('D&D 5e plugin feature authority action', () => {
           id: 'plugin-area:plugin-action-1', label: '守护区域', color: '#22c55e',
           cells: expect.arrayContaining([{ col: 4, row: 0 }]),
           concentrationId: 'plugin-area:plugin-action-1', expiresAfterRound: 3,
+          vertical: { mode: 'volume', baseElevationFeet: 30, heightFeet: 20 },
           visual: { preset: 'toxic-cloud', intensity: 'strong' },
         }),
       ])
       expect(resolved.application?.characters.find((entry) => entry.id === hero.id)).toMatchObject({
         concentrating: true,
         dnd5eCombatState: { concentrationSpellId: 'plugin-area:plugin-action-1' },
+      })
+    } finally {
+      setMapGeometryRuntime([])
+      dispose()
+    }
+  })
+
+  it('rebuilds plugin area targets against the selected Z-axis volume', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.airburst', name: 'Airburst', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'airburst', resolve: ({ succeed }) => succeed() })
+        featureId = api.registerFeature({
+          id: 'airburst', name: 'Airburst', summary: 'Airburst', description: 'Airburst', automation: 'full',
+          action: {
+            id: 'airburst', label: 'Airburst', economy: 'action',
+            targeting: {
+              kind: 'area', relation: 'enemy', maximumTargets: 8,
+              template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
+            },
+          },
+        })
+      },
+    })
+    try {
+      const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
+      const ground = character('ground')
+      const airborne = character('airborne')
+      const groundToken = token('ground-token', ground.id, 125, 'enemy')
+      const airborneToken = {
+        ...token('airborne-token', airborne.id, 125, 'enemy'),
+        elevationFeet: 40,
+      }
+      const map: BattleMap = {
+        id: 'map-1', name: 'Airburst map', width: 500, height: 500,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [token('hero-token', hero.id, 25), groundToken, airborneToken],
+      }
+      const initiativeOrder: InitiativeEntry[] = map.tokens.map((entry, index) => ({
+        slotId: `${entry.id}:normal`, tokenId: entry.id, label: entry.label,
+        emoji: entry.emoji ?? '', color: entry.color ?? '', roll: 20 - index,
+      }))
+      const baseAction = {
+        ...action(featureId),
+        targetTokenId: undefined,
+        targetCell: { col: 2, row: 0 },
+      }
+
+      const groundCast = prepareDnd5ePluginFeatureAction({
+        action: baseAction,
+        map,
+        characters: [hero, ground, airborne],
+        initiativeOrder,
+      })
+      expect(groundCast).toMatchObject({
+        ok: true,
+        prepared: { targetTokens: [{ id: groundToken.id }] },
+      })
+
+      const airCast = prepareDnd5ePluginFeatureAction({
+        action: { ...baseAction, targetElevationFeet: 40 },
+        map,
+        characters: [hero, ground, airborne],
+        initiativeOrder,
+      })
+      expect(airCast).toMatchObject({
+        ok: true,
+        prepared: {
+          areaTargetElevationFeet: 40,
+          targetTokens: [{ id: airborneToken.id }],
+        },
       })
     } finally {
       dispose()

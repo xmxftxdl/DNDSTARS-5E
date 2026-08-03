@@ -5,7 +5,7 @@ import {
   validateAccountDocument,
 } from './account-storage-sqlite.mjs'
 
-export const POSTGRES_DATABASE_SCHEMA_VERSION = 2
+export const POSTGRES_DATABASE_SCHEMA_VERSION = 3
 
 const { Pool } = pg
 
@@ -119,6 +119,27 @@ async function initializeSchema(pool) {
     CREATE INDEX IF NOT EXISTS campaigns_owner_updated
       ON campaigns(owner_account_id, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS ai_jobs (
+      job_id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+      campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id) ON DELETE CASCADE,
+      task_kind TEXT NOT NULL,
+      execution_mode TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      revision BIGINT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      document_json JSONB NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      UNIQUE(account_id, campaign_id, idempotency_key)
+    );
+    CREATE INDEX IF NOT EXISTS ai_jobs_campaign_updated
+      ON ai_jobs(campaign_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS ai_jobs_account_status
+      ON ai_jobs(account_id, status, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS migration_sources (
       source_path TEXT PRIMARY KEY,
       source_sha256 TEXT NOT NULL,
@@ -198,7 +219,8 @@ async function initializeSchema(pool) {
     INSERT INTO schema_migrations(version, name, applied_at)
     VALUES
       (1, 'accounts-campaigns-marketplace-v1', $1),
-      (2, 'marketplace-immutable-conflict-guards', $1)
+      (2, 'marketplace-immutable-conflict-guards', $1),
+      (3, 'campaign-ai-jobs-v2', $1)
     ON CONFLICT(version) DO NOTHING
   `, [Date.now()])
 }
@@ -206,6 +228,7 @@ async function initializeSchema(pool) {
 async function writeAccountProjections(client, account, identityRecords = []) {
   const accountId = account.accountId
   await client.query('DELETE FROM account_sessions WHERE account_id = $1', [accountId])
+  await client.query('DELETE FROM ai_jobs WHERE account_id = $1', [accountId])
   await client.query('DELETE FROM campaigns WHERE owner_account_id = $1', [accountId])
   await client.query('DELETE FROM account_identities WHERE account_id = $1', [accountId])
 
@@ -242,6 +265,33 @@ async function writeAccountProjections(client, account, identityRecords = []) {
       normalizedInteger(campaign.createdAt),
       normalizedInteger(campaign.updatedAt),
     ])
+  }
+
+  for (const campaign of account.campaigns ?? []) {
+    const jobs = Array.isArray(campaign?.aiWorkspace?.jobs) ? campaign.aiWorkspace.jobs : []
+    for (const job of jobs) {
+      if (!plainObject(job) || typeof job.jobId !== 'string' || !job.jobId) continue
+      await client.query(`
+        INSERT INTO ai_jobs(
+          job_id, account_id, campaign_id, task_kind, execution_mode, provider_id,
+          model_id, status, revision, idempotency_key, document_json, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13)
+      `, [
+        job.jobId,
+        accountId,
+        campaign.campaignId,
+        String(job.taskKind ?? ''),
+        String(job.executionMode ?? ''),
+        String(job.providerId ?? ''),
+        String(job.modelId ?? ''),
+        String(job.status ?? ''),
+        normalizedInteger(job.revision, 1),
+        String(job.idempotencyKey ?? ''),
+        JSON.stringify(job),
+        normalizedInteger(job.createdAt),
+        normalizedInteger(job.updatedAt, normalizedInteger(job.createdAt)),
+      ])
+    }
   }
 
   const identities = new Map()
@@ -586,6 +636,7 @@ export class PostgresStorage {
         (SELECT COUNT(*) FROM campaigns) AS campaigns,
         (SELECT COUNT(*) FROM account_sessions) AS sessions,
         (SELECT COUNT(*) FROM account_identities) AS identities,
+        (SELECT COUNT(*) FROM ai_jobs) AS ai_jobs,
         (SELECT COUNT(*) FROM marketplace_orders) AS orders,
         (SELECT COUNT(*) FROM marketplace_ledger_entries) AS ledger_entries,
         (SELECT COUNT(*) FROM marketplace_payouts) AS payouts
@@ -598,6 +649,7 @@ export class PostgresStorage {
       campaigns: Number(row.campaigns),
       sessions: Number(row.sessions),
       identities: Number(row.identities),
+      aiJobs: Number(row.ai_jobs),
       orders: Number(row.orders),
       ledgerEntries: Number(row.ledger_entries),
       payouts: Number(row.payouts),

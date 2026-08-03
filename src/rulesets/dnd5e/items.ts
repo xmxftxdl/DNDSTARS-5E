@@ -27,7 +27,7 @@ import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginA
 import { DND5E_SRD_CLASS_DEFINITIONS, dnd5eClassDefinition, dnd5eIgnoresMagicItemRequirements } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 import { projectDnd5eActiveEffectState } from './activeEffects'
-import { dnd5eTotemWarriorCarryingCapacityMultiplier } from './totemWarrior'
+import { dnd5eRageFeatureCarryingCapacityMultiplier } from './rageFeature'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 const EMPTY_CURRENCY: Dnd5eCurrencyWallet = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 }
@@ -413,7 +413,7 @@ export function dnd5eInventoryLoad(character: Character): Dnd5eInventoryLoad {
   const totalWeightLb = itemWeightLb + currencyWeightLb
   const carryingCapacityLb = strength * 15 * dnd5eActiveCarryingCapacityMultiplier(
     character.dnd5eCombatState?.activeEffects,
-  ) * dnd5eTotemWarriorCarryingCapacityMultiplier(character)
+  ) * dnd5eRageFeatureCarryingCapacityMultiplier(character)
   const encumberedThresholdLb = strength * 5
   const heavilyEncumberedThresholdLb = strength * 10
   const status = totalWeightLb > carryingCapacityLb

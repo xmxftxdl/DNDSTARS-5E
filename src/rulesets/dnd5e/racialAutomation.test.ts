@@ -13,6 +13,7 @@ import {
   type Dnd5eRacialRulesSnapshot,
 } from './racialAutomation'
 import { createDnd5eConditionEffect } from './activeEffects'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -52,31 +53,59 @@ function combatant(
 }
 
 describe('D&D 5e racial Headless automation', () => {
-  it('projects level-gated innate spells from local namespaced race ids', () => {
-    expect(dnd5eRacialRulesForCharacter({
-      race: '卓尔',
-      dnd5eRaceId: 'local.phb2014.race-metadata:race:drow',
-      level: 5,
-    }).innateSpells).toEqual([
-      expect.objectContaining({ spellId: 'dancing-lights', resetOn: 'at-will' }),
-      expect.objectContaining({ spellId: 'faerie-fire', resetOn: 'long-rest' }),
-      expect.objectContaining({ spellId: 'darkness', resetOn: 'long-rest' }),
-    ])
-    expect(dnd5eRacialRulesForCharacter({
-      race: '森林侏儒',
-      dnd5eRaceId: 'local.phb2014.race-metadata:race:forest-gnome',
-      level: 1,
-    }).innateSpells).toEqual([
-      expect.objectContaining({ spellId: 'minor-illusion', resetOn: 'at-will' }),
-    ])
-    expect(dnd5eRacialRulesForCharacter({
-      race: '提夫林',
-      dnd5eRaceId: 'tiefling',
-      level: 3,
-    }).innateSpells.map((grant) => grant.spellId)).toEqual([
-      'thaumaturgy',
-      'hellish-rebuke',
-    ])
+  it('projects level-gated innate spells from registered race data', () => {
+    const pluginId = 'local.test.racial-grants'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId,
+        name: 'Racial Grants Test',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Tests',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerRace({
+          id: 'ancestry-a',
+          name: 'Ancestry A',
+          speedFeet: 30,
+          innateSpells: [
+            { spellId: 'dancing-lights', minimumLevel: 1, ability: 'cha', castAtLevel: 0, resetOn: 'at-will' },
+            { spellId: 'faerie-fire', minimumLevel: 3, ability: 'cha', castAtLevel: 1, resetOn: 'long-rest' },
+            { spellId: 'darkness', minimumLevel: 5, ability: 'cha', castAtLevel: 2, resetOn: 'long-rest' },
+          ],
+        })
+        api.registerRace({
+          id: 'ancestry-b',
+          name: 'Ancestry B',
+          speedFeet: 25,
+          innateSpells: [
+            { spellId: 'minor-illusion', minimumLevel: 1, ability: 'int', castAtLevel: 0, resetOn: 'at-will' },
+          ],
+        })
+      },
+    })
+    try {
+      expect(dnd5eRacialRulesForCharacter({
+        race: 'Ancestry A',
+        dnd5eRaceId: `${pluginId}:ancestry-a`,
+        level: 5,
+      }).innateSpells).toEqual([
+        expect.objectContaining({ spellId: 'dancing-lights', resetOn: 'at-will' }),
+        expect.objectContaining({ spellId: 'faerie-fire', resetOn: 'long-rest' }),
+        expect.objectContaining({ spellId: 'darkness', resetOn: 'long-rest' }),
+      ])
+      expect(dnd5eRacialRulesForCharacter({
+        race: 'Ancestry B',
+        dnd5eRaceId: `${pluginId}:ancestry-b`,
+        level: 1,
+      }).innateSpells).toEqual([
+        expect.objectContaining({ spellId: 'minor-illusion', resetOn: 'at-will' }),
+      ])
+    } finally {
+      dispose()
+    }
   })
 
   it('requires and applies a Halfling Lucky reroll for a natural 1', () => {

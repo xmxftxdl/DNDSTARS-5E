@@ -938,11 +938,20 @@ export function shouldApplySharedCharactersSnapshot(input: {
 
 export function mergePlayerWritableCharacter(local: Character, shared: Character): Character {
   const projectedEffects = projectDnd5eActiveEffectState(shared.dnd5eCombatState?.activeEffects)
+  const hasStructuredConcentration = Boolean(
+    local.dnd5eCombatState?.concentrationSpellId?.trim() ||
+    shared.dnd5eCombatState?.concentrationSpellId?.trim(),
+  )
   return {
     ...local,
     currentHp: shared.currentHp,
     maxHp: shared.maxHp,
     tempHp: shared.tempHp,
+    // Headless concentration is DM-authoritative, including the short window
+    // where one side has already cleared the spell id. When neither snapshot
+    // has a structured spell, retain the legacy/manual sheet toggle instead
+    // of making that existing player control impossible to save.
+    concentrating: hasStructuredConcentration ? shared.concentrating : local.concentrating,
     conditions: projectedEffects.conditions,
     classResources: shared.classResources,
     dnd5eCombatState: shared.dnd5eCombatState

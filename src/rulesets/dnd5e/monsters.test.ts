@@ -509,7 +509,13 @@ describe('SRD 5.1 monster catalog', () => {
         monsterId: 'srd-5.1:vampire-vampire',
         baseActionId: 'unarmed-strike',
         legendaryActionId: 'legendary-unarmed-strike',
-        automation: 'dm-adjudication',
+        automation: 'headless',
+      },
+      {
+        monsterId: 'srd-5.1:vampire-vampire',
+        baseActionId: 'bite',
+        legendaryActionId: 'legendary-bite-costs-2-actions',
+        automation: 'headless',
       },
       {
         monsterId: 'srd-5.1:lich',

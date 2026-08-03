@@ -7,6 +7,14 @@ export interface Dnd5eHouseRulesV1 {
   advantageMode?: 'standard' | 'stacking-cancel'
   shortRestMinutes?: number
   longRestHours?: number
+  /** Shows turn, attack, spell, and kill-streak banners on the battle map. */
+  combatBannersEnabled?: boolean
+  /** Plays synchronized spell projectiles, manifestations, and area effects. */
+  spellAnimationsEnabled?: boolean
+  /** Enforces casting prerequisites such as components, Wild Shape, and armor proficiency. */
+  spellcastingPrerequisitesEnabled?: boolean
+  /** Calculates and presents inventory and currency encumbrance. */
+  encumbranceEnabled?: boolean
 }
 
 export interface Dnd5eEffectivePluginRequirementV1 {
@@ -32,6 +40,10 @@ const DEFAULT_HOUSE_RULES: Required<Dnd5eHouseRulesV1> = {
   advantageMode: 'standard',
   shortRestMinutes: 60,
   longRestHours: 8,
+  combatBannersEnabled: true,
+  spellAnimationsEnabled: true,
+  spellcastingPrerequisitesEnabled: true,
+  encumbranceEnabled: true,
 }
 
 const combatContexts = new Map<string, Dnd5eEffectiveRulesContextV1>()
@@ -73,6 +85,10 @@ export function normalizeDnd5eHouseRulesV1(value: unknown): Required<Dnd5eHouseR
     longRestHours: Number.isInteger(longRestHours) && longRestHours >= 1 && longRestHours <= 24
       ? longRestHours
       : DEFAULT_HOUSE_RULES.longRestHours,
+    combatBannersEnabled: rules.combatBannersEnabled !== false,
+    spellAnimationsEnabled: rules.spellAnimationsEnabled !== false,
+    spellcastingPrerequisitesEnabled: rules.spellcastingPrerequisitesEnabled !== false,
+    encumbranceEnabled: rules.encumbranceEnabled !== false,
   }
 }
 

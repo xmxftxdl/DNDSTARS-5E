@@ -5,6 +5,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eCombatantClassLevel,
+  dnd5eCombatantHasSubclass,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatEvent,
@@ -16,7 +17,7 @@ import {
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
 import { resolveDnd5eRollMode } from './rollMode'
-import { dnd5eTotemWarriorFeatureForCombatant } from './totemWarrior'
+import { dnd5eRageFeatureForCombatant } from './rageFeature'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 
 export type Dnd5eAbilityCheckRejectReason =
@@ -51,11 +52,16 @@ export function prepareDnd5eAbilityCheck(input: {
   if (
     !Number.isInteger(payload.dc) || payload.dc < 0 || payload.dc > 100 ||
     (payload.skill && (!skill || skill.ability !== payload.ability)) ||
-    (payload.context != null && (
-      payload.context !== 'push-pull-lift-break' ||
-      payload.ability !== 'str' ||
-      payload.skill != null
-    ))
+    (payload.context != null &&
+      !(
+        payload.context === 'push-pull-lift-break' &&
+        payload.ability === 'str' &&
+        payload.skill == null
+      ) &&
+      !(
+        payload.context === 'interact-with-dragons' &&
+        payload.ability === 'cha'
+      ))
   ) return { ok: false, reason: 'invalid-action' }
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
@@ -71,6 +77,13 @@ export function prepareDnd5eAbilityCheck(input: {
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
+  if (
+    payload.context === 'interact-with-dragons' &&
+    (
+      dnd5eCombatantClassLevel(actorCombatant, 'sorcerer') < 1 ||
+      !dnd5eCombatantHasSubclass(actorCombatant, 'sorcerer', 'draconic')
+    )
+  ) return { ok: false, reason: 'invalid-action' }
   if (payload.spendAction && input.turnEconomy && input.turnEconomy.action.current < 1) {
     return { ok: false, reason: 'action-unavailable' }
   }
@@ -104,11 +117,11 @@ export function prepareDnd5eAbilityCheck(input: {
           },
           {
             active: payload.context === 'push-pull-lift-break' &&
-              !!dnd5eTotemWarriorFeatureForCombatant(
+              !!dnd5eRageFeatureForCombatant(
                 actorCombatant,
-                'aspect-of-the-beast-bear',
+                'object-strength-and-carrying',
               ),
-            reason: 'totem-warrior-bear-aspect',
+            reason: 'rage-feature-carrying',
           },
           {
             active: actorCombatant.classState.helpedAbilityCheckSourceId != null,

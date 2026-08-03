@@ -70,6 +70,7 @@ const TOOL_LABELS: Record<Exclude<MapGeometryTool, 'select'>, string> = {
   door: '门',
   window: '窗户',
   obstacle: '区域/障碍',
+  'difficult-terrain': '困难地形',
   elevation: '格子高度',
   light: '光源',
   delete: '删除',
@@ -105,6 +106,7 @@ function NumberField({
   label,
   value,
   min = -1_000,
+  max,
   disabled = false,
   help,
   onChange,
@@ -112,6 +114,7 @@ function NumberField({
   label: string
   value: number
   min?: number
+  max?: number
   disabled?: boolean
   help?: string
   onChange: (value: number) => void
@@ -122,6 +125,7 @@ function NumberField({
       <input
         type="number"
         min={min}
+        max={max}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value) || 0)}
@@ -257,6 +261,12 @@ export default function MapGeometryToolbar({
             </span>
           )}
           {tool === 'obstacle' && <Package className="h-3.5 w-3.5 text-orange-200" />}
+          {tool === 'difficult-terrain' && (
+            <span className="flex items-center gap-1 text-[10px] text-amber-200" title="单击涂一格，按住拖动可连续涂格；新区域默认移动消耗 ×2，不会阻挡移动、视线或效果线">
+              <Grid3X3 className="h-3.5 w-3.5" />
+              点击／拖动涂格 · 默认 ×2
+            </span>
+          )}
           {tool === 'elevation' && (
             <span className="flex items-center gap-1 text-[10px] text-emerald-200" title="单击选择一格，按住拖动可连续选择地图格；松开后只保留选区外边界">
               <Mountain className="h-3.5 w-3.5" />
@@ -886,9 +896,10 @@ export default function MapGeometryToolbar({
                   label="地形倍率"
                   help="进入并经过区域时的移动消耗倍率。1 为正常，2 为困难地形，3 表示每走 1 尺消耗 3 尺移动力。"
                   min={1}
+                  max={10}
                   value={selectedEntity.terrainCostMultiplier ?? 1}
                   onChange={(terrainCostMultiplier) => updateEntity(mapId, selectedEntity.id, {
-                    terrainCostMultiplier: Math.max(1, terrainCostMultiplier),
+                    terrainCostMultiplier: Math.max(1, Math.min(10, terrainCostMultiplier)),
                   })}
                 />
                 <NumberField

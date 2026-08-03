@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Character } from '../types/character'
 import { registerClassDefinition, type ClassDefinition } from './classDefinitionRegistry'
 import { getClassResource, restoreClassResources, spendClassResource, syncCharacterClassResources } from './classResources'
+import { registerDnd5eRulesPlugin } from '../rulesets/dnd5e/pluginApi'
 
 function character(patch: Partial<Character> = {}): Character {
   return {
@@ -96,19 +97,48 @@ describe('D&D 5e class resources', () => {
         .classResources?.['dnd5e-racial-half-orc-relentless-endurance'].current,
     ).toBe(1)
 
-    const drow = syncCharacterClassResources(character({
-      race: '卓尔',
-      dnd5eRaceId: 'drow',
-      level: 5,
-    }))
-    expect(drow.classResources?.['dnd5e-racial-spell-faerie-fire']).toEqual({
-      current: 1,
-      max: 1,
+    const pluginId = 'local.test.class-resource-race'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId,
+        name: 'Class resource race fixture',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Tests',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerRace({
+          id: 'shadow-elf',
+          name: 'Shadow Elf',
+          speedFeet: 30,
+          coreRaceMechanicsId: 'elf',
+          innateSpells: [
+            { spellId: 'dancing-lights', minimumLevel: 1, ability: 'cha', castAtLevel: 0, resetOn: 'at-will' },
+            { spellId: 'faerie-fire', minimumLevel: 3, ability: 'cha', castAtLevel: 1, resetOn: 'long-rest' },
+            { spellId: 'darkness', minimumLevel: 5, ability: 'cha', castAtLevel: 2, resetOn: 'long-rest' },
+          ],
+        })
+      },
     })
-    expect(drow.classResources?.['dnd5e-racial-spell-darkness']).toEqual({
-      current: 1,
-      max: 1,
-    })
-    expect(drow.classResources?.['dnd5e-racial-spell-dancing-lights']).toBeUndefined()
+    try {
+      const localRace = syncCharacterClassResources(character({
+        race: 'Shadow Elf',
+        dnd5eRaceId: `${pluginId}:shadow-elf`,
+        level: 5,
+      }))
+      expect(localRace.classResources?.['dnd5e-racial-spell-faerie-fire']).toEqual({
+        current: 1,
+        max: 1,
+      })
+      expect(localRace.classResources?.['dnd5e-racial-spell-darkness']).toEqual({
+        current: 1,
+        max: 1,
+      })
+      expect(localRace.classResources?.['dnd5e-racial-spell-dancing-lights']).toBeUndefined()
+    } finally {
+      dispose()
+    }
   })
 })

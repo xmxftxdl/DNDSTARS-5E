@@ -352,7 +352,11 @@ async function performSharedResourceSave<T>(
         const body = await response.json().catch(() => ({})) as { currentRevision?: number }
         const resolvedCurrent = Number.isInteger(body.currentRevision) ? Number(body.currentRevision) : currentRevision
         const revision = Number.isInteger(resolvedCurrent) && resolvedCurrent >= 0 ? resolvedCurrent : expectedRevision
-        rememberSharedResourceRevisionWatermark(name, revision)
+        // A conflict response proves that our snapshot is stale, but it does
+        // not contain the winning resource value. Do not advance the local CAS
+        // watermark until a subsequent GET has actually rebased the store.
+        // Otherwise an already-queued HP/healing snapshot could reuse the new
+        // revision with old data and overwrite the authoritative result.
         recordSharedConflict(name, expectedRevision, revision)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
@@ -491,8 +495,16 @@ async function performSharedResourcesAtomicSave(
   }
   if (!response.ok) {
     for (const conflict of body.conflicts ?? []) {
-      rememberSharedResourceRevisionWatermark(conflict.name, conflict.currentRevision)
+      // Keep the pre-transaction watermark until a real read obtains the
+      // winning snapshot. This makes queued stale full-state writes fail
+      // closed instead of authorizing them with the winner's revision.
       recordSharedConflict(conflict.name, normalized.find((write) => write.name === conflict.name)?.expectedRevision ?? 0, conflict.currentRevision)
+      const event = {
+        id: `conflict:${conflict.name}:${Date.now()}`,
+        name: conflict.name,
+        updatedAt: Date.now(),
+      }
+      for (const listener of [...sharedStateChangedListeners]) listener(event)
     }
     throw new Error(body.error ?? `shared-state-transaction-${response.status}`)
   }
@@ -649,7 +661,8 @@ async function performClearSharedResource(name: string): Promise<void> {
         const body = await response.json().catch(() => ({})) as { currentRevision?: number }
         const resolvedCurrent = Number.isInteger(body.currentRevision) ? Number(body.currentRevision) : currentRevision
         const revision = Number.isInteger(resolvedCurrent) && resolvedCurrent >= 0 ? resolvedCurrent : expectedRevision
-        rememberSharedResourceRevisionWatermark(name, revision)
+        // A delete conflict needs the same read-before-retry barrier as a save;
+        // knowing only the newer revision must not authorize a stale retry.
         recordSharedConflict(name, expectedRevision, revision)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
@@ -737,6 +750,8 @@ const sharedEventListeners = new Map<string, Set<(data: unknown) => void>>()
 let sharedEventSources: EventSource[] = []
 let sharedEventStreamId: string | null = null
 let lastSharedEventSequence = 0
+let sharedEventReconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+const SHARED_EVENT_RECONNECT_DELAY_MS = 250
 
 function requestFullSharedRecovery(): void {
   const event: SharedStateChangedEvent = {
@@ -783,7 +798,15 @@ function ensureSharedEventSource(): void {
         }
       })
       source.onerror = () => {
-        if (source.readyState === EventSource.CLOSED) source.close()
+        if (source.readyState !== EventSource.CLOSED) return
+        source.close()
+        sharedEventSources = sharedEventSources.filter((candidate) => candidate !== source)
+        if (sharedEventSources.length === 0 && sharedEventListeners.size > 0 && sharedEventReconnectTimer == null) {
+          sharedEventReconnectTimer = globalThis.setTimeout(() => {
+            sharedEventReconnectTimer = null
+            if (sharedEventListeners.size > 0) ensureSharedEventSource()
+          }, SHARED_EVENT_RECONNECT_DELAY_MS)
+        }
       }
       sharedEventSources.push(source)
     } catch {
@@ -793,6 +816,10 @@ function ensureSharedEventSource(): void {
 }
 
 function closeSharedEventSource(): void {
+  if (sharedEventReconnectTimer != null) {
+    globalThis.clearTimeout(sharedEventReconnectTimer)
+    sharedEventReconnectTimer = null
+  }
   for (const source of sharedEventSources) source.close()
   sharedEventSources = []
   sharedEventStreamId = null
@@ -821,7 +848,12 @@ function subscribeSharedStateChanged(listener: (event: SharedStateChangedEvent) 
 export function subscribeSharedResourceInvalidation(
   name: string,
   refresh: () => void | Promise<void>,
-  options: { recoveryMs?: number; immediate?: boolean } = {},
+  options: {
+    recoveryMs?: number
+    immediate?: boolean
+    recoverWhenHidden?: boolean
+    refreshOnVisibilityRestore?: boolean
+  } = {},
 ): () => void {
   let disposed = false
   let running = false
@@ -855,13 +887,25 @@ export function subscribeSharedResourceInvalidation(
   if (options.immediate !== false) void run()
   const recoveryMs = Math.max(1_000, options.recoveryMs ?? SHARED_RESOURCE_RECOVERY_MS)
   const timer = globalThis.setInterval(() => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    if (
+      !options.recoverWhenHidden &&
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'hidden'
+    ) return
     void run()
   }, recoveryMs)
+  const visibilityDocument = options.refreshOnVisibilityRestore && typeof document !== 'undefined'
+    ? document
+    : null
+  const handleVisibilityChange = () => {
+    if (visibilityDocument?.visibilityState === 'visible') void run()
+  }
+  visibilityDocument?.addEventListener('visibilitychange', handleVisibilityChange)
 
   return () => {
     disposed = true
     globalThis.clearInterval(timer)
+    visibilityDocument?.removeEventListener('visibilitychange', handleVisibilityChange)
     unsubscribe()
   }
 }

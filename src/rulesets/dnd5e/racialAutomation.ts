@@ -2,6 +2,7 @@ import type { ClassResourceDefinition } from '../../lib/classDefinitionTypes'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { Dnd5eDamageType } from './damageTypes'
+import { dnd5ePluginRaceDefinition } from './pluginApi'
 
 export const DND5E_RACIAL_RESOURCE_KEYS = {
   dragonbornBreath: 'dnd5e-racial-dragonborn-breath',
@@ -96,29 +97,15 @@ export function dnd5eDragonbornBreathDiceCount(level: number): number {
 export function dnd5eRacialRulesForCharacter(
   character: RacialCharacterIdentity,
 ): Dnd5eRacialRulesSnapshot {
+  const pluginRace = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
   const halfling = raceMatches(
     character,
-    'halfling', 'lightfoot-halfling', 'stout-halfling',
-    '半身人', '轻足半身人', '强心半身人', '强心半身人（stout）',
+    'halfling', 'lightfoot-halfling', '半身人', '轻足半身人',
   )
   const halfOrc = raceMatches(character, 'half-orc', 'half orc', '半兽人')
   const dragonborn = raceMatches(character, 'dragonborn', '龙裔')
-  const drow = raceMatches(character, 'drow', 'dark-elf', '卓尔', '黑暗精灵')
-  const forestGnome = raceMatches(character, 'forest-gnome', '森林侏儒')
   const tiefling = raceMatches(character, 'tiefling', '提夫林')
   const innateSpells: Dnd5eRacialInnateSpellGrant[] = []
-  if (drow) {
-    innateSpells.push(
-      { spellId: 'dancing-lights', minimumLevel: 1, ability: 'cha', castAtLevel: 0, resetOn: 'at-will' },
-      { spellId: 'faerie-fire', minimumLevel: 3, ability: 'cha', castAtLevel: 1, resetOn: 'long-rest' },
-      { spellId: 'darkness', minimumLevel: 5, ability: 'cha', castAtLevel: 2, resetOn: 'long-rest' },
-    )
-  }
-  if (forestGnome) {
-    innateSpells.push(
-      { spellId: 'minor-illusion', minimumLevel: 1, ability: 'int', castAtLevel: 0, resetOn: 'at-will' },
-    )
-  }
   if (tiefling) {
     innateSpells.push(
       { spellId: 'thaumaturgy', minimumLevel: 1, ability: 'cha', castAtLevel: 0, resetOn: 'at-will' },
@@ -126,8 +113,9 @@ export function dnd5eRacialRulesForCharacter(
       { spellId: 'darkness', minimumLevel: 5, ability: 'cha', castAtLevel: 2, resetOn: 'long-rest' },
     )
   }
+  innateSpells.push(...(pluginRace?.innateSpells ?? []))
   return {
-    halflingLucky: halfling,
+    halflingLucky: halfling || pluginRace?.naturalOneReroll === true,
     halfOrcRelentlessEndurance: halfOrc,
     halfOrcSavageAttacks: halfOrc,
     dragonbornAncestry: dragonborn

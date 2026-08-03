@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getImage } from '../../lib/imageStore'
+import { resolveAvailablePortraitSource } from '../../lib/portraitPresentation'
 
 export interface InitiativeEntry {
   /** Stable identity for one turn slot. A creature can own more than one slot. */
@@ -29,6 +30,9 @@ const ACTIVE_PORTRAIT_SCALE = 1.15
 
 function InitiativePortrait({ entry, active }: { entry: InitiativeEntry; active: boolean }) {
   const [loaded, setLoaded] = useState<{ imageId: string; src: string }>()
+  const sourceKey = JSON.stringify([entry.tokenId, entry.portrait ?? null, entry.portraitImageId ?? null])
+  const [failed, setFailed] = useState<{ key: string; sources: string[] }>({ key: sourceKey, sources: [] })
+  const failedSources = failed.key === sourceKey ? failed.sources : []
 
   useEffect(() => {
     if (!entry.portraitImageId) return
@@ -47,9 +51,23 @@ function InitiativePortrait({ entry, active }: { entry: InitiativeEntry; active:
   }, [entry.portraitImageId])
 
   const sharedSrc = loaded && loaded.imageId === entry.portraitImageId ? loaded.src : undefined
-  const src = entry.portrait ?? sharedSrc
+  const src = resolveAvailablePortraitSource(entry.portrait, sharedSrc, failedSources)
   if (src) {
-    return <img src={src} alt={`${entry.label}的完整立绘`} className="h-full w-full object-cover" />
+    return (
+      <img
+        src={src}
+        alt=""
+        className="h-full w-full object-cover"
+        onError={() => {
+          setFailed((current) => {
+            const currentSources = current.key === sourceKey ? current.sources : []
+            return currentSources.includes(src)
+              ? current
+              : { key: sourceKey, sources: [...currentSources, src] }
+          })
+        }}
+      />
+    )
   }
   return (
     <span className="leading-none transition-transform duration-300" style={{ fontSize: active ? 40 : 36 }}>
@@ -91,7 +109,7 @@ export default function InitiativeTracker({
   const canNext = clampedScroll < maxScroll
 
   return (
-    <div className="relative flex items-center gap-[7px] px-1 pb-1 pt-[22px] drop-shadow-[0_8px_14px_rgba(0,0,0,0.72)]">
+    <div className="pointer-events-none relative flex items-center gap-[7px] px-1 pb-1 pt-[22px] drop-shadow-[0_8px_14px_rgba(0,0,0,0.72)]">
       {round != null && (
         <span className="pointer-events-none absolute left-1 top-0 rounded-full border border-amber-300/55 bg-amber-950/75 px-[9px] py-1 text-xs font-black leading-none tabular-nums text-amber-100 shadow-lg backdrop-blur-sm">
           R{round}
@@ -102,7 +120,7 @@ export default function InitiativeTracker({
         disabled={!canPrev}
         onClick={() => onScroll(Math.max(0, clampedScroll - 1))}
         className={[
-          'flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
+          'pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
           canPrev ? 'text-slate-200 hover:border-white/25 hover:bg-void-900/80 hover:text-white' : 'cursor-not-allowed opacity-35 text-slate-500',
         ].join(' ')}
         title="查看靠前的先攻"
@@ -134,7 +152,7 @@ export default function InitiativeTracker({
               data-active-turn={isActive && !defeated ? 'true' : 'false'}
               type="button"
               onClick={() => onSelect(entry.tokenId)}
-              className="group flex shrink-0 flex-col items-center gap-1 outline-none transition-[width] duration-200"
+              className="pointer-events-auto group flex shrink-0 flex-col items-center gap-1 outline-none transition-[width] duration-200"
               style={{ width: portraitWidth }}
               title={`${entry.label} · 先攻 ${entry.roll}${entry.turnKind === 'thief-reflexes' ? ' · 盗贼反射额外回合' : ''}${hp ? ` · HP ${hp.hp}/${hp.max}` : ''}${defeated ? ' · 已阵亡' : ''}${isActive && !defeated ? ' · 当前回合' : ''}`}
               aria-label={`${entry.label}，先攻 ${entry.roll}${hp ? `，生命值 ${hp.hp}/${hp.max}` : ''}${isActive && !defeated ? '，当前回合' : ''}`}
@@ -233,7 +251,7 @@ export default function InitiativeTracker({
         disabled={!canNext}
         onClick={() => onScroll(Math.min(maxScroll, clampedScroll + 1))}
         className={[
-          'flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
+          'pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
           canNext ? 'text-slate-200 hover:border-white/25 hover:bg-void-900/80 hover:text-white' : 'cursor-not-allowed opacity-35 text-slate-500',
         ].join(' ')}
         title="查看靠后的先攻"

@@ -7,9 +7,9 @@ import { useSpellbookStore } from '../../store/spellbook'
 import { getClassResource } from '../../lib/classResources'
 import {
   dnd5eAvailableSpellModifierIntents,
-  dnd5eEldritchKnightFeatureForCharacter,
-  dnd5eEldritchKnightWarMagicAvailable,
-  dnd5eTotemWarriorFeatureForCharacter,
+  dnd5eMartialSpellSynergyForCharacter,
+  dnd5eMartialSpellBonusAttackAvailable,
+  dnd5eRageFeatureForCharacter,
   dnd5eEffectiveSpellcastingSources,
   dnd5eEffectiveSpellSelections,
   dnd5eFreeSpellCastSource,
@@ -94,6 +94,13 @@ interface PlayerCombatHotbarProps {
     grapplerTokenId: string
     grapplerLabel: string
     dc?: number
+  }[]
+  movablePersistentAreas?: readonly {
+    id: string
+    label: string
+    economy: 'action' | 'bonus-action'
+    maximumFeet: number
+    coreSpellId?: string
   }[]
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
@@ -180,6 +187,7 @@ export default function PlayerCombatHotbar({
   turnEconomy,
   activeActionId,
   grappleEscapes = [],
+  movablePersistentAreas = [],
   selectedSpellSlotLevels,
   onSelectedSpellSlotLevelChange,
   onCommand,
@@ -300,70 +308,83 @@ export default function PlayerCombatHotbar({
       available,
       unavailableReason,
     }))
+    featureSources.unshift(...movablePersistentAreas.map((area) => ({
+      id: `persistent-area-move:${area.id}`,
+      label: `移动${area.label}`,
+      description: `以${area.economy === 'bonus-action' ? '附赠动作' : '动作'}在地图上选择新位置，至多移动 ${area.maximumFeet} 尺；落点、路径和撞击效果仍由 Headless 校验。`,
+      icon: dnd5eSpellActionIcon({
+        id: area.coreSpellId ?? area.id,
+        name: area.label,
+      }),
+      economy: area.economy,
+      targeting: 'map-position' as const,
+      resource: { label: '尺', current: area.maximumFeet },
+      command: { kind: 'move-persistent-area' as const, areaId: area.id },
+    })))
     const turnKey = turnEconomy.turnKey ?? ''
     const mainWeaponId = character.equipment?.mainWeapon?.id
     if (
       dnd5eWeaponAttackProfile(character) &&
-      dnd5eEldritchKnightWarMagicAvailable(character, turnKey)
+      dnd5eMartialSpellBonusAttackAvailable(character, turnKey)
     ) {
       featureSources.push({
-        id: 'eldritch-knight-war-magic-attack',
-        label: '战争魔法：附赠动作武器攻击',
+        id: 'martial-spell-synergy-cantrip-then-bonus-attack-attack',
+        label: '特性附赠武器攻击',
         description: '施法已开启本回合的一次附赠动作武器攻击；目标、距离和命中仍由 Host 校验。',
-        icon: dnd5eSystemActionIcon('eldritch-knight-war-magic', 'melee-attack'),
+        icon: dnd5eSystemActionIcon('martial-spell-synergy-cantrip-then-bonus-attack', 'melee-attack'),
         economy: 'bonus-action',
         targeting: 'creature',
         command: {
           kind: 'select-weapon-target',
-          options: { eldritchKnightWarMagicAttack: true },
+          options: { featureBonusWeaponAttack: true },
         },
       })
     }
     if (
       mainWeaponId &&
-      dnd5eEldritchKnightFeatureForCharacter(character, 'weapon-bond') &&
-      character.dnd5eCombatState?.eldritchKnightBondedWeaponIds?.includes(mainWeaponId)
+      dnd5eMartialSpellSynergyForCharacter(character, 'linked-equipment') &&
+      character.dnd5eCombatState?.linkedEquipmentIds?.includes(mainWeaponId)
     ) {
       featureSources.push({
-        id: 'eldritch-knight-summon-bonded-weapon',
+        id: 'linked-equipment-recall',
         label: '召回联结武器',
         description: `以附赠动作召回${character.equipment?.mainWeapon?.name ?? '当前主武器'}。`,
-        icon: dnd5eSystemActionIcon('eldritch-knight-weapon-bond', 'summon'),
+        icon: dnd5eSystemActionIcon('martial-spell-synergy-linked-equipment', 'summon'),
         economy: 'bonus-action',
         targeting: 'self',
         command: {
           kind: 'use-class-feature',
           payload: {
-            feature: 'eldritch-knight-summon-bonded-weapon',
+            feature: 'linked-equipment-recall',
             weaponId: mainWeaponId,
           },
         },
       })
     }
     if (
-      dnd5eEldritchKnightFeatureForCharacter(character, 'arcane-charge') &&
-      character.dnd5eCombatState?.eldritchKnightArcaneChargeTurnKey === turnKey &&
-      character.dnd5eCombatState?.eldritchKnightArcaneChargeUsedTurnKey !== turnKey
+      dnd5eMartialSpellSynergyForCharacter(character, 'extra-action-teleport') &&
+      character.dnd5eCombatState?.extraActionTeleportTurnKey === turnKey &&
+      character.dnd5eCombatState?.extraActionTeleportUsedTurnKey !== turnKey
     ) {
       featureSources.push({
-        id: 'eldritch-knight-arcane-charge',
-        label: '奥术冲锋',
+        id: 'feature-extra-action-teleport',
+        label: '额外动作传送',
         description: '动作如潮已开启；在地图选择 30 尺内未占据落点。',
-        icon: dnd5eSystemActionIcon('eldritch-knight-arcane-charge', 'arcane'),
+        icon: dnd5eSystemActionIcon('feature-extra-action-teleport', 'arcane'),
         economy: 'none',
         targeting: 'map-position',
-        command: { kind: 'select-arcane-charge-destination' },
+        command: { kind: 'select-extra-action-teleport-destination' },
       })
     }
     const wearingHeavyArmor =
       character.equipment?.armor?.dnd5e?.kind === 'armor' &&
       character.equipment.armor.dnd5e.category === 'heavy'
-    if (dnd5eTotemWarriorFeatureForCharacter(character, 'totem-spirit-eagle')) {
+    if (dnd5eRageFeatureForCharacter(character, 'rage-mobile-defense')) {
       featureSources.push({
-        id: 'totem-warrior-eagle-dash',
-        label: '鹰图腾疾走',
+        id: 'rage-feature-eagle-dash',
+        label: '狂暴特性疾走',
         description: '狂暴期间以附赠动作获得一份等同步行速度的本回合移动。',
-        icon: dnd5eSystemActionIcon('totem-warrior-eagle-dash', 'dash'),
+        icon: dnd5eSystemActionIcon('rage-feature-eagle-dash', 'dash'),
         economy: 'bonus-action',
         targeting: 'self',
         available: character.dnd5eCombatState?.raging === true && !wearingHeavyArmor,
@@ -372,30 +393,30 @@ export default function PlayerCombatHotbar({
           : '需要先进入狂暴。',
         command: {
           kind: 'use-class-feature',
-          payload: { feature: 'barbarian-totem-eagle-dash' },
+          payload: { feature: 'feature-rage-bonus-dash' },
         },
       })
     }
     const wolfTargets =
-      character.dnd5eCombatState?.totemWarriorWolfAttunementTargetIds ?? []
+      character.dnd5eCombatState?.bonusProneEligibleTargetIds ?? []
     if (
-      dnd5eTotemWarriorFeatureForCharacter(character, 'totemic-attunement-wolf') &&
+      dnd5eRageFeatureForCharacter(character, 'bonus-prone-on-hit') &&
       wolfTargets.length > 0
     ) {
       featureSources.push({
-        id: 'totem-warrior-wolf-knockdown',
-        label: '狼图腾击倒',
+        id: 'rage-feature-wolf-knockdown',
+        label: '狂暴特性击倒',
         description: wolfTargets.length === 1
           ? '以附赠动作击倒本回合已被近战命中的合格目标。'
           : '本回合有多个合格目标；打开职业特性面板选择其中一个。',
-        icon: dnd5eSystemActionIcon('totem-warrior-wolf-knockdown', 'control'),
+        icon: dnd5eSystemActionIcon('rage-feature-wolf-knockdown', 'control'),
         economy: 'bonus-action',
         targeting: wolfTargets.length === 1 ? 'creature' : 'configure',
         command: wolfTargets.length === 1
           ? {
               kind: 'use-class-feature',
               payload: {
-                feature: 'barbarian-totem-wolf-knockdown',
+                feature: 'feature-rage-bonus-prone',
                 targetTokenId: wolfTargets[0],
               },
             }
@@ -444,6 +465,7 @@ export default function PlayerCombatHotbar({
     grappleEscapes,
     importedSpells,
     inventory,
+    movablePersistentAreas,
     movementRemaining,
     pending,
     spellModifierIntents,

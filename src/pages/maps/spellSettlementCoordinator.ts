@@ -1,5 +1,10 @@
 import type { BattleMap } from '../../store/maps'
 import type { Dnd5eCombatEvent } from '../../rulesets/dnd5e/headlessCombatEngine'
+import {
+  COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
+  isCombatPresentationAreaSpellId,
+} from '../../../shared/combat-presentation-contract.mjs'
+import type { CombatPresentationAreaSpellId } from '../../../shared/combat-presentation-contract.mjs'
 
 export interface FireballPresentationSettlement {
   id: string
@@ -15,11 +20,12 @@ export interface AreaSpellPresentationSettlement {
   mapId: string
   transactionId: string
   sourceTokenId: string
-  spellId: 'burning-hands' | 'thunderwave' | 'shatter' | 'lightning-bolt'
+  spellId: CombatPresentationAreaSpellId
   targetCell: { col: number; row: number }
-  shape: 'cone' | 'line' | 'circle'
+  shape: 'cone' | 'line' | 'circle' | 'rect'
   lengthFeet?: number
   widthFeet?: number
+  heightFeet?: number
   radiusFeet?: number
 }
 
@@ -80,6 +86,13 @@ export type PreRollSpellPresentation = {
     | 'hideous-laughter'
     | 'hold-person'
     | 'blindness-deafness'
+    | 'blight'
+    | 'chain-lightning'
+    | 'disintegrate'
+    | 'finger-of-death'
+    | 'power-word-stun'
+    | 'power-word-kill'
+    | 'false-life'
   id: string
   mapId: string
   transactionId: string
@@ -146,6 +159,13 @@ export function spellPresentationsBeforeRoll(input: {
     'hideous-laughter',
     'hold-person',
     'blindness-deafness',
+    'blight',
+    'chain-lightning',
+    'disintegrate',
+    'finger-of-death',
+    'power-word-stun',
+    'power-word-kill',
+    'false-life',
   ])
   if (!supported.has(input.spellId as PreRollSpellPresentation['spellId'])) return []
   const spellId = input.spellId as PreRollSpellPresentation['spellId']
@@ -154,7 +174,9 @@ export function spellPresentationsBeforeRoll(input: {
     id: `${input.transactionId}:${spellId}:${index}`,
     mapId: input.mapId,
     transactionId: input.transactionId,
-    sourceTokenId: input.actorTokenId,
+    sourceTokenId: spellId === 'chain-lightning' && index > 0
+      ? input.targetTokenIds[0]
+      : input.actorTokenId,
     targetTokenId,
   }))
 }
@@ -201,22 +223,14 @@ export function areaSpellPresentationForSettlement(input: {
     input.areaAnchorCell.col < 0 ||
     input.areaAnchorCell.row < 0
   ) return null
-  const area = {
-    'burning-hands': { shape: 'cone', lengthFeet: 15, widthFeet: 15 },
-    thunderwave: { shape: 'line', lengthFeet: 15, widthFeet: 15 },
-    shatter: { shape: 'circle', radiusFeet: 10 },
-    'lightning-bolt': { shape: 'line', lengthFeet: 100, widthFeet: 5 },
-  }[input.spellId] as Pick<
-    AreaSpellPresentationSettlement,
-    'shape' | 'lengthFeet' | 'widthFeet' | 'radiusFeet'
-  > | undefined
-  if (!area) return null
+  if (!isCombatPresentationAreaSpellId(input.spellId)) return null
+  const area = COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS[input.spellId]
   return {
     id: `${input.transactionId}:${input.spellId}:area`,
     mapId: input.mapId,
     transactionId: input.transactionId,
     sourceTokenId: input.actorTokenId,
-    spellId: input.spellId as AreaSpellPresentationSettlement['spellId'],
+    spellId: input.spellId,
     targetCell: { ...input.areaAnchorCell },
     ...area,
   }

@@ -276,4 +276,61 @@ describe('T10/AC3 — maps store version + migrate', () => {
       }),
     ])
   })
+
+  it('normalizes bounded vertical snapshots without backfilling legacy areas', () => {
+    const area = {
+      pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:test-area', label: 'Test area', color: '#8b5cf6',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 1, expiresAfterRound: 10,
+    }
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: 'Map', width: 500, height: 500,
+        dnd5ePluginAreas: [
+          { ...area, id: 'legacy' },
+          { ...area, id: 'ground', vertical: { mode: 'ground' } },
+          {
+            ...area,
+            id: 'volume',
+            vertical: { mode: 'volume', baseElevationFeet: 20, heightFeet: 30, anchorOffsetFeet: -5 },
+          },
+          { ...area, id: 'invalid', vertical: { mode: 'volume', baseElevationFeet: 20, heightFeet: 0 } },
+        ],
+      }],
+    })
+
+    expect(result.maps[0].dnd5ePluginAreas?.map(({ id }) => id)).toEqual(['legacy', 'ground', 'volume'])
+    expect(result.maps[0].dnd5ePluginAreas?.[0].vertical).toBeUndefined()
+    expect(result.maps[0].dnd5ePluginAreas?.[1].vertical).toEqual({ mode: 'ground' })
+    expect(result.maps[0].dnd5ePluginAreas?.[2].vertical).toEqual({
+      mode: 'volume', baseElevationFeet: 20, heightFeet: 30, anchorOffsetFeet: -5,
+    })
+  })
+
+  it('backfills the canonical Flaming Sphere visual for legacy core spell areas', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: 'Map', width: 500, height: 500,
+        dnd5ePluginAreas: [{
+          id: 'core-spell-area:cast-1',
+          pluginId: 'srd-5.1',
+          featureId: 'srd-5.1:spell:flaming-sphere',
+          sourceKind: 'core-spell',
+          coreSpellId: 'flaming-sphere',
+          label: 'Flaming Sphere',
+          color: '#f97316',
+          sourceCharacterId: 'wizard',
+          sourceTokenId: 'wizard-token',
+          cells: [{ col: 2, row: 3 }],
+          createdRound: 1,
+          expiresAfterRound: 11,
+        }],
+      }],
+    })
+
+    expect(result.maps[0].dnd5ePluginAreas?.[0].visual).toEqual({
+      preset: 'flaming-sphere',
+      intensity: 'strong',
+    })
+  })
 })

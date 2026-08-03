@@ -734,7 +734,7 @@ export function dnd5eClassSpellSlots(definition: Dnd5eClassDefinition, level: nu
   if (definition.spellcasting.kind === 'full-known' || definition.spellcasting.kind === 'full-prepared') return FULL_CASTER_SLOTS[current - 1]
   if (definition.spellcasting.kind === 'half-known' || definition.spellcasting.kind === 'half-prepared') return HALF_CASTER_SLOTS[current - 1]
   if (definition.spellcasting.kind === 'one-third-known') {
-    // The single-class Eldritch Knight/Arcane Trickster table advances at
+    // A single-class one-third-caster table advances at
     // levels 3, 4, 7, 10, ...; multiclass slot contribution still rounds down.
     const casterLevel = current < 3 ? 0 : Math.ceil(current / 3)
     return casterLevel > 0 ? FULL_CASTER_SLOTS[casterLevel - 1] : []

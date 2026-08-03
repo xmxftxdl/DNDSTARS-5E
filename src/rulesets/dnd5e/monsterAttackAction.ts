@@ -1,6 +1,5 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
-import { mapGeometryRuntimeForMap, mapGeometryTokenElevation } from '../../lib/mapGeometry'
+import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
@@ -18,19 +17,22 @@ import {
   dnd5eEffectiveSizeRank,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
-  dnd5eTotemBearGuardianDisadvantage,
-  dnd5eTotemWolfPackAdvantage,
+  dnd5eRageAllyProtectionDisadvantage,
+  dnd5eRageAllyMeleeAdvantage,
   dnd5eMonsterTargetEligibilityAllows,
   dnd5eTranquilityWardCheck,
   reconcileDnd5eSourceLinkedRelations,
   previewDnd5ePostD20AdjustedAttack,
+  previewDnd5eUnsupportedAirborneFalls,
   resolveDnd5eHeadlessAction,
+  type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterActionRoll,
   type Dnd5eMonsterMechanicRoll,
   type Dnd5eMonsterMultiattackStepResolutionV1,
   type Dnd5ePostD20AdjustmentUse,
+  type Dnd5eUnsupportedAirborneFallPreview,
 } from './headlessCombatEngine'
 import {
   createDnd5eMapCombatSnapshot,
@@ -61,7 +63,12 @@ import {
   prepareDnd5eMonsterCompositeRuntimePlan,
   type Dnd5eMonsterCompositeRuntimePlan,
 } from './monsterCompositeRuntime'
-import { dnd5eEligibleMonsterMechanics, dnd5eMonsterMechanicDiceRequirements } from './monsterAutomation'
+import {
+  dnd5eEligibleMonsterMechanics,
+  dnd5eMonsterMechanicDiceRequirements,
+  selectDnd5eMonsterPreferredTarget,
+} from './monsterAutomation'
+import { dnd5eMapTokenDistanceFeet } from './verticalCombatGeometry'
 import {
   dnd5eMonsterAssassinateAutomaticCritical,
   dnd5eMonsterAttackTraitAdvantage,
@@ -214,10 +221,23 @@ export function prepareDnd5eMonsterAttack(input: {
     ? actorToken.poolId
     : actorCharacter?.dnd5eCombatState?.wildShapeFormId
   if (!actorToken || !statBlockId) return { ok: false, reason: 'invalid-actor' }
-  const targetToken = input.map.tokens.find((token) => token.id === input.targetTokenId && token.id !== actorToken.id && token.type !== 'obstacle')
-  if (!targetToken || !areOpposedCombatTokens(actorToken, targetToken)) return { ok: false, reason: 'invalid-target' }
   const monster = getDnd5eSrdMonster(statBlockId)
   if (!monster) return { ok: false, reason: 'invalid-stat-block' }
+  const berserkTarget = actorToken.dnd5eCombatState?.monsterBerserk === true
+    ? selectDnd5eMonsterPreferredTarget({
+        map: input.map,
+        enemy: actorToken,
+        monster,
+        characters: input.characters,
+      })
+    : undefined
+  const targetToken = input.map.tokens.find((token) => token.id === input.targetTokenId && token.id !== actorToken.id && token.type !== 'obstacle')
+  if (
+    !targetToken ||
+    (berserkTarget
+      ? targetToken.id !== berserkTarget.id
+      : !areOpposedCombatTokens(actorToken, targetToken))
+  ) return { ok: false, reason: 'invalid-target' }
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
     round: input.round,
@@ -259,14 +279,14 @@ export function prepareDnd5eMonsterAttack(input: {
     ) return { ok: false, reason: 'invalid-action' }
   }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
-  const distanceFeet = Math.max(
-    tokenFootprintDistanceCells(actorToken, targetToken, input.map) *
-      Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL),
-    Math.abs(
-      mapGeometryTokenElevation(geometry, actorToken) -
-        mapGeometryTokenElevation(geometry, targetToken),
-    ),
-  )
+  const distanceFeet = dnd5eMapTokenDistanceFeet({
+    map: input.map,
+    geometry,
+    left: actorToken,
+    right: targetToken,
+    leftSizeRank: dnd5eEffectiveSizeRank(actorCombatant),
+    rightSizeRank: dnd5eEffectiveSizeRank(target),
+  })
   const multiattack = !input.multiattackContinuation &&
     indexedAction.kind === 'weapon-attack'
     ? monster.actions.find((action) => {
@@ -424,7 +444,9 @@ export function prepareDnd5eMonsterAttack(input: {
         token.id === targetId &&
         token.id !== actorToken.id &&
         token.type !== 'obstacle' &&
-        areOpposedCombatTokens(actorToken, token))
+        (berserkTarget
+          ? token.id === berserkTarget.id
+          : areOpposedCombatTokens(actorToken, token)))
       return candidate ? [candidate] : []
     },
   )
@@ -493,20 +515,12 @@ export function prepareDnd5eMonsterAttack(input: {
     const occurrenceTarget = requestedTargetTokens.find((candidate) =>
       candidate.id === occurrenceTargetId)
     const occurrenceDistanceFeet = occurrenceTarget
-      ? Math.max(
-          tokenFootprintDistanceCells(
-            actorToken,
-            occurrenceTarget,
-            input.map,
-          ) * Math.max(
-            1,
-            input.map.feetPerCell ?? DND_FEET_PER_CELL,
-          ),
-          Math.abs(
-            mapGeometryTokenElevation(geometry, actorToken) -
-              mapGeometryTokenElevation(geometry, occurrenceTarget),
-          ),
-        )
+      ? dnd5eMapTokenDistanceFeet({
+          map: input.map,
+          geometry,
+          left: actorToken,
+          right: occurrenceTarget,
+        })
       : 0
     return definition?.attack && dnd5eMonsterActionAutomation(definition) === 'headless'
       && occurrenceTarget
@@ -589,11 +603,14 @@ export function prepareDnd5eMonsterAttack(input: {
         ally.currentHp > 0 &&
         !ally.deathSaves.dead &&
         !dnd5eIsIncapacitated(ally) &&
-        tokenFootprintDistanceCells(
-          candidate,
-          entry.targetToken,
-          input.map,
-        ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+        dnd5eMapTokenDistanceFeet({
+          map: input.map,
+          geometry,
+          left: candidate,
+          right: entry.targetToken,
+          leftSizeRank: dnd5eEffectiveSizeRank(ally),
+          rightSizeRank: dnd5eEffectiveSizeRank(occurrenceTarget),
+        }) <= 5
     })
     return {
       combatId: snapshot.state.combatId,
@@ -636,11 +653,14 @@ export function prepareDnd5eMonsterAttack(input: {
         ally.currentHp > 0 &&
         !ally.deathSaves.dead &&
         !dnd5eIsIncapacitated(ally) &&
-        tokenFootprintDistanceCells(
-          candidate,
-          targetToken,
-          input.map,
-        ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+        dnd5eMapTokenDistanceFeet({
+          map: input.map,
+          geometry,
+          left: candidate,
+          right: targetToken,
+          leftSizeRank: dnd5eEffectiveSizeRank(ally),
+          rightSizeRank: dnd5eEffectiveSizeRank(fallbackTargetState),
+        }) <= 5
     },
   )
   const monsterAttackTraitContext =
@@ -719,7 +739,16 @@ export function prepareDnd5eMonsterAttack(input: {
     const candidateCombatant = snapshot.state.combatants[candidate.id]
     return candidate.id !== actorToken.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(actorToken, candidate) &&
       dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
-      tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+      dnd5eMapTokenDistanceFeet({
+        map: input.map,
+        geometry,
+        left: actorToken,
+        right: candidate,
+        leftSizeRank: dnd5eEffectiveSizeRank(actorCombatant),
+        rightSizeRank: candidateCombatant
+          ? dnd5eEffectiveSizeRank(candidateCombatant)
+          : undefined,
+      }) <= 5
   })
   const baseAttackModes: PreparedDnd5eMonsterAttack['attackModes'][number][] = []
   const preparedAttacks: PreparedDnd5eMonsterAttack['attacks'] =
@@ -744,13 +773,14 @@ export function prepareDnd5eMonsterAttack(input: {
             dnd5eCombatTokenSide(candidate) === actorSide,
           currentHp: ally.currentHp,
           incapacitated: dnd5eIsIncapacitated(ally),
-          distanceFeetToTarget:
-            tokenFootprintDistanceCells(
-              candidate,
-              attackTargetToken,
-              input.map,
-            ) *
-            Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL),
+          distanceFeetToTarget: dnd5eMapTokenDistanceFeet({
+            map: input.map,
+            geometry,
+            left: candidate,
+            right: attackTargetToken,
+            leftSizeRank: dnd5eEffectiveSizeRank(ally),
+            rightSizeRank: dnd5eEffectiveSizeRank(attackTarget),
+          }),
         }]
       }),
     })
@@ -777,7 +807,7 @@ export function prepareDnd5eMonsterAttack(input: {
         ) ||
         dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
         (targetProne && attackDistance <= 5) ||
-        dnd5eTotemWolfPackAdvantage(
+        dnd5eRageAllyMeleeAdvantage(
           snapshot.state,
           actorCombatant,
           attackTarget,
@@ -786,6 +816,7 @@ export function prepareDnd5eMonsterAttack(input: {
         packTactics
       )
     const targetImposesDisadvantage =
+      actorCombatant.classState.monsterDamageAversionActive === true ||
       dnd5eTargetIsDodging(attackTarget) ||
       dnd5eBlurImposesAttackDisadvantage(
         snapshot.state,
@@ -800,7 +831,7 @@ export function prepareDnd5eMonsterAttack(input: {
       ) ||
       actorProne ||
       (targetProne && attackDistance > 5) ||
-      dnd5eTotemBearGuardianDisadvantage(
+      dnd5eRageAllyProtectionDisadvantage(
         snapshot.state,
         actorCombatant,
         attackTarget,
@@ -1034,7 +1065,12 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
     parentActionId: string
     occurrenceIndex: number
   }
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+} {
   const { prepared } = input
   const weaponRolls = input.rolls.map((roll, attackIndex) => ({
     ...roll,
@@ -1043,9 +1079,8 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
       prepared.attacks[attackIndex]?.targetToken.id ??
       prepared.targetToken.id,
   }))
-  const result = resolveDnd5eHeadlessAction(
-    prepared.state,
-    prepared.compositeRuntime
+  const action: Dnd5eAction = {
+    ...(prepared.compositeRuntime
       ? {
           type: 'monster-multiattack-composite',
           schemaVersion: 1,
@@ -1062,11 +1097,18 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
           multiattackContinuation: input.multiattackContinuation,
           mechanicRolls: input.mechanicRolls,
           rolls: weaponRolls,
-        },
-  )
-  if (!result.ok) return { result }
+        }),
+    airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+  }
+  const fallPreview = input.airborneFallDamageRollsByCombatantId == null
+    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
+    : undefined
+  const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
+  const result = resolveDnd5eHeadlessAction(prepared.state, action)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

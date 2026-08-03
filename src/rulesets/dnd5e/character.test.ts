@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e, normalizeLegacyAbilityScore } from './character'
+import {
+  dnd5eCombatantPairKey,
+  previewDnd5eUnsupportedAirborneFalls,
+  resolveDnd5eHeadlessAction,
+  startDnd5eHeadlessCombat,
+} from './headlessCombatEngine'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 
@@ -28,6 +34,57 @@ describe('D&D 5e character boundary', () => {
     const character = migrateCharacterToDnd5e({ ...legacyCharacter(), concentrating: true })
     const combatant = createCombatantFromDnd5eCharacter({ character, controller: 'player', initiativeD20: 12, position: { x: 5, y: 5 } })
     expect(combatant).toMatchObject({ concentrating: true, initiative: 15, proficiencyBonus: 3, turn: { actionAvailable: true, reactionAvailable: true, movementRemaining: 30 } })
+  })
+
+  it('preserves persistent hover through the Character boundary and keeps a prone flyer aloft', () => {
+    const flyer = createCombatantFromDnd5eCharacter({
+      character: migrateCharacterToDnd5e({
+        ...legacyCharacter(),
+        id: 'hover-flyer',
+        dnd5eMovementSpeeds: { fly: 40, hover: true },
+      }),
+      controller: 'player',
+      initiativeD20: 10,
+      position: { x: 5, y: 0 },
+    })
+    flyer.elevationFeet = 30
+    flyer.groundElevationFeet = 0
+    flyer.airborne = true
+    const shover = createCombatantFromDnd5eCharacter({
+      character: migrateCharacterToDnd5e({ ...legacyCharacter(), id: 'shover' }),
+      controller: 'dm',
+      initiativeD20: 20,
+      position: { x: 0, y: 0 },
+    })
+    expect(flyer.movementSpeeds).toMatchObject({ walk: 30, fly: 40, hover: true })
+
+    const state = startDnd5eHeadlessCombat('hover-character', [shover, flyer])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(shover.id, flyer.id)]: 5,
+    }
+    const shoveProne = {
+      type: 'shove' as const,
+      actorId: shover.id,
+      targetId: flyer.id,
+      actorD20: 20,
+      targetD20: 1,
+      targetDefense: 'acrobatics' as const,
+      outcome: 'prone' as const,
+    }
+    expect(previewDnd5eUnsupportedAirborneFalls(state, shoveProne)).toEqual({
+      ok: true,
+      falls: [],
+    })
+    const resolved = resolveDnd5eHeadlessAction(state, shoveProne)
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[flyer.id]).toMatchObject({
+      movementSpeeds: { fly: 40, hover: true },
+      elevationFeet: 30,
+      groundElevationFeet: 0,
+      airborne: true,
+    })
+    expect(resolved.state.combatants[flyer.id].conditions).toContain('prone')
   })
 
   it('projects elf Fey Ancestry as magical Sleep immunity', () => {

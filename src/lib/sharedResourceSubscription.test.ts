@@ -35,6 +35,28 @@ class FakeEventSource {
   }
 }
 
+class FakeVisibilityDocument {
+  visibilityState: DocumentVisibilityState = 'hidden'
+  private readonly listeners = new Set<EventListenerOrEventListenerObject>()
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (type === 'visibilitychange') this.listeners.add(listener)
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (type === 'visibilitychange') this.listeners.delete(listener)
+  }
+
+  setVisibility(visibilityState: DocumentVisibilityState): void {
+    this.visibilityState = visibilityState
+    const event = { type: 'visibilitychange' } as Event
+    for (const listener of this.listeners) {
+      if (typeof listener === 'function') listener(event)
+      else listener.handleEvent(event)
+    }
+  }
+}
+
 async function flushAsync(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
@@ -102,6 +124,73 @@ describe('shared resource invalidation', () => {
     expect(FakeEventSource.instances[0].closed).toBe(false)
     stopCharacters()
     expect(FakeEventSource.instances[0].closed).toBe(true)
+  })
+
+  it('can recover while hidden and refresh immediately when visibility is restored', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const visibilityDocument = new FakeVisibilityDocument()
+    vi.stubGlobal('document', visibilityDocument)
+    const refresh = vi.fn(async () => undefined)
+
+    const stop = subscribeSharedResourceInvalidation('player-action-requests', refresh, {
+      recoveryMs: 2_000,
+      recoverWhenHidden: true,
+      refreshOnVisibilityRestore: true,
+    })
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(refresh).toHaveBeenCalledTimes(2)
+
+    visibilityDocument.setVisibility('visible')
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(3)
+
+    stop()
+    visibilityDocument.setVisibility('hidden')
+    visibilityDocument.setVisibility('visible')
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps hidden recovery disabled by default', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', FakeEventSource)
+    vi.stubGlobal('document', new FakeVisibilityDocument())
+    const refresh = vi.fn(async () => undefined)
+
+    const stop = subscribeSharedResourceInvalidation('maps', refresh, { recoveryMs: 2_000 })
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
+  it('removes a closed event source and reconnects while listeners remain', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const refresh = vi.fn(async () => undefined)
+
+    const stop = subscribeSharedResourceInvalidation('maps', refresh)
+    await flushAsync()
+    const firstSource = FakeEventSource.instances[0]
+    expect(firstSource).toBeDefined()
+
+    firstSource.readyState = FakeEventSource.CLOSED
+    firstSource.onerror?.()
+    expect(firstSource.closed).toBe(true)
+    expect(FakeEventSource.instances).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(250)
+    expect(FakeEventSource.instances).toHaveLength(2)
+    expect(FakeEventSource.instances[1].closed).toBe(false)
+
+    stop()
+    expect(FakeEventSource.instances[1].closed).toBe(true)
   })
 
   it('ignores replay duplicates and reloads authority state when an event sequence has a gap', async () => {

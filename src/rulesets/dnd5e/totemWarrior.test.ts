@@ -6,7 +6,6 @@ import type { Character } from '../../types/character'
 import {
   declarativeSubclassCompatibilityReportV1,
   type DeclarativeSubclassDefinitionV1,
-  type Dnd5e2014TotemWarriorFeatureId,
 } from './declarativeSubclassAbility'
 import {
   createDnd5eCombatant,
@@ -45,11 +44,24 @@ const LOCAL_DEFINITION_PATH = new URL(
 let sequence = 0
 let unregister: (() => void) | undefined
 
+type LocalRageFeatureId =
+  | 'spirit-seeker'
+  | 'totem-spirit-bear'
+  | 'totem-spirit-eagle'
+  | 'totem-spirit-wolf'
+  | 'aspect-of-the-beast-bear'
+  | 'aspect-of-the-beast-eagle'
+  | 'aspect-of-the-beast-wolf'
+  | 'spirit-walker'
+  | 'totemic-attunement-bear'
+  | 'totemic-attunement-eagle'
+  | 'totemic-attunement-wolf'
+
 function definition(): DeclarativeSubclassDefinitionV1 {
   return JSON.parse(readFileSync(LOCAL_DEFINITION_PATH, 'utf8'))[0] as DeclarativeSubclassDefinitionV1
 }
 
-function featureId(feature: Dnd5e2014TotemWarriorFeatureId): string {
+function featureId(feature: LocalRageFeatureId): string {
   return `${SUBCLASS_ID}.${feature}`
 }
 
@@ -80,7 +92,7 @@ function combatant(
 function totem(
   id: string,
   level: number,
-  features: readonly Dnd5e2014TotemWarriorFeatureId[],
+  features: readonly LocalRageFeatureId[],
   patch: Partial<Dnd5eCombatant> = {},
 ): Dnd5eCombatant {
   return combatant(id, 'player', 20, {
@@ -284,7 +296,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       totem('eagle', 3, ['totem-spirit-eagle']),
       combatant('enemy', 'dm', 10, { position: { x: 5, y: 0 } }),
     ]), {
-      type: 'barbarian-totem-eagle-dash',
+      type: 'feature-rage-bonus-dash',
       actorId: 'eagle',
     }))
     expect(dashed.state.combatants.eagle.turn).toMatchObject({
@@ -316,7 +328,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       totem('armored-eagle', 3, ['totem-spirit-eagle'], { wearingHeavyArmor: true }),
       combatant('enemy', 'dm', 10, { position: { x: 5, y: 0 } }),
     ]), {
-      type: 'barbarian-totem-eagle-dash',
+      type: 'feature-rage-bonus-dash',
       actorId: 'armored-eagle',
     })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
 
@@ -324,7 +336,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       totem('calm-eagle', 3, ['totem-spirit-eagle'], { classState: {} }),
       combatant('enemy', 'dm', 10, { position: { x: 5, y: 0 } }),
     ]), {
-      type: 'barbarian-totem-eagle-dash',
+      type: 'feature-rage-bonus-dash',
       actorId: 'calm-eagle',
     })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
 
@@ -485,16 +497,16 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       targetId: 'enemy',
       d20: 15,
     }))
-    expect(hit.state.combatants.wolf.classState.totemWarriorWolfAttunementTargetIds)
+    expect(hit.state.combatants.wolf.classState.bonusProneEligibleTargetIds)
       .toEqual(['enemy'])
 
     const knockedDown = success(resolveDnd5eHeadlessAction(hit.state, {
-      type: 'barbarian-totem-wolf-knockdown',
+      type: 'feature-rage-bonus-prone',
       actorId: 'wolf',
       targetId: 'enemy',
     }))
     expect(knockedDown.state.combatants.wolf.turn.bonusActionAvailable).toBe(false)
-    expect(knockedDown.state.combatants.wolf.classState.totemWarriorWolfAttunementTargetIds)
+    expect(knockedDown.state.combatants.wolf.classState.bonusProneEligibleTargetIds)
       .toBeUndefined()
     expect(knockedDown.state.combatants.enemy.conditions).toContain('prone')
 
@@ -507,7 +519,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       d20: 2,
     }))
     expect(
-      missed.state.combatants.wolf.classState.totemWarriorWolfAttunementTargetIds,
+      missed.state.combatants.wolf.classState.bonusProneEligibleTargetIds,
     ).toBeUndefined()
 
     const rangedHit = success(weaponAttack(stateWith([
@@ -520,7 +532,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       mode: 'ranged',
     }))
     expect(
-      rangedHit.state.combatants.wolf.classState.totemWarriorWolfAttunementTargetIds,
+      rangedHit.state.combatants.wolf.classState.bonusProneEligibleTargetIds,
     ).toBeUndefined()
 
     const turnEnded = success(resolveDnd5eHeadlessAction(hit.state, {
@@ -528,10 +540,10 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       actorId: 'wolf',
     }))
     expect(
-      turnEnded.state.combatants.wolf.classState.totemWarriorWolfAttunementTargetIds,
+      turnEnded.state.combatants.wolf.classState.bonusProneEligibleTargetIds,
     ).toBeUndefined()
     expect(resolveDnd5eHeadlessAction(turnEnded.state, {
-      type: 'barbarian-totem-wolf-knockdown',
+      type: 'feature-rage-bonus-prone',
       actorId: 'wolf',
       targetId: 'enemy',
     }).ok).toBe(false)
@@ -620,7 +632,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
     expect(hit.result.ok).toBe(true)
     if (!hit.application) return
     expect(
-      hit.application.characters[0].dnd5eCombatState?.totemWarriorWolfAttunementTargetIds,
+      hit.application.characters[0].dnd5eCombatState?.bonusProneEligibleTargetIds,
     ).toEqual([enemyToken.id])
 
     const knockdownAction: SharedPlayerActionState = {
@@ -628,7 +640,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
       id: 'knockdown',
       type: 'dnd5e-class-feature',
       dnd5eClassFeature: {
-        feature: 'barbarian-totem-wolf-knockdown',
+        feature: 'feature-rage-bonus-prone',
         targetTokenId: enemyToken.id,
       },
       seq: 2,
@@ -670,8 +682,8 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
     const landed = success(resolveDnd5eHeadlessAction(state, {
       type: 'end-turn',
       actorId: 'eagle',
-      totemEagleLandingElevationFeet: 0,
-      totemEagleFallingDamageRolls: [6, 6, 6],
+      rageFlightLandingElevationFeet: 0,
+      rageFlightFallingDamageRolls: [6, 6, 6],
     }))
     expect(landed.state.combatants.eagle).toMatchObject({
       currentHp: 31,
@@ -709,8 +721,8 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
     const landed = success(resolveDnd5eHeadlessAction(rageEnded.state, {
       type: 'end-turn',
       actorId: 'eagle',
-      totemEagleLandingElevationFeet: 0,
-      totemEagleFallingDamageRolls: [6, 6, 6],
+      rageFlightLandingElevationFeet: 0,
+      rageFlightFallingDamageRolls: [6, 6, 6],
     }))
     expect(landed.state.combatants.eagle).toMatchObject({
       elevationFeet: 0,
@@ -796,7 +808,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
     })
     expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
     if (!prepared.ok) return
-    expect(prepared.prepared.totemEagleFall).toEqual({
+    expect(prepared.prepared.rageFlightFall).toEqual({
       landingElevationFeet: 0,
       distanceFeet: 30,
       fallingDamageDice: 3,
@@ -814,7 +826,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
     })
     expect(afterRage.ok, afterRage.ok ? undefined : afterRage.reason).toBe(true)
     if (!afterRage.ok) return
-    expect(afterRage.prepared.totemEagleFall).toEqual({
+    expect(afterRage.prepared.rageFlightFall).toEqual({
       landingElevationFeet: 0,
       distanceFeet: 30,
       fallingDamageDice: 3,

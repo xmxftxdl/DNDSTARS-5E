@@ -211,7 +211,7 @@ export default function Sidebar({
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-all hover:bg-red-500/10 hover:text-red-200"
           >
             <LogOut className="h-5 w-5" />
-            {roomSession?.role === 'dm' ? '关闭并离开房间' : '离开房间'}
+            离开房间
           </button>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eAbilityCheckRollMode, dnd5eAttackerIsUnseenForAttack, dnd5eCombatantCanSee, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveFlySpeed, dnd5eEffectiveSizeRank, dnd5eEffectiveSpeed, dnd5eGrappleDragExtraMovementFeet, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eAbilityCheckRollMode, dnd5eAttackerIsUnseenForAttack, dnd5eCombatantCanSee, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveFlySpeed, dnd5eEffectiveSizeRank, dnd5eEffectiveSpeed, dnd5eGrappleDragExtraMovementFeet, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, previewDnd5eUnsupportedAirborneFalls, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
@@ -5646,6 +5646,26 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(healed.state.combatants.ally.currentHp).toBe(15)
     expect(healed.state.combatants.cleric.currentHp).toBe(13)
 
+    const upcastCleric = fighter('upcast-cleric', 20, {
+      classId: 'cleric', subclassId: 'life', level: 6, currentHp: 10,
+      abilities: { ...abilities, wis: 16 },
+      classSelections: { 'spell-prepared': ['cure-wounds'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const upcastState = startDnd5eHeadlessCombat('life-upcast', [
+      upcastCleric,
+      fighter('upcast-ally', 10, { currentHp: 1, maxHp: 40 }),
+    ])
+    const upcast = resolveDnd5eHeadlessAction(upcastState, {
+      type: 'cast-spell', actorId: 'upcast-cleric', targetId: 'upcast-ally',
+      spellId: 'cure-wounds', slotLevel: 3, effectRolls: [1, 2, 3],
+    })
+    expect(upcast.ok).toBe(true)
+    if (!upcast.ok) return
+    // 1+2+3 + Wis 3 + Disciple of Life (2+slot 3) = 14; Blessed Healer returns 5.
+    expect(upcast.state.combatants['upcast-ally'].currentHp).toBe(15)
+    expect(upcast.state.combatants['upcast-cleric'].currentHp).toBe(15)
+
     const poolCleric = fighter('pool-cleric', 20, {
       classId: 'cleric', subclassId: 'life', level: 17, currentHp: 1,
       abilities: { ...abilities, wis: 16 },
@@ -8670,5 +8690,223 @@ describe('D&D 5e 2014 headless combat engine', () => {
       actorId: 'spy',
       d20: 19,
     }))
+  })
+
+  describe('unsupported airborne falls at the action transaction boundary', () => {
+    function airborneContestState(input?: {
+      hover?: boolean
+      magicalFlight?: boolean
+    }) {
+      const shover = fighter('shover', 20, {
+        position: { x: 0, y: 0 },
+      })
+      const flyer = fighter('flyer', 10, {
+        controller: 'dm',
+        position: { x: 5, y: 0 },
+        elevationFeet: 30,
+        groundElevationFeet: 0,
+        airborne: true,
+        movementSpeeds: input?.magicalFlight
+          ? { walk: 30 }
+          : { walk: 30, fly: 60, hover: input?.hover === true },
+      })
+      if (input?.magicalFlight) {
+        flyer.classState.activeEffects = [createDnd5eMechanicalEffect({
+          id: 'fly-spell-effect',
+          definitionId: 'srd-5.1:spell:fly',
+          label: 'Fly',
+          targetId: flyer.id,
+          source: { kind: 'spell', actorId: flyer.id, rulesId: 'fly' },
+          duration: { type: 'concentration', sourceActorId: flyer.id, concentrationId: 'fly' },
+          modifiers: { flySpeedFeet: 60 },
+        })]
+      }
+      const state = startDnd5eHeadlessCombat('airborne-shove', [shover, flyer])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(shover.id, flyer.id)]: 5,
+      }
+      return state
+    }
+
+    const shoveProne = {
+      type: 'shove' as const,
+      actorId: 'shover',
+      targetId: 'flyer',
+      actorD20: 20,
+      targetD20: 1,
+      targetDefense: 'acrobatics' as const,
+      outcome: 'prone' as const,
+    }
+
+    it('previews and resolves a native non-hover flyer falling after becoming prone', () => {
+      const state = airborneContestState()
+      expect(previewDnd5eUnsupportedAirborneFalls(state, shoveProne)).toEqual({
+        ok: true,
+        falls: [{
+          combatantId: 'flyer',
+          fromElevationFeet: 30,
+          groundElevationFeet: 0,
+          fallDistanceFeet: 30,
+          fallingDamageDice: 3,
+        }],
+      })
+
+      const resolved = resolveDnd5eHeadlessAction(state, {
+        ...shoveProne,
+        airborneFallDamageRollsByCombatantId: { flyer: [2, 3, 4] },
+      })
+      expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+      if (!resolved.ok) return
+      expect(resolved.state.combatants.flyer).toMatchObject({
+        currentHp: 11,
+        elevationFeet: 0,
+        groundElevationFeet: 0,
+        airborne: false,
+      })
+      expect(resolved.state.combatants.flyer.conditions).toContain('prone')
+      expect(resolved.events).toContainEqual(expect.objectContaining({
+        type: 'falling-damage-resolved',
+        actorId: 'flyer',
+        distanceFeet: 30,
+        dice: 3,
+        damage: 9,
+      }))
+    })
+
+    it('keeps hover and magical Fly aloft after becoming prone', () => {
+      for (const state of [
+        airborneContestState({ hover: true }),
+        airborneContestState({ magicalFlight: true }),
+      ]) {
+        expect(previewDnd5eUnsupportedAirborneFalls(state, shoveProne)).toEqual({
+          ok: true,
+          falls: [],
+        })
+        const resolved = resolveDnd5eHeadlessAction(state, shoveProne)
+        expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+        if (!resolved.ok) continue
+        expect(resolved.state.combatants.flyer).toMatchObject({
+          elevationFeet: 30,
+          groundElevationFeet: 0,
+          airborne: true,
+        })
+        expect(resolved.state.combatants.flyer.conditions).toContain('prone')
+        expect(resolved.events.some((event) => event.type === 'falling-damage-resolved')).toBe(false)
+      }
+    })
+
+    it('falls when incapacitation ends the Fly spell concentration', () => {
+      const attacker = fighter('attacker', 20, {
+        controller: 'dm',
+        position: { x: 0, y: 0 },
+      })
+      const flyer = fighter('flyer', 10, {
+        position: { x: 5, y: 0 },
+        currentHp: 5,
+        maxHp: 20,
+        elevationFeet: 30,
+        groundElevationFeet: 0,
+        airborne: true,
+        movementSpeeds: { walk: 30 },
+        concentrating: true,
+        classState: {
+          concentrationSpellId: 'fly',
+          concentrationTargetIds: ['flyer'],
+          activeEffects: [createDnd5eMechanicalEffect({
+            id: 'fly-spell-effect',
+            definitionId: 'srd-5.1:spell:fly',
+            label: 'Fly',
+            targetId: 'flyer',
+            source: { kind: 'spell', actorId: 'flyer', rulesId: 'fly' },
+            duration: { type: 'concentration', sourceActorId: 'flyer', concentrationId: 'fly' },
+            modifiers: { flySpeedFeet: 60 },
+          })],
+        },
+      })
+      const state = startDnd5eHeadlessCombat('fly-concentration-loss', [attacker, flyer])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(attacker.id, flyer.id)]: 5,
+      }
+      const attack = {
+        type: 'attack' as const,
+        actorId: attacker.id,
+        targetId: flyer.id,
+        attackModifier: 20,
+        d20: 10,
+        damage: { count: 1, sides: 6, bonus: 0, rolls: [6], type: 'slashing' as const },
+      }
+      expect(previewDnd5eUnsupportedAirborneFalls(state, attack)).toEqual({
+        ok: true,
+        falls: [expect.objectContaining({ combatantId: 'flyer', fallingDamageDice: 3 })],
+      })
+
+      const resolved = resolveDnd5eHeadlessAction(state, {
+        ...attack,
+        airborneFallDamageRollsByCombatantId: { flyer: [1, 1, 1] },
+      })
+      expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+      if (!resolved.ok) return
+      expect(resolved.state.combatants.flyer).toMatchObject({
+        elevationFeet: 0,
+        groundElevationFeet: 0,
+        airborne: false,
+        concentrating: false,
+      })
+      expect(resolved.state.combatants.flyer.classState.concentrationSpellId).toBeUndefined()
+      expect(resolved.state.combatants.flyer.classState.activeEffects?.some((effect) =>
+        effect.modifiers?.flySpeedFeet != null)).not.toBe(true)
+      expect(resolved.events).toContainEqual(expect.objectContaining({
+        type: 'falling-damage-resolved',
+        actorId: 'flyer',
+        damage: 3,
+      }))
+    })
+
+    it('falls when a speed penalty reduces native flight to zero', () => {
+      const caster = fighter('caster', 20, {
+        classId: 'wizard',
+        level: 5,
+        abilities: { ...abilities, int: 18 },
+        classSelections: { 'spell-cantrips': ['ray-of-frost'] },
+        position: { x: 0, y: 0 },
+      })
+      const flyer = fighter('flyer', 10, {
+        controller: 'dm',
+        armorClass: 10,
+        position: { x: 30, y: 0 },
+        elevationFeet: 30,
+        groundElevationFeet: 0,
+        airborne: true,
+        movementSpeeds: { walk: 30, fly: 10 },
+      })
+      const state = startDnd5eHeadlessCombat('native-flight-speed-zero', [caster, flyer])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(caster.id, flyer.id)]: 30,
+      }
+      const action = {
+        type: 'cast-spell' as const,
+        actorId: caster.id,
+        targetId: flyer.id,
+        spellId: 'ray-of-frost',
+        slotLevel: 0,
+        d20: 15,
+        effectRolls: [1, 1],
+      }
+      expect(previewDnd5eUnsupportedAirborneFalls(state, action)).toEqual({
+        ok: true,
+        falls: [expect.objectContaining({ combatantId: flyer.id, fallingDamageDice: 3 })],
+      })
+      const resolved = resolveDnd5eHeadlessAction(state, {
+        ...action,
+        airborneFallDamageRollsByCombatantId: { [flyer.id]: [1, 2, 3] },
+      })
+      expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+      if (!resolved.ok) return
+      expect(dnd5eEffectiveFlySpeed(resolved.state.combatants.flyer)).toBeUndefined()
+      expect(resolved.state.combatants.flyer).toMatchObject({
+        elevationFeet: 0,
+        airborne: false,
+      })
+    })
   })
 })

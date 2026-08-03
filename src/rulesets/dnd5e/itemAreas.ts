@@ -12,6 +12,11 @@ import { rollbackCombatTransaction, type CombatTransaction } from '../../lib/com
 import type { BattleMap, Dnd5eItemArea, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5eInventoryEntry, Dnd5eInventoryTargeting } from '../../types/inventory'
+import {
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+} from '../../lib/mapGeometry'
 import { applyDnd5eInventoryMutation } from './items'
 
 export type Dnd5eItemAreaPlacementFailure =
@@ -173,18 +178,37 @@ export function dnd5eItemAreasEnteredByMove(input: {
   token: Token
   to: { x: number; y: number }
   path?: Array<{ x: number; y: number }>
+  pathElevationsFeet?: readonly number[]
 }): Dnd5eEnteredItemArea[] {
   const fromAnchor = tokenAnchorCellFromPixel(input.token.x, input.token.y, input.token, input.map)
   const toAnchor = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
-  const path = input.path?.length
-    ? input.path.map((point) => tokenAnchorCellFromPixel(point.x, point.y, input.token, input.map))
-        .filter((cell, index, cells) => index === 0 || cellKey(cell) !== cellKey(cells[index - 1]))
-    : dnd5eMovementPathCells(fromAnchor, toAnchor)
+  const path: Array<{ cell: GridCell; elevationFeet?: number }> = input.path?.length
+    ? input.path.map((point, index) => ({
+        cell: tokenAnchorCellFromPixel(point.x, point.y, input.token, input.map),
+        elevationFeet: Number.isFinite(input.pathElevationsFeet?.[index])
+          ? input.pathElevationsFeet![index]
+          : undefined,
+      })).filter((entry, index, entries) => {
+        if (index === 0 || cellKey(entry.cell) !== cellKey(entries[index - 1].cell)) return true
+        const previousElevation = entries[index - 1].elevationFeet
+        return entry.elevationFeet != null && previousElevation != null &&
+          Math.abs(entry.elevationFeet - previousElevation) > 1e-4
+      })
+    : dnd5eMovementPathCells(fromAnchor, toAnchor).map((cell) => ({ cell }))
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
   const found = new Set<string>()
   const entered: Dnd5eEnteredItemArea[] = []
   for (let pathIndex = 1; pathIndex < path.length; pathIndex++) {
-    const anchor = path[pathIndex]
+    const { cell: anchor, elevationFeet } = path[pathIndex]
     const center = tokenCenterForAnchorCell(anchor, input.token, input.map)
+    const tokenBottom = elevationFeet ?? mapGeometryTokenElevation(geometry, {
+      ...input.token,
+      ...center,
+    })
+    const ground = mapGeometryTerrainElevationAtPoint(geometry, center)
+    // Ball bearings, caltrops and hunting traps occupy the supporting surface,
+    // not an infinitely tall column through the cell.
+    if (Math.abs(tokenBottom - ground) > 1e-4) continue
     const footprint = new Set(tokenOccupiedCellsAt(input.token, input.map, center).map(cellKey))
     for (const area of input.map.dnd5eItemAreas ?? []) {
       if (!area.armed || found.has(area.id) || !area.cells.some((cell) => footprint.has(cellKey(cell)))) continue

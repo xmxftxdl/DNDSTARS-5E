@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
   compileDnd5eEffectiveVisionProfile,
+  dnd5eCharacterDarkvisionRangeFeet,
   dnd5eCharacterHasDevilsSight,
-  dnd5eCoreRaceDarkvisionRangeFeet,
 } from '../../../shared/dnd5e-vision-profile.mjs'
 
 describe('D&D 5e effective vision profile', () => {
-  it('derives core racial Darkvision without trusting a map-token duplicate', () => {
-    expect(dnd5eCoreRaceDarkvisionRangeFeet({ race: '精灵' })).toBe(60)
-    expect(dnd5eCoreRaceDarkvisionRangeFeet({ race: '丘陵矮人' })).toBe(60)
-    expect(dnd5eCoreRaceDarkvisionRangeFeet({ dnd5eRaceId: 'local.phb:drow' })).toBe(120)
-    expect(dnd5eCoreRaceDarkvisionRangeFeet({ dnd5eRaceId: 'half-orc' })).toBe(60)
-    expect(dnd5eCoreRaceDarkvisionRangeFeet({ race: '人类' })).toBe(0)
+  it('uses the host-resolved character Darkvision without inspecting content ids', () => {
+    expect(dnd5eCharacterDarkvisionRangeFeet({ darkvisionRangeFeet: 60 })).toBe(60)
+    expect(dnd5eCharacterDarkvisionRangeFeet({ darkvisionRangeFeet: 120 })).toBe(120)
+    expect(dnd5eCharacterDarkvisionRangeFeet({ darkvisionRangeFeet: 99_999 })).toBe(10_000)
+    expect(dnd5eCharacterDarkvisionRangeFeet({ race: 'private-room-race' })).toBe(0)
+  })
+
+  it('merges a room-token character projection with explicit token vision', () => {
+    expect(compileDnd5eEffectiveVisionProfile({
+      token: { darkvisionRangeFeet: 30, dnd5eCharacterDarkvisionRangeFeet: 120 },
+    }).darkvisionRangeFeet).toBe(120)
   })
 
   it('merges temporary effects and clamps untrusted ranges', () => {
@@ -33,7 +38,7 @@ describe('D&D 5e effective vision profile', () => {
     })
   })
 
-  it('turns the Devil’s Sight invocation into normal sight through both kinds of darkness', () => {
+  it('turns Devil\'s Sight into normal sight through both kinds of darkness', () => {
     const character = {
       dnd5eClassChoices: {
         classes: {
@@ -50,7 +55,7 @@ describe('D&D 5e effective vision profile', () => {
     })
   })
 
-  it('derives monster senses and Devil’s Sight from the stat block', () => {
+  it('derives monster senses and Devil\'s Sight from the stat block', () => {
     expect(compileDnd5eEffectiveVisionProfile({
       token: {},
       monster: {

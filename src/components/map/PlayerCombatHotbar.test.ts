@@ -80,6 +80,28 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('system:escape-grapple:ankheg-token')
   })
 
+  it('在快捷栏显示当前角色可移动的炽焰法球附赠动作', () => {
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: character(),
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      movablePersistentAreas: [{
+        id: 'flaming-sphere-area',
+        label: '炽焰法球',
+        economy: 'bonus-action',
+        maximumFeet: 30,
+        coreSpellId: 'flaming-sphere',
+      }],
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('aria-label="移动炽焰法球"')
+    expect(html).toContain('data-action-id="feature:persistent-area-move:flaming-sphere-area"')
+    expect(html).toContain('/assets/icons/flaming-sphere-spell-action.png')
+    expect(html).toContain('>30<')
+  })
+
   it('在法术栏位上方显示剩余法术位', () => {
     const wizard: Character = {
       ...character(),

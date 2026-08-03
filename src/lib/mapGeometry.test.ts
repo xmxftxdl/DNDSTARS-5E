@@ -7,6 +7,7 @@ import {
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
+  mapGeometryLineOfSightBlocked,
   mapGeometryGridSelectionBoundary,
   mapGeometryMovementBlocked,
   mapGeometrySegments,
@@ -147,6 +148,56 @@ describe('map geometry', () => {
       .toMatchObject({ cover: 'three-quarters', armorClassBonus: 5, blocksLineOfEffect: false })
     expect(mapGeometryCoverBetween(g, token('a', 50, 50), token('b', 150, 50)))
       .toMatchObject({ cover: 'total', blocksLineOfEffect: true, sourceEntityId: 'wall' })
+  })
+
+  it('samples cover rays at each entity body height', () => {
+    const lowWall = geometry()
+    lowWall.walls = [{
+      ...lowWall.walls[0],
+      points: [{ x: 50, y: 0 }, { x: 50, y: 100 }],
+      heightFeet: 8,
+    }]
+    lowWall.obstacles = []
+    const mediumAttacker = token('medium-attacker', 10, 50)
+    const mediumTarget = token('medium-target', 90, 50, { type: 'enemy' })
+    const tallAttacker = { ...mediumAttacker, id: 'tall-attacker', size: 4 }
+    const tallTarget = { ...mediumTarget, id: 'tall-target', size: 4 }
+    const mediumRayMap = { ...map, gridSize: 10, tokens: [mediumAttacker, mediumTarget] }
+    const tallRayMap = { ...map, gridSize: 10, tokens: [tallAttacker, tallTarget] }
+
+    expect(mapGeometryCoverBetween(lowWall, mediumAttacker, mediumTarget, mediumRayMap))
+      .toMatchObject({ cover: 'total', blocksLineOfEffect: true, sourceEntityId: 'wall' })
+    expect(mapGeometryCoverBetween(lowWall, tallAttacker, tallTarget, tallRayMap))
+      .toMatchObject({ cover: 'none', armorClassBonus: 0, blocksLineOfEffect: false })
+    expect(mapGeometryLineOfSightBlocked({
+      geometry: lowWall,
+      from: mediumAttacker,
+      to: mediumTarget,
+    })).toBe(true)
+    expect(mapGeometryLineOfSightBlocked({
+      geometry: lowWall,
+      from: tallAttacker,
+      to: tallTarget,
+    })).toBe(false)
+
+    lowWall.walls = []
+    lowWall.obstacles = [{
+      id: 'low-barricade',
+      kind: 'obstacle',
+      label: 'Low barricade',
+      points: [{ x: 45, y: 0 }, { x: 55, y: 0 }, { x: 55, y: 100 }, { x: 45, y: 100 }],
+      cover: 'three-quarters',
+      blocksVision: false,
+      blocksMovement: true,
+      blocksLineOfEffect: false,
+      baseHeightFeet: 0,
+      heightFeet: 5,
+      createdAt: 1,
+    }]
+    expect(mapGeometryCoverBetween(lowWall, mediumAttacker, mediumTarget, mediumRayMap))
+      .toMatchObject({ cover: 'three-quarters', armorClassBonus: 5 })
+    expect(mapGeometryCoverBetween(lowWall, tallAttacker, tallTarget, tallRayMap))
+      .toMatchObject({ cover: 'none', armorClassBonus: 0 })
   })
 
   it('treats another creature between attacker and target as half cover', () => {
@@ -431,6 +482,24 @@ describe('map geometry', () => {
     expect(mapGeometryTokenElevation(g, token('legacy', 50, 50))).toBe(20)
     expect(mapGeometryTokenElevation(g, token('stale', 50, 50, { elevationFeet: 0 }))).toBe(20)
     expect(mapGeometryTokenElevation(g, token('flying', 50, 50, { elevationFeet: 35 }))).toBe(35)
+  })
+
+  it('does not let a legacy ground difficult-terrain overlay replace platform elevation', () => {
+    const g = geometry()
+    g.obstacles.push({
+      id: 'plateau', kind: 'obstacle', label: 'Plateau',
+      points: [{ x: 0, y: 0 }, { x: 90, y: 0 }, { x: 90, y: 90 }, { x: 0, y: 90 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainRegion: true, terrainElevationFeet: 20, createdAt: 1,
+    }, {
+      id: 'legacy-grease', kind: 'obstacle', label: 'Legacy grease',
+      points: [{ x: 10, y: 10 }, { x: 80, y: 10 }, { x: 80, y: 80 }, { x: 10, y: 80 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 0,
+      terrainCostMultiplier: 2, traversal: 'ground', createdAt: 2,
+    })
+
+    expect(mapGeometryTokenElevation(g, token('grounded', 50, 50))).toBe(20)
   })
 
   it('simplifies a dense height-brush loop into an editable closed-region outline', () => {

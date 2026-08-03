@@ -56,4 +56,12 @@ describe('先攻头像队列', () => {
     expect(html).toContain('AI 思考中…')
     expect(renderTracker('another-token')).not.toContain('initiative-thinking-hero-token')
   })
+
+  it('lets pointer input pass through transparent tracker space while keeping controls interactive', () => {
+    const html = renderTracker()
+
+    expect(html).toContain('pointer-events-none relative flex items-center')
+    expect(html).toContain('pointer-events-auto group flex')
+    expect(html.match(/pointer-events-auto flex h-11 w-11/g)).toHaveLength(2)
+  })
 })

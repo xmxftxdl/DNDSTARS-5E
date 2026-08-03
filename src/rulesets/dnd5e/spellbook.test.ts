@@ -91,9 +91,9 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference?.sourcePage).toBe(118)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
       .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(103)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(106)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(86)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(17)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(20)
     expect(entries.find((entry) => entry.id === 'prayer-of-healing')).toMatchObject({
       headless: true,
       automationLevel: 'partial',

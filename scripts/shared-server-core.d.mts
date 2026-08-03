@@ -22,6 +22,25 @@ export const DND5E_2014_RULESET_ID: 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION: number
 export const SHARED_MIN_CLIENT_PROTOCOL: number
 export const SHARED_STATE_SCHEMA_VERSION: number
+export const COMBAT_COMMAND_SCHEMA_VERSION: 1
+export const COMBAT_COMMAND_RECEIPT_RESOURCE: 'combat-command-receipts'
+export function compactCombatCommandHistory<
+  TCommand extends { commandId?: string },
+  TReceipt extends { commandId?: string; status?: string },
+>(commands: readonly TCommand[], receipts: readonly TReceipt[]): {
+  commands: TCommand[]
+  receipts: TReceipt[]
+}
+export interface CombatCommandAuthoritativeStateV1 {
+  appliedAt: number
+  revisions: Readonly<Record<string, number>>
+  mapId: string
+  combatId: string
+  round: number
+  initiativeIndex: number
+  acceptedPosition?: { x: number; y: number }
+  acceptedElevationFeet?: number
+}
 export const ACCOUNT_SESSION_LIMIT: number
 export const ACCOUNT_CHARACTER_LIMIT: number
 export const ACCOUNT_AUTH_SCHEMA_VERSION: number
@@ -202,6 +221,11 @@ export function eventChannelOperationAllowed(
   channel: string,
   operation: 'publish' | 'subscribe',
   role: 'open' | 'dm' | 'player' | 'spectator',
+): boolean
+export function publishEventBestEffort(
+  ctx: Record<string, unknown>,
+  channel: string,
+  payload: unknown,
 ): boolean
 export function stateResourceWriteAllowedForRole(
   resourceName: string,

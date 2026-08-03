@@ -226,6 +226,31 @@ describe('publishPlayerActionAckWithSnapshots', () => {
     }))
   })
 
+  it('keeps a durable commit successful when live ACK delivery fails', async () => {
+    const ack = makeAck('accepted')
+    const commitSharedResources = vi.fn(async () => ({
+      revisions: { maps: 8, combat: 9, 'player-action-ack': 10 },
+    }))
+    const publishAck = vi.fn(async () => {
+      throw new Error('sse-disconnected-after-commit')
+    })
+
+    await expect(publishPlayerActionAckWithSnapshots({
+      ack,
+      snapshots: {
+        characters: [],
+        maps: [{ id: 'map-1' } as BattleMap],
+        updatedAt: 123,
+      },
+      saveSharedResource: vi.fn(),
+      commitSharedResources,
+      publishAck,
+    })).resolves.toBeUndefined()
+
+    expect(commitSharedResources).toHaveBeenCalledTimes(1)
+    expect(publishAck).toHaveBeenCalledTimes(1)
+  })
+
   it('commits a rejected acknowledgement and its replay receipt atomically', async () => {
     const ack = makeAck('rejected')
     const commitSharedResources = vi.fn(async () => ({

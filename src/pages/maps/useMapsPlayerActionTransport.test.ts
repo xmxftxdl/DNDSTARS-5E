@@ -3,6 +3,7 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import { consumePlayerActionAck } from '../../lib/playerActionSync'
 import {
   drainDmPlayerActionQueue,
+  playerActionAckMustWaitForCombatReceipt,
   playerActionRejectionNotice,
   syncPersistedAcceptedPlayerActionSnapshot,
 } from './useMapsPlayerActionTransport'
@@ -74,6 +75,31 @@ describe('DM player action drain', () => {
 })
 
 describe('persisted player action ACK fallback', () => {
+  it('keeps move/end-turn locked until their durable command receipt arrives', () => {
+    const ack = {
+      id: 'ack-command-1',
+      mapId: 'map-1',
+      actionId: 'command-1',
+      status: 'accepted' as const,
+      round: 1,
+      initiativeIndex: 0,
+      updatedAt: 10,
+    }
+
+    expect(playerActionAckMustWaitForCombatReceipt({
+      ack,
+      mapId: 'map-1',
+      pendingActionId: 'command-1',
+      isReceiptAuthoritativeAction: (actionId) => actionId === 'command-1',
+    })).toBe(true)
+    expect(playerActionAckMustWaitForCombatReceipt({
+      ack,
+      mapId: 'map-1',
+      pendingActionId: 'legacy-action',
+      isReceiptAuthoritativeAction: () => true,
+    })).toBe(false)
+  })
+
   it('loads combat after fallback sync and before unlocking an accepted action without revisions', async () => {
     const calls: string[] = []
     let pendingAction: { id: string; label?: string } | null = { id: 'action-1' }
@@ -148,6 +174,14 @@ describe('player action rejection notice', () => {
     expect(playerActionRejectionNotice('component-unavailable')).toEqual({
       title: '施法成分不可用',
       message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术需要尚未结构化管理的贵重／消耗材料。',
+    })
+    expect(playerActionRejectionNotice('spell-area-target-out-of-range')).toEqual({
+      title: '施法点超出射程',
+      message: '所选范围中心超出该法术允许的施法距离；请在角色射程内重新选择。',
+    })
+    expect(playerActionRejectionNotice('verbal-component-unavailable')).toEqual({
+      title: '无法说出咒语',
+      message: '角色处于沉默效果中，而该法术需要言语成分，本次施法未结算。',
     })
   })
 })

@@ -4,6 +4,8 @@ export interface Dnd5eMovementHazardTrace {
   tokenId: string
   to: { x: number; y: number }
   path: readonly { x: number; y: number }[]
+  /** Absolute token-bottom elevation aligned one-to-one with `path`. */
+  pathElevationsFeet?: readonly number[]
 }
 
 export interface Dnd5eEffectiveMovementHazardTrace extends Dnd5eMovementHazardTrace {
@@ -51,6 +53,7 @@ export async function settleDnd5eMovementTracesSequentially<TContext>(input: {
         plannedTo: movement.to,
         to,
         path,
+        pathElevationsFeet: movement.pathElevationsFeet?.slice(0, path.length),
       },
       index,
     })

@@ -4,6 +4,7 @@ import type { Character } from '../../types/character'
 import {
   dnd5eBestGrappleDefense,
   dnd5eCombatantCanSee,
+  dnd5eEffectiveFlySpeed,
   dnd5eTargetArmorClassForAttack,
   resolveDnd5eHeadlessAction,
   type Dnd5eCombatEvent,
@@ -378,6 +379,105 @@ describe('D&D 5e map bridge', () => {
     })
   })
 
+  it('projects monster hover and authoritative terrain-relative airborne state', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.id = 'room-monster:hover-scout'
+    draft.fly = 40
+    draft.hover = true
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const monsterToken = token({
+      id: 'hover-scout',
+      poolId: monster.id,
+      elevationFeet: 30,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'monster-hover',
+      name: 'Monster hover',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'monster-hover',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: monsterToken.id,
+        label: monsterToken.label,
+        emoji: '',
+        color: '',
+        roll: 20,
+      }],
+    })
+
+    expect(snapshot.state.combatants[monsterToken.id]).toMatchObject({
+      movementSpeeds: { walk: 30, fly: 40, hover: true },
+      elevationFeet: 30,
+      groundElevationFeet: 0,
+      airborne: true,
+    })
+  })
+
+  it('keeps a walking monster airborne when elevation is supported by a Fly effect', () => {
+    const fly = createDnd5eMechanicalEffect({
+      id: 'walking-monster-fly',
+      definitionId: 'srd-5.1:spell:fly',
+      label: 'Fly',
+      targetId: 'walking-monster',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'fly' },
+      duration: { type: 'concentration', sourceActorId: 'caster', concentrationId: 'fly' },
+      modifiers: { flySpeedFeet: 60 },
+    })
+    const monsterToken = token({
+      id: 'walking-monster',
+      poolId: 'srd-5.1:goblin',
+      elevationFeet: 30,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [fly],
+      },
+    })
+    const map: BattleMap = {
+      id: 'spell-supported-monster-flight',
+      name: 'Spell-supported monster flight',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'spell-supported-monster-flight',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: monsterToken.id,
+        label: monsterToken.label,
+        emoji: '',
+        color: '',
+        roll: 20,
+      }],
+    })
+
+    expect(snapshot.state.combatants[monsterToken.id]).toMatchObject({
+      elevationFeet: 30,
+      groundElevationFeet: 0,
+      airborne: true,
+    })
+    expect(dnd5eEffectiveFlySpeed(snapshot.state.combatants[monsterToken.id])).toBe(60)
+  })
+
   it('persists pending monster triggers and one-shot roll modifiers across map snapshots', () => {
     const monsterToken = token({ id: 'custom', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7 })
     const map: BattleMap = {
@@ -516,6 +616,81 @@ describe('D&D 5e map bridge', () => {
       attackModifier: 99, d20: 20, damage: { count: 1, sides: 8, bonus: 3, rolls: [8] },
     })
     expect(naturalTwenty).toMatchObject({ ok: true, state: { combatants: { [enemy.id]: { currentHp: 10 } } } })
+  })
+
+  it('uses effective creature heights for Headless vision and cover rays', () => {
+    const giantSize = '\u5de8\u578b' as Token['creatureSize']
+    const attacker = token({
+      id: 'giant-attacker',
+      x: 10,
+      y: 50,
+      size: 1,
+      creatureSize: giantSize,
+    })
+    const target = token({
+      id: 'giant-target',
+      x: 90,
+      y: 50,
+      size: 1,
+      creatureSize: giantSize,
+    })
+    const map: BattleMap = {
+      id: 'height-aware-headless-rays',
+      name: 'Height-aware Headless rays',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [attacker, target],
+    }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [{
+        id: 'low-wall',
+        kind: 'wall',
+        label: 'Low wall',
+        points: [{ x: 50, y: 0 }, { x: 50, y: 100 }],
+        blocksVision: true,
+        blocksMovement: true,
+        blocksLineOfEffect: true,
+        baseHeightFeet: 0,
+        heightFeet: 8,
+        createdAt: 1,
+      }],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+    const initiativeOrder = [attacker, target].map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: '',
+      color: '',
+      roll: 20 - index,
+    }))
+
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'height-aware-headless-rays',
+      map,
+      characters: [],
+      initiativeOrder,
+    })
+    const directedKey = `${attacker.id}\u0000${target.id}`
+
+    expect(snapshot.state.combatants[attacker.id].sizeRank).toBe(5)
+    expect(snapshot.state.lineOfEffectBlockedByCombatantPair?.[directedKey]).toBeUndefined()
+    expect(snapshot.state.coverBonusByCombatantPair?.[directedKey]).toBeUndefined()
+    expect(snapshot.state.physicalLineOfSightBlockedByCombatantPair?.[directedKey]).toBeUndefined()
+    expect(dnd5eCombatantCanSee(snapshot.state, attacker.id, target.id)).toBe(true)
   })
 
   it('compiles character Darkvision ActiveEffects into ordinary-darkness visibility', () => {

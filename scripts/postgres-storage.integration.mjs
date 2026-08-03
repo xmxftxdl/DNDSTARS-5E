@@ -67,6 +67,32 @@ const account = {
     archived: false,
     roomCount: 2,
     lastRoomId: 'PGTEST',
+    aiWorkspace: {
+      schemaVersion: 1,
+      updatedAt: createdAt,
+      jobs: [{
+        schemaVersion: 2,
+        jobId: 'cb2ec8e3-742a-48f5-ad6b-20eb797a8ed7',
+        accountId,
+        campaignId,
+        taskKind: 'campaign-analysis',
+        executionMode: 'local-runner',
+        providerId: 'local-bridge',
+        modelId: 'qwen3.5:35b',
+        promptVersion: 'pdf-campaign-analysis-v2',
+        idempotencyKey: 'postgres-ai-job-0001',
+        sourceAssets: [{ assetId: 'pdf-1', name: '模组.pdf', mimeType: 'application/pdf', sizeBytes: 1024 }],
+        input: { depth: 'deep' },
+        status: 'review-required',
+        revision: 3,
+        progress: { stage: 'review-required', current: 1, total: 1, message: '等待 DM 审阅' },
+        lease: null,
+        artifact: null,
+        failure: null,
+        createdAt,
+        updatedAt: createdAt,
+      }],
+    },
     createdAt,
     updatedAt: createdAt,
   }],
@@ -134,6 +160,7 @@ try {
     assert.equal(diagnostics.campaigns, 1)
     assert.equal(diagnostics.sessions, 1)
     assert.equal(diagnostics.identities, 2)
+    assert.equal(diagnostics.aiJobs, 1)
     assert.equal(diagnostics.orders, 1)
     assert.equal(diagnostics.integrity, 'ok')
 

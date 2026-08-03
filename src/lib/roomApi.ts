@@ -644,6 +644,14 @@ export async function leaveRoom(session: RoomSession): Promise<void> {
   })
 }
 
+export async function closeRoom(session: RoomSession): Promise<void> {
+  if (session.role !== 'dm') throw new RoomApiError('forbidden', 403)
+  await roomRequest<{ ok: true }>(`/rooms/${encodeURIComponent(session.roomId)}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ memberId: session.memberId }),
+  })
+}
+
 export function roomApiErrorMessage(error: unknown): string {
   const code = error instanceof RoomApiError ? error.code : 'request-failed'
   const messages: Record<string, string> = {

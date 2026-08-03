@@ -119,7 +119,7 @@ describe('CharacterDetailPanel', () => {
     }))
 
     expect(markup).toContain('data-defeated="true"')
-    expect(markup).toContain('z-[70]')
+    expect(markup).toContain('z-[90]')
     expect(markup).toContain('data-testid="close-character-detail"')
     expect(markup).toContain('aria-label="关闭角色详情"')
   })

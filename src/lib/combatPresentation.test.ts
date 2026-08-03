@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { publishSharedEvent, sampleSharedServerClock } from './sharedApi'
+import { setRoomRulesSnapshot } from './roomRulesState'
+import type { RoomRulesSnapshot } from './roomSession'
 import {
   ACID_SPLASH_ANIMATION_DURATION_MS,
+  BLIGHT_ANIMATION_DURATION_MS,
+  CHAIN_LIGHTNING_ANIMATION_DURATION_MS,
   ATTACK_TARGET_EFFECT_DURATION_MS,
   CHILL_TOUCH_ANIMATION_DURATION_MS,
   ELDRITCH_BLAST_ANIMATION_DURATION_MS,
@@ -12,6 +16,10 @@ import {
   FIREBALL_ANIMATION_DURATION_MS,
   FIREBALL_ANIMATION_START_DELAY_MS,
   FIREBALL_PRESENTATION_EVENT_TTL_MS,
+  FLAMING_SPHERE_ANIMATION_DURATION_MS,
+  FLAMING_SPHERE_ENTRANCE_DURATION_MS,
+  FINGER_OF_DEATH_ANIMATION_DURATION_MS,
+  FALSE_LIFE_ANIMATION_DURATION_MS,
   GUIDANCE_MANIFESTATION_DURATION_MS,
   GUIDANCE_ORBIT_RADIUS_FACTOR,
   KILL_STREAK_BANNER_START_DELAY_MS,
@@ -20,6 +28,8 @@ import {
   MAGIC_MISSILE_SEQUENCE_GAP_MS,
   PRODUCE_FLAME_ANIMATION_DURATION_MS,
   POISON_SPRAY_ANIMATION_DURATION_MS,
+  POWER_WORD_KILL_ANIMATION_DURATION_MS,
+  POWER_WORD_STUN_ANIMATION_DURATION_MS,
   RAY_OF_FROST_ANIMATION_DURATION_MS,
   RESISTANCE_MANIFESTATION_DURATION_MS,
   RESISTANCE_ORBIT_RADIUS_FACTOR,
@@ -41,18 +51,26 @@ import {
   publishChillTouchPresentation,
   publishDexteritySavingThrowPresentation,
   publishAttackBannerPresentation,
+  publishAreaSpellPresentation,
   publishSavingThrowPresentation,
   combatPresentationSavingThrowAbilityLabel,
   subscribeLocalCombatPresentationEvent,
   publishAcidSplashPresentation,
+  publishBlightPresentation,
+  publishChainLightningPresentation,
+  publishDisintegratePresentation,
   publishEldritchBlastPresentation,
   publishFireBoltPresentation,
   publishFireballPresentation,
+  publishFingerOfDeathPresentation,
+  publishFalseLifePresentation,
   publishGuidancePresentation,
   publishKillStreakPresentation,
   publishMagicMissilePresentation,
   publishProduceFlamePresentation,
   publishPoisonSprayPresentation,
+  publishPowerWordKillPresentation,
+  publishPowerWordStunPresentation,
   publishRayOfFrostPresentation,
   publishResistancePresentation,
   publishSanctuaryPresentation,
@@ -218,6 +236,36 @@ const map = {
 describe('combat presentation events', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setRoomRulesSnapshot(null)
+  })
+
+  afterEach(() => setRoomRulesSnapshot(null))
+
+  it('does not publish banners or spell visuals disabled by the synchronized room rules', async () => {
+    setRoomRulesSnapshot({
+      schemaVersion: 1,
+      roomId: 'ROOM',
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      revision: 2,
+      hash: 'sha256-disabled-presentation',
+      updatedAt: 1,
+      houseRules: { combatBannersEnabled: false, spellAnimationsEnabled: false },
+      requiredPlugins: [],
+      plugins: [],
+      member: { ready: true, missing: [], mismatched: [] },
+    } satisfies RoomRulesSnapshot)
+    await publishSpellBannerPresentation({
+      id: 'banner', mapId: 'map-a', transactionId: 'transaction', sourceTokenId: 'wizard',
+      spellId: 'fire-bolt', casterName: '法师', spellName: '火焰箭', castingClassId: 'wizard',
+    })
+    await publishAttackBannerPresentation({
+      id: 'attack', mapId: 'map-a', transactionId: 'transaction', sourceTokenId: 'wizard',
+      targetTokenId: 'goblin', actorName: '法师', attackName: '短剑', attackKind: 'melee', classId: 'wizard',
+    })
+    await publishFireBoltPresentation({
+      id: 'projectile', mapId: 'map-a', transactionId: 'transaction', sourceTokenId: 'wizard', targetTokenId: 'goblin',
+    })
+    expect(publishSharedEvent).not.toHaveBeenCalled()
   })
 
   it('parses bounded spell projectile events and rejects unsupported spell effects', () => {
@@ -583,6 +631,297 @@ describe('combat presentation events', () => {
     })
   })
 
+  it('projects Flame Strike and Sunburst at their authoritative area radii', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 2 },
+      shape: 'circle' as const,
+      createdAt: 1_000,
+      expiresAt: 2_600,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'flame-strike-area',
+        transactionId: 'flame-strike-transaction',
+        spellId: 'flame-strike' as const,
+        radiusFeet: 10,
+      },
+      {
+        ...base,
+        id: 'sunburst-area',
+        transactionId: 'sunburst-transaction',
+        spellId: 'sunburst' as const,
+        radiusFeet: 60,
+      },
+    ]
+    const state = events.reduce(
+      (current, event) => reduceCombatPresentationState(current, event, 1_100),
+      EMPTY_COMBAT_PRESENTATION_STATE,
+    )
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({ kind: 'flame-strike', radiusPx: 100 }),
+      expect.objectContaining({ kind: 'sunburst', radiusPx: 600 }),
+    ])
+  })
+
+  it('projects Cone of Cold from the caster along the selected 60-foot cone', () => {
+    const event = {
+      schemaVersion: 1 as const,
+      id: 'cone-of-cold-area',
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      transactionId: 'cone-of-cold-transaction',
+      spellId: 'cone-of-cold' as const,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 0 },
+      shape: 'cone' as const,
+      lengthFeet: 60,
+      widthFeet: 60,
+      createdAt: 1_000,
+      expiresAt: 2_600,
+    }
+    const state = reduceCombatPresentationState(EMPTY_COMBAT_PRESENTATION_STATE, event, 1_100)
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({
+        kind: 'cone-of-cold',
+        from: { x: 50, y: 100 },
+        areaWidthPx: 600,
+      }),
+    ])
+  })
+
+  it('projects the new circular spell atlases at their authoritative radii', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 0 },
+      shape: 'circle' as const,
+      createdAt: 1_000,
+      expiresAt: 2_600,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'circle-of-death-area',
+        transactionId: 'circle-of-death-transaction',
+        spellId: 'circle-of-death' as const,
+        radiusFeet: 60,
+      },
+      {
+        ...base,
+        id: 'ice-storm-area',
+        transactionId: 'ice-storm-transaction',
+        spellId: 'ice-storm' as const,
+        radiusFeet: 20,
+      },
+      {
+        ...base,
+        id: 'freezing-sphere-area',
+        transactionId: 'freezing-sphere-transaction',
+        spellId: 'freezing-sphere' as const,
+        radiusFeet: 60,
+      },
+    ]
+    const state = events.reduce(
+      (current, event) => reduceCombatPresentationState(current, event, 1_100),
+      EMPTY_COMBAT_PRESENTATION_STATE,
+    )
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({ kind: 'circle-of-death', radiusPx: 600 }),
+      expect.objectContaining({ kind: 'ice-storm', radiusPx: 200 }),
+      expect.objectContaining({ kind: 'freezing-sphere', radiusPx: 600 }),
+    ])
+  })
+
+  it('projects the low-level cone, circle, and square spell atlases at native sizes', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 0 },
+      createdAt: 1_000,
+      expiresAt: 2_600,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'color-spray-area',
+        transactionId: 'color-spray-transaction',
+        spellId: 'color-spray' as const,
+        shape: 'cone' as const,
+        lengthFeet: 15,
+        widthFeet: 15,
+      },
+      {
+        ...base,
+        id: 'faerie-fire-area',
+        transactionId: 'faerie-fire-transaction',
+        spellId: 'faerie-fire' as const,
+        shape: 'rect' as const,
+        widthFeet: 20,
+        heightFeet: 20,
+      },
+      {
+        ...base,
+        id: 'sleep-area',
+        transactionId: 'sleep-transaction',
+        spellId: 'sleep' as const,
+        shape: 'circle' as const,
+        radiusFeet: 20,
+      },
+      {
+        ...base,
+        id: 'entangle-area',
+        transactionId: 'entangle-transaction',
+        spellId: 'entangle' as const,
+        shape: 'rect' as const,
+        widthFeet: 20,
+        heightFeet: 20,
+      },
+      {
+        ...base,
+        id: 'grease-area',
+        transactionId: 'grease-transaction',
+        spellId: 'grease' as const,
+        shape: 'rect' as const,
+        widthFeet: 10,
+        heightFeet: 10,
+      },
+    ]
+    const state = events.reduce(
+      (current, event) => reduceCombatPresentationState(current, event, 1_100),
+      EMPTY_COMBAT_PRESENTATION_STATE,
+    )
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({ kind: 'color-spray', areaWidthPx: 150 }),
+      expect.objectContaining({ kind: 'faerie-fire', radiusPx: 100, areaWidthPx: 200 }),
+      expect.objectContaining({ kind: 'sleep', radiusPx: 200 }),
+      expect.objectContaining({ kind: 'entangle', radiusPx: 100, areaWidthPx: 200 }),
+      expect.objectContaining({ kind: 'grease', radiusPx: 50, areaWidthPx: 100 }),
+    ])
+  })
+
+  it('projects persistent area spell cast atlases before their headless effects begin', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 0 },
+      shape: 'circle' as const,
+      createdAt: 1_000,
+      expiresAt: 2_900,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'darkness-area',
+        transactionId: 'darkness-transaction',
+        spellId: 'darkness' as const,
+        radiusFeet: 15,
+      },
+      {
+        ...base,
+        id: 'flaming-sphere-area',
+        transactionId: 'flaming-sphere-transaction',
+        spellId: 'flaming-sphere' as const,
+        radiusFeet: 5,
+      },
+      {
+        ...base,
+        id: 'moonbeam-area',
+        transactionId: 'moonbeam-transaction',
+        spellId: 'moonbeam' as const,
+        radiusFeet: 5,
+      },
+      {
+        ...base,
+        id: 'daylight-area',
+        transactionId: 'daylight-transaction',
+        spellId: 'daylight' as const,
+        radiusFeet: 120,
+      },
+      {
+        ...base,
+        id: 'black-tentacles-area',
+        transactionId: 'black-tentacles-transaction',
+        spellId: 'black-tentacles' as const,
+        shape: 'rect' as const,
+        widthFeet: 20,
+        heightFeet: 20,
+      },
+      {
+        ...base,
+        id: 'spike-growth-area',
+        transactionId: 'spike-growth-transaction',
+        spellId: 'spike-growth' as const,
+        radiusFeet: 20,
+      },
+    ]
+    const state = events.reduce(
+      (current, event) => reduceCombatPresentationState(current, event, 1_100),
+      EMPTY_COMBAT_PRESENTATION_STATE,
+    )
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({ kind: 'darkness', radiusPx: 150 }),
+      expect.objectContaining({ kind: 'flaming-sphere', radiusPx: 50 }),
+      expect.objectContaining({ kind: 'moonbeam', radiusPx: 50 }),
+      expect.objectContaining({ kind: 'daylight', radiusPx: 1_200 }),
+      expect.objectContaining({ kind: 'black-tentacles', radiusPx: 100, areaWidthPx: 200 }),
+      expect.objectContaining({ kind: 'spike-growth', radiusPx: 200 }),
+    ])
+  })
+
+  it('holds Flaming Sphere through settlement and hands off to its exact persistent area', () => {
+    const event = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      id: 'flaming-sphere-handoff:area',
+      mapId: map.id,
+      transactionId: 'flaming-sphere-handoff',
+      sourceTokenId: 'wizard',
+      spellId: 'flaming-sphere' as const,
+      targetCell: { col: 3, row: 0 },
+      shape: 'circle' as const,
+      radiusFeet: 5,
+      createdAt: 1_000,
+      expiresAt: 1_000 + FLAMING_SPHERE_ANIMATION_DURATION_MS + 500,
+    }
+    const state = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      event,
+      event.createdAt,
+    )
+    const duringHandoff = event.createdAt + FLAMING_SPHERE_ENTRANCE_DURATION_MS + 400
+
+    expect(combatPresentationProjectilesForMap(state, map, duringHandoff)).toEqual([
+      expect.objectContaining({
+        kind: 'flaming-sphere',
+        durationMs: FLAMING_SPHERE_ANIMATION_DURATION_MS,
+      }),
+    ])
+    expect(combatPresentationProjectilesForMap(state, {
+      ...map,
+      dnd5ePluginAreas: [{
+        id: 'core-spell-area:flaming-sphere-handoff',
+        sourceKind: 'core-spell',
+        coreSpellId: 'flaming-sphere',
+      }],
+    }, duringHandoff)).toEqual([])
+    expect(combatPresentationProjectilesForMap(
+      state,
+      map,
+      event.createdAt + FLAMING_SPHERE_ANIMATION_DURATION_MS,
+    )).toEqual([])
+  })
+
   it('projects a synchronized banner-only spell without creating a map projectile', () => {
     const shatterBanner = {
       schemaVersion: 1 as const,
@@ -639,6 +978,34 @@ describe('combat presentation events', () => {
     })
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(20_500 + SPELL_BANNER_TOTAL_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('continues Flaming Sphere settlement after its entrance while keeping the handoff event alive', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(20_500)
+    await refreshCombatPresentationClock(true)
+    const schedule = await publishAreaSpellPresentation({
+      id: 'flaming-sphere-live:area',
+      mapId: 'map-a',
+      transactionId: 'flaming-sphere-live',
+      sourceTokenId: 'wizard',
+      spellId: 'flaming-sphere',
+      targetCell: { col: 3, row: 2 },
+      shape: 'circle',
+      radiusFeet: 5,
+    })
+    const event = vi.mocked(publishSharedEvent).mock.calls.at(-1)?.[1]
+
+    expect(event).toMatchObject({
+      type: 'spell-area-effect',
+      spellId: 'flaming-sphere',
+      createdAt: 21_000,
+      expiresAt: 21_000 + FLAMING_SPHERE_ANIMATION_DURATION_MS + 500,
+    })
+    expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    expect(schedule.completesAt).toBe(21_000 + FLAMING_SPHERE_ENTRANCE_DURATION_MS)
+    expect((event as { expiresAt: number }).expiresAt).toBeGreaterThan(schedule.completesAt)
     vi.useRealTimers()
   })
 
@@ -826,12 +1193,15 @@ describe('combat presentation events', () => {
       }),
     ])
     const events = vi.mocked(publishSharedEvent).mock.calls.map((call) => call[1])
-    expect(events.map((event) => (event as { spellId?: string }).spellId)).toEqual([
-      'spare-the-dying',
-      'acid-splash',
-      'poison-spray',
-      'vicious-mockery',
-    ])
+    expect(events).toHaveLength(4)
+    expect(events.map((event) => (event as { spellId?: string }).spellId)).toEqual(
+      expect.arrayContaining([
+        'spare-the-dying',
+        'acid-splash',
+        'poison-spray',
+        'vicious-mockery',
+      ]),
+    )
     for (const event of events) {
       expect(parseCombatPresentationEvent(event)).not.toBeNull()
       expect(event).toMatchObject({
@@ -1161,6 +1531,100 @@ describe('combat presentation events', () => {
     const event = vi.mocked(publishSharedEvent).mock.calls[0]?.[1]
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(27_500 + CHILL_TOUCH_ANIMATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes Blight before its saving throw is rolled', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(27_600)
+    await refreshCombatPresentationClock(true)
+    const schedule = await publishBlightPresentation({
+      id: 'blight-live-1',
+      mapId: 'map-a',
+      transactionId: 'transaction-blight-live-1',
+      sourceTokenId: 'druid',
+      targetTokenId: 'plant-monster',
+    })
+    expect(publishSharedEvent).toHaveBeenCalledWith(
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({
+        type: 'spell-target-effect',
+        spellId: 'blight',
+        createdAt: 28_100,
+      }),
+    )
+    const event = vi.mocked(publishSharedEvent).mock.calls[0]?.[1]
+    expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    expect(schedule.completesAt).toBe(28_100 + BLIGHT_ANIMATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes Chain Lightning and Disintegrate before saving throws', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(28_000)
+    await refreshCombatPresentationClock(true)
+    const input = {
+      mapId: 'map-a',
+      transactionId: 'high-level-spell-transaction',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'goblin',
+    }
+    const chain = await publishChainLightningPresentation({ ...input, id: 'chain-lightning-live' })
+    const disintegrate = await publishDisintegratePresentation({ ...input, id: 'disintegrate-live' })
+    expect(publishSharedEvent).toHaveBeenCalledWith(
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({ type: 'spell-projectile', spellId: 'chain-lightning' }),
+    )
+    expect(publishSharedEvent).toHaveBeenCalledWith(
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({ type: 'spell-projectile', spellId: 'disintegrate' }),
+    )
+    expect(chain.completesAt).toBe(28_500 + CHAIN_LIGHTNING_ANIMATION_DURATION_MS)
+    expect(disintegrate.completesAt).toBeGreaterThan(chain.completesAt)
+    vi.useRealTimers()
+  })
+
+  it('publishes the high-level command effects before Headless resolution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(28_600)
+    await refreshCombatPresentationClock(true)
+    const input = {
+      mapId: 'map-a',
+      transactionId: 'high-level-command-transaction',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'goblin',
+    }
+    const finger = await publishFingerOfDeathPresentation({ ...input, id: 'finger-of-death-live' })
+    const stun = await publishPowerWordStunPresentation({ ...input, id: 'power-word-stun-live' })
+    const kill = await publishPowerWordKillPresentation({ ...input, id: 'power-word-kill-live' })
+    for (const spellId of ['finger-of-death', 'power-word-stun', 'power-word-kill']) {
+      expect(publishSharedEvent).toHaveBeenCalledWith(
+        COMBAT_PRESENTATION_CHANNEL,
+        expect.objectContaining({ type: 'spell-target-effect', spellId }),
+      )
+    }
+    expect(finger.completesAt).toBe(29_100 + FINGER_OF_DEATH_ANIMATION_DURATION_MS)
+    expect(stun.completesAt).toBe(29_100 + POWER_WORD_STUN_ANIMATION_DURATION_MS)
+    expect(kill.completesAt).toBe(29_100 + POWER_WORD_KILL_ANIMATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes False Life before rolling temporary hit points', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(29_000)
+    await refreshCombatPresentationClock(true)
+    const schedule = await publishFalseLifePresentation({
+      id: 'false-life-live',
+      mapId: 'map-a',
+      transactionId: 'false-life-transaction',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'wizard',
+    })
+    expect(publishSharedEvent).toHaveBeenCalledWith(
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({ type: 'spell-target-effect', spellId: 'false-life' }),
+    )
+    expect(schedule.completesAt).toBe(29_500 + FALSE_LIFE_ANIMATION_DURATION_MS)
     vi.useRealTimers()
   })
 

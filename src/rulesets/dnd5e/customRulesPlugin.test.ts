@@ -257,6 +257,7 @@ describe('DM custom rules plugin builder', () => {
         },
         persistentArea: {
           label: '臭云术区域示例', color: '#65a30d', durationRounds: 10, concentration: true,
+          vertical: { mode: 'volume', heightFeet: 20 },
           visual: { preset: 'toxic-cloud', intensity: 'normal' },
           triggers: [{
             id: 'cloud-entry', label: '进入毒云', timing: 'on-enter', oncePerRound: true,
@@ -270,7 +271,28 @@ describe('DM custom rules plugin builder', () => {
     value.headlessActions = [{ id: 'toxic-cloud-demo', label: '放置毒云', effects: [] }]
     expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
     expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"preset": "toxic-cloud"')
+    expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"heightFeet": 20')
     expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"timing": "on-enter"')
+  })
+
+  it('rejects an invalid persistent-area vertical declaration before export', () => {
+    const value = draft()
+    value.features = [{
+      id: 'invalid-volume', name: 'Invalid volume', summary: 'Test.', description: 'Test.', automation: 'full',
+      action: {
+        id: 'invalid-volume', label: 'Place', economy: 'action',
+        targeting: {
+          kind: 'area', template: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 60 },
+        },
+        persistentArea: {
+          label: 'Invalid volume', durationRounds: 3,
+          vertical: { mode: 'volume', heightFeet: 0 },
+        },
+      },
+    }]
+    value.headlessActions = [{ id: 'invalid-volume', label: 'Place', effects: [] }]
+    expect(validateDnd5eCustomRulesPluginDraft(value))
+      .toContain('特性 Invalid volume 的持续区域声明无效。')
   })
 
   it('validates summon declarations before exporting the plugin file', () => {

@@ -8,6 +8,7 @@ import { DND5E_LEATHER_ARMOR } from './equipment'
 import { DND5E_SRD_MONSTERS } from './monsters'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { prepareDnd5ePluginSpellCast, resolvePreparedDnd5ePluginSpellCast } from './pluginSpellTransaction'
+import { createDnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 
 function wizard(spellId: string): Character {
   return {
@@ -70,6 +71,15 @@ describe('plugin spell CombatTransaction', () => {
         characters: [{ ...actor, equipment: { armor: DND5E_LEATHER_ARMOR } }],
         initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
       })).toEqual({ ok: false, reason: 'armor-proficiency-required' })
+      expect(prepareDnd5ePluginSpellCast({
+        action,
+        map,
+        characters: [{ ...actor, equipment: { armor: DND5E_LEATHER_ARMOR }, conditions: ['沉默'] }],
+        initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+        effectiveRules: createDnd5eEffectiveRulesContextV1({
+          houseRules: { spellcastingPrerequisitesEnabled: false },
+        }),
+      })).toMatchObject({ ok: true })
       const prepared = prepareDnd5ePluginSpellCast({
         action, map, characters: [actor],
         initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),

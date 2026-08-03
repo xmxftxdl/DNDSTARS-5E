@@ -149,6 +149,232 @@ export interface Dnd5eMonsterHeadlessCoverageReport {
   }
 }
 
+/**
+ * Monotonic coverage floor for the checked-in SRD catalog.
+ *
+ * These values deliberately measure executable structure, rather than names or
+ * prose that merely look like a supported rule:
+ * - actions must pass the action schema and, for Multiattack, every referenced
+ *   child must be supported by the composite transaction;
+ * - spells must have a structured core definition accepted by the monster spell
+ *   compatibility gate;
+ * - traits only count when they explicitly declare Headless automation and carry
+ *   a structured rule payload.
+ *
+ * Raising a floor (or lowering a maximum) is expected when coverage improves.
+ * Lowering one requires an explicit review because it permits a regression.
+ */
+export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
+  schemaVersion: 1,
+  monsterCount: 334,
+  actions: {
+    total: 1056,
+    headlessMinimum: 931,
+    dmAdjudicationMaximum: 31,
+    unstructuredMaximum: 94,
+    blockedByChildMaximum: 0,
+    invalidMaximum: 0,
+    multiattack: {
+      total: 240,
+      headlessMinimum: 240,
+      incompleteMaximum: 0,
+      unparsedMaximum: 0,
+    },
+  },
+  spells: {
+    occurrenceTotal: 313,
+    fullMinimum: 94,
+    definedMinimum: 159,
+    missingMaximum: 154,
+  },
+  traits: {
+    total: 551,
+    headlessWithRuleMinimum: 139,
+    headlessWithoutRuleMaximum: 0,
+    dmAdjudicationMaximum: 412,
+  },
+} as const
+
+export interface Dnd5eMonsterHeadlessCoverageRatchetResult {
+  passed: boolean
+  violations: readonly string[]
+}
+
+function requireExact(
+  violations: string[],
+  label: string,
+  actual: number,
+  expected: number,
+): void {
+  if (actual !== expected) violations.push(`${label}: expected ${expected}, received ${actual}`)
+}
+
+function requireMinimum(
+  violations: string[],
+  label: string,
+  actual: number,
+  minimum: number,
+): void {
+  if (actual < minimum) violations.push(`${label}: minimum ${minimum}, received ${actual}`)
+}
+
+function requireMaximum(
+  violations: string[],
+  label: string,
+  actual: number,
+  maximum: number,
+): void {
+  if (actual > maximum) violations.push(`${label}: maximum ${maximum}, received ${actual}`)
+}
+
+export function verifyDnd5eMonsterHeadlessCoverageRatchet(
+  report: Dnd5eMonsterHeadlessCoverageReport,
+): Dnd5eMonsterHeadlessCoverageRatchetResult {
+  const ratchet = DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET
+  const action = report.actions.summary
+  const spell = report.spells.summary
+  const trait = report.traits.summary
+  const violations: string[] = []
+
+  requireExact(violations, 'monsters.total', report.monsterCount, ratchet.monsterCount)
+  requireExact(violations, 'actions.total', action.total, ratchet.actions.total)
+  requireExact(
+    violations,
+    'actions.declared.partition',
+    action.declared.headless + action.declared.dmAdjudication + action.declared.implicit,
+    action.total,
+  )
+  requireExact(
+    violations,
+    'actions.effective.partition',
+    action.effective.headless + action.effective.dmAdjudication +
+      action.effective.unstructured + action.effective.blockedByChild + action.effective.invalid,
+    action.total,
+  )
+  requireMinimum(
+    violations,
+    'actions.headless',
+    action.effective.headless,
+    ratchet.actions.headlessMinimum,
+  )
+  requireMaximum(
+    violations,
+    'actions.dmAdjudication',
+    action.effective.dmAdjudication,
+    ratchet.actions.dmAdjudicationMaximum,
+  )
+  requireMaximum(
+    violations,
+    'actions.unstructured',
+    action.effective.unstructured,
+    ratchet.actions.unstructuredMaximum,
+  )
+  requireMaximum(
+    violations,
+    'actions.blockedByChild',
+    action.effective.blockedByChild,
+    ratchet.actions.blockedByChildMaximum,
+  )
+  requireMaximum(
+    violations,
+    'actions.invalid',
+    action.effective.invalid,
+    ratchet.actions.invalidMaximum,
+  )
+  requireExact(
+    violations,
+    'actions.multiattack.total',
+    action.multiattack.total,
+    ratchet.actions.multiattack.total,
+  )
+  requireMinimum(
+    violations,
+    'actions.multiattack.headless',
+    action.multiattack.headless,
+    ratchet.actions.multiattack.headlessMinimum,
+  )
+  requireMaximum(
+    violations,
+    'actions.multiattack.incomplete',
+    action.multiattack.incomplete,
+    ratchet.actions.multiattack.incompleteMaximum,
+  )
+  requireMaximum(
+    violations,
+    'actions.multiattack.unparsed',
+    action.multiattack.unparsed,
+    ratchet.actions.multiattack.unparsedMaximum,
+  )
+  const unprovenActionRows = report.actions.rows.filter((row) =>
+    row.effectiveAutomation === 'headless' &&
+    (row.blockedChildIds.length > 0 || row.reasonCodes.length > 0))
+  requireMaximum(
+    violations,
+    'actions.headlessWithoutExecutableEvidence',
+    unprovenActionRows.length,
+    0,
+  )
+
+  requireExact(violations, 'spells.occurrences', spell.total, ratchet.spells.occurrenceTotal)
+  requireExact(
+    violations,
+    'spells.partition',
+    spell.full + spell.manual + spell.missing,
+    spell.total,
+  )
+  requireMinimum(violations, 'spells.full', spell.full, ratchet.spells.fullMinimum)
+  requireMinimum(
+    violations,
+    'spells.defined',
+    spell.full + spell.manual,
+    ratchet.spells.definedMinimum,
+  )
+  requireMaximum(violations, 'spells.missing', spell.missing, ratchet.spells.missingMaximum)
+  requireMaximum(
+    violations,
+    'spells.fullWithoutDefinition',
+    report.spells.occurrences.filter((row) =>
+      row.compatibility === 'full' && row.definition !== 'present').length,
+    0,
+  )
+
+  requireExact(violations, 'traits.total', trait.total, ratchet.traits.total)
+  requireExact(
+    violations,
+    'traits.partition',
+    trait.headlessWithRule + trait.headlessWithoutRule + trait.dmAdjudication + trait.implicit,
+    trait.total,
+  )
+  requireMinimum(
+    violations,
+    'traits.headlessWithRule',
+    trait.headlessWithRule,
+    ratchet.traits.headlessWithRuleMinimum,
+  )
+  requireMaximum(
+    violations,
+    'traits.headlessWithoutRule',
+    trait.headlessWithoutRule,
+    ratchet.traits.headlessWithoutRuleMaximum,
+  )
+  requireMaximum(
+    violations,
+    'traits.dmAdjudication',
+    trait.dmAdjudication,
+    ratchet.traits.dmAdjudicationMaximum,
+  )
+  requireMaximum(
+    violations,
+    'traits.headlessWithoutExecutableEvidence',
+    report.traits.rows.filter((row) =>
+      row.effectiveAutomation === 'headless-with-rule' &&
+      (row.declaredAutomation !== 'headless' || !row.hasRule)).length,
+    0,
+  )
+
+  return { passed: violations.length === 0, violations }
+}
+
 function actionStructure(action: Dnd5eMonsterAction): Dnd5eMonsterActionStructure {
   if (action.referencedActionId) return 'reference'
   if (action.kind === 'weapon-attack') return 'weapon'

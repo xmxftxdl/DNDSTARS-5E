@@ -29,6 +29,7 @@ async function startServer(
   const distRoot = path.join(sharedRoot, 'dist')
   await mkdir(distRoot, { recursive: true })
   await writeFile(path.join(distRoot, 'index.html'), '<!doctype html><title>stars</title>')
+  await writeFile(path.join(distRoot, 'worker.mjs'), 'export const ready = true\n')
   const proc = spawn(
     process.execPath,
     [serverScript, '--host', HOST, '--port', String(port), '--root', distRoot],
@@ -108,6 +109,16 @@ describe('AC7 — 玩家 PUT 在两种 flag 状态都成功', () => {
   it('flag ON：玩家不能直接写 DM 权威 maps', async () => {
     const res = await putState(onServer.base, 'maps', { maps: [], updatedAt: Date.now() })
     expect(res.status).toBe(401)
+  })
+})
+
+describe('静态模块资源', () => {
+  it('以 JavaScript MIME 返回 .mjs Worker，避免 nosniff 拒绝动态导入', async () => {
+    const response = await fetch(`${offServer.base}/worker.mjs`)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('text/javascript; charset=utf-8')
+    expect(await response.text()).toContain('export const ready')
   })
 })
 
@@ -741,6 +752,16 @@ describe('账号级战役与临时房间协议', () => {
       body: JSON.stringify({ memberId: firstRoom.member.memberId }),
     })).status).toBe(200)
 
+    const leftRoomPreview = await fetch(`${offServer.base}/api/rooms/${firstRoom.roomId}/preview`)
+    expect(leftRoomPreview.status).toBe(200)
+    await expect(leftRoomPreview.json()).resolves.toMatchObject({ hostOnline: false, hostStatus: 'offline' })
+
+    expect((await fetch(`${offServer.base}/api/rooms/${firstRoom.roomId}/close`, {
+      method: 'POST',
+      headers: { ...firstRoomHeaders, 'X-Stars-Account-Token': account.session.sessionToken },
+      body: JSON.stringify({ memberId: firstRoom.member.memberId }),
+    })).status).toBe(200)
+
     const secondRoomResponse = await launch()
     expect(secondRoomResponse.status).toBe(201)
     const secondRoom = await secondRoomResponse.json() as {
@@ -891,7 +912,7 @@ describe('账号级战役与临时房间协议', () => {
       },
     })).status).toBe(404)
 
-    expect((await fetch(`${offServer.base}/api/rooms/${resumed.roomId}/leave`, {
+    expect((await fetch(`${offServer.base}/api/rooms/${resumed.roomId}/close`, {
       method: 'POST',
       headers: {
         ...ownerHeaders,
@@ -2159,7 +2180,7 @@ describe('房间临时内容合集', () => {
     const pluginDirectory = path.join(offServer.sharedRoot, 'lobby', 'plugins', created.roomId)
     expect(await readdir(pluginDirectory)).toHaveLength(1)
 
-    const close = await fetch(`${offServer.base}/api/rooms/${created.roomId}/leave`, {
+    const close = await fetch(`${offServer.base}/api/rooms/${created.roomId}/close`, {
       method: 'POST',
       headers: { ...memberHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({ memberId: created.member.memberId }),
@@ -2376,7 +2397,13 @@ describe('房间大厅协议', () => {
       body: JSON.stringify({
         memberId: created.member.memberId,
         requiredPlugins: [roomPlugin],
-        houseRules: { declarativeAbilityDamageMultiplier: 2 },
+        houseRules: {
+          declarativeAbilityDamageMultiplier: 2,
+          combatBannersEnabled: false,
+          spellAnimationsEnabled: false,
+          spellcastingPrerequisitesEnabled: false,
+          encumbranceEnabled: false,
+        },
       }),
     })
     expect(dmRulesUpdate.status).toBe(200)
@@ -2384,7 +2411,13 @@ describe('房间大厅协议', () => {
     expect(updatedRules).toMatchObject({
       schemaVersion: 1,
       revision: playerRules.revision + 1,
-      houseRules: { declarativeAbilityDamageMultiplier: 2 },
+      houseRules: {
+        declarativeAbilityDamageMultiplier: 2,
+        combatBannersEnabled: false,
+        spellAnimationsEnabled: false,
+        spellcastingPrerequisitesEnabled: false,
+        encumbranceEnabled: false,
+      },
       requiredPlugins: [roomPlugin],
     })
     expect(updatedRules.hash).not.toBe(playerRules.hash)
@@ -2421,7 +2454,7 @@ describe('房间大厅协议', () => {
       { headers: { 'X-Stars-Member': successful[0].member.memberId, 'X-Stars-Room-Token': successful[0].member.roomToken } },
     )).status).toBe(404)
 
-    const closeResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/leave`, {
+    const closeResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/close`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3228,5 +3261,252 @@ describe('room privacy projections and event channel ACLs', () => {
     })).status).toBe(200)
     expect((await post('unregistered-private-channel', dmHeaders, { secret: true })).status).toBe(404)
     expect((await post('player-action-player-to-dm', playerHeaders, { id: 'valid-request', sourceMode: 'dm' })).status).toBe(200)
+  })
+})
+
+describe('账号战役 AI Job V2', () => {
+  it('通过本地 Runner 租约原子提交 PDF 草稿，并在刷新后恢复', async () => {
+    const accountResponse = await fetch(`${offServer.base}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'AI 备团 DM', clientId: 'ai-job-browser-client' }),
+    })
+    expect(accountResponse.status).toBe(201)
+    const account = await accountResponse.json() as {
+      session: { accountId: string; sessionToken: string }
+    }
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Stars-Account-Token': account.session.sessionToken,
+    }
+    const campaignResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'AI 持久化战役', rulesetId: 'dnd5e-2014-srd-5.1' }),
+    })
+    expect(campaignResponse.status).toBe(201)
+    const campaign = await campaignResponse.json() as { campaignId: string }
+    const jobsUrl = `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/ai-jobs`
+    const createResponse = await fetch(jobsUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        schemaVersion: 2,
+        taskKind: 'campaign-analysis',
+        executionMode: 'local-runner',
+        providerId: 'local-bridge',
+        modelId: 'qwen3.5:35b',
+        promptVersion: 'pdf-campaign-analysis-v2',
+        idempotencyKey: 'http-ai-job-request-0001',
+        sourceAssets: [{ assetId: 'pdf-1', name: '模组.pdf', mimeType: 'application/pdf', sizeBytes: 1024 }],
+        input: { depth: 'deep' },
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const created = await createResponse.json() as { job: { jobId: string; revision: number; status: string } }
+    expect(created.job.status).toBe('awaiting-local-runner')
+
+    const leaseResponse = await fetch(`${jobsUrl}/${created.job.jobId}/lease`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ expectedRevision: created.job.revision, runnerId: 'browser-http-runner' }),
+    })
+    expect(leaseResponse.status).toBe(200)
+    const leased = await leaseResponse.json() as {
+      leaseToken: string
+      job: { revision: number; status: string; lease: Record<string, unknown> }
+    }
+    expect(leased.job.status).toBe('running')
+    expect(leased.job.lease).not.toHaveProperty('tokenHash')
+    const duplicateLease = await fetch(`${jobsUrl}/${created.job.jobId}/lease`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ expectedRevision: created.job.revision, runnerId: 'second-browser-runner' }),
+    })
+    expect(duplicateLease.status).toBe(409)
+    await expect(duplicateLease.json()).resolves.toMatchObject({ error: 'ai-job-revision-conflict' })
+
+    const takeoverResponse = await fetch(`${jobsUrl}/${created.job.jobId}/lease`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: leased.job.revision,
+        runnerId: 'browser-http-runner',
+        takeoverOwnedLease: true,
+      }),
+    })
+    expect(takeoverResponse.status).toBe(200)
+    const takeover = await takeoverResponse.json() as {
+      leaseToken: string
+      job: { revision: number; status: string }
+    }
+    expect(takeover.job.status).toBe('running')
+    expect(takeover.leaseToken).not.toBe(leased.leaseToken)
+    const foreignTakeover = await fetch(`${jobsUrl}/${created.job.jobId}/lease`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: takeover.job.revision,
+        runnerId: 'different-browser-runner',
+        takeoverOwnedLease: true,
+      }),
+    })
+    expect(foreignTakeover.status).toBe(409)
+    await expect(foreignTakeover.json()).resolves.toMatchObject({ error: 'ai-job-not-leasable' })
+    const activeDelete = await fetch(`${jobsUrl}/${created.job.jobId}`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ expectedRevision: takeover.job.revision }),
+    })
+    expect(activeDelete.status).toBe(409)
+    await expect(activeDelete.json()).resolves.toMatchObject({ error: 'ai-job-active' })
+    const staleRunnerProgress = await fetch(`${jobsUrl}/${created.job.jobId}/progress`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: takeover.job.revision,
+        leaseToken: leased.leaseToken,
+        progress: { stage: 'analyzing', current: 1, total: 3, message: '旧页面不应继续写入' },
+      }),
+    })
+    expect(staleRunnerProgress.status).toBe(409)
+    await expect(staleRunnerProgress.json()).resolves.toMatchObject({ error: 'invalid-ai-job-lease' })
+
+    const artifact = {
+      schemaVersion: 1,
+      kind: 'pdf-campaign-analysis',
+      payload: {
+        schemaVersion: 1,
+        overview: 'DM 可编辑的分析草稿',
+        documents: [{ name: '模组.pdf', pageCount: 3, extractedCharacters: 500, scannedPages: [] }],
+        analyzedChunks: 1,
+        people: [], relationships: [], locations: [], factions: [], clues: [], scenes: [],
+        encounters: [], importCandidates: [], prepTips: [], warnings: [],
+      },
+    }
+    const resultResponse = await fetch(`${jobsUrl}/${created.job.jobId}/result`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: takeover.job.revision,
+        leaseToken: takeover.leaseToken,
+        artifact,
+      }),
+    })
+    expect(resultResponse.status).toBe(200)
+    const result = await resultResponse.json() as {
+      job: { revision: number; status: string; artifact: { payload: { overview: string } } }
+    }
+    expect(result.job).toMatchObject({ status: 'review-required' })
+    expect(result.job.artifact.payload.overview).toBe('DM 可编辑的分析草稿')
+
+    const invalidEdit = {
+      ...artifact,
+      payload: {
+        ...artifact.payload,
+        people: [{
+          name: '越界人物', description: '', role: '', personality: '', motivation: '', secret: '', voice: '',
+          citations: [{ documentName: '模组.pdf', page: 4 }],
+        }],
+      },
+    }
+    const rejected = await fetch(`${jobsUrl}/${created.job.jobId}/artifact`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ expectedRevision: result.job.revision, artifact: invalidEdit }),
+    })
+    expect(rejected.status).toBe(400)
+    await expect(rejected.json()).resolves.toMatchObject({ error: 'invalid-ai-job-artifact' })
+
+    const listResponse = await fetch(`${jobsUrl}?includeArtifact=1`, { headers })
+    expect(listResponse.status).toBe(200)
+    await expect(listResponse.json()).resolves.toMatchObject({
+      schemaVersion: 2,
+      jobs: [{ jobId: created.job.jobId, status: 'review-required', artifact }],
+    })
+
+    const failedCreateResponse = await fetch(jobsUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        schemaVersion: 2,
+        taskKind: 'campaign-analysis',
+        executionMode: 'local-runner',
+        providerId: 'external-account',
+        modelId: 'external:test-model',
+        promptVersion: 'pdf-campaign-analysis-v2',
+        idempotencyKey: 'http-ai-job-request-failure-0001',
+        sourceAssets: [{ assetId: 'pdf-failure', name: '失败模组.pdf', mimeType: 'application/pdf', sizeBytes: 2048 }],
+        input: { depth: 'quick' },
+      }),
+    })
+    expect(failedCreateResponse.status).toBe(201)
+    const failedCreated = await failedCreateResponse.json() as { job: { jobId: string; revision: number } }
+    const failedLeaseResponse = await fetch(`${jobsUrl}/${failedCreated.job.jobId}/lease`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ expectedRevision: failedCreated.job.revision, runnerId: 'browser-failure-runner' }),
+    })
+    expect(failedLeaseResponse.status).toBe(200)
+    const failedLease = await failedLeaseResponse.json() as { leaseToken: string; job: { revision: number } }
+    const forgedFailureResponse = await fetch(`${jobsUrl}/${failedCreated.job.jobId}/failure`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: failedLease.job.revision,
+        leaseToken: 'forged-local-runner-lease-token-that-is-invalid',
+        failure: { code: 'forged-failure', message: '不应写入' },
+      }),
+    })
+    expect(forgedFailureResponse.status).toBe(409)
+    await expect(forgedFailureResponse.json()).resolves.toMatchObject({ error: 'invalid-ai-job-lease' })
+    const failureResponse = await fetch(`${jobsUrl}/${failedCreated.job.jobId}/failure`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: failedLease.job.revision,
+        leaseToken: failedLease.leaseToken,
+        failure: { code: 'invalid-structured-output', message: '模型返回内容未通过 Host Schema 校验' },
+      }),
+    })
+    expect(failureResponse.status).toBe(200)
+    const failedJob = await failureResponse.json() as { job: { revision: number } }
+    expect(failedJob).toMatchObject({
+      job: {
+        status: 'failed',
+        lease: null,
+        failure: { code: 'invalid-structured-output', message: '模型返回内容未通过 Host Schema 校验' },
+      },
+    })
+
+    const unauthenticatedDelete = await fetch(`${jobsUrl}/${failedCreated.job.jobId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: failedJob.job.revision }),
+    })
+    expect(unauthenticatedDelete.status).toBe(401)
+
+    const failedDelete = await fetch(`${jobsUrl}/${failedCreated.job.jobId}`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ expectedRevision: failedJob.job.revision }),
+    })
+    expect(failedDelete.status).toBe(200)
+    await expect(failedDelete.json()).resolves.toEqual({ deleted: true, jobId: failedCreated.job.jobId })
+
+    const accountFileContents = JSON.parse(await readFile(
+      path.join(offServer.sharedRoot, 'lobby', 'accounts', `${account.session.accountId}.json`),
+      'utf8',
+    )) as { campaigns: Array<{ aiWorkspace?: { jobs?: Array<{ jobId: string }> } }> }
+    expect(accountFileContents.campaigns[0]?.aiWorkspace?.jobs?.[0]?.jobId).toBe(created.job.jobId)
+
+    const reviewDelete = await fetch(`${jobsUrl}/${created.job.jobId}`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ expectedRevision: result.job.revision }),
+    })
+    expect(reviewDelete.status).toBe(200)
+    const emptyListResponse = await fetch(`${jobsUrl}?includeArtifact=1`, { headers })
+    await expect(emptyListResponse.json()).resolves.toMatchObject({ schemaVersion: 2, jobs: [] })
   })
 })

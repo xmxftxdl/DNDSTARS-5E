@@ -170,83 +170,83 @@ export type DeclarativeSubclassDurationV1 =
   | { kind: 'concentration'; rounds: number }
   | { kind: 'permanent' }
 
-export const DND5E_2014_BATTLE_MASTER_MANEUVERS = [
-  'commanders-strike',
-  'disarming-attack',
-  'distracting-strike',
-  'evasive-footwork',
-  'feinting-attack',
-  'goading-attack',
-  'lunging-attack',
-  'maneuvering-attack',
-  'menacing-attack',
-  'parry',
-  'precision-attack',
-  'pushing-attack',
-  'rally',
-  'riposte',
-  'sweeping-attack',
-  'trip-attack',
+export const DND5E_COMBAT_MANEUVER_OPERATIONS = [
+  'ally-reaction-attack',
+  'drop-held-item',
+  'next-ally-advantage',
+  'movement-defense',
+  'next-attack-advantage',
+  'target-attack-disadvantage',
+  'extended-reach',
+  'ally-reposition',
+  'frighten-on-hit',
+  'reaction-damage-reduction',
+  'attack-roll-bonus',
+  'push-on-hit',
+  'temporary-hit-points',
+  'reaction-counterattack',
+  'secondary-target-damage',
+  'prone-on-hit',
 ] as const
 
-export type Dnd5e2014BattleMasterManeuverId =
-  typeof DND5E_2014_BATTLE_MASTER_MANEUVERS[number]
+export type Dnd5eCombatManeuverOperation =
+  typeof DND5E_COMBAT_MANEUVER_OPERATIONS[number]
 
-/**
- * A closed Host semantic. Imported JSON can select one audited 2014 maneuver
- * implementation, but cannot supply code or alter its settlement rules.
- */
-export interface DeclarativeBattleMasterMechanicV1 {
-  kind: 'battle-master-2014'
-  maneuver: Dnd5e2014BattleMasterManeuverId
+/** A closed, content-neutral Host operation selected by imported data. */
+export interface DeclarativeCombatManeuverMechanicV1 {
+  kind: 'combat-maneuver'
+  operation: Dnd5eCombatManeuverOperation
   resourceId: string
   superiorityRollId: string
 }
 
-export const DND5E_2014_ELDRITCH_KNIGHT_FEATURES = [
-  'weapon-bond',
-  'war-magic',
-  'eldritch-strike',
-  'arcane-charge',
-  'improved-war-magic',
+export const DND5E_MARTIAL_SPELL_SYNERGY_OPERATIONS = [
+  'linked-equipment',
+  'cantrip-then-bonus-attack',
+  'weapon-hit-save-pressure',
+  'extra-action-teleport',
+  'spell-then-bonus-attack',
 ] as const
 
-export type Dnd5e2014EldritchKnightFeatureId =
-  typeof DND5E_2014_ELDRITCH_KNIGHT_FEATURES[number]
+export type Dnd5eMartialSpellSynergyOperation =
+  typeof DND5E_MARTIAL_SPELL_SYNERGY_OPERATIONS[number]
 
-/**
- * Closed Host semantics for the 2014 Eldritch Knight. Imported JSON only
- * identifies the audited feature; executable behavior remains in Headless.
- */
-export interface DeclarativeEldritchKnightMechanicV1 {
-  kind: 'eldritch-knight-2014'
-  feature: Dnd5e2014EldritchKnightFeatureId
+/** Closed content-neutral martial/spell interoperability operations. */
+export interface DeclarativeMartialSpellSynergyMechanicV1 {
+  kind: 'martial-spell-synergy'
+  operation: Dnd5eMartialSpellSynergyOperation
+  linkedEquipmentLimit?: number
+  recallEconomy?: 'bonusAction'
+  teleportRangeFeet?: number
 }
 
-export const DND5E_2014_TOTEM_WARRIOR_FEATURES = [
-  'spirit-seeker',
-  'totem-spirit-bear',
-  'totem-spirit-eagle',
-  'totem-spirit-wolf',
-  'aspect-of-the-beast-bear',
-  'aspect-of-the-beast-eagle',
-  'aspect-of-the-beast-wolf',
-  'spirit-walker',
-  'totemic-attunement-bear',
-  'totemic-attunement-eagle',
-  'totemic-attunement-wolf',
+export const DND5E_RAGE_FEATURE_OPERATIONS = [
+  'exploration-rituals',
+  'broad-rage-resistance',
+  'rage-mobile-defense',
+  'ally-melee-advantage-aura',
+  'object-strength-and-carrying',
+  'long-range-vision',
+  'travel-tracking',
+  'nature-communion-ritual',
+  'ally-protection-aura',
+  'turn-flight',
+  'bonus-prone-on-hit',
 ] as const
 
-export type Dnd5e2014TotemWarriorFeatureId =
-  typeof DND5E_2014_TOTEM_WARRIOR_FEATURES[number]
+export type Dnd5eRageFeatureOperation =
+  typeof DND5E_RAGE_FEATURE_OPERATIONS[number]
 
-/**
- * Closed Host semantics for the 2014 Totem Warrior. Local JSON chooses only
- * an audited feature identifier; all combat behavior remains in Headless.
- */
-export interface DeclarativeTotemWarriorMechanicV1 {
-  kind: 'totem-warrior-2014'
-  feature: Dnd5e2014TotemWarriorFeatureId
+/** Closed content-neutral rage operations selected by imported data. */
+export interface DeclarativeRageFeatureMechanicV1 {
+  kind: 'rage-feature'
+  operation: Dnd5eRageFeatureOperation
+  radiusFeet?: number
+  excludedDamageTypes?: readonly Dnd5eDamageType[]
+  requiresNoHeavyArmor?: boolean
+  speedMultiplier?: number
+  carryingCapacityMultiplier?: number
+  maximumTargetSizeRank?: number
 }
 
 /**
@@ -350,6 +350,30 @@ export interface DeclarativePostSpellRandomTableMechanicV1 {
 }
 
 /**
+ * Passive modifier for another declarative random-table ability in the same
+ * subclass. The Host rolls every candidate and the owning player chooses one;
+ * imported data never supplies dice or executable selection code.
+ */
+export interface DeclarativePostSpellRandomTableChoiceMechanicV1 {
+  kind: 'post-spell-random-table-choice'
+  tableAbilityId: string
+  rollCount: number
+}
+
+/**
+ * Generic passive spell-damage rider. After a qualifying class spell rolls at
+ * least one maximum-valued damage die, the Host may roll the declared number
+ * of extra dice with the selected die's sides and bind them to that damage
+ * group. The authoritative cast transaction validates both the maximum die
+ * and the once-per-turn ledger before applying the bonus.
+ */
+export interface DeclarativeSpellDamageMaxDieBonusMechanicV1 {
+  kind: 'spell-damage-max-die-bonus'
+  spellcastingClassId: Dnd5eClassId
+  additionalDice: number
+}
+
+/**
  * Pure-data subclass ability protocol. Imported packages never supply a resolver;
  * the Host compiles supported declarations into its whitelisted Headless executor.
  */
@@ -368,9 +392,9 @@ export interface DeclarativeSubclassAbilityV1 {
   limits?: DeclarativeSubclassLimitsV1
   duration?: DeclarativeSubclassDurationV1
   mechanic?:
-    | DeclarativeBattleMasterMechanicV1
-    | DeclarativeEldritchKnightMechanicV1
-    | DeclarativeTotemWarriorMechanicV1
+    | DeclarativeCombatManeuverMechanicV1
+    | DeclarativeMartialSpellSynergyMechanicV1
+    | DeclarativeRageFeatureMechanicV1
     | DeclarativeOpeningAttackMechanicV1
     | DeclarativeHiddenSpellSaveDisadvantageMechanicV1
     | DeclarativeUtilityProjectionControlMechanicV1
@@ -378,6 +402,8 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeNextD20AdvantageMechanicV1
     | DeclarativePostD20AdjustmentMechanicV1
     | DeclarativePostSpellRandomTableMechanicV1
+    | DeclarativePostSpellRandomTableChoiceMechanicV1
+    | DeclarativeSpellDamageMaxDieBonusMechanicV1
   /**
    * Opens the post-result reaction window when an enemy succeeds on a d20.
    * This is only an eligibility declaration; the Host and DM still validate
@@ -699,23 +725,83 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
   }
   if (value.mechanic != null) {
     if (!record(value.mechanic)) throw new Error(`${path}机械协议无效`)
-    if (value.mechanic.kind === 'battle-master-2014') {
-      assertKeys(value.mechanic, ['kind', 'maneuver', 'resourceId', 'superiorityRollId'], `${path}机械协议`)
-      if (!DND5E_2014_BATTLE_MASTER_MANEUVERS.includes(
-        value.mechanic.maneuver as Dnd5e2014BattleMasterManeuverId,
-      )) throw new Error(`${path}战斗大师战技协议无效`)
+    if (value.mechanic.kind === 'combat-maneuver') {
+      assertKeys(value.mechanic, ['kind', 'operation', 'resourceId', 'superiorityRollId'], `${path}机械协议`)
+      if (!DND5E_COMBAT_MANEUVER_OPERATIONS.includes(
+        value.mechanic.operation as Dnd5eCombatManeuverOperation,
+      )) throw new Error(`${path}战技操作协议无效`)
       assertId(value.mechanic.resourceId, `${path}战技资源`)
       assertId(value.mechanic.superiorityRollId, `${path}卓越骰`)
-    } else if (value.mechanic.kind === 'eldritch-knight-2014') {
-      assertKeys(value.mechanic, ['kind', 'feature'], `${path}机械协议`)
-      if (!DND5E_2014_ELDRITCH_KNIGHT_FEATURES.includes(
-        value.mechanic.feature as Dnd5e2014EldritchKnightFeatureId,
-      )) throw new Error(`${path}奥法骑士特性协议无效`)
-    } else if (value.mechanic.kind === 'totem-warrior-2014') {
-      assertKeys(value.mechanic, ['kind', 'feature'], `${path}机械协议`)
-      if (!DND5E_2014_TOTEM_WARRIOR_FEATURES.includes(
-        value.mechanic.feature as Dnd5e2014TotemWarriorFeatureId,
-      )) throw new Error(`${path}图腾武者特性协议无效`)
+    } else if (value.mechanic.kind === 'martial-spell-synergy') {
+      assertKeys(value.mechanic, [
+        'kind', 'operation', 'linkedEquipmentLimit', 'recallEconomy', 'teleportRangeFeet',
+      ], `${path}机械协议`)
+      if (!DND5E_MARTIAL_SPELL_SYNERGY_OPERATIONS.includes(
+        value.mechanic.operation as Dnd5eMartialSpellSynergyOperation,
+      )) throw new Error(`${path}武法协同操作协议无效`)
+      if (value.mechanic.operation === 'linked-equipment') {
+        if (!finiteInteger(value.mechanic.linkedEquipmentLimit, 1, 32) ||
+          value.mechanic.recallEconomy !== 'bonusAction') {
+          throw new Error(`${path}联结装备配置无效`)
+        }
+      } else if (value.mechanic.linkedEquipmentLimit != null || value.mechanic.recallEconomy != null) {
+        throw new Error(`${path}仅联结装备操作可声明联结配置`)
+      }
+      if (value.mechanic.operation === 'extra-action-teleport') {
+        if (!finiteInteger(value.mechanic.teleportRangeFeet, 1, 1_000)) {
+          throw new Error(`${path}额外动作传送距离无效`)
+        }
+      } else if (value.mechanic.teleportRangeFeet != null) {
+        throw new Error(`${path}仅额外动作传送可声明距离`)
+      }
+    } else if (value.mechanic.kind === 'rage-feature') {
+      assertKeys(value.mechanic, [
+        'kind', 'operation', 'radiusFeet', 'excludedDamageTypes', 'requiresNoHeavyArmor',
+        'speedMultiplier', 'carryingCapacityMultiplier', 'maximumTargetSizeRank',
+      ], `${path}机械协议`)
+      if (!DND5E_RAGE_FEATURE_OPERATIONS.includes(
+        value.mechanic.operation as Dnd5eRageFeatureOperation,
+      )) throw new Error(`${path}狂暴特性操作协议无效`)
+      if (value.mechanic.radiusFeet != null && !finiteInteger(value.mechanic.radiusFeet, 0, 1_000)) {
+        throw new Error(`${path}狂暴特性半径无效`)
+      }
+      if (value.mechanic.excludedDamageTypes != null && (
+        !Array.isArray(value.mechanic.excludedDamageTypes) ||
+        value.mechanic.excludedDamageTypes.some((type) => !DAMAGE_TYPES.has(String(type)))
+      )) throw new Error(`${path}狂暴特性排除伤害类型无效`)
+      if (value.mechanic.requiresNoHeavyArmor != null &&
+        typeof value.mechanic.requiresNoHeavyArmor !== 'boolean') {
+        throw new Error(`${path}狂暴特性护甲限制无效`)
+      }
+      for (const [field, minimum, maximum] of [
+        ['speedMultiplier', 1, 10],
+        ['carryingCapacityMultiplier', 1, 100],
+        ['maximumTargetSizeRank', 0, 5],
+      ] as const) {
+        const configured = value.mechanic[field]
+        if (configured != null && !finiteInteger(configured, minimum, maximum)) {
+          throw new Error(`${path}狂暴特性数值配置无效`)
+        }
+      }
+      const requiredFieldByOperation: Partial<Record<Dnd5eRageFeatureOperation, keyof DeclarativeRageFeatureMechanicV1>> = {
+        'broad-rage-resistance': 'excludedDamageTypes',
+        'rage-mobile-defense': 'speedMultiplier',
+        'ally-melee-advantage-aura': 'radiusFeet',
+        'object-strength-and-carrying': 'carryingCapacityMultiplier',
+        'ally-protection-aura': 'radiusFeet',
+        'turn-flight': 'speedMultiplier',
+        'bonus-prone-on-hit': 'maximumTargetSizeRank',
+      }
+      const requiredField = requiredFieldByOperation[
+        value.mechanic.operation as Dnd5eRageFeatureOperation
+      ]
+      if (requiredField && value.mechanic[requiredField] == null) {
+        throw new Error(`${path}狂暴特性缺少 ${requiredField} 配置`)
+      }
+      if (value.mechanic.operation === 'rage-mobile-defense' &&
+        typeof value.mechanic.requiresNoHeavyArmor !== 'boolean') {
+        throw new Error(`${path}狂暴移动防御缺少护甲限制配置`)
+      }
     } else if (value.mechanic.kind === 'opening-attack') {
       assertKeys(
         value.mechanic,
@@ -889,6 +975,28 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
           }
         }
       }
+    } else if (value.mechanic.kind === 'post-spell-random-table-choice') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'tableAbilityId', 'rollCount'],
+        `${path} post-spell-random-table-choice mechanic`,
+      )
+      assertId(value.mechanic.tableAbilityId, `${path} random table ability`)
+      if (
+        !finiteInteger(value.mechanic.rollCount, 2, 8) ||
+        value.trigger.kind !== 'after-spell-cast'
+      ) throw new Error(`${path} post-spell random table choice declaration is invalid`)
+    } else if (value.mechanic.kind === 'spell-damage-max-die-bonus') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'spellcastingClassId', 'additionalDice'],
+        `${path} spell-damage-max-die-bonus mechanic`,
+      )
+      if (
+        !CLASS_IDS.has(value.mechanic.spellcastingClassId as Dnd5eClassId) ||
+        !finiteInteger(value.mechanic.additionalDice, 1, 8) ||
+        value.trigger.kind !== 'after-spell-cast'
+      ) throw new Error(`${path} spell damage maximum die bonus declaration is invalid`)
     } else {
       throw new Error(`${path}机械协议无效`)
     }
@@ -980,7 +1088,7 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
   ) throw new Error(`${path}效果无效`)
   for (const effect of value.effects) validateEffect(effect, rollIds, `${path}效果`)
   if (
-    value.mechanic?.kind === 'battle-master-2014' &&
+    value.mechanic?.kind === 'combat-maneuver' &&
     !rollIds.has(String(value.mechanic.superiorityRollId))
   ) {
     throw new Error(`${path}战技协议引用了未声明卓越骰`)
@@ -1317,6 +1425,20 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
     }
   }
   for (const ability of value.abilities as DeclarativeSubclassAbilityV1[]) {
+    const choiceMechanic = ability.mechanic?.kind === 'post-spell-random-table-choice'
+      ? ability.mechanic
+      : undefined
+    if (choiceMechanic) {
+      const tableAbility = (value.abilities as DeclarativeSubclassAbilityV1[]).find(
+        (candidate) => candidate.id === choiceMechanic.tableAbilityId,
+      )
+      if (
+        tableAbility?.mechanic?.kind !== 'post-spell-random-table' ||
+        ability.level < tableAbility.level
+      ) {
+        throw new Error(`${path}能力 ${ability.id} 引用了无效的施法后随机表能力`)
+      }
+    }
     for (const choice of ability.predicates?.subclassChoices ?? []) {
       const options = choiceOptionsByGroupId.get(choice.groupId)
       if (!options?.has(choice.optionId)) {
@@ -1333,7 +1455,7 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
           ? [roll.hostRoll.die.resourceId]
           : []
       ),
-      ...(ability.mechanic?.kind === 'battle-master-2014' ? [ability.mechanic.resourceId] : []),
+      ...(ability.mechanic?.kind === 'combat-maneuver' ? [ability.mechanic.resourceId] : []),
       ...ability.effects.flatMap((effect) => effect.kind === 'spend-resource' || effect.kind === 'restore-resource' ? [effect.resourceId] : []),
     ]
     const missing = referenced.find((resourceId) => !resourceIds.has(resourceId))
@@ -1346,7 +1468,7 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
           !roll.hostRoll ||
           (
             ability.trigger.kind !== 'after-attack-hit' &&
-            ability.mechanic?.kind !== 'battle-master-2014'
+            ability.mechanic?.kind !== 'combat-maneuver'
           )
         )
       ) {
@@ -1374,9 +1496,9 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
 
 export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAbilityV1): DeclarativeAbilityCompatibilityEntryV1 {
   const reasons: string[] = []
-  const auditedBattleMaster = ability.mechanic?.kind === 'battle-master-2014'
-  const auditedEldritchKnight = ability.mechanic?.kind === 'eldritch-knight-2014'
-  const auditedTotemWarrior = ability.mechanic?.kind === 'totem-warrior-2014'
+  const auditedCombatManeuver = ability.mechanic?.kind === 'combat-maneuver'
+  const auditedMartialSpellSynergy = ability.mechanic?.kind === 'martial-spell-synergy'
+  const auditedRageFeature = ability.mechanic?.kind === 'rage-feature'
   const auditedOpeningAttack = ability.mechanic?.kind === 'opening-attack'
   const auditedHiddenSpellSave =
     ability.mechanic?.kind === 'hidden-spell-save-disadvantage'
@@ -1387,10 +1509,15 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   const auditedPostD20Adjustment = ability.mechanic?.kind === 'post-d20-adjustment'
   const auditedPostSpellRandomTable =
     ability.mechanic?.kind === 'post-spell-random-table'
-  const auditedMechanic = auditedBattleMaster || auditedEldritchKnight ||
-    auditedTotemWarrior || auditedOpeningAttack || auditedHiddenSpellSave ||
+  const auditedPostSpellRandomTableChoice =
+    ability.mechanic?.kind === 'post-spell-random-table-choice'
+  const auditedSpellDamageMaxDieBonus =
+    ability.mechanic?.kind === 'spell-damage-max-die-bonus'
+  const auditedMechanic = auditedCombatManeuver || auditedMartialSpellSynergy ||
+    auditedRageFeature || auditedOpeningAttack || auditedHiddenSpellSave ||
     auditedUtilityProjection || auditedNextD20 || auditedPostD20Adjustment ||
-    auditedPostSpellRandomTable
+    auditedPostSpellRandomTable || auditedPostSpellRandomTableChoice ||
+    auditedSpellDamageMaxDieBonus
   if (ability.canModifyEnemyD20) {
     reasons.push('改变敌方 d20 需要玩家声明并由 DM 在投掷后 Interrupt 窗口确认')
   }
@@ -1473,39 +1600,39 @@ export function declarativeSubclassCompatibilityReportV1(
         hook.decision === 'actor-choice' &&
         (
           ability.trigger.kind === 'after-attack-hit' ||
-          ability.mechanic?.kind === 'battle-master-2014'
+          ability.mechanic?.kind === 'combat-maneuver'
         )
       )
       if (
         hasHostRollRecipe &&
-        ability.mechanic?.kind !== 'battle-master-2014' &&
+        ability.mechanic?.kind !== 'combat-maneuver' &&
         ability.trigger.kind !== 'active-use' &&
         !hasSupportedPrearmHook
       ) {
         reasons.push('Host 掷骰配方当前只支持主动能力或绑定到 actor-choice 的命中后预激活钩子')
       }
       for (const hook of abilityHooks) {
-        const auditedEldritchKnightHook =
-          ability.mechanic?.kind === 'eldritch-knight-2014' &&
+        const auditedMartialSpellSynergyHook =
+          ability.mechanic?.kind === 'martial-spell-synergy' &&
           hook.activation === 'automatic' &&
           hook.decision === 'automatic' &&
           (
-            (ability.mechanic.feature === 'eldritch-strike' && hook.timing === 'after-attack-hit') ||
+            (ability.mechanic.operation === 'weapon-hit-save-pressure' && hook.timing === 'after-attack-hit') ||
             (
-              (ability.mechanic.feature === 'war-magic' ||
-                ability.mechanic.feature === 'improved-war-magic') &&
+              (ability.mechanic.operation === 'cantrip-then-bonus-attack' ||
+                ability.mechanic.operation === 'spell-then-bonus-attack') &&
               hook.timing === 'spell-cast'
             )
           )
-        const auditedTotemWarriorHook =
-          ability.mechanic?.kind === 'totem-warrior-2014' &&
+        const auditedRageFeatureHook =
+          ability.mechanic?.kind === 'rage-feature' &&
           hook.activation === 'automatic' &&
           hook.decision === 'automatic'
-        const directlyExecutable = auditedEldritchKnightHook || auditedTotemWarriorHook ||
+        const directlyExecutable = auditedMartialSpellSynergyHook || auditedRageFeatureHook ||
           (
             hook.timing === 'after-attack-hit' ||
             (
-              ability.mechanic?.kind === 'battle-master-2014' &&
+              ability.mechanic?.kind === 'combat-maneuver' &&
               ['before-attack-roll', 'after-attack-roll'].includes(hook.timing)
             )
           ) &&
@@ -1516,7 +1643,7 @@ export function declarativeSubclassCompatibilityReportV1(
           ) &&
           (
             ability.trigger.kind === 'after-attack-hit' ||
-            ability.mechanic?.kind === 'battle-master-2014'
+            ability.mechanic?.kind === 'combat-maneuver'
           )
         if (!directlyExecutable) {
           reasons.push(`战斗钩子 ${hook.id}（${hook.timing}/${hook.decision}）已注册，但尚未接入权威事件决策窗口`)

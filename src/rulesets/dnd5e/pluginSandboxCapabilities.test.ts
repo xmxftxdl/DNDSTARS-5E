@@ -28,6 +28,88 @@ function combatant(id: string, initiative: number, controller: 'dm' | 'player', 
 }
 
 describe('D&D 5e plugin Worker capability application', () => {
+  it('previews and atomically settles a non-hover flyer dropped by a Worker condition', () => {
+    const pluginId = 'com.example.worker-fall'
+    const featureId = `${pluginId}:trip`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Worker fall', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'trip', execution: 'worker' })
+        api.registerFeature({
+          id: 'trip', name: 'Trip', summary: 'Trip', description: 'Trip', automation: 'full',
+          action: {
+            id: 'trip', label: 'Trip', economy: 'action',
+            targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 30 },
+          },
+        })
+      },
+    })
+    try {
+      const actor = combatant('actor', 20, 'player', [featureId])
+      const flyer = combatant('flyer', 10, 'dm')
+      flyer.position = { x: 5, y: 0 }
+      flyer.elevationFeet = 30
+      flyer.groundElevationFeet = 0
+      flyer.airborne = true
+      flyer.movementSpeeds = { walk: 30, fly: 60 }
+      const state = startDnd5eHeadlessCombat('worker-fall', [actor, flyer])
+      const action = {
+        type: 'plugin' as const,
+        pluginId,
+        actionId: 'trip',
+        featureId,
+        actorId: actor.id,
+        targetId: flyer.id,
+        distanceFeet: 5,
+      }
+      const operations = [{
+        kind: 'apply-standard-condition' as const,
+        targetId: flyer.id,
+        condition: 'prone' as const,
+        duration: { expiresAt: 'target-turn-end' as const, remainingRounds: 1 },
+      }]
+
+      const preview = resolveDnd5eSandboxedPluginCapabilities(state, action, operations)
+      expect(preview).toMatchObject({
+        ok: false,
+        reason: 'invalid-dice',
+        airborneFalls: [{
+          combatantId: flyer.id,
+          fromElevationFeet: 30,
+          groundElevationFeet: 0,
+          fallDistanceFeet: 30,
+          fallingDamageDice: 3,
+        }],
+      })
+      expect(state.combatants.flyer).toMatchObject({
+        currentHp: 20, elevationFeet: 30, airborne: true, conditions: [],
+      })
+      expect(state.combatants.actor.turn.actionAvailable).toBe(true)
+
+      const settled = resolveDnd5eSandboxedPluginCapabilities(
+        state,
+        action,
+        operations,
+        { [flyer.id]: [2, 3, 4] },
+      )
+      expect(settled.ok, settled.ok ? undefined : settled.reason).toBe(true)
+      expect(settled.airborneFalls).toBeUndefined()
+      expect(settled.state.combatants.flyer).toMatchObject({
+        currentHp: 11,
+        elevationFeet: 0,
+        groundElevationFeet: 0,
+        airborne: false,
+      })
+      expect(settled.state.combatants.flyer.conditions).toContain('prone')
+      expect(settled.state.combatants.actor.turn.actionAvailable).toBe(false)
+    } finally {
+      dispose()
+    }
+  })
+
   it('spends and restores only resources declared by the same plugin', () => {
     const pluginId = 'com.example.resources'
     let resourceId = ''

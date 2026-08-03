@@ -3,6 +3,7 @@ import {
   clearDnd5eEffectiveRulesContextsForTest,
   createDnd5eEffectiveRulesContextV1,
   dnd5eEffectiveRulesContextForCombat,
+  normalizeDnd5eHouseRulesV1,
   restoreDnd5eEffectiveRulesContextForCombat,
 } from './effectiveRulesContext'
 
@@ -40,5 +41,25 @@ describe('effective combat rules persistence', () => {
       houseRules: {},
       requiredPlugins: [{ id: '', version: '1.0.0' }],
     })).toBeNull()
+  })
+
+  it('defaults optional presentation and validation switches on and preserves explicit opt-outs', () => {
+    expect(normalizeDnd5eHouseRulesV1({})).toMatchObject({
+      combatBannersEnabled: true,
+      spellAnimationsEnabled: true,
+      spellcastingPrerequisitesEnabled: true,
+      encumbranceEnabled: true,
+    })
+    expect(normalizeDnd5eHouseRulesV1({
+      combatBannersEnabled: false,
+      spellAnimationsEnabled: false,
+      spellcastingPrerequisitesEnabled: false,
+      encumbranceEnabled: false,
+    })).toMatchObject({
+      combatBannersEnabled: false,
+      spellAnimationsEnabled: false,
+      spellcastingPrerequisitesEnabled: false,
+      encumbranceEnabled: false,
+    })
   })
 })

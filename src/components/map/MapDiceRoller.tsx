@@ -4,9 +4,11 @@ import { ABILITIES, SKILLS } from '../../lib/dnd'
 import type { Dnd5eAbilityCheckPayload, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import {
   dnd5eAbilityCheckModifier,
+  dnd5eCharacterClassLevel,
+  dnd5eTotalCharacterLevel,
   dnd5eSkillCheckModifier,
   dnd5eSkillCheckProficiencyRank,
-  dnd5eTotemWarriorFeatureForCharacter,
+  dnd5eRageFeatureForCharacter,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 
@@ -56,6 +58,7 @@ export default function MapDiceRoller({
   const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
   const [spendAction, setSpendAction] = useState(false)
   const [bearAspectTask, setBearAspectTask] = useState(false)
+  const [draconicInteraction, setDraconicInteraction] = useState(false)
 
   const selectedCheck = useMemo(() => {
     if (!character) return undefined
@@ -82,7 +85,21 @@ export default function MapDiceRoller({
     character != null &&
     selectedCheck?.ability === 'str' &&
     selectedCheck.skill == null &&
-    !!dnd5eTotemWarriorFeatureForCharacter(character, 'aspect-of-the-beast-bear')
+    !!dnd5eRageFeatureForCharacter(character, 'object-strength-and-carrying')
+  const selectedProficiencyRank = character && selectedCheck?.skill
+    ? dnd5eSkillCheckProficiencyRank(character, selectedCheck.skill)
+    : 0
+  const draconicInteractionAvailable =
+    character != null &&
+    selectedCheck?.ability === 'cha' &&
+    selectedProficiencyRank === 1 &&
+    dnd5eCharacterClassLevel(character, 'sorcerer') >= 1 &&
+    character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
+  const draconicInteractionBonus =
+    draconicInteractionAvailable && draconicInteraction && selectedProficiencyRank === 1
+      ? 2 + Math.floor((dnd5eTotalCharacterLevel(character!) - 1) / 4)
+      : 0
+  const selectedCheckModifier = (selectedCheck?.modifier ?? 0) + draconicInteractionBonus
   const checkDisabled = !selectedCheck || !canCheck || pending || (spendAction && turnEconomy.action.current < 1)
 
   const roll = async () => {
@@ -203,6 +220,16 @@ export default function MapDiceRoller({
                       熊之形：本次力量检定用于推、拉、举起或破坏物体
                     </label>
                   ) : null}
+                  {draconicInteractionAvailable ? (
+                    <label className="mt-2 flex items-center gap-2 text-[11px] text-amber-200">
+                      <input
+                        type="checkbox"
+                        checked={draconicInteraction}
+                        onChange={(event) => setDraconicInteraction(event.target.checked)}
+                      />
+                      龙族先祖：本次魅力检定用于与龙类互动
+                    </label>
+                  ) : null}
                   {!canCheck && <p className="mt-2 text-[11px] text-amber-300/80">只有当前获得行动权的玩家角色可以提交 Headless 鉴定。</p>}
                   <button
                     type="button"
@@ -212,13 +239,15 @@ export default function MapDiceRoller({
                       skill: selectedCheck.skill,
                       context: bearAspectAvailable && bearAspectTask
                         ? 'push-pull-lift-break'
-                        : undefined,
+                        : draconicInteractionAvailable && draconicInteraction
+                          ? 'interact-with-dragons'
+                          : undefined,
                       dc,
                       mode,
                       spendAction: spendAction || undefined,
                     })}
                     className="mt-3 w-full rounded-xl bg-cyan-500/20 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35 disabled:cursor-not-allowed disabled:opacity-40"
-                  >{pending ? '等待 DM 结算…' : `进行${selectedCheck.label}（${selectedCheck.modifier >= 0 ? '+' : ''}${selectedCheck.modifier}）· DC ${dc}`}</button>
+                  >{pending ? '等待 DM 结算…' : `进行${selectedCheck.label}（${selectedCheckModifier >= 0 ? '+' : ''}${selectedCheckModifier}）· DC ${dc}`}</button>
                 </>
               ) : <p className="rounded-xl border border-amber-300/15 bg-amber-500/[0.06] p-3 text-xs leading-5 text-amber-100/80">请先选择一个已加入地图的玩家角色。</p>}
             </div>

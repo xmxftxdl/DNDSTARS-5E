@@ -127,4 +127,57 @@ describe('RoomCommandBus', () => {
     await expect(bus.dispatch(command)).rejects.toThrow('retry')
     await expect(bus.dispatch(command)).resolves.toBe(9)
   })
+
+  it('keeps only the latest queued value without changing aggregate order', async () => {
+    const events: string[] = []
+    const resolvers = new Map<number, () => void>()
+    const bus = new RoomCommandBus<TestCommand, number>(async (command) => {
+      events.push(`start:${command.value}`)
+      await new Promise<void>((resolve) => resolvers.set(command.value, resolve))
+      events.push(`end:${command.value}`)
+      return command.value
+    })
+
+    const first = bus.dispatch({ id: 'one', type: 'test', aggregateId: 'room:a', issuedAt: 1, value: 1 })
+    const stale = bus.dispatchLatest(
+      { id: 'two', type: 'test', aggregateId: 'room:a', issuedAt: 2, value: 2 },
+      'latest:room:a',
+    )
+    const latest = bus.dispatchLatest(
+      { id: 'three', type: 'test', aggregateId: 'room:a', issuedAt: 3, value: 3 },
+      'latest:room:a',
+    )
+    const after = bus.dispatch({ id: 'four', type: 'test', aggregateId: 'room:a', issuedAt: 4, value: 4 })
+    const newest = bus.dispatchLatest(
+      { id: 'five', type: 'test', aggregateId: 'room:a', issuedAt: 5, value: 5 },
+      'latest:room:a',
+    )
+
+    expect(stale).toBe(latest)
+    expect(newest).not.toBe(latest)
+    expect(events).toEqual(['start:1'])
+    resolvers.get(1)?.()
+    await expect(first).resolves.toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toEqual(['start:1', 'end:1', 'start:3'])
+
+    resolvers.get(3)?.()
+    await expect(Promise.all([stale, latest])).resolves.toEqual([3, 3])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toEqual(['start:1', 'end:1', 'start:3', 'end:3', 'start:4'])
+
+    resolvers.get(4)?.()
+    await expect(after).resolves.toBe(4)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toEqual([
+      'start:1', 'end:1',
+      'start:3', 'end:3',
+      'start:4', 'end:4',
+      'start:5',
+    ])
+
+    resolvers.get(5)?.()
+    await expect(newest).resolves.toBe(5)
+    expect(events).not.toContain('start:2')
+  })
 })

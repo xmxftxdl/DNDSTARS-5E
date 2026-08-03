@@ -1,49 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { auditDnd5eMonsterHeadlessCoverage } from './monsterHeadlessCoverage'
+import {
+  auditDnd5eMonsterHeadlessCoverage,
+  DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET,
+  verifyDnd5eMonsterHeadlessCoverageRatchet,
+} from './monsterHeadlessCoverage'
 import {
   DND5E_SRD_MONSTERS,
   dnd5eMonsterAreaSavingThrowVariants,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
 
-const ACTION_BASELINE = {
-  total: 1055,
-  headlessMinimum: 877,
-  dmAdjudicationMaximum: 32,
-  unstructuredMaximum: 146,
-  blockedByChildMaximum: 0,
-  multiattackTotal: 240,
-  multiattackHeadlessMinimum: 240,
-  multiattackIncompleteMaximum: 0,
-  unparsedMultiattackMaximum: 0,
-} as const
-
-const SPELL_OCCURRENCE_BASELINE = {
-  total: 313,
-  fullMinimum: 40,
-  // A prose-only definition is still forward progress from a missing spell,
-  // even though it must remain manual until its map choices are structured.
-  // Ratchet the combined defined set so missing -> manual -> full is monotonic.
-  definedMinimum: 147,
-  missingMaximum: 166,
-} as const
-
-const TRAIT_BASELINE = {
-  total: 551,
-  // Relentless, Petrifying Gaze, Blood Frenzy, Surprise Attack,
-  // Doppelganger Ambusher, Reckless and Marilith Reactive are authoritative.
-  headlessWithRuleMinimum: 104,
-  dmAdjudicationMaximum: 447,
-} as const
-
 describe('D&D 5e monster Headless coverage audit', () => {
   it('keeps the complete SRD catalog on a monotonic Headless coverage ratchet', () => {
     const report = auditDnd5eMonsterHeadlessCoverage()
     const effective = report.actions.summary.effective
     const spells = report.spells.summary
+    const ratchet = DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET
 
-    expect(report.monsterCount).toBe(334)
-    expect(report.actions.summary.total).toBe(ACTION_BASELINE.total)
+    expect(verifyDnd5eMonsterHeadlessCoverageRatchet(report)).toEqual({
+      passed: true,
+      violations: [],
+    })
+    expect(report.monsterCount).toBe(ratchet.monsterCount)
+    expect(report.actions.summary.total).toBe(ratchet.actions.total)
     expect(
       effective.headless +
       effective.dmAdjudication +
@@ -51,35 +30,35 @@ describe('D&D 5e monster Headless coverage audit', () => {
       effective.blockedByChild +
       effective.invalid,
     ).toBe(report.actions.summary.total)
-    expect(effective.headless).toBeGreaterThanOrEqual(ACTION_BASELINE.headlessMinimum)
-    expect(effective.dmAdjudication).toBeLessThanOrEqual(ACTION_BASELINE.dmAdjudicationMaximum)
-    expect(effective.unstructured).toBeLessThanOrEqual(ACTION_BASELINE.unstructuredMaximum)
-    expect(effective.blockedByChild).toBeLessThanOrEqual(ACTION_BASELINE.blockedByChildMaximum)
+    expect(effective.headless).toBeGreaterThanOrEqual(ratchet.actions.headlessMinimum)
+    expect(effective.dmAdjudication).toBeLessThanOrEqual(ratchet.actions.dmAdjudicationMaximum)
+    expect(effective.unstructured).toBeLessThanOrEqual(ratchet.actions.unstructuredMaximum)
+    expect(effective.blockedByChild).toBeLessThanOrEqual(ratchet.actions.blockedByChildMaximum)
     expect(effective.invalid).toBe(0)
     expect(report.actions.rows
       .filter((row) => row.effectiveAutomation === 'headless')
       .every((row) => row.blockedChildIds.length === 0 && row.reasonCodes.length === 0))
       .toBe(true)
     expect(report.actions.summary.multiattack).toEqual({
-      total: ACTION_BASELINE.multiattackTotal,
-      headless: ACTION_BASELINE.multiattackHeadlessMinimum,
-      incomplete: ACTION_BASELINE.multiattackIncompleteMaximum,
-      unparsed: ACTION_BASELINE.unparsedMultiattackMaximum,
+      total: ratchet.actions.multiattack.total,
+      headless: ratchet.actions.multiattack.headlessMinimum,
+      incomplete: ratchet.actions.multiattack.incompleteMaximum,
+      unparsed: ratchet.actions.multiattack.unparsedMaximum,
     })
 
-    expect(spells.total).toBe(SPELL_OCCURRENCE_BASELINE.total)
+    expect(spells.total).toBe(ratchet.spells.occurrenceTotal)
     expect(spells.full + spells.manual + spells.missing).toBe(spells.total)
-    expect(spells.full).toBeGreaterThanOrEqual(SPELL_OCCURRENCE_BASELINE.fullMinimum)
+    expect(spells.full).toBeGreaterThanOrEqual(ratchet.spells.fullMinimum)
     expect(spells.full + spells.manual)
-      .toBeGreaterThanOrEqual(SPELL_OCCURRENCE_BASELINE.definedMinimum)
-    expect(spells.missing).toBeLessThanOrEqual(SPELL_OCCURRENCE_BASELINE.missingMaximum)
+      .toBeGreaterThanOrEqual(ratchet.spells.definedMinimum)
+    expect(spells.missing).toBeLessThanOrEqual(ratchet.spells.missingMaximum)
     expect(spells.compatibilityRate).toBe(spells.full / spells.total)
 
-    expect(report.traits.summary.total).toBe(TRAIT_BASELINE.total)
+    expect(report.traits.summary.total).toBe(ratchet.traits.total)
     expect(report.traits.summary.headlessWithRule)
-      .toBeGreaterThanOrEqual(TRAIT_BASELINE.headlessWithRuleMinimum)
+      .toBeGreaterThanOrEqual(ratchet.traits.headlessWithRuleMinimum)
     expect(report.traits.summary.dmAdjudication)
-      .toBeLessThanOrEqual(TRAIT_BASELINE.dmAdjudicationMaximum)
+      .toBeLessThanOrEqual(ratchet.traits.dmAdjudicationMaximum)
     expect(report.traits.summary.headlessWithoutRule).toBe(0)
 
     expect(report.damageDefenses.summary).toEqual({
@@ -87,6 +66,31 @@ describe('D&D 5e monster Headless coverage audit', () => {
       conditionalRuleCount: 72,
       monstersWithUnparsedClauses: 0,
       unparsedClauseCount: 0,
+    })
+  })
+
+  it('fails the ratchet when executable structure regresses in any coverage class', () => {
+    const degraded = structuredClone(auditDnd5eMonsterHeadlessCoverage())
+    degraded.actions.summary.effective.headless =
+      DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET.actions.headlessMinimum - 1
+    degraded.actions.summary.effective.unstructured =
+      DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET.actions.unstructuredMaximum + 1
+    degraded.spells.summary.full =
+      DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET.spells.fullMinimum - 1
+    degraded.traits.summary.headlessWithRule =
+      DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET.traits.headlessWithRuleMinimum - 1
+    degraded.traits.summary.dmAdjudication =
+      DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET.traits.dmAdjudicationMaximum + 1
+
+    expect(verifyDnd5eMonsterHeadlessCoverageRatchet(degraded)).toEqual({
+      passed: false,
+      violations: expect.arrayContaining([
+        expect.stringContaining('actions.headless'),
+        expect.stringContaining('actions.unstructured'),
+        expect.stringContaining('spells.full'),
+        expect.stringContaining('traits.headlessWithRule'),
+        expect.stringContaining('traits.dmAdjudication'),
+      ]),
     })
   })
 
@@ -154,6 +158,45 @@ describe('D&D 5e monster Headless coverage audit', () => {
       })
       expect(rows.get(`${slug}:multiattack-weapons-only`), slug).toMatchObject({
         effectiveAutomation: 'headless',
+        blockedChildIds: [],
+        reasonCodes: [],
+      })
+    }
+  })
+
+  it('keeps every adult and ancient dragon Wing Attack on stable structured rules', () => {
+    const dragonSlugs = DND5E_SRD_MONSTERS
+      .filter((monster) => /^(?:adult|ancient)-.+-dragon$/.test(monster.slug))
+      .map((monster) => monster.slug)
+    const rows = new Map(
+      auditDnd5eMonsterHeadlessCoverage().actions.rows
+        .map((row) => [`${row.slug}:${row.actionId}`, row]),
+    )
+
+    expect(dragonSlugs).toHaveLength(20)
+    for (const slug of dragonSlugs) {
+      const monster = DND5E_SRD_MONSTERS.find((candidate) => candidate.slug === slug)!
+      const wingAttack = (monster.legendaryActions ?? []).find((action) =>
+        action.id === 'wing-attack-costs-2-actions')
+      expect(wingAttack, slug).toMatchObject({
+        automation: 'headless',
+        legendaryCost: 2,
+        rule: {
+          kind: 'legendary-wing-attack',
+          target: 'all-creatures-except-self',
+          ability: 'dex',
+          damageOnSuccessfulSave: 'none',
+          conditionOnFailedSave: 'prone',
+          followUpMovement: {
+            kind: 'grant-fly-movement',
+            maximumSpeedFraction: 0.5,
+          },
+        },
+      })
+      if (!wingAttack) throw new Error(`${slug} is missing Wing Attack`)
+      expect(rows.get(`${slug}:wing-attack-costs-2-actions`), slug).toMatchObject({
+        effectiveAutomation: 'headless',
+        structure: 'rule',
         blockedChildIds: [],
         reasonCodes: [],
       })
@@ -390,7 +433,8 @@ describe('D&D 5e monster Headless coverage audit', () => {
         spells: [
           { id: 'fireball', name: 'Fireball', level: 3 },
           { id: 'blight', name: 'Blight', level: 4 },
-          { id: 'not-a-core-spell', name: 'Unknown', level: 1 },
+          // A familiar display name must not turn an unknown id into automation.
+          { id: 'not-a-core-spell', name: 'Fireball', level: 1 },
         ],
       },
       traits: [

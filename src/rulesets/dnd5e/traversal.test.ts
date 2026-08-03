@@ -31,6 +31,21 @@ describe('D&D 5e 2014 traversal', () => {
       .toEqual({ ok: true, movementCostFeet: 45 })
   })
 
+  it('charges flight for absolute vertical change when callers pass descent as elevationGainFeet', () => {
+    expect(dnd5eTraversalMovementCost({
+      distanceFeet: 0,
+      elevationGainFeet: 20,
+      mode: 'fly',
+      profile: { ...profile, flySpeed: 60 },
+    })).toEqual({ ok: true, movementCostFeet: 10 })
+    expect(dnd5eTraversalMovementCost({
+      distanceFeet: 30,
+      elevationGainFeet: 30,
+      mode: 'fly',
+      profile: { ...profile, flySpeed: 30 },
+    })).toEqual({ ok: true, movementCostFeet: 60 })
+  })
+
   it('rejects jumps beyond the automatic distance', () => {
     expect(dnd5eTraversalMovementCost({ distanceFeet: 17, mode: 'long-jump-running', profile }))
       .toEqual({ ok: false, reason: 'jump-too-far' })

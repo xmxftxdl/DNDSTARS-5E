@@ -1,5 +1,6 @@
 import { tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { mapGeometryCanSeeToken, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
@@ -13,6 +14,7 @@ import {
   type Dnd5eMonsterTargetingPreferenceV1,
   type Dnd5eMonsterTargetPriority,
 } from './monsters'
+import { dnd5eMonsterBerserkRule } from './monsterGenericAbilities'
 
 export const DND5E_MONSTER_TARGET_PRIORITY_OPTIONS: readonly {
   value: Dnd5eMonsterTargetPriority
@@ -97,11 +99,17 @@ export function selectDnd5eMonsterPreferredTarget(input: {
 }): Token | undefined {
   const { map, enemy, monster } = input
   const charactersById = new Map((input.characters ?? []).map((character) => [character.id, character]))
+  const berserk = enemy.dnd5eCombatState?.monsterBerserk === true &&
+    dnd5eMonsterBerserkRule(monster)?.target === 'nearest-visible-creature'
+  const geometry = mapGeometryRuntimeForMap(map.id)
   const candidates = map.tokens.filter((token) =>
-    token.id !== enemy.id && token.type !== 'obstacle' && areOpposedCombatTokens(enemy, token) &&
+    token.id !== enemy.id && token.type !== 'obstacle' &&
+    (berserk
+      ? mapGeometryCanSeeToken({ geometry, map, viewer: enemy, target: token })
+      : areOpposedCombatTokens(enemy, token)) &&
     targetHitPoints(token, charactersById).current > 0,
   )
-  const priority = dnd5eMonsterEffectiveTargetPriority(monster, enemy)
+  const priority = berserk ? 'nearest' : dnd5eMonsterEffectiveTargetPriority(monster, enemy)
   const threat = enemy.dnd5eCombatState?.monsterThreatByTargetId ?? {}
   const distance = (target: Token) => tokenFootprintDistanceCells(enemy, target, map)
   const primary = (target: Token): number => {

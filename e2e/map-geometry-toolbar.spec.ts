@@ -4,7 +4,7 @@ const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
 const SESSION_KEY = 'stars-room-session:v1'
 
-test('DM 收起几何工具后石墙仍显示，并实时同步到玩家端', async ({ browser, request }) => {
+test('DM 几何与困难地形画笔实时同步到玩家端', async ({ browser, request }) => {
   const createdResponse = await request.post(`${DM}/api/rooms`, {
     data: {
       roomName: 'Geometry toolbar persistence',
@@ -180,6 +180,45 @@ test('DM 收起几何工具后石墙仍显示，并实时同步到玩家端', as
     }
     return state.maps?.find((map) => map.mapId === 'geometry-toolbar-map')?.walls?.length ?? -1
   }).toBe(1)
+
+  await geometryButton.click()
+  await page.getByLabel('地图几何工具').selectOption('difficult-terrain')
+  await expect(canvas).toHaveAttribute('data-geometry-tool', 'difficult-terrain')
+  await page.mouse.move(box!.x + box!.width * 0.2, box!.y + box!.height * 0.28)
+  await page.mouse.down()
+  await page.mouse.move(
+    box!.x + box!.width * 0.34,
+    box!.y + box!.height * 0.28,
+    { steps: 6 },
+  )
+  await page.mouse.up()
+
+  await expect.poll(() => playerPage.evaluate(async () => {
+    const { useMapGeometryStore } = await import('/src/store/mapGeometry.ts')
+    const terrain = useMapGeometryStore.getState().maps
+      .find((map) => map.mapId === 'geometry-toolbar-map')?.obstacles
+      .find((obstacle) => (obstacle.terrainCostMultiplier ?? 1) > 1)
+    return terrain ? {
+      label: terrain.label,
+      multiplier: terrain.terrainCostMultiplier,
+      cover: terrain.cover,
+      traversal: terrain.traversal,
+      blocksVision: terrain.blocksVision,
+      blocksMovement: terrain.blocksMovement,
+      blocksLineOfEffect: terrain.blocksLineOfEffect,
+    } : null
+  })).toEqual({
+    label: '困难地形',
+    multiplier: 2,
+    cover: 'none',
+    traversal: 'ground',
+    blocksVision: false,
+    blocksMovement: false,
+    blocksLineOfEffect: false,
+  })
+  await expect.poll(async () => Number(
+    await playerCanvas.getAttribute('data-difficult-terrain-cell-count'),
+  )).toBeGreaterThan(0)
 
   await dmContext.close()
   await playerContext.close()

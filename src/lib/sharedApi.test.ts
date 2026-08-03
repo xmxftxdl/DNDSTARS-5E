@@ -3,6 +3,7 @@ import {
   configuredApiBases,
   defaultSharedApiCandidates,
   loadSharedResource,
+  saveSharedResourcesAtomically,
   saveSharedResourceWithResult,
   sharedEventApiCandidates,
   sharedWriteApiCandidates,
@@ -118,6 +119,81 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     await expect(saveSharedResourceWithResult('test-save-conflict', { updatedAt: 2 })).resolves.toEqual({
       status: 'conflict', expectedRevision: 0, currentRevision: 4,
     })
+  })
+
+  it('does not authorize a queued stale save with a conflict revision before reloading', async () => {
+    const resource = `conflict-reload-barrier-${Date.now()}`
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 404,
+        headers: { 'X-Stars-State-Revision': '0' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ currentRevision: 4 }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '4' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ currentRevision: 4 }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '4' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ updatedAt: 4 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '4' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 5 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '5' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(saveSharedResourceWithResult(resource, { updatedAt: 1 })).resolves.toMatchObject({
+      status: 'conflict', expectedRevision: 0, currentRevision: 4,
+    })
+    await expect(saveSharedResourceWithResult(resource, { updatedAt: 2 })).resolves.toMatchObject({
+      status: 'conflict', expectedRevision: 0, currentRevision: 4,
+    })
+
+    const secondPut = fetchMock.mock.calls[2]?.[1] as RequestInit | undefined
+    expect(new Headers(secondPut?.headers).get('X-Stars-Expected-Revision')).toBe('0')
+
+    await loadSharedResource(resource)
+    await expect(saveSharedResourceWithResult(resource, { updatedAt: 5 })).resolves.toEqual({
+      status: 'saved', revision: 5,
+    })
+    const rebasedPut = fetchMock.mock.calls[4]?.[1] as RequestInit | undefined
+    expect(new Headers(rebasedPut?.headers).get('X-Stars-Expected-Revision')).toBe('4')
+  })
+
+  it('keeps atomic transaction conflicts behind the same read-before-retry barrier', async () => {
+    const resource = `transaction-conflict-reload-barrier-${Date.now()}`
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 404,
+        headers: { 'X-Stars-State-Revision': '0' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: 'shared-state-transaction-conflict',
+        conflicts: [{ name: resource, currentRevision: 7 }],
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ currentRevision: 7 }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '7' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(saveSharedResourcesAtomically([{
+      name: resource,
+      data: { updatedAt: 1 },
+    }], { transactionId: 'transaction-conflict-test' })).rejects.toThrow('shared-state-transaction-conflict')
+    await expect(saveSharedResourceWithResult(resource, { updatedAt: 2 })).resolves.toMatchObject({
+      status: 'conflict', expectedRevision: 0, currentRevision: 7,
+    })
+
+    const staleRetry = fetchMock.mock.calls[2]?.[1] as RequestInit | undefined
+    expect(new Headers(staleRetry?.headers).get('X-Stars-Expected-Revision')).toBe('0')
   })
 
   it('does not let a late older GET lower the CAS revision watermark', async () => {

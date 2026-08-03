@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { Activity, AlertTriangle, CheckCircle2, Download, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Activity, AlertTriangle, CheckCircle2, Download, FileJson, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
 import Dnd5eEffectDiagnosticsPanel from '../components/Dnd5eEffectDiagnosticsPanel'
 import RoomManagementPanel from '../components/RoomManagementPanel'
 import { SharedSyncDiagnosticsPanel } from '../components/SharedSyncStatus'
-import Dnd5eCustomPluginBuilder from '../components/rules/Dnd5eCustomPluginBuilder'
 import {
   activeDnd5eRulesPluginRequirements,
   compileDnd5eLocalContentCollection,
+  prepareDnd5eLocalContentJson,
+  prepareDnd5eLocalContentJsonFile,
   dnd5eRoomRuntimeProjectionBytesV2,
   roomActiveDnd5eRulesPluginRequirements,
   type Dnd5eContentAutomationCoverageReportV2,
@@ -22,6 +23,7 @@ import {
   heartbeatRoom,
   loadRoomRules,
   roomApiErrorMessage,
+  updateRoomRules,
 } from '../lib/roomApi'
 import { activateRoomPluginPackage } from '../lib/roomPluginActivation'
 import { getRoomSession } from '../lib/roomSession'
@@ -39,9 +41,9 @@ import {
   DND5E_SRD_5_1_TRANSLATION_NOTICE,
 } from '../rulesets/dnd5e/srdContent'
 
-export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settings' | 'workshop' }) {
-  const { campaignId } = useParams()
+export default function RulesPluginsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const localJsonRef = useRef<HTMLInputElement>(null)
   const collectionRef = useRef<HTMLInputElement>(null)
   const [roomSession] = useState(() => getRoomSession())
   const roomRules = useSyncExternalStore(
@@ -63,6 +65,10 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
     useState<Dnd5eContentAutomationCoverageReportV2 | null>(null)
   const [collectionAudit, setCollectionAudit] =
     useState<Dnd5eLocalContentCollectionAudit | null>(null)
+  const [portableLocalJson, setPortableLocalJson] = useState<{
+    bytes: ArrayBuffer
+    fileName: string
+  } | null>(null)
   const [settingsSection, setSettingsSection] = useState<'plugins' | 'room' | 'diagnostics'>('plugins')
   const installed = host?.listInstalled() ?? []
   const activeById = new Map((host?.listActive() ?? []).map((plugin) => [plugin.id, plugin]))
@@ -76,6 +82,29 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
     let next = await heartbeatRoom(roomSession, roomActiveDnd5eRulesPluginRequirements())
     if (!next.member.ready) next = (await synchronizeRoomPlugins(roomSession, next)).rules
     setRoomRulesSnapshot(next)
+  }
+
+  const updateHouseRuleToggle = async (
+    key: 'combatBannersEnabled' | 'spellAnimationsEnabled' | 'spellcastingPrerequisitesEnabled' | 'encumbranceEnabled',
+    enabled: boolean,
+  ) => {
+    if (!roomSession || roomSession.role !== 'dm' || !roomRules) return
+    setBusy(true)
+    setNotice(null)
+    setError(null)
+    try {
+      const next = await updateRoomRules(
+        roomSession,
+        roomRules.requiredPlugins,
+        { ...roomRules.houseRules, [key]: enabled },
+      )
+      setRoomRulesSnapshot(next)
+      setNotice('房间规则已更新并同步给当前房间成员。')
+    } catch (reason) {
+      setError(roomApiErrorMessage(reason))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const activateRoomPlugin = async (input: {
@@ -202,6 +231,7 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
       }
       const compiled = await compileDnd5eLocalContentCollection(files)
       setCollectionAudit(compiled.audit)
+      setPortableLocalJson({ bytes: compiled.bytes.slice(0), fileName: compiled.fileName })
       if (!compiled.audit.complete) {
         const accepted = window.confirm([
           '本地合集缺口审计未通过，仍要临时导入吗？',
@@ -224,6 +254,44 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
       setBusy(false)
     }
   }
+
+  const installPreparedLocalJson = async (
+    prepare: () => ReturnType<typeof prepareDnd5eLocalContentJson>,
+  ) => {
+    setBusy(true)
+    setNotice(null)
+    setError(null)
+    try {
+      if (!roomSession || roomSession.role !== 'dm') {
+        throw new Error('单文件本地规则只能由 DM 导入当前房间')
+      }
+      const prepared = await prepare()
+      setCollectionAudit(prepared.audit ?? null)
+      setPortableLocalJson({ bytes: prepared.bytes.slice(0), fileName: prepared.fileName })
+      if (prepared.audit && !prepared.audit.complete) {
+        const accepted = window.confirm([
+          '本地 JSON 缺口审计未通过，仍要临时导入吗？',
+          `条目：${prepared.audit.totals.entries}`,
+          `数量缺口：${prepared.audit.totals.countShortfall}`,
+          `缺失稳定 ID：${prepared.audit.totals.missingIds}`,
+          `缺失图片：${prepared.audit.totals.missingImages}`,
+        ].join('\n'))
+        if (!accepted) return
+      }
+      await installFile(new File(
+        [new Uint8Array(prepared.bytes)],
+        prepared.fileName,
+        { type: 'application/json' },
+      ))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const installLocalJsonFile = (file: File) =>
+    installPreparedLocalJson(() => prepareDnd5eLocalContentJsonFile(file))
 
   const remove = async (plugin: InstalledDnd5eRulesPlugin) => {
     if (!host || !window.confirm(`卸载规则插件 ${plugin.id}？角色存档中的命名空间 ID 会保留。`)) return
@@ -322,53 +390,20 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
     URL.revokeObjectURL(url)
   }
 
-  if (view === 'workshop') return (
-    <div className="mx-auto max-w-6xl">
-      <PageHeader
-        title="自定义工坊"
-        description="创建当前战役可安装的怪物、子职、种族、背景、特性、法术、装备与规则内容。所有自动化能力仍由 Host 白名单和 DM 权威层校验。"
-      />
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.04] p-4">
-          <p className="text-sm font-semibold text-amber-100">专长编辑器</p>
-          <p className="mt-1 text-xs leading-5 text-amber-100/60">已接通等级、属性与种族前提、角色选择以及声明式 Headless 行动；资格和资源由 Host 复核。</p>
-        </div>
-        <div className="rounded-2xl border border-sky-400/15 bg-sky-500/[0.04] p-4">
-          <p className="text-sm font-semibold text-sky-100">声明式职业 V1</p>
-          <p className="mt-1 text-xs leading-5 text-sky-100/60">已支持职业底盘、1–20 级进度、熟练项、施法、兼职前提、升级选择与起始装备；不安全的战斗特性会显式降级。</p>
-        </div>
-      </div>
-      <Dnd5eCustomPluginBuilder
-        defaultPublisher={roomSession?.displayName}
-        busy={busy}
-        onInstall={installFile}
-        installLabel="安装并启用到当前战役"
-        alwaysExpanded
-        categoryControl="select"
-      />
-      {notice && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-          {notice}
-        </div>
-      )}
-      {automationCoverage && (
-        <section className="mb-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.05] px-4 py-3 text-sm text-sky-100">
-          <p className="font-semibold">自动化兼容报告</p>
-          <p className="mt-1 text-xs leading-5 text-sky-100/65">
-            完整 {automationCoverage.totals.full} · 部分 {automationCoverage.totals.partial} ·
-            手动 {automationCoverage.totals.manual} · 仅资料 {automationCoverage.totals.referenceOnly}。
-          </p>
-        </section>
-      )}
-      {error && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          {error}
-        </div>
-      )}
-    </div>
-  )
+  const downloadPortableLocalJson = () => {
+    if (!portableLocalJson) return
+    const blob = new Blob([portableLocalJson.bytes], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = portableLocalJson.fileName.endsWith('.json')
+      ? portableLocalJson.fileName
+      : `${portableLocalJson.fileName}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -393,6 +428,19 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
                     event.currentTarget.value = ''
                   }}
                 />
+                {roomSession?.role === 'dm' && (
+                  <input
+                    ref={localJsonRef}
+                    type="file"
+                    accept=".json,.dndstars5e,application/json"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0]
+                      if (file) void installLocalJsonFile(file)
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                )}
                 {roomSession?.role === 'dm' && (
                   <input
                     ref={collectionRef}
@@ -420,11 +468,22 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
                   <button
                     type="button"
                     disabled={busy || !host}
+                    onClick={() => localJsonRef.current?.click()}
+                    className="flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-400/8 px-4 py-2.5 text-sm font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <FileJson className="h-4 w-4" />
+                    一键导入 JSON
+                  </button>
+                )}
+                {roomSession?.role === 'dm' && (
+                  <button
+                    type="button"
+                    disabled={busy || !host}
                     onClick={() => collectionRef.current?.click()}
                     className="flex items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/8 px-4 py-2.5 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Upload className="h-4 w-4" />
-                    导入房间临时合集
+                    导入合集目录
                   </button>
                 )}
               </>
@@ -466,12 +525,76 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
           </p>
         </div>
         <Link
-          to={campaignId ? `/campaign/${encodeURIComponent(campaignId)}/extensions` : '/app/extensions'}
+          to="/app/extensions"
           className="shrink-0 rounded-xl bg-arcane-500/15 px-4 py-2.5 text-center text-sm font-semibold text-arcane-100 hover:bg-arcane-500/20"
         >
           打开插件中心
         </Link>
       </section>
+      {roomSession && (
+        <section className="mb-5 rounded-2xl border border-violet-400/20 bg-violet-500/[0.04] p-5" data-testid="dnd5e-room-feature-toggles">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-slate-100">规则与表现</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                这些选项由 DM 统一设置并同步给房间内所有客户端。表现类开关立即生效；影响 Headless 结算的施法条件会随当前战斗锁定，战斗中修改默认从下一场战斗生效。
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] font-semibold text-slate-400">
+              {roomSession.role === 'dm' ? 'DM 可编辑' : '由 DM 管理'}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {([
+              {
+                key: 'combatBannersEnabled',
+                label: '横幅',
+                description: '显示回合开始、攻击、法术与连续击败横幅。关闭后不再发布或展示这些横幅。',
+              },
+              {
+                key: 'spellAnimationsEnabled',
+                label: '法术动画',
+                description: '播放投射物、命中特效、法术显化与范围动画。关闭不会改变法术结算或持续区域。',
+              },
+              {
+                key: 'spellcastingPrerequisitesEnabled',
+                label: '施法条件',
+                description: '校验言语、姿势、材料、野性变身与未熟练护甲。法术位、准备、行动、距离和目标始终校验。',
+              },
+              {
+                key: 'encumbranceEnabled',
+                label: '负重计算',
+                description: '计算物品与钱币重量并显示负重阈值。关闭后物品栏不再计算或显示负重。',
+              },
+            ] as const).map((option) => {
+              const checked = roomRules?.houseRules?.[option.key] !== false
+              return (
+                <label
+                  key={option.key}
+                  className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+                    checked
+                      ? 'border-violet-300/20 bg-violet-400/[0.07]'
+                      : 'border-white/8 bg-black/15'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    data-testid={`room-rule-${option.key}`}
+                    checked={checked}
+                    disabled={busy || roomSession.role !== 'dm' || !roomRules}
+                    onChange={(event) => void updateHouseRuleToggle(option.key, event.currentTarget.checked)}
+                    className="mt-1 h-4 w-4 shrink-0 accent-violet-500 disabled:cursor-not-allowed"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-100">{option.label}</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </section>
+      )}
       <section className="mb-5 rounded-2xl border border-white/8 bg-black/15 p-5">
         <h2 className="font-semibold text-slate-100">SRD 5.1 来源与许可</h2>
         <p className="mt-2 text-sm leading-6 text-slate-400">{DND5E_SRD_5_1_TRANSLATION_NOTICE}</p>
@@ -502,10 +625,10 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
             <div>
               <h2 className="font-semibold text-amber-100">单房间临时 JSON/CSV 合集</h2>
               <p className="mt-1 text-sm leading-6 text-amber-100/65">
-                选择含 <code>collection.json</code> 的本地目录后，浏览器会合并 JSON、CSV 和你提供的
+              可直接选择单个 JSON、粘贴整段 JSON，或选择含 <code>collection.json</code> 的本地目录。浏览器会合并 JSON、CSV 和你提供的
                 PNG/JPEG/WebP 图片。原始合集、AI 提示词和模型记录不会上传；发送给房间的 V2 运行包只保留名称、
                 结构化结算字段和图片，长篇规则正文会被统一占位文本替换。包只驻留客户端内存并由当前房间临时托管，
-                DM 关闭房间后服务端删除文件，下次开房必须重新选择合集。
+                DM 关闭房间后服务端删除文件，下次开房必须重新导入。目录导入完成后还可以下载合并后的单文件 JSON，供以后直接一键选择。
               </p>
             </div>
           </div>
@@ -645,14 +768,27 @@ export default function RulesPluginsPage({ view = 'settings' }: { view?: 'settin
                 报告不含正文、内容名称、图片数据或 AI 提示词。
               </p>
             </div>
-            <button
-              type="button"
-              onClick={downloadCollectionAudit}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-current/20 bg-black/10 px-3 py-2 text-xs font-semibold"
-            >
-              <Download className="h-4 w-4" />
-              下载缺口报告
-            </button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {portableLocalJson && (
+                <button
+                  type="button"
+                  onClick={downloadPortableLocalJson}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-current/20 bg-black/10 px-3 py-2 text-xs font-semibold"
+                  title="该文件保留你本地填写的结构化内容与图片；请只保存在你控制的设备上"
+                >
+                  <FileJson className="h-4 w-4" />
+                  下载单文件合集
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={downloadCollectionAudit}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-current/20 bg-black/10 px-3 py-2 text-xs font-semibold"
+              >
+                <Download className="h-4 w-4" />
+                下载缺口报告
+              </button>
+            </div>
           </div>
         </section>
       )}

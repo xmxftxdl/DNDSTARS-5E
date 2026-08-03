@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   mapCanvasAoeGridCell,
+  mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
   mapCanvasStageCanPan,
   mapCanvasTokenClickAction,
@@ -32,6 +33,7 @@ describe('map canvas viewport panning', () => {
   it('reserves left-drag for active drawing and targeting tools', () => {
     expect(mapCanvasStageCanPan({ ...base, fogEditMode: true, fogTool: 'reveal-brush' })).toBe(false)
     expect(mapCanvasStageCanPan({ ...base, geometryEditMode: true, geometryTool: 'wall' })).toBe(false)
+    expect(mapCanvasStageCanPan({ ...base, geometryEditMode: true, geometryTool: 'difficult-terrain' })).toBe(false)
     expect(mapCanvasStageCanPan({ ...base, aoeSelectMode: true })).toBe(false)
     expect(mapCanvasStageCanPan({ ...base, tabletopTool: 'arrow' })).toBe(false)
   })
@@ -42,6 +44,7 @@ describe('map canvas viewport panning', () => {
     expect(mapCanvasGeometryDrawShouldStart('door', true)).toBe(true)
     expect(mapCanvasGeometryDrawShouldStart('window', true)).toBe(true)
     expect(mapCanvasGeometryDrawShouldStart('wall', false)).toBe(true)
+    expect(mapCanvasGeometryDrawShouldStart('difficult-terrain', false)).toBe(true)
   })
 })
 
@@ -66,5 +69,41 @@ describe('map canvas area targeting', () => {
       { x: 225, y: 145 },
       { gridSize: 40, gridOffsetX: 5, gridOffsetY: 5 },
     )).toEqual({ col: 5, row: 3 })
+  })
+})
+
+describe('effect-token persistent area drag preview', () => {
+  it('moves the rendered area with the live drag preview without changing its authority anchor', () => {
+    expect(mapCanvasEffectTokenAreaRenderOffset({
+      anchorMode: 'effect-token',
+      areaAnchorPosition: { x: 100, y: 140 },
+      anchorTokenPosition: { x: 100, y: 140 },
+      dragPreviewPosition: { x: 220, y: 180 },
+    })).toEqual({ x: 120, y: 40 })
+  })
+
+  it('bridges the saved Token position while the area snapshot is still catching up', () => {
+    expect(mapCanvasEffectTokenAreaRenderOffset({
+      anchorMode: 'effect-token',
+      areaAnchorPosition: { x: 100, y: 140 },
+      anchorTokenPosition: { x: 220, y: 180 },
+    })).toEqual({ x: 120, y: 40 })
+
+    expect(mapCanvasEffectTokenAreaRenderOffset({
+      anchorMode: 'effect-token',
+      areaAnchorPosition: { x: 220, y: 180 },
+      anchorTokenPosition: { x: 220, y: 180 },
+    })).toEqual({ x: 0, y: 0 })
+  })
+
+  it('never shifts fixed or source-token areas', () => {
+    for (const anchorMode of ['fixed', 'source-token', undefined]) {
+      expect(mapCanvasEffectTokenAreaRenderOffset({
+        anchorMode,
+        areaAnchorPosition: { x: 100, y: 140 },
+        anchorTokenPosition: { x: 100, y: 140 },
+        dragPreviewPosition: { x: 220, y: 180 },
+      })).toEqual({ x: 0, y: 0 })
+    }
   })
 })

@@ -9,6 +9,7 @@ import {
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5ePersistentAreaDmAdjustment,
+  type Dnd5eSpellDamageMaxDieBonusUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import {
@@ -16,6 +17,7 @@ import {
   type Dnd5ePersistentAreaTriggerCandidate,
 } from './pluginAreas'
 import { normalizeDnd5eActiveEffects } from './activeEffects'
+import { getDnd5eSrdCombatSpell } from './spells'
 
 export interface PreparedDnd5ePersistentAreaTrigger {
   candidate: Dnd5ePersistentAreaTriggerCandidate
@@ -52,6 +54,14 @@ export function prepareDnd5ePersistentAreaTrigger(input: {
   const source = snapshot.state.combatants[input.candidate.area.sourceTokenId]
   const target = snapshot.state.combatants[input.candidate.targetToken.id]
   if (!source || !target || target.deathSaves.dead) return { ok: false, reason: 'combatant-missing' }
+  const coreSpell = input.candidate.area.sourceKind === 'core-spell' && input.candidate.area.coreSpellId
+    ? getDnd5eSrdCombatSpell(input.candidate.area.coreSpellId)
+    : undefined
+  const saveContext = {
+    effectVisible: true,
+    sourceCreatureType: source.creatureType,
+    sourceIsSpell: !!coreSpell,
+  } as const
   const skipSaveCondition = input.candidate.trigger.skipSaveWhenSourceConditionActive
   const hasSourceCondition = skipSaveCondition
     ? normalizeDnd5eActiveEffects(target.classState.activeEffects).some((effect) =>
@@ -66,10 +76,10 @@ export function prepareDnd5ePersistentAreaTrigger(input: {
         dc: input.candidate.trigger.savingThrow.dc,
         mode: input.candidate.trigger.savingThrow.shapechangerDisadvantage && target.shapechanger
           ? imposeDnd5eRollDisadvantage(
-              dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, { effectVisible: true }),
+              dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, saveContext),
               'moonbeam-shapechanger',
             ).mode
-          : dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, { effectVisible: true }),
+          : dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, saveContext),
         blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bless'),
         baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bane'),
       }
@@ -95,6 +105,7 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
   blessRoll?: number
   baneRoll?: number
   damageRolls?: readonly number[]
+  spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse
   dmAdjustment?: Dnd5ePersistentAreaDmAdjustment
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
@@ -102,6 +113,7 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
     areaId: prepared.candidate.area.id,
     areaSourceKind: prepared.candidate.area.sourceKind,
     coreSpellId: prepared.candidate.area.coreSpellId,
+    castingClassId: prepared.candidate.area.castingClassId,
     sourceId: prepared.candidate.area.sourceTokenId,
     targetId: prepared.candidate.targetToken.id,
     trigger: prepared.candidate.trigger,
@@ -110,6 +122,7 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
     damageRolls: input.damageRolls,
+    spellDamageMaxDieBonus: input.spellDamageMaxDieBonus,
     dmAdjustment: input.dmAdjustment,
   })
   if (!result.ok) return { result }

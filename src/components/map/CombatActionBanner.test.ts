@@ -105,7 +105,10 @@ describe('CombatActionBanner', () => {
       'pointer-events-none absolute inset-x-0 top-5 z-[130] flex justify-center',
     )
     expect(mapsPageSource).toContain(
-      'absolute inset-x-2 top-2 z-[80] flex flex-col items-center gap-2',
+      'pointer-events-none absolute inset-x-2 top-2 z-[80] flex flex-col items-center gap-2',
+    )
+    expect(mapsPageSource).toContain(
+      'pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center px-2',
     )
     expect(css).toMatch(/\.kill-streak-presentation\s*{[^}]*z-index:\s*130;/s)
   })

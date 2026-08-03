@@ -1,6 +1,8 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
+  DND_FEET_PER_CELL,
   tokenAnchorCellFromPixel,
+  tokenFootprintDistanceCells,
   type GridCell,
 } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
@@ -16,10 +18,12 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   resolveDnd5eHeadlessAction,
+  previewDnd5eUnsupportedAirborneFalls,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterAreaActionResolutionV1,
   type Dnd5eSpellForcedMovement,
+  type Dnd5eUnsupportedAirborneFallPreview,
 } from './headlessCombatEngine'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import {
@@ -39,6 +43,10 @@ import {
   dnd5eForcedMovementFall,
   dnd5eForcedPushDestination,
 } from './spellAction'
+import {
+  dnd5eInstantAoeAffectsTokenVertically,
+  dnd5eTokenToPointDistanceFeet,
+} from './verticalCombatGeometry'
 
 export type Dnd5eMonsterAreaActionRejectReason =
   | 'invalid-actor'
@@ -60,6 +68,7 @@ export interface PreparedDnd5eMonsterAreaAction {
   variant: Dnd5eMonsterAreaSavingThrowVariant
   areaTargetCell: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  areaTargetElevationFeet?: number
 }
 
 export interface Dnd5eMonsterAreaForcedMovementPlan extends Dnd5eSpellForcedMovement {
@@ -195,6 +204,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
   targetTokenIds: readonly string[]
   areaTargetCell?: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  areaTargetElevationFeet?: number
   turnEconomy?: Dnd5eTurnEconomyCounts
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
 }): { ok: true; prepared: PreparedDnd5eMonsterAreaAction } | {
@@ -238,15 +248,49 @@ export function prepareDnd5eMonsterAreaAction(input: {
   const orientFrom = aoeOrientFromCell(variant.area, casterCell, targetCell, {
     rectRotation: input.areaTargetOrientation,
   })
-  const effectOrigin = variant.area.origin === 'point'
-    ? {
-        x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
-        y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
-      }
-    : actorToken
+  const effectAim = {
+    x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
+    y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
+  }
+  const effectOrigin = variant.area.origin === 'point' ? effectAim : actorToken
+  if (
+    input.areaTargetElevationFeet != null &&
+    (!Number.isFinite(input.areaTargetElevationFeet) ||
+      input.areaTargetElevationFeet < -1_000 ||
+      input.areaTargetElevationFeet > 10_000)
+  ) return { ok: false, reason: 'invalid-target' }
+  const effectAimElevation = input.areaTargetElevationFeet ??
+    mapGeometryTerrainElevationAtPoint(geometry, effectAim)
   const effectOriginElevation = variant.area.origin === 'point'
-    ? mapGeometryTerrainElevationAtPoint(geometry, effectOrigin)
+    ? effectAimElevation
     : mapGeometryTokenElevation(geometry, actorToken)
+  if (variant.area.origin === 'point') {
+    const areaPointToken = {
+      ...actorToken,
+      id: `${actorToken.id}:monster-area-placement`,
+      characterId: undefined,
+      type: 'obstacle' as const,
+      size: 1,
+      ...effectOrigin,
+      elevationFeet: effectOriginElevation,
+    }
+    const horizontalPlacementDistanceFeet = tokenFootprintDistanceCells(
+      actorToken,
+      areaPointToken,
+      input.map,
+    ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    if (
+      variant.area.placeRangeFeet != null &&
+      dnd5eTokenToPointDistanceFeet({
+        geometry,
+        token: actorToken,
+        pointElevationFeet: effectOriginElevation,
+        horizontalDistanceFeet: horizontalPlacementDistanceFeet,
+      }) > variant.area.placeRangeFeet + 1e-4
+    ) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+  }
   if (
     variant.area.origin === 'point' && mapGeometryLineOfEffectBlocked({
       geometry,
@@ -263,6 +307,18 @@ export function prepareDnd5eMonsterAreaAction(input: {
       isPresentMonsterAreaCreature(candidate, input.characters) &&
       (variant.target === 'all-creatures-except-self' ||
         areOpposedCombatTokens(actorToken, candidate)) &&
+      dnd5eInstantAoeAffectsTokenVertically({
+        spellId: `monster:${action.id}`,
+        area: variant.area,
+        map: input.map,
+        geometry,
+        sourceToken: actorToken,
+        targetToken: candidate,
+        effectOrigin,
+        effectOriginElevationFeet: effectOriginElevation,
+        effectAim,
+        effectAimElevationFeet: effectAimElevation,
+      }) &&
       !mapGeometryLineOfEffectBlocked({
         geometry,
         from: effectOrigin,
@@ -334,6 +390,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
       variant,
       areaTargetCell: targetCell,
       areaTargetOrientation: input.areaTargetOrientation,
+      areaTargetElevationFeet: input.areaTargetElevationFeet,
     },
   }
 }
@@ -341,9 +398,14 @@ export function prepareDnd5eMonsterAreaAction(input: {
 export function resolvePreparedDnd5eMonsterAreaAction(input: {
   prepared: PreparedDnd5eMonsterAreaAction
   resolution: Omit<Dnd5eMonsterAreaActionResolutionV1, 'schemaVersion' | 'targetIds' | 'variantId'>
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+} {
   const { prepared } = input
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  const action = {
     type: 'monster-area-action',
     actorId: prepared.actorToken.id,
     actionId: prepared.action.id,
@@ -353,10 +415,17 @@ export function resolvePreparedDnd5eMonsterAreaAction(input: {
       variantId: prepared.variant.id === 'default' ? undefined : prepared.variant.id,
       targetIds: prepared.targetTokens.map((target) => target.id),
     },
-  })
-  if (!result.ok) return { result }
+    airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+  } as const
+  const fallPreview = input.airborneFallDamageRollsByCombatantId == null
+    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
+    : undefined
+  const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
+  const result = resolveDnd5eHeadlessAction(prepared.state, action)
+  if (!result.ok) return { result, airborneFalls }
   return {
     result,
+    airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,

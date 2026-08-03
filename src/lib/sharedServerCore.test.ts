@@ -7,6 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as sharedServerCore from '../../scripts/shared-server-core.mjs'
 import { parseCombatPresentationEvent } from './combatPresentation'
 import {
+  COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
+  COMBAT_PRESENTATION_PROJECTILE_SPELL_IDS,
+  COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS,
+} from '../../shared/combat-presentation-contract.mjs'
+import {
   EVENT_BACKLOG_LIMIT,
   EVENT_CHANNEL_LIMIT,
   EVENT_REPLAY_LIMIT,
@@ -1015,7 +1020,7 @@ describe('map geometry player projection', () => {
     expect(project({ truesightRangeFeet: 60 }, {}).map((token: { id: string }) => token.id)).toContain('target')
   })
 
-  it('projects character-derived Darkvision and Devil’s Sight before hiding enemy tokens', () => {
+  it('projects host-resolved character Darkvision and Devil’s Sight before hiding enemy tokens', () => {
     const maps = {
       maps: [{
         id: 'map-1', width: 120, height: 60, gridSize: 10, feetPerCell: 5,
@@ -1050,9 +1055,9 @@ describe('map geometry player projection', () => {
         { characters: [{ id: 'character-1', ...character }] },
       ).maps[0].tokens
 
-    expect(project({ race: '人类' }).map((token: { id: string }) => token.id))
+    expect(project({}).map((token: { id: string }) => token.id))
       .not.toContain('target')
-    expect(project({ race: '精灵' }).map((token: { id: string }) => token.id))
+    expect(project({ darkvisionRangeFeet: 60 }).map((token: { id: string }) => token.id))
       .toContain('target')
     const magicalDarknessGeometry = {
       ...baseMapGeometry,
@@ -1070,7 +1075,7 @@ describe('map geometry player projection', () => {
         heightFeet: 20,
       }],
     }
-    expect(project({ race: '精灵' }, magicalDarknessGeometry)
+    expect(project({ darkvisionRangeFeet: 60 }, magicalDarknessGeometry)
       .map((token: { id: string }) => token.id)).not.toContain('target')
     expect(project({
       dnd5eClassChoices: {
@@ -1461,6 +1466,89 @@ describe('map geometry player projection', () => {
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('accepts every client-declared spell animation through the server presentation contract', () => {
+    const timestamp = 32_000
+    const common = {
+      schemaVersion: 1,
+      mapId: 'map-1',
+      transactionId: 'all-spell-presentations-1',
+      sourceTokenId: 'caster',
+    }
+
+    for (const spellId of COMBAT_PRESENTATION_PROJECTILE_SPELL_IDS) {
+      const payload = {
+        ...common,
+        id: `${spellId}-projectile-1`,
+        type: 'spell-projectile',
+        spellId,
+        targetTokenId: 'target',
+        accentColor: '#8b5cf6',
+        glowColor: '#c4b5fd',
+      }
+      const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+      expect(normalized, `server rejected projectile animation ${spellId}`).toMatchObject({ ok: true })
+      if (!normalized.ok) continue
+      expect(parseCombatPresentationEvent(normalized.event), `client rejected projectile animation ${spellId}`)
+        .toEqual(normalized.event)
+    }
+
+    for (const spellId of COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS) {
+      const payload = {
+        ...common,
+        id: `${spellId}-target-effect-1`,
+        type: 'spell-target-effect',
+        spellId,
+        targetTokenId: 'target',
+        accentColor: '#8b5cf6',
+        glowColor: '#c4b5fd',
+      }
+      const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+      expect(normalized, `server rejected target animation ${spellId}`).toMatchObject({ ok: true })
+      if (!normalized.ok) continue
+      expect(parseCombatPresentationEvent(normalized.event), `client rejected target animation ${spellId}`)
+        .toEqual(normalized.event)
+    }
+
+    for (const [spellId, contract] of Object.entries(COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS)) {
+      const payload = {
+        ...common,
+        id: `${spellId}-area-effect-1`,
+        type: 'spell-area-effect',
+        spellId,
+        targetCell: { col: 7, row: 4 },
+        ...contract,
+      }
+      const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+      expect(normalized, `server rejected area animation ${spellId}`).toMatchObject({ ok: true })
+      if (!normalized.ok) continue
+      expect(parseCombatPresentationEvent(normalized.event), `client rejected area animation ${spellId}`)
+        .toEqual(normalized.event)
+
+      const dimensionKey = contract.radiusFeet != null
+        ? 'radiusFeet'
+        : contract.lengthFeet != null
+          ? 'lengthFeet'
+          : 'widthFeet'
+      const incorrectDimension = Number(contract[dimensionKey]) + 5
+      expect(normalizeCombatPresentationEvent(
+        { ...payload, [dimensionKey]: incorrectDimension },
+        { role: 'dm' },
+        timestamp,
+      ), `server accepted incorrect ${dimensionKey} for ${spellId}`)
+        .toMatchObject({ ok: false, status: 400 })
+
+      const unexpectedDimension = contract.radiusFeet != null
+        ? { lengthFeet: 5 }
+        : { radiusFeet: 5 }
+      expect(normalizeCombatPresentationEvent(
+        { ...payload, ...unexpectedDimension },
+        { role: 'dm' },
+        timestamp,
+      ), `server accepted an extra dimension for ${spellId}`)
+        .toMatchObject({ ok: false, status: 400 })
+    }
   })
 
   it('accepts Shatter and Thunderwave spell banners and authors their display lifetime', () => {
@@ -2473,6 +2561,29 @@ describe('combat interrupt atomic mutation', () => {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         label: '非法光照', createdRound: 1, expiresAfterRound: 2,
         lighting: { kind: 'javascript', code: 'fetch("/")' },
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
+  })
+
+  it('validates bounded persistent-area vertical snapshots at the server boundary', () => {
+    const area = { label: 'Area', createdRound: 1, expiresAfterRound: 2 }
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...area, vertical: { mode: 'ground' } }] }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...area,
+        vertical: { mode: 'volume', baseElevationFeet: -10, heightFeet: 30, anchorOffsetFeet: 5 },
+      }] }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...area, vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 0 },
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...area, vertical: { mode: 'ground', run: 'eval()' },
       }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
   })

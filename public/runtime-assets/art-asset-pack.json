@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "packId": "astraltrace.dnd5e-2014.art",
-  "version": "content-479e5475d36662a1",
+  "version": "content-e4811efe67419057",
   "assetBasePath": "/assets/",
   "sourceCatalog": "src/lib/enemyPool.ts",
   "summary": {
-    "totalFiles": 2486,
-    "totalBytes": 3119968618,
-    "runtimeFiles": 1798,
-    "runtimeBytes": 461473142,
+    "totalFiles": 2534,
+    "totalBytes": 3175436593,
+    "runtimeFiles": 1846,
+    "runtimeBytes": 516941117,
     "authoringFiles": 688,
     "authoringBytes": 2658495476,
     "catalogTokenPortraits": 677,
@@ -17,8 +17,8 @@
     "legacyInitiativeDerivatives": 11,
     "authoringMasters": 426,
     "authoringRaw": 262,
-    "icons": 401,
-    "vfx": 21
+    "icons": 403,
+    "vfx": 67
   },
   "files": [
     {
@@ -634,6 +634,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/concentration-status-token.png",
+      "bytes": 72515,
+      "sha256": "287e78ee8ad3d2378404289cb7415df6c8d20ebca888c3148f2b2a00381613ad",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/cone-of-cold-spell-action.png",
       "bytes": 368833,
       "sha256": "9df784fa59a8b0eb3c1144a548449f8b3d46b8567b9f8f7e74b284c56c0551e6",
@@ -1225,6 +1231,12 @@
       "path": "assets/icons/flaming-sphere-spell-action.png",
       "bytes": 313204,
       "sha256": "83113777a2a27e1267ed135efca401ddf270343612b5db4f9b9d2caf82dcb3a5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/flesh-golem-fire-aversion-status.png",
+      "bytes": 265354,
+      "sha256": "d84098e1f534de5925346ee44b20c5c7f7e9cc9f448e591fa6321048cfd10a41",
       "contentType": "image/png"
     },
     {
@@ -10690,9 +10702,39 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/acid-arrow-sprite-v2.png",
+      "bytes": 760785,
+      "sha256": "b98e7ba4d297e1fe64cfd18aa70ee90ba73bd81ab39f68f419b2298136892ecb",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/acid-splash-fluid.png",
       "bytes": 1074768,
       "sha256": "031e10c05370b47b0de0cf282b0b55350dcb26e71239982899fc353e656a87fa",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/acid-splash-sprite-v2.png",
+      "bytes": 741526,
+      "sha256": "56ac587c0d9bc838b80f84d0b299a1f28050b6119c0b62f73ea8237e28831618",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/black-tentacles-sprite-v2.png",
+      "bytes": 1789508,
+      "sha256": "7eb01ed48744dea9fb092fd1577572a5ef025aa55a7dca8ba41baaeed06fdec8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/blade-barrier-sprite-v2.png",
+      "bytes": 922170,
+      "sha256": "8c4dcc4f254ee301faedbc746851143c2ae6a98093902ccf0d58e72ada07967b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/blight-sprite-v2.png",
+      "bytes": 841715,
+      "sha256": "91ff9c1557b4f73c9d68ef9084457f7bab04e9449e171ec1358ed4e163af1d1c",
       "contentType": "image/png"
     },
     {
@@ -10708,9 +10750,45 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/call-lightning-sprite-v2.png",
+      "bytes": 1762525,
+      "sha256": "e1011059d29c6fd9740534d430611456a4c92e474c2b048d5778c492929be004",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/call-lightning-strike-sprite-v2.png",
+      "bytes": 772147,
+      "sha256": "99a6587b4c471d313d9764155c034273d1a283a8be6430de963e5c4e368665d3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/chain-lightning-sprite-v2.png",
+      "bytes": 625309,
+      "sha256": "44547a891c0099dd199ca9649ec367bac04b9e8662cf9dffbedd2608ef98a2cd",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/chill-touch-hand.png",
       "bytes": 912154,
       "sha256": "f614f75d6e81b986769db6e0ae81d77d4453820857cb109cee035e64e6c6db05",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/circle-of-death-sprite-v2.png",
+      "bytes": 1798531,
+      "sha256": "c4ea7cfbc49aff7610582a1156a23839e8440df14882de3d14dc551031f8792a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/color-spray-sprite-v2.png",
+      "bytes": 1171586,
+      "sha256": "328723e9967cc0f0a5036b635b72ee2bbb3d26a09ad9968ba21658ebec54bf4e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/cone-of-cold-sprite-v2.png",
+      "bytes": 1048860,
+      "sha256": "f2a161b4a2b1c8b6ce458a822ddd354a70632079d581a425223d743f90cbc726",
       "contentType": "image/png"
     },
     {
@@ -10720,9 +10798,63 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/cure-wounds-sprite-v2.png",
+      "bytes": 1235744,
+      "sha256": "30081e5ff8ddeb69f62159e1a87adc4d75223a29184b0d47a363be079acf118c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/darkness-sprite-v2.png",
+      "bytes": 1043914,
+      "sha256": "0e1f43094de9b8bd0bcebf8d28d6b9bb4fd95285a3c81267160e36ed18d72f5c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/daylight-sprite-v2.png",
+      "bytes": 1564206,
+      "sha256": "c4c41fb67d5b8b11201b4ddca71ec792a27b7cf291023992a49da39f2787c552",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/disintegrate-sprite-v2.png",
+      "bytes": 732333,
+      "sha256": "c47357084efaa317c43d106eb2f918cc21541487beeee657cda4ceb602f7e984",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/eldritch-blast-fluid.png",
       "bytes": 1119666,
       "sha256": "64ed1db017b76ed8236428ef1f94287ee803795a48ef9726ec00a401fec9c721",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/eldritch-blast-sprite-v2.png",
+      "bytes": 673595,
+      "sha256": "50fbe19a6354c3491583502583639e3f20c4578ad95f7c871a6ae5b86133f650",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/entangle-sprite-v2.png",
+      "bytes": 2009968,
+      "sha256": "acc72d16b924e9d17a1b405e2665b6f5c30375edc5f9630e47c64cc7cf6b33b4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/faerie-fire-sprite-v2.png",
+      "bytes": 1647092,
+      "sha256": "db2871586581613b864cb8c1309e0f00e790e949022e3abe22eae7cb9df51327",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/false-life-sprite-v2.png",
+      "bytes": 1321033,
+      "sha256": "8dfe5f2c93d9bf24c0cf0ac2e25e705f273fb8a85cac3b6207576304a302b594",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/finger-of-death-sprite-v2.png",
+      "bytes": 1079246,
+      "sha256": "d8744cac0130870884916dea5869f519186f81fdcd9aa80bb0580e1b9f728f74",
       "contentType": "image/png"
     },
     {
@@ -10738,9 +10870,39 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/flame-strike-sprite-v2.png",
+      "bytes": 887122,
+      "sha256": "bf0cacf51bdd78113ca5dec598c5b1cba5368ffdd31aca74aa2ced81df3027b2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/flaming-sphere-sprite-v2.png",
+      "bytes": 1167340,
+      "sha256": "85e0da347621b2b1049c73398e1e594b1cb572ef37f2de4205eef84ba7398e07",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/freezing-sphere-sprite-v2.png",
+      "bytes": 1698299,
+      "sha256": "9f358f5a3b9483c12b07833fcaf6c0466a3fac215b3ff887362cf0308b35ec32",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/grease-sprite-v2.png",
+      "bytes": 1465722,
+      "sha256": "a3b629b599be7a45a088ec4f3f69f01a3abaffa47b6be6694adf2ca23a7757aa",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/guiding-bolt-fluid.png",
       "bytes": 786025,
       "sha256": "3a83b3814fc70652cf0b8c4c49876369846f697211a280a636c79ed1c571d19d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/guiding-bolt-sprite-v2.png",
+      "bytes": 520948,
+      "sha256": "d35dc09f975d68dad8f27ae491d349409dc0210f4d35ac7b25c02866d2dcfcbf",
       "contentType": "image/png"
     },
     {
@@ -10750,9 +10912,27 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/healing-word-sprite-v2.png",
+      "bytes": 629048,
+      "sha256": "05ca46edefb64a9c02c6c204905c2a4b0b0421c55d8760982004bfa8b53c77e0",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/hellish-rebuke-fluid.png",
       "bytes": 1497461,
       "sha256": "cffb9f5d4ddf10d0fbf551fdd4398bbe3cba507dd79b06e0a7754a1b023b1e62",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/hellish-rebuke-sprite-v2.png",
+      "bytes": 1488582,
+      "sha256": "04c5d987d8c29599f7105a147ee757ecb50229f4a31427baef915b20e663fb6a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/ice-storm-sprite-v2.png",
+      "bytes": 1780132,
+      "sha256": "ba126801a7a1fd40e00844dd82e2bb62fb3615a6a3ae4509638ffe6a03205fb4",
       "contentType": "image/png"
     },
     {
@@ -10762,9 +10942,33 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/inflict-wounds-sprite-v2.png",
+      "bytes": 932548,
+      "sha256": "dac2b38bf0c2598a8249504e3db1a03e68c4609fa965a9633f6183ea140b4d39",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/insect-plague-sprite-v2.png",
+      "bytes": 1580738,
+      "sha256": "d7746160b22fafb62cad034475051bb9cfab88f639741912ee4527ee021a1bb1",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/lightning-bolt-fluid.png",
       "bytes": 758469,
       "sha256": "49918eab021f4fe94f746cf3ece946c7c21adaa01a91c06cb42ff58ce147f522",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/lightning-bolt-sprite-v2.png",
+      "bytes": 693600,
+      "sha256": "8c238fb4deffcdde068d67ce21b580c1e55820a3071f6d6c8f31160378fd8dd8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/mage-hand-sprite-v2.png",
+      "bytes": 1318799,
+      "sha256": "116c15636bee12c19612f5db50da61696a8a3a409a3485c8fb80c3c1e2d0c875",
       "contentType": "image/png"
     },
     {
@@ -10774,9 +10978,33 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/moonbeam-sprite-v2.png",
+      "bytes": 1306439,
+      "sha256": "af8ac4fc737b9322d3abfd8b4fe0aba1abcbad4d70614ab264f11933f224e74f",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/poison-spray-fluid.png",
       "bytes": 1227515,
       "sha256": "6e32b9ecd92654866b0c7b1fcd3cea5fa85f1b59c4bcc3b3089c98e17032a6da",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/poison-spray-sprite-v2.png",
+      "bytes": 1128140,
+      "sha256": "fb61f473672d4721e4f15f348fa0cf9309756b6ae685e5181004f91769931b3d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/power-word-kill-sprite-v2.png",
+      "bytes": 1147527,
+      "sha256": "278c83f321f050c3716394682e89cda889d51d4ad48ef01e8dc3653f16a94e80",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/power-word-stun-sprite-v2.png",
+      "bytes": 1105929,
+      "sha256": "5ea463d2ea29bffa817ac713ea29751a622e38f92304f5b0ffaf0f6b36b0f17b",
       "contentType": "image/png"
     },
     {
@@ -10786,9 +11014,21 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/ray-of-frost-sprite-v2.png",
+      "bytes": 828934,
+      "sha256": "2b6f9d90407fb1e86d10a74a4c2f7e8e0332bb9738878def24fa0673119aedb9",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/sacred-flame-fluid.png",
       "bytes": 1074784,
       "sha256": "3f7a3c6f8a48a04e6963786211f1a0afb88a007dc36b5eff97ff3642e2d21285",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sacred-flame-sprite-v2.png",
+      "bytes": 900128,
+      "sha256": "8e3ec0aaa0ff30774feb3bccece127da436662bdbfd9842194a82fc78281e282",
       "contentType": "image/png"
     },
     {
@@ -10798,9 +11038,51 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/scorching-ray-sprite-v2.png",
+      "bytes": 473185,
+      "sha256": "aaa0a201fb7c401ff72586b75b3beb1299477b181bc2b16ed29507ac25bb3c16",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/shatter-fluid.png",
       "bytes": 2445659,
       "sha256": "1665ec30d58008f89a0028ffda9392b060cfabc5bdbdb8be096df55e10aac56a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/shatter-sprite-v2.png",
+      "bytes": 1733199,
+      "sha256": "9e58d899f339f36a8ffc38bceae3f9463bb205c87bc34e7a1a9571dfa9628308",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sleep-sprite-v2.png",
+      "bytes": 1636155,
+      "sha256": "1620d6c93a8d7de7a326e30194b987346c2e8e53e7205acc4c3b0e237cabdf14",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/spike-growth-sprite-v2.png",
+      "bytes": 1865657,
+      "sha256": "6f36391da07dd7dfa77daf5de12f562615060b76330c620c3754104429d7a713",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/spirit-guardians-sprite-v2.png",
+      "bytes": 1240330,
+      "sha256": "6113ace7102f3b7632d4e6bcc4c6c2db9b1e3b0e50e57f153f2b4a679d952645",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/spiritual-weapon-sprite-v2.png",
+      "bytes": 1056770,
+      "sha256": "4fedbde986cda2ddf9c2f0254741d1e7cbbcec1a877ea804ed3943d18292fb71",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sunburst-sprite-v2.png",
+      "bytes": 1722020,
+      "sha256": "ec68386d44f14498e76552a9401a92ed756539c702c430d8e6fb5e4f0b4f6475",
       "contentType": "image/png"
     },
     {
@@ -10808,6 +11090,12 @@
       "bytes": 109154,
       "sha256": "7fb8b9b8fa588a6dbfea68130368427fd2e9f2d34482f3bf3415eefdf64d6ae5",
       "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/wall-of-fire-sprite-v2.png",
+      "bytes": 1281022,
+      "sha256": "4a719dba8d55bcadfc09f7155db3ac9fa1705d2fb1342526b09a52bb373da11a",
+      "contentType": "image/png"
     }
   ],
   "collections": {
@@ -19694,6 +19982,12 @@
           "sha256": "4b38ee415dba983f3e68052795114b38a5dda770cadd109a2b33c8af49e73682"
         },
         {
+          "path": "/assets/icons/concentration-status-token.png",
+          "mediaType": "image/png",
+          "bytes": 72515,
+          "sha256": "287e78ee8ad3d2378404289cb7415df6c8d20ebca888c3148f2b2a00381613ad"
+        },
+        {
           "path": "/assets/icons/cone-of-cold-spell-action.png",
           "mediaType": "image/png",
           "bytes": 368833,
@@ -20286,6 +20580,12 @@
           "mediaType": "image/png",
           "bytes": 313204,
           "sha256": "83113777a2a27e1267ed135efca401ddf270343612b5db4f9b9d2caf82dcb3a5"
+        },
+        {
+          "path": "/assets/icons/flesh-golem-fire-aversion-status.png",
+          "mediaType": "image/png",
+          "bytes": 265354,
+          "sha256": "d84098e1f534de5925346ee44b20c5c7f7e9cc9f448e591fa6321048cfd10a41"
         },
         {
           "path": "/assets/icons/flesh-to-stone-spell-action.png",
@@ -21496,10 +21796,40 @@
           "sha256": "4d96ca238314b4649e4f9fdf2b07e04ec0cb9ef6e458571634e3c008154d9569"
         },
         {
+          "path": "/assets/vfx/acid-arrow-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 760785,
+          "sha256": "b98e7ba4d297e1fe64cfd18aa70ee90ba73bd81ab39f68f419b2298136892ecb"
+        },
+        {
           "path": "/assets/vfx/acid-splash-fluid.png",
           "mediaType": "image/png",
           "bytes": 1074768,
           "sha256": "031e10c05370b47b0de0cf282b0b55350dcb26e71239982899fc353e656a87fa"
+        },
+        {
+          "path": "/assets/vfx/acid-splash-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 741526,
+          "sha256": "56ac587c0d9bc838b80f84d0b299a1f28050b6119c0b62f73ea8237e28831618"
+        },
+        {
+          "path": "/assets/vfx/black-tentacles-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1789508,
+          "sha256": "7eb01ed48744dea9fb092fd1577572a5ef025aa55a7dca8ba41baaeed06fdec8"
+        },
+        {
+          "path": "/assets/vfx/blade-barrier-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 922170,
+          "sha256": "8c4dcc4f254ee301faedbc746851143c2ae6a98093902ccf0d58e72ada07967b"
+        },
+        {
+          "path": "/assets/vfx/blight-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 841715,
+          "sha256": "91ff9c1557b4f73c9d68ef9084457f7bab04e9449e171ec1358ed4e163af1d1c"
         },
         {
           "path": "/assets/vfx/burning-hands-fluid.png",
@@ -21514,10 +21844,46 @@
           "sha256": "23b54c9cd6a60022e988de8fe20bea8a9e7b11cbb517a48559b6973680bc44c7"
         },
         {
+          "path": "/assets/vfx/call-lightning-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1762525,
+          "sha256": "e1011059d29c6fd9740534d430611456a4c92e474c2b048d5778c492929be004"
+        },
+        {
+          "path": "/assets/vfx/call-lightning-strike-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 772147,
+          "sha256": "99a6587b4c471d313d9764155c034273d1a283a8be6430de963e5c4e368665d3"
+        },
+        {
+          "path": "/assets/vfx/chain-lightning-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 625309,
+          "sha256": "44547a891c0099dd199ca9649ec367bac04b9e8662cf9dffbedd2608ef98a2cd"
+        },
+        {
           "path": "/assets/vfx/chill-touch-hand.png",
           "mediaType": "image/png",
           "bytes": 912154,
           "sha256": "f614f75d6e81b986769db6e0ae81d77d4453820857cb109cee035e64e6c6db05"
+        },
+        {
+          "path": "/assets/vfx/circle-of-death-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1798531,
+          "sha256": "c4ea7cfbc49aff7610582a1156a23839e8440df14882de3d14dc551031f8792a"
+        },
+        {
+          "path": "/assets/vfx/color-spray-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1171586,
+          "sha256": "328723e9967cc0f0a5036b635b72ee2bbb3d26a09ad9968ba21658ebec54bf4e"
+        },
+        {
+          "path": "/assets/vfx/cone-of-cold-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1048860,
+          "sha256": "f2a161b4a2b1c8b6ce458a822ddd354a70632079d581a425223d743f90cbc726"
         },
         {
           "path": "/assets/vfx/cure-wounds-fluid.png",
@@ -21526,10 +21892,64 @@
           "sha256": "5771139f8eb6e6e4b7f63711cd25a95947643ae27ccfde27663c108220a71977"
         },
         {
+          "path": "/assets/vfx/cure-wounds-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1235744,
+          "sha256": "30081e5ff8ddeb69f62159e1a87adc4d75223a29184b0d47a363be079acf118c"
+        },
+        {
+          "path": "/assets/vfx/darkness-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1043914,
+          "sha256": "0e1f43094de9b8bd0bcebf8d28d6b9bb4fd95285a3c81267160e36ed18d72f5c"
+        },
+        {
+          "path": "/assets/vfx/daylight-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1564206,
+          "sha256": "c4c41fb67d5b8b11201b4ddca71ec792a27b7cf291023992a49da39f2787c552"
+        },
+        {
+          "path": "/assets/vfx/disintegrate-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 732333,
+          "sha256": "c47357084efaa317c43d106eb2f918cc21541487beeee657cda4ceb602f7e984"
+        },
+        {
           "path": "/assets/vfx/eldritch-blast-fluid.png",
           "mediaType": "image/png",
           "bytes": 1119666,
           "sha256": "64ed1db017b76ed8236428ef1f94287ee803795a48ef9726ec00a401fec9c721"
+        },
+        {
+          "path": "/assets/vfx/eldritch-blast-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 673595,
+          "sha256": "50fbe19a6354c3491583502583639e3f20c4578ad95f7c871a6ae5b86133f650"
+        },
+        {
+          "path": "/assets/vfx/entangle-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 2009968,
+          "sha256": "acc72d16b924e9d17a1b405e2665b6f5c30375edc5f9630e47c64cc7cf6b33b4"
+        },
+        {
+          "path": "/assets/vfx/faerie-fire-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1647092,
+          "sha256": "db2871586581613b864cb8c1309e0f00e790e949022e3abe22eae7cb9df51327"
+        },
+        {
+          "path": "/assets/vfx/false-life-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1321033,
+          "sha256": "8dfe5f2c93d9bf24c0cf0ac2e25e705f273fb8a85cac3b6207576304a302b594"
+        },
+        {
+          "path": "/assets/vfx/finger-of-death-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1079246,
+          "sha256": "d8744cac0130870884916dea5869f519186f81fdcd9aa80bb0580e1b9f728f74"
         },
         {
           "path": "/assets/vfx/fire-projectile-fluid.png",
@@ -21544,10 +21964,40 @@
           "sha256": "11d89ca4eccfae2a810b7c38bcd6d5972f80cbf0959cb5141d04be913a00f5b9"
         },
         {
+          "path": "/assets/vfx/flame-strike-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 887122,
+          "sha256": "bf0cacf51bdd78113ca5dec598c5b1cba5368ffdd31aca74aa2ced81df3027b2"
+        },
+        {
+          "path": "/assets/vfx/flaming-sphere-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1167340,
+          "sha256": "85e0da347621b2b1049c73398e1e594b1cb572ef37f2de4205eef84ba7398e07"
+        },
+        {
+          "path": "/assets/vfx/freezing-sphere-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1698299,
+          "sha256": "9f358f5a3b9483c12b07833fcaf6c0466a3fac215b3ff887362cf0308b35ec32"
+        },
+        {
+          "path": "/assets/vfx/grease-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1465722,
+          "sha256": "a3b629b599be7a45a088ec4f3f69f01a3abaffa47b6be6694adf2ca23a7757aa"
+        },
+        {
           "path": "/assets/vfx/guiding-bolt-fluid.png",
           "mediaType": "image/png",
           "bytes": 786025,
           "sha256": "3a83b3814fc70652cf0b8c4c49876369846f697211a280a636c79ed1c571d19d"
+        },
+        {
+          "path": "/assets/vfx/guiding-bolt-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 520948,
+          "sha256": "d35dc09f975d68dad8f27ae491d349409dc0210f4d35ac7b25c02866d2dcfcbf"
         },
         {
           "path": "/assets/vfx/healing-word-fluid.png",
@@ -21556,10 +22006,28 @@
           "sha256": "5145eae7e6e4a0cb8ad591ffa1777ce4ea703d6bb472f638a0dadd89886f576c"
         },
         {
+          "path": "/assets/vfx/healing-word-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 629048,
+          "sha256": "05ca46edefb64a9c02c6c204905c2a4b0b0421c55d8760982004bfa8b53c77e0"
+        },
+        {
           "path": "/assets/vfx/hellish-rebuke-fluid.png",
           "mediaType": "image/png",
           "bytes": 1497461,
           "sha256": "cffb9f5d4ddf10d0fbf551fdd4398bbe3cba507dd79b06e0a7754a1b023b1e62"
+        },
+        {
+          "path": "/assets/vfx/hellish-rebuke-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1488582,
+          "sha256": "04c5d987d8c29599f7105a147ee757ecb50229f4a31427baef915b20e663fb6a"
+        },
+        {
+          "path": "/assets/vfx/ice-storm-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1780132,
+          "sha256": "ba126801a7a1fd40e00844dd82e2bb62fb3615a6a3ae4509638ffe6a03205fb4"
         },
         {
           "path": "/assets/vfx/inflict-wounds-fluid.png",
@@ -21568,10 +22036,34 @@
           "sha256": "2d06d931ed8e75edeb862e7c24f862b9c739a228190c2c2febf7d1146d89926c"
         },
         {
+          "path": "/assets/vfx/inflict-wounds-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 932548,
+          "sha256": "dac2b38bf0c2598a8249504e3db1a03e68c4609fa965a9633f6183ea140b4d39"
+        },
+        {
+          "path": "/assets/vfx/insect-plague-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1580738,
+          "sha256": "d7746160b22fafb62cad034475051bb9cfab88f639741912ee4527ee021a1bb1"
+        },
+        {
           "path": "/assets/vfx/lightning-bolt-fluid.png",
           "mediaType": "image/png",
           "bytes": 758469,
           "sha256": "49918eab021f4fe94f746cf3ece946c7c21adaa01a91c06cb42ff58ce147f522"
+        },
+        {
+          "path": "/assets/vfx/lightning-bolt-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 693600,
+          "sha256": "8c238fb4deffcdde068d67ce21b580c1e55820a3071f6d6c8f31160378fd8dd8"
+        },
+        {
+          "path": "/assets/vfx/mage-hand-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1318799,
+          "sha256": "116c15636bee12c19612f5db50da61696a8a3a409a3485c8fb80c3c1e2d0c875"
         },
         {
           "path": "/assets/vfx/magic-missile-fluid.png",
@@ -21580,10 +22072,34 @@
           "sha256": "71b83f3c89a0742267fb0dda5f11025e991819cdd41060976126aa6febb16fbe"
         },
         {
+          "path": "/assets/vfx/moonbeam-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1306439,
+          "sha256": "af8ac4fc737b9322d3abfd8b4fe0aba1abcbad4d70614ab264f11933f224e74f"
+        },
+        {
           "path": "/assets/vfx/poison-spray-fluid.png",
           "mediaType": "image/png",
           "bytes": 1227515,
           "sha256": "6e32b9ecd92654866b0c7b1fcd3cea5fa85f1b59c4bcc3b3089c98e17032a6da"
+        },
+        {
+          "path": "/assets/vfx/poison-spray-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1128140,
+          "sha256": "fb61f473672d4721e4f15f348fa0cf9309756b6ae685e5181004f91769931b3d"
+        },
+        {
+          "path": "/assets/vfx/power-word-kill-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1147527,
+          "sha256": "278c83f321f050c3716394682e89cda889d51d4ad48ef01e8dc3653f16a94e80"
+        },
+        {
+          "path": "/assets/vfx/power-word-stun-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1105929,
+          "sha256": "5ea463d2ea29bffa817ac713ea29751a622e38f92304f5b0ffaf0f6b36b0f17b"
         },
         {
           "path": "/assets/vfx/ray-of-frost-fluid.png",
@@ -21592,10 +22108,22 @@
           "sha256": "3a6573b8996d5a7ace185d854d6609dba79aff45d5eb6096f81ea6d3d8084944"
         },
         {
+          "path": "/assets/vfx/ray-of-frost-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 828934,
+          "sha256": "2b6f9d90407fb1e86d10a74a4c2f7e8e0332bb9738878def24fa0673119aedb9"
+        },
+        {
           "path": "/assets/vfx/sacred-flame-fluid.png",
           "mediaType": "image/png",
           "bytes": 1074784,
           "sha256": "3f7a3c6f8a48a04e6963786211f1a0afb88a007dc36b5eff97ff3642e2d21285"
+        },
+        {
+          "path": "/assets/vfx/sacred-flame-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 900128,
+          "sha256": "8e3ec0aaa0ff30774feb3bccece127da436662bdbfd9842194a82fc78281e282"
         },
         {
           "path": "/assets/vfx/scorching-ray-fluid.png",
@@ -21604,16 +22132,64 @@
           "sha256": "9c78f2b6b5def759044bc05cf5fd450022eea99a4900c63ad7e4cd98f6d1db0c"
         },
         {
+          "path": "/assets/vfx/scorching-ray-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 473185,
+          "sha256": "aaa0a201fb7c401ff72586b75b3beb1299477b181bc2b16ed29507ac25bb3c16"
+        },
+        {
           "path": "/assets/vfx/shatter-fluid.png",
           "mediaType": "image/png",
           "bytes": 2445659,
           "sha256": "1665ec30d58008f89a0028ffda9392b060cfabc5bdbdb8be096df55e10aac56a"
         },
         {
+          "path": "/assets/vfx/shatter-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1733199,
+          "sha256": "9e58d899f339f36a8ffc38bceae3f9463bb205c87bc34e7a1a9571dfa9628308"
+        },
+        {
+          "path": "/assets/vfx/sleep-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1636155,
+          "sha256": "1620d6c93a8d7de7a326e30194b987346c2e8e53e7205acc4c3b0e237cabdf14"
+        },
+        {
+          "path": "/assets/vfx/spike-growth-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1865657,
+          "sha256": "6f36391da07dd7dfa77daf5de12f562615060b76330c620c3754104429d7a713"
+        },
+        {
+          "path": "/assets/vfx/spirit-guardians-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1240330,
+          "sha256": "6113ace7102f3b7632d4e6bcc4c6c2db9b1e3b0e50e57f153f2b4a679d952645"
+        },
+        {
+          "path": "/assets/vfx/spiritual-weapon-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1056770,
+          "sha256": "4fedbde986cda2ddf9c2f0254741d1e7cbbcec1a877ea804ed3943d18292fb71"
+        },
+        {
+          "path": "/assets/vfx/sunburst-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1722020,
+          "sha256": "ec68386d44f14498e76552a9401a92ed756539c702c430d8e6fb5e4f0b4f6475"
+        },
+        {
           "path": "/assets/vfx/thunderwave-fluid.webp",
           "mediaType": "image/webp",
           "bytes": 109154,
           "sha256": "7fb8b9b8fa588a6dbfea68130368427fd2e9f2d34482f3bf3415eefdf64d6ae5"
+        },
+        {
+          "path": "/assets/vfx/wall-of-fire-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1281022,
+          "sha256": "4a719dba8d55bcadfc09f7155db3ac9fa1705d2fb1342526b09a52bb373da11a"
         }
       ]
     },
@@ -25752,5 +26328,5 @@
       ]
     }
   },
-  "contentSha256": "479e5475d36662a1b9a8eef38cac75c3c8c86939d3b2db62aeb4975f70bc2abd"
+  "contentSha256": "e4811efe674190576d749d7cbc958c4bca8e7150f17c69d3d9b30b0faa1841fe"
 }

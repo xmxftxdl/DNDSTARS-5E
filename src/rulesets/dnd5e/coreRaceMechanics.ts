@@ -118,22 +118,18 @@ export function dnd5eCoreRaceMechanics(
   const matches = (...values: readonly string[]) => identities.some((identity) =>
     values.some((value) => identity === value || identity.endsWith(`:${value}`)))
   if (matches(
-    'dwarf', 'hill-dwarf', 'mountain-dwarf',
-    '矮人', '丘陵矮人', '山地矮人',
+    'dwarf', '矮人',
   )) return CORE_RACE_MECHANICS.dwarf
   if (matches(
-    'elf', 'high-elf', 'wood-elf', 'drow', 'dark-elf',
-    '精灵', '高等精灵', '木精灵', '卓尔', '黑暗精灵',
+    'elf', 'high-elf', '精灵', '高等精灵',
   )) return CORE_RACE_MECHANICS.elf
   if (matches(
-    'halfling', 'lightfoot-halfling', 'stout-halfling',
-    '半身人', '轻足半身人', '强心半身人', '强心半身人（stout）',
+    'halfling', 'lightfoot-halfling', '半身人', '轻足半身人',
   )) return CORE_RACE_MECHANICS.halfling
-  if (matches('human', 'variant-human', '人类', '变体人类')) return CORE_RACE_MECHANICS.human
+  if (matches('human', '人类')) return CORE_RACE_MECHANICS.human
   if (matches('dragonborn', '龙裔')) return CORE_RACE_MECHANICS.dragonborn
   if (matches(
-    'gnome', 'rock-gnome', 'forest-gnome',
-    '侏儒', '岩地侏儒', '森林侏儒',
+    'gnome', 'rock-gnome', '侏儒', '岩地侏儒',
   )) return CORE_RACE_MECHANICS.gnome
   if (matches('half-elf', 'half elf', '半精灵')) return CORE_RACE_MECHANICS['half-elf']
   if (matches('half-orc', 'half orc', '半兽人')) return CORE_RACE_MECHANICS['half-orc']

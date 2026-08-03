@@ -92,6 +92,56 @@ describe('D&D 5e monster resource actions', () => {
     }))
   })
 
+  it('resolves the vampire legendary Bite through the base eligibility and life-drain rules', () => {
+    const hero = combatant('hero', 20, {
+      controller: 'player',
+      position: { x: 5, y: 0 },
+      classState: {
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'incapacitated',
+          targetId: 'hero',
+          source: {
+            kind: 'monster',
+            actorId: 'vampire',
+            rulesId: 'test:incapacitated',
+          },
+        })],
+      },
+    })
+    const vampire = combatant('vampire', 10, {
+      statBlockId: 'srd-5.1:vampire-vampire',
+      position: { x: 0, y: 0 },
+      currentHp: 50,
+      maxHp: 100,
+      classState: { monsterLegendaryActionPoints: 3 },
+    })
+    const state = startDnd5eHeadlessCombat('vampire-legendary-bite', [hero, vampire])
+    state.distanceFeetByCombatantPair = { ['hero\u0000vampire']: 5 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-legendary-action',
+      actorId: 'vampire',
+      actionId: 'legendary-bite-costs-2-actions',
+      rolls: [{
+        targetId: 'hero',
+        d20: 10,
+        damageRolls: [[3], [2, 3, 4]],
+        onHitEffectRolls: [{ effectId: 'bite-hit-point-maximum-reduction' }],
+      }],
+    })
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.vampire.classState.monsterLegendaryActionPoints).toBe(1)
+    expect(result.state.combatants.vampire.currentHp).toBe(59)
+    expect(result.state.combatants.hero.currentHp).toBe(84)
+    expect(result.state.combatants.hero.maxHp).toBe(91)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-legendary-action-used',
+      actionId: 'legendary-bite-costs-2-actions',
+      cost: 2,
+    }))
+  })
+
   it('declares every SRD 5.1 aboleth action as Headless and keeps Tail Swipe linked to Tail', () => {
     const aboleth = getDnd5eSrdMonster('srd-5.1:aboleth')!
     expect([
@@ -492,6 +542,94 @@ describe('D&D 5e monster resource actions', () => {
     expect(spoofedTarget).toMatchObject({ ok: false, reason: 'invalid-dice' })
   })
 
+  it('lets a monster cast Shield as a reaction to Magic Missile without a forged client target list', () => {
+    const wizard = combatant('wizard', 20, {
+      controller: 'player',
+      classId: 'wizard',
+      classLevels: { wizard: 3 },
+      level: 3,
+      classSelections: { 'spell-prepared': ['magic-missile'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['magic-missile'] } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const mage = combatant('mage', 10, {
+      statBlockId: 'srd-5.1:mage',
+      currentHp: 40,
+      maxHp: 40,
+      classState: { monsterSpellSlots: { 1: { current: 1, max: 1 } } },
+    })
+    const state = startDnd5eHeadlessCombat('monster-shield-reaction', [wizard, mage])
+    state.distanceFeetByCombatantPair = { ['mage\u0000wizard']: 30 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell',
+      actorId: 'wizard',
+      castingClassId: 'wizard',
+      targetId: 'mage',
+      targetIds: ['mage'],
+      projectileTargetIds: ['mage', 'mage', 'mage'],
+      spellId: 'magic-missile',
+      slotLevel: 1,
+      effectRolls: [4, 4, 4],
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.mage.currentHp).toBe(40)
+    expect(result.state.combatants.mage.turn.reactionAvailable).toBe(false)
+    expect(result.state.combatants.mage.classState.monsterSpellSlots?.['1'].current).toBe(0)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: 'mage', stateKey: 'shield-spell', active: true,
+    }))
+  })
+
+  it('only auto-casts monster Shield on an attack when the target can actually cast it', () => {
+    const attacker = combatant('attacker', 20, { controller: 'player' })
+    const mage = combatant('mage', 10, {
+      statBlockId: 'srd-5.1:mage',
+      armorClass: 15,
+      currentHp: 40,
+      maxHp: 40,
+      classState: { monsterSpellSlots: { 1: { current: 1, max: 1 } } },
+    })
+    const shielded = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('monster-shield-weapon-attack', [attacker, mage]),
+      {
+        type: 'attack',
+        actorId: 'attacker',
+        targetId: 'mage',
+        attackModifier: 5,
+        d20: 12,
+        damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+      },
+    )
+    expect(shielded.ok, shielded.ok ? undefined : shielded.reason).toBe(true)
+    expect(shielded.state.combatants.mage.currentHp).toBe(40)
+    expect(shielded.state.combatants.mage.turn.reactionAvailable).toBe(false)
+    expect(shielded.state.combatants.mage.classState.monsterSpellSlots?.['1'].current).toBe(0)
+    expect(shielded.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', targetId: 'mage', hit: false,
+    }))
+
+    const goblin = combatant('goblin', 10, {
+      statBlockId: 'srd-5.1:goblin',
+      armorClass: 15,
+      currentHp: 20,
+      maxHp: 20,
+    })
+    const ordinaryHit = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('monster-without-shield-weapon-attack', [attacker, goblin]),
+      {
+        type: 'attack',
+        actorId: 'attacker',
+        targetId: 'goblin',
+        attackModifier: 5,
+        d20: 11,
+        damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+      },
+    )
+    expect(ordinaryHit.ok, ordinaryHit.ok ? undefined : ordinaryHit.reason).toBe(true)
+    expect(ordinaryHit.state.combatants.goblin.currentHp).toBe(12)
+    expect(ordinaryHit.state.combatants.goblin.turn.reactionAvailable).toBe(true)
+  })
+
   it('rejects a monster core spell through total cover', () => {
     const target = combatant('target', 10, { controller: 'player', currentHp: 30, maxHp: 30 })
     const mage = combatant('mage', 20, { statBlockId: 'srd-5.1:mage' })
@@ -557,6 +695,45 @@ describe('D&D 5e monster resource actions', () => {
       success: true,
     }))
     expect(result.events.some((event) => event.type === 'monster-core-spell-resolved')).toBe(false)
+  })
+
+  it('lets a monster spend its own slot to Counterspell a player spell', () => {
+    const wizard = combatant('wizard', 20, {
+      controller: 'player',
+      classId: 'wizard',
+      classLevels: { wizard: 5 },
+      level: 5,
+      classSelections: { 'spell-prepared': ['magic-missile'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['magic-missile'] } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const mage = combatant('mage', 10, {
+      statBlockId: 'srd-5.1:mage',
+      currentHp: 40,
+      maxHp: 40,
+      classState: { monsterSpellSlots: { 3: { current: 1, max: 1 } } },
+    })
+    const state = startDnd5eHeadlessCombat('monster-counterspell-player', [wizard, mage])
+    state.distanceFeetByCombatantPair = { ['mage\u0000wizard']: 30 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell',
+      actorId: 'wizard',
+      castingClassId: 'wizard',
+      targetId: 'mage',
+      targetIds: ['mage'],
+      projectileTargetIds: ['mage', 'mage', 'mage'],
+      spellId: 'magic-missile',
+      slotLevel: 1,
+      counterspellReaction: { actorId: 'mage', slotLevel: 3 },
+      effectRolls: [4, 4, 4],
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.mage.currentHp).toBe(40)
+    expect(result.state.combatants.mage.turn.reactionAvailable).toBe(false)
+    expect(result.state.combatants.mage.classState.monsterSpellSlots?.['3'].current).toBe(0)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'counterspell-resolved', actorId: 'mage', success: true,
+    }))
   })
 
   it('requires the counterspeller to see the monster caster', () => {
@@ -642,6 +819,12 @@ describe('D&D 5e monster resource actions', () => {
       currentHp: 100,
       maxHp: 100,
     })
+    const dragonAlly = combatant('dragon-ally', 15, {
+      controller: 'dm',
+      position: { x: 0, y: 5 },
+      currentHp: 100,
+      maxHp: 100,
+    })
     const dragon = combatant('dragon', 10, {
       statBlockId: 'srd-5.1:adult-black-dragon',
       classState: { monsterLegendaryActionPoints: 3 },
@@ -659,20 +842,45 @@ describe('D&D 5e monster resource actions', () => {
       d20: 12,
     }))
 
-    const wingState = startDnd5eHeadlessCombat('legendary-wing', [hero, dragon])
-    wingState.distanceFeetByCombatantPair = { ['dragon\u0000hero']: 5 }
+    const dragonStatBlock = structuredClone(getDnd5eSrdMonster('srd-5.1:adult-black-dragon')!)
+    const wingDefinition = dragonStatBlock.legendaryActions!.find((candidate) =>
+      candidate.id === 'wing-attack-costs-2-actions')!
+    expect(dnd5eMonsterActionAutomation(wingDefinition)).toBe('headless')
+    expect(wingDefinition.rule).toEqual(expect.objectContaining({
+      kind: 'legendary-wing-attack',
+      rangeFeet: 10,
+      dc: 19,
+      damage: expect.objectContaining({ count: 2, sides: 6, bonus: 6 }),
+    }))
+    // Runtime values must come from the structured rule, not localized prose.
+    wingDefinition.description = 'translated prose without dice or a save DC'
+    setDnd5eRoomMonsterCatalog([dragonStatBlock])
+
+    const wingState = startDnd5eHeadlessCombat('legendary-wing', [hero, dragonAlly, dragon])
+    wingState.distanceFeetByCombatantPair = {
+      ['dragon\u0000hero']: 5,
+      ['dragon\u0000dragon-ally']: 5,
+    }
     const wing = resolveDnd5eHeadlessAction(wingState, {
       type: 'monster-adjudicated-action',
       actorId: 'dragon',
       actionId: 'wing-attack-costs-2-actions',
       legendary: true,
       effects: [],
-      targetSavingThrows: [{ targetId: 'hero', d20: 1 }],
+      targetSavingThrows: [
+        { targetId: 'hero', d20: 1 },
+        { targetId: 'dragon-ally', d20: 20 },
+      ],
       damageRolls: [3, 4],
     })
     expect(wing.ok, wing.ok ? undefined : wing.reason).toBe(true)
     expect(wing.state.combatants.hero.currentHp).toBe(87)
     expect(wing.state.combatants.hero.conditions).toContain('prone')
+    expect(wing.state.combatants['dragon-ally'].currentHp).toBe(100)
+    expect(wing.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: 'dragon-ally',
+    }))
     expect(wing.state.combatants.dragon.turn.movementRemaining).toBe(70)
   })
 

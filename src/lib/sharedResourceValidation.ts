@@ -14,6 +14,7 @@ import {
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaLighting,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
+  normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
 } from '../rulesets/dnd5e/persistentAreaTypes'
 import { MAP_FOG_RESOURCE, normalizeSharedMapFog } from './fogOfWar'
@@ -158,6 +159,9 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     }
     if (raw.lighting != null && !normalizeDnd5ePersistentAreaLighting(raw.lighting)) {
       issues.push(`${areaPath}.lighting 无效`)
+    }
+    if (raw.vertical != null && !normalizeDnd5ePersistentAreaVerticalSnapshot(raw.vertical)) {
+      issues.push(`${areaPath}.vertical 无效`)
     }
     const triggerIds = new Set<string>()
     const receiptTriggerIds = new Set<string>()

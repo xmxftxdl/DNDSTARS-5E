@@ -104,4 +104,46 @@ describe('D&D 5e ability-check authority bridge', () => {
     if (!preparedAcrobatics.ok) return
     expect(preparedAcrobatics.prepared.rollMode).toBe('normal')
   })
+
+  it('doubles an applicable Charisma proficiency for Draconic Ancestry interaction checks', () => {
+    const input = fixture({
+      ability: 'cha',
+      skill: 'persuasion',
+      context: 'interact-with-dragons',
+      dc: 20,
+    })
+    input.actor.charClass = '术士'
+    input.actor.level = 5
+    input.actor.dnd5eClassLevels = { sorcerer: 5 }
+    input.actor.skills = ['persuasion']
+    input.actor.dnd5eClassChoices = {
+      classes: { sorcerer: { subclass: 'draconic', selections: { 'dragon-ancestor': ['red-fire'] } } },
+    }
+    const prepared = prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 10 })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved',
+      actorId: input.map.tokens[0].id,
+      ability: 'cha',
+      skill: 'persuasion',
+      modifier: 10,
+      total: 20,
+      success: true,
+    }))
+  })
+
+  it('rejects a forged Draconic Ancestry interaction context', () => {
+    const input = fixture({
+      ability: 'cha',
+      skill: 'performance',
+      context: 'interact-with-dragons',
+      dc: 10,
+    })
+    expect(prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] }))
+      .toEqual({ ok: false, reason: 'invalid-action' })
+  })
 })

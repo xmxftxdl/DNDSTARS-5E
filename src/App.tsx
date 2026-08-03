@@ -7,11 +7,12 @@ import SharedIntegrityBanner from './components/SharedIntegrityBanner'
 import PageErrorBoundary from './components/PageErrorBoundary'
 import { SharedSyncRecoveryBanner } from './components/SharedSyncStatus'
 import { modeFromPort } from './lib/appMode'
-import { heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
+import { closeRoom, heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
 import { clearRoomSession, getRoomSession, subscribeRoomSession } from './lib/roomSession'
 import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesState'
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
+import { nextCampaignRoomPath } from './lib/campaignNavigation'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
 const Sidebar = lazy(() => import('./components/Sidebar'))
@@ -25,6 +26,8 @@ const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
 const DmPrepAssistantPage = lazy(() => import('./pages/DmPrepAssistantPage'))
+const DmWorkshopPage = lazy(() => import('./pages/DmWorkshopPage'))
+const ActiveRulesExtensionsPage = lazy(() => import('./pages/ActiveRulesExtensionsPage'))
 const MapsPage = lazy(() => import('./pages/MapsPage'))
 const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
@@ -62,7 +65,7 @@ export default function App() {
   const [roomSession, setRoomSession] = useState(() => getRoomSession())
   const [roomNotice, setRoomNotice] = useState<string | null>(null)
   const [connection, setConnection] = useState<'online' | 'reconnecting'>('online')
-  const [roomTransition, setRoomTransition] = useState<'leave' | 'new-campaign' | null>(null)
+  const [roomTransition, setRoomTransition] = useState<'leave' | 'new-room' | null>(null)
   const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
   const isSpectator = roomSession?.role === 'spectator'
   const dmToolsAvailable = roomSession?.role === 'dm' || (!roomSession && endpointMode === 'dm')
@@ -307,24 +310,39 @@ export default function App() {
     )
   }
 
-  const handleLeaveRoom = async (intent: 'leave' | 'new-campaign' = 'leave') => {
+  const handleLeaveRoom = async (intent: 'leave' | 'new-room' = 'leave') => {
     if (!roomSession || roomTransition) return
-    const confirmation = intent === 'new-campaign'
-      ? '新建战役会关闭当前房间，房间内玩家将断开连接。当前战役的服务器数据不会被覆盖。确定继续吗？'
-      : '关闭房间后，所有玩家都需要重新加入。确定离开吗？'
+    const nextRoomPath = intent === 'new-room' ? nextCampaignRoomPath(campaignId) : null
+    if (intent === 'new-room' && !nextRoomPath) {
+      setRoomNotice('当前房间没有绑定账号级战役，无法建立下一场房间。请先从战役列表进入该战役。')
+      return
+    }
+    const confirmation = intent === 'new-room'
+      ? '建立下一场房间会结束当前临时房间，但地图、角色、讲义和战役总览数据会继续保留在当前战役中。确定继续吗？'
+      : '离开后房间不会关闭；下次可从战役列表恢复并继续使用。确定离开吗？'
     if (roomSession.role === 'dm' && !window.confirm(confirmation)) return
     setRoomTransition(intent)
     try {
-      await leaveRoom(roomSession)
-    } catch {
+      if (intent === 'new-room') await closeRoom(roomSession)
+      else await leaveRoom(roomSession)
+    } catch (error) {
+      if (intent === 'new-room') {
+        setRoomNotice(`当前房间未能结束：${roomApiErrorMessage(error)}`)
+        setRoomTransition(null)
+        return
+      }
       // 即使共享服务暂时不可达，也清除本机会话；房主心跳超时后房间会自动离线。
     }
-    await window.DNDSTARS_5E_RULES_PLUGINS?.clearEphemeral()
+    try {
+      await window.DNDSTARS_5E_RULES_PLUGINS?.clearEphemeral()
+    } catch {
+      // 房间状态已经由服务端提交；本地插件清理失败不能阻止离开或进入下一场。
+    }
     clearRoomSession()
     setRoomRulesSnapshot(null)
     setRoomPluginSyncError(null)
-    if (intent === 'new-campaign') {
-      navigate('/app/rooms?mode=create', { replace: true })
+    if (intent === 'new-room') {
+      navigate(nextRoomPath!, { replace: true })
       setRoomTransition(null)
       return
     }
@@ -377,8 +395,8 @@ export default function App() {
               ? <Navigate to={`${campaignBasePath}/maps`} replace />
               : lazyPage('战役总览', (
                   <Dashboard
-                    onCreateCampaign={() => void handleLeaveRoom('new-campaign')}
-                    creatingCampaign={roomTransition === 'new-campaign'}
+                    onCreateCampaign={() => void handleLeaveRoom('new-room')}
+                    creatingCampaign={roomTransition === 'new-room'}
                   />
                 ))}
           />
@@ -389,7 +407,7 @@ export default function App() {
             />
             <Route
               path="/campaign/:campaignId/dm-tools/workshop"
-              element={lazyPage('自定义工坊', <RulesPluginsPage view="workshop" />)}
+              element={lazyPage('自定义工坊', <DmWorkshopPage />)}
             />
             <Route
               path="/campaign/:campaignId/dm-tools/prep"
@@ -408,7 +426,7 @@ export default function App() {
           {!isSpectator && <Route path="/campaign/:campaignId/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
-          {!isSpectator && <Route path="/campaign/:campaignId/extensions" element={lazyPage('规则与扩展', <PluginsPage />)} />}
+          {!isSpectator && <Route path="/campaign/:campaignId/extensions" element={lazyPage('规则与扩展', <ActiveRulesExtensionsPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
           <Route path="/campaign/:campaignId" element={<Navigate to={defaultCampaignPath} replace />} />
           <Route path="/" element={<Navigate to={defaultCampaignPath} replace />} />

@@ -20,6 +20,39 @@ export function mapCanvasTokenClickAction(
   return areaTargeting ? 'consume-area-click' : 'select-token'
 }
 
+/**
+ * Effect-token areas are persisted as both a Token and an area snapshot. During
+ * a drag (and briefly while the area snapshot catches up after the Token save),
+ * render the area at the Token's visual position without mutating either source
+ * of authority.
+ */
+export function mapCanvasEffectTokenAreaRenderOffset(input: {
+  anchorMode?: string
+  areaAnchorPosition?: { x: number; y: number }
+  anchorTokenPosition?: { x: number; y: number }
+  dragPreviewPosition?: { x: number; y: number }
+}): { x: number; y: number } {
+  if (input.anchorMode !== 'effect-token' || !input.areaAnchorPosition) {
+    return { x: 0, y: 0 }
+  }
+  const visualPosition = input.dragPreviewPosition ?? input.anchorTokenPosition
+  if (
+    !visualPosition ||
+    ![
+      input.areaAnchorPosition.x,
+      input.areaAnchorPosition.y,
+      visualPosition.x,
+      visualPosition.y,
+    ].every(Number.isFinite)
+  ) {
+    return { x: 0, y: 0 }
+  }
+  return {
+    x: visualPosition.x - input.areaAnchorPosition.x,
+    y: visualPosition.y - input.areaAnchorPosition.y,
+  }
+}
+
 export function mapCanvasGeometryDrawShouldStart(
   tool: MapGeometryTool,
   openingAttachedToWall: boolean,

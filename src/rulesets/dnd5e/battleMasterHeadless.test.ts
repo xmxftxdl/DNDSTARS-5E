@@ -206,7 +206,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('Battle Master 2014 local Head
     ]), 'disarming-attack', {
       payload: { savingThrow: { d20: 1 } },
     }))
-    expect(disarm.state.combatants.enemy.classState.battleMasterDroppedWeaponIds)
+    expect(disarm.state.combatants.enemy.classState.droppedEquipmentIds)
       .toContain('enemy-sword')
     disarm.state.initiativeIndex = disarm.state.initiativeOrder.indexOf('enemy')
     expect(resolveDnd5eHeadlessAction(disarm.state, {
@@ -256,8 +256,8 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('Battle Master 2014 local Head
     }))
     expect(menace.state.combatants.enemy.conditions).toContain('frightened')
     expect(menace.events).toContainEqual(expect.objectContaining({
-      type: 'battle-master-maneuver-resolved',
-      maneuver: 'menacing-attack',
+      type: 'combat-maneuver-resolved',
+      maneuver: 'frighten-on-hit',
       saveSucceeded: false,
     }))
   })
@@ -360,8 +360,8 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('Battle Master 2014 local Head
     }))
     expect(sweeping.state.combatants['enemy-two'].currentHp).toBe(34)
     expect(sweeping.events).toContainEqual(expect.objectContaining({
-      type: 'battle-master-maneuver-resolved',
-      maneuver: 'sweeping-attack',
+      type: 'combat-maneuver-resolved',
+      maneuver: 'secondary-target-damage',
       secondaryTargetId: 'enemy-two',
     }))
   })

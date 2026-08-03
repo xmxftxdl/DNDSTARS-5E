@@ -17,8 +17,10 @@ import {
   dnd5eSavingThrowRerollFeature,
   getDnd5eSrdMonster,
   planDnd5eMapResultApplication,
+  previewDnd5eUnsupportedAirborneFalls,
   previewDnd5eSavingThrowRoll,
   resolveDnd5eHeadlessAction,
+  type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
   type Dnd5eMapResultPlan,
@@ -75,9 +77,42 @@ export async function settleDnd5eConcentrationChecks(input: {
     outcomeId?: string
     events: Extract<Dnd5eActionResult, { ok: true }>['events']
   }) => Promise<DmAdjudicationInterruptResponse>
+  requestPostSpellRandomTableChoice?: (request: {
+    actor: Dnd5eCombatant
+    tableFeatureId: string
+    choiceFeatureId: string
+    tableRolls: readonly number[]
+    tableDieSides: number
+    transactionId: string
+  }) => Promise<number | undefined>
 }): Promise<{ result: Extract<Dnd5eActionResult, { ok: true }>; application: Dnd5eMapResultPlan }> {
   let state = input.result.state
   const events = [...input.result.events]
+  const resolveWithUnsupportedAirborneFalls = async (
+    source: typeof state,
+    action: Dnd5eAction,
+  ) => {
+    const preview = previewDnd5eUnsupportedAirborneFalls(source, action)
+    if (!preview.ok || preview.falls.length === 0) {
+      return resolveDnd5eHeadlessAction(source, action)
+    }
+    const airborneFallDamageRollsByCombatantId: Record<string, readonly number[]> = {}
+    for (const fall of preview.falls) {
+      if (fall.fallingDamageDice < 1) continue
+      const targetName = input.map.tokens.find((token) => token.id === fall.combatantId)?.label ??
+        source.combatants[fall.combatantId]?.name ?? fall.combatantId
+      airborneFallDamageRollsByCombatantId[fall.combatantId] = await input.rollDice(
+        fall.fallingDamageDice,
+        6,
+        '失去飞行支撑·坠落伤害',
+        targetName,
+      )
+    }
+    return resolveDnd5eHeadlessAction(source, {
+      ...action,
+      airborneFallDamageRollsByCombatantId,
+    })
+  }
   const rollHalflingLucky = async (
     combatant: Dnd5eCombatant,
     d20: number,
@@ -113,14 +148,44 @@ export async function settleDnd5eConcentrationChecks(input: {
             actorName,
           ))[0]
     const triggered = check.forceTable || check.triggerValues.includes(triggerRoll!)
-    const tableRoll = triggered
-      ? (await input.rollDice(
-          1,
+    const tableRollCount = check.tableRollChoiceFeatureId &&
+      Number.isInteger(check.tableRollCount) && check.tableRollCount! > 1
+      ? check.tableRollCount!
+      : 1
+    const tableRollCandidates = triggered
+      ? await input.rollDice(
+          tableRollCount,
           check.tableDieSides,
-          '施法后随机表·结果',
+          tableRollCount > 1 ? '施法后随机表·候选结果' : '施法后随机表·结果',
           actorName,
-        ))[0]
+        )
       : undefined
+    const requestedTableRollIndex = triggered && tableRollCandidates && tableRollCount > 1 &&
+      check.tableRollChoiceFeatureId && input.requestPostSpellRandomTableChoice
+      ? await input.requestPostSpellRandomTableChoice({
+          actor,
+          tableFeatureId: check.featureId,
+          choiceFeatureId: check.tableRollChoiceFeatureId,
+          tableRolls: tableRollCandidates,
+          tableDieSides: check.tableDieSides,
+          transactionId: [
+            'post-spell-random-table-choice',
+            state.combatId,
+            state.round,
+            state.initiativeIndex,
+            actor.id,
+            check.featureId,
+          ].join(':'),
+        })
+      : undefined
+    const selectedTableRollIndex = tableRollCandidates && tableRollCount > 1 &&
+      Number.isInteger(requestedTableRollIndex) &&
+      requestedTableRollIndex! >= 0 && requestedTableRollIndex! < tableRollCandidates.length
+      ? requestedTableRollIndex!
+      : tableRollCandidates && tableRollCount > 1
+        ? 0
+        : undefined
+    const tableRoll = tableRollCandidates?.[selectedTableRollIndex ?? 0]
     const plan = dnd5ePostSpellRandomTablePlan(
       state,
       actor.id,
@@ -251,12 +316,14 @@ export async function settleDnd5eConcentrationChecks(input: {
         ),
       }
     }
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'resolve-post-spell-random-table',
       actorId: actor.id,
       featureId: check.featureId,
       triggerRoll,
       tableRoll,
+      tableRollCandidates: selectedTableRollIndex == null ? undefined : tableRollCandidates,
+      selectedTableRollIndex,
       resolution,
     })
     if (!resolved.ok) continue
@@ -285,7 +352,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           outcomeId: required.outcomeId,
           events: resolved.events,
         })
-        const adjudicated = resolveDnd5eHeadlessAction(state, {
+        const adjudicated = await resolveWithUnsupportedAirborneFalls(state, {
           type: 'resolve-post-spell-random-table-manual-adjudication',
           actorId: required.actorId,
           adjudicationId: required.adjudicationId,
@@ -345,7 +412,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           total: initial.roll.total, targetNumber: check.dc,
         })
       : undefined
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'barbarian-relentless-rage-save', actorId: check.targetId, d20, d20Second,
       halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       blessRoll, baneRoll, bardicInspirationRoll, dc: check.dc,
@@ -373,7 +440,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const baneRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bane')
       ? await input.rollD4('灾祸术·亡灵坚韧豁免减值', targetName)
       : undefined
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'monster-undead-fortitude-save', actorId: check.targetId,
       d20, d20Second, blessRoll, baneRoll,
     })
@@ -440,7 +507,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           total: initial.roll.total, dc: check.dc, mode,
         })
       : undefined
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'monster-on-hit-save', actorId: check.targetId,
       sourceId: check.sourceId, actionId: check.actionId,
       d20, d20Second, blessRoll, baneRoll,
@@ -506,7 +573,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           total: initial.roll.total, dc: check.dc, mode,
         })
       : undefined
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'sorcerer-draconic-presence-save', actorId: combatant.id, sourceId: source.id,
       d20, d20Second, blessRoll, baneRoll,
       halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
@@ -587,7 +654,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           total: initial.roll.total, dc: check.dc, mode,
         })
       : undefined
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'active-effect-damage-save', actorId: combatant.id, effectId: check.effectId,
       d20, d20Second, blessRoll, baneRoll,
       halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
@@ -656,7 +723,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           mode,
         })
       : undefined
-    const resolved = resolveDnd5eHeadlessAction(state, {
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'concentration-save', actorId: check.targetId, d20, d20Second,
       halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       blessRoll,
@@ -768,7 +835,7 @@ export async function settleDnd5eConcentrationChecks(input: {
             source.name,
           )
         : []
-      const resolved = resolveDnd5eHeadlessAction(state, {
+      const resolved = await resolveWithUnsupportedAirborneFalls(state, {
         type: 'resolve-monster-death-area-effect',
         actorId: source.id,
         snapshotId: pendingDeathArea.id,
@@ -851,7 +918,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         sourceName,
       )
       const racialInnate = dnd5eRacialInnateSpellGrant(reactor.racialRules, 'hellish-rebuke')?.castAtLevel === slotLevel
-      const reaction = resolveDnd5eHeadlessAction(state, {
+      const reaction = await resolveWithUnsupportedAirborneFalls(state, {
         type: 'hellish-rebuke', actorId: reactor.id, targetId: damageSource.id,
         racialInnate,
         slotLevel, triggerDamageAmount: damageEvent.amount,

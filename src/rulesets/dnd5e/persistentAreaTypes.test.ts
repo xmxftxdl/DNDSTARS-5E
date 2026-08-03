@@ -1,8 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import {
   normalizeDnd5ePersistentAreaTriggerSnapshot,
+  normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
+
+describe('persistent area vertical snapshots', () => {
+  it('normalizes bounded ground and volume declarations', () => {
+    expect(normalizeDnd5ePersistentAreaVerticalSnapshot({ mode: 'ground' })).toEqual({ mode: 'ground' })
+    expect(normalizeDnd5ePersistentAreaVerticalSnapshot({
+      mode: 'volume', baseElevationFeet: -10, heightFeet: 40, anchorOffsetFeet: 5,
+    })).toEqual({
+      mode: 'volume', baseElevationFeet: -10, heightFeet: 40, anchorOffsetFeet: 5,
+    })
+    expect(normalizeDnd5ePersistentAreaVerticalSnapshot({
+      mode: 'volume', baseElevationFeet: 15, heightFeet: 10,
+    })).toEqual({ mode: 'volume', baseElevationFeet: 15, heightFeet: 10 })
+  })
+
+  it('fails closed on malformed, unbounded, or executable metadata', () => {
+    for (const value of [
+      { mode: 'ground', heightFeet: 5 },
+      { mode: 'volume', baseElevationFeet: 0 },
+      { mode: 'volume', baseElevationFeet: 0, heightFeet: 0 },
+      { mode: 'volume', baseElevationFeet: 0.5, heightFeet: 10 },
+      { mode: 'volume', baseElevationFeet: 0, heightFeet: 10, anchorOffsetFeet: 10_001 },
+      { mode: 'volume', baseElevationFeet: 0, heightFeet: 10, run: 'eval()' },
+    ]) expect(normalizeDnd5ePersistentAreaVerticalSnapshot(value)).toBeUndefined()
+  })
+})
 
 describe('persistent area visual declarations', () => {
   it('normalizes the bounded toxic-cloud renderer declaration', () => {
@@ -28,6 +54,15 @@ describe('persistent area visual declarations', () => {
       timing: 'on-enter', savingThrow: { ability: 'dex', dc: 14 },
       condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
     })
+  })
+
+  it('accepts dedicated material presets for persistent spell visuals', () => {
+    for (const preset of ['mage-hand', 'insect-plague', 'blade-barrier'] as const) {
+      expect(normalizeDnd5ePersistentAreaVisual({ preset })).toEqual({
+        preset,
+        intensity: 'normal',
+      })
+    }
   })
 
   it('accepts a bounded Entangle escape check and rejects executable escape metadata', () => {

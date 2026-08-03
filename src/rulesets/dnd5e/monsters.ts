@@ -437,6 +437,8 @@ export interface Dnd5eMonsterWeaponAttack {
 export interface Dnd5eMonsterAreaSavingThrowEffect {
   area: SkillAoeTargeting
   target: 'hostile' | 'all-creatures-except-self'
+  /** Creature categories excluded by the SRD action before any saving throw is rolled. */
+  targetCreatureTypeExclusions?: readonly ('aberration' | 'demon' | 'undead')[]
   ability: AbilityKey
   dc: number
   /** The saving throw is against a magical monster effect. */
@@ -445,6 +447,8 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   requiresSourceCanSeeTarget?: boolean
   /** Every submitted target must be able to see the acting monster. */
   requiresTargetCanSeeSource?: boolean
+  /** Every submitted target must be able to hear the acting monster. */
+  requiresTargetCanHearSource?: boolean
   /** Omit for pure control effects such as Frightful Presence. */
   damage?: Dnd5eMonsterDamage
   damageOnSuccessfulSave?: 'none' | 'half'
@@ -524,11 +528,47 @@ export type Dnd5eMonsterAreaSavingThrowRule =
       variants: readonly Dnd5eMonsterAreaSavingThrowVariant[]
     }
 
+export interface Dnd5eMonsterLegendaryWingAttackRule {
+  /** Stable SRD data for the dragon legendary action; never parsed from translated prose. */
+  kind: 'legendary-wing-attack'
+  rangeFeet: number
+  target: 'all-creatures-except-self'
+  ability: 'dex'
+  dc: number
+  damage: Dnd5eMonsterDamage & { type: 'bludgeoning' }
+  damageOnSuccessfulSave: 'none'
+  conditionOnFailedSave: 'prone'
+  followUpMovement: {
+    kind: 'grant-fly-movement'
+    maximumSpeedFraction: number
+  }
+}
+
 export type Dnd5eMonsterSpecialActionRule =
   | {
       kind: 'ability-check'
       ability: AbilityKey
       skillKey?: string
+    }
+  | {
+      /** Fixed-range self teleport to one visible, unoccupied destination. */
+      kind: 'teleport'
+      target: 'self'
+      rangeFeet: number
+      requiresVisibleDestination: true
+      requiresUnoccupiedDestination: true
+    }
+  | {
+      /**
+       * A monster-authored invisibility action. Break conditions are stable
+       * identifiers, never inferred from translated action prose.
+       */
+      kind: 'invisibility'
+      target: 'self'
+      concentration: true
+      maximumDurationRounds?: number
+      breakOn: readonly ('makes-attack' | 'casts-spell')[]
+      breakOnMonsterAbilityIds?: readonly string[]
     }
   | {
       kind: 'saving-throw-condition'
@@ -553,6 +593,14 @@ export type Dnd5eMonsterSpecialActionRule =
       requiredCondition: Dnd5eStandardConditionId
       requireSameSource: boolean
       damage: Dnd5eMonsterDamage
+    }
+  | {
+      /** SRD celestials' finite-use touch: deterministic healing plus bounded cures. */
+      kind: 'healing-touch'
+      rangeFeet: 5
+      target: 'another-living-creature'
+      healing: { count: number; sides: number; bonus: number }
+      removes: readonly ('curse' | 'disease' | 'poisoned' | 'blinded' | 'deafened')[]
     }
   | {
       /** Roper Reel: move every target held by one source-linked slot group. */
@@ -609,6 +657,7 @@ export type Dnd5eMonsterSpecialActionRule =
       magical: true
       requiresMutualVisualSight: true
     }
+  | Dnd5eMonsterLegendaryWingAttackRule
   | Dnd5eMonsterAreaSavingThrowRule
 
 export function dnd5eMonsterAreaSavingThrowVariants(
@@ -662,6 +711,11 @@ export interface Dnd5eMonsterTrait {
   } | {
     kind: 'nimble-escape'
     bonusActionOptions: readonly ['disengage', 'hide']
+  } | {
+    /** Flying movement does not provoke opportunity attacks. */
+    kind: 'flyby'
+    movementMode: 'fly'
+    provokesOpportunityAttacks: false
   } | {
     /** A conditional skill bonus tied to one sense, with an optional combat sense. */
     kind: 'keen-sense'
@@ -750,6 +804,30 @@ export interface Dnd5eMonsterTrait {
     /** Every weapon attack made by this stat block counts as magical. */
     kind: 'magic-weapons'
     weaponAttacksMagical: true
+  } | {
+    /** Flesh Golem: low hit points can force attacks against the nearest visible creature. */
+    kind: 'berserk'
+    hitPointThreshold: number
+    dieSides: number
+    minimum: number
+    target: 'nearest-visible-creature'
+    endsWhenFullyHealed: true
+  } | {
+    /** A damage type temporarily imposes disadvantage on this creature's rolls. */
+    kind: 'damage-aversion'
+    damageType: Dnd5eDamageType
+    attackRollMode: 'disadvantage'
+    abilityCheckRollMode: 'disadvantage'
+    duration: 'until-end-of-next-turn'
+  } | {
+    /** The creature cannot be affected by spells or effects that alter its form. */
+    kind: 'immutable-form'
+    immuneToFormAlteringEffects: true
+  } | {
+    /** Incoming damage of one type is replaced by healing for the same amount. */
+    kind: 'damage-absorption'
+    damageType: Dnd5eDamageType
+    healing: 'damage-taken'
   } | {
     /** Advantage while an active ally is close enough to the attack target. */
     kind: 'pack-tactics'
@@ -857,6 +935,8 @@ export interface Dnd5eMonsterAction {
   name: string
   description: string
   kind: 'weapon-attack' | 'multiattack' | 'other'
+  /** Ordinary stat-block actions default to an action; reviewed exceptions may use a bonus action. */
+  economy?: 'action' | 'bonus-action'
   automation?: Dnd5eMonsterAutomation
   attack?: Dnd5eMonsterWeaponAttack
   sequence?: readonly string[]
@@ -1105,6 +1185,61 @@ const ADULT_DRAGON_FRIGHTFUL_PRESENCE_DCS = {
   'adult-silver-dragon': 18,
   'adult-white-dragon': 14,
 } as const
+
+function dragonLegendaryWingAttackRule(
+  rangeFeet: number,
+  dc: number,
+  damageBonus: number,
+): Dnd5eMonsterLegendaryWingAttackRule {
+  return {
+    kind: 'legendary-wing-attack',
+    rangeFeet,
+    target: 'all-creatures-except-self',
+    ability: 'dex',
+    dc,
+    damage: {
+      average: 7 + damageBonus,
+      count: 2,
+      sides: 6,
+      bonus: damageBonus,
+      type: 'bludgeoning',
+    },
+    damageOnSuccessfulSave: 'none',
+    conditionOnFailedSave: 'prone',
+    followUpMovement: {
+      kind: 'grant-fly-movement',
+      maximumSpeedFraction: 0.5,
+    },
+  }
+}
+
+/**
+ * The 20 SRD dragons share an action id but not a save DC, radius or damage
+ * bonus. Keep those values keyed by stable stat-block slug so Chinese catalog
+ * translations cannot silently disable or alter the Headless resolver.
+ */
+const DRAGON_LEGENDARY_WING_ATTACK_RULES = {
+  'adult-black-dragon': dragonLegendaryWingAttackRule(10, 19, 6),
+  'adult-blue-dragon': dragonLegendaryWingAttackRule(10, 20, 7),
+  'adult-brass-dragon': dragonLegendaryWingAttackRule(10, 19, 6),
+  'adult-bronze-dragon': dragonLegendaryWingAttackRule(10, 20, 7),
+  'adult-copper-dragon': dragonLegendaryWingAttackRule(10, 19, 6),
+  'adult-gold-dragon': dragonLegendaryWingAttackRule(10, 22, 8),
+  'adult-green-dragon': dragonLegendaryWingAttackRule(10, 19, 6),
+  'adult-red-dragon': dragonLegendaryWingAttackRule(10, 22, 8),
+  'adult-silver-dragon': dragonLegendaryWingAttackRule(10, 22, 8),
+  'adult-white-dragon': dragonLegendaryWingAttackRule(10, 19, 6),
+  'ancient-black-dragon': dragonLegendaryWingAttackRule(15, 23, 8),
+  'ancient-blue-dragon': dragonLegendaryWingAttackRule(15, 24, 9),
+  'ancient-brass-dragon': dragonLegendaryWingAttackRule(15, 22, 8),
+  'ancient-bronze-dragon': dragonLegendaryWingAttackRule(15, 24, 9),
+  'ancient-copper-dragon': dragonLegendaryWingAttackRule(15, 23, 8),
+  'ancient-gold-dragon': dragonLegendaryWingAttackRule(15, 25, 10),
+  'ancient-green-dragon': dragonLegendaryWingAttackRule(15, 23, 8),
+  'ancient-red-dragon': dragonLegendaryWingAttackRule(15, 25, 10),
+  'ancient-silver-dragon': dragonLegendaryWingAttackRule(15, 25, 10),
+  'ancient-white-dragon': dragonLegendaryWingAttackRule(15, 22, 8),
+} as const satisfies Readonly<Record<string, Dnd5eMonsterLegendaryWingAttackRule>>
 
 function bronzeDragonBreathVariants(input: {
   dc: number
@@ -1643,6 +1778,16 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
       damageOnSuccessfulSave: 'half',
     },
   },
+  'steam-mephit': {
+    actionId: 'steam-breath',
+    rule: {
+      kind: 'area-saving-throw',
+      area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
+      target: 'all-creatures-except-self', ability: 'dex', dc: 10,
+      damage: { average: 4, count: 1, sides: 8, bonus: 0, type: 'fire' },
+      damageOnSuccessfulSave: 'half',
+    },
+  },
   'red-dragon-wyrmling': {
     actionId: 'fire-breath',
     rule: {
@@ -1983,6 +2128,9 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
   const multiBreath = ADULT_DRAGON_MULTI_BREATH_RULES[
     monster.slug as keyof typeof ADULT_DRAGON_MULTI_BREATH_RULES
   ]
+  const wingAttackRule = DRAGON_LEGENDARY_WING_ATTACK_RULES[
+    monster.slug as keyof typeof DRAGON_LEGENDARY_WING_ATTACK_RULES
+  ]
   if (frightfulPresenceDc != null) {
     return {
       ...monster,
@@ -2020,11 +2168,23 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
         }
         return action
       }),
-      legendaryActions: monster.legendaryActions?.map((action) => action.id === 'detect' ? {
-        ...action,
-        automation: 'headless',
-        rule: { kind: 'ability-check', ability: 'wis', skillKey: 'perception' },
-      } : action),
+      legendaryActions: monster.legendaryActions?.map((action) => {
+        if (action.id === 'detect') {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            rule: { kind: 'ability-check' as const, ability: 'wis' as const, skillKey: 'perception' },
+          }
+        }
+        if (action.id === 'wing-attack-costs-2-actions' && wingAttackRule) {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            rule: wingAttackRule,
+          }
+        }
+        return action
+      }),
     }
   }
 
@@ -2036,6 +2196,9 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
   ]
   const ancientMultiBreath = ANCIENT_DRAGON_MULTI_BREATH_RULES[
     monster.slug as keyof typeof ANCIENT_DRAGON_MULTI_BREATH_RULES
+  ]
+  const ancientWingAttackRule = DRAGON_LEGENDARY_WING_ATTACK_RULES[
+    monster.slug as keyof typeof DRAGON_LEGENDARY_WING_ATTACK_RULES
   ]
   if (ancientFrightfulPresenceDc != null) {
     return {
@@ -2074,11 +2237,23 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
         }
         return action
       }),
-      legendaryActions: monster.legendaryActions?.map((action) => action.id === 'detect' ? {
-        ...action,
-        automation: 'headless',
-        rule: { kind: 'ability-check', ability: 'wis', skillKey: 'perception' },
-      } : action),
+      legendaryActions: monster.legendaryActions?.map((action) => {
+        if (action.id === 'detect') {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            rule: { kind: 'ability-check' as const, ability: 'wis' as const, skillKey: 'perception' },
+          }
+        }
+        if (action.id === 'wing-attack-costs-2-actions' && ancientWingAttackRule) {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            rule: ancientWingAttackRule,
+          }
+        }
+        return action
+      }),
     }
   }
 
@@ -2414,6 +2589,165 @@ const CATALOG_EXACT_WEAPON_ATTACKS = {
       }],
     },
   }],
+  gnoll: [{
+    actionId: 'spear',
+    branchNote:
+      'Headless uses the one-handed melee or thrown branch here; the optional two-handed melee branch remains a DM choice.',
+    attack: {
+      mode: 'melee-or-ranged',
+      toHit: 4,
+      reachFeet: 5,
+      rangeFeet: { normal: 20, long: 60 },
+      target: 'one target',
+      damage: [{ average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+      rangedDamage: [{ average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+    },
+  }],
+  'guardian-naga': [{
+    actionId: 'spit-poison',
+    attack: {
+      mode: 'ranged',
+      toHit: 8,
+      rangeFeet: { normal: 15, long: 30 },
+      target: 'one creature',
+      damage: [],
+      onHit: 'DC 15 Constitution save; 10d8 poison damage, half on a success.',
+      onHitEffects: [{
+        id: 'poison-save-damage',
+        kind: 'saving-throw-damage',
+        ability: 'con',
+        dc: 15,
+        damage: [
+          { average: 45, count: 10, sides: 8, bonus: 0, type: 'poison' },
+        ],
+        damageOnSuccessfulSave: 'half',
+      }],
+    },
+  }],
+  octopus: [{
+    actionId: 'tentacles',
+    attack: {
+      mode: 'melee',
+      toHit: 4,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'bludgeoning' }],
+      onHitEffects: [{
+        id: 'tentacles-grapple',
+        kind: 'source-linked-condition',
+        relation: {
+          kind: 'grapple',
+          slotGroup: 'tentacles',
+          capacity: 1,
+          maxDistanceFeet: 5,
+          targetMaxSizeRank: 5,
+          whenCapacityFull: 'linked-target-only',
+        },
+        escapeDc: 10,
+        conditions: [{ condition: 'grappled' }],
+      }],
+    },
+  }],
+  'poisonous-snake': [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee',
+      toHit: 5,
+      reachFeet: 5,
+      target: 'one target',
+      damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'piercing' }],
+      onHit: 'DC 10 Constitution save; 2d4 poison damage, half on a success.',
+      onHitEffects: [{
+        id: 'poison-save-damage',
+        kind: 'saving-throw-damage',
+        ability: 'con',
+        dc: 10,
+        damage: [{ average: 5, count: 2, sides: 4, bonus: 0, type: 'poison' }],
+        damageOnSuccessfulSave: 'half',
+      }],
+    },
+  }],
+  scorpion: [{
+    actionId: 'sting',
+    attack: {
+      mode: 'melee',
+      toHit: 2,
+      reachFeet: 5,
+      target: 'one creature',
+      damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'piercing' }],
+      onHit: 'DC 9 Constitution save; 1d8 poison damage, half on a success.',
+      onHitEffects: [{
+        id: 'poison-save-damage',
+        kind: 'saving-throw-damage',
+        ability: 'con',
+        dc: 9,
+        damage: [{ average: 4, count: 1, sides: 8, bonus: 0, type: 'poison' }],
+        damageOnSuccessfulSave: 'half',
+      }],
+    },
+  }],
+  spider: [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee',
+      toHit: 4,
+      reachFeet: 5,
+      target: 'one creature',
+      damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'piercing' }],
+      onHit: 'DC 9 Constitution save; 1d4 poison damage on a failure.',
+      onHitEffects: [{
+        id: 'poison-save-damage',
+        kind: 'saving-throw-damage',
+        ability: 'con',
+        dc: 9,
+        damage: [{ average: 2, count: 1, sides: 4, bonus: 0, type: 'poison' }],
+        damageOnSuccessfulSave: 'none',
+      }],
+    },
+  }],
+  sprite: [
+    {
+      actionId: 'longsword',
+      attack: {
+        mode: 'melee',
+        toHit: 2,
+        reachFeet: 5,
+        target: 'one target',
+        damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'slashing' }],
+      },
+    },
+    {
+      actionId: 'shortbow',
+      attack: {
+        mode: 'ranged',
+        toHit: 6,
+        rangeFeet: { normal: 40, long: 160 },
+        target: 'one target',
+        damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'piercing' }],
+        onHit: 'DC 10 Constitution save; poisoned for 1 minute on a failure, and unconscious when the result is 5 or lower.',
+        onHitEffects: [{
+          id: 'shortbow-poisoned-unconscious',
+          kind: 'saving-throw-condition',
+          ability: 'con',
+          dc: 10,
+          conditionOnFailedSave: {
+            condition: 'poisoned',
+            durationRounds: 10,
+            repeatSaveAtEndOfTargetTurn: false,
+          },
+          additionalConditionsOnFailedSave: [{
+            condition: 'unconscious',
+            durationRounds: 10,
+            repeatSaveAtEndOfTargetTurn: false,
+            minimumFailureMargin: 5,
+            dependsOnCondition: 'poisoned',
+            breakOnDamage: true,
+            canBeAwakenedByAction: true,
+          }],
+        }],
+      },
+    },
+  ],
   djinni: [{
     actionId: 'scimitar',
     branchNote: 'Headless 固定分支：本动作选择闪电伤害；雷鸣伤害请使用“弯刀（雷鸣）”。',
@@ -3879,6 +4213,12 @@ const CATALOG_BLOOD_FRENZY_TRAIT_INDEX = {
   'swarm-of-quippers': 0,
 } as const satisfies Readonly<Record<string, number>>
 
+const CATALOG_FLYBY_TRAIT_INDEX = {
+  'flying-snake': 0,
+  'giant-owl': 0,
+  owl: 0,
+} as const satisfies Readonly<Record<string, number>>
+
 const CATALOG_SURPRISE_ATTACK_TRAITS = {
   bugbear: {
     traitIndex: 1,
@@ -4010,22 +4350,261 @@ const CATALOG_PARRY_ARMOR_CLASS_BONUSES = {
 } as const satisfies Readonly<Record<string, number>>
 
 const CATALOG_LEGENDARY_ACTION_REFERENCES = {
-  lich: {
+  lich: [{
     legacyActionId: 'paralyzing-touch-costs-2-actions',
     actionId: 'paralyzing-touch-costs-2-actions',
     referencedActionId: 'paralyzing-touch',
-  },
-  unicorn: {
+    automation: 'headless',
+  }],
+  unicorn: [{
     legacyActionId: 'hooves',
     actionId: 'legendary-hooves',
     referencedActionId: 'hooves',
-  },
-  'vampire-vampire': {
-    legacyActionId: 'unarmed-strike',
-    actionId: 'legendary-unarmed-strike',
-    referencedActionId: 'unarmed-strike',
-  },
+    automation: 'headless',
+  }],
+  'vampire-vampire': [
+    {
+      legacyActionId: 'unarmed-strike',
+      actionId: 'legendary-unarmed-strike',
+      referencedActionId: 'unarmed-strike',
+      automation: 'headless',
+    },
+    {
+      legacyActionId: 'bite-costs-2-actions',
+      actionId: 'legendary-bite-costs-2-actions',
+      referencedActionId: 'bite',
+      automation: 'headless',
+    },
+  ],
 } as const
+
+const CATALOG_HEALING_TOUCH_RULES = {
+  deva: {
+    usage: { kind: 'per-day', max: 3 },
+    healing: { count: 4, sides: 8, bonus: 2 },
+    removes: ['curse', 'disease', 'poisoned', 'blinded', 'deafened'],
+  },
+  planetar: {
+    usage: { kind: 'per-day', max: 4 },
+    healing: { count: 6, sides: 8, bonus: 3 },
+    removes: ['curse', 'disease', 'poisoned', 'blinded', 'deafened'],
+  },
+  solar: {
+    usage: { kind: 'per-day', max: 4 },
+    healing: { count: 8, sides: 8, bonus: 4 },
+    removes: ['curse', 'disease', 'poisoned', 'blinded', 'deafened'],
+  },
+  unicorn: {
+    usage: { kind: 'per-day', max: 3 },
+    healing: { count: 2, sides: 8, bonus: 2 },
+    removes: ['disease', 'poisoned'],
+  },
+} as const satisfies Readonly<Record<string, {
+  usage: Dnd5eMonsterActionPerDayUsage
+  healing: { count: number; sides: number; bonus: number }
+  removes: readonly ('curse' | 'disease' | 'poisoned' | 'blinded' | 'deafened')[]
+}>>
+
+/**
+ * Reviewed self-only teleports whose complete SRD destination contract is
+ * expressible by the shared map transaction. Blink Dog and Unicorn are
+ * intentionally absent: their optional attack ordering / willing multi-map
+ * passenger semantics require a larger structured rule.
+ */
+const CATALOG_SELF_TELEPORT_RULES = {
+  androsphinx: { section: 'legendary', actionId: 'teleport-costs-2-actions', rangeFeet: 120 },
+  balor: { section: 'action', actionId: 'teleport', rangeFeet: 120 },
+  gynosphinx: { section: 'legendary', actionId: 'teleport-costs-2-actions', rangeFeet: 120 },
+  marilith: { section: 'action', actionId: 'teleport', rangeFeet: 120 },
+  nalfeshnee: { section: 'action', actionId: 'teleport', rangeFeet: 120 },
+  solar: { section: 'legendary', actionId: 'teleport', rangeFeet: 120 },
+} as const satisfies Readonly<Record<string, {
+  section: 'action' | 'legendary'
+  actionId: string
+  rangeFeet: number
+}>>
+
+const CATALOG_INVISIBILITY_RULES = {
+  duergar: {
+    actionId: 'invisibility',
+    maximumDurationRounds: 600,
+    breakOn: ['makes-attack', 'casts-spell'],
+    breakOnMonsterAbilityIds: ['enlarge'],
+  },
+  imp: {
+    actionId: 'invisibility',
+    breakOn: ['makes-attack'],
+  },
+  quasit: {
+    actionId: 'invisibility',
+    breakOn: ['makes-attack'],
+    breakOnMonsterAbilityIds: ['scare'],
+  },
+  sprite: {
+    actionId: 'invisibility',
+    breakOn: ['makes-attack', 'casts-spell'],
+  },
+  'will-o-wisp': {
+    actionId: 'invisibility',
+    breakOn: ['makes-attack'],
+    breakOnMonsterAbilityIds: ['consume-life'],
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  maximumDurationRounds?: number
+  breakOn: readonly ('makes-attack' | 'casts-spell')[]
+  breakOnMonsterAbilityIds?: readonly string[]
+}>>
+
+/**
+ * Reviewed combat actions whose translated prose is fully represented by the
+ * bounded special-action schema.  This table intentionally omits cinematic,
+ * shapechanging and persistent-volume actions until their complete semantics
+ * can be expressed without parsing prose at runtime.
+ */
+const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
+  cloaker: {
+    moan: {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 60 },
+      target: 'all-creatures-except-self',
+      targetCreatureTypeExclusions: ['aberration'],
+      ability: 'wis',
+      dc: 13,
+      requiresTargetCanHearSource: true,
+      conditionOnFailedSave: {
+        condition: 'frightened',
+        durationRounds: 1,
+        repeatSaveAtEndOfTargetTurn: false,
+        expiresAtSourceTurnEnd: true,
+      },
+      immunityOnSuccessfulSaveOrEffectEnd: {
+        durationRounds: 14_400,
+        scope: { kind: 'source-action' },
+      },
+    },
+  },
+  gorgon: {
+    'petrifying-breath': {
+      kind: 'area-saving-throw',
+      area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
+      target: 'all-creatures-except-self',
+      ability: 'con',
+      dc: 13,
+      conditionOnFailedSave: {
+        condition: 'restrained',
+        durationRounds: 1,
+        repeatSaveAtEndOfTargetTurn: true,
+        onRepeatSaveFailureTransition: {
+          replaceWithCondition: 'petrified',
+          duration: 'permanent',
+        },
+      },
+    },
+  },
+  quasit: {
+    scare: {
+      kind: 'saving-throw-condition',
+      rangeFeet: 20,
+      ability: 'wis',
+      dc: 10,
+      condition: 'frightened',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+      repeatSaveDisadvantageWhenSourceVisible: true,
+    },
+  },
+  'stone-golem': {
+    slow: {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 10 },
+      target: 'hostile',
+      ability: 'wis',
+      dc: 17,
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      activeEffectOnFailedSave: {
+        id: 'stone-golem-slow',
+        label: '石魔像缓慢',
+        durationRounds: 10,
+        repeatSaveAtEndOfTargetTurn: true,
+        modifiers: {
+          speedMultiplier: 0.5,
+          preventReactions: true,
+          maximumAttacksPerTurn: 1,
+          actionOrBonusActionOnly: true,
+        },
+      },
+    },
+  },
+  'storm-giant': {
+    'lightning-strike': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 500 },
+      target: 'all-creatures-except-self',
+      ability: 'dex',
+      dc: 17,
+      magical: true,
+      damage: { average: 54, count: 12, sides: 8, bonus: 0, type: 'lightning' },
+      damageOnSuccessfulSave: 'half',
+    },
+  },
+  vrock: {
+    'stunning-screech': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 20 },
+      target: 'all-creatures-except-self',
+      targetCreatureTypeExclusions: ['demon'],
+      ability: 'con',
+      dc: 14,
+      requiresTargetCanHearSource: true,
+      conditionOnFailedSave: {
+        condition: 'stunned',
+        durationRounds: 1,
+        repeatSaveAtEndOfTargetTurn: false,
+        expiresAtSourceTurnEnd: true,
+      },
+    },
+  },
+} as const satisfies Readonly<Record<string, Readonly<Record<string, Dnd5eMonsterSpecialActionRule>>>>
+
+const CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS = {
+  lich: {
+    'frightening-gaze-costs-2-actions': {
+      kind: 'saving-throw-condition',
+      rangeFeet: 10,
+      ability: 'wis',
+      dc: 18,
+      condition: 'frightened',
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+      immunityOnSuccessfulSaveOrEffectEnd: {
+        durationRounds: 14_400,
+        scope: { kind: 'source-action' },
+      },
+    },
+  },
+  solar: {
+    'blinding-gaze-costs-3-actions': {
+      kind: 'saving-throw-condition',
+      rangeFeet: 30,
+      ability: 'con',
+      dc: 15,
+      condition: 'blinded',
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      requiresTargetCanSeeSource: true,
+    },
+  },
+} as const satisfies Readonly<Record<string, Readonly<Record<string, Dnd5eMonsterSpecialActionRule>>>>
+
+const CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE = {
+  vrock: {
+    'stunning-screech': { kind: 'recharge', dieSides: 6, minimum: 6 },
+  },
+} as const satisfies Readonly<Record<string, Readonly<Record<string, Dnd5eMonsterActionUsage>>>>
 
 interface Dnd5eCatalogCompositeSpecialAction {
   rule: Dnd5eMonsterSpecialActionRule
@@ -4960,6 +5539,15 @@ const CATALOG_MULTIATTACK_CANDIDATES: Readonly<
 function applyCatalogMonsterActionRules(
   monster: Dnd5eMonsterStatBlock,
 ): Dnd5eMonsterStatBlock {
+  const selfTeleport = CATALOG_SELF_TELEPORT_RULES[
+    monster.slug as keyof typeof CATALOG_SELF_TELEPORT_RULES
+  ]
+  const invisibility = CATALOG_INVISIBILITY_RULES[
+    monster.slug as keyof typeof CATALOG_INVISIBILITY_RULES
+  ]
+  const healingTouch = CATALOG_HEALING_TOUCH_RULES[
+    monster.slug as keyof typeof CATALOG_HEALING_TOUCH_RULES
+  ]
   const fixedDamageAttack = CATALOG_FIXED_DAMAGE_ATTACKS[
     monster.slug as keyof typeof CATALOG_FIXED_DAMAGE_ATTACKS
   ]
@@ -5003,9 +5591,18 @@ function applyCatalogMonsterActionRules(
     CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS[
       monster.slug as keyof typeof CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS
     ]
-  const legendaryActionReference = CATALOG_LEGENDARY_ACTION_REFERENCES[
+  const legendaryActionReferences = CATALOG_LEGENDARY_ACTION_REFERENCES[
     monster.slug as keyof typeof CATALOG_LEGENDARY_ACTION_REFERENCES
-  ]
+  ] ?? []
+  const structuredSpecialActions = CATALOG_STRUCTURED_SPECIAL_ACTIONS[
+    monster.slug as keyof typeof CATALOG_STRUCTURED_SPECIAL_ACTIONS
+  ] ?? {}
+  const structuredLegendarySpecialActions = CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS[
+    monster.slug as keyof typeof CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS
+  ] ?? {}
+  const structuredSpecialActionUsage = CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE[
+    monster.slug as keyof typeof CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE
+  ] ?? {}
   const compositeSpecialActions = CATALOG_COMPOSITE_SPECIAL_ACTIONS[monster.slug] ?? {}
   const multiattackOverride = CATALOG_MULTIATTACK_OVERRIDES[monster.slug]
   const multiattackCandidates = CATALOG_MULTIATTACK_CANDIDATES[monster.slug] ?? []
@@ -5027,6 +5624,72 @@ function applyCatalogMonsterActionRules(
     ...monster,
     actions: [
       ...monster.actions.map((action) => {
+        const structuredRule = structuredSpecialActions[
+          action.id as keyof typeof structuredSpecialActions
+        ] as Dnd5eMonsterSpecialActionRule | undefined
+        if (structuredRule) {
+          const structuredUsage = structuredSpecialActionUsage[
+            action.id as keyof typeof structuredSpecialActionUsage
+          ] as Dnd5eMonsterActionUsage | undefined
+          return {
+            ...action,
+            kind: 'other' as const,
+            automation: 'headless' as const,
+            usage: structuredUsage ?? action.usage,
+            rule: structuredRule,
+          }
+        }
+        if (
+          selfTeleport?.section === 'action' &&
+          action.id === selfTeleport.actionId
+        ) {
+          return {
+            ...action,
+            kind: 'other' as const,
+            automation: 'headless' as const,
+            rule: {
+              kind: 'teleport' as const,
+              target: 'self' as const,
+              rangeFeet: selfTeleport.rangeFeet,
+              requiresVisibleDestination: true as const,
+              requiresUnoccupiedDestination: true as const,
+            },
+          }
+        }
+        if (invisibility && action.id === invisibility.actionId) {
+          return {
+            ...action,
+            kind: 'other' as const,
+            automation: 'headless' as const,
+            rule: {
+              kind: 'invisibility' as const,
+              target: 'self' as const,
+              concentration: true as const,
+              maximumDurationRounds: 'maximumDurationRounds' in invisibility
+                ? invisibility.maximumDurationRounds
+                : undefined,
+              breakOn: invisibility.breakOn,
+              breakOnMonsterAbilityIds: 'breakOnMonsterAbilityIds' in invisibility
+                ? invisibility.breakOnMonsterAbilityIds
+                : undefined,
+            },
+          }
+        }
+        if (healingTouch && action.id === 'healing-touch') {
+          return {
+            ...action,
+            kind: 'other' as const,
+            automation: 'headless' as const,
+            usage: healingTouch.usage,
+            rule: {
+              kind: 'healing-touch' as const,
+              rangeFeet: 5 as const,
+              target: 'another-living-creature' as const,
+              healing: healingTouch.healing,
+              removes: healingTouch.removes,
+            },
+          }
+        }
         const compositeSpecialAction = compositeSpecialActions[action.id]
         const exactWeaponAttack = exactWeaponAttacks.find((candidate) =>
           candidate.actionId === action.id)
@@ -5543,6 +6206,17 @@ function applyCatalogMonsterActionRules(
         }
         return action
       }),
+      ...(monster.slug === 'will-o-wisp'
+        ? [{
+            id: 'consume-life',
+            name: 'Consume Life',
+            description:
+              'Bonus action; the DM adjudicates the zero-hit-point target save, death, and healing.',
+            kind: 'other' as const,
+            economy: 'bonus-action' as const,
+            automation: 'dm-adjudication' as const,
+          }]
+        : []),
       ...(damageOrGrappleAttack
         ? monster.actions.flatMap((source) => {
             if (
@@ -5663,25 +6337,45 @@ function applyCatalogMonsterActionRules(
         },
       }
     }),
-    legendaryActions: monster.legendaryActions?.map((action) =>
-      legendaryActionReference &&
-      action.id === legendaryActionReference.legacyActionId
-        ? {
-            ...action,
-            id: legendaryActionReference.actionId,
-            referencedActionId: legendaryActionReference.referencedActionId,
-            automation:
-              (
-                monster.actions.find((candidate) =>
-                  candidate.id === legendaryActionReference.referencedActionId)
-                  ?.automation === 'headless' ||
-                savingThrowConditionAttack?.actionId ===
-                  legendaryActionReference.referencedActionId
-              )
-                ? 'headless' as const
-                : 'dm-adjudication' as const,
-          }
-        : action),
+    legendaryActions: monster.legendaryActions?.map((action) => {
+      const structuredRule = structuredLegendarySpecialActions[
+        action.id as keyof typeof structuredLegendarySpecialActions
+      ] as Dnd5eMonsterSpecialActionRule | undefined
+      if (structuredRule) {
+        return {
+          ...action,
+          kind: 'other' as const,
+          automation: 'headless' as const,
+          rule: structuredRule,
+        }
+      }
+      if (
+        selfTeleport?.section === 'legendary' &&
+        action.id === selfTeleport.actionId
+      ) {
+        return {
+          ...action,
+          kind: 'other' as const,
+          automation: 'headless' as const,
+          rule: {
+            kind: 'teleport' as const,
+            target: 'self' as const,
+            rangeFeet: selfTeleport.rangeFeet,
+            requiresVisibleDestination: true as const,
+            requiresUnoccupiedDestination: true as const,
+          },
+        }
+      }
+      const reference = legendaryActionReferences.find((candidate) =>
+        candidate.legacyActionId === action.id)
+      if (!reference) return action
+      return {
+        ...action,
+        id: reference.actionId,
+        referencedActionId: reference.referencedActionId,
+        automation: reference.automation,
+      }
+    }),
   }
 }
 
@@ -5689,6 +6383,70 @@ function applyCatalogMonsterTraitRules(
   monster: Dnd5eMonsterStatBlock,
 ): Dnd5eMonsterStatBlock {
   const traits = monster.traits.map((trait, traitIndex) => {
+    if (monster.slug === 'flesh-golem') {
+      if (traitIndex === 0) {
+        return {
+          ...trait,
+          automation: 'headless' as const,
+          rule: {
+            kind: 'berserk' as const,
+            hitPointThreshold: 40,
+            dieSides: 6,
+            minimum: 6,
+            target: 'nearest-visible-creature' as const,
+            endsWhenFullyHealed: true as const,
+          },
+        }
+      }
+      if (traitIndex === 1) {
+        return {
+          ...trait,
+          automation: 'headless' as const,
+          rule: {
+            kind: 'damage-aversion' as const,
+            damageType: 'fire' as const,
+            attackRollMode: 'disadvantage' as const,
+            abilityCheckRollMode: 'disadvantage' as const,
+            duration: 'until-end-of-next-turn' as const,
+          },
+        }
+      }
+      if (traitIndex === 2) {
+        return {
+          ...trait,
+          automation: 'headless' as const,
+          rule: {
+            kind: 'immutable-form' as const,
+            immuneToFormAlteringEffects: true as const,
+          },
+        }
+      }
+      if (traitIndex === 3) {
+        return {
+          ...trait,
+          automation: 'headless' as const,
+          rule: {
+            kind: 'damage-absorption' as const,
+            damageType: 'lightning' as const,
+            healing: 'damage-taken' as const,
+          },
+        }
+      }
+    }
+    const flybyTraitIndex = CATALOG_FLYBY_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_FLYBY_TRAIT_INDEX
+    ]
+    if (flybyTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'flyby' as const,
+          movementMode: 'fly' as const,
+          provokesOpportunityAttacks: false as const,
+        },
+      }
+    }
     if (
       monster.legendaryResistanceUses != null &&
       /legendary resistance|传奇抗性/i.test(trait.name.trim())

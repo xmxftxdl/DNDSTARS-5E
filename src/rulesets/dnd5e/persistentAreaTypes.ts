@@ -21,6 +21,9 @@ export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'entangle',
   'black-tentacles',
   'wall-of-fire',
+  'mage-hand',
+  'insect-plague',
+  'blade-barrier',
 ] as const
 
 export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]
@@ -72,6 +75,15 @@ export type Dnd5ePersistentAreaTriggerTiming =
 
 export type Dnd5ePersistentAreaSourceKind = 'plugin-feature' | 'core-spell'
 export type Dnd5ePersistentAreaAnchorMode = 'fixed' | 'source-token' | 'effect-token'
+
+export type Dnd5ePersistentAreaVerticalSnapshot =
+  | { mode: 'ground' }
+  | {
+      mode: 'volume'
+      baseElevationFeet: number
+      heightFeet: number
+      anchorOffsetFeet?: number
+    }
 
 export interface Dnd5ePersistentAreaMovementDeclaration {
   economy: 'action' | 'bonus-action'
@@ -164,6 +176,34 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function integer(value: unknown, min: number, max: number): value is number {
   return Number.isInteger(value) && Number(value) >= min && Number(value) <= max
+}
+
+/** Runtime boundary for the authoritative vertical extent of a persistent area. */
+export function normalizeDnd5ePersistentAreaVerticalSnapshot(
+  value: unknown,
+): Dnd5ePersistentAreaVerticalSnapshot | undefined {
+  const vertical = record(value)
+  if (!vertical) return undefined
+  if (vertical.mode === 'ground') {
+    return Object.keys(vertical).length === 1 ? { mode: 'ground' } : undefined
+  }
+  const allowed = new Set(['mode', 'baseElevationFeet', 'heightFeet', 'anchorOffsetFeet'])
+  if (
+    vertical.mode !== 'volume' ||
+    Object.keys(vertical).some((key) => !allowed.has(key)) ||
+    !integer(vertical.baseElevationFeet, -1_000, 10_000) ||
+    !integer(vertical.heightFeet, 1, 10_000) ||
+    (Object.prototype.hasOwnProperty.call(vertical, 'anchorOffsetFeet') &&
+      !integer(vertical.anchorOffsetFeet, -1_000, 10_000))
+  ) return undefined
+  return {
+    mode: 'volume',
+    baseElevationFeet: Number(vertical.baseElevationFeet),
+    heightFeet: Number(vertical.heightFeet),
+    ...(vertical.anchorOffsetFeet == null
+      ? {}
+      : { anchorOffsetFeet: Number(vertical.anchorOffsetFeet) }),
+  }
 }
 
 export function normalizeDnd5ePersistentAreaVisual(

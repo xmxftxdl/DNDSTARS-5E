@@ -112,23 +112,62 @@ describe('CombatActionDescriptorV1', () => {
   it('将已开放的子职能力路由到 Headless 职业特性命令', () => {
     const [feature] = build({
       features: [{
-        id: 'eldritch-knight-arcane-charge',
+        id: 'feature-extra-action-teleport',
         label: '奥术冲锋',
         description: '选择 30 尺内落点。',
         icon: dnd5eSpellActionIcon({ id: 'arcane-charge', name: '奥术冲锋' }),
         economy: 'none',
         targeting: 'map-position',
-        command: { kind: 'select-arcane-charge-destination' },
+        command: { kind: 'select-extra-action-teleport-destination' },
       }],
-    }).filter((entry) => entry.id === 'feature:eldritch-knight-arcane-charge')
+    }).filter((entry) => entry.id === 'feature:feature-extra-action-teleport')
 
     expect(feature).toMatchObject({
       sourceKind: 'feature',
       economy: 'none',
       targeting: 'map-position',
-      command: { kind: 'select-arcane-charge-destination' },
+      command: { kind: 'select-extra-action-teleport-destination' },
       enabled: true,
     })
+  })
+
+  it('将可移动持续法术区域生成为受附赠动作约束的地图选点命令', () => {
+    const feature = {
+      id: 'persistent-area-move:flaming-sphere-area',
+      label: '移动炽焰法球',
+      description: '以附赠动作在地图选择 30 尺内的新位置。',
+      icon: dnd5eSpellActionIcon({ id: 'flaming-sphere', name: '炽焰法球' }),
+      economy: 'bonus-action' as const,
+      targeting: 'map-position' as const,
+      resource: { label: '尺', current: 30 },
+      command: { kind: 'move-persistent-area' as const, areaId: 'flaming-sphere-area' },
+    }
+    const available = build({ features: [feature] }).find((entry) =>
+      entry.id === 'feature:persistent-area-move:flaming-sphere-area')
+    const spent = build({ bonusActionRemaining: 0, features: [feature] }).find((entry) =>
+      entry.id === 'feature:persistent-area-move:flaming-sphere-area')
+    const pending = build({ pending: true, features: [feature] }).find((entry) =>
+      entry.id === 'feature:persistent-area-move:flaming-sphere-area')
+
+    expect(available).toMatchObject({
+      sourceKind: 'feature',
+      economy: 'bonus-action',
+      targeting: 'map-position',
+      resource: { label: '尺', current: 30 },
+      enabled: true,
+      command: { kind: 'move-persistent-area', areaId: 'flaming-sphere-area' },
+    })
+    expect(spent).toMatchObject({ enabled: false, disabledReason: '本回合附赠动作已用尽。' })
+    expect(pending).toMatchObject({ enabled: false, disabledReason: '正在等待 DM 结算上一项操作。' })
+
+    const descriptors = build({ features: [feature] })
+    const legacyPreference = {
+      schemaVersion: 1 as const,
+      actionIds: build().map((entry) => entry.id).reverse(),
+      activePage: 0,
+    }
+    expect(reconcileDnd5eCombatHotbarPreference(legacyPreference, descriptors).actionIds[0])
+      .toBe('feature:persistent-area-move:flaming-sphere-area')
   })
 
   it('恢复排序时移除旧动作、去重并追加新动作', () => {

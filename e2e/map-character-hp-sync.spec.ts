@@ -348,6 +348,9 @@ test('DM 可随时调整双方生命值、状态与位置，并通过 SSE 同步
   await enemyPanel.locator('button').first().click()
 
   await dragMapToken(dm, { x: 350, y: 300 }, { x: 400, y: 300 })
+  // Enemy placement drags are intentionally rejected during combat. A DM
+  // takeover moves the current monster through click-to-move instead, so an
+  // old/free drag cannot bypass Headless movement validation.
   await dragMapToken(dm, { x: 500, y: 300 }, { x: 550, y: 300 })
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/state/maps?room=${created.roomId}`, {
@@ -371,7 +374,7 @@ test('DM 可随时调整双方生命值、状态与位置，并通过 SSE 同步
       : null
   }, { timeout: 20_000 }).toEqual({
     player: { x: 425, y: 325 },
-    monster: { x: 575, y: 325 },
+    monster: { x: 500, y: 300 },
   })
 
   await dmContext.close()

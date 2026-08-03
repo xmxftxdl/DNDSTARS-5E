@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ComponentType } from 'react'
 import {
   Backpack,
   BedDouble,
@@ -29,6 +29,10 @@ import { formatEquipmentStatLine } from '../../lib/combatStats'
 import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
 import { getRoomSession } from '../../lib/roomSession'
+import {
+  getRoomRulesSnapshot,
+  subscribeRoomRules,
+} from '../../lib/roomRulesState'
 import { mutateRoomCharacterInventory } from '../../store/roomCommands'
 import {
   dnd5eAttunementRequirementDecision,
@@ -40,7 +44,7 @@ import {
   DND5E_MAGIC_ITEM_RARITY_LABELS,
 } from '../../rulesets/dnd5e/magicItems'
 import { dnd5eArmorProficient, dnd5eWeaponProficient } from '../../rulesets/dnd5e/equipment'
-import { dnd5eEldritchKnightFeatureForCharacter } from '../../rulesets/dnd5e/eldritchKnight'
+import { dnd5eMartialSpellSynergyForCharacter } from '../../rulesets/dnd5e/martialSpellSynergy'
 import {
   DND5E_EDITABLE_CURRENCIES,
   DND5E_EDITABLE_CURRENCY_LABELS,
@@ -110,7 +114,11 @@ export interface EquipmentTabProps {
   onClearQuickbarSlot?: (slotIndex: number) => void
 }
 
-function equipmentProficiency(character: Character, item: EquipmentItem): {
+function equipmentProficiency(
+  character: Character,
+  item: EquipmentItem,
+  spellcastingPrerequisitesEnabled = true,
+): {
   category: string
   proficient: boolean
   consequence: string
@@ -129,12 +137,22 @@ function equipmentProficiency(character: Character, item: EquipmentItem): {
       ? '盾牌'
       : rules.category === 'light' ? '轻甲' : rules.category === 'medium' ? '中甲' : '重甲',
     proficient: dnd5eArmorProficient(character, item),
-    consequence: '穿戴未熟练护甲或持用未熟练盾牌时，涉及力量或敏捷的检定、豁免与攻击具有劣势，并且不能施法；AC 仍按该装备计算。',
+    consequence: `穿戴未熟练护甲或持用未熟练盾牌时，涉及力量或敏捷的检定、豁免与攻击具有劣势${
+      spellcastingPrerequisitesEnabled ? '，并且不能施法' : ''
+    }；AC 仍按该装备计算。`,
   }
 }
 
-function EquipmentProficiencyLine({ character, item }: { character: Character; item: EquipmentItem }) {
-  const result = equipmentProficiency(character, item)
+function EquipmentProficiencyLine({
+  character,
+  item,
+  spellcastingPrerequisitesEnabled,
+}: {
+  character: Character
+  item: EquipmentItem
+  spellcastingPrerequisitesEnabled: boolean
+}) {
+  const result = equipmentProficiency(character, item, spellcastingPrerequisitesEnabled)
   if (!result) return null
   return (
     <p className={`mt-1 text-[11px] ${result.proficient ? 'text-emerald-300/75' : 'text-amber-300/85'}`}>
@@ -143,8 +161,16 @@ function EquipmentProficiencyLine({ character, item }: { character: Character; i
   )
 }
 
-function EquipmentProficiencyNotice({ character, item }: { character: Character; item: EquipmentItem }) {
-  const result = equipmentProficiency(character, item)
+function EquipmentProficiencyNotice({
+  character,
+  item,
+  spellcastingPrerequisitesEnabled,
+}: {
+  character: Character
+  item: EquipmentItem
+  spellcastingPrerequisitesEnabled: boolean
+}) {
+  const result = equipmentProficiency(character, item, spellcastingPrerequisitesEnabled)
   if (!result) return null
   return (
     <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${
@@ -176,6 +202,14 @@ export default function EquipmentTab({
   const [transferTargetId, setTransferTargetId] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [notice, setNotice] = useState('')
+  const roomRules = useSyncExternalStore(
+    subscribeRoomRules,
+    getRoomRulesSnapshot,
+    getRoomRulesSnapshot,
+  )
+  const encumbranceEnabled = roomRules?.houseRules.encumbranceEnabled !== false
+  const spellcastingPrerequisitesEnabled =
+    roomRules?.houseRules.spellcastingPrerequisitesEnabled !== false
   const combatManagementLocked = !!onUseItem
   const isDm = (getRoomSession()?.role ?? modeFromPort()) === 'dm'
   const canIdentify = isDm
@@ -195,28 +229,29 @@ export default function EquipmentTab({
     candidate.visibleToPlayers !== false &&
     (!character.roomId || !candidate.roomId || candidate.roomId === character.roomId),
   )
-  const load = dnd5eInventoryLoad(character)
+  const load = encumbranceEnabled ? dnd5eInventoryLoad(character) : null
   const containers = inventory.entries.filter((entry) => entry.item.containerCapacityWeightLb != null && entry.instanceId !== selected?.instanceId)
-  const weaponBondFeature = dnd5eEldritchKnightFeatureForCharacter(character, 'weapon-bond')
-  const bondedWeaponIds = character.dnd5eCombatState?.eldritchKnightBondedWeaponIds ?? []
+  const linkedEquipmentFeature = dnd5eMartialSpellSynergyForCharacter(character, 'linked-equipment')
+  const linkedEquipmentLimit = linkedEquipmentFeature?.mechanic.linkedEquipmentLimit ?? 0
+  const linkedEquipmentIds = character.dnd5eCombatState?.linkedEquipmentIds ?? []
 
-  const toggleWeaponBond = (weaponId: string, weaponName: string) => {
-    const alreadyBonded = bondedWeaponIds.includes(weaponId)
-    if (!alreadyBonded && bondedWeaponIds.length >= 2) {
-      setNotice('奥法骑士最多登记两件联结武器；请先解除一件现有联结。')
+  const toggleLinkedEquipment = (weaponId: string, weaponName: string) => {
+    const alreadyLinked = linkedEquipmentIds.includes(weaponId)
+    if (!alreadyLinked && linkedEquipmentIds.length >= linkedEquipmentLimit) {
+      setNotice(`该特性最多登记 ${linkedEquipmentLimit} 件联结武器；请先解除一件现有联结。`)
       return
     }
-    if (!alreadyBonded && !window.confirm(`确认已完成联结仪式，并将“${weaponName}”登记为联结武器吗？`)) return
-    const nextBonded = alreadyBonded
-      ? bondedWeaponIds.filter((id) => id !== weaponId)
-      : [...bondedWeaponIds, weaponId]
+    if (!alreadyLinked && !window.confirm(`确认已完成联结仪式，并将“${weaponName}”登记为联结武器吗？`)) return
+    const nextLinked = alreadyLinked
+      ? linkedEquipmentIds.filter((id) => id !== weaponId)
+      : [...linkedEquipmentIds, weaponId]
     updateCharacter(character.id, {
       dnd5eCombatState: {
         ...character.dnd5eCombatState,
-        eldritchKnightBondedWeaponIds: nextBonded.length > 0 ? nextBonded : undefined,
+        linkedEquipmentIds: nextLinked.length > 0 ? nextLinked : undefined,
       },
     })
-    setNotice(alreadyBonded ? `已解除“${weaponName}”的武器联结。` : `已登记“${weaponName}”为联结武器。`)
+    setNotice(alreadyLinked ? `已解除“${weaponName}”的武器联结。` : `已登记“${weaponName}”为联结武器。`)
   }
 
   const run = (mutation: Parameters<typeof mutateRoomCharacterInventory>[0]) => {
@@ -248,7 +283,11 @@ export default function EquipmentTab({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{compact ? '战斗物品快捷栏' : '物品栏'}</p>
-            <p className="mt-1 text-xs text-slate-500">{compact ? '点击图标查看；再次点击已选中的可用道具即可选择目标或提交结算。' : `${inventory.entries.length} 个物品栏位 · ${formatWeight(load.totalWeightLb)} / ${load.carryingCapacityLb} 磅`}</p>
+            <p className="mt-1 text-xs text-slate-500">{compact
+              ? '点击图标查看；再次点击已选中的可用道具即可选择目标或提交结算。'
+              : load
+                ? `${inventory.entries.length} 个物品栏位 · ${formatWeight(load.totalWeightLb)} / ${load.carryingCapacityLb} 磅`
+                : `${inventory.entries.length} 个物品栏位`}</p>
           </div>
           <div className="flex rounded-xl border border-white/8 bg-black/20 p-1">
             <GroupButton active={group === 'equipment'} onClick={() => { setGroup('equipment'); setSelectedId(null) }} icon={Shield}>装备</GroupButton>
@@ -360,12 +399,12 @@ export default function EquipmentTab({
               </label>
             ))}
           </div>
-          <div className={`rounded-xl border p-3 ${load.status === 'normal' ? 'border-emerald-300/10 bg-emerald-500/[0.035]' : 'border-amber-300/15 bg-amber-500/[0.05]'}`}>
+          {load && <div className={`rounded-xl border p-3 ${load.status === 'normal' ? 'border-emerald-300/10 bg-emerald-500/[0.035]' : 'border-amber-300/15 bg-amber-500/[0.05]'}`}>
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-200"><Weight className="h-4 w-4" />负重</div>
             <p className="mt-1.5 text-xs text-slate-400">物品 {formatWeight(load.itemWeightLb)} 磅 · 钱币 {formatWeight(load.currencyWeightLb)} 磅 · 总计 {formatWeight(load.totalWeightLb)} 磅</p>
             <p className="mt-1 text-[11px] text-slate-500">可选负重阈值 {load.encumberedThresholdLb} / {load.heavilyEncumberedThresholdLb} 磅 · 携带上限 {load.carryingCapacityLb} 磅</p>
             {load.status !== 'normal' && <p className="mt-1 text-[11px] text-amber-200">{load.status === 'encumbered' ? '负重：速度 -10 尺。' : load.status === 'heavily-encumbered' ? '重度负重：速度 -20 尺，并承受相应检定与豁免劣势。' : '超过携带上限，通常无法继续携带或移动。'}</p>}
-          </div>
+          </div>}
         </div>}
 
         {!compact && group === 'equipment' && (
@@ -382,7 +421,11 @@ export default function EquipmentTab({
                   </div>
                   <p className="mt-2 text-sm font-semibold text-slate-100">{item?.name ?? '空'}</p>
                   {item && <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{formatEquipmentStatLine(item)}</p>}
-                  {item && <EquipmentProficiencyLine character={character} item={item} />}
+                  {item && <EquipmentProficiencyLine
+                    character={character}
+                    item={item}
+                    spellcastingPrerequisitesEnabled={spellcastingPrerequisitesEnabled}
+                  />}
                   {editable && entry && (
                     <button
                       type="button"
@@ -393,17 +436,17 @@ export default function EquipmentTab({
                       卸下
                     </button>
                   )}
-                  {editable && !combatManagementLocked && weaponBondFeature && item?.dnd5e?.kind === 'weapon' && (
+                  {editable && !combatManagementLocked && linkedEquipmentFeature && item?.dnd5e?.kind === 'weapon' && (
                     <button
                       type="button"
-                      onClick={() => toggleWeaponBond(item.id, item.name)}
+                      onClick={() => toggleLinkedEquipment(item.id, item.name)}
                       disabled={
                         pending ||
-                        (!bondedWeaponIds.includes(item.id) && bondedWeaponIds.length >= 2)
+                        (!linkedEquipmentIds.includes(item.id) && linkedEquipmentIds.length >= linkedEquipmentLimit)
                       }
                       className="mt-2 ml-1 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.06] px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/15 disabled:opacity-40"
                     >
-                      {bondedWeaponIds.includes(item.id) ? '解除联结' : '登记联结'}
+                      {linkedEquipmentIds.includes(item.id) ? '解除联结' : '登记联结'}
                     </button>
                   )}
                 </div>
@@ -499,7 +542,11 @@ export default function EquipmentTab({
             </p>
           )}
           {selected.identified !== false && selected.item.equipment && (
-            <EquipmentProficiencyNotice character={character} item={selected.item.equipment} />
+            <EquipmentProficiencyNotice
+              character={character}
+              item={selected.item.equipment}
+              spellcastingPrerequisitesEnabled={spellcastingPrerequisitesEnabled}
+            />
           )}
 
           {selected.identified === false ? (

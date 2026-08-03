@@ -1,12 +1,13 @@
-import type {
-  Dnd5ePluginAbilityGenerationDefinition,
-  Dnd5ePluginBackgroundDefinition,
-  Dnd5ePluginFeatureDefinition,
-  Dnd5ePluginFeatDefinition,
-  Dnd5ePluginItemDefinition,
-  Dnd5ePluginRaceDefinition,
-  Dnd5ePluginSpellDefinition,
-  Dnd5eRulesPluginManifest,
+import {
+  normalizeDnd5ePluginPersistentAreaVerticalDeclaration,
+  type Dnd5ePluginAbilityGenerationDefinition,
+  type Dnd5ePluginBackgroundDefinition,
+  type Dnd5ePluginFeatureDefinition,
+  type Dnd5ePluginFeatDefinition,
+  type Dnd5ePluginItemDefinition,
+  type Dnd5ePluginRaceDefinition,
+  type Dnd5ePluginSpellDefinition,
+  type Dnd5eRulesPluginManifest,
 } from './pluginApi'
 import {
   DND5E_DECLARATIVE_PACKAGE_FORMAT,
@@ -215,6 +216,8 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
       !/^#[0-9a-f]{6}$/i.test(persistentArea.color ?? '#8b5cf6') ||
       !Number.isInteger(persistentArea.durationRounds) || persistentArea.durationRounds < 1 ||
       persistentArea.durationRounds > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS ||
+      (persistentArea.vertical != null &&
+        !normalizeDnd5ePluginPersistentAreaVerticalDeclaration(persistentArea.vertical)) ||
       (persistentArea.visual != null && !normalizeDnd5ePersistentAreaVisual(persistentArea.visual)) ||
       invalidPersistentAreaTriggers
     )) errors.push(`特性 ${feature.name || feature.id} 的持续区域声明无效。`)

@@ -8,6 +8,7 @@ import {
 } from './adjudicatedSpellAction'
 import { dnd5eSpellbookEntries, type Dnd5eImportedSpell } from './spellbook'
 import { DND5E_LEATHER_ARMOR } from './equipment'
+import { createDnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 
 function wizard(spellId: string): Character {
   return {
@@ -92,6 +93,18 @@ describe('DM-adjudicated spell Headless transaction', () => {
       ok: false,
       reason: 'component-unavailable',
     })
+  })
+
+  it('allows DM-adjudicated casting when the room disables casting prerequisites', () => {
+    const input = fixture()
+    input.actor.equipment = { armor: DND5E_LEATHER_ARMOR }
+    input.actor.conditions = ['沉默']
+    expect(prepareDnd5eAdjudicatedSpell({
+      ...input,
+      effectiveRules: createDnd5eEffectiveRulesContextV1({
+        houseRules: { spellcastingPrerequisitesEnabled: false },
+      }),
+    })).toMatchObject({ ok: true })
   })
 
   it('does not spend resources during preparation and commits all approved effects atomically', () => {

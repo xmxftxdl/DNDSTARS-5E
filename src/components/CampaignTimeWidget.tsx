@@ -14,6 +14,7 @@ import {
 } from '../lib/campaignTime'
 import type { AppMode } from '../lib/appMode'
 import { useCampaignTimeStore } from '../store/campaignTime'
+import { completeDnd5eCampaignLongRest } from '../store/campaignLongRest'
 import { useCharacterStore } from '../store/characters'
 import { planDnd5eTravel, type Dnd5eTravelPace } from '../rulesets/dnd5e/travel'
 
@@ -65,13 +66,9 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
     }
   }
   const advance = (minutes: number, reason: string) => run(() => mutate({ operation: 'advance', minutes, reason }))
-  const startLongRest = () => run(async () => {
-    const nextClock = await mutate({
-      operation: 'long-rest',
-      reason: '队伍完成长休',
-    })
-    await useCharacterStore.getState().reconcileCampaignTimeAndSave(nextClock)
-  })
+  const startLongRest = () => run(() =>
+    completeDnd5eCampaignLongRest('队伍完成长休'),
+  )
   const createTimer = () => {
     const character = characters.find((entry) => entry.id === timerCharacterId)
     const durationMinutes = timerDuration * (timerUnit === 'hour' ? 60 : 1)

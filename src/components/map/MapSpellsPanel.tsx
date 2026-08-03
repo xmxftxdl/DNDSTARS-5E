@@ -42,12 +42,19 @@ export function resolveMapSpellSlotSelection(input: MapSpellSlotSelectionInput):
 } {
   const selectedSlot = input.pinnedSlotLevel ?? mapSpellDefaultSlotLevel(input)
   const selectedSlotAvailable = input.availableLevels.includes(selectedSlot)
+  const availableSlots = [...new Set(input.availableLevels)].sort((left, right) => left - right)
+  const nextAvailableSlot = availableSlots.find((level) => level > selectedSlot) ?? availableSlots[0]
+  const unavailableMessage = selectedSlotAvailable
+    ? undefined
+    : input.pinnedSlotLevel != null
+      ? nextAvailableSlot == null
+        ? `已固定的 ${selectedSlot} 环位已耗尽；当前没有可用法术位`
+        : `已固定的 ${selectedSlot} 环位已耗尽；请选择/右键固定 ${nextAvailableSlot} 环`
+      : MAP_SPELL_BASE_SLOT_UNAVAILABLE_MESSAGE
   return {
     selectedSlot,
     selectedSlotAvailable,
-    unavailableMessage: input.pinnedSlotLevel == null && !selectedSlotAvailable
-      ? MAP_SPELL_BASE_SLOT_UNAVAILABLE_MESSAGE
-      : undefined,
+    unavailableMessage,
   }
 }
 

@@ -48,6 +48,12 @@ import {
   type Dnd5eActionIconSpec,
 } from '../../lib/dnd5eActionIcons'
 import { dnd5eActionIconBackdropImage } from './dnd5eActionIconBackdropImage'
+import Dnd5eConcentrationTokenBadge, {
+  DND5E_CONCENTRATION_TOKEN_IMAGE_SRC,
+  type ConcentrationTokenMark,
+} from './Dnd5eConcentrationTokenBadge'
+import { targetSpriteAtlasPlaybackState } from './targetSpriteAtlasPlayback'
+import { dnd5ePersistentAreaPresentationVisual } from '../../rulesets/dnd5e/persistentAreaPresentation'
 
 const TOKEN_MOVE_DURATION = TOKEN_MOVE_DURATION_S
 // Treat tiny drags as click jitter; do not submit movement or broadcast.
@@ -90,6 +96,7 @@ type MapSpellStatusId =
   | 'hideous-laughter'
   | 'hold-person'
   | 'blindness-deafness'
+  | 'monster-damage-aversion'
 
 const MAP_SPELL_STATUS_ICONS: Readonly<Record<MapSpellStatusId, Dnd5eActionIconSpec>> = {
   guidance: dnd5eSpellActionIcon({
@@ -309,6 +316,18 @@ const MAP_SPELL_STATUS_ICONS: Readonly<Record<MapSpellStatusId, Dnd5eActionIconS
     school: '死灵',
     effect: '感官剥夺',
   }),
+  'monster-damage-aversion': {
+    key: 'monster-damage-aversion',
+    motif: 'fire',
+    background: '#7c2d12',
+    backgroundDeep: '#1c0703',
+    accent: '#fb923c',
+    glow: '#f97316',
+    runeIndex: 0,
+    textureRotation: 0,
+    asset: '/assets/icons/flesh-golem-fire-aversion-status.png',
+    assetMode: 'foreground',
+  },
 }
 
 /**
@@ -420,6 +439,7 @@ import {
 } from '../../lib/mapGeometry'
 import type { MapGeometryDiagnostics } from '../../lib/mapGeometryDiagnostics'
 import type { WallDetectionCandidate } from '../../lib/mapImageGeometryDetection'
+import { collectMapDifficultTerrainCells } from '../../lib/mapDifficultTerrain'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { campaignLightIsActive } from '../../lib/campaignTime'
 import { useCampaignTimeStore } from '../../store/campaignTime'
@@ -441,6 +461,7 @@ import {
 import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
 import {
   mapCanvasAoeGridCell,
+  mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
   mapCanvasStageCanPan,
   mapCanvasTokenClickAction,
@@ -472,12 +493,13 @@ export interface MapProjectile {
   id: string
   from: { x: number; y: number }
   to: { x: number; y: number }
-  kind?: 'arrow' | 'focus' | 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame' | 'spare-the-dying' | 'acid-splash' | 'poison-spray' | 'vicious-mockery' | 'magic-missile' | 'scorching-ray' | 'guiding-bolt' | 'acid-arrow' | 'cure-wounds' | 'healing-word' | 'inflict-wounds' | 'hellish-rebuke' | 'burning-hands' | 'thunderwave' | 'shatter' | 'lightning-bolt' | 'bless' | 'bane' | 'shield-of-faith' | 'mage-armor' | 'jump' | 'darkvision' | 'see-invisibility' | 'warding-bond' | 'fly' | 'heroism' | 'enlarge-reduce' | 'enhance-ability' | 'divine-favor' | 'hunters-mark' | 'magic-weapon' | 'flame-blade' | 'invisibility' | 'blur' | 'barkskin' | 'protection-from-poison' | 'longstrider' | 'protection-from-energy' | 'death-ward' | 'greater-invisibility' | 'charm-person' | 'hideous-laughter' | 'hold-person' | 'blindness-deafness'
+  kind?: 'arrow' | 'focus' | 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame' | 'spare-the-dying' | 'acid-splash' | 'poison-spray' | 'vicious-mockery' | 'magic-missile' | 'scorching-ray' | 'guiding-bolt' | 'acid-arrow' | 'chain-lightning' | 'disintegrate' | 'cure-wounds' | 'healing-word' | 'inflict-wounds' | 'hellish-rebuke' | 'blight' | 'finger-of-death' | 'power-word-stun' | 'power-word-kill' | 'false-life' | 'burning-hands' | 'thunderwave' | 'shatter' | 'lightning-bolt' | 'flame-strike' | 'sunburst' | 'cone-of-cold' | 'circle-of-death' | 'ice-storm' | 'freezing-sphere' | 'color-spray' | 'faerie-fire' | 'sleep' | 'entangle' | 'grease' | 'darkness' | 'flaming-sphere' | 'moonbeam' | 'daylight' | 'black-tentacles' | 'spike-growth' | 'mage-hand' | 'spiritual-weapon' | 'spirit-guardians' | 'call-lightning' | 'call-lightning-strike' | 'insect-plague' | 'wall-of-fire' | 'blade-barrier' | 'bless' | 'bane' | 'shield-of-faith' | 'mage-armor' | 'jump' | 'darkvision' | 'see-invisibility' | 'warding-bond' | 'fly' | 'heroism' | 'enlarge-reduce' | 'enhance-ability' | 'divine-favor' | 'hunters-mark' | 'magic-weapon' | 'flame-blade' | 'invisibility' | 'blur' | 'barkskin' | 'protection-from-poison' | 'longstrider' | 'protection-from-energy' | 'death-ward' | 'greater-invisibility' | 'charm-person' | 'hideous-laughter' | 'hold-person' | 'blindness-deafness'
   hit?: boolean
   issuedAt?: number
   durationMs?: number
   radiusPx?: number
   areaWidthPx?: number
+  areaHeightPx?: number
   accentColor?: string
   glowColor?: string
 }
@@ -566,6 +588,8 @@ interface MapCanvasProps {
   sanctuaryTokenIds?: string[]
   /** Persistent spell statuses colored by the class of the actor who granted them. */
   spellStatusTokenMarks?: SpellStatusTokenMark[]
+  /** Authoritative concentration markers colored by the concentrating actor. */
+  concentrationTokenMarks?: ConcentrationTokenMark[]
   /** Characters currently wielding a club or quarterstaff empowered by Shillelagh. */
   shillelaghTokenIds?: string[]
   /** Defeated tokens are dimmed. */
@@ -1440,7 +1464,9 @@ function MapGeometryLayer({
           strokeWidth: (selected ? 5 : 3) * inv,
           opacity: isDraft ? 0.68 : 0.92,
           hitStrokeWidth: 14 * inv,
-          listening: (entityEditListening || (editMode && tool === 'obstacle')) && !isDraft,
+          listening: (entityEditListening || (editMode && (
+            tool === 'obstacle' || tool === 'difficult-terrain'
+          ))) && !isDraft,
           onMouseDown: selectEntity,
         }
         return (
@@ -1527,6 +1553,7 @@ function useTokenBadgeImage(asset: string | undefined): HTMLImageElement | undef
   useEffect(() => {
     if (!asset) return
     let disposed = false
+    let retryTimer = 0
     const cached = cachedBrowserImage(asset)
     if (cached) {
       queueMicrotask(() => {
@@ -1536,11 +1563,24 @@ function useTokenBadgeImage(asset: string | undefined): HTMLImageElement | undef
         disposed = true
       }
     }
-    void preloadBrowserImage(asset).then((image) => {
-      if (!disposed) setLoaded({ asset, image })
-    })
+    const load = (attempt: number) => {
+      void preloadBrowserImage(asset).then((image) => {
+        if (disposed) return
+        if (image) {
+          setLoaded({ asset, image })
+          return
+        }
+        if (attempt >= 4) {
+          setLoaded({ asset })
+          return
+        }
+        retryTimer = window.setTimeout(() => load(attempt + 1), 180 * (attempt + 1))
+      })
+    }
+    load(0)
     return () => {
       disposed = true
+      if (retryTimer) window.clearTimeout(retryTimer)
     }
   }, [asset])
 
@@ -1785,8 +1825,8 @@ function SpellStatusTokenBadge(input: {
             y={-size * 0.48}
             width={size * 0.96}
             height={size * 0.96}
-            globalCompositeOperation="screen"
-            opacity={0.94}
+            globalCompositeOperation={input.mark.statusId === 'monster-damage-aversion' ? 'source-over' : 'screen'}
+            opacity={input.mark.statusId === 'monster-damage-aversion' ? 1 : 0.94}
             listening={false}
           />
         </Group>
@@ -2148,6 +2188,7 @@ function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; ma
 }
 
 const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>> = {
+  'mage-hand': { icon: '✋', glow: '#67e8f9' },
   grease: { icon: '≋', glow: '#fde68a' },
   daylight: { icon: '☀', glow: '#fef3c7' },
   darkness: { icon: '●', glow: '#8b5cf6' },
@@ -2160,6 +2201,348 @@ const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>
   entangle: { icon: '🌿', glow: '#a3e635' },
   'black-tentacles': { icon: '⌁', glow: '#a78bfa' },
   'wall-of-fire': { icon: '🔥', glow: '#fb7185' },
+  'insect-plague': { icon: '✦', glow: '#d6a94d' },
+  'blade-barrier': { icon: '✧', glow: '#bae6fd' },
+}
+
+const PERSISTENT_AREA_SPRITE_ASSETS: Readonly<Record<string, string>> = {
+  'mage-hand': '/assets/vfx/mage-hand-sprite-v2.png',
+  darkness: '/assets/vfx/darkness-sprite-v2.png',
+  daylight: '/assets/vfx/daylight-sprite-v2.png',
+  entangle: '/assets/vfx/entangle-sprite-v2.png',
+  'black-tentacles': '/assets/vfx/black-tentacles-sprite-v2.png',
+  'spiritual-weapon': '/assets/vfx/spiritual-weapon-sprite-v2.png',
+  'spike-growth': '/assets/vfx/spike-growth-sprite-v2.png',
+  'spirit-guardians': '/assets/vfx/spirit-guardians-sprite-v2.png',
+  moonbeam: '/assets/vfx/moonbeam-sprite-v2.png',
+  'call-lightning': '/assets/vfx/call-lightning-sprite-v2.png',
+  'wall-of-fire': '/assets/vfx/wall-of-fire-sprite-v2.png',
+  'insect-plague': '/assets/vfx/insect-plague-sprite-v2.png',
+  'blade-barrier': '/assets/vfx/blade-barrier-sprite-v2.png',
+}
+
+const PERSISTENT_STRIP_PRESETS = new Set(['wall-of-fire', 'blade-barrier'])
+
+function PersistentAreaSpriteAtlas({
+  image,
+  x,
+  y,
+  width,
+  height,
+  rotation = 0,
+  opacity,
+  glow,
+  reducedMotion,
+  preset,
+}: {
+  image: HTMLImageElement
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation?: number
+  opacity: number
+  glow: string
+  reducedMotion: boolean
+  preset: string
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const spriteRef = useRef<Konva.Image>(null)
+  const frameWidth = (image.naturalWidth || image.width) / 4
+  const frameHeight = (image.naturalHeight || image.height) / 4
+  const loopFrames = [8, 9, 10, 11, 12, 13, 14, 15] as const
+  const cropInset = Math.max(0.5, Math.min(frameWidth, frameHeight) * 0.004)
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    (frame) => {
+      const seconds = (frame?.time ?? 0) / 1000
+      const frameIndex = loopFrames[Math.floor(seconds * 7) % loopFrames.length]
+      spriteRef.current?.crop({
+        x: (frameIndex % 4) * frameWidth + cropInset,
+        y: Math.floor(frameIndex / 4) * frameHeight + cropInset,
+        width: frameWidth - cropInset * 2,
+        height: frameHeight - cropInset * 2,
+      })
+      spriteRef.current?.opacity(opacity + Math.sin(seconds * 2.2) * 0.035)
+    },
+    [cropInset, frameHeight, frameWidth, image, opacity],
+    { active: !reducedMotion, fps: 14 },
+  )
+
+  const initialFrame = loopFrames[0]
+  return (
+    <Group
+      ref={groupRef}
+      name={`persistent-area-sprite-atlas persistent-area-${preset}`}
+      x={x}
+      y={y}
+      rotation={rotation}
+      listening={false}
+    >
+      <KonvaImage
+        ref={spriteRef}
+        image={image}
+        crop={{
+          x: (initialFrame % 4) * frameWidth + cropInset,
+          y: Math.floor(initialFrame / 4) * frameHeight + cropInset,
+          width: frameWidth - cropInset * 2,
+          height: frameHeight - cropInset * 2,
+        }}
+        x={-width / 2}
+        y={-height / 2}
+        width={width}
+        height={height}
+        opacity={opacity}
+        shadowColor={glow}
+        shadowBlur={Math.min(width, height) * 0.12}
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+    </Group>
+  )
+}
+
+function persistentAreaSpritePlacement(
+  area: Dnd5ePluginArea,
+  map: BattleMap,
+  preset: string,
+): { x: number; y: number; width: number; height: number; rotation: number } | undefined {
+  const grid = Math.max(1, map.gridSize)
+  const cells = area.cells.length > 0 ? area.cells : area.anchorCell ? [area.anchorCell] : []
+  if (cells.length === 0) return undefined
+  const centers = cells.map((cell) => {
+    const point = cellTopLeft(cell, map)
+    return { x: point.x + grid / 2, y: point.y + grid / 2 }
+  })
+  const x = centers.reduce((sum, point) => sum + point.x, 0) / centers.length
+  const y = centers.reduce((sum, point) => sum + point.y, 0) / centers.length
+
+  if (PERSISTENT_STRIP_PRESETS.has(preset)) {
+    const covariance = centers.reduce((sum, point) => ({
+      xx: sum.xx + (point.x - x) ** 2,
+      yy: sum.yy + (point.y - y) ** 2,
+      xy: sum.xy + (point.x - x) * (point.y - y),
+    }), { xx: 0, yy: 0, xy: 0 })
+    const angle = Math.atan2(2 * covariance.xy, covariance.xx - covariance.yy) / 2
+    const projections = centers.map((point) =>
+      (point.x - x) * Math.cos(angle) + (point.y - y) * Math.sin(angle),
+    )
+    const length = Math.max(...projections) - Math.min(...projections) + grid * 1.25
+    return {
+      x,
+      y,
+      width: Math.max(grid * 1.25, length),
+      height: grid * (preset === 'wall-of-fire' ? 2.05 : 1.65),
+      rotation: angle * 180 / Math.PI,
+    }
+  }
+
+  const anchor = area.anchorCell ?? cells[0]
+  if (preset === 'mage-hand' || preset === 'spiritual-weapon') {
+    const point = cellTopLeft(anchor, map)
+    const size = grid * (preset === 'spiritual-weapon' ? 1.5 : 1.65)
+    return { x: point.x + grid / 2, y: point.y + grid / 2, width: size, height: size, rotation: 0 }
+  }
+
+  const points = cells.map((cell) => cellTopLeft(cell, map))
+  const minX = Math.min(...points.map((point) => point.x))
+  const minY = Math.min(...points.map((point) => point.y))
+  const maxX = Math.max(...points.map((point) => point.x + grid))
+  const maxY = Math.max(...points.map((point) => point.y + grid))
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
+    width: Math.max(grid, maxX - minX) * 1.04,
+    height: Math.max(grid, maxY - minY) * 1.04,
+    rotation: 0,
+  }
+}
+
+function PersistentFlamingSphereAtlas({
+  image,
+  x,
+  y,
+  size,
+  reducedMotion,
+}: {
+  image: HTMLImageElement
+  x: number
+  y: number
+  size: number
+  reducedMotion: boolean
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const auraRef = useRef<Konva.Circle>(null)
+  const spriteRef = useRef<Konva.Image>(null)
+  const frameWidth = (image.naturalWidth || image.width) / 4
+  const frameHeight = (image.naturalHeight || image.height) / 4
+  // Frames 0-7 build the sphere and 12-15 destroy it. The persistent overlay
+  // must only idle across the fully formed frames until concentration ends.
+  const loopFrames = [8, 9, 10, 11, 10, 9] as const
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    (frame) => {
+      const seconds = (frame?.time ?? 0) / 1000
+      const frameIndex = loopFrames[Math.floor(seconds * 8) % loopFrames.length]
+      spriteRef.current?.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      const pulse = 1 + Math.sin(seconds * 4.1) * 0.035
+      spriteRef.current?.scale({ x: pulse, y: pulse })
+      spriteRef.current?.rotation(Math.sin(seconds * 1.7) * 2.5)
+      auraRef.current?.radius(size * (0.37 + Math.sin(seconds * 3.2) * 0.018))
+      auraRef.current?.opacity(0.25 + Math.sin(seconds * 3.2) * 0.08)
+    },
+    [frameHeight, frameWidth, image, size],
+    { active: !reducedMotion, fps: 16 },
+  )
+
+  const initialFrame = loopFrames[0]
+  return (
+    <Group ref={groupRef} x={x} y={y} listening={false}>
+      <Circle
+        ref={auraRef}
+        radius={size * 0.37}
+        fill="rgba(249,115,22,0.16)"
+        shadowColor="#fb923c"
+        shadowBlur={size * 0.32}
+        opacity={0.25}
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+      <KonvaImage
+        ref={spriteRef}
+        image={image}
+        crop={{
+          x: (initialFrame % 4) * frameWidth,
+          y: Math.floor(initialFrame / 4) * frameHeight,
+          width: frameWidth,
+          height: frameHeight,
+        }}
+        x={-size / 2}
+        y={-size / 2}
+        width={size}
+        height={size}
+        shadowColor="#f97316"
+        shadowBlur={size * 0.18}
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+    </Group>
+  )
+}
+
+function PersistentGreasePoolAtlas({
+  image,
+  x,
+  y,
+  width,
+  height,
+  reducedMotion,
+}: {
+  image: HTMLImageElement
+  x: number
+  y: number
+  width: number
+  height: number
+  reducedMotion: boolean
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const quadrantSpriteRefs = useRef<Array<Konva.Image | null>>([])
+  const frameWidth = (image.naturalWidth || image.width) / 4
+  const frameHeight = (image.naturalHeight || image.height) / 4
+  const loopFrames = [8, 9, 10, 11, 10, 9] as const
+  // All mature source frames share this centered content window. Keeping the
+  // crop fixed prevents the oil pool from drifting as its reflections change.
+  const cropInsetX = frameWidth * 0.11
+  const cropInsetTop = frameHeight * 0.185
+  const cropInsetBottom = frameHeight * 0.17
+  const contentWidth = frameWidth - cropInsetX * 2
+  const contentHeight = frameHeight - cropInsetTop - cropInsetBottom
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    (frame) => {
+      const seconds = (frame?.time ?? 0) / 1000
+      const frameIndex = loopFrames[Math.floor(seconds * 5) % loopFrames.length]
+      const crop = {
+        x: (frameIndex % 4) * frameWidth + cropInsetX,
+        y: Math.floor(frameIndex / 4) * frameHeight + cropInsetTop,
+        width: contentWidth,
+        height: contentHeight,
+      }
+      const opacity = 0.7 + Math.sin(seconds * 1.9) * 0.045
+      quadrantSpriteRefs.current.forEach((sprite) => {
+        sprite?.crop(crop)
+        sprite?.opacity(opacity)
+      })
+    },
+    [contentHeight, contentWidth, cropInsetTop, cropInsetX, frameHeight, frameWidth, height, image, width],
+    { active: !reducedMotion, fps: 12 },
+  )
+
+  const initialFrame = loopFrames[0]
+  return (
+    <Group ref={groupRef} x={x} y={y} listening={false}>
+      <Rect
+        x={-width / 2}
+        y={-height / 2}
+        width={width}
+        height={height}
+        fillRadialGradientStartPoint={{ x: width / 2, y: height / 2 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={{ x: width / 2, y: height / 2 }}
+        fillRadialGradientEndRadius={Math.max(width, height) * 0.72}
+        fillRadialGradientColorStops={[
+          0, 'rgba(111,76,20,0.9)',
+          0.46, 'rgba(58,38,12,0.88)',
+          1, 'rgba(24,16,7,0.92)',
+        ]}
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+      {[
+        { clipX: -width / 2, clipY: -height / 2, imageX: -width * 0.54, imageY: -height * 0.54, scaleX: 1, scaleY: 1 },
+        { clipX: 0, clipY: -height / 2, imageX: width * 0.54, imageY: -height * 0.54, scaleX: -1, scaleY: 1 },
+        { clipX: -width / 2, clipY: 0, imageX: -width * 0.54, imageY: height * 0.54, scaleX: 1, scaleY: -1 },
+        { clipX: 0, clipY: 0, imageX: width * 0.54, imageY: height * 0.54, scaleX: -1, scaleY: -1 },
+      ].map((quadrant, index) => (
+        <Group
+          key={`grease-quadrant:${index}`}
+          clipX={quadrant.clipX}
+          clipY={quadrant.clipY}
+          clipWidth={width / 2}
+          clipHeight={height / 2}
+          listening={false}
+        >
+          <KonvaImage
+            ref={(node) => { quadrantSpriteRefs.current[index] = node }}
+            image={image}
+            crop={{
+              x: (initialFrame % 4) * frameWidth + cropInsetX,
+              y: Math.floor(initialFrame / 4) * frameHeight + cropInsetTop,
+              width: contentWidth,
+              height: contentHeight,
+            }}
+            x={quadrant.imageX}
+            y={quadrant.imageY}
+            width={width * 1.08}
+            height={height * 1.08}
+            scaleX={quadrant.scaleX}
+            scaleY={quadrant.scaleY}
+            opacity={0.72}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        </Group>
+      ))}
+    </Group>
+  )
 }
 
 function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
@@ -2168,7 +2551,16 @@ function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: 
   const boundaryRef = useRef<Konva.Group>(null)
   const iconRef = useRef<Konva.Text>(null)
   const reducedMotion = usePrefersReducedMotion()
-  const preset = area.visual?.preset ?? ''
+  const areaVisual = dnd5ePersistentAreaPresentationVisual(area)
+  const preset = areaVisual?.preset ?? ''
+  const persistentFlamingSphereImage = useTokenBadgeImage(
+    preset === 'flaming-sphere' ? '/assets/vfx/flaming-sphere-sprite-v2.png' : undefined,
+  )
+  const persistentGreaseImage = useTokenBadgeImage(
+    preset === 'grease' ? '/assets/vfx/grease-sprite-v2.png' : undefined,
+  )
+  const persistentSpriteAsset = PERSISTENT_AREA_SPRITE_ASSETS[preset]
+  const persistentAreaImage = useTokenBadgeImage(persistentSpriteAsset)
   const visual = CORE_AREA_VISUALS[preset] ?? { icon: '✦', glow: area.color }
   const areaCellKeys = new Set(area.cells.map(cellKey))
   const triggerOnlyCells = [...new Map(
@@ -2178,13 +2570,41 @@ function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: 
   ).values()]
   const firstCell = area.anchorCell ?? area.cells[0]
   const iconPoint = firstCell ? cellTopLeft(firstCell, map) : { x: 0, y: 0 }
-  const intensity = area.visual?.intensity === 'strong' ? 1.18 : area.visual?.intensity === 'subtle' ? 0.72 : 1
+  const areaPixelBounds = area.cells.reduce((bounds, cell) => {
+    const point = cellTopLeft(cell, map)
+    return {
+      minX: Math.min(bounds.minX, point.x),
+      minY: Math.min(bounds.minY, point.y),
+      maxX: Math.max(bounds.maxX, point.x + grid),
+      maxY: Math.max(bounds.maxY, point.y + grid),
+    }
+  }, { minX: Number.POSITIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY, maxY: Number.NEGATIVE_INFINITY })
+  const intensity = areaVisual?.intensity === 'strong' ? 1.18 : areaVisual?.intensity === 'subtle' ? 0.72 : 1
+  const spritePlacement = persistentAreaImage
+    ? persistentAreaSpritePlacement(area, map, preset)
+    : undefined
+  const persistentSpriteOpacity = preset === 'daylight'
+    ? 0.5
+    : preset === 'darkness'
+      ? 0.76
+      : preset === 'call-lightning'
+        ? 0.68
+        : preset === 'spirit-guardians'
+          ? 0.9
+          : preset === 'insect-plague'
+            ? 0.76
+            : 0.82
+  const hasMaterialVisual = preset === 'grease' || preset === 'flaming-sphere' || !!persistentSpriteAsset
 
   useStatusAnimation(
     () => groupRef.current?.getLayer() ?? null,
     (frame) => {
       const seconds = (frame?.time ?? 0) / 1000
-      groupRef.current?.opacity((0.84 + Math.sin(seconds * 2.1) * 0.12) * intensity)
+      groupRef.current?.opacity(
+        preset === 'flaming-sphere'
+          ? 1
+          : (0.84 + Math.sin(seconds * 2.1) * 0.12) * intensity,
+      )
       boundaryRef.current?.getChildren().forEach((node) => {
         if (node instanceof Konva.Rect) node.dashOffset(-seconds * (preset === 'flaming-sphere' ? 18 : 10))
       })
@@ -2227,7 +2647,9 @@ function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: 
             height={grid}
             fill={area.color}
             opacity={
-              preset === 'spike-growth' || preset === 'entangle' || preset === 'black-tentacles'
+              hasMaterialVisual
+                ? 0.035
+                : preset === 'spike-growth' || preset === 'entangle' || preset === 'black-tentacles'
                 ? 0.22
                 : preset === 'wall-of-fire' ? 0.28 : 0.16
             }
@@ -2237,7 +2659,7 @@ function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: 
           />
         )
       })}
-      <Group ref={boundaryRef} listening={false}>
+      {!hasMaterialVisual && <Group ref={boundaryRef} listening={false}>
         {area.cells.map((cell) => {
           const { x, y } = cellTopLeft(cell, map)
           return (
@@ -2258,8 +2680,34 @@ function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: 
             />
           )
         })}
-      </Group>
-      {firstCell && (
+      </Group>}
+      {area.cells.length > 0 && preset === 'grease' && persistentGreaseImage ? (
+        <PersistentGreasePoolAtlas
+          image={persistentGreaseImage}
+          x={(areaPixelBounds.minX + areaPixelBounds.maxX) / 2}
+          y={(areaPixelBounds.minY + areaPixelBounds.maxY) / 2}
+          width={areaPixelBounds.maxX - areaPixelBounds.minX}
+          height={areaPixelBounds.maxY - areaPixelBounds.minY}
+          reducedMotion={reducedMotion}
+        />
+      ) : firstCell && preset === 'flaming-sphere' && persistentFlamingSphereImage ? (
+        <PersistentFlamingSphereAtlas
+          image={persistentFlamingSphereImage}
+          x={iconPoint.x + grid / 2}
+          y={iconPoint.y + grid / 2}
+          size={grid * 1.55}
+          reducedMotion={reducedMotion}
+        />
+      ) : persistentAreaImage && spritePlacement ? (
+        <PersistentAreaSpriteAtlas
+          image={persistentAreaImage}
+          {...spritePlacement}
+          opacity={persistentSpriteOpacity}
+          glow={visual.glow}
+          reducedMotion={reducedMotion}
+          preset={preset}
+        />
+      ) : firstCell && (
         <Text
           ref={iconRef}
           x={iconPoint.x}
@@ -2285,13 +2733,22 @@ function Dnd5ePluginAreaOverlays({
   map,
   isDM,
   onVisibilityToggle,
+  dragPreviewPositions,
+  registerEffectTokenAreaOverlay,
 }: {
   map: BattleMap
   isDM: boolean
   onVisibilityToggle?: (areaId: string) => void
+  dragPreviewPositions: Readonly<Record<string, Point>>
+  registerEffectTokenAreaOverlay?: (
+    areaId: string,
+    tokenId: string | undefined,
+    areaAnchorPosition: Point | undefined,
+    node: Konva.Group | null,
+  ) => void
 }) {
   return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
-    const preset = area.visual?.preset ?? ''
+    const preset = dnd5ePersistentAreaPresentationVisual(area)?.preset ?? ''
     const overlay = preset === 'toxic-cloud'
       ? <Dnd5eToxicCloudAreaOverlay area={area} map={map} />
       : CORE_AREA_VISUALS[preset]
@@ -2299,7 +2756,32 @@ function Dnd5ePluginAreaOverlays({
         : <Dnd5eStaticPluginAreaOverlay area={area} map={map} />
     const anchor = area.anchorCell ?? area.cells[0]
     const center = anchor ? tokenCenterForAnchorCell(anchor, { size: 1 } as Token, map) : undefined
-    return <Group key={area.id}>
+    const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
+      ? map.tokens.find((token) => token.id === area.anchorTokenId)
+      : undefined
+    const areaAnchorPosition = anchor
+      ? tokenCenterForAnchorCell(anchor, anchorToken ?? ({ size: 1 } as Token), map)
+      : undefined
+    const renderOffset = mapCanvasEffectTokenAreaRenderOffset({
+      anchorMode: area.anchorMode,
+      areaAnchorPosition,
+      anchorTokenPosition: anchorToken ? { x: anchorToken.x, y: anchorToken.y } : undefined,
+      dragPreviewPosition: area.anchorTokenId
+        ? dragPreviewPositions[area.anchorTokenId]
+        : undefined,
+    })
+    return <Group
+      key={area.id}
+      name={`dnd5e-plugin-area dnd5e-plugin-area-${preset || 'static'}`}
+      ref={(node) => registerEffectTokenAreaOverlay?.(
+        area.id,
+        area.anchorMode === 'effect-token' ? area.anchorTokenId : undefined,
+        areaAnchorPosition,
+        node,
+      )}
+      x={renderOffset.x}
+      y={renderOffset.y}
+    >
       {overlay}
       {isDM && area.coreSpellId === 'spike-growth' && center && onVisibilityToggle && <Group
         x={center.x}
@@ -2312,6 +2794,64 @@ function Dnd5ePluginAreaOverlays({
       </Group>}
     </Group>
   })}</>
+}
+
+function DifficultTerrainCellOverlays({
+  map,
+  cells,
+}: {
+  map: BattleMap
+  cells: ReturnType<typeof collectMapDifficultTerrainCells>
+}) {
+  const grid = Math.max(1, map.gridSize)
+  const badgeWidth = Math.max(20, Math.min(34, grid * 0.46))
+  const badgeHeight = Math.max(14, Math.min(22, grid * 0.3))
+  const inset = Math.max(2, Math.min(5, grid * 0.06))
+  const fontSize = Math.max(8, Math.min(13, grid * 0.18))
+  return (
+    <Group listening={false}>
+      {cells.map((cell) => {
+        const { x, y } = cellTopLeft(cell, map)
+        const formattedMultiplier = Number.isInteger(cell.multiplier)
+          ? String(cell.multiplier)
+          : cell.multiplier.toFixed(1).replace(/\.0$/, '')
+        return (
+          <Group key={`difficult-terrain:${cellKey(cell)}`} listening={false}>
+            <Rect
+              x={x + 1}
+              y={y + 1}
+              width={Math.max(0, grid - 2)}
+              height={Math.max(0, grid - 2)}
+              fill="rgba(245,158,11,0.07)"
+              stroke="rgba(251,191,36,0.48)"
+              strokeWidth={1}
+              dash={[Math.max(3, grid * 0.1), Math.max(2, grid * 0.07)]}
+            />
+            <Group x={x + grid - badgeWidth - inset} y={y + inset} listening={false}>
+              <Rect
+                width={badgeWidth}
+                height={badgeHeight}
+                cornerRadius={Math.min(6, badgeHeight * 0.32)}
+                fill="rgba(2,6,23,0.82)"
+                stroke="rgba(251,191,36,0.9)"
+                strokeWidth={1}
+              />
+              <Text
+                width={badgeWidth}
+                height={badgeHeight}
+                text={`×${formattedMultiplier}`}
+                align="center"
+                verticalAlign="middle"
+                fontSize={fontSize}
+                fontStyle="bold"
+                fill="#fef3c7"
+              />
+            </Group>
+          </Group>
+        )
+      })}
+    </Group>
+  )
 }
 
 function TerrainElevationContours({
@@ -2416,6 +2956,7 @@ export default function MapCanvas({
   chillTouchTokenIds = [],
   sanctuaryTokenIds = [],
   spellStatusTokenMarks = [],
+  concentrationTokenMarks = [],
   shillelaghTokenIds = [],
   defeatedTokenIds = [],
   savingThrowTokenId,
@@ -2511,6 +3052,12 @@ export default function MapCanvas({
   })
   const dragPreviewPositions = tokenDragVisualState.previews
   const tokenVisualNodesRef = useRef(new Map<string, Set<TokenVisualNodeLike>>())
+  const effectTokenAreaOverlayNodesRef = useRef(new Map<string, {
+    tokenId: string
+    areaAnchorPosition: Point
+    node: Konva.Group
+  }>())
+  const effectTokenDragPositionsRef = useRef<Record<string, Point>>({})
   const activeDraggingTokenIdsRef = useRef(new Set<string>())
   const [directMovePreviewTracker] = useState(createLatestTokenMovePreviewTracker)
   const [deleteDrag, setDeleteDrag] = useState<{ start: Point; current: Point } | null>(null)
@@ -2550,7 +3097,55 @@ export default function MapCanvas({
     // Thunderwave lasts only about one second. Warm this single lightweight
     // texture on every map client so a cold player cache cannot spend the
     // whole presentation window downloading and decoding it.
-    void preloadBrowserImage('/assets/vfx/thunderwave-fluid.webp')
+    void Promise.all([
+      preloadBrowserImage('/assets/vfx/thunderwave-fluid.webp'),
+      preloadBrowserImage('/assets/vfx/acid-splash-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/poison-spray-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/ray-of-frost-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/eldritch-blast-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/scorching-ray-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/guiding-bolt-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/acid-arrow-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/inflict-wounds-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/healing-word-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/cure-wounds-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/hellish-rebuke-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/shatter-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/lightning-bolt-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/sacred-flame-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/blight-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/flame-strike-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/sunburst-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/cone-of-cold-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/circle-of-death-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/ice-storm-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/freezing-sphere-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/color-spray-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/faerie-fire-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/sleep-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/entangle-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/grease-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/darkness-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/flaming-sphere-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/moonbeam-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/daylight-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/black-tentacles-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/spike-growth-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/mage-hand-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/spiritual-weapon-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/spirit-guardians-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/call-lightning-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/call-lightning-strike-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/insect-plague-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/wall-of-fire-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/blade-barrier-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/chain-lightning-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/disintegrate-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/finger-of-death-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/power-word-stun-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/power-word-kill-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/false-life-sprite-v2.png'),
+    ])
   }, [])
 
   // Measurement state in image coordinates: fixed segments plus pending/cursor points.
@@ -2612,6 +3207,39 @@ export default function MapCanvas({
     setTokenVisualNodesPositionLocked(nodes, locked)
   }, [])
 
+  const syncEffectTokenAreaOverlayPosition = useCallback((tokenId: string, x: number, y: number) => {
+    for (const entry of effectTokenAreaOverlayNodesRef.current.values()) {
+      if (entry.tokenId !== tokenId) continue
+      const offset = mapCanvasEffectTokenAreaRenderOffset({
+        anchorMode: 'effect-token',
+        areaAnchorPosition: entry.areaAnchorPosition,
+        dragPreviewPosition: { x, y },
+      })
+      entry.node.position(offset)
+      entry.node.getLayer()?.batchDraw()
+    }
+  }, [])
+
+  const registerEffectTokenAreaOverlay = useCallback((
+    areaId: string,
+    tokenId: string | undefined,
+    areaAnchorPosition: Point | undefined,
+    node: Konva.Group | null,
+  ) => {
+    if (!node || !tokenId || !areaAnchorPosition) {
+      effectTokenAreaOverlayNodesRef.current.delete(areaId)
+      return
+    }
+    effectTokenAreaOverlayNodesRef.current.set(areaId, { tokenId, areaAnchorPosition, node })
+    const dragPosition = effectTokenDragPositionsRef.current[tokenId]
+    if (!dragPosition) return
+    node.position(mapCanvasEffectTokenAreaRenderOffset({
+      anchorMode: 'effect-token',
+      areaAnchorPosition,
+      dragPreviewPosition: dragPosition,
+    }))
+  }, [])
+
   const displayToken = (token: Token): Token => {
     const preview = dragPreviewPositions[token.id]
     const suppressMovementAnimation = !!token.movementAnimation && (
@@ -2646,6 +3274,10 @@ export default function MapCanvas({
 
   const previewTokenDrag = (token: Token, x: number, y: number) => {
     syncTokenVisualPosition(token.id, x, y)
+    if (token.dnd5eSpellEffect) {
+      effectTokenDragPositionsRef.current[token.id] = { x, y }
+      syncEffectTokenAreaOverlayPosition(token.id, x, y)
+    }
     setTokenDragVisualState((current) => ({
       ...current,
       previews: {
@@ -2665,9 +3297,17 @@ export default function MapCanvas({
     // Keep body, name and vitals in one imperative frame without re-rendering
     // the entire map for every pointer event.
     syncTokenVisualPosition(token.id, x, y)
+    if (token.dnd5eSpellEffect) {
+      // The animated sphere is a detached persistent-area overlay. Move that
+      // Konva group imperatively too, avoiding a full canvas React render for
+      // every pointer event.
+      effectTokenDragPositionsRef.current[token.id] = { x, y }
+      syncEffectTokenAreaOverlayPosition(token.id, x, y)
+    }
   }
 
   const releaseTokenDragPreview = (tokenId: string) => {
+    delete effectTokenDragPositionsRef.current[tokenId]
     setTokenVisualPositionLocked(tokenId, false)
     setTokenDragVisualState((current) => {
       if (!current.previews[tokenId]) return current
@@ -2681,6 +3321,7 @@ export default function MapCanvas({
     const authoritative = map.tokens.find((token) => token.id === tokenId)
     if (authoritative) {
       syncTokenVisualPosition(tokenId, authoritative.x, authoritative.y)
+      syncEffectTokenAreaOverlayPosition(tokenId, authoritative.x, authoritative.y)
     }
     releaseTokenDragPreview(tokenId)
   }
@@ -3065,15 +3706,16 @@ export default function MapCanvas({
   const geometryEntityFromDrag = (start: Point, current: Point): MapGeometryEntity | null => {
     const drag = geometryDragStartRef.current
     if (!drag || geometryTool === 'select' || geometryTool === 'delete') return null
+    const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const common = {
       id: drag.id,
-      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : geometryTool === 'elevation' ? '高地区域' : '区域地形',
+      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : geometryTool === 'elevation' ? '高地区域' : geometryTool === 'difficult-terrain' ? '困难地形' : '区域地形',
       createdAt: drag.createdAt,
       baseHeightFeet: 0,
-      heightFeet: geometryTool === 'elevation' ? 0 : geometryTool === 'obstacle' ? 5 : 10,
-      blocksVision: geometryTool !== 'obstacle' && geometryTool !== 'elevation',
-      blocksMovement: geometryTool !== 'elevation',
-      blocksLineOfEffect: geometryTool !== 'obstacle' && geometryTool !== 'elevation',
+      heightFeet: gridPaintTool ? 0 : geometryTool === 'obstacle' ? 5 : 10,
+      blocksVision: geometryTool !== 'obstacle' && !gridPaintTool,
+      blocksMovement: !gridPaintTool,
+      blocksLineOfEffect: geometryTool !== 'obstacle' && !gridPaintTool,
     }
     if (geometryTool === 'wall') return { ...common, kind: 'wall', material: geometryWallMaterial, points: [start, current] }
     if (geometryTool === 'door' || geometryTool === 'window') {
@@ -3140,6 +3782,18 @@ export default function MapCanvas({
         cover: 'none',
         terrainElevationFeet: 10,
         terrainRegion: true,
+        points: drag.points,
+      }
+    }
+    if (geometryTool === 'difficult-terrain') {
+      return {
+        ...common,
+        kind: 'obstacle',
+        cover: 'none',
+        terrainCostMultiplier: 2,
+        // This is a surface overlay, not a new elevation region. Pathfinding
+        // binds it to the terrain surface independently in every covered cell.
+        traversal: 'ground',
         points: drag.points,
       }
     }
@@ -3217,8 +3871,9 @@ export default function MapCanvas({
     }
     const rawPoint = relativePoint(stage)
     if (geometryTool === 'elevation' && geometryTerrainEditingLocked) return true
+    const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const point = rawPoint
-      ? geometryTool === 'door' || geometryTool === 'window' || geometryTool === 'elevation' ? rawPoint : snapGeometryPoint(rawPoint)
+      ? geometryTool === 'door' || geometryTool === 'window' || gridPaintTool ? rawPoint : snapGeometryPoint(rawPoint)
       : null
     if (!point) return true
     const openingAttachedToWall = geometryTool === 'door' || geometryTool === 'window'
@@ -3237,13 +3892,13 @@ export default function MapCanvas({
     stage?.stopDrag()
     stage?.draggable(false)
     setGeometryDragActive(true)
-    const elevationCell = geometryTool === 'elevation' ? geometryGridCellAtPoint(point) : null
-    if (geometryTool === 'elevation' && !elevationCell) {
+    const gridCell = gridPaintTool ? geometryGridCellAtPoint(point) : null
+    if (gridPaintTool && !gridCell) {
       setGeometryDragActive(false)
       return true
     }
-    const gridCells = elevationCell
-      ? new Map([[`${elevationCell.col},${elevationCell.row}`, elevationCell]])
+    const gridCells = gridCell
+      ? new Map([[`${gridCell.col},${gridCell.row}`, gridCell]])
       : undefined
     geometryDragStartRef.current = {
       point,
@@ -3251,7 +3906,7 @@ export default function MapCanvas({
       id: `geometry:${Date.now()}:${Math.random().toString(36).slice(2, 9)}`,
       createdAt: Date.now(),
       gridCells,
-      lastGridCell: elevationCell ?? undefined,
+      lastGridCell: gridCell ?? undefined,
     }
     setGeometryDraft(geometryEntityFromDrag(point, point))
     return true
@@ -3261,10 +3916,11 @@ export default function MapCanvas({
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
     const rawPoint = relativePoint(stage)
+    const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const point = rawPoint
-      ? geometryTool === 'door' || geometryTool === 'window' || geometryTool === 'elevation' ? rawPoint : snapGeometryPoint(rawPoint)
+      ? geometryTool === 'door' || geometryTool === 'window' || gridPaintTool ? rawPoint : snapGeometryPoint(rawPoint)
       : null
-    if (point && geometryTool === 'elevation') {
+    if (point && gridPaintTool) {
       const cell = geometryGridCellAtPoint(point)
       if (cell && drag.gridCells && drag.lastGridCell) {
         addGeometryGridPath(drag.gridCells, drag.lastGridCell, cell)
@@ -3287,14 +3943,17 @@ export default function MapCanvas({
     if (geometryTool === 'door' || geometryTool === 'window') stage?.draggable(true)
     setGeometryDraft(null)
     if (!draft) return true
-    const terrainRegionArea = draft.kind === 'obstacle' && draft.terrainRegion
+    const gridRegion = draft.kind === 'obstacle' && (
+      draft.terrainRegion || (draft.terrainCostMultiplier ?? 1) > 1
+    )
+    const terrainRegionArea = gridRegion
       ? Math.abs(draft.points.reduce((area, point, index) => {
           const next = draft.points[(index + 1) % draft.points.length]
           return area + point.x * next.y - next.x * point.y
         }, 0)) / 2
       : 0
     const valid = draft.kind === 'light' || (draft.kind === 'obstacle'
-      ? draft.terrainRegion
+      ? gridRegion
         ? draft.points.length >= 3 && terrainRegionArea >= Math.max(16, map.gridSize ** 2 * 0.04)
         : Math.abs(draft.points[1].x - draft.points[0].x) >= 4 && Math.abs(draft.points[2].y - draft.points[1].y) >= 4
       : Math.hypot(draft.points[1].x - draft.points[0].x, draft.points[1].y - draft.points[0].y) >= 4)
@@ -3624,6 +4283,10 @@ export default function MapCanvas({
       )
     : 0
   const geometryOverlayVisible = isDM || (!isDM && !!onGeometryDoorInteract)
+  const difficultTerrainCells = useMemo(
+    () => collectMapDifficultTerrainCells({ map, geometry }),
+    [geometry, map],
+  )
   const geometryStructureCount = geometryOverlayVisible
     ? (geometry?.walls.length ?? 0) +
       (geometry?.doors.length ?? 0) +
@@ -3711,6 +4374,10 @@ export default function MapCanvas({
         .map((mark) =>
           `${mark.statusId}:${mark.backgroundHighlightColor}:${mark.backgroundColor}`)
         .join(',')}
+      data-concentration-token-count={concentrationTokenMarks.length}
+      data-concentration-token-spells={concentrationTokenMarks
+        .map((mark) => `${mark.tokenId}:${mark.spellId}`)
+        .join(',')}
       data-standard-condition-token-colors={standardConditionTokenMarks
         .map((mark) =>
           `${mark.condition}:${mark.backgroundColor}:${mark.borderColor}`)
@@ -3722,6 +4389,7 @@ export default function MapCanvas({
       data-viewport-scale={view.scale}
       data-geometry-tool={geometryEditMode ? geometryTool : 'off'}
       data-geometry-overlay-visible={geometryOverlayVisible ? 'true' : 'false'}
+      data-difficult-terrain-cell-count={difficultTerrainCells.length}
       data-dm-geometry-wall-count={isDM ? geometry?.walls.length ?? 0 : 0}
       data-geometry-structure-count={geometryStructureCount}
       data-stage-can-pan={stageCanPan ? 'true' : 'false'}
@@ -4009,7 +4677,14 @@ export default function MapCanvas({
           {coordinateLabels}
           <TerrainElevationContours geometry={geometry} inv={inv} />
           <Dnd5eItemAreaOverlays map={map} />
-          <Dnd5ePluginAreaOverlays map={map} isDM={isDM} onVisibilityToggle={onDnd5ePluginAreaVisibilityToggle} />
+          <Dnd5ePluginAreaOverlays
+            map={map}
+            isDM={isDM}
+            onVisibilityToggle={onDnd5ePluginAreaVisibilityToggle}
+            dragPreviewPositions={dragPreviewPositions}
+            registerEffectTokenAreaOverlay={registerEffectTokenAreaOverlay}
+          />
+          <DifficultTerrainCellOverlays map={map} cells={difficultTerrainCells} />
           {isDM && sceneTriggerZones.map((zone) =>
             sceneRegionNode(zone.region, `scene-zone:${zone.sceneId}:${zone.triggerId}`, zone.name, zone.enabled))}
           {isDM && sceneEditMode && sceneDraft && sceneRegionNode(sceneDraft, 'scene-zone:draft', '绘制触发区', true, true)}
@@ -4173,6 +4848,7 @@ export default function MapCanvas({
               }
               hoverLabel={hoveredTokenId === t.id ? tokenHoverLabels[t.id] : undefined}
               showName={hoveredTokenId === t.id}
+              concentrationMark={concentrationTokenMarks.find((mark) => mark.tokenId === t.id)}
               onHoverChange={(hovered) =>
                 // Use functional updates to avoid hover flicker races.
                 setHoveredTokenId((id) => (hovered ? t.id : id === t.id ? null : id))
@@ -4305,6 +4981,7 @@ export default function MapCanvas({
                 }
                 hoverLabel={hoveredTokenId === t.id ? tokenHoverLabels[t.id] : undefined}
                 showName={hoveredTokenId === t.id}
+                concentrationMark={concentrationTokenMarks.find((mark) => mark.tokenId === t.id)}
                 onHoverChange={() => undefined}
                 onSelect={() => {
                   if (deleteSelectMode) return
@@ -4341,6 +5018,7 @@ export default function MapCanvas({
                 standardConditionMarks={standardConditionTokenMarks.filter((mark) => mark.tokenId === t.id)}
                 shillelaghActive={shillelaghTokenIds.includes(t.id)}
                 spellStatusMarks={spellStatusTokenMarks.filter((mark) => mark.tokenId === t.id)}
+                concentrationMark={concentrationTokenMarks.find((mark) => mark.tokenId === t.id)}
                 airborne={mapGeometryTokenElevation(geometry, t) >
                   mapGeometryTerrainElevationAtPoint(geometry, t)}
                 onStandardConditionClick={(condition) => onDnd5eConditionClick?.(t.id, condition)}
@@ -4795,11 +5473,12 @@ function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile }) {
 function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
   const trailRef = useRef<Konva.Group>(null)
+  const spriteRef = useRef<Konva.Image>(null)
   const frontRef = useRef<Konva.Group>(null)
   const impactRef = useRef<Konva.Group>(null)
   const impactRingRef = useRef<Konva.Circle>(null)
   const dropletRefs = useRef<Array<Konva.Circle | null>>([])
-  const fluidImage = useTokenBadgeImage('/assets/vfx/acid-splash-fluid.png')
+  const fluidImage = useTokenBadgeImage('/assets/vfx/acid-splash-sprite-v2.png')
   const glow = projectile.glowColor ?? '#bef264'
   const accent = projectile.accentColor ?? '#84cc16'
   const distance = Math.max(
@@ -4810,6 +5489,8 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
   const fluidHeight = Math.min(160, Math.max(82, distance * 0.36))
   const fluidX = -distance * 0.055
   const impactSize = Math.min(132, Math.max(72, fluidHeight * 0.92))
+  const frameWidth = fluidImage ? (fluidImage.naturalWidth || fluidImage.width) / 4 : 1
+  const frameHeight = fluidImage ? (fluidImage.naturalHeight || fluidImage.height) / 4 : 1
 
   useEffect(() => {
     const effect = effectRef.current
@@ -4817,8 +5498,9 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
     const front = frontRef.current
     const impact = impactRef.current
     const impactRing = impactRingRef.current
+    const sprite = spriteRef.current
     const layer = effect?.getLayer()
-    if (!effect || !trail || !front || !impact || !impactRing || !fluidImage || !layer) return
+    if (!effect || !trail || !front || !impact || !impactRing || !sprite || !fluidImage || !layer) return
     const duration = Math.max(1, projectile.durationMs ?? 1_050)
     const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
     const dx = projectile.to.x - projectile.from.x
@@ -4834,12 +5516,21 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
       const impactRaw = Math.max(0, Math.min(1, (raw - 0.48) / 0.24))
       const fade = raw < 0.82 ? 1 : Math.max(0, (1 - raw) / 0.18)
       const pulse = Math.sin(elapsed * 0.021)
+      const spriteRaw = Math.min(1, raw / 0.9)
+      const frameIndex = Math.min(15, Math.floor(spriteRaw * 16))
+      sprite.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
 
-      trail.clipWidth(Math.max(fluidHeight * 0.14, frontX + fluidHeight * 0.22))
+      trail.clipWidth(fluidWidth)
       trail.opacity(Math.min(1, raw / 0.075) * fade * 0.9)
       trail.scaleY(0.94 + pulse * 0.065)
       trail.y(Math.sin(elapsed * 0.013) * fluidHeight * 0.035)
 
+      front.visible(false)
       front.x(frontX)
       front.y(Math.sin(elapsed * 0.016) * fluidHeight * 0.075)
       front.scale({
@@ -4879,7 +5570,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
     return () => {
       animation.stop()
     }
-  }, [distance, fluidHeight, fluidImage, fluidWidth, impactSize, projectile])
+  }, [distance, fluidHeight, fluidImage, fluidWidth, frameHeight, frameWidth, impactSize, projectile])
 
   return (
     <Group ref={effectRef} x={projectile.from.x} y={projectile.from.y} listening={false}>
@@ -4893,7 +5584,9 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
       >
         {fluidImage && (
           <KonvaImage
+            ref={spriteRef}
             image={fluidImage}
+            crop={{ x: 0, y: 0, width: frameWidth, height: frameHeight }}
             x={fluidX}
             y={-fluidHeight / 2}
             width={fluidWidth}
@@ -4905,7 +5598,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
         )}
       </Group>
       {fluidImage ? (
-        <Group ref={frontRef} listening={false}>
+        <Group ref={frontRef} visible={false} listening={false}>
           <KonvaImage
             image={fluidImage}
             crop={{ x: 760, y: 80, width: 760, height: 870 }}
@@ -4936,7 +5629,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
         {fluidImage ? (
           <KonvaImage
             image={fluidImage}
-            crop={{ x: 690, y: 20, width: 830, height: 970 }}
+            crop={{ x: frameWidth * 3, y: frameHeight * 2, width: frameWidth, height: frameHeight }}
             x={-impactSize * 0.64}
             y={-impactSize * 0.57}
             width={impactSize * 1.22}
@@ -4975,7 +5668,8 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
 function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
   const fluidRef = useRef<Konva.Group>(null)
-  const fluidImage = useTokenBadgeImage('/assets/vfx/poison-spray-fluid.png')
+  const spriteRef = useRef<Konva.Image>(null)
+  const fluidImage = useTokenBadgeImage('/assets/vfx/poison-spray-sprite-v2.png')
   const glow = projectile.glowColor ?? '#86efac'
   const distance = Math.max(
     1,
@@ -4984,12 +5678,15 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
   const fluidWidth = distance * 1.15
   const fluidHeight = Math.min(190, Math.max(104, distance * 0.5))
   const fluidX = -distance * 0.06
+  const frameWidth = fluidImage ? (fluidImage.naturalWidth || fluidImage.width) / 4 : 1
+  const frameHeight = fluidImage ? (fluidImage.naturalHeight || fluidImage.height) / 4 : 1
 
   useEffect(() => {
     const effect = effectRef.current
     const fluid = fluidRef.current
+    const sprite = spriteRef.current
     const layer = effect?.getLayer()
-    if (!effect || !fluid || !fluidImage || !layer) return
+    if (!effect || !fluid || !sprite || !fluidImage || !layer) return
     const duration = Math.max(1, projectile.durationMs ?? 1_150)
     const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
     const dx = projectile.to.x - projectile.from.x
@@ -4999,10 +5696,16 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
     const animation = new Konva.Animation((frame) => {
       const elapsed = initialElapsed + (frame?.time ?? 0)
       const raw = Math.min(1, elapsed / duration)
-      const revealRaw = Math.min(1, raw / 0.66)
-      const reveal = 1 - Math.pow(1 - revealRaw, 2)
       const fade = raw < 0.8 ? 1 : Math.max(0, (1 - raw) / 0.2)
-      fluid.clipWidth(fluidWidth * reveal)
+      const spriteRaw = Math.min(1, raw / 0.9)
+      const frameIndex = Math.min(15, Math.floor(spriteRaw * 16))
+      sprite.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      fluid.clipWidth(fluidWidth)
       fluid.opacity(Math.min(1, raw / 0.1) * fade)
       fluid.scaleY(0.94 + Math.sin(elapsed * 0.009) * 0.075)
       fluid.x(Math.sin(elapsed * 0.006) * 2.5)
@@ -5013,7 +5716,7 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
     return () => {
       animation.stop()
     }
-  }, [fluidImage, fluidWidth, projectile])
+  }, [fluidImage, fluidWidth, frameHeight, frameWidth, projectile])
 
   return (
     <Group ref={effectRef} x={projectile.from.x} y={projectile.from.y} listening={false}>
@@ -5026,7 +5729,9 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
       >
         {fluidImage && (
           <KonvaImage
+            ref={spriteRef}
             image={fluidImage}
+            crop={{ x: 0, y: 0, width: frameWidth, height: frameHeight }}
             x={fluidX}
             y={-fluidHeight / 2}
             width={fluidWidth}
@@ -5440,18 +6145,50 @@ function CombatProjectileEffect({
                                 : projectile.kind === 'magic-missile'
                                   ? <MagicMissileProjectile projectile={projectile} />
                                   : projectile.kind === 'scorching-ray' ||
-                                    projectile.kind === 'guiding-bolt' ||
-                                    projectile.kind === 'acid-arrow' ||
-                                    projectile.kind === 'healing-word' ||
+                                     projectile.kind === 'guiding-bolt' ||
+                                     projectile.kind === 'acid-arrow' ||
+                                     projectile.kind === 'chain-lightning' ||
+                                     projectile.kind === 'disintegrate' ||
+                                     projectile.kind === 'healing-word' ||
                                     projectile.kind === 'inflict-wounds'
                                   ? <MaterialSpellProjectile projectile={projectile} />
-                                  : projectile.kind === 'cure-wounds' ||
-                                      projectile.kind === 'hellish-rebuke'
+                                    : projectile.kind === 'cure-wounds' ||
+                                      projectile.kind === 'hellish-rebuke' ||
+                                      projectile.kind === 'blight' ||
+                                      projectile.kind === 'finger-of-death' ||
+                                      projectile.kind === 'power-word-stun' ||
+                                      projectile.kind === 'power-word-kill' ||
+                                      projectile.kind === 'false-life'
                                     ? <MaterialTargetSpellEffect projectile={projectile} />
                                     : projectile.kind === 'burning-hands' ||
                                         projectile.kind === 'thunderwave' ||
                                         projectile.kind === 'shatter' ||
-                                        projectile.kind === 'lightning-bolt'
+                                        projectile.kind === 'lightning-bolt' ||
+                                        projectile.kind === 'flame-strike' ||
+                                        projectile.kind === 'sunburst'
+                                        || projectile.kind === 'cone-of-cold'
+                                        || projectile.kind === 'circle-of-death'
+                                        || projectile.kind === 'ice-storm'
+                                        || projectile.kind === 'freezing-sphere'
+                                        || projectile.kind === 'color-spray'
+                                        || projectile.kind === 'faerie-fire'
+                                        || projectile.kind === 'sleep'
+                                        || projectile.kind === 'entangle'
+                                        || projectile.kind === 'grease'
+                                        || projectile.kind === 'darkness'
+                                        || projectile.kind === 'flaming-sphere'
+                                        || projectile.kind === 'moonbeam'
+                                        || projectile.kind === 'daylight'
+                                        || projectile.kind === 'black-tentacles'
+                                        || projectile.kind === 'spike-growth'
+                                        || projectile.kind === 'mage-hand'
+                                        || projectile.kind === 'spiritual-weapon'
+                                        || projectile.kind === 'spirit-guardians'
+                                        || projectile.kind === 'call-lightning'
+                                        || projectile.kind === 'call-lightning-strike'
+                                        || projectile.kind === 'insect-plague'
+                                        || projectile.kind === 'wall-of-fire'
+                                        || projectile.kind === 'blade-barrier'
                                       ? <MaterialAreaSpellEffect
                                           projectile={projectile}
                                         />
@@ -5549,6 +6286,134 @@ function DirectionalTextureEffect({
           perfectDrawEnabled={false}
         />
       </Group>
+    </Group>
+  )
+}
+
+function DirectionalSpriteAtlasEffect({
+  projectile,
+  image,
+  heightRatio,
+  minHeight,
+  maxHeight,
+  shadowColor,
+  particleColor,
+  particleHighlight,
+}: {
+  projectile: MapProjectile
+  image: HTMLImageElement
+  heightRatio: number
+  minHeight: number
+  maxHeight: number
+  shadowColor: string
+  particleColor: string
+  particleHighlight: string
+}) {
+  const effectRef = useRef<Konva.Group>(null)
+  const spriteRef = useRef<Konva.Image>(null)
+  const particleRefs = useRef<Array<Konva.Circle | null>>([])
+  const dx = projectile.to.x - projectile.from.x
+  const dy = projectile.to.y - projectile.from.y
+  const distance = Math.max(1, Math.hypot(dx, dy))
+  const width = distance * 1.14
+  const height = Math.min(maxHeight, Math.max(minHeight, distance * heightRatio))
+  const imageX = -distance * 0.055
+  const frameWidth = (image.naturalWidth || image.width) / 4
+  const frameHeight = (image.naturalHeight || image.height) / 4
+  const particles = useMemo(() => Array.from({ length: 10 }, (_, index) => {
+    const random = (field: string) => nextAreaRandom(
+      areaSeed(`${projectile.id}:directional-sprite:${index}:${field}`),
+    )[1]
+    return {
+      angle: random('angle') * Math.PI * 2,
+      distance: height * (0.16 + random('distance') * 0.42),
+      radius: Math.max(1.1, height * (0.014 + random('radius') * 0.014)),
+      delay: random('delay') * 0.16,
+    }
+  }), [height, projectile.id])
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const sprite = spriteRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !sprite || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_000)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    effect.rotation(Math.atan2(dy, dx) * 180 / Math.PI)
+    const drawFrame = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      const spriteRaw = Math.min(1, raw / 0.9)
+      const frameIndex = Math.min(15, Math.floor(spriteRaw * 16))
+      const fade = raw < 0.82 ? 1 : Math.max(0, (1 - raw) / 0.18)
+      sprite.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      sprite.opacity(Math.min(1, raw / 0.055) * fade)
+      sprite.scaleY(0.985 + Math.sin(elapsed * 0.025) * 0.025)
+      particleRefs.current.forEach((particle, index) => {
+        if (!particle) return
+        const spec = particles[index]
+        const local = Math.max(0, Math.min(1, (raw - 0.42 - spec.delay) / 0.46))
+        const spread = spec.distance * (0.25 + local)
+        particle.position({
+          x: imageX + width * (0.91 + local * 0.08) + Math.cos(spec.angle) * spread,
+          y: Math.sin(spec.angle) * spread,
+        })
+        particle.radius(spec.radius * (1 - local * 0.38))
+        particle.opacity(Math.sin(local * Math.PI) * 0.86 * fade)
+      })
+      return raw
+    }
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    const animation = new Konva.Animation((frame) => {
+      if (drawFrame(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [
+    dx,
+    dy,
+    frameHeight,
+    frameWidth,
+    imageX,
+    particles,
+    projectile.durationMs,
+    projectile.issuedAt,
+    width,
+  ])
+
+  return (
+    <Group ref={effectRef} x={projectile.from.x} y={projectile.from.y} listening={false}>
+      <KonvaImage
+        ref={spriteRef}
+        image={image}
+        crop={{ x: 0, y: 0, width: frameWidth, height: frameHeight }}
+        x={imageX}
+        y={-height / 2}
+        width={width}
+        height={height}
+        shadowColor={shadowColor}
+        shadowBlur={24}
+        perfectDrawEnabled={false}
+      />
+      {particles.map((particle, index) => (
+        <Circle
+          key={`directional-sprite-particle:${index}`}
+          ref={(node) => { particleRefs.current[index] = node }}
+          radius={particle.radius}
+          fill={index % 3 === 0 ? particleHighlight : particleColor}
+          shadowColor={shadowColor}
+          shadowBlur={8}
+          opacity={0}
+          perfectDrawEnabled={false}
+        />
+      ))}
     </Group>
   )
 }
@@ -5976,57 +6841,123 @@ function MagicMissileProjectile({ projectile }: { projectile: MapProjectile }) {
 }
 
 function MaterialSpellProjectile({ projectile }: { projectile: MapProjectile }) {
-  const config = projectile.kind === 'scorching-ray'
+  const config: {
+    asset: string
+    heightRatio: number
+    minHeight: number
+    maxHeight: number
+    revealEnd: number
+    fadeStart: number
+    shadowColor: string
+    sprite?: boolean
+    particleColor?: string
+    particleHighlight?: string
+  } = projectile.kind === 'scorching-ray'
       ? {
-          asset: '/assets/vfx/scorching-ray-fluid.png',
+          asset: '/assets/vfx/scorching-ray-sprite-v2.png',
           heightRatio: 0.3,
           minHeight: 70,
           maxHeight: 132,
           revealEnd: 0.4,
           fadeStart: 0.7,
           shadowColor: '#f97316',
+          sprite: true,
+          particleColor: '#fb923c',
+          particleHighlight: '#fff7c2',
         }
       : projectile.kind === 'guiding-bolt'
         ? {
-            asset: '/assets/vfx/guiding-bolt-fluid.png',
+            asset: '/assets/vfx/guiding-bolt-sprite-v2.png',
             heightRatio: 0.31,
             minHeight: 72,
             maxHeight: 136,
             revealEnd: 0.44,
             fadeStart: 0.72,
             shadowColor: '#facc15',
+            sprite: true,
+            particleColor: '#fde68a',
+            particleHighlight: '#ffffff',
           }
         : projectile.kind === 'healing-word'
           ? {
-              asset: '/assets/vfx/healing-word-fluid.png',
+              asset: '/assets/vfx/healing-word-sprite-v2.png',
               heightRatio: 0.26,
               minHeight: 62,
               maxHeight: 116,
               revealEnd: 0.46,
               fadeStart: 0.72,
               shadowColor: '#fde68a',
+              sprite: true,
+              particleColor: '#86efac',
+              particleHighlight: '#fef3c7',
             }
           : projectile.kind === 'inflict-wounds'
             ? {
-                asset: '/assets/vfx/inflict-wounds-fluid.png',
+                asset: '/assets/vfx/inflict-wounds-sprite-v2.png',
                 heightRatio: 0.34,
                 minHeight: 76,
                 maxHeight: 144,
                 revealEnd: 0.42,
                 fadeStart: 0.7,
                 shadowColor: '#7c3aed',
+                sprite: true,
+                particleColor: '#6d28d9',
+                particleHighlight: '#c4b5fd',
               }
-        : {
-            asset: '/assets/vfx/acid-arrow-fluid.png',
+            : projectile.kind === 'chain-lightning'
+              ? {
+                  asset: '/assets/vfx/chain-lightning-sprite-v2.png',
+                  heightRatio: 0.28,
+                  minHeight: 68,
+                  maxHeight: 126,
+                  revealEnd: 0.38,
+                  fadeStart: 0.72,
+                  shadowColor: '#38bdf8',
+                  sprite: true,
+                  particleColor: '#60a5fa',
+                  particleHighlight: '#ffffff',
+                }
+              : projectile.kind === 'disintegrate'
+                ? {
+                    asset: '/assets/vfx/disintegrate-sprite-v2.png',
+                    heightRatio: 0.31,
+                    minHeight: 72,
+                    maxHeight: 138,
+                    revealEnd: 0.4,
+                    fadeStart: 0.72,
+                    shadowColor: '#4ade80',
+                    sprite: true,
+                    particleColor: '#22c55e',
+                    particleHighlight: '#ecfccb',
+                  }
+                : {
+            asset: '/assets/vfx/acid-arrow-sprite-v2.png',
             heightRatio: 0.3,
             minHeight: 70,
             maxHeight: 134,
             revealEnd: 0.45,
             fadeStart: 0.7,
             shadowColor: '#84cc16',
-          }
+            sprite: true,
+            particleColor: '#a3e635',
+            particleHighlight: '#f7fee7',
+                  }
   const image = useTokenBadgeImage(config.asset)
   if (!image) return null
+  if (config.sprite) {
+    return (
+      <DirectionalSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        heightRatio={config.heightRatio}
+        minHeight={config.minHeight}
+        maxHeight={config.maxHeight}
+        shadowColor={config.shadowColor}
+        particleColor={config.particleColor ?? config.shadowColor}
+        particleHighlight={config.particleHighlight ?? '#ffffff'}
+      />
+    )
+  }
   return (
     <DirectionalTextureEffect
       projectile={projectile}
@@ -6198,22 +7129,206 @@ function TargetTextureManifestation({
   )
 }
 
+function TargetSpriteAtlasEffect({
+  projectile,
+  image,
+  diameter,
+  width = diameter,
+  height = diameter,
+  rotation = 0,
+  shadowColor,
+  particleColor,
+  particleHighlight,
+}: {
+  projectile: MapProjectile
+  image: HTMLImageElement
+  diameter: number
+  width?: number
+  height?: number
+  rotation?: number
+  shadowColor: string
+  particleColor: string
+  particleHighlight: string
+}) {
+  const effectRef = useRef<Konva.Group>(null)
+  const spriteRef = useRef<Konva.Image>(null)
+  const particleRefs = useRef<Array<Konva.Circle | null>>([])
+  const holdMatureFrame = projectile.kind === 'flaming-sphere'
+  const frameWidth = (image.naturalWidth || image.width) / 4
+  const frameHeight = (image.naturalHeight || image.height) / 4
+  const particles = useMemo(() => Array.from({ length: 10 }, (_, index) => {
+    const random = (field: string) => nextAreaRandom(
+      areaSeed(`${projectile.id}:target-sprite:${index}:${field}`),
+    )[1]
+    return {
+      angle: random('angle') * Math.PI * 2,
+      distance: diameter * (0.18 + random('distance') * 0.3),
+      radius: Math.max(1.1, diameter * (0.008 + random('radius') * 0.008)),
+      delay: random('delay') * 0.15,
+    }
+  }), [diameter, projectile.id])
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const sprite = spriteRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !sprite || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_000)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const drawFrame = (elapsed: number) => {
+      const playback = targetSpriteAtlasPlaybackState({
+        elapsedMs: elapsed,
+        durationMs: duration,
+        holdMatureFrame,
+      })
+      const { raw, frameIndex, fade, spriteOpacity } = playback
+      sprite.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      sprite.opacity(spriteOpacity)
+      sprite.scale({
+        x: 0.98 + Math.sin(elapsed * 0.022) * 0.025,
+        y: 0.98 + Math.cos(elapsed * 0.019) * 0.025,
+      })
+      particleRefs.current.forEach((particle, index) => {
+        if (!particle) return
+        const spec = particles[index]
+        const local = Math.max(0, Math.min(1, (raw - 0.46 - spec.delay) / 0.42))
+        const spread = spec.distance * (0.32 + local)
+        particle.position({
+          x: Math.cos(spec.angle) * spread,
+          y: Math.sin(spec.angle) * spread - diameter * local * 0.08,
+        })
+        particle.radius(spec.radius * (1 - local * 0.35))
+        particle.opacity(Math.sin(local * Math.PI) * 0.82 * fade)
+      })
+      effect.opacity(fade)
+      return raw
+    }
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    const animation = new Konva.Animation((frame) => {
+      if (drawFrame(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [diameter, frameHeight, frameWidth, holdMatureFrame, particles, projectile.durationMs, projectile.issuedAt])
+
+  return (
+    <Group ref={effectRef} x={projectile.to.x} y={projectile.to.y} rotation={rotation} listening={false}>
+      <KonvaImage
+        ref={spriteRef}
+        image={image}
+        crop={{ x: 0, y: 0, width: frameWidth, height: frameHeight }}
+        x={-width / 2}
+        y={-height / 2}
+        width={width}
+        height={height}
+        shadowColor={shadowColor}
+        shadowBlur={24}
+        perfectDrawEnabled={false}
+      />
+      {particles.map((particle, index) => (
+        <Circle
+          key={`target-sprite-particle:${index}`}
+          ref={(node) => { particleRefs.current[index] = node }}
+          radius={particle.radius}
+          fill={index % 3 === 0 ? particleHighlight : particleColor}
+          shadowColor={shadowColor}
+          shadowBlur={8}
+          opacity={0}
+          perfectDrawEnabled={false}
+        />
+      ))}
+    </Group>
+  )
+}
+
 function MaterialTargetSpellEffect({ projectile }: { projectile: MapProjectile }) {
   const isCureWounds = projectile.kind === 'cure-wounds'
-  const image = useTokenBadgeImage(isCureWounds
-    ? '/assets/vfx/cure-wounds-fluid.png'
-    : '/assets/vfx/hellish-rebuke-fluid.png')
+  const isBlight = projectile.kind === 'blight'
+  const isFingerOfDeath = projectile.kind === 'finger-of-death'
+  const isPowerWordStun = projectile.kind === 'power-word-stun'
+  const isPowerWordKill = projectile.kind === 'power-word-kill'
+  const isFalseLife = projectile.kind === 'false-life'
+  const image = useTokenBadgeImage(
+    isCureWounds
+      ? '/assets/vfx/cure-wounds-sprite-v2.png'
+      : isBlight
+        ? '/assets/vfx/blight-sprite-v2.png'
+        : isFingerOfDeath
+          ? '/assets/vfx/finger-of-death-sprite-v2.png'
+          : isPowerWordStun
+            ? '/assets/vfx/power-word-stun-sprite-v2.png'
+            : isPowerWordKill
+              ? '/assets/vfx/power-word-kill-sprite-v2.png'
+              : isFalseLife
+                ? '/assets/vfx/false-life-sprite-v2.png'
+                : '/assets/vfx/hellish-rebuke-sprite-v2.png',
+  )
   if (!image) return null
   const radius = Math.max(24, projectile.radiusPx ?? 42)
+  if (isCureWounds) {
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * 3.15}
+        shadowColor="#4ade80"
+        particleColor="#86efac"
+        particleHighlight="#fef3c7"
+      />
+    )
+  }
+  if (isBlight) {
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * 3.45}
+        shadowColor="#581c87"
+        particleColor="#a3e635"
+        particleHighlight="#d9f99d"
+      />
+    )
+  }
+  if (isFingerOfDeath || isPowerWordStun || isPowerWordKill) {
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isFingerOfDeath ? 4.2 : 3.65)}
+        shadowColor={isFingerOfDeath ? '#65a30d' : isPowerWordStun ? '#a855f7' : '#dc2626'}
+        particleColor={isFingerOfDeath ? '#a3e635' : isPowerWordStun ? '#f0abfc' : '#ef4444'}
+        particleHighlight={isFingerOfDeath ? '#ecfccb' : '#ffffff'}
+      />
+    )
+  }
+  if (isFalseLife) {
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * 3.35}
+        shadowColor="#7c3aed"
+        particleColor="#a78bfa"
+        particleHighlight="#e0e7ff"
+      />
+    )
+  }
   return (
-    <TargetTextureManifestation
+    <TargetSpriteAtlasEffect
       projectile={projectile}
       image={image}
-      width={radius * (isCureWounds ? 3.15 : 3.5)}
-      height={radius * (isCureWounds ? 3.15 : 3.5)}
-      y={0}
-      descend={isCureWounds ? radius * 0.45 : radius * 0.8}
-      shadowColor={isCureWounds ? '#4ade80' : '#ef4444'}
+      diameter={radius * 3.5}
+      shadowColor="#ef4444"
+      particleColor="#f97316"
+      particleHighlight="#fef3c7"
     />
   )
 }
@@ -6637,13 +7752,88 @@ function MaterialAreaSpellEffect({
   projectile: MapProjectile
 }) {
   const isShatter = projectile.kind === 'shatter'
+  const isFlameStrike = projectile.kind === 'flame-strike'
+  const isSunburst = projectile.kind === 'sunburst'
+  const isConeOfCold = projectile.kind === 'cone-of-cold'
+  const isCircleOfDeath = projectile.kind === 'circle-of-death'
+  const isIceStorm = projectile.kind === 'ice-storm'
+  const isFreezingSphere = projectile.kind === 'freezing-sphere'
+  const isColorSpray = projectile.kind === 'color-spray'
+  const isFaerieFire = projectile.kind === 'faerie-fire'
+  const isSleep = projectile.kind === 'sleep'
+  const isEntangle = projectile.kind === 'entangle'
+  const isGrease = projectile.kind === 'grease'
+  const isDarkness = projectile.kind === 'darkness'
+  const isFlamingSphere = projectile.kind === 'flaming-sphere'
+  const isMoonbeam = projectile.kind === 'moonbeam'
+  const isDaylight = projectile.kind === 'daylight'
+  const isBlackTentacles = projectile.kind === 'black-tentacles'
+  const isSpikeGrowth = projectile.kind === 'spike-growth'
+  const isMageHand = projectile.kind === 'mage-hand'
+  const isSpiritualWeapon = projectile.kind === 'spiritual-weapon'
+  const isSpiritGuardians = projectile.kind === 'spirit-guardians'
+  const isCallLightning = projectile.kind === 'call-lightning'
+  const isCallLightningStrike = projectile.kind === 'call-lightning-strike'
+  const isInsectPlague = projectile.kind === 'insect-plague'
+  const isWallOfFire = projectile.kind === 'wall-of-fire'
+  const isBladeBarrier = projectile.kind === 'blade-barrier'
   const asset = projectile.kind === 'burning-hands'
     ? '/assets/vfx/burning-hands-sprite-v2.png'
     : projectile.kind === 'thunderwave'
       ? '/assets/vfx/thunderwave-fluid.webp'
       : isShatter
-        ? '/assets/vfx/shatter-fluid.png'
-        : '/assets/vfx/lightning-bolt-fluid.png'
+        ? '/assets/vfx/shatter-sprite-v2.png'
+        : isFlameStrike
+          ? '/assets/vfx/flame-strike-sprite-v2.png'
+          : isSunburst
+            ? '/assets/vfx/sunburst-sprite-v2.png'
+            : isConeOfCold
+              ? '/assets/vfx/cone-of-cold-sprite-v2.png'
+              : isCircleOfDeath
+                ? '/assets/vfx/circle-of-death-sprite-v2.png'
+                : isIceStorm
+                  ? '/assets/vfx/ice-storm-sprite-v2.png'
+                  : isFreezingSphere
+                    ? '/assets/vfx/freezing-sphere-sprite-v2.png'
+                    : isColorSpray
+                      ? '/assets/vfx/color-spray-sprite-v2.png'
+                      : isFaerieFire
+                        ? '/assets/vfx/faerie-fire-sprite-v2.png'
+                        : isSleep
+                          ? '/assets/vfx/sleep-sprite-v2.png'
+                          : isEntangle
+                            ? '/assets/vfx/entangle-sprite-v2.png'
+                            : isGrease
+                              ? '/assets/vfx/grease-sprite-v2.png'
+                              : isDarkness
+                                ? '/assets/vfx/darkness-sprite-v2.png'
+                                : isFlamingSphere
+                                  ? '/assets/vfx/flaming-sphere-sprite-v2.png'
+                                  : isMoonbeam
+                                    ? '/assets/vfx/moonbeam-sprite-v2.png'
+                                    : isDaylight
+                                      ? '/assets/vfx/daylight-sprite-v2.png'
+                                      : isBlackTentacles
+                                        ? '/assets/vfx/black-tentacles-sprite-v2.png'
+                                        : isSpikeGrowth
+                                          ? '/assets/vfx/spike-growth-sprite-v2.png'
+                                          : isMageHand
+                                            ? '/assets/vfx/mage-hand-sprite-v2.png'
+                                            : isSpiritualWeapon
+                                              ? '/assets/vfx/spiritual-weapon-sprite-v2.png'
+                                              : isSpiritGuardians
+                                                ? '/assets/vfx/spirit-guardians-sprite-v2.png'
+                                                : isCallLightning
+                                                  ? '/assets/vfx/call-lightning-sprite-v2.png'
+                                                  : isCallLightningStrike
+                                                    ? '/assets/vfx/call-lightning-strike-sprite-v2.png'
+                                                  : isInsectPlague
+                                                    ? '/assets/vfx/insect-plague-sprite-v2.png'
+                                                    : isWallOfFire
+                                                      ? '/assets/vfx/wall-of-fire-sprite-v2.png'
+                                                      : isBladeBarrier
+                                                        ? '/assets/vfx/blade-barrier-sprite-v2.png'
+                                                        : '/assets/vfx/lightning-bolt-sprite-v2.png'
   const loadedImage = useTokenBadgeImage(asset)
   const image = loadedImage
   if (!image) return null
@@ -6653,13 +7843,112 @@ function MaterialAreaSpellEffect({
   if (isShatter) {
     const radius = Math.max(30, projectile.radiusPx ?? 70)
     return (
-      <TargetTextureManifestation
+      <TargetSpriteAtlasEffect
         projectile={projectile}
         image={image}
-        width={radius * 2.45}
-        height={radius * 2.45}
-        y={0}
+        diameter={radius * 2.45}
         shadowColor="#8b5cf6"
+        particleColor="#60a5fa"
+        particleHighlight="#ede9fe"
+      />
+    )
+  }
+  if (isFlameStrike || isSunburst) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isSunburst ? 2.08 : 2.5)}
+        shadowColor={isSunburst ? '#fef08a' : '#f97316'}
+        particleColor={isSunburst ? '#fde68a' : '#fb923c'}
+        particleHighlight="#ffffff"
+      />
+    )
+  }
+  if (isCircleOfDeath || isIceStorm || isFreezingSphere) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isIceStorm ? 2.35 : 2.08)}
+        shadowColor={isCircleOfDeath ? '#7c3aed' : '#38bdf8'}
+        particleColor={isCircleOfDeath ? '#84cc16' : '#93c5fd'}
+        particleHighlight={isCircleOfDeath ? '#d9f99d' : '#ffffff'}
+      />
+    )
+  }
+  if (isFaerieFire || isSleep || isEntangle || isGrease) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isFaerieFire ? 2.05 : isSleep ? 2.18 : 2.06)}
+        shadowColor={isFaerieFire ? '#d946ef' : isSleep ? '#6366f1' : isEntangle ? '#65a30d' : '#d97706'}
+        particleColor={isFaerieFire ? '#67e8f9' : isSleep ? '#c4b5fd' : isEntangle ? '#84cc16' : '#f59e0b'}
+        particleHighlight={isFaerieFire ? '#fde68a' : isSleep ? '#fef3c7' : isEntangle ? '#d9f99d' : '#fef3c7'}
+      />
+    )
+  }
+  if (isDarkness || isFlamingSphere || isMoonbeam) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isMoonbeam ? 3.4 : isFlamingSphere ? 2.65 : 2.08)}
+        shadowColor={isDarkness ? '#581c87' : isFlamingSphere ? '#f97316' : '#bfdbfe'}
+        particleColor={isDarkness ? '#8b5cf6' : isFlamingSphere ? '#fb923c' : '#e0f2fe'}
+        particleHighlight={isDarkness ? '#c4b5fd' : isFlamingSphere ? '#fef3c7' : '#ffffff'}
+      />
+    )
+  }
+  if (isDaylight || isBlackTentacles || isSpikeGrowth) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isBlackTentacles ? 2.08 : 2.05)}
+        shadowColor={isDaylight ? '#fde68a' : isBlackTentacles ? '#581c87' : '#65a30d'}
+        particleColor={isDaylight ? '#fef3c7' : isBlackTentacles ? '#a855f7' : '#84cc16'}
+        particleHighlight={isDaylight ? '#ffffff' : isBlackTentacles ? '#ddd6fe' : '#d9f99d'}
+      />
+    )
+  }
+  if (isMageHand || isSpiritualWeapon || isSpiritGuardians || isCallLightning || isCallLightningStrike || isInsectPlague) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isMageHand ? 2.05 : isSpiritualWeapon ? 2.55 : isCallLightningStrike ? 2.7 : 2.08)}
+        shadowColor={isMageHand ? '#22d3ee' : isSpiritualWeapon ? '#c4b5fd' : isSpiritGuardians ? '#fde68a' : isCallLightning || isCallLightningStrike ? '#38bdf8' : '#d6a94d'}
+        particleColor={isMageHand ? '#67e8f9' : isSpiritualWeapon ? '#ddd6fe' : isSpiritGuardians ? '#fef3c7' : isCallLightning || isCallLightningStrike ? '#60a5fa' : '#a16207'}
+        particleHighlight={isInsectPlague ? '#fde68a' : '#ffffff'}
+      />
+    )
+  }
+  if (isWallOfFire || isBladeBarrier) {
+    const width = Math.max(60, projectile.areaWidthPx ?? 120)
+    const height = Math.max(34, (projectile.areaHeightPx ?? 20) * (isWallOfFire ? 2.2 : 1.8))
+    const angle = Math.atan2(
+      projectile.to.y - projectile.from.y,
+      projectile.to.x - projectile.from.x,
+    ) * 180 / Math.PI
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={height}
+        width={width}
+        height={height}
+        rotation={angle}
+        shadowColor={isWallOfFire ? '#ef4444' : '#67e8f9'}
+        particleColor={isWallOfFire ? '#fb923c' : '#bae6fd'}
+        particleHighlight="#ffffff"
       />
     )
   }
@@ -6668,6 +7957,48 @@ function MaterialAreaSpellEffect({
     Math.hypot(projectile.to.x - projectile.from.x, projectile.to.y - projectile.from.y),
   )
   const areaWidth = Math.max(28, projectile.areaWidthPx ?? 70)
+  if (isConeOfCold) {
+    return (
+      <DirectionalSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        heightRatio={areaWidth / distance}
+        minHeight={areaWidth * 0.98}
+        maxHeight={areaWidth * 1.02}
+        shadowColor="#7dd3fc"
+        particleColor="#bfdbfe"
+        particleHighlight="#ffffff"
+      />
+    )
+  }
+  if (isColorSpray) {
+    return (
+      <DirectionalSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        heightRatio={areaWidth / distance}
+        minHeight={areaWidth * 0.98}
+        maxHeight={areaWidth * 1.02}
+        shadowColor="#f472b6"
+        particleColor="#67e8f9"
+        particleHighlight="#fef08a"
+      />
+    )
+  }
+  if (projectile.kind === 'lightning-bolt') {
+    return (
+      <DirectionalSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        heightRatio={areaWidth / distance}
+        minHeight={areaWidth * 0.98}
+        maxHeight={areaWidth * 1.02}
+        shadowColor="#38bdf8"
+        particleColor="#60a5fa"
+        particleHighlight="#ffffff"
+      />
+    )
+  }
   if (projectile.kind === 'thunderwave') {
     return <ThunderwaveMaterialEffect
       projectile={projectile}
@@ -6683,7 +8014,7 @@ function MaterialAreaSpellEffect({
       heightRatio={areaWidth / distance}
       minHeight={areaWidth * 0.98}
       maxHeight={areaWidth * 1.02}
-      revealEnd={projectile.kind === 'lightning-bolt' ? 0.32 : 0.46}
+      revealEnd={0.46}
       fadeStart={0.72}
       shadowColor="#22d3ee"
     />
@@ -6697,7 +8028,7 @@ function SacredFlameEffect({ projectile }: { projectile: MapProjectile }) {
   const impactRef = useRef<Konva.Group>(null)
   const ringRef = useRef<Konva.Circle>(null)
   const flameRefs = useRef<Array<Konva.Line | null>>([])
-  const sacredFlameImage = useTokenBadgeImage('/assets/vfx/sacred-flame-fluid.png')
+  const sacredFlameImage = useTokenBadgeImage('/assets/vfx/sacred-flame-sprite-v2.png')
   const radius = Math.max(20, projectile.radiusPx ?? 32)
 
   useEffect(() => {
@@ -6758,14 +8089,13 @@ function SacredFlameEffect({ projectile }: { projectile: MapProjectile }) {
   ]
   if (sacredFlameImage) {
     return (
-      <TargetTextureManifestation
+      <TargetSpriteAtlasEffect
         projectile={projectile}
         image={sacredFlameImage}
-        width={radius * 2.35}
-        height={radius * 5.1}
-        y={-radius * 1.65}
-        descend={radius * 1.25}
+        diameter={radius * 5.1}
         shadowColor="#facc15"
+        particleColor="#fde68a"
+        particleHighlight="#ffffff"
       />
     )
   }
@@ -7803,7 +9133,7 @@ function EldritchBlastProjectile({ projectile }: { projectile: MapProjectile }) 
   const coreRef = useRef<Konva.Line>(null)
   const impactRef = useRef<Konva.Group>(null)
   const impactCoreRef = useRef<Konva.Circle>(null)
-  const fluidImage = useTokenBadgeImage('/assets/vfx/eldritch-blast-fluid.png')
+  const fluidImage = useTokenBadgeImage('/assets/vfx/eldritch-blast-sprite-v2.png')
 
   useEffect(() => {
     const effect = effectRef.current
@@ -7871,15 +9201,15 @@ function EldritchBlastProjectile({ projectile }: { projectile: MapProjectile }) 
 
   if (fluidImage) {
     return (
-      <DirectionalTextureEffect
+      <DirectionalSpriteAtlasEffect
         projectile={projectile}
         image={fluidImage}
         heightRatio={0.31}
         minHeight={72}
         maxHeight={142}
-        revealEnd={0.42}
-        fadeStart={0.66}
         shadowColor="#a855f7"
+        particleColor="#a855f7"
+        particleHighlight="#f3e8ff"
       />
     )
   }
@@ -7968,7 +9298,7 @@ function RayOfFrostProjectile({ projectile }: { projectile: MapProjectile }) {
   const filamentRef = useRef<Konva.Line>(null)
   const impactRef = useRef<Konva.Group>(null)
   const impactRingRef = useRef<Konva.Circle>(null)
-  const fluidImage = useTokenBadgeImage('/assets/vfx/ray-of-frost-fluid.png')
+  const fluidImage = useTokenBadgeImage('/assets/vfx/ray-of-frost-sprite-v2.png')
 
   useEffect(() => {
     const effect = effectRef.current
@@ -8032,15 +9362,15 @@ function RayOfFrostProjectile({ projectile }: { projectile: MapProjectile }) {
 
   if (fluidImage) {
     return (
-      <DirectionalTextureEffect
+      <DirectionalSpriteAtlasEffect
         projectile={projectile}
         image={fluidImage}
         heightRatio={0.3}
         minHeight={70}
         maxHeight={138}
-        revealEnd={0.5}
-        fadeStart={0.7}
         shadowColor="#38bdf8"
+        particleColor="#7dd3fc"
+        particleHighlight="#ffffff"
       />
     )
   }
@@ -8611,6 +9941,7 @@ function TokenNode({
   standardConditionMarks = [],
   shillelaghActive = false,
   spellStatusMarks = [],
+  concentrationMark,
   airborne = false,
   onStandardConditionClick,
   hoverLabel,
@@ -8639,6 +9970,7 @@ function TokenNode({
   standardConditionMarks?: readonly StandardConditionTokenMark[]
   shillelaghActive?: boolean
   spellStatusMarks?: readonly SpellStatusTokenMark[]
+  concentrationMark?: ConcentrationTokenMark
   airborne?: boolean
   onStandardConditionClick?: (condition?: Dnd5eStandardConditionId) => void
   hoverLabel?: string
@@ -8666,6 +9998,9 @@ function TokenNode({
       : ''
   const [loadedTokenImage, setLoadedTokenImage] = useState<{ key: string; image?: HTMLImageElement }>()
   const tokenImage = loadedTokenImage?.key === tokenImageKey ? loadedTokenImage.image : undefined
+  const concentrationTokenImage = useTokenBadgeImage(
+    concentrationMark ? DND5E_CONCENTRATION_TOKEN_IMAGE_SRC : undefined,
+  )
   const movementAnimation = token.movementAnimation
   const latestPositionRef = useRef({ x: token.x, y: token.y })
   const draggingRef = useRef(false)
@@ -8728,6 +10063,13 @@ function TokenNode({
     : radius * 2.4
   const isDragonEmoji = token.emoji === '\u{1f409}' || token.emoji === '\u{1f432}'
   const isDetectedUnseen = token.perceptionVisibility === 'detected-unseen'
+  // Flaming Sphere already has a persistent animated area visual. Keep its
+  // authoritative effect token as an invisible drag/select hit target so
+  // movement and Headless settlement still work without drawing a second
+  // black-backed fire token on top of the sphere.
+  const hidePersistentEffectTokenBody =
+    token.dnd5eSpellEffect?.spellId === 'flaming-sphere' ||
+    token.dnd5eSpellEffect?.spellId === 'spiritual-weapon'
   const emojiFontScale = isDragonEmoji ? 0.94 : 1
   const emojiOffsetY = isDragonEmoji ? radius * 0.07 : 0
 
@@ -8882,7 +10224,7 @@ function TokenNode({
     }
   }, [cancelPositionAnimation, instantPosition, movementAnimation, token.x, token.y])
 
-  const nameLayer = showName ? (
+  const nameLayer = showName && !hidePersistentEffectTokenBody ? (
     <Group y={radius + 4}>
       <Rect
         x={-radius - 6}
@@ -8968,6 +10310,19 @@ function TokenNode({
                 gridIndex={airborne ? 1 : 0}
               />
             )}
+            {concentrationMark && (() => {
+              const size = rightBadgeSize(radius)
+              const position = rightBadgeGridPos(radius, size, grid++)
+              return (
+                <Dnd5eConcentrationTokenBadge
+                  x={position.x}
+                  y={position.y}
+                  size={size}
+                  image={concentrationTokenImage}
+                  mark={concentrationMark}
+                />
+              )
+            })()}
             {spellStatusMarks.map((mark) => (
               <SpellStatusTokenBadge
                 key={`spell-status:${mark.statusId}`}
@@ -9101,7 +10456,7 @@ function TokenNode({
           listening={false}
         />
       )}
-      {currentTurn && !defeated && <ActiveTurnHalo radius={radius} />}
+      {currentTurn && !defeated && !hidePersistentEffectTokenBody && <ActiveTurnHalo radius={radius} />}
       {targetSelected && (
         <Circle
           radius={radius + selectedGap * 1.55}
@@ -9113,7 +10468,7 @@ function TokenNode({
           listening={false}
         />
       )}
-      {isDetectedUnseen && (
+      {isDetectedUnseen && !hidePersistentEffectTokenBody && (
         <Circle
           radius={radius + selectedGap * 0.65}
           stroke="#94a3b8"
@@ -9123,19 +10478,28 @@ function TokenNode({
           listening={false}
         />
       )}
-      {isStunned && <StunGlow radius={radius} />}
-      {isPoisoned && <PoisonCloudGlow radius={radius} />}
-      <Circle
-        radius={radius}
-        fill={defeated ? 'rgba(30,32,45,0.92)' : 'rgba(10,11,22,0.85)'}
-        stroke={strokeColor}
-        strokeWidth={
-          isStunned || isPoisoned
-            ? statusStrokeW
-            : baseStrokeW
-        }
-      />
-      {tokenImage && tokenImageCrop && (
+      {isStunned && !hidePersistentEffectTokenBody && <StunGlow radius={radius} />}
+      {isPoisoned && !hidePersistentEffectTokenBody && <PoisonCloudGlow radius={radius} />}
+      {hidePersistentEffectTokenBody ? (
+        <Circle
+          name="persistent-spell-effect-token-hitbox"
+          radius={radius}
+          fill="rgba(0,0,0,0.001)"
+          strokeWidth={0}
+        />
+      ) : (
+        <Circle
+          radius={radius}
+          fill={defeated ? 'rgba(30,32,45,0.92)' : 'rgba(10,11,22,0.85)'}
+          stroke={strokeColor}
+          strokeWidth={
+            isStunned || isPoisoned
+              ? statusStrokeW
+              : baseStrokeW
+          }
+        />
+      )}
+      {!hidePersistentEffectTokenBody && tokenImage && tokenImageCrop && (
         <Group
           clipFunc={(context) => {
             context.beginPath()
@@ -9155,7 +10519,7 @@ function TokenNode({
           />
         </Group>
       )}
-      {defeated && (
+      {defeated && !hidePersistentEffectTokenBody && (
         <Circle
           radius={radius}
           fill="rgba(148,163,184,0.35)"
@@ -9239,7 +10603,7 @@ function TokenNode({
           />
         </Group>
       )}
-      {!tokenImage && (
+      {!hidePersistentEffectTokenBody && !tokenImage && (
         <Text
           text={token.emoji}
           y={emojiOffsetY}
@@ -9253,8 +10617,8 @@ function TokenNode({
           opacity={defeated ? 0.65 : 1}
         />
       )}
-      {isPoisoned && <PoisonCloud radius={radius} />}
-      {isStunned && <StunOrbitStars radius={radius} />}
+      {isPoisoned && !hidePersistentEffectTokenBody && <PoisonCloud radius={radius} />}
+      {isStunned && !hidePersistentEffectTokenBody && <StunOrbitStars radius={radius} />}
       {renderMode !== 'body' && (() => {
         let grid = airborne ? 1 : 0
         return (
@@ -9265,6 +10629,19 @@ function TokenNode({
                 onClick={() => onStandardConditionClick?.()}
               />
             )}
+            {concentrationMark && (() => {
+              const size = rightBadgeSize(radius)
+              const position = rightBadgeGridPos(radius, size, grid++)
+              return (
+                <Dnd5eConcentrationTokenBadge
+                  x={position.x}
+                  y={position.y}
+                  size={size}
+                  image={concentrationTokenImage}
+                  mark={concentrationMark}
+                />
+              )
+            })()}
             {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
               .map((condition) => (
                 <Dnd5eStandardConditionBadge
@@ -9287,7 +10664,7 @@ function TokenNode({
         )
       })()}
       {/* 名称标签 */}
-      {renderMode !== 'body' && showName && (
+      {renderMode !== 'body' && showName && !hidePersistentEffectTokenBody && (
         <Group y={radius + 4}>
           <Rect
             x={-radius - 6}

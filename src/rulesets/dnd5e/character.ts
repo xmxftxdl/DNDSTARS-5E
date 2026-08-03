@@ -63,7 +63,7 @@ export interface Dnd5eCharacter {
   temporaryHp: number
   exhaustionLevel: number
   speed: number
-  movementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number }
+  movementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number; hover?: boolean }
   initiativeBonus: number
   hitPointDice: readonly { sides: number; current: number; max: number }[]
   deathSaves: Dnd5eDeathSaves
@@ -229,7 +229,10 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   const backgroundSkills = dnd5ePluginBackgroundDefinition(character.dnd5eBackgroundId ?? character.background)
     ?.skillProficiencies ?? character.dnd5eBackgroundSkillProficiencies ?? []
   const raceDefinition = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
-  const coreRace = dnd5eCoreRaceMechanics(character.race, character.dnd5eRaceId)
+  const coreRace = dnd5eCoreRaceMechanics(
+    character.race,
+    raceDefinition?.coreRaceMechanicsId ?? character.dnd5eRaceId,
+  )
   const racialRules = dnd5eRacialRulesForCharacter(character)
   const selectedPluginFeatures = registeredDnd5ePluginFeatures()
     .filter((feature) => dnd5eCharacterHasPluginFeature(character, feature.id))
@@ -276,6 +279,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       climb: character.dnd5eMovementSpeeds?.climb,
       swim: character.dnd5eMovementSpeeds?.swim,
       fly: character.dnd5eMovementSpeeds?.fly,
+      hover: character.dnd5eMovementSpeeds?.hover,
     },
     initiativeBonus: Math.floor(character.initiativeBonus) + staticModifierTotal(staticModifiers, 'initiativeBonus'),
     hitPointDice: character.hitPointDice?.length
@@ -326,16 +330,6 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
 
 export function dnd5eInitiativeModifier(character: Dnd5eCharacter): number {
   return rules.abilityModifier(character.abilities.dex) + character.initiativeBonus
-}
-
-function dnd5eRaceHasMagicalSleepImmunity(race?: string, raceId?: string): boolean {
-  const identity = [race, raceId]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim().toLowerCase())
-  return identity.some((value) => [
-    '精灵', '半精灵', '高等精灵', '木精灵', '黑暗精灵', '卓尔',
-    'elf', 'half-elf', 'half elf', 'high elf', 'wood elf', 'dark elf', 'drow',
-  ].includes(value))
 }
 
 export function createCombatantFromDnd5eCharacter(input: {
@@ -399,12 +393,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     hasShield: character.hasShield,
     damageResistances: character.damageResistances,
     damageImmunities: character.damageImmunities,
-    conditionImmunities: [
-      ...character.conditionImmunities,
-      ...(dnd5eRaceHasMagicalSleepImmunity(character.race, character.raceId)
-        ? ['magical-sleep', '魔法睡眠']
-        : []),
-    ],
+    conditionImmunities: character.conditionImmunities,
     classState: {
       ...character.classState,
       wildShapeOriginalDamageVulnerabilities: normalizedDamageTypes(character.classState.wildShapeOriginalDamageVulnerabilities),
