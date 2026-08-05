@@ -14,6 +14,7 @@ import type {
 } from '../../types/inventory'
 import { DND5E_INVENTORY_SCHEMA_VERSION } from '../../types/inventory'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import { equipmentSlotAcceptsItemSlot, isEquipmentSlot } from '../../lib/equipmentDefaults'
 import { dnd5eActiveCarryingCapacityMultiplier } from './activeEffects'
 import {
   appendRollLedgerEntry,
@@ -323,9 +324,11 @@ export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id'
   })
   return {
     schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+    revision: 0,
     entries,
     currency: { ...EMPTY_CURRENCY },
     authorityGrantReceipts: [],
+    authorityUseReceipts: [],
   }
 }
 
@@ -336,6 +339,13 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     .filter((receipt): receipt is string =>
       typeof receipt === 'string' && receipt.length > 0 && receipt.length <= 300,
     ))].slice(-512)
+  const authorityUseReceipts = [...new Set((raw?.authorityUseReceipts ?? [])
+    .filter((receipt): receipt is string =>
+      typeof receipt === 'string' && receipt.length > 0 && receipt.length <= 300,
+    ))].slice(-512)
+  const revision = Number.isSafeInteger(raw?.revision) && Number(raw?.revision) >= 0
+    ? Number(raw?.revision)
+    : 0
   const entries: Dnd5eInventoryEntry[] = (raw?.entries ?? [])
     .filter((entry) => entry && typeof entry.instanceId === 'string' && typeof entry.templateId === 'string')
     .map((entry) => {
@@ -347,6 +357,7 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
         item,
         quantity,
         resources,
+        equippedSlot: isEquipmentSlot(entry.equippedSlot) ? entry.equippedSlot : undefined,
         identified: item.magicItem ? (raw?.schemaVersion === 3 ? entry.identified !== false : true) : true,
         remainingCharges: undefined,
         acquiredAt: Number.isFinite(entry.acquiredAt) ? entry.acquiredAt : 0,
@@ -387,10 +398,23 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
   normalizeContainerLinks(entries)
   return {
     schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+    revision,
     entries,
     currency,
     authorityGrantReceipts,
+    authorityUseReceipts,
   }
+}
+
+export function dnd5eExpendedSpellSlotLevels(
+  character: Character,
+  maximumSlotLevel = 9,
+): number[] {
+  const maximum = Math.min(9, Math.max(1, Math.floor(maximumSlotLevel)))
+  return Array.from({ length: maximum }, (_, index) => index + 1).filter((level) => {
+    const resource = character.classResources?.[`dnd5e-spell-slot-${level}`]
+    return !!resource && resource.max > 0 && resource.current < resource.max
+  })
 }
 
 export interface Dnd5eInventoryLoad {
@@ -460,6 +484,89 @@ export function dnd5eInventoryEntryResource(
 }
 
 /** 权威事务使用的实例资源扣除函数。资源归零后仍保留物品实例。 */
+export type Dnd5eInventoryActivityCost =
+  | { kind: 'resource'; resourceId: string; amount: number }
+  | { kind: 'quantity'; amount: number }
+
+export type Dnd5eInventoryActivityCostFailure =
+  | 'invalid-receipt'
+  | 'stale-inventory-revision'
+  | 'item-not-found'
+  | 'item-unidentified'
+  | 'item-inactive'
+  | 'invalid-cost'
+  | 'resource-not-found'
+  | 'insufficient-resource'
+  | 'insufficient-quantity'
+
+/** Preflights every cost before producing one authoritative inventory snapshot. */
+export function applyDnd5eInventoryActivityCosts(
+  character: Character,
+  input: {
+    instanceId: string
+    costs: readonly Dnd5eInventoryActivityCost[]
+    receiptId: string
+    expectedInventoryRevision: number
+  },
+):
+  | { ok: true; character: Character; deduplicated: boolean }
+  | { ok: false; character: Character; reason: Dnd5eInventoryActivityCostFailure } {
+  const inventory = normalizeDnd5eInventory(character)
+  if (!validAuthorityReceiptId(input.receiptId)) {
+    return { ok: false, character, reason: 'invalid-receipt' }
+  }
+  if (inventory.authorityUseReceipts?.includes(input.receiptId)) {
+    return { ok: true, character: { ...character, dnd5eInventory: inventory }, deduplicated: true }
+  }
+  if (inventory.revision !== input.expectedInventoryRevision) {
+    return { ok: false, character, reason: 'stale-inventory-revision' }
+  }
+  const entry = inventory.entries.find((candidate) => candidate.instanceId === input.instanceId)
+  if (!entry) return { ok: false, character, reason: 'item-not-found' }
+  if (entry.item.magicItem && entry.identified === false) {
+    return { ok: false, character, reason: 'item-unidentified' }
+  }
+  if (!dnd5eInventoryEntryIsActive(entry)) {
+    return { ok: false, character, reason: 'item-inactive' }
+  }
+  if (
+    input.costs.length > 32 ||
+    input.costs.some((cost) => !Number.isSafeInteger(cost.amount) || cost.amount < 0 || cost.amount > 1_000_000)
+  ) return { ok: false, character, reason: 'invalid-cost' }
+
+  const quantityCost = input.costs
+    .filter((cost): cost is Extract<Dnd5eInventoryActivityCost, { kind: 'quantity' }> => cost.kind === 'quantity')
+    .reduce((sum, cost) => sum + cost.amount, 0)
+  if (quantityCost > entry.quantity) {
+    return { ok: false, character, reason: 'insufficient-quantity' }
+  }
+  const resourceCosts = new Map<string, number>()
+  for (const cost of input.costs) {
+    if (cost.kind !== 'resource') continue
+    resourceCosts.set(cost.resourceId, (resourceCosts.get(cost.resourceId) ?? 0) + cost.amount)
+  }
+  for (const [resourceId, amount] of resourceCosts) {
+    const resource = entry.resources?.[resourceId]
+    if (!resource) return { ok: false, character, reason: 'resource-not-found' }
+    if (resource.current < amount) return { ok: false, character, reason: 'insufficient-resource' }
+  }
+
+  let next: Character = { ...character, dnd5eInventory: inventory }
+  for (const [resourceId, amount] of resourceCosts) {
+    if (amount === 0) continue
+    const spent = spendDnd5eInventoryResource(next, input.instanceId, resourceId, amount)
+    if (!spent.ok) return { ok: false, character, reason: spent.reason }
+    next = spent.character
+  }
+  if (quantityCost > 0) {
+    const currentEntry = normalizeDnd5eInventory(next).entries.find((candidate) => candidate.instanceId === input.instanceId)
+    if (!currentEntry) return { ok: false, character, reason: 'item-not-found' }
+    next = removeItem(next, currentEntry, quantityCost)
+  }
+  next = recordDnd5eInventoryUseReceipt(next, input.receiptId)
+  return { ok: true, character: next, deduplicated: false }
+}
+
 export function spendDnd5eInventoryResource(
   character: Character,
   instanceId: string,
@@ -646,6 +753,7 @@ export function applyDnd5eInventoryGrantBundle(
     ...next,
     dnd5eInventory: {
       ...inventory,
+      revision: (inventory.revision ?? 0) + 1,
       currency,
       authorityGrantReceipts: [
         ...(inventory.authorityGrantReceipts ?? []),
@@ -674,6 +782,23 @@ function applyDnd5eInventoryMutationInternal(
   if (sourceIndex < 0) return failed(characters, 'character-not-found')
   const source = withNormalizedInventory(characters[sourceIndex])
 
+  if (mutation.type === 'use') {
+    const inventory = normalizeDnd5eInventory(source)
+    if (mutation.receiptId != null && !validAuthorityReceiptId(mutation.receiptId)) {
+      return failed(characters, 'invalid-receipt')
+    }
+    if (mutation.receiptId && inventory.authorityUseReceipts?.includes(mutation.receiptId)) {
+      return {
+        ...succeeded(characters, '该道具事务已经结算，不会重复消耗或应用效果。'),
+        deduplicated: true,
+      }
+    }
+    if (
+      mutation.expectedInventoryRevision != null &&
+      mutation.expectedInventoryRevision !== inventory.revision
+    ) return failed(characters, 'stale-inventory-revision')
+  }
+
   if (mutation.type === 'grant') {
     const quantity = validQuantity(mutation.quantity)
     if (!quantity) return failed(characters, 'invalid-quantity')
@@ -691,7 +816,10 @@ function applyDnd5eInventoryMutationInternal(
     const nextAmount = currency[mutation.currency] + delta
     if (nextAmount < 0) return failed(characters, 'insufficient-currency')
     currency[mutation.currency] = nextAmount
-    const next = { ...source, dnd5eInventory: { ...inventory, currency } }
+    const next = {
+      ...source,
+      dnd5eInventory: { ...inventory, revision: (inventory.revision ?? 0) + 1, currency },
+    }
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 的${currencyLabel(mutation.currency)}变更 ${delta > 0 ? '+' : ''}${delta}。`)
   }
 
@@ -723,7 +851,11 @@ function applyDnd5eInventoryMutationInternal(
   if (mutation.type === 'equip') {
     if (!entry.item.equipment) return failed(characters, 'not-equipment')
     if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
-    const next = equipEntry(source, entry)
+    const requestedSlot = mutation.slot ?? defaultEquipmentDestination(source, entry.item.equipment.slot)
+    if (!isEquipmentSlot(requestedSlot) || !equipmentSlotAcceptsItemSlot(requestedSlot, entry.item.equipment.slot)) {
+      return failed(characters, 'invalid-equipment-slot')
+    }
+    const next = equipEntry(source, entry, requestedSlot)
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 装备了 ${entry.item.name}。`)
   }
 
@@ -811,7 +943,11 @@ function applyDnd5eInventoryMutationInternal(
   const use = entry.item.use
   if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
   if (!use) return failed(characters, 'not-usable')
-  if (entry.quantity < use.consumeQuantity || (use.chargesPerItem && (entry.resources?.uses?.current ?? 0) < 1)) {
+  if (
+    entry.quantity < use.consumeQuantity ||
+    (use.chargesPerItem && (entry.resources?.uses?.current ?? 0) < 1) ||
+    (use.resourceCost && (entry.resources?.[use.resourceCost.resourceId]?.current ?? 0) < use.resourceCost.amount)
+  ) {
     return failed(characters, 'insufficient-quantity')
   }
   if (options.turnEconomy && use.economy === 'action' && options.turnEconomy.action.current < 1) {
@@ -821,9 +957,19 @@ function applyDnd5eInventoryMutationInternal(
     return failed(characters, 'bonus-action-unavailable')
   }
 
-  let next = source
+  const targetIndex = mutation.targetCharacterId == null || mutation.targetCharacterId === source.id
+    ? sourceIndex
+    : characters.findIndex((character) => character.id === mutation.targetCharacterId)
+  if (targetIndex < 0) return failed(characters, 'target-not-found')
+  const target = targetIndex === sourceIndex
+    ? source
+    : withNormalizedInventory(characters[targetIndex])
+  let nextSource = source
+  let nextTarget = target
   let healingRolled: number | undefined
   let healingApplied: number | undefined
+  let spellSlotLevel: number | undefined
+  let spellSlotsRecovered: number | undefined
   let requiresDmAdjudication: string | undefined
   if (use.effect.kind === 'healing') {
     const rolls = mutation.healingRolls
@@ -832,24 +978,62 @@ function applyDnd5eInventoryMutationInternal(
       return failed(characters, 'invalid-rolls')
     }
     healingRolled = rolls.reduce((sum, roll) => sum + roll, bonus)
-    healingApplied = Math.min(healingRolled, Math.max(0, source.maxHp - source.currentHp))
-    next = {
-      ...next,
-      currentHp: Math.min(next.maxHp, next.currentHp + healingRolled),
-      dnd5eCombatState: healingApplied > 0 && (next.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) > 0
-        ? { ...next.dnd5eCombatState, caltropsSpeedPenaltyFeet: undefined }
-        : next.dnd5eCombatState,
+    healingApplied = Math.min(healingRolled, Math.max(0, target.maxHp - target.currentHp))
+    nextTarget = {
+      ...target,
+      currentHp: Math.min(target.maxHp, target.currentHp + healingRolled),
+      dnd5eCombatState: healingApplied > 0 && (target.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) > 0
+        ? { ...target.dnd5eCombatState, caltropsSpeedPenaltyFeet: undefined }
+        : target.dnd5eCombatState,
     }
+    if (targetIndex === sourceIndex) nextSource = nextTarget
+  } else if (use.effect.kind === 'spell-slot-recovery') {
+    if (targetIndex !== sourceIndex) return failed(characters, 'invalid-target')
+    const selectedLevel = mutation.spellSlotLevel
+    if (
+      !Number.isInteger(selectedLevel) || selectedLevel == null || selectedLevel < 1 ||
+      selectedLevel > use.effect.maximumSlotLevel
+    ) return failed(characters, 'invalid-spell-slot')
+    const resourceKey = `dnd5e-spell-slot-${selectedLevel}`
+    const resource = source.classResources?.[resourceKey]
+    if (!resource || resource.max < 1 || resource.current >= resource.max) {
+      return failed(characters, 'spell-slot-unavailable')
+    }
+    spellSlotLevel = selectedLevel
+    spellSlotsRecovered = Math.min(use.effect.amount, resource.max - resource.current)
+    nextSource = {
+      ...source,
+      classResources: {
+        ...(source.classResources ?? {}),
+        [resourceKey]: { ...resource, current: resource.current + spellSlotsRecovered },
+      },
+    }
+    nextTarget = nextSource
   } else {
     requiresDmAdjudication = use.effect.adjudication
   }
-  if (use.chargesPerItem) next = consumeItemCharge(next, entry)
-  else if (use.consumeQuantity > 0) next = removeItem(next, entry, use.consumeQuantity)
-  const result = succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 使用了 ${entry.item.name}。`)
+  if (use.resourceCost) {
+    const spent = spendDnd5eInventoryResource(
+      nextSource,
+      entry.instanceId,
+      use.resourceCost.resourceId,
+      use.resourceCost.amount,
+    )
+    if (!spent.ok) return failed(characters, 'insufficient-quantity')
+    nextSource = spent.character
+  }
+  if (use.chargesPerItem) nextSource = consumeItemCharge(nextSource, entry)
+  else if (use.consumeQuantity > 0) nextSource = removeItem(nextSource, entry, use.consumeQuantity)
+  nextSource = recordDnd5eInventoryUseReceipt(nextSource, mutation.receiptId)
+  let nextCharacters = replaceAt(characters, sourceIndex, nextSource)
+  if (targetIndex !== sourceIndex) nextCharacters = replaceAt(nextCharacters, targetIndex, nextTarget)
+  const result = succeeded(nextCharacters, `${source.name} 使用了 ${entry.item.name}。`)
   return {
     ...result,
     healingRolled,
     healingApplied,
+    spellSlotLevel,
+    spellSlotsRecovered,
     requiresDmAdjudication,
     spentEconomy: use.economy === 'none' ? undefined : use.economy,
   }
@@ -1015,9 +1199,15 @@ function dnd5eAttunementRequirementMet(
   return decision === 'met' || (decision === 'dm-confirmation-required' && dmPrerequisiteConfirmed)
 }
 
-function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character {
+function defaultEquipmentDestination(character: Character, itemSlot: EquipmentSlot): EquipmentSlot {
+  if (itemSlot !== 'ring') return itemSlot
+  if (!character.equipment?.ring) return 'ring'
+  if (!character.equipment?.ring2) return 'ring2'
+  return 'ring'
+}
+
+function equipEntry(character: Character, entry: Dnd5eInventoryEntry, slot: EquipmentSlot): Character {
   const equipment = entry.item.equipment!
-  const slot = equipment.slot
   const inventory = normalizeDnd5eInventory(character)
   const entries = inventory.entries.map((candidate) => ({
     ...candidate,
@@ -1190,9 +1380,32 @@ function normalizeCurrency(value: Partial<Dnd5eCurrencyWallet> | undefined): Dnd
 function inventoryWithEntries(inventory: Dnd5eInventory, entries: Dnd5eInventoryEntry[]): Dnd5eInventory {
   return {
     schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+    revision: (inventory.revision ?? 0) + 1,
     entries,
     currency: normalizeCurrency(inventory.currency),
     authorityGrantReceipts: [...(inventory.authorityGrantReceipts ?? [])],
+    authorityUseReceipts: [...(inventory.authorityUseReceipts ?? [])],
+  }
+}
+
+function validAuthorityReceiptId(receiptId: string): boolean {
+  return receiptId.length > 0 && receiptId.length <= 300
+}
+
+function recordDnd5eInventoryUseReceipt(
+  character: Character,
+  receiptId: string | undefined,
+): Character {
+  if (!receiptId) return character
+  const inventory = normalizeDnd5eInventory(character)
+  if (inventory.authorityUseReceipts?.includes(receiptId)) return character
+  return {
+    ...character,
+    dnd5eInventory: {
+      ...inventory,
+      revision: (inventory.revision ?? 0) + 1,
+      authorityUseReceipts: [...(inventory.authorityUseReceipts ?? []), receiptId].slice(-512),
+    },
   }
 }
 

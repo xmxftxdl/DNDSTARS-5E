@@ -293,9 +293,16 @@ export function aoeOrientFromCell(
   aoe: SkillAoeTargeting,
   casterCell: GridCell,
   anchorCell: GridCell,
-  opts?: { rectRotation?: number },
+  opts?: { rectRotation?: number; rectAngleDegrees?: number },
 ): GridCell {
   if (aoe.shape !== 'rect' || !aoe.rotatable) return casterCell
+  if (Number.isFinite(opts?.rectAngleDegrees)) {
+    const radians = ((Number(opts?.rectAngleDegrees) - 90) * Math.PI) / 180
+    return {
+      col: anchorCell.col - Math.cos(radians),
+      row: anchorCell.row - Math.sin(radians),
+    }
+  }
   const rotation = opts?.rectRotation ?? 0
   const dir = [
     { col: 0, row: -1 },

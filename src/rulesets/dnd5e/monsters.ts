@@ -560,6 +560,25 @@ export type Dnd5eMonsterSpecialActionRule =
     }
   | {
       /**
+       * Host-authoritative creature summoning. Headless validates the declared
+       * catalog target and the complete count-roll recipe before consuming the
+       * action/resource; map placement is committed from the resolved event.
+       */
+      kind: 'summon'
+      monsterId: string
+      count:
+        | { kind: 'fixed'; value: number }
+        | { kind: 'dice'; count: number; sides: number; bonus: number }
+      /** Duration starts when the creatures actually appear, not when the action is spent. */
+      timing: 'immediate' | 'source-next-turn-start'
+      durationRounds: number
+      concentration: boolean
+      /** Invocation concentration ends at appearance unless the summon itself also requires it. */
+      concentrationEndsOnAppearance: boolean
+      side: 'ally' | 'enemy'
+    }
+  | {
+      /**
        * A monster-authored invisibility action. Break conditions are stable
        * identifiers, never inferred from translated action prose.
        */
@@ -1052,6 +1071,7 @@ export interface Dnd5eMonsterStatBlock {
   /** Lair actions normally resolve on initiative count 20. */
   lairInitiative?: number
   /** Room-owned compressed images. Data URLs are validated at the schema boundary. */
+  portrait?: string
   tokenPortrait?: string
   initiativePortrait?: string
   equipment?: readonly Dnd5eMonsterEquipment[]

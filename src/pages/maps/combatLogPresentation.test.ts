@@ -3,6 +3,8 @@ import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  dnd5eCharacterPresentationColors,
+  inferCombatLogActorTokenId,
   resolveCombatLogSubject,
   resolveHeadlessCombatLogActorTokenId,
 } from './combatLogPresentation'
@@ -53,6 +55,15 @@ const goblinToken = token({
 })
 
 describe('combat log subject presentation', () => {
+  it('keeps the solid combat border, light status frame and glow as separate class colors', () => {
+    expect(dnd5eCharacterPresentationColors(wizard)).toMatchObject({
+      accentColor: '#3B82F6',
+      statusBorderColor: '#DBEAFE',
+      glowColor: '#60A5FA',
+      classId: 'wizard',
+    })
+  })
+
   it('uses stable actorTokenId before target names and applies the player class border', () => {
     const subject = resolveCombatLogSubject({
       entry: entry({ actorTokenId: wizardToken.id }),
@@ -65,7 +76,7 @@ describe('combat log subject presentation', () => {
       resolution: 'actor-token-id',
       side: 'player',
       classId: 'wizard',
-      borderColor: '#60A5FA',
+      borderColor: '#3B82F6',
       portrait: '/wizard-token.png',
     })
   })
@@ -97,5 +108,33 @@ describe('combat log subject presentation', () => {
       [{ actorId: wizard.id, sourceId: goblinToken.id }],
       [wizardToken, goblinToken],
     )).toBe(wizardToken.id)
+  })
+
+  it('keeps round-boundary rows actorless instead of borrowing the first token of the new round', () => {
+    const roundEntry = entry({
+      round: 2,
+      text: '进入第 2 回合',
+      kind: 'turn',
+      actorTokenId: goblinToken.id,
+    })
+
+    expect(inferCombatLogActorTokenId({
+      text: roundEntry.text,
+      kind: roundEntry.kind,
+      tokens: [goblinToken, wizardToken],
+      characters: [wizard],
+      currentTurnTokenId: goblinToken.id,
+    })).toBeUndefined()
+    const subject = resolveCombatLogSubject({
+      entry: roundEntry,
+      tokens: [goblinToken, wizardToken],
+      characters: [wizard],
+      currentTurnTokenId: goblinToken.id,
+    })
+    expect(subject).toMatchObject({
+      side: 'neutral',
+      resolution: 'neutral',
+    })
+    expect(subject.token).toBeUndefined()
   })
 })

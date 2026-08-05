@@ -2258,6 +2258,27 @@ describe('character token presentation', () => {
     expect(projectCharacterTokenPresentations(original, [])).toBe(original)
   })
 
+  it('keeps separate shared map-token and initiative crops ahead of catalogue artwork', () => {
+    const original = [
+      token({
+        type: 'enemy',
+        characterId: undefined,
+        poolId: 'srd-5.1:goblin',
+        portrait: '/inline/initiative.png',
+        tokenPortrait: '/inline/token.png',
+        portraitImageId: 'shared-initiative',
+        tokenPortraitImageId: 'shared-token',
+      }),
+    ]
+    const projected = projectCharacterTokenPresentations(original, [])
+    expect(projected[0]).toMatchObject({
+      portraitImageId: 'shared-initiative',
+      tokenPortraitImageId: 'shared-token',
+    })
+    expect(projected[0].portrait).toBeUndefined()
+    expect(projected[0].tokenPortrait).toBeUndefined()
+  })
+
   it('projects the selected goblin appearance into both map and initiative artwork', () => {
     const projected = projectCharacterTokenPresentations([
       token({

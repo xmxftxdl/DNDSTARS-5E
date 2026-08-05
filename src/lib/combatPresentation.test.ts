@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { publishSharedEvent, sampleSharedServerClock } from './sharedApi'
 import { setRoomRulesSnapshot } from './roomRulesState'
 import type { RoomRulesSnapshot } from './roomSession'
+import { DND5E_CORE_SPELL_AREA_VISUALS } from '../rulesets/dnd5e/coreSpellAreaVisuals'
 import {
   ACID_SPLASH_ANIMATION_DURATION_MS,
   BLIGHT_ANIMATION_DURATION_MS,
   CHAIN_LIGHTNING_ANIMATION_DURATION_MS,
+  COUNTERSPELL_ANIMATION_DURATION_MS,
   ATTACK_TARGET_EFFECT_DURATION_MS,
   CHILL_TOUCH_ANIMATION_DURATION_MS,
   ELDRITCH_BLAST_ANIMATION_DURATION_MS,
@@ -18,16 +20,22 @@ import {
   FIREBALL_PRESENTATION_EVENT_TTL_MS,
   FLAMING_SPHERE_ANIMATION_DURATION_MS,
   FLAMING_SPHERE_ENTRANCE_DURATION_MS,
+  FLAMING_SPHERE_HANDOFF_TIMEOUT_MS,
   FINGER_OF_DEATH_ANIMATION_DURATION_MS,
   FALSE_LIFE_ANIMATION_DURATION_MS,
+  DISPEL_MAGIC_ANIMATION_DURATION_MS,
   GUIDANCE_MANIFESTATION_DURATION_MS,
   GUIDANCE_ORBIT_RADIUS_FACTOR,
+  HOLD_MONSTER_ANIMATION_DURATION_MS,
   KILL_STREAK_BANNER_START_DELAY_MS,
   KILL_STREAK_PRESENTATION_EVENT_TTL_MS,
   MAGIC_MISSILE_ANIMATION_DURATION_MS,
   MAGIC_MISSILE_SEQUENCE_GAP_MS,
+  LESSER_RESTORATION_ANIMATION_DURATION_MS,
+  MISTY_STEP_ANIMATION_DURATION_MS,
   PRODUCE_FLAME_ANIMATION_DURATION_MS,
   POISON_SPRAY_ANIMATION_DURATION_MS,
+  PERSISTENT_AREA_PRESENTATION_SPELL_IDS,
   POWER_WORD_KILL_ANIMATION_DURATION_MS,
   POWER_WORD_STUN_ANIMATION_DURATION_MS,
   RAY_OF_FROST_ANIMATION_DURATION_MS,
@@ -40,8 +48,10 @@ import {
   SANCTUARY_ORBIT_RADIUS_FACTOR,
   SACRED_FLAME_ANIMATION_DURATION_MS,
   SHOCKING_GRASP_ANIMATION_DURATION_MS,
+  SHIELD_ANIMATION_DURATION_MS,
   SPARE_THE_DYING_ANIMATION_DURATION_MS,
   SPELL_BANNER_TOTAL_DURATION_MS,
+  WALL_OF_FIRE_HANDOFF_TIMEOUT_MS,
   combatPresentationAttackTargetEffectsForMap,
   combatPresentationKillStreakForMap,
   combatPresentationProjectilesForMap,
@@ -58,15 +68,20 @@ import {
   publishAcidSplashPresentation,
   publishBlightPresentation,
   publishChainLightningPresentation,
+  publishCounterspellPresentation,
   publishDisintegratePresentation,
+  publishDispelMagicPresentation,
   publishEldritchBlastPresentation,
   publishFireBoltPresentation,
   publishFireballPresentation,
   publishFingerOfDeathPresentation,
   publishFalseLifePresentation,
   publishGuidancePresentation,
+  publishHoldMonsterPresentation,
   publishKillStreakPresentation,
   publishMagicMissilePresentation,
+  publishLesserRestorationPresentation,
+  publishMistyStepPresentation,
   publishProduceFlamePresentation,
   publishPoisonSprayPresentation,
   publishPowerWordKillPresentation,
@@ -76,6 +91,7 @@ import {
   publishSanctuaryPresentation,
   publishSacredFlamePresentation,
   publishShockingGraspPresentation,
+  publishShieldPresentation,
   publishSpareTheDyingPresentation,
   publishSpellBannerPresentation,
   reduceCombatPresentationState,
@@ -83,6 +99,13 @@ import {
   publishViciousMockeryPresentation,
   VICIOUS_MOCKERY_ANIMATION_DURATION_MS,
 } from './combatPresentation'
+
+describe('persistent spell presentation coverage', () => {
+  it('keeps every core persistent visual in the entrance handoff registry', () => {
+    expect([...PERSISTENT_AREA_PRESENTATION_SPELL_IDS].sort())
+      .toEqual(Object.keys(DND5E_CORE_SPELL_AREA_VISUALS).sort())
+  })
+})
 
 vi.mock('./sharedApi', () => ({
   publishSharedEvent: vi.fn(async () => undefined),
@@ -879,7 +902,7 @@ describe('combat presentation events', () => {
     ])
   })
 
-  it('holds Flaming Sphere through settlement and hands off to its exact persistent area', () => {
+  it('holds Flaming Sphere through delayed area delivery until the canvas confirms visual readiness', () => {
     const event = {
       schemaVersion: 1 as const,
       type: 'spell-area-effect' as const,
@@ -892,7 +915,7 @@ describe('combat presentation events', () => {
       shape: 'circle' as const,
       radiusFeet: 5,
       createdAt: 1_000,
-      expiresAt: 1_000 + FLAMING_SPHERE_ANIMATION_DURATION_MS + 500,
+      expiresAt: 1_000 + FLAMING_SPHERE_HANDOFF_TIMEOUT_MS,
     }
     const state = reduceCombatPresentationState(
       EMPTY_COMBAT_PRESENTATION_STATE,
@@ -905,21 +928,95 @@ describe('combat presentation events', () => {
       expect.objectContaining({
         kind: 'flaming-sphere',
         durationMs: FLAMING_SPHERE_ANIMATION_DURATION_MS,
+        radiusPx: 50,
+        handoffAreaId: 'core-spell-area:flaming-sphere-handoff',
       }),
     ])
-    expect(combatPresentationProjectilesForMap(state, {
+    const delayedAreaMap = {
       ...map,
       dnd5ePluginAreas: [{
         id: 'core-spell-area:flaming-sphere-handoff',
         sourceKind: 'core-spell',
         coreSpellId: 'flaming-sphere',
       }],
-    }, duringHandoff)).toEqual([])
+    }
+    const afterOldFixedCutoff = event.createdAt + FLAMING_SPHERE_ANIMATION_DURATION_MS + 3_000
+
     expect(combatPresentationProjectilesForMap(
       state,
-      map,
-      event.createdAt + FLAMING_SPHERE_ANIMATION_DURATION_MS,
+      delayedAreaMap,
+      afterOldFixedCutoff,
+    )).toEqual([expect.objectContaining({
+      kind: 'flaming-sphere',
+      handoffAreaId: 'core-spell-area:flaming-sphere-handoff',
+    })])
+
+    const timedOutState = reduceCombatPresentationState(
+      state,
+      null,
+      event.createdAt + FLAMING_SPHERE_HANDOFF_TIMEOUT_MS,
+    )
+    expect(combatPresentationProjectilesForMap(
+      timedOutState,
+      delayedAreaMap,
+      event.createdAt + FLAMING_SPHERE_HANDOFF_TIMEOUT_MS,
     )).toEqual([])
+  })
+
+  it('keeps Wall of Fire ring geometry projected until its persistent visual is ready', () => {
+    const event = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      id: 'wall-of-fire-ring:area',
+      mapId: map.id,
+      transactionId: 'wall-of-fire-ring',
+      sourceTokenId: 'wizard',
+      spellId: 'wall-of-fire' as const,
+      targetCell: { col: 3, row: 2 },
+      shape: 'rect' as const,
+      widthFeet: 60,
+      heightFeet: 5,
+      wallOfFireShape: 'ring' as const,
+      wallOfFireAngleDegrees: 0,
+      createdAt: 1_000,
+      expiresAt: 1_000 + WALL_OF_FIRE_HANDOFF_TIMEOUT_MS,
+    }
+    expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    const state = reduceCombatPresentationState(EMPTY_COMBAT_PRESENTATION_STATE, event, event.createdAt)
+
+    expect(combatPresentationProjectilesForMap(state, map, event.createdAt + 30_000)).toEqual([
+      expect.objectContaining({
+        kind: 'wall-of-fire',
+        areaShape: 'ring',
+        radiusPx: 100,
+        handoffAreaId: 'core-spell-area:wall-of-fire-ring',
+      }),
+    ])
+  })
+
+  it('projects a handoff id for every declared persistent core area', () => {
+    const event = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      id: 'cloudkill-handoff:area',
+      mapId: map.id,
+      transactionId: 'cloudkill-handoff',
+      sourceTokenId: 'wizard',
+      spellId: 'cloudkill' as const,
+      targetCell: { col: 3, row: 2 },
+      shape: 'circle' as const,
+      radiusFeet: 20,
+      createdAt: 1_000,
+      expiresAt: 1_000 + WALL_OF_FIRE_HANDOFF_TIMEOUT_MS,
+    }
+    const state = reduceCombatPresentationState(EMPTY_COMBAT_PRESENTATION_STATE, event, event.createdAt)
+
+    expect(combatPresentationProjectilesForMap(state, map, event.createdAt + 30_000)).toEqual([
+      expect.objectContaining({
+        kind: 'cloudkill',
+        handoffAreaId: 'core-spell-area:cloudkill-handoff',
+      }),
+    ])
   })
 
   it('projects a synchronized banner-only spell without creating a map projectile', () => {
@@ -1001,7 +1098,7 @@ describe('combat presentation events', () => {
       type: 'spell-area-effect',
       spellId: 'flaming-sphere',
       createdAt: 21_000,
-      expiresAt: 21_000 + FLAMING_SPHERE_ANIMATION_DURATION_MS + 500,
+      expiresAt: 21_000 + FLAMING_SPHERE_HANDOFF_TIMEOUT_MS,
     })
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(21_000 + FLAMING_SPHERE_ENTRANCE_DURATION_MS)
@@ -1625,6 +1722,50 @@ describe('combat presentation events', () => {
       expect.objectContaining({ type: 'spell-target-effect', spellId: 'false-life' }),
     )
     expect(schedule.completesAt).toBe(29_500 + FALSE_LIFE_ANIMATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes the next target-effect batch through the shared whitelist', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(30_000)
+    await refreshCombatPresentationClock(true)
+    const input = {
+      mapId: 'map-a',
+      transactionId: 'next-target-effect-batch',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'goblin',
+    }
+    const schedules = await Promise.all([
+      publishMistyStepPresentation({ ...input, id: 'misty-step-live' }),
+      publishHoldMonsterPresentation({ ...input, id: 'hold-monster-live' }),
+      publishCounterspellPresentation({ ...input, id: 'counterspell-live' }),
+      publishDispelMagicPresentation({ ...input, id: 'dispel-magic-live' }),
+      publishShieldPresentation({ ...input, id: 'shield-live' }),
+      publishLesserRestorationPresentation({ ...input, id: 'lesser-restoration-live' }),
+    ])
+    const spellIds = vi.mocked(publishSharedEvent).mock.calls.map((call) =>
+      (call[1] as { spellId?: string }).spellId,
+    )
+    expect(spellIds).toEqual([
+      'misty-step',
+      'hold-monster',
+      'counterspell',
+      'dispel-magic',
+      'shield',
+      'lesser-restoration',
+    ])
+    for (const event of vi.mocked(publishSharedEvent).mock.calls.map((call) => call[1])) {
+      expect(event).toMatchObject({ type: 'spell-target-effect' })
+      expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    }
+    expect(schedules.map((schedule) => schedule.completesAt - 30_500)).toEqual([
+      MISTY_STEP_ANIMATION_DURATION_MS,
+      HOLD_MONSTER_ANIMATION_DURATION_MS,
+      COUNTERSPELL_ANIMATION_DURATION_MS,
+      DISPEL_MAGIC_ANIMATION_DURATION_MS,
+      SHIELD_ANIMATION_DURATION_MS,
+      LESSER_RESTORATION_ANIMATION_DURATION_MS,
+    ])
     vi.useRealTimers()
   })
 

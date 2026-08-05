@@ -101,6 +101,22 @@ function appendApiPath(baseUrl, pathName) {
   return url
 }
 
+function safeUpstreamErrorDetail(body) {
+  if (!plainObject(body)) return ''
+  const error = body.error
+  const candidates = typeof error === 'string'
+    ? [error]
+    : plainObject(error)
+      ? [error.message, error.type, error.param, error.code]
+      : [body.message]
+  const details = candidates.flatMap((value) => {
+    if (typeof value !== 'string') return []
+    const sanitized = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
+    return sanitized ? [sanitized] : []
+  })
+  return [...new Set(details)].join(' | ').slice(0, 480)
+}
+
 async function readJsonBody(req, maximumBytes = 32 * 1024 * 1024) {
   const chunks = []
   let size = 0
@@ -123,9 +139,7 @@ async function fetchJson(url, init = {}, timeoutMs = 5_000, externalSignal = nul
     const response = await fetch(url, { ...init, signal })
     if (!response.ok) {
       const body = await response.json().catch(() => null)
-      const detail = plainObject(body) && typeof body.error === 'string'
-        ? body.error.trim().slice(0, 240)
-        : ''
+      const detail = safeUpstreamErrorDetail(body)
       throw new Error(`upstream-${response.status}${detail ? `:${detail}` : ''}`)
     }
     return await response.json()
@@ -158,9 +172,7 @@ async function fetchOllamaChat(url, init = {}, timeoutMs = 900_000, externalSign
     const response = await fetch(url, { ...init, signal })
     if (!response.ok) {
       const body = await response.json().catch(() => null)
-      const detail = plainObject(body) && typeof body.error === 'string'
-        ? body.error.trim().slice(0, 240)
-        : ''
+      const detail = safeUpstreamErrorDetail(body)
       throw new Error(`upstream-${response.status}${detail ? `:${detail}` : ''}`)
     }
     if (!response.body) throw new Error('upstream-empty-response')
@@ -287,7 +299,7 @@ function externalModelDescriptor(config) {
   const roleTasks = config.role === 'extraction'
     ? ['pdf-extraction']
     : config.role === 'synthesis'
-      ? ['campaign-analysis']
+      ? ['campaign-analysis', 'resource-structuring', 'session-summary', 'prep-recommendations']
       : supportedTasks(capabilities)
   return {
     schemaVersion: 1,
@@ -312,7 +324,8 @@ function documentPrompt(documents) {
 
 function structuredOutputTokenBudget(task, requested, engine = 'ollama') {
   const documentTask = ['pdf-extraction', 'campaign-analysis'].includes(task)
-  const taskMaximum = documentTask
+  const resourceTask = task === 'resource-structuring'
+  const taskMaximum = documentTask || resourceTask
     ? (engine === 'external' ? 16_384 : 6_144)
     : 2_048
   if (!Number.isSafeInteger(requested)) return taskMaximum
@@ -421,8 +434,15 @@ async function generateStructured({
           { role: 'system', content: systemContent },
           { role: 'user', content },
         ],
-        temperature: 0,
-        max_tokens: structuredOutputTokenBudget(request.task, request.maxOutputTokens, engine),
+        ...(engine === 'external'
+          ? {
+              max_completion_tokens: structuredOutputTokenBudget(request.task, request.maxOutputTokens, engine),
+              ...(/^gpt-5\.6(?:-|$)/i.test(upstreamModel) ? { reasoning_effort: 'none' } : {}),
+            }
+          : {
+              temperature: 0,
+              max_tokens: structuredOutputTokenBudget(request.task, request.maxOutputTokens, engine),
+            }),
         response_format: {
           type: 'json_schema',
           json_schema: {
@@ -481,6 +501,10 @@ export async function startLocalAiBridge(options = {}) {
   const sharedApiUrl = configuredText(options.externalApiUrl)
   const sharedApiKey = configuredText(options.externalApiKey)
   const imageModelId = configuredText(options.externalImageModelId)
+  const configuredImageDefaultQuality = configuredText(options.externalImageDefaultQuality)
+  const imageDefaultQuality = ['low', 'medium', 'high'].includes(configuredImageDefaultQuality)
+    ? configuredImageDefaultQuality
+    : 'low'
   const imageModel = imageModelId ? {
     apiUrl: externalModelApiUrl(options.externalImageApiUrl || sharedApiUrl),
     apiKey: configuredText(options.externalImageApiKey || sharedApiKey),
@@ -673,7 +697,7 @@ export async function startLocalAiBridge(options = {}) {
         const body = await readJsonBody(req, 16_384)
         const prompt = configuredText(body?.prompt)
         const aspect = body?.aspect === 'square' ? 'square' : 'portrait-3:4'
-        const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium'
+        const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : imageDefaultQuality
         if (prompt.length < 20 || prompt.length > 4_000) {
           jsonResponse(res, 400, { error: 'invalid-image-prompt' }, corsHeaders)
           return
@@ -697,6 +721,7 @@ export async function startLocalAiBridge(options = {}) {
         jsonResponse(res, 200, {
           schemaVersion: 1,
           modelId: imageModel.modelId,
+          quality,
           mimeType: 'image/png',
           dataUrl: `data:image/png;base64,${base64}`,
         }, corsHeaders)
@@ -728,6 +753,7 @@ export async function startLocalAiBridge(options = {}) {
         imageGeneration: imageModel ? {
           status: 'ready',
           modelId: imageModel.modelId,
+          defaultQuality: imageDefaultQuality,
         } : { status: 'unconfigured' },
       }, corsHeaders)
       return
@@ -804,7 +830,12 @@ export async function startLocalAiBridge(options = {}) {
         const selectedExternalModel = engine === 'external' ? externalModelsById.get(modelId) : null
         const externalRoleMatchesTask = !selectedExternalModel || selectedExternalModel.role === 'general' ||
           (selectedExternalModel.role === 'extraction' && normalized.ok && normalized.value.task === 'pdf-extraction') ||
-          (selectedExternalModel.role === 'synthesis' && normalized.ok && normalized.value.task === 'campaign-analysis')
+          (selectedExternalModel.role === 'synthesis' && normalized.ok && [
+            'campaign-analysis',
+            'resource-structuring',
+            'session-summary',
+            'prep-recommendations',
+          ].includes(normalized.value.task))
         if (!engine || !modelId || !normalized.ok ||
           (engine === 'external' && (!selectedExternalModel || !externalRoleMatchesTask))) {
           jsonResponse(res, 400, { error: normalized.ok ? 'invalid-bridge-request' : normalized.error }, corsHeaders)

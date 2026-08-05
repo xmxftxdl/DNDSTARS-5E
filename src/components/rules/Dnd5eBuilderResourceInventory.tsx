@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { ChevronDown, Info } from 'lucide-react'
 import {
   dnd5eBuilderAutomationStatus,
@@ -33,9 +34,15 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
 export default function Dnd5eBuilderResourceInventory({
   sectionLabel,
   entries,
+  headerAction,
+  entryActionLabel,
+  onEntryAction,
 }: {
   sectionLabel: string
   entries: readonly Dnd5eBuilderResourceInventoryEntry[]
+  headerAction?: ReactNode
+  entryActionLabel?: string
+  onEntryAction?: (entry: Dnd5eBuilderResourceInventoryEntry) => void
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const summary = summarizeDnd5eBuilderResourceInventory(entries)
@@ -49,16 +56,19 @@ export default function Dnd5eBuilderResourceInventory({
             当前扩展包含 {summary.resources} 项；下方只显示“{sectionLabel}”分类的资源。
           </p>
         </div>
-        <button
-          type="button"
-          aria-expanded={detailsOpen}
-          onClick={() => setDetailsOpen((open) => !open)}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-300/20 bg-cyan-400/8 px-3 py-2 text-xs font-semibold text-cyan-100"
-        >
-          <Info className="h-3.5 w-3.5" />
-          详细信息
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {headerAction}
+          <button
+            type="button"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((open) => !open)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-300/20 bg-cyan-400/8 px-3 py-2 text-xs font-semibold text-cyan-100"
+          >
+            <Info className="h-3.5 w-3.5" />
+            详细信息
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {entries.length === 0 ? (
@@ -81,6 +91,16 @@ export default function Dnd5eBuilderResourceInventory({
                   </span>
                 </div>
                 {entry.summary && <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-500">{entry.summary}</p>}
+                {entryActionLabel && onEntryAction && (
+                  <button
+                    type="button"
+                    aria-label={`${entryActionLabel}：${entry.name || entry.id}`}
+                    onClick={() => onEntryAction(entry)}
+                    className="mt-3 w-full rounded-lg border border-violet-400/20 bg-violet-500/[0.06] px-2.5 py-1.5 text-[11px] font-semibold text-violet-100 transition hover:border-violet-300/35 hover:bg-violet-500/12"
+                  >
+                    {entryActionLabel}
+                  </button>
+                )}
               </article>
             )
           })}

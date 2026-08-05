@@ -165,6 +165,20 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   // example while the DM restores a cached map into a new room). The player
   // canvas must recover without a page reload when that image appears later.
   await expect(canvas).toHaveAttribute('data-map-image-state', 'missing')
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'light'
+  })
+  await expect.poll(() => canvas.evaluate((element) =>
+    getComputedStyle(element).backgroundColor,
+  )).toBe('rgb(10, 11, 22)')
+  await expect.poll(() => canvas.evaluate((element) => {
+    const surface = element.getBoundingClientRect()
+    const stage = element.querySelector<HTMLElement>('.konvajs-content')?.getBoundingClientRect()
+    if (!stage) return false
+    return Math.abs(stage.width - surface.width) <= 1 &&
+      Math.abs(stage.height - surface.height) <= 1 &&
+      stage.width > 0 && stage.height > 0
+  })).toBe(true)
   const mapImage = Buffer.from([
     '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800">',
     '<rect width="800" height="800" fill="#7e22ce"/>',

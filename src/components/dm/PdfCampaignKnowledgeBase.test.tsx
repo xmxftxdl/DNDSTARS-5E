@@ -33,4 +33,31 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('地图')
     expect(html).toContain('编辑知识库')
   })
+
+  it('把 NPC 待导入草稿渲染为可打开详情的按钮，并提示战斗单位可能误分类', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            importCandidates: [{
+              name: '伊利法军兵',
+              description: '守序邪恶，作为召唤单位参与战斗。',
+              kind: 'npc',
+              automation: 'full',
+              citations: [{ documentName: '模组.pdf', page: 10 }],
+            }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="imports"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('查看详情')
+    expect(html).toContain('可能应归类为怪物')
+    expect(html).toContain('<button')
+  })
 })

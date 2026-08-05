@@ -4,24 +4,28 @@ import { canWriteSharedState } from '../lib/appMode'
 import {
   applyDnd5eCombatStatisticsObservation,
   applyCombatExperienceSettlement,
+  archiveCombatStatisticsLog,
   COMBAT_STATISTICS_MAX_SESSIONS,
   COMBAT_STATISTICS_RESOURCE,
   COMBAT_STATISTICS_SCHEMA_VERSION,
   createCombatStatisticsSession,
+  deleteCombatStatisticsLog,
   dnd5eCombatStatisticsReceipt,
   normalizeSharedCombatStatistics,
   type CombatStatisticsSession,
+  type CombatLogArchiveInput,
   type CombatStatisticsSide,
   type Dnd5eCombatStatisticsObservation,
   type SharedCombatStatisticsState,
 } from '../lib/combatStatistics'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
-import type { Dnd5eHeadlessResolutionObservation } from '../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eHeadlessResolutionObservation } from '../application/combat/dnd5eCombatRules'
 import type { CombatExperienceSettlement } from '../lib/combatExperience'
 
 interface CombatStatisticsStoreState {
   sessions: CombatStatisticsSession[]
+  hydrated: boolean
   loadShared: () => Promise<void>
   startCombat: (combatId: string, mapId: string) => void
   record: (
@@ -32,6 +36,8 @@ interface CombatStatisticsStoreState {
   ) => void
   /** 同一 combatId 仅接受一次；返回 false 表示已经结算。 */
   settleExperience: (settlement: CombatExperienceSettlement) => boolean
+  archiveCombatLog: (input: CombatLogArchiveInput) => Promise<boolean>
+  deleteCombatLog: (combatId: string) => Promise<boolean>
   clearCombat: (combatId: string) => void
 }
 
@@ -69,8 +75,8 @@ function migratePersistedStatisticsState(persistedState: unknown): Pick<CombatSt
   return { sessions: normalized?.sessions ?? [] }
 }
 
-function publish(sessions: CombatStatisticsSession[]) {
-  if (!canWriteSharedState()) return
+async function publish(sessions: CombatStatisticsSession[]): Promise<boolean> {
+  if (!canWriteSharedState()) return false
   const ticket = sharedWriteWatermark.begin()
   const updatedAt = ticket.updatedAt
   const payload: SharedCombatStatisticsState = {
@@ -78,19 +84,23 @@ function publish(sessions: CombatStatisticsSession[]) {
     sessions: sessions.slice(-COMBAT_STATISTICS_MAX_SESSIONS),
     updatedAt,
   }
-  void saveSharedResourceWithResult(COMBAT_STATISTICS_RESOURCE, payload).then((result) => {
-    sharedWriteWatermark.settle(ticket, result.status === 'saved')
-  })
+  const result = await saveSharedResourceWithResult(COMBAT_STATISTICS_RESOURCE, payload)
+  sharedWriteWatermark.settle(ticket, result.status === 'saved')
+  return result.status === 'saved'
 }
 
 export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
   persist((set, get) => ({
     sessions: [],
+    hydrated: false,
     loadShared: async () => {
       const shared = normalizeSharedCombatStatistics(await loadSharedResource(COMBAT_STATISTICS_RESOURCE))
-      if (!shared || !sharedWriteWatermark.shouldApplyRemote(shared.updatedAt)) return
-      sharedWriteWatermark.acceptRemote(shared.updatedAt)
-      set({ sessions: shared.sessions })
+      if (shared && sharedWriteWatermark.shouldApplyRemote(shared.updatedAt)) {
+        sharedWriteWatermark.acceptRemote(shared.updatedAt)
+        set({ sessions: shared.sessions, hydrated: true })
+        return
+      }
+      set({ hydrated: true })
     },
     startCombat: (combatId, mapId) => {
       if (!combatId || !mapId) return
@@ -101,7 +111,7 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
           createCombatStatisticsSession({ combatId, mapId, now }),
         ].slice(-COMBAT_STATISTICS_MAX_SESSIONS),
       }))
-      queueMicrotask(() => publish(get().sessions))
+      queueMicrotask(() => { void publish(get().sessions) })
     },
     record: (mapId, observation, sideByCombatantId, characterIdByCombatantId) => {
       if (!observation.result.ok || observation.result.events.length === 0) return
@@ -121,7 +131,7 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
         sessions: [...state.sessions.filter((session) => session.combatId !== combatId), next]
           .slice(-COMBAT_STATISTICS_MAX_SESSIONS),
       }))
-      queueMicrotask(() => publish(get().sessions))
+      queueMicrotask(() => { void publish(get().sessions) })
     },
     settleExperience: (settlement) => {
       let accepted = false
@@ -137,12 +147,61 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
           ].slice(-COMBAT_STATISTICS_MAX_SESSIONS),
         }
       })
-      if (accepted) queueMicrotask(() => publish(get().sessions))
+      if (accepted) queueMicrotask(() => { void publish(get().sessions) })
       return accepted
+    },
+    archiveCombatLog: async (input) => {
+      let archived = false
+      set((state) => {
+        const current = state.sessions.find((session) => session.combatId === input.combatId)
+        const next = archiveCombatStatisticsLog(current, input)
+        if (current === next ||
+          (current?.logEntries && current.endedAt != null &&
+            current.logEntries.length === next.logEntries?.length &&
+            current.updatedAt >= next.updatedAt)) return state
+        archived = true
+        return {
+          sessions: [
+            ...state.sessions.filter((session) => session.combatId !== input.combatId),
+            next,
+          ].slice(-COMBAT_STATISTICS_MAX_SESSIONS),
+        }
+      })
+      return archived ? publish(get().sessions) : true
+    },
+    deleteCombatLog: async (combatId) => {
+      const previous = get().sessions.find((session) => session.combatId === combatId)
+      if (!previous?.logEntries?.length) return true
+      const next = deleteCombatStatisticsLog(previous, Date.now())
+      set((state) => ({
+        sessions: [
+          ...state.sessions.filter((session) => session.combatId !== combatId),
+          next,
+        ].slice(-COMBAT_STATISTICS_MAX_SESSIONS),
+      }))
+      let saved = false
+      try {
+        saved = await publish(get().sessions)
+      } catch (error) {
+        console.error('[combat-statistics] failed to delete archived combat log', error)
+      }
+      if (!saved) {
+        set((state) => {
+          const current = state.sessions.find((session) => session.combatId === combatId)
+          if (current?.logDeletedAt !== next.logDeletedAt) return state
+          return {
+            sessions: [
+              ...state.sessions.filter((session) => session.combatId !== combatId),
+              previous,
+            ].slice(-COMBAT_STATISTICS_MAX_SESSIONS),
+          }
+        })
+      }
+      return saved
     },
     clearCombat: (combatId) => {
       set((state) => ({ sessions: state.sessions.filter((session) => session.combatId !== combatId) }))
-      queueMicrotask(() => publish(get().sessions))
+      queueMicrotask(() => { void publish(get().sessions) })
     },
   }), {
     name: 'dndstars-combat-statistics',

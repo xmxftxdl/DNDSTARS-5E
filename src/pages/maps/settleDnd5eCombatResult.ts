@@ -10,6 +10,7 @@ import {
   dnd5eDarkOnesOwnLuckAvailable,
   dnd5eHeldBardicInspirationDie,
   dnd5eHellishRebukeSlotLevel,
+  dnd5ePendingMonsterMechanicResolutions,
   dnd5ePendingMonsterDeathAreaEffects,
   dnd5ePostSpellRandomTablePlan,
   dnd5eRacialInnateSpellGrant,
@@ -935,6 +936,42 @@ export async function settleDnd5eConcentrationChecks(input: {
       state = nested.result.state
       events.push(...nested.result.events)
     }
+  }
+  const pendingMonsterMechanics = dnd5ePendingMonsterMechanicResolutions(state)
+  for (const pending of pendingMonsterMechanics) {
+    // Triggered attacks require a separate authoritative preview because a
+    // critical hit changes the required damage-die count. Dice-only mechanics
+    // can be settled immediately, including conditional extra damage.
+    if (pending.attacks.length > 0) continue
+    const effectRolls = []
+    for (const requirement of pending.dice) {
+      effectRolls.push({
+        effectId: requirement.effectId,
+        rolls: await input.rollDice(
+          requirement.count,
+          requirement.sides,
+          `${pending.mechanicName}·${requirement.effectName}`,
+          pending.ownerName,
+        ),
+      })
+    }
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
+      type: 'resolve-monster-mechanic-trigger',
+      actorId: pending.snapshot.mechanicOwnerId,
+      snapshotId: pending.snapshot.id,
+      roll: {
+        actorId: pending.snapshot.mechanicOwnerId,
+        mechanicId: pending.snapshot.mechanicId,
+        effectRolls,
+      },
+    })
+    if (!resolved.ok) continue
+    const nested = await settleDnd5eConcentrationChecks({
+      ...input,
+      result: resolved,
+    })
+    state = nested.result.state
+    events.push(...nested.result.events)
   }
   const result = { ok: true as const, state, events }
   const application = planDnd5eMapResultApplication({

@@ -1,46 +1,20 @@
 import { DND5E_CLASS_ICON_PALETTES } from '../../lib/dnd5eActionIcons'
 import { getEnemyTemplate } from '../../lib/enemyPool'
 import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
-import { dnd5eClassDefinition } from '../../rulesets/dnd5e/classes'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
+import { dnd5eCharacterPresentationColors } from '../../presentation/dnd5e/characterPresentation'
+export { dnd5eCharacterPresentationColors } from '../../presentation/dnd5e/characterPresentation'
 
 const FALLBACK_PRESENTATION = {
   accentColor: '#94a3b8',
   glowColor: '#e2e8f0',
   statusBackgroundHighlightColor: '#334155',
   statusBackgroundColor: '#111827',
-  statusBorderColor: '#e2e8f0',
+  statusBorderColor: '#94a3b8',
   classId: undefined,
 } as const
-
-export function dnd5eCharacterPresentationColors(
-  character: Character | undefined,
-) {
-  const levelClassId = Object.entries(character?.dnd5eClassLevels ?? {})
-    .filter(([, level]) => Number(level ?? 0) > 0)
-    .sort(([, left], [, right]) => Number(right ?? 0) - Number(left ?? 0))[0]?.[0]
-  const legacyClassId = character
-    ? dnd5eClassDefinition(character.charClass)?.id ??
-      (
-        DND5E_CLASS_ICON_PALETTES[character.charClass.trim().toLowerCase()]
-          ? character.charClass.trim().toLowerCase()
-          : undefined
-      )
-    : undefined
-  const classId = levelClassId ?? legacyClassId
-  const palette = classId ? DND5E_CLASS_ICON_PALETTES[classId] : undefined
-  if (!palette) return FALLBACK_PRESENTATION
-  return {
-    accentColor: palette[0],
-    glowColor: palette[3],
-    statusBackgroundHighlightColor: palette[0],
-    statusBackgroundColor: palette[1],
-    statusBorderColor: palette[2],
-    classId,
-  }
-}
 
 export type CombatLogSubjectResolution =
   | 'actor-token-id'
@@ -66,6 +40,13 @@ interface SubjectCandidate {
   token: Token
   character?: Character
   aliases: readonly string[]
+}
+
+export function combatLogEntryIsRoundBoundary(entry: Pick<CombatLogEntry, 'kind' | 'text'>): boolean {
+  if (entry.kind !== 'turn') return false
+  const text = entry.text.trim()
+  return /^进入第\s*\d+\s*回合$/u.test(text) ||
+    /^round\s+\d+\s*(?:begins|starts)?$/iu.test(text)
 }
 
 function normalizedAlias(value: string | undefined): string | undefined {
@@ -147,7 +128,7 @@ function presentationForCandidate(
       monsterTemplate?.tokenPortrait,
     portraitImageId: token.portraitImageId,
     borderColor: isPlayer
-      ? playerColors?.glowColor ?? token.color ?? FALLBACK_PRESENTATION.glowColor
+      ? playerColors?.accentColor ?? token.color ?? FALLBACK_PRESENTATION.accentColor
       : token.type === 'enemy'
         ? monsterPalette[3]
         : token.color ?? monsterPalette[3],
@@ -174,6 +155,7 @@ export function inferCombatLogActorTokenId(input: {
   characters: readonly Character[]
   currentTurnTokenId?: string
 }): string | undefined {
+  if (combatLogEntryIsRoundBoundary(input)) return undefined
   const candidates = subjectCandidates(input.tokens, input.characters)
   const named = candidateMention(candidates, input.text, input.currentTurnTokenId)
   if (named) return named.token.id
@@ -220,6 +202,15 @@ export function resolveCombatLogSubject(input: {
   characters: readonly Character[]
   currentTurnTokenId?: string
 }): CombatLogSubjectPresentation {
+  if (combatLogEntryIsRoundBoundary(input.entry)) {
+    return {
+      label: '回合推进',
+      emoji: '',
+      borderColor: '#64748b',
+      side: 'neutral',
+      resolution: 'neutral',
+    }
+  }
   const candidates = subjectCandidates(input.tokens, input.characters)
   const explicit = candidateForEntityId(candidates, input.entry.actorTokenId)
   if (explicit) return presentationForCandidate(explicit, 'actor-token-id')

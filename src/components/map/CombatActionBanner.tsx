@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import {
   DND5E_CLASS_ICON_PALETTES,
+  dnd5eNamedActionIcon,
   dnd5eSystemActionIcon,
   dnd5eSpellActionIcon,
 } from '../../lib/dnd5eActionIcons'
@@ -15,7 +16,7 @@ interface CombatActionBannerProps {
   spellId?: string
   spellName?: string
   attackName?: string
-  attackKind?: 'melee' | 'ranged'
+  attackKind?: 'melee' | 'ranged' | 'action'
 }
 
 const FALLBACK_PALETTE = ['#3B82F6', '#071A38', '#DBEAFE', '#60A5FA'] as const
@@ -46,7 +47,13 @@ export default function CombatActionBanner({
         damageType: spellId === 'fireball' ? 'fire' : undefined,
         castingClassId: classId,
       })
-    : mode === 'attack'
+    : mode === 'attack' && attackKind === 'action'
+      ? dnd5eNamedActionIcon({
+          id: attackName,
+          name: attackName,
+          classId,
+        })
+      : mode === 'attack'
       ? dnd5eSystemActionIcon(
           `${attackKind}:${attackName}`,
           classId === 'monster'

@@ -1,9 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import { DND5E_SRD_ITEM_TEMPLATES } from '../rulesets/dnd5e/items'
 import { DND5E_SRD_SPELL_CATALOG } from '../rulesets/dnd5e/spellCatalog'
-import { dnd5eItemActionIcon, dnd5eSpellActionIcon } from './dnd5eActionIcons'
+import {
+  DND5E_CLASS_ICON_PALETTES,
+  dnd5eItemActionIcon,
+  dnd5eSpellActionIcon,
+} from './dnd5eActionIcons'
 
 describe('D&D 5e combat action icon registry', () => {
+  it('keeps the canonical class presentation colors stable', () => {
+    expect(Object.fromEntries(Object.entries(DND5E_CLASS_ICON_PALETTES)
+      .filter(([classId]) => classId !== 'monster')
+      .map(([classId, palette]) => [classId, palette[0]])))
+      .toEqual({
+        barbarian: '#E5484D',
+        bard: '#D946EF',
+        cleric: '#FBBF24',
+        druid: '#22C55E',
+        fighter: '#94A3B8',
+        monk: '#F97316',
+        paladin: '#BAE6FD',
+        ranger: '#65A30D',
+        rogue: '#475569',
+        sorcerer: '#FB7185',
+        warlock: '#8B5CF6',
+        wizard: '#3B82F6',
+      })
+    expect(DND5E_CLASS_ICON_PALETTES.monster[3]).toBe('#EF4444')
+  })
+
   it('为全部 SRD 5.1 法术生成稳定图标', () => {
     expect(DND5E_SRD_SPELL_CATALOG).toHaveLength(319)
     const specs = DND5E_SRD_SPELL_CATALOG.map((spell) => dnd5eSpellActionIcon(spell))

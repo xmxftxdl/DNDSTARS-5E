@@ -1,11 +1,13 @@
 import { getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from '../rulesets/dnd5e/monsters'
-import { planDnd5eMonsterTurn, type Dnd5eMonsterTurnPlan } from '../rulesets/dnd5e/monsterTurnPlanner'
+import type { Dnd5eMonsterTurnPlan } from '../rulesets/dnd5e/monsterTurnPlanner'
 import { createDnd5eLearnedMonsterDecisionProvider } from '../rulesets/dnd5e/monsterStrategyLearning'
 import type {
   Dnd5eMonsterTurnWorkerInput,
   Dnd5eMonsterTurnWorkerRequest,
   Dnd5eMonsterTurnWorkerResponse,
 } from './dnd5eMonsterTurnWorkerProtocol'
+
+export type { Dnd5eMonsterTurnPlan } from '../rulesets/dnd5e/monsterTurnPlanner'
 
 export interface Dnd5eMonsterTurnPlanningControl {
   signal?: AbortSignal
@@ -74,7 +76,11 @@ function prepareWorkerInput(input: Dnd5eMonsterTurnWorkerInput): Dnd5eMonsterTur
   }
 }
 
-function resolveSynchronously(input: Dnd5eMonsterTurnWorkerInput): Dnd5eMonsterTurnPlan {
+async function resolveSynchronously(input: Dnd5eMonsterTurnWorkerInput): Promise<Dnd5eMonsterTurnPlan> {
+  // Keep the large planner implementation outside the map route's eager graph.
+  // The synchronous fallback is exceptional, so load it only when a Worker is
+  // genuinely unavailable instead of charging every map session for it.
+  const { planDnd5eMonsterTurn } = await import('../rulesets/dnd5e/monsterTurnPlanner')
   // The application's map and monster stores already install their registries
   // on the main thread. Do not replace those global registries in a fallback.
   return planDnd5eMonsterTurn(input.map, input.enemy, input.characters, {
@@ -95,11 +101,9 @@ function runSynchronousFallback(task: PendingPlanningTask, reason: string): void
     return
   }
   task.control.onSynchronousFallback?.(reason)
-  try {
-    task.resolve(resolveSynchronously(task.input))
-  } catch (error) {
+  void resolveSynchronously(task.input).then(task.resolve, (error: unknown) => {
     task.reject(error instanceof Error ? error : new Error(String(error)))
-  }
+  })
 }
 
 function takePendingTask(requestId: number): PendingPlanningTask | undefined {

@@ -7,7 +7,9 @@ import {
   rollbackCombatTransaction,
   type CombatTransaction,
 } from '../../lib/combatTransaction'
-import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import { DND_FEET_PER_CELL, pixelToCell, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells, type SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { D20RollMode } from '../contracts'
@@ -30,7 +32,12 @@ import {
   type RegisteredDnd5ePluginSpell,
 } from './pluginApi'
 import { dnd5eSpellcastingClassIdForSpell } from './spells'
-import type { Dnd5eSpellConditionDuration, Dnd5eSpellMechanicsDefinition } from './spellMechanics'
+import {
+  dnd5eSpellCantripScalingTotals,
+  dnd5eSpellUpcastTotals,
+  type Dnd5eSpellConditionDuration,
+  type Dnd5eSpellMechanicsDefinition,
+} from './spellMechanics'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eWearingUnproficientArmor } from './equipment'
 import { resolveDnd5eDamageDefenses } from './damageDefenses'
@@ -41,6 +48,7 @@ import {
   type Dnd5eSpellComponentCheck,
 } from './spellComponents'
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
+import { dnd5ePluginSpellArea, dnd5ePluginSpellTargetCapacity } from './pluginSpellTargeting'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -67,6 +75,17 @@ export type Dnd5ePluginSpellRejectReason =
 
 export type Dnd5ePluginSpellComponentCheck = Dnd5eSpellComponentCheck
 
+export interface PreparedDnd5ePluginSpellTarget {
+  key: string
+  token: Token
+  distanceFeet: number
+  attackMode: D20RollMode
+  saveModifier?: number
+  saveMode?: D20RollMode
+  saveAutomaticallyFails: boolean
+  armorClass: number
+}
+
 export interface PreparedDnd5ePluginSpellCast {
   action: SharedPlayerActionState
   payload: Dnd5eSpellCastPayload
@@ -80,6 +99,9 @@ export interface PreparedDnd5ePluginSpellCast {
   castingClassLevel: number
   actorToken: Token
   targetToken: Token
+  targetTokens: Token[]
+  targets: PreparedDnd5ePluginSpellTarget[]
+  area?: SkillAoeTargeting
   slotLevel: number
   castingTime: 'action' | 'bonus-action'
   componentCheck: Dnd5ePluginSpellComponentCheck
@@ -92,6 +114,7 @@ export interface PreparedDnd5ePluginSpellCast {
   targetArmorClass: number
   damageDice: { count: number; sides: number; bonus: number }
   concentrationRounds?: number
+  upcastDurationRounds: number
   transaction: CombatTransaction
 }
 
@@ -101,6 +124,23 @@ export interface Dnd5ePluginSpellResolutionRolls {
   savingThrowD20?: number
   savingThrowD20Second?: number
   damageRolls?: number[]
+  targetRolls?: Array<{
+    attackD20?: number
+    attackD20Second?: number
+    savingThrowD20?: number
+    savingThrowD20Second?: number
+    damageRolls?: number[]
+  }>
+}
+
+export interface Dnd5ePluginSpellTargetResolution {
+  key: string
+  targetTokenId: string
+  attackHit?: boolean
+  critical: boolean
+  saveSucceeded?: boolean
+  rawDamage: number
+  finalDamage: number
 }
 
 export interface Dnd5ePluginSpellResolution {
@@ -112,6 +152,7 @@ export interface Dnd5ePluginSpellResolution {
   saveSucceeded?: boolean
   rawDamage?: number
   finalDamage?: number
+  targetResolutions?: Dnd5ePluginSpellTargetResolution[]
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 }
 
@@ -127,14 +168,10 @@ export function dnd5ePluginSpellAutomationSupported(spell: RegisteredDnd5ePlugin
     spell.mechanics.resolution === 'dm-adjudication' ||
     !dnd5ePluginHeadlessActionDefinition(spell.ownerPluginId, spell.automation.actionId)
   ) return false
-  const unsupportedUpcast = spell.mechanics.upcast?.effects.some((effect) =>
-    effect.kind !== 'damage-dice' && effect.kind !== 'flat-damage',
-  ) === true
   return spell.mechanics.kind !== 'healing' &&
     (!!spell.mechanics.damage || !!spell.mechanics.conditions?.length) &&
-    spell.range.shape == null && spell.range.sizeFeet == null &&
     ['self', 'touch', 'distance', 'sight'].includes(spell.range.type) &&
-    !unsupportedUpcast
+    (spell.range.shape == null || dnd5ePluginSpellArea(spell) != null)
 }
 
 export function prepareDnd5ePluginSpellCast(input: {
@@ -205,13 +242,59 @@ export function prepareDnd5ePluginSpellCast(input: {
     if ((actor.classResources?.[resourceKey]?.current ?? 0) < 1) return { ok: false, reason: 'slot-unavailable' }
   }
 
-  const targetToken = spell.range.type === 'self'
-    ? actorToken
-    : input.map.tokens.find((token) => token.id === (payload.targetTokenId || input.action.targetTokenId))
-  if (!targetToken || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
-  const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-  const maximumRange = spell.range.type === 'self' ? 0 : spell.range.type === 'touch' ? 5 : spell.range.type === 'distance' ? (spell.range.feet ?? 0) : Number.POSITIVE_INFINITY
-  if (distanceFeet > maximumRange) return { ok: false, reason: 'target-out-of-range' }
+  const area = dnd5ePluginSpellArea(spell)
+  const targetCapacity = dnd5ePluginSpellTargetCapacity(spell, slotLevel)
+  let targetTokens: Token[]
+  if (area) {
+    const casterCell = pixelToCell(actorToken.x, actorToken.y, input.map)
+    const targetCell = payload.areaTargetCell ?? (spell.range.type === 'self' ? casterCell : undefined)
+    if (!targetCell || !canPlaceAoe(area, casterCell, targetCell)) return { ok: false, reason: 'target-out-of-range' }
+    if (payload.areaTargetAngleDegrees != null && (
+      !Number.isFinite(payload.areaTargetAngleDegrees) ||
+      payload.areaTargetAngleDegrees < 0 || payload.areaTargetAngleDegrees >= 360 ||
+      area.shape !== 'rect' || !area.rotatable
+    )) return { ok: false, reason: 'invalid-target' }
+    const orientFrom = aoeOrientFromCell(area, casterCell, targetCell, {
+      rectRotation: payload.areaTargetOrientation,
+      rectAngleDegrees: payload.areaTargetAngleDegrees,
+    })
+    const affectedCells = cellsForAoe(area, orientFrom, targetCell)
+    targetTokens = tokensInCells(input.map, input.map.tokens, affectedCells)
+      .filter((token) => {
+        if (token.type === 'obstacle') return false
+        if (token.id === actorToken.id && spell.targeting?.includeSelf !== true) return false
+        const opposed = areOpposedCombatTokens(actorToken, token)
+        if (spell.targeting?.relation === 'ally' && opposed) return false
+        if (spell.targeting?.relation === 'enemy' && !opposed) return false
+        return true
+      })
+      .slice(0, targetCapacity.maximumTargets)
+  } else if (spell.range.type === 'self') {
+    targetTokens = [actorToken]
+  } else {
+    const requestedIds = targetCapacity.allowDuplicateTargets
+      ? payload.projectileTargetIds ?? payload.targetTokenIds ?? [payload.targetTokenId || input.action.targetTokenId]
+      : [...new Set(payload.targetTokenIds?.length ? payload.targetTokenIds : [payload.targetTokenId || input.action.targetTokenId])]
+    if (requestedIds.length < 1 || requestedIds.length > targetCapacity.maximumTargets) return { ok: false, reason: 'invalid-target' }
+    targetTokens = requestedIds.flatMap((targetId) => {
+      const token = input.map.tokens.find((candidate) => candidate.id === targetId)
+      return token ? [token] : []
+    })
+    if (targetTokens.length !== requestedIds.length || targetTokens.some((token) => token.type === 'obstacle')) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    for (const token of targetTokens) {
+      if (token.id === actorToken.id && spell.targeting?.includeSelf !== true) return { ok: false, reason: 'invalid-target' }
+      const opposed = areOpposedCombatTokens(actorToken, token)
+      if (spell.targeting?.relation === 'ally' && opposed) return { ok: false, reason: 'invalid-target' }
+      if (spell.targeting?.relation === 'enemy' && !opposed) return { ok: false, reason: 'invalid-target' }
+      const distanceFeet = tokenFootprintDistanceCells(actorToken, token, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      const maximumRange = spell.range.type === 'touch' ? 5 : spell.range.type === 'distance' ? (spell.range.feet ?? 0) : Number.POSITIVE_INFINITY
+      if (distanceFeet > maximumRange) return { ok: false, reason: 'target-out-of-range' }
+    }
+  }
+  const targetToken = targetTokens[0]
+  if (!targetToken) return { ok: false, reason: 'invalid-target' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.action.combatId ?? `map-${input.map.id}`,
@@ -223,10 +306,9 @@ export function prepareDnd5ePluginSpellCast(input: {
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actorCombatant = snapshot.state.combatants[actorToken.id]
-  const targetCombatant = snapshot.state.combatants[targetToken.id]
-  if (actorIndex < 0 || !actorCombatant || !targetCombatant) return { ok: false, reason: 'combatant-missing' }
-  const directedPairKey = dnd5eDirectedCombatantPairKey(actorToken.id, targetToken.id)
-  if (snapshot.state.lineOfEffectBlockedByCombatantPair?.[directedPairKey]) {
+  const targetCombatants = targetTokens.map((token) => snapshot.state.combatants[token.id])
+  if (actorIndex < 0 || !actorCombatant || targetCombatants.some((target) => !target)) return { ok: false, reason: 'combatant-missing' }
+  if (!area && targetTokens.some((token) => snapshot.state.lineOfEffectBlockedByCombatantPair?.[dnd5eDirectedCombatantPairKey(actorToken.id, token.id)])) {
     return { ok: false, reason: 'effect-line-blocked' }
   }
   for (const [tokenId, economy] of Object.entries(input.turnEconomyByToken ?? {})) {
@@ -244,46 +326,56 @@ export function prepareDnd5ePluginSpellCast(input: {
     }
   }
   const damage = spell.mechanics.damage
-  const upcastDelta = Math.max(0, slotLevel - (spell.mechanics.upcast?.fromSlotLevel ?? spell.level))
-  const upcastDice = spell.mechanics.upcast?.effects.reduce((total, effect) => effect.kind === 'damage-dice' ? total + effect.diceCountPerSlot * upcastDelta : total, 0) ?? 0
-  const upcastFlat = spell.mechanics.upcast?.effects.reduce((total, effect) => effect.kind === 'flat-damage' ? total + effect.amountPerSlot * upcastDelta : total, 0) ?? 0
-  const cantripMultiplier = damage?.cantripScaling
-    ? actor.level >= 17 ? 4 : actor.level >= 11 ? 3 : actor.level >= 5 ? 2 : 1
-    : 1
+  const upcast = dnd5eSpellUpcastTotals(spell.mechanics, slotLevel, spell.level)
+  const cantripScaling = dnd5eSpellCantripScalingTotals(damage, actor.level)
   const castingModifier = damage?.addSpellcastingModifier
     ? rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
     : 0
   const spellSaveDc = 8 + rules.proficiencyBonus(actor.level) +
     rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
   const saveAbility = spell.mechanics.savingThrow?.ability
-  const saveModifier = saveAbility
-    ? (targetCombatant.savingThrowBonuses[saveAbility] ?? rules.abilityModifier(targetCombatant.abilities[saveAbility])) +
-      (saveAbility === 'dex' && spell.id !== 'sacred-flame' ? snapshot.state.coverBonusByCombatantPair?.[directedPairKey] ?? 0 : 0)
-    : undefined
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const attackAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) && (
-    dnd5eTargetGrantsAttackAdvantage(targetCombatant) || actorCombatant.classState.hiddenCheckTotal != null ||
-    !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
-    dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5)
-  )
-  const attackDisadvantage = actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(targetCombatant) ||
-    dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
-    dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
-    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne ||
-    (targetProne && distanceFeet > 5)
-  const attackMode: D20RollMode = resolveDnd5eRollMode({
-    advantage: [{ active: attackAdvantage, reason: 'plugin-spell-attack-advantage' }],
-    disadvantage: [{ active: attackDisadvantage, reason: 'plugin-spell-attack-disadvantage' }],
-  }).mode
-  const saveMode = saveAbility
-    ? dnd5eSavingThrowMode(targetCombatant, saveAbility, {
+  const targets: PreparedDnd5ePluginSpellTarget[] = targetTokens.map((token, index) => {
+    const targetCombatant = snapshot.state.combatants[token.id]!
+    const directedPairKey = dnd5eDirectedCombatantPairKey(actorToken.id, token.id)
+    const distanceFeet = tokenFootprintDistanceCells(actorToken, token, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    const saveModifier = saveAbility
+      ? (targetCombatant.savingThrowBonuses[saveAbility] ?? rules.abilityModifier(targetCombatant.abilities[saveAbility])) +
+        (saveAbility === 'dex' && spell.id !== 'sacred-flame' ? snapshot.state.coverBonusByCombatantPair?.[directedPairKey] ?? 0 : 0)
+      : undefined
+    const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+    const attackAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) && (
+      dnd5eTargetGrantsAttackAdvantage(targetCombatant) || actorCombatant.classState.hiddenCheckTotal != null ||
+      !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || (targetProne && distanceFeet <= 5)
+    )
+    const attackDisadvantage = actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(targetCombatant) ||
+      dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, token.id) ||
+      dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
+      dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne ||
+      (targetProne && distanceFeet > 5)
+    return {
+      key: `${token.id}:${index}`,
+      token,
+      distanceFeet,
+      attackMode: resolveDnd5eRollMode({
+        advantage: [{ active: attackAdvantage, reason: 'plugin-spell-attack-advantage' }],
+        disadvantage: [{ active: attackDisadvantage, reason: 'plugin-spell-attack-disadvantage' }],
+      }).mode,
+      saveModifier,
+      saveMode: saveAbility ? dnd5eSavingThrowMode(targetCombatant, saveAbility, {
         effectVisible: true,
         sourceCreatureType: actorCombatant.creatureType,
         sourceIsSpell: true,
-      })
+      }) : undefined,
+      saveAutomaticallyFails: saveAbility ? dnd5eConditionSavingThrowAutomaticallyFails(targetCombatant, saveAbility) : false,
+      armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, token.id),
+    }
+  })
+  const firstTarget = targets[0]
+  const concentrationRounds = spell.duration.concentration
+    ? Math.min(14_400, spellDurationRounds(spell) + upcast.durationRounds)
     : undefined
-  const concentrationRounds = spell.duration.concentration ? spellDurationRounds(spell) : undefined
   const now = input.now ?? Date.now()
   return {
     ok: true,
@@ -300,18 +392,26 @@ export function prepareDnd5ePluginSpellCast(input: {
       castingClassLevel,
       actorToken,
       targetToken,
+      targetTokens,
+      targets,
+      area,
       slotLevel,
       castingTime,
       componentCheck,
       attackModifier: spellSaveDc - 8,
-      attackMode,
+      attackMode: firstTarget.attackMode,
       saveDc: spellSaveDc,
-      saveModifier,
-      saveMode,
-      saveAutomaticallyFails: saveAbility ? dnd5eConditionSavingThrowAutomaticallyFails(targetCombatant, saveAbility) : false,
-      targetArmorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, targetToken.id),
-      damageDice: { count: Math.max(0, (damage?.dice.count ?? 0) * cantripMultiplier + upcastDice), sides: damage?.dice.sides ?? 2, bonus: (damage?.dice.bonus ?? 0) + upcastFlat + castingModifier },
+      saveModifier: firstTarget.saveModifier,
+      saveMode: firstTarget.saveMode,
+      saveAutomaticallyFails: firstTarget.saveAutomaticallyFails,
+      targetArmorClass: firstTarget.armorClass,
+      damageDice: {
+        count: Math.max(0, (damage?.dice.count ?? 0) + cantripScaling.damageDice + upcast.damageDice),
+        sides: damage?.dice.sides ?? 2,
+        bonus: (damage?.dice.bonus ?? 0) + cantripScaling.flatDamage + upcast.flatDamage + castingModifier,
+      },
       concentrationRounds,
+      upcastDurationRounds: upcast.durationRounds,
       transaction: createCombatTransaction({ id: input.action.id, mapId: input.map.id, combatId: input.action.combatId, actorId: actor.id, actionId: input.action.id, actionKind: 'plugin-spell', now }),
     },
   }
@@ -327,92 +427,121 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   const mechanics = prepared.spell.mechanics!
   const now = input.now ?? Date.now()
   let transaction = prepared.transaction
-  let attackHit: boolean | undefined
-  let critical = false
-  let saveSucceeded: boolean | undefined
-  if (mechanics.resolution === 'spell-attack') {
-    if (!validD20Pair(supplied.attackD20, supplied.attackD20Second, prepared.attackMode)) return invalidDice(prepared, transaction, now)
-    const attackD20 = selectedD20(supplied.attackD20!, supplied.attackD20Second, prepared.attackMode)
-    transaction = appendRollLedgerEntry(transaction, {
-      id: `${prepared.action.id}:spell-attack`, kind: 'attack', label: `${prepared.spell.name}·法术攻击`,
-      dice: { sides: 20, values: prepared.attackMode === 'normal' ? [supplied.attackD20!] : [supplied.attackD20!, supplied.attackD20Second!] }, modifier: prepared.attackModifier, visibility: 'public',
-      sourceId: prepared.actor.id, targetId: prepared.targetToken.id, createdAt: now,
-    })
-    critical = attackD20 === 20
-    attackHit = critical || (attackD20 !== 1 && attackD20 + prepared.attackModifier >= prepared.targetArmorClass)
-  } else if (mechanics.resolution === 'saving-throw') {
-    if (!prepared.saveMode || !validD20Pair(supplied.savingThrowD20, supplied.savingThrowD20Second, prepared.saveMode) || prepared.saveModifier == null) return invalidDice(prepared, transaction, now)
-    const savingThrowD20 = selectedD20(supplied.savingThrowD20!, supplied.savingThrowD20Second, prepared.saveMode)
-    transaction = appendRollLedgerEntry(transaction, {
-      id: `${prepared.action.id}:saving-throw`, kind: 'saving-throw', label: `${prepared.spell.name}·豁免`,
-      dice: { sides: 20, values: prepared.saveMode === 'normal' ? [supplied.savingThrowD20!] : [supplied.savingThrowD20!, supplied.savingThrowD20Second!] }, modifier: prepared.saveModifier, visibility: 'public',
-      sourceId: prepared.targetToken.id, targetId: prepared.actor.id, createdAt: now,
-    })
-    saveSucceeded = !prepared.saveAutomaticallyFails && savingThrowD20 + prepared.saveModifier >= prepared.saveDc
-  }
-
-  let rawDamage = 0
-  let finalDamage = 0
   const sourceCombatant = prepared.state.combatants[prepared.actorToken.id]
-  const targetCombatant = prepared.state.combatants[prepared.targetToken.id]
-  const targetWilling = sourceCombatant.controller === targetCombatant.controller
-  const spellNegated = dnd5eLimitedMagicImmunityNegatesSpell({
-    rule: targetCombatant.limitedMagicImmunity,
-    spellLevel: prepared.slotLevel,
-    target: targetWilling ? 'ally' : 'hostile',
-    willing: targetWilling,
-  })
-  const shouldDealDamage = !!mechanics.damage && (mechanics.resolution !== 'spell-attack' || attackHit)
-  if (shouldDealDamage) {
-    const count = prepared.damageDice.count * (critical ? 2 : 1)
-    const values = supplied.damageRolls ?? []
-    if (values.length !== count || values.some((value) => !validDie(value, prepared.damageDice.sides))) {
-      return invalidDice(prepared, transaction, now)
-    }
+  const sharedAreaDamage = !!prepared.area && mechanics.resolution !== 'spell-attack'
+  const sharedDamageValues = supplied.damageRolls ?? []
+  if (sharedAreaDamage && mechanics.damage && (
+    sharedDamageValues.length !== prepared.damageDice.count ||
+    sharedDamageValues.some((value) => !validDie(value, prepared.damageDice.sides))
+  )) return invalidDice(prepared, transaction, now)
+  if (sharedAreaDamage && mechanics.damage) {
     transaction = appendRollLedgerEntry(transaction, {
-      id: `${prepared.action.id}:damage`, kind: 'damage', label: `${prepared.spell.name}·伤害`,
-      dice: { sides: prepared.damageDice.sides, values }, modifier: prepared.damageDice.bonus, visibility: 'public',
+      id: `${prepared.action.id}:damage:shared`, kind: 'damage', label: `${prepared.spell.name}·范围伤害`,
+      dice: { sides: prepared.damageDice.sides, values: sharedDamageValues }, modifier: prepared.damageDice.bonus, visibility: 'public',
       sourceId: prepared.actor.id, targetId: prepared.targetToken.id, createdAt: now,
     })
-    rawDamage = Math.max(0, values.reduce((total, value) => total + value, prepared.damageDice.bonus))
-    if (saveSucceeded) {
-      const onSuccess = mechanics.savingThrow?.onSuccess ?? 'none'
-      rawDamage = onSuccess === 'half' ? Math.floor(rawDamage / 2) : onSuccess === 'full' ? rawDamage : 0
-    }
-    finalDamage = resolveDnd5eDamageDefenses({
-      damage: rawDamage,
-      source: {
-        damageType: mechanics.damage!.type,
-        delivery: 'spell',
-        magical: true,
-        spellLevel: prepared.slotLevel,
-        sourceMoralAlignment: sourceCombatant.moralAlignment,
-      },
-      defenses: {
-        immunities: targetCombatant.damageImmunities,
-        resistances: targetCombatant.damageResistances,
-        vulnerabilities: targetCombatant.damageVulnerabilities,
-        damageDefenseRules: targetCombatant.damageDefenseRules,
-      },
-    }).finalDamage
-    if (spellNegated) finalDamage = 0
   }
 
-  const conditions = (mechanics.conditions ?? []).filter((condition) => {
-    if (condition.trigger === 'always') return true
-    if (condition.trigger === 'on-hit') return attackHit === true
-    return saveSucceeded === false
-  })
-  const effects = [
-    ...(mechanics.damage && (shouldDealDamage || mechanics.resolution === 'saving-throw')
-      ? [{ targetId: prepared.targetToken.id, operation: 'damage' as const, amount: finalDamage }]
-      : []),
-    ...conditions.map((condition) => ({
-      targetId: prepared.targetToken.id,
-      addCondition: condition.condition,
-      ...dnd5ePluginSpellConditionLifecycle(condition.duration, prepared.saveDc),
-    })),
-  ]
+  const effects: import('./headlessCombatEngine').Dnd5eAdjudicatedSpellEffect[] = []
+  const targetResolutions: Dnd5ePluginSpellTargetResolution[] = []
+  for (let index = 0; index < prepared.targets.length; index += 1) {
+    const target = prepared.targets[index]
+    const targetSupplied = supplied.targetRolls?.[index] ?? (index === 0 ? supplied : {})
+    const targetCombatant = prepared.state.combatants[target.token.id]
+    let attackHit: boolean | undefined
+    let critical = false
+    let saveSucceeded: boolean | undefined
+    if (mechanics.resolution === 'spell-attack') {
+      if (!validD20Pair(targetSupplied.attackD20, targetSupplied.attackD20Second, target.attackMode)) return invalidDice(prepared, transaction, now)
+      const attackD20 = selectedD20(targetSupplied.attackD20!, targetSupplied.attackD20Second, target.attackMode)
+      transaction = appendRollLedgerEntry(transaction, {
+        id: `${prepared.action.id}:spell-attack:${index}`, kind: 'attack', label: `${prepared.spell.name}·法术攻击`,
+        dice: { sides: 20, values: target.attackMode === 'normal' ? [targetSupplied.attackD20!] : [targetSupplied.attackD20!, targetSupplied.attackD20Second!] }, modifier: prepared.attackModifier, visibility: 'public',
+        sourceId: prepared.actor.id, targetId: target.token.id, createdAt: now,
+      })
+      critical = attackD20 === 20
+      attackHit = critical || (attackD20 !== 1 && attackD20 + prepared.attackModifier >= target.armorClass)
+    } else if (mechanics.resolution === 'saving-throw') {
+      if (!target.saveMode || !validD20Pair(targetSupplied.savingThrowD20, targetSupplied.savingThrowD20Second, target.saveMode) || target.saveModifier == null) {
+        return invalidDice(prepared, transaction, now)
+      }
+      const savingThrowD20 = selectedD20(targetSupplied.savingThrowD20!, targetSupplied.savingThrowD20Second, target.saveMode)
+      transaction = appendRollLedgerEntry(transaction, {
+        id: `${prepared.action.id}:saving-throw:${index}`, kind: 'saving-throw', label: `${prepared.spell.name}·豁免`,
+        dice: { sides: 20, values: target.saveMode === 'normal' ? [targetSupplied.savingThrowD20!] : [targetSupplied.savingThrowD20!, targetSupplied.savingThrowD20Second!] }, modifier: target.saveModifier, visibility: 'public',
+        sourceId: target.token.id, targetId: prepared.actor.id, createdAt: now,
+      })
+      saveSucceeded = !target.saveAutomaticallyFails && savingThrowD20 + target.saveModifier >= prepared.saveDc
+    }
+
+    let rawDamage = 0
+    let finalDamage = 0
+    const shouldDealDamage = !!mechanics.damage && (mechanics.resolution !== 'spell-attack' || attackHit)
+    if (shouldDealDamage) {
+      const count = prepared.damageDice.count * (critical ? 2 : 1)
+      const values = sharedAreaDamage ? sharedDamageValues : targetSupplied.damageRolls ?? []
+      if (values.length !== count || values.some((value) => !validDie(value, prepared.damageDice.sides))) {
+        return invalidDice(prepared, transaction, now)
+      }
+      if (!sharedAreaDamage) {
+        transaction = appendRollLedgerEntry(transaction, {
+          id: `${prepared.action.id}:damage:${index}`, kind: 'damage', label: `${prepared.spell.name}·伤害`,
+          dice: { sides: prepared.damageDice.sides, values }, modifier: prepared.damageDice.bonus, visibility: 'public',
+          sourceId: prepared.actor.id, targetId: target.token.id, createdAt: now,
+        })
+      }
+      rawDamage = Math.max(0, values.reduce((total, value) => total + value, prepared.damageDice.bonus))
+      if (saveSucceeded) {
+        const onSuccess = mechanics.savingThrow?.onSuccess ?? 'none'
+        rawDamage = onSuccess === 'half' ? Math.floor(rawDamage / 2) : onSuccess === 'full' ? rawDamage : 0
+      }
+      finalDamage = resolveDnd5eDamageDefenses({
+        damage: rawDamage,
+        source: {
+          damageType: mechanics.damage!.type,
+          delivery: 'spell', magical: true, spellLevel: prepared.slotLevel,
+          sourceMoralAlignment: sourceCombatant.moralAlignment,
+        },
+        defenses: {
+          immunities: targetCombatant.damageImmunities,
+          resistances: targetCombatant.damageResistances,
+          vulnerabilities: targetCombatant.damageVulnerabilities,
+          damageDefenseRules: targetCombatant.damageDefenseRules,
+        },
+      }).finalDamage
+      const targetWilling = sourceCombatant.controller === targetCombatant.controller
+      if (dnd5eLimitedMagicImmunityNegatesSpell({
+        rule: targetCombatant.limitedMagicImmunity,
+        spellLevel: prepared.slotLevel,
+        target: targetWilling ? 'ally' : 'hostile',
+        willing: targetWilling,
+      })) finalDamage = 0
+    }
+
+    if (mechanics.damage && (shouldDealDamage || mechanics.resolution === 'saving-throw')) {
+      effects.push({ targetId: target.token.id, operation: 'damage', amount: finalDamage })
+    }
+    for (const condition of mechanics.conditions ?? []) {
+      const applies = condition.trigger === 'always' ||
+        (condition.trigger === 'on-hit' && attackHit === true) ||
+        (condition.trigger === 'on-failed-save' && saveSucceeded === false)
+      if (applies) effects.push({
+        targetId: target.token.id,
+        addCondition: condition.condition,
+        ...dnd5ePluginSpellConditionLifecycle(condition.duration, prepared.saveDc, prepared.upcastDurationRounds),
+      })
+    }
+    targetResolutions.push({
+      key: target.key,
+      targetTokenId: target.token.id,
+      attackHit,
+      critical,
+      saveSucceeded,
+      rawDamage,
+      finalDamage,
+    })
+  }
+
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'adjudicated-spell',
     actorId: prepared.actorToken.id,
@@ -428,16 +557,24 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   transaction = result.transaction ?? (result.ok
     ? commitCombatTransaction(transaction, now)
     : rollbackCombatTransaction(transaction, result.reason, now))
-  if (!result.ok) return { result, transaction, attackHit, critical, saveSucceeded, rawDamage, finalDamage, airborneFalls }
+  const first = targetResolutions[0]
+  const rawDamage = targetResolutions.reduce((total, resolution) => total + resolution.rawDamage, 0)
+  const finalDamage = targetResolutions.reduce((total, resolution) => total + resolution.finalDamage, 0)
+  if (!result.ok) return {
+    result, transaction,
+    attackHit: first?.attackHit, critical: first?.critical ?? false,
+    saveSucceeded: first?.saveSucceeded, rawDamage, finalDamage, targetResolutions, airborneFalls,
+  }
   return {
     result,
     application: planDnd5eMapResultApplication({ state: result.state, map: prepared.map, characters: prepared.characters, characterIdByCombatantId: prepared.characterIdByCombatantId }),
     transaction,
-    attackHit,
-    critical,
-    saveSucceeded,
+    attackHit: first?.attackHit,
+    critical: first?.critical ?? false,
+    saveSucceeded: first?.saveSucceeded,
     rawDamage,
     finalDamage,
+    targetResolutions,
     airborneFalls,
   }
 }
@@ -445,6 +582,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
 function dnd5ePluginSpellConditionLifecycle(
   duration: Dnd5eSpellConditionDuration,
   saveDc: number,
+  upcastDurationRounds = 0,
 ): Pick<import('./headlessCombatEngine').Dnd5eAdjudicatedSpellEffect, 'conditionDuration' | 'conditionRepeatSave'> {
   if (duration.kind === 'source-next-turn-start') {
     return { conditionDuration: { type: 'until-turn-boundary', boundary: 'source-turn-start' } }
@@ -453,11 +591,11 @@ function dnd5ePluginSpellConditionLifecycle(
     return { conditionDuration: { type: 'until-turn-boundary', boundary: 'target-turn-start' } }
   }
   if (duration.kind === 'fixed-rounds') {
-    return { conditionDuration: { type: 'rounds', remainingRounds: duration.rounds, tickOn: 'target-turn-end' } }
+    return { conditionDuration: { type: 'rounds', remainingRounds: duration.rounds + upcastDurationRounds, tickOn: 'target-turn-end' } }
   }
   if (duration.kind === 'save-ends') {
     return {
-      conditionDuration: { type: 'rounds', remainingRounds: duration.maximumRounds, tickOn: 'target-turn-end' },
+      conditionDuration: { type: 'rounds', remainingRounds: duration.maximumRounds + upcastDurationRounds, tickOn: 'target-turn-end' },
       conditionRepeatSave: {
         ability: duration.saveAbility,
         dc: saveDc,

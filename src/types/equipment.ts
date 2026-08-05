@@ -5,6 +5,8 @@ export type EquipmentSlot =
   | 'helmet'
   | 'shoes'
   | 'ring'
+  | 'ring2'
+  | 'belt'
   | 'necklace'
 
 /** Host 可执行的声明式装备效果；插件不能借此执行任意代码。 */
@@ -70,6 +72,8 @@ export interface CharacterEquipment {
   helmet?: EquipmentItem
   shoes?: EquipmentItem
   ring?: EquipmentItem
+  ring2?: EquipmentItem
+  belt?: EquipmentItem
   necklace?: EquipmentItem
 }
 

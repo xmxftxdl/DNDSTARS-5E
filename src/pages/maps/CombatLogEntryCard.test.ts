@@ -26,6 +26,18 @@ const wizardToken = {
   size: 1,
 } as Token
 
+const monsterToken = {
+  id: 'monster-token',
+  label: '怪物',
+  type: 'enemy',
+  poolId: 'srd-5.1:goblin',
+  x: 0,
+  y: 0,
+  color: '#ef4444',
+  emoji: '',
+  size: 1,
+} as Token
+
 const entry: CombatLogEntry = {
   id: 23,
   round: 1,
@@ -45,7 +57,7 @@ describe('CombatLogEntryCard identity border', () => {
 
     expect(html).toContain('initiative-active-ring')
     expect(html).toContain('combat-log-flow-only')
-    expect(html).toContain('--initiative-turn-color:#60A5FA')
+    expect(html).toContain('--initiative-turn-color:#3B82F6')
   })
 
   it('keeps the actor portrait when the log names a spell', () => {
@@ -59,5 +71,35 @@ describe('CombatLogEntryCard identity border', () => {
     expect(html).toContain('data-subject-token-id="wizard-token"')
     expect(html).not.toContain('data-testid="combat-log-spell-token"')
     expect(html).not.toContain('/assets/icons/fireball-spell-action.png')
+  })
+
+  it('does not render a monster Token on a new-round boundary row', () => {
+    const html = renderToStaticMarkup(createElement(CombatLogEntryCard, {
+      entry: {
+        ...entry,
+        round: 2,
+        text: '进入第 2 回合',
+        kind: 'turn',
+        actorTokenId: monsterToken.id,
+      },
+      tokens: [monsterToken, wizardToken],
+      characters: [wizard],
+      currentTurnTokenId: monsterToken.id,
+    }))
+
+    expect(html).toContain('进入第 2 回合')
+    expect(html).not.toContain('data-testid="combat-log-subject-token"')
+    expect(html).not.toContain('data-subject-token-id="monster-token"')
+  })
+
+  it('does not expose timeline rollback actions in the combat log', () => {
+    const html = renderToStaticMarkup(createElement(CombatLogEntryCard, {
+      entry,
+      tokens: [wizardToken],
+      characters: [wizard],
+    }))
+
+    expect(html).not.toContain('combat-log-rollback-23')
+    expect(html).not.toContain('撤销至此')
   })
 })

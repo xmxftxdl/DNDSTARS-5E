@@ -1,6 +1,8 @@
-import { DoorOpen, Home, LibraryBig, Puzzle, Sparkles, UserRound } from 'lucide-react'
+import { DoorOpen, Home, LibraryBig, Puzzle, UserRound } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import starMarkLogo from '../assets/starmark-logo.png'
+import ThemeToggle from './ThemeToggle'
 
 const accountNavigation = [
   { to: '/app', label: '我的战役', icon: LibraryBig, end: true },
@@ -26,11 +28,11 @@ export default function AccountAppShell({
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex items-center justify-between gap-5">
             <Link to="/app" className="flex items-center gap-3">
-              <span className="glow-arcane flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600">
-                <Sparkles className="h-5 w-5 text-white" />
+              <span className="glow-arcane flex h-10 w-10 items-center justify-center">
+                <img src={starMarkLogo} alt="" aria-hidden="true" className="h-10 w-10 object-contain" />
               </span>
               <span>
-                <span className="block text-base font-bold text-gradient">星痕 APP</span>
+                <span className="block text-base font-bold text-gradient">星痕</span>
                 <span className="block text-[11px] text-slate-500">战役与扩展控制台</span>
               </span>
             </Link>
@@ -40,6 +42,7 @@ export default function AccountAppShell({
                 {accountName}
               </span>
             )}
+            <ThemeToggle compact className="lg:hidden" />
             <Link
               to="/"
               aria-label="返回主页"
@@ -70,6 +73,7 @@ export default function AccountAppShell({
           </nav>
 
           <div className="hidden items-center gap-3 lg:flex">
+            <ThemeToggle compact />
             <Link to="/" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white">
               <Home className="h-4 w-4" />返回主页
             </Link>

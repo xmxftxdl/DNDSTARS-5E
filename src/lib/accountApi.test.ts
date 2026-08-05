@@ -109,4 +109,37 @@ describe('账号插件本地隐私边界', () => {
       fetchSpy.mockRestore()
     }
   })
+
+  it('将 DM 工坊的战役与房间凭据作为独立请求头发送', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      id: 'com.example.workshop', version: '1.0.0', workshopOrigin: { kind: 'dm-workshop' },
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+    try {
+      await uploadAccountPlugin({
+        manifest: {
+          id: 'com.example.workshop', name: 'Workshop package', version: '1.0.0', apiVersion: 2,
+          rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'DM', license: 'Original',
+          distributionPolicy: 'room-distributable',
+        },
+        fileName: 'workshop.dndstars5e',
+        integrity: 'sha256-YWJjZA==',
+        bytes: new TextEncoder().encode('{}').buffer,
+        authority: {
+          kind: 'dm-workshop',
+          campaignId: 'ABC234DEF567',
+          room: { roomId: 'ABC234', memberId: 'dm-member', roomToken: 'x'.repeat(32) },
+        },
+      })
+      const [, init] = fetchSpy.mock.calls[0]
+      expect(init?.headers).toMatchObject({
+        'X-Stars-Plugin-Origin': 'dm-workshop',
+        'X-Stars-Campaign-Id': 'ABC234DEF567',
+        'X-Stars-Room-Id': 'ABC234',
+        'X-Stars-Member': 'dm-member',
+        'X-Stars-Room-Token': 'x'.repeat(32),
+      })
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
 })

@@ -141,7 +141,7 @@ export default function ActiveRulesExtensionsPage() {
             const counts = summary ? [
               ['种族', summary.races], ['背景', summary.backgrounds], ['特性', summary.features],
               ['专长', summary.feats], ['法术', summary.spells], ['物品', summary.items],
-              ['子职', summary.subclasses], ['怪物', summary.monsters],
+              ['职业', summary.classes], ['子职', summary.subclasses], ['怪物', summary.monsters],
             ].filter(([, count]) => Number(count) > 0) : []
             return (
               <article key={manifest.id} className="rounded-2xl border border-white/8 bg-black/15 p-5">

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 // FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
 import { DICE_TIMING, parseDiceBoxMessage, resolveFlyOffset } from '../lib/diceOverlayShared'
@@ -44,6 +44,7 @@ export default function DiceBoxRollOverlay({
   const requestId = forcedRequestId ?? generatedRequestId
   const iframeSides = Math.max(2, Math.min(100, Math.round(Number(sides) || 6)))
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const [frameReady, setFrameReady] = useState(false)
   const readyRef = useRef(false)
   const completedRef = useRef(false)
   const sentRequestRef = useRef<string | null>(null)
@@ -102,10 +103,12 @@ export default function DiceBoxRollOverlay({
       )
     }
     const handleMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return
       const data = parseDiceBoxMessage(event)
       if (!data) return
       if (data?.type === 'dice-box-ready' && !readyRef.current) {
         readyRef.current = true
+        setFrameReady(true)
         log('iframe-ready')
         sendRoll()
         return
@@ -138,7 +141,7 @@ export default function DiceBoxRollOverlay({
           ref={iframeRef}
           title={`${sides}-sided dice roller`}
           src={`/dice-box-frame.html?badge=0&sides=${iframeSides}&qty=${safeCountForFrame}`}
-          className="dice-box-damage-frame dice-box-roll-flight"
+          className={`dice-box-damage-frame dice-box-roll-flight ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
           style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />

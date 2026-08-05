@@ -12,7 +12,7 @@ export default function PublicBlogPage() {
           <div className="flex flex-wrap items-end justify-between gap-5">
             <div>
               <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-300">Blog</p>
-              <h1 className="mt-4 font-display text-4xl font-bold text-white sm:text-5xl">
+              <h1 className="mt-4 font-display text-4xl font-bold text-slate-100 sm:text-5xl">
                 开发日志与跑团实践
               </h1>
             </div>

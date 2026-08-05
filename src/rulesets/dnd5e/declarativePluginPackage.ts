@@ -9,47 +9,43 @@ import type {
   Dnd5eRulesPluginApi,
 } from './pluginApi'
 import type { Dnd5eDeclarativeRulesPackageV1 } from './declarativeSubclassAbility'
+import { compileDnd5eActivityHeadlessAction } from './activities/dnd5eActivityHeadlessCompiler'
+import { dnd5eActivityFromCustomHeadlessAction } from './activities/legacyCustomHeadlessActivityAdapter'
+import {
+  DND5E_SPELLCASTING_CLASS_IDS,
+  type Dnd5eSpellcastingClassId,
+} from './spellbook'
+
+const supportedSpellcastingClassIds = new Set<string>(DND5E_SPELLCASTING_CLASS_IDS)
+
+/**
+ * Early room packages could preserve catalog-only class ids (most commonly
+ * `artificer`) beside supported 2014 classes. The current spell registry is
+ * intentionally stricter, but rejecting the entire legacy package also keeps
+ * every unrelated room rule offline. Remove only unsupported ids when at
+ * least one supported class remains; genuinely unusable spell declarations
+ * still fail normal validation.
+ */
+function normalizeLegacySpellClassIds(
+  draft: Dnd5eCustomRulesPluginDraft,
+): Dnd5eCustomRulesPluginDraft {
+  const spells = draft.spells.map((spell) => {
+    const classes = (spell.classes as readonly string[]).filter(
+      (classId): classId is Dnd5eSpellcastingClassId => supportedSpellcastingClassIds.has(classId),
+    )
+    return classes.length > 0 && classes.length !== spell.classes.length
+      ? { ...spell, classes }
+      : spell
+  })
+  return spells.some((spell, index) => spell !== draft.spells[index])
+    ? { ...draft, spells }
+    : draft
+}
 
 export function dnd5eHeadlessActionFromDeclarativeDraft(
   definition: Dnd5eCustomHeadlessActionDraft,
 ): Dnd5ePluginHeadlessActionDefinition {
-  return {
-    id: definition.id,
-    execution: 'trusted',
-    rolls: definition.effects.flatMap((effect, index) => {
-      if (effect.kind !== 'damage' && effect.kind !== 'healing') return []
-      return [{
-        id: `effect-${index}`,
-        label: `${definition.label} · ${effect.kind === 'damage' ? '伤害' : '治疗'}`,
-        count: effect.dice.count,
-        sides: effect.dice.sides,
-        modifier: effect.dice.modifier ?? 0,
-        visibility: 'public' as const,
-      }]
-    }),
-    resolve(context) {
-      if (
-        definition.requiredInterruptOptionId &&
-        context.action.interruptChoiceId !== definition.requiredInterruptOptionId
-      ) return context.fail('invalid-plugin-action')
-      const targets = context.targets.length > 0
-        ? context.targets
-        : context.target
-          ? [context.target]
-          : [context.actor]
-      if (targets.length < 1) return context.fail('invalid-target')
-      for (const [index, effect] of definition.effects.entries()) {
-        const roll = context.rolls[`effect-${index}`]
-        if ((effect.kind === 'damage' || effect.kind === 'healing') && !roll) return context.fail('invalid-dice')
-        for (const target of targets) {
-          if (effect.kind === 'damage') context.dealDamage(target.id, roll.total, effect.damageType)
-          else if (effect.kind === 'healing') context.heal(target.id, roll.total)
-          else context.applyStandardCondition(target.id, effect.condition, effect.duration)
-        }
-      }
-      return context.succeed()
-    },
-  }
+  return compileDnd5eActivityHeadlessAction(dnd5eActivityFromCustomHeadlessAction(definition))
 }
 
 function registerLegacyContributions(api: Dnd5eRulesPluginApi, draft: Dnd5eCustomRulesPluginDraft): void {
@@ -67,7 +63,9 @@ function registerLegacyContributions(api: Dnd5eRulesPluginApi, draft: Dnd5eCusto
 export function dnd5eRulesPluginFromDeclarativePackageV1(
   value: Dnd5eDeclarativeRulesPackageV1,
 ): Dnd5eRulesPlugin {
-  const legacy = value.legacy == null ? undefined : value.legacy as Dnd5eCustomRulesPluginDraft
+  const legacy = value.legacy == null
+    ? undefined
+    : normalizeLegacySpellClassIds(value.legacy as Dnd5eCustomRulesPluginDraft)
   const hasLegacy = !!legacy && (
     legacy.races.length + legacy.backgrounds.length + legacy.features.length + (legacy.feats?.length ?? 0) + legacy.spells.length +
     legacy.items.length + legacy.abilityGenerationMethods.length + (legacy.monsters?.length ?? 0) > 0

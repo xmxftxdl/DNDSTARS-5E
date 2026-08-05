@@ -20,6 +20,7 @@ import { characterExportFileName, makeCharacterExport, parseCharacterExport } fr
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
 import { dnd5eStartingEquipmentPlan, resolveDnd5eStartingEquipment } from '../rulesets/dnd5e/startingEquipment'
+import { showAppAlert } from '../lib/appDialog'
 
 type Mode = 'player' | 'dm'
 
@@ -180,7 +181,7 @@ export default function CharactersPage() {
       select(id)
     } catch (error) {
       console.error('[character-import-failed]', error)
-      window.alert('无法载入角色 JSON。请确认文件是从本项目导出的角色文件。')
+      await showAppAlert('无法载入角色 JSON。请确认文件是从本项目导出的角色文件。')
     }
   }
 

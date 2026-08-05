@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const mapsPageSource = readFileSync(new URL('../pages/MapsPage.tsx', import.meta.url), 'utf8')
+const mapsRouteSource = readFileSync(new URL('../pages/MapsPage.tsx', import.meta.url), 'utf8')
+const mapsWorkspaceSource = readFileSync(new URL('../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
 
 describe('headless migration boundary', () => {
   it('keeps engine resolvers and the removed mutation pipeline out of MapsPage', () => {
@@ -15,7 +16,7 @@ describe('headless migration boundary', () => {
       'resolveEnemyMoveAuthority',
       'resolveOpportunityAttackAuthority',
     ]) {
-      expect(mapsPageSource, `MapsPage must not contain ${forbidden}`).not.toContain(forbidden)
+      expect(mapsRouteSource, `MapsPage route shell must not contain ${forbidden}`).not.toContain(forbidden)
     }
   })
 
@@ -33,7 +34,7 @@ describe('headless migration boundary', () => {
       'resolveDnd5eMonsterMapMove',
       'resolveDnd5eHeadlessAction',
     ]) {
-      expect(mapsPageSource, `MapsPage must route through ${required}`).toContain(required)
+      expect(mapsWorkspaceSource, `MapsWorkspacePage must route through ${required}`).toContain(required)
     }
   })
 
@@ -43,9 +44,9 @@ describe('headless migration boundary', () => {
       'activeChar.rulesetId',
       'attacker.rulesetId',
     ]) {
-      expect(mapsPageSource, `MapsPage must not use ${forbidden} to reach an AP fallback`).not.toContain(forbidden)
+      expect(mapsWorkspaceSource, `MapsWorkspacePage must not use ${forbidden} to reach an AP fallback`).not.toContain(forbidden)
     }
-    expect(mapsPageSource).toContain('currentDnd5eTurnEconomy(currentInitiativeToken.id).movement.current')
-    expect(mapsPageSource).toContain('currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current')
+    expect(mapsWorkspaceSource).toContain('currentDnd5eTurnEconomy(currentInitiativeToken.id).movement.current')
+    expect(mapsWorkspaceSource).toContain('currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current')
   })
 })

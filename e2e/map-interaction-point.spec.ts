@@ -316,6 +316,16 @@ test('DM 私有互动配置投影为玩家标记，成功后原子发放且重�
   await adjudication.getByTestId('dm-adjudication-approve').click()
 
   await expect.poll(async () => {
+    const response = await request.get(
+      `${DM}/api/state/player-action-ack?room=${dmMembership.roomId}`,
+      { headers: roomHeaders(dmMembership) },
+    )
+    if (!response.ok()) return { status: 'pending', reason: `http-${response.status()}` }
+    const ack = await response.json() as { status?: string; reason?: string }
+    return { status: ack.status ?? 'pending', reason: ack.reason }
+  }, { timeout: 20_000 }).toMatchObject({ status: 'accepted' })
+
+  await expect.poll(async () => {
     const state = await getRoomState<{
       characters: Array<{
         id: string

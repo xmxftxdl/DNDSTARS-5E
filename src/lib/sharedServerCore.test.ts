@@ -446,6 +446,57 @@ describe('authoritative campaign time', () => {
     })
   })
 
+  it('records DM-selected short-rest beneficiaries and long-rest overrides', () => {
+    const shortRest = mutateCampaignTimeState(null, {
+      operation: 'short-rest',
+      beneficiaryCharacterIds: ['hero-a'],
+      restRecoveryReports: [{
+        characterId: 'hero-a',
+        characterName: '测试角色',
+        entries: [{
+          category: 'feature-resource',
+          label: '回气',
+          outcome: 'restored',
+          before: 0,
+          after: 1,
+          maximum: 1,
+        }],
+      }],
+    }, 10, host, context)
+    expect(shortRest).toMatchObject({
+      ok: true,
+      next: {
+        worldMinute: 540,
+        advances: [{
+          kind: 'short-rest',
+          minutes: 60,
+          beneficiaryCharacterIds: ['hero-a'],
+          restRecoveryReports: [{
+            characterId: 'hero-a',
+            entries: [{ label: '回气', outcome: 'restored' }],
+          }],
+        }],
+      },
+    })
+    if (!shortRest.ok) throw new Error('expected short rest')
+    const longRest = mutateCampaignTimeState(shortRest.next, {
+      operation: 'long-rest',
+      beneficiaryCharacterIds: ['hero-b'],
+      ignoreLongRestCooldown: true,
+    }, 20, host, context)
+    expect(longRest).toMatchObject({
+      ok: true,
+      next: {
+        worldMinute: 1_020,
+        advances: [expect.anything(), {
+          kind: 'long-rest',
+          beneficiaryCharacterIds: ['hero-b'],
+          ignoreLongRestCooldown: true,
+        }],
+      },
+    })
+  })
+
   it('sets either a campaign day or Gregorian date while keeping the rules clock monotonic', () => {
     const gregorian = mutateCampaignTimeState(null, {
       operation: 'set-time', displayMode: 'gregorian', date: '1992-10-10', hour: 14, minute: 30,
@@ -868,6 +919,34 @@ describe('map geometry player projection', () => {
       .toEqual(['hero', 'near', 'always'])
     expect(projected.maps[0].dnd5ePluginAreas.map((area: { id: string }) => area.id))
       .toEqual(['shown-area', 'own-hidden-area'])
+  })
+
+  it('publishes only explicitly enabled enemy detail snapshots', () => {
+    const approvedDetail = {
+      schemaVersion: 1,
+      monsterId: 'room-monster:visible',
+      tags: ['类人生物'],
+      statBlock: { cr: '1', actions: [{ name: '长剑' }] },
+    }
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          {
+            id: 'visible-detail', type: 'enemy', x: 30, y: 20,
+            showDetailOnToken: true, playerVisibleEnemyDetail: approvedDetail,
+          },
+          {
+            id: 'private-detail', type: 'enemy', x: 30, y: 30,
+            showDetailOnToken: false, playerVisibleEnemyDetail: approvedDetail,
+          },
+        ],
+      }],
+    }, geometry, 'character-1')
+
+    expect(projected.maps[0].tokens[1].playerVisibleEnemyDetail).toEqual(approvedDetail)
+    expect(projected.maps[0].tokens[2]).not.toHaveProperty('playerVisibleEnemyDetail')
   })
 
   it('recovers the player viewer from room ownership before presence catches up', () => {
@@ -1551,6 +1630,36 @@ describe('map geometry player projection', () => {
     }
   })
 
+  it('preserves Wall of Fire ring geometry for synchronized playback', () => {
+    const timestamp = 33_000
+    const normalized = normalizeCombatPresentationEvent({
+      schemaVersion: 1,
+      id: 'wall-ring:area-effect',
+      type: 'spell-area-effect',
+      mapId: 'map-1',
+      transactionId: 'wall-ring',
+      spellId: 'wall-of-fire',
+      sourceTokenId: 'wizard',
+      targetCell: { col: 7, row: 4 },
+      shape: 'rect',
+      widthFeet: 60,
+      heightFeet: 5,
+      wallOfFireShape: 'ring',
+      wallOfFireAngleDegrees: 0,
+    }, { role: 'dm' }, timestamp)
+
+    expect(normalized).toMatchObject({
+      ok: true,
+      event: {
+        wallOfFireShape: 'ring',
+        wallOfFireAngleDegrees: 0,
+        createdAt: timestamp,
+        expiresAt: timestamp + 120_000,
+      },
+    })
+    if (normalized.ok) expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+  })
+
   it('accepts Shatter and Thunderwave spell banners and authors their display lifetime', () => {
     const timestamp = 33_000
     const payload = {
@@ -1967,6 +2076,10 @@ describe('map geometry player projection', () => {
           {
             id: 'invisible-enemy', type: 'enemy', label: '隐形法师', poolId: 'mage', hp: 40, maxHp: 40,
             x: 30, y: 20, dnd5eCombatState: { conditions: ['invisible'] },
+            playerVisibleEnemyDetail: {
+              schemaVersion: 1, monsterId: 'mage', tags: [],
+              statBlock: { actions: [{ name: '秘密动作' }] },
+            },
           },
         ],
       }],
@@ -1982,6 +2095,7 @@ describe('map geometry player projection', () => {
     expect(serialized).not.toContain('mage')
     expect(serialized).not.toContain('40')
     expect(serialized).not.toContain('dnd5eCombatState')
+    expect(serialized).not.toContain('秘密动作')
   })
 
   it('redacts closed secret doors as anonymous walls', () => {
@@ -2136,6 +2250,12 @@ describe('dedicated 5e shared-state migration', () => {
       mapId: 'map',
       entries: [{ id: 1, text: '战士 移动 10 尺，AP 1/2' }],
     })).toMatchObject({ entries: [{ text: '战士 移动 10 尺' }] })
+    expect(validateSharedStateShape('combat-log', {
+      mapId: 'map', entries: [], rollbackCutoffEntryId: 12.5, updatedAt: 1,
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat-log', {
+      mapId: 'map', entries: [], rollbackCutoffEntryId: 'broken', updatedAt: 1,
+    })).toMatchObject({ ok: false, reason: 'invalid-combat-log-rollback-cutoff' })
   })
 
   it('removes the retired enemy AP ledger from shared combat snapshots', () => {
@@ -2533,6 +2653,16 @@ describe('combat interrupt atomic mutation', () => {
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'monster', portraitImageId: '../private' }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-token-portrait-image' })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'monster', tokenPortraitImageId: '../private' }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-token-portrait-image' })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{
+        id: 'monster',
+        portraitImageId: 'monster_initiative_safe',
+        tokenPortraitImageId: 'monster_token_safe',
+      }] }],
+    })).toEqual({ ok: true })
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'monster', visualVariantId: '../private' }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-token-visual-variant' })

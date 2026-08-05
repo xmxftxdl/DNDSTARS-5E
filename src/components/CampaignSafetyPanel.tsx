@@ -12,6 +12,7 @@ import {
   type CampaignPreflight,
   type CampaignSnapshotSummary,
 } from '../lib/campaignBackupApi'
+import { showAppConfirm } from '../lib/appDialog'
 
 function snapshotKindLabel(kind: string): string {
   if (kind === 'auto') return '自动快照'
@@ -134,8 +135,13 @@ export default function CampaignSafetyPanel() {
               <button
                 type="button"
                 disabled={!pendingImport.preflight.ok || busy !== null}
-                onClick={() => {
-                  if (!window.confirm('还原会覆盖当前房间的同名状态；系统会先自动建立保护快照。确定继续吗？')) return
+                onClick={async () => {
+                  if (!await showAppConfirm({
+                    title: '还原战役',
+                    message: '还原会覆盖当前房间的同名状态；系统会先自动建立保护快照。确定继续吗？',
+                    confirmLabel: '确认还原',
+                    tone: 'danger',
+                  })) return
                   void run('import', async () => {
                     await importCampaignBundle(pendingImport.bundle)
                     setPendingImport(null)
@@ -169,8 +175,13 @@ export default function CampaignSafetyPanel() {
                 <button
                   type="button"
                   disabled={busy !== null}
-                  onClick={() => {
-                    if (!window.confirm('确定还原这个快照吗？当前状态会先建立保护点。')) return
+                  onClick={async () => {
+                    if (!await showAppConfirm({
+                      title: '还原快照',
+                      message: '确定还原这个快照吗？当前状态会先建立保护点。',
+                      confirmLabel: '确认还原',
+                      tone: 'danger',
+                    })) return
                     void run(snapshot.id, async () => {
                       await restoreCampaignSnapshot(snapshot.id)
                       window.location.reload()

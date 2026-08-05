@@ -6,6 +6,7 @@ import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './ch
 import {
   DND5E_CONTENT_PACKAGE_FORMAT,
   DND5E_CONTENT_PACKAGE_SCHEMA_VERSION,
+  buildDnd5eCustomRulesContentPackageV2,
   dnd5eContentPackageAutomationCoverageV2,
   dnd5eContentPackageSummaryV2,
   dnd5eRoomRuntimeProjectionV2,
@@ -15,13 +16,18 @@ import {
   parseDnd5eContentPackageV2,
   type Dnd5eContentPackageV2,
 } from './contentPackageV2'
+import type { Dnd5eCustomRulesPluginDraft } from './customRulesPlugin'
 import { dnd5ePluginImageAssetUrl, registeredDnd5ePluginImageAssets } from './pluginAssets'
 import {
   registerDnd5eRulesPlugin,
+  dnd5ePluginSpellDefinition,
   registeredDnd5ePluginFeats,
   registeredDnd5ePluginItems,
   registeredDnd5ePluginRaces,
 } from './pluginApi'
+import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
+import { listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
+import { listRegisteredContentDefinitionPackages } from '../../domain/content/contentDefinitionRegistry'
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -138,6 +144,92 @@ function character(): Character {
 }
 
 describe('D&D 5e content package V2', () => {
+  it('projects executable V2 content into the internal Activity catalog without changing the wire schema', () => {
+    const source = packageValue()
+    source.content.headlessActions = [{
+      id: 'ember-wave-action',
+      label: 'Ember Wave',
+      effects: [{ kind: 'damage', dice: { count: 2, sides: 6 }, damageType: 'fire' }],
+    }]
+    source.content.features = [{
+      id: 'ember-pulse',
+      name: 'Ember Pulse',
+      summary: 'Synthetic action feature.',
+      description: 'Synthetic action feature.',
+      automation: 'full',
+      action: {
+        id: 'ember-wave-action', label: 'Ember Wave', economy: 'action',
+        targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 30 },
+      },
+    }]
+    source.content.spells = [{
+      id: 'ember-wave', name: 'Ember Wave', level: 1, school: 'evocation', ritual: false,
+      castingTime: { value: 1, unit: 'action' },
+      range: { type: 'distance', feet: 30 },
+      components: { verbal: true, somatic: true, material: false },
+      duration: { type: 'instantaneous', concentration: false },
+      classes: ['wizard'], description: 'Synthetic spell.',
+      automation: { mode: 'headless-action', actionId: 'ember-wave-action' },
+    }]
+    const projection = dnd5eContentPackageActivityProjectionV1(source)
+    expect(projection.counts).toMatchObject({ total: 3, adapted: 3, legacyFallback: 0 })
+    expect(projection.activities.map((activity) => activity.id)).toEqual([
+      'ember-wave-action', 'feature:ember-pulse', 'spell:ember-wave',
+    ])
+
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(source))
+    try {
+      expect(listRegisteredDnd5eActivityPackages()).toContainEqual(expect.objectContaining({
+        packageId: 'com.example.content-v2',
+        activities: expect.arrayContaining([expect.objectContaining({ id: 'spell:ember-wave' })]),
+      }))
+      expect(listRegisteredContentDefinitionPackages()).toContainEqual(expect.objectContaining({
+        packageId: 'com.example.content-v2',
+        definitions: expect.arrayContaining([
+          expect.objectContaining({ kind: 'feature', id: 'feature.ember-pulse' }),
+          expect.objectContaining({ kind: 'spell', id: 'spell.ember-wave' }),
+        ]),
+      }))
+    } finally {
+      dispose()
+    }
+    expect(listRegisteredDnd5eActivityPackages()).toEqual([])
+    expect(listRegisteredContentDefinitionPackages()).toEqual([])
+  })
+
+  it('builds workshop spell icons into V2 and registers the namespaced asset', () => {
+    const source = packageValue()
+    const draft: Dnd5eCustomRulesPluginDraft = {
+      manifest: source.manifest,
+      races: [], backgrounds: [], features: [], feats: [], items: [], abilityGenerationMethods: [],
+      headlessActions: [], subclasses: [], classes: [], monsters: [],
+      spells: [{
+        id: 'thunderclap', name: '鸣雷破', iconAssetId: 'spell-thunderclap-icon',
+        level: 0, school: 'evocation', ritual: false,
+        castingTime: { value: 1, unit: 'action' },
+        range: { type: 'self', shape: 'radius', sizeFeet: 5 },
+        components: { verbal: false, somatic: true, material: false },
+        duration: { type: 'instantaneous', concentration: false },
+        classes: ['wizard'], description: 'Synthetic spell used only by tests.',
+        automation: { mode: 'reference-only' },
+      }],
+    }
+    const encoded = new TextEncoder().encode(buildDnd5eCustomRulesContentPackageV2(draft, [{
+      id: 'spell-thunderclap-icon', mediaType: 'image/png', dataBase64: ONE_PIXEL_PNG,
+    }]))
+    const parsed = parseDnd5eContentPackageV2(encoded.buffer)!
+    expect(parsed.content.spells[0].iconAssetId).toBe('spell-thunderclap-icon')
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(parsed))
+    try {
+      expect(dnd5ePluginSpellDefinition('com.example.content-v2:thunderclap')?.iconAssetId)
+        .toBe('com.example.content-v2:spell-thunderclap-icon')
+      expect(dnd5ePluginImageAssetUrl('com.example.content-v2:spell-thunderclap-icon'))
+        .toMatch(/^data:image\/png;base64,/)
+    } finally {
+      dispose()
+    }
+  })
+
   it('keeps the checked-in original-content example importable', () => {
     const bytes = readFileSync(new URL('../../../examples/original-content-v2.dndstars5e', import.meta.url))
     const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
@@ -160,11 +252,12 @@ describe('D&D 5e content package V2', () => {
     })
     expect(subclass?.resources?.[0].die).toMatchObject({ sides: 6 })
     expect(subclass?.choiceGroups?.[0].maxSelectionsByLevel?.[0]).toEqual({ level: 7, maxSelections: 5 })
-    expect(dnd5eContentPackageAutomationCoverageV2(parsed!).entries).toContainEqual({
+    expect(dnd5eContentPackageAutomationCoverageV2(parsed!).entries).toContainEqual(expect.objectContaining({
       category: 'subclass-ability',
       id: 'synthetic-protocol-demo:precision-pulse',
       status: 'full',
-    })
+      capability: expect.objectContaining({ level: 'full', manualPhases: [] }),
+    }))
   })
 
   it('parses pure JSON and reports a non-executable installation preview', () => {
@@ -217,12 +310,42 @@ describe('D&D 5e content package V2', () => {
       full: 0,
       partial: 1,
     })
-    expect(dnd5eContentPackageAutomationCoverageV2(source).entries).toContainEqual({
+    expect(dnd5eContentPackageAutomationCoverageV2(source).entries).toContainEqual(expect.objectContaining({
       category: 'race',
       id: 'emberkin',
       status: 'partial',
       reasons: ['Scene-dependent trait requires DM adjudication.'],
-    })
+      capability: expect.objectContaining({
+        level: 'assisted',
+        limitations: ['Scene-dependent trait requires DM adjudication.'],
+      }),
+    }))
+  })
+
+  it('uses the migrated Activity capability instead of trusting a stale full declaration', () => {
+    const source = packageValue()
+    source.content.features = [{
+      id: 'broken-action-link',
+      name: 'Broken action link',
+      summary: 'Synthetic migration edge case.',
+      description: 'Synthetic migration edge case.',
+      automation: 'full',
+      action: {
+        id: 'missing-action',
+        label: 'Missing action',
+        economy: 'action',
+        targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 30 },
+      },
+    }]
+
+    expect(dnd5eContentPackageAutomationCoverageV2(source).entries).toContainEqual(
+      expect.objectContaining({
+        category: 'feature',
+        id: 'broken-action-link',
+        status: 'partial',
+        capability: expect.objectContaining({ level: 'assisted' }),
+      }),
+    )
   })
 
   it('projects room-ephemeral mechanics and images without source prose', () => {

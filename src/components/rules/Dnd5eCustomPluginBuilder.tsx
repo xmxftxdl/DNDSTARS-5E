@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
-import { Download, FolderOpen, Plus, Save, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { BadgeDollarSign, ChevronDown, Download, FolderOpen, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
-  buildDnd5eCustomRulesPluginPackageV1,
+  buildDnd5eCustomRulesContentPackageV2,
   DND5E_DAMAGE_TYPES,
+  DND5E_PERSISTENT_AREA_VISUAL_PRESETS,
   DND5E_SRD_MONSTERS,
   DND5E_STANDARD_CONDITIONS,
   dnd5eCustomClassAutomationReportV1,
@@ -12,6 +13,10 @@ import {
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomHeadlessActionDraft,
   type Dnd5eCustomRulesPluginDraft,
+  type Dnd5eContentPackageV2,
+  type Dnd5eCantripScalingStep,
+  type Dnd5eSpellMechanicsDefinition,
+  type Dnd5eLocalContentAiTargetKind,
   type Dnd5eDamageType,
   type Dnd5ePluginAbilityGenerationDefinition,
   type Dnd5ePluginBackgroundDefinition,
@@ -21,15 +26,23 @@ import {
   type Dnd5ePluginDeclaredCapability,
   type Dnd5ePluginDistributionPolicy,
   type Dnd5ePluginItemDefinition,
+  type Dnd5ePluginImageAssetDefinition,
   type Dnd5ePluginRaceDefinition,
   type Dnd5ePluginSpellDefinition,
+  type Dnd5ePersistentAreaTriggerDeclaration,
+  type Dnd5ePersistentAreaTriggerTiming,
+  type Dnd5ePersistentAreaVisualPreset,
+  type Dnd5ePluginEffectDuration,
   type DeclarativeSubclassDefinitionV1,
   type DeclarativeClassDefinitionV1,
 } from '../../rulesets/dnd5e'
 import Dnd5eDeclarativeSubclassEditor from './Dnd5eDeclarativeSubclassEditor'
 import Dnd5eDeclarativeClassEditor from './Dnd5eDeclarativeClassEditor'
-import Dnd5eMonsterWorkshopDialog from '../map/Dnd5eMonsterWorkshopDialog'
+import Dnd5eMonsterWorkshopDialog, {
+  type Dnd5eMonsterWorkshopEditRequest,
+} from '../map/Dnd5eMonsterWorkshopDialog'
 import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
+import type { Dnd5eMonsterWorkshopAiReview } from '../map/monsterWorkshopReview'
 import { dnd5ePluginCapabilityLabel } from '../../rulesets/dnd5e/pluginCapabilityLabels'
 import Dnd5eBuilderResourceInventory from './Dnd5eBuilderResourceInventory'
 import {
@@ -37,6 +50,19 @@ import {
   type Dnd5eBuilderAutomationStatus,
   type Dnd5eBuilderResourceInventoryEntry,
 } from './dnd5eBuilderResourceInventoryModel'
+import { showAppConfirm } from '../../lib/appDialog'
+import {
+  dnd5eCustomSpellHeadlessRangePatch,
+  dnd5eCustomSpellRangeSummary,
+  inferDnd5eCustomSpellRangeFromText,
+  type Dnd5eCustomSpellRangeShape,
+} from './dnd5eCustomSpellRangeModel'
+import {
+  dnd5eSpellIconAssetDataUrl,
+  dnd5eSpellIconAssetFromFile,
+  dnd5eSpellWorkshopHeadlessReady,
+  dnd5eSpellWorkshopHeadlessStatus,
+} from './dnd5eSpellWorkshopModel'
 
 interface RaceDraft {
   id: string
@@ -47,6 +73,7 @@ interface RaceDraft {
   flexibleCount: number
   flexibleAmount: number
   flexibleExclude: AbilityKey[]
+  sourceDefinition?: Dnd5ePluginRaceDefinition
 }
 
 interface MethodDraft {
@@ -62,6 +89,7 @@ interface MethodDraft {
   diceCount: number
   dieSides: number
   dropLowest: number
+  sourceDefinition?: Dnd5ePluginAbilityGenerationDefinition
 }
 
 interface BackgroundDraft {
@@ -73,6 +101,7 @@ interface BackgroundDraft {
   languages: number
   featureName: string
   featureDescription: string
+  sourceDefinition?: Dnd5ePluginBackgroundDefinition
 }
 
 interface FeatureDraft {
@@ -83,17 +112,19 @@ interface FeatureDraft {
   minimumLevel: number
   canModifyEnemyD20: boolean
   headless: HeadlessEffectEditorDraft
+  sourceDefinition?: Dnd5ePluginFeatureDefinition
 }
 
 interface FeatDraft extends FeatureDraft {
   prerequisiteAbilities: Record<AbilityKey, number>
   prerequisiteRaceIds: string
+  sourceFeatDefinition?: Dnd5ePluginFeatDefinition
 }
 
 interface PersistentAreaTriggerEditorDraft {
   id: string
   label: string
-  timing: 'on-create' | 'on-enter' | 'turn-start' | 'turn-end'
+  timing: Dnd5ePersistentAreaTriggerTiming
   oncePerRound: boolean
   oncePerTurn: boolean
   savingThrowEnabled: boolean
@@ -108,11 +139,13 @@ interface PersistentAreaTriggerEditorDraft {
   damageType: Dnd5eDamageType
   conditionEnabled: boolean
   condition: keyof typeof DND5E_STANDARD_CONDITIONS
-  conditionExpiresAt: HeadlessEffectEditorDraft['conditionExpiresAt']
+  conditionExpiresAt: Dnd5ePluginEffectDuration['expiresAt']
   conditionRounds: number
   conditionSaveAbility: AbilityKey
   conditionSaveDc: number
   dmAdjustable: boolean
+  /** Preserves newer trigger fields that this compact editor does not expose yet. */
+  sourceDeclaration?: Dnd5ePersistentAreaTriggerDeclaration
 }
 
 interface HeadlessEffectEditorDraft {
@@ -128,6 +161,7 @@ interface HeadlessEffectEditorDraft {
   areaWidthFeet: number
   areaHeightFeet: number
   areaLengthFeet: number
+  areaRotatable: boolean
   maximumTargets: number
   persistentAreaEnabled: boolean
   persistentAreaLabel: string
@@ -136,7 +170,7 @@ interface HeadlessEffectEditorDraft {
   persistentAreaConcentration: boolean
   persistentAreaVerticalMode: 'legacy' | 'ground' | 'volume'
   persistentAreaHeightFeet: number
-  persistentAreaVisualPreset: 'arcane' | 'toxic-cloud'
+  persistentAreaVisualPreset: Dnd5ePersistentAreaVisualPreset
   persistentAreaVisualIntensity: 'subtle' | 'normal' | 'strong'
   persistentAreaTriggers: PersistentAreaTriggerEditorDraft[]
   summonEnabled: boolean
@@ -156,7 +190,7 @@ interface HeadlessEffectEditorDraft {
   healingModifier: number
   conditionEnabled: boolean
   condition: keyof typeof DND5E_STANDARD_CONDITIONS
-  conditionExpiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
+  conditionExpiresAt: Dnd5ePluginEffectDuration['expiresAt']
   conditionRounds: number
   conditionSaveAbility: AbilityKey
   conditionSaveDc: number
@@ -170,6 +204,7 @@ interface SpellDraft {
   id: string
   name: string
   englishName: string
+  iconAssetId?: string
   level: number
   school: Dnd5ePluginSpellDefinition['school']
   classes: Dnd5ePluginSpellDefinition['classes']
@@ -179,6 +214,11 @@ interface SpellDraft {
   reactionTrigger: string
   rangeType: Dnd5ePluginSpellDefinition['range']['type']
   rangeFeet: number
+  rangeShape: Dnd5eCustomSpellRangeShape
+  rangeSizeFeet: number
+  rangeWidthFeet: number
+  rangeHeightFeet: number
+  rangeRotatable: boolean
   verbal: boolean
   somatic: boolean
   material: boolean
@@ -192,8 +232,16 @@ interface SpellDraft {
   resolution: 'spell-attack' | 'saving-throw' | 'automatic'
   saveAbility: AbilityKey
   saveOnSuccess: 'none' | 'half' | 'full'
+  cantripScaling: boolean
+  cantripScalingSteps: Dnd5eCantripScalingStep[]
+  upcastFromSlotLevel: number
   upcastDamageDicePerLevel: number
+  upcastFlatDamagePerLevel: number
+  upcastAdditionalTargetsPerLevel: number
+  upcastAdditionalProjectilesPerLevel: number
+  upcastDurationRoundsPerLevel: number
   headless: HeadlessEffectEditorDraft
+  sourceDefinition?: Dnd5ePluginSpellDefinition
 }
 
 interface ItemDraft {
@@ -202,7 +250,7 @@ interface ItemDraft {
   description: string
   rulesText: string
   kind: 'weapon' | 'armor' | 'shield' | 'accessory' | 'consumable'
-  slot: 'mainWeapon' | 'offHand' | 'armor' | 'helmet' | 'shoes' | 'ring' | 'necklace'
+  slot: 'mainWeapon' | 'offHand' | 'armor' | 'helmet' | 'shoes' | 'ring' | 'ring2' | 'belt' | 'necklace'
   weaponMode: 'melee' | 'ranged'
   weaponCategory: 'simple' | 'martial'
   attackAbility: 'str' | 'dex' | 'finesse'
@@ -227,6 +275,24 @@ interface ItemDraft {
   attackRerollEnabled: boolean
   attackRerollCharges: number
   attackRerollResetOn: 'none' | 'short-rest' | 'long-rest' | 'dawn'
+  headlessEffectsUseCharges: boolean
+  onHitBonusDamageEnabled: boolean
+  onHitBonusDamageCount: number
+  onHitBonusDamageSides: number
+  onHitBonusDamageBonus: number
+  onHitBonusDamageType: 'inherit' | Dnd5eDamageType
+  onHitBonusDamageOncePerTurn: boolean
+  damageReductionEnabled: boolean
+  damageReductionAmount: number
+  damageReductionOncePerTurn: boolean
+  deathPreventionEnabled: boolean
+  deathPreventionHitPoints: number
+  deathPreventionMassiveDamage: boolean
+  spellSlotRecoveryEnabled: boolean
+  spellSlotRecoveryMaximumLevel: number
+  spellSlotRecoveryAmount: number
+  spellSlotRecoveryEconomy: 'action' | 'bonusAction' | 'none'
+  sourceDefinition?: Dnd5ePluginItemDefinition
 }
 
 type BuilderSection = 'races' | 'backgrounds' | 'features' | 'feats' | 'classes' | 'subclasses' | 'spells' | 'items' | 'monsters' | 'methods'
@@ -263,6 +329,16 @@ function builderSectionLabel(section: BuilderSection): string {
   return BUILDER_SECTIONS.find((entry) => entry.id === section)?.label ?? '资源'
 }
 
+function builderSectionForAiTarget(
+  target: Exclude<Dnd5eLocalContentAiTargetKind, 'auto'>,
+): BuilderSection {
+  if (target === 'ability-generation') return 'methods'
+  if (target === 'class') return 'classes'
+  if (target === 'subclass') return 'subclasses'
+  if (target === 'monster') return 'monsters'
+  return `${target}s` as BuilderSection
+}
+
 interface SavedBuilderDraft {
   metadata: {
     id: string
@@ -288,9 +364,53 @@ interface SavedBuilderDraft {
   subclasses: DeclarativeSubclassDefinitionV1[]
   classes: DeclarativeClassDefinitionV1[]
   monsters: Dnd5eMonsterStatBlock[]
+  assets?: Dnd5ePluginImageAssetDefinition[]
+  importedHeadlessActions?: Dnd5eCustomHeadlessActionDraft[]
 }
 
 const DRAFT_STORAGE_KEY = 'dndstars5e:custom-rules-workshop:v1'
+
+function scopedBuilderDraftStorageKey(scope: string): string {
+  return `${DRAFT_STORAGE_KEY}:${encodeURIComponent(scope || 'local')}`
+}
+
+function readSavedBuilderDraft(storageKey: string): Partial<SavedBuilderDraft> | null {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return null
+    const saved = JSON.parse(raw) as Partial<SavedBuilderDraft>
+    if (!saved || typeof saved !== 'object' || !saved.metadata) return null
+    return saved
+  } catch {
+    return null
+  }
+}
+
+function defaultBuilderMetadata(defaultPublisher: string): SavedBuilderDraft['metadata'] {
+  return {
+    id: 'local.dm.custom-rules',
+    name: '房间自定义规则',
+    version: '1.0.0',
+    publisher: defaultPublisher || '房间 DM',
+    license: '自定义内容；由房间 DM 负责授权',
+    description: '由 Astral Trace 扩展工作室生成。',
+    minimumGameProtocolVersion: 5,
+    dependencies: '',
+    conflicts: '',
+    declaredCapabilities: [],
+    distributionPolicy: 'room-distributable',
+    contentCategory: 'mixed',
+  }
+}
+
+function builderDraftHasContent(saved: SavedBuilderDraft, defaults: SavedBuilderDraft['metadata']): boolean {
+  return saved.races.length > 0 || saved.backgrounds.length > 0 || saved.features.length > 0 ||
+    saved.feats.length > 0 || saved.spells.length > 0 || saved.items.length > 0 ||
+    saved.methods.length > 0 || saved.subclasses.length > 0 || saved.classes.length > 0 ||
+    saved.monsters.length > 0 || (saved.assets?.length ?? 0) > 0 ||
+    (saved.importedHeadlessActions?.length ?? 0) > 0 ||
+    JSON.stringify(saved.metadata) !== JSON.stringify(defaults)
+}
 const PLUGIN_DISTRIBUTION_POLICIES = [
   ['room-distributable', '可随房间分发'],
   ['account-entitled', '每个账号需单独授权'],
@@ -307,11 +427,12 @@ const PLUGIN_CAPABILITIES: readonly Dnd5ePluginDeclaredCapability[] = [
 const SPELL_SCHOOLS = [['abjuration', '防护'], ['conjuration', '咒法'], ['divination', '预言'], ['enchantment', '惑控'], ['evocation', '塑能'], ['illusion', '幻术'], ['necromancy', '死灵'], ['transmutation', '变化']] as const
 const CASTING_UNITS = [['action', '动作'], ['bonus-action', '附赠动作'], ['reaction', '反应'], ['minute', '分钟'], ['hour', '小时']] as const
 const RANGE_TYPES = [['self', '自身'], ['touch', '触及'], ['distance', '距离'], ['sight', '视线'], ['unlimited', '无限'], ['special', '特殊']] as const
+const RANGE_SHAPES = [['none', '单体／无范围模板'], ['radius', '半径区域'], ['sphere', '球形'], ['cone', '锥形'], ['cube', '立方体'], ['cylinder', '圆柱'], ['line', '线形'], ['rect', '长方形／墙体']] as const
 const DURATION_TYPES = [['instantaneous', '立即'], ['timed', '计时'], ['until-dispelled', '直到被解除'], ['special', '特殊']] as const
 const DURATION_UNITS = [['round', '轮'], ['minute', '分钟'], ['hour', '小时'], ['day', '日']] as const
 const SPELL_CLASSES = [['bard', '吟游诗人'], ['cleric', '牧师'], ['druid', '德鲁伊'], ['paladin', '圣武士'], ['ranger', '游侠'], ['sorcerer', '术士'], ['warlock', '邪术师'], ['wizard', '法师']] as const
 const ITEM_KINDS = [['weapon', '武器'], ['armor', '护甲'], ['shield', '盾牌'], ['accessory', '饰品／其他装备'], ['consumable', '治疗消耗品']] as const
-const EQUIPMENT_SLOTS = [['mainWeapon', '主手'], ['offHand', '副手'], ['armor', '护甲'], ['helmet', '头部'], ['shoes', '足部'], ['ring', '戒指'], ['necklace', '颈部']] as const
+const EQUIPMENT_SLOTS = [['mainWeapon', '主手'], ['offHand', '副手'], ['armor', '护甲'], ['helmet', '头部'], ['shoes', '足部'], ['ring', '戒指 1'], ['ring2', '戒指 2'], ['belt', '腰带'], ['necklace', '颈部']] as const
 const WEAPON_CATEGORIES = [['simple', '简易武器'], ['martial', '军用武器']] as const
 const WEAPON_MODES = [['melee', '近战'], ['ranged', '远程']] as const
 const ATTACK_ABILITIES = [['str', '力量'], ['dex', '敏捷'], ['finesse', '灵巧（取高）']] as const
@@ -324,12 +445,15 @@ const TARGET_RELATIONS = [['enemy', '敌方'], ['ally', '友方'], ['any', '任�
 const AREA_SHAPES = [['circle', '圆形'], ['cone', '锥形'], ['line', '线形'], ['rect', '矩形']] as const
 const INTERRUPT_AUDIENCES = [['dm', 'DM'], ['actor', '行动者'], ['target', '目标']] as const
 const CONDITION_EXPIRATIONS = [
+  ['permanent', '永久'],
   ['source-next-turn-start', '来源下回合开始'],
   ['target-next-turn-start', '目标下回合开始'],
   ['target-turn-end', '目标回合结束'],
   ['target-turn-end-save', '目标回合结束重复豁免'],
 ] as const
 const PERSISTENT_AREA_TRIGGER_TIMINGS = [
+  ['on-move-distance', '区域内移动距离'],
+  ['on-area-move-impact', '区域移动命中'],
   ['on-create', '首次创建区域'],
   ['on-enter', '进入区域'],
   ['turn-start', '目标回合开始'],
@@ -357,8 +481,23 @@ interface Props {
   busy?: boolean
   onInstall(file: File): Promise<void>
   installLabel?: string
+  onPublish?: (file: File) => Promise<void>
+  publishLabel?: string
   alwaysExpanded?: boolean
   categoryControl?: 'tabs' | 'select'
+  monsterWorkshopImport?: Dnd5eMonsterWorkshopEditRequest | null
+  onMonsterWorkshopImportClose?: () => void
+  contentWorkshopImport?: Dnd5eWorkshopContentEditRequest | null
+  onContentWorkshopImportClose?: () => void
+  /** 本地草稿按房间隔离；不会上传到服务器或随规则包分发。 */
+  draftStorageScope?: string
+}
+
+export interface Dnd5eWorkshopContentEditRequest {
+  requestId: number
+  targetKind: Exclude<Dnd5eLocalContentAiTargetKind, 'auto'>
+  package: Dnd5eContentPackageV2
+  review?: Dnd5eMonsterWorkshopAiReview
 }
 
 const emptyBonuses = (): Record<AbilityKey, number> => ({ str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
@@ -427,6 +566,7 @@ function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
       actionLabel: '使用特性', economy: 'action', targetingKind: 'single-creature',
       relation: 'enemy', includeSelf: false, rangeFeet: 60,
       areaShape: 'circle', areaRadiusFeet: 10, areaWidthFeet: 10, areaHeightFeet: 10,
+      areaRotatable: true,
       areaLengthFeet: 30, maximumTargets: 16,
       persistentAreaEnabled: false, persistentAreaLabel: '持续区域', persistentAreaColor: '#8b5cf6',
       persistentAreaDurationRounds: 10, persistentAreaConcentration: false,
@@ -503,15 +643,37 @@ function restoreFeatDraft(value: Partial<FeatDraft>, index: number): FeatDraft {
   }
 }
 
+const DEFAULT_CANTRIP_SCALING_STEPS: readonly Dnd5eCantripScalingStep[] = [
+  { level: 5, diceCount: 1 },
+  { level: 11, diceCount: 1 },
+  { level: 17, diceCount: 1 },
+]
+
+function cantripScalingStepsFromDamage(
+  damage: Dnd5eSpellMechanicsDefinition['damage'] | undefined,
+): Dnd5eCantripScalingStep[] {
+  const scaling = damage?.cantripScaling
+  if (scaling && scaling !== true) return scaling.steps.map((step) => ({ ...step }))
+  const diceCount = scaling === true ? Math.max(1, damage?.dice.count ?? 1) : 1
+  return DEFAULT_CANTRIP_SCALING_STEPS.map((step) => ({ ...step, diceCount }))
+}
+
 function newSpell(index: number): SpellDraft {
   return {
     id: `custom-spell-${index}`, name: `自定义法术 ${index}`, englishName: '', level: 1,
     school: 'evocation', classes: ['wizard'], ritual: false,
     castingTimeUnit: 'action', castingTimeValue: 1, reactionTrigger: '', rangeType: 'distance', rangeFeet: 60,
+    rangeShape: 'none', rangeSizeFeet: 5, rangeWidthFeet: 60, rangeHeightFeet: 5, rangeRotatable: true,
     verbal: true, somatic: true, material: false, materialText: '',
     durationType: 'instantaneous', durationValue: 1, durationUnit: 'round', concentration: false,
     description: '', higherLevels: '', resolution: 'spell-attack', saveAbility: 'dex', saveOnSuccess: 'half',
-    upcastDamageDicePerLevel: 1, headless: { ...newHeadlessEffectDraft(), actionLabel: '施放法术' },
+    cantripScaling: false,
+    cantripScalingSteps: DEFAULT_CANTRIP_SCALING_STEPS.map((step) => ({ ...step })),
+    upcastFromSlotLevel: 1,
+    upcastDamageDicePerLevel: 1, upcastFlatDamagePerLevel: 0,
+    upcastAdditionalTargetsPerLevel: 0, upcastAdditionalProjectilesPerLevel: 0,
+    upcastDurationRoundsPerLevel: 0,
+    headless: { ...newHeadlessEffectDraft(), actionLabel: '施放法术' },
   }
 }
 
@@ -526,16 +688,409 @@ function newItem(index: number): ItemDraft {
     savingThrowBonus: 0, speedBonusFeet: 0,
     healingCount: 1, healingSides: 4, healingBonus: 0,
     attackRerollEnabled: false, attackRerollCharges: 4, attackRerollResetOn: 'long-rest',
+    headlessEffectsUseCharges: true,
+    onHitBonusDamageEnabled: false, onHitBonusDamageCount: 1, onHitBonusDamageSides: 6,
+    onHitBonusDamageBonus: 0, onHitBonusDamageType: 'inherit', onHitBonusDamageOncePerTurn: false,
+    damageReductionEnabled: false, damageReductionAmount: 1, damageReductionOncePerTurn: false,
+    deathPreventionEnabled: false, deathPreventionHitPoints: 1, deathPreventionMassiveDamage: false,
+    spellSlotRecoveryEnabled: false, spellSlotRecoveryMaximumLevel: 3, spellSlotRecoveryAmount: 1,
+    spellSlotRecoveryEconomy: 'action',
   }
 }
 
 function restoreSpellDraft(value: Partial<SpellDraft>, index: number): SpellDraft {
   const fallback = newSpell(index + 1)
-  return { ...fallback, ...value, headless: restoreHeadlessEffectDraft(value.headless) }
+  const inferredLegacyRange = value.rangeShape == null && value.description
+    ? inferDnd5eCustomSpellRangeFromText(value.description)
+    : undefined
+  const sourceDamage = value.sourceDefinition?.mechanics?.damage
+  return {
+    ...fallback,
+    ...value,
+    ...inferredLegacyRange,
+    cantripScalingSteps: Array.isArray(value.cantripScalingSteps) && value.cantripScalingSteps.length > 0
+      ? value.cantripScalingSteps.map((step) => ({ ...step }))
+      : cantripScalingStepsFromDamage(sourceDamage),
+    upcastFromSlotLevel: value.upcastFromSlotLevel ?? value.sourceDefinition?.mechanics?.upcast?.fromSlotLevel ?? Math.max(1, value.level ?? fallback.level),
+    headless: restoreHeadlessEffectDraft(value.headless),
+  }
 }
 
 function restoreItemDraft(value: Partial<ItemDraft>, index: number): ItemDraft {
   return { ...newItem(index + 1), ...value }
+}
+
+function upsertById<T extends { id: string }>(current: readonly T[], incoming: readonly T[]): T[] {
+  const byId = new Map(current.map((entry) => [entry.id, entry]))
+  for (const entry of incoming) byId.set(entry.id, entry)
+  return [...byId.values()]
+}
+
+function importedHeadlessEffectDraft(
+  definition: Dnd5ePluginFeatureDefinition,
+  linkedAction?: Dnd5eCustomHeadlessActionDraft,
+): HeadlessEffectEditorDraft {
+  const fallback = newHeadlessEffectDraft()
+  const action = definition.action
+  const damage = linkedAction?.effects.find((effect) => effect.kind === 'damage')
+  const healing = linkedAction?.effects.find((effect) => effect.kind === 'healing')
+  const condition = linkedAction?.effects.find((effect) => effect.kind === 'condition')
+  const targeting = action?.targeting
+  const template = targeting?.kind === 'area' ? targeting.template : undefined
+  const templateRangeFeet = template?.shape === 'circle' || template?.shape === 'rect'
+    ? template.placeRangeFeet ?? fallback.rangeFeet
+    : template?.shape === 'cone' || template?.shape === 'line'
+      ? template.aimRangeFeet ?? fallback.rangeFeet
+      : fallback.rangeFeet
+  const editableConditionExpiration = condition?.duration.expiresAt
+  return {
+    ...fallback,
+    enabled: !!action,
+    actionLabel: action?.label ?? definition.name,
+    economy: action?.economy ?? fallback.economy,
+    targetingKind: targeting?.kind ?? fallback.targetingKind,
+    relation: targeting && targeting.kind !== 'self' ? targeting.relation ?? 'any' : fallback.relation,
+    includeSelf: targeting && targeting.kind !== 'self' ? targeting.includeSelf ?? false : true,
+    rangeFeet: targeting?.kind === 'single-creature'
+      ? targeting.rangeFeet ?? fallback.rangeFeet
+      : templateRangeFeet,
+    areaShape: template?.shape ?? fallback.areaShape,
+    areaRadiusFeet: template?.shape === 'circle' ? template.radiusFeet : fallback.areaRadiusFeet,
+    areaWidthFeet: template?.shape === 'line' || template?.shape === 'rect' ? template.widthFeet : fallback.areaWidthFeet,
+    areaHeightFeet: template?.shape === 'rect' ? template.heightFeet : fallback.areaHeightFeet,
+    areaLengthFeet: template?.shape === 'cone' || template?.shape === 'line' ? template.lengthFeet : fallback.areaLengthFeet,
+    areaRotatable: template?.shape === 'rect' ? template.rotatable ?? false : fallback.areaRotatable,
+    maximumTargets: targeting?.kind === 'area' ? targeting.maximumTargets ?? fallback.maximumTargets : 1,
+    persistentAreaEnabled: !!action?.persistentArea,
+    persistentAreaLabel: action?.persistentArea?.label ?? fallback.persistentAreaLabel,
+    persistentAreaColor: action?.persistentArea?.color ?? fallback.persistentAreaColor,
+    persistentAreaDurationRounds: action?.persistentArea?.durationRounds ?? fallback.persistentAreaDurationRounds,
+    persistentAreaConcentration: action?.persistentArea?.concentration ?? false,
+    persistentAreaVerticalMode: action?.persistentArea?.vertical?.mode ?? 'legacy',
+    persistentAreaHeightFeet: action?.persistentArea?.vertical?.mode === 'volume'
+      ? action.persistentArea.vertical.heightFeet
+      : fallback.persistentAreaHeightFeet,
+    persistentAreaVisualPreset: action?.persistentArea?.visual?.preset ?? fallback.persistentAreaVisualPreset,
+    persistentAreaVisualIntensity: action?.persistentArea?.visual?.intensity ?? fallback.persistentAreaVisualIntensity,
+    persistentAreaTriggers: (action?.persistentArea?.triggers ?? []).map((trigger, index) => ({
+      ...newPersistentAreaTrigger(index + 1),
+      id: trigger.id,
+      label: trigger.label,
+      timing: trigger.timing as PersistentAreaTriggerEditorDraft['timing'],
+      oncePerRound: trigger.oncePerRound ?? false,
+      oncePerTurn: trigger.oncePerTurn ?? false,
+      savingThrowEnabled: !!trigger.savingThrow,
+      savingThrowAbility: trigger.savingThrow?.ability ?? 'con',
+      savingThrowDcMode: trigger.savingThrow?.dc === 'source-save-dc' ? 'source-save-dc' : 'fixed',
+      savingThrowDc: typeof trigger.savingThrow?.dc === 'number' ? trigger.savingThrow.dc : 12,
+      savingThrowOnSuccess: trigger.savingThrow?.onSuccess ?? 'none',
+      damageEnabled: !!trigger.damage,
+      damageCount: trigger.damage?.count ?? 1,
+      damageSides: trigger.damage?.sides ?? 6,
+      damageModifier: trigger.damage?.modifier ?? 0,
+      damageType: trigger.damage?.type ?? 'force',
+      conditionEnabled: !!trigger.condition,
+      condition: trigger.condition?.condition ?? 'prone',
+      conditionExpiresAt: trigger.condition?.duration.expiresAt ?? 'target-turn-end',
+      conditionRounds: trigger.condition?.duration.remainingRounds ?? 1,
+      conditionSaveAbility: trigger.condition?.duration.saveAbility ?? 'con',
+      conditionSaveDc: trigger.condition?.duration.saveDc ?? 10,
+      dmAdjustable: trigger.dmAdjustable ?? false,
+      sourceDeclaration: structuredClone(trigger),
+      })),
+    summonEnabled: !!action?.summon,
+    summonMonsterId: action?.summon?.monsterId ?? fallback.summonMonsterId,
+    summonLabel: action?.summon?.label ?? '',
+    summonDurationRounds: action?.summon?.durationRounds ?? fallback.summonDurationRounds,
+    summonConcentration: action?.summon?.concentration ?? false,
+    summonSide: action?.summon?.side ?? 'ally',
+    damageEnabled: !!damage,
+    damageCount: damage?.dice.count ?? fallback.damageCount,
+    damageSides: damage?.dice.sides ?? fallback.damageSides,
+    damageModifier: damage?.dice.modifier ?? 0,
+    damageType: damage?.damageType ?? fallback.damageType,
+    healingEnabled: !!healing,
+    healingCount: healing?.dice.count ?? fallback.healingCount,
+    healingSides: healing?.dice.sides ?? fallback.healingSides,
+    healingModifier: healing?.dice.modifier ?? 0,
+    conditionEnabled: !!condition,
+    condition: condition?.condition ?? fallback.condition,
+    conditionExpiresAt: editableConditionExpiration ?? fallback.conditionExpiresAt,
+    conditionRounds: condition?.duration.remainingRounds ?? fallback.conditionRounds,
+    conditionSaveAbility: condition?.duration.saveAbility ?? fallback.conditionSaveAbility,
+    conditionSaveDc: condition?.duration.saveDc ?? fallback.conditionSaveDc,
+    interruptEnabled: !!action?.interrupt,
+    interruptAudience: action?.interrupt?.audience ?? fallback.interruptAudience,
+    interruptPrompt: action?.interrupt?.prompt ?? fallback.interruptPrompt,
+    interruptTimeoutSeconds: Math.max(1, Math.round((action?.interrupt?.timeoutMs ?? 30_000) / 1_000)),
+  }
+}
+
+function importedRaceDraft(definition: Dnd5ePluginRaceDefinition): RaceDraft {
+  const bonuses = emptyBonuses()
+  for (const ability of ABILITIES) bonuses[ability.key] = definition.abilityBonuses?.[ability.key] ?? 0
+  return {
+    ...newRace(1),
+    id: definition.id,
+    name: definition.name,
+    description: definition.description ?? '',
+    speedFeet: definition.speedFeet,
+    abilityBonuses: bonuses,
+    flexibleCount: definition.flexibleAbilityBonus?.count ?? 0,
+    flexibleAmount: definition.flexibleAbilityBonus?.amount ?? 1,
+    flexibleExclude: [...(definition.flexibleAbilityBonus?.exclude ?? [])],
+    sourceDefinition: structuredClone(definition),
+  }
+}
+
+function importedBackgroundDraft(definition: Dnd5ePluginBackgroundDefinition): BackgroundDraft {
+  return {
+    ...newBackground(1),
+    id: definition.id,
+    name: definition.name,
+    description: definition.description ?? '',
+    skillProficiencies: [...definition.skillProficiencies],
+    toolProficiencies: (definition.toolProficiencies ?? []).join(', '),
+    languages: definition.languages ?? 0,
+    featureName: definition.feature?.name ?? '',
+    featureDescription: definition.feature?.description ?? '',
+    sourceDefinition: structuredClone(definition),
+  }
+}
+
+function importedFeatureDraft(
+  definition: Dnd5ePluginFeatureDefinition,
+  headlessActions: readonly Dnd5eCustomHeadlessActionDraft[],
+): FeatureDraft {
+  const linkedAction = definition.action
+    ? headlessActions.find((action) => action.id === definition.action?.id)
+    : undefined
+  return {
+    ...newFeature(1),
+    id: definition.id,
+    name: definition.name,
+    summary: definition.summary,
+    description: definition.description,
+    minimumLevel: definition.minimumLevel ?? 1,
+    canModifyEnemyD20: definition.canModifyEnemyD20 ?? false,
+    headless: importedHeadlessEffectDraft(definition, linkedAction),
+    sourceDefinition: structuredClone(definition),
+  }
+}
+
+function importedFeatDraft(
+  definition: Dnd5ePluginFeatDefinition,
+  headlessActions: readonly Dnd5eCustomHeadlessActionDraft[],
+): FeatDraft {
+  const feature = importedFeatureDraft(definition, headlessActions)
+  return {
+    ...feature,
+    prerequisiteAbilities: { ...emptyBonuses(), ...(definition.prerequisite?.abilityScores ?? {}) },
+    prerequisiteRaceIds: (definition.prerequisite?.raceIds ?? []).join(', '),
+    minimumLevel: definition.prerequisite?.minimumLevel ?? feature.minimumLevel,
+    sourceFeatDefinition: structuredClone(definition),
+  }
+}
+
+function importedMethodDraft(definition: Dnd5ePluginAbilityGenerationDefinition): MethodDraft {
+  const draft = newMethod(1)
+  if (definition.kind === 'standard-array') draft.scores = definition.scores.join(', ')
+  if (definition.kind === 'point-buy') {
+    draft.budget = definition.budget
+    draft.minimum = definition.minimum
+    draft.maximum = definition.maximum
+    draft.costs = Object.entries(definition.costs).map(([score, cost]) => `${score}:${cost}`).join(', ')
+  }
+  if (definition.kind === 'roll') {
+    draft.diceCount = definition.diceCount
+    draft.dieSides = definition.dieSides
+    draft.dropLowest = definition.dropLowest
+  }
+  return {
+    ...draft,
+    id: definition.id,
+    name: definition.name,
+    summary: definition.summary,
+    kind: definition.kind,
+    sourceDefinition: structuredClone(definition),
+  }
+}
+
+function importedSpellDraft(
+  definition: Dnd5ePluginSpellDefinition,
+  headlessActions: readonly Dnd5eCustomHeadlessActionDraft[],
+): SpellDraft {
+  const fallback = newSpell(1)
+  const mechanics = definition.mechanics
+  const automation = definition.automation
+  const linkedActionId = automation?.mode === 'headless-action'
+    ? automation.actionId
+    : undefined
+  const linkedAction = linkedActionId
+    ? headlessActions.find((action) => action.id === linkedActionId)
+    : undefined
+  const linkedDamage = linkedAction?.effects.find((effect) => effect.kind === 'damage')
+  const linkedCondition = linkedAction?.effects.find((effect) => effect.kind === 'condition')
+  const condition = mechanics?.conditions?.[0]
+  const damage = mechanics?.damage
+  const upcast = mechanics?.upcast?.effects ?? []
+  const rangeShape = definition.range.shape ?? 'none'
+  const conditionExpiration = condition?.duration.kind === 'source-next-turn-start'
+    ? 'source-next-turn-start' as const
+    : condition?.duration.kind === 'target-next-turn-start'
+      ? 'target-next-turn-start' as const
+      : condition?.duration.kind === 'save-ends'
+        ? 'target-turn-end-save' as const
+        : 'target-turn-end' as const
+  const conditionRounds = condition?.duration.kind === 'fixed-rounds'
+    ? condition.duration.rounds
+    : condition?.duration.kind === 'save-ends'
+      ? condition.duration.maximumRounds
+      : 1
+  const linkedConditionExpiration = linkedCondition?.duration.expiresAt
+  const headless: HeadlessEffectEditorDraft = {
+    ...fallback.headless,
+    enabled: definition.automation?.mode === 'headless-action',
+    actionLabel: definition.name,
+    targetingKind: rangeShape === 'none'
+      ? definition.range.type === 'self' ? 'self' : 'single-creature'
+      : 'area',
+    relation: definition.targeting?.relation ?? 'enemy',
+    includeSelf: definition.targeting?.includeSelf ?? definition.range.type === 'self',
+    maximumTargets: definition.targeting?.maximumTargets ?? (rangeShape === 'none' ? 1 : 16),
+    damageEnabled: !!(damage || linkedDamage),
+    damageCount: damage?.dice.count ?? linkedDamage?.dice.count ?? 1,
+    damageSides: damage?.dice.sides ?? linkedDamage?.dice.sides ?? 6,
+    damageModifier: damage?.dice.bonus ?? linkedDamage?.dice.modifier ?? 0,
+    damageType: damage?.type ?? linkedDamage?.damageType ?? 'force',
+    conditionEnabled: !!(condition || linkedCondition),
+    condition: condition?.condition ?? linkedCondition?.condition ?? 'prone',
+    conditionExpiresAt: linkedConditionExpiration ?? conditionExpiration,
+    conditionRounds: linkedCondition?.duration.remainingRounds ?? conditionRounds,
+    conditionSaveAbility: linkedCondition?.duration.saveAbility ?? (
+      condition?.duration.kind === 'save-ends' ? condition.duration.saveAbility : 'con'
+    ),
+    conditionSaveDc: linkedCondition?.duration.saveDc ?? 10,
+  }
+  return {
+    ...fallback,
+    id: definition.id,
+    name: definition.name,
+    englishName: definition.englishName ?? '',
+    iconAssetId: definition.iconAssetId,
+    level: definition.level,
+    school: definition.school,
+    classes: [...definition.classes],
+    ritual: definition.ritual,
+    castingTimeUnit: definition.castingTime.unit,
+    castingTimeValue: definition.castingTime.value,
+    reactionTrigger: definition.castingTime.reactionTrigger ?? '',
+    rangeType: definition.range.type,
+    rangeFeet: definition.range.feet ?? fallback.rangeFeet,
+    rangeShape,
+    rangeSizeFeet: definition.range.sizeFeet ?? fallback.rangeSizeFeet,
+    rangeWidthFeet: definition.range.widthFeet ?? fallback.rangeWidthFeet,
+    rangeHeightFeet: definition.range.heightFeet ?? fallback.rangeHeightFeet,
+    rangeRotatable: definition.range.rotatable ?? fallback.rangeRotatable,
+    verbal: definition.components.verbal,
+    somatic: definition.components.somatic,
+    material: definition.components.material,
+    materialText: definition.components.materialText ?? '',
+    durationType: definition.duration.type,
+    durationValue: definition.duration.value ?? fallback.durationValue,
+    durationUnit: definition.duration.unit ?? fallback.durationUnit,
+    concentration: definition.duration.concentration,
+    description: definition.description,
+    higherLevels: definition.higherLevels ?? '',
+    resolution: mechanics?.resolution === 'dm-adjudication'
+      ? 'automatic'
+      : mechanics?.resolution ?? fallback.resolution,
+    saveAbility: mechanics?.savingThrow?.ability ?? fallback.saveAbility,
+    saveOnSuccess: mechanics?.savingThrow?.onSuccess ?? fallback.saveOnSuccess,
+    cantripScaling: !!damage?.cantripScaling,
+    cantripScalingSteps: cantripScalingStepsFromDamage(damage),
+    upcastFromSlotLevel: mechanics?.upcast?.fromSlotLevel ?? Math.max(1, definition.level),
+    upcastDamageDicePerLevel: upcast.find((effect) => effect.kind === 'damage-dice')?.diceCountPerSlot ?? 0,
+    upcastFlatDamagePerLevel: upcast.find((effect) => effect.kind === 'flat-damage')?.amountPerSlot ?? 0,
+    upcastAdditionalTargetsPerLevel: upcast.find((effect) => effect.kind === 'additional-targets')?.countPerSlot ?? 0,
+    upcastAdditionalProjectilesPerLevel: upcast.find((effect) => effect.kind === 'additional-projectiles')?.countPerSlot ?? 0,
+    upcastDurationRoundsPerLevel: upcast.find((effect) => effect.kind === 'duration-rounds')?.roundsPerSlot ?? 0,
+    headless,
+    sourceDefinition: structuredClone(definition),
+  }
+}
+
+function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
+  const draft = newItem(1)
+  const equipment = definition.equipment
+  const dnd5e = equipment?.dnd5e
+  const healing = definition.use?.effect.kind === 'healing' ? definition.use.effect : undefined
+  const reroll = definition.headlessEffects?.find((effect) => effect.kind === 'attack-roll-reroll')
+  const bonusDamage = definition.headlessEffects?.find((effect) => effect.kind === 'on-hit-bonus-damage')
+  const damageReduction = definition.headlessEffects?.find((effect) => effect.kind === 'damage-reduction')
+  const deathPrevention = definition.headlessEffects?.find((effect) => effect.kind === 'death-prevention')
+  const slotRecovery = definition.use?.effect.kind === 'spell-slot-recovery' ? definition.use.effect : undefined
+  const effectResourceId = reroll?.resourceId ?? bonusDamage?.resourceId ?? damageReduction?.resourceId ??
+    deathPrevention?.resourceId ?? definition.use?.resourceCost?.resourceId
+  const charges = effectResourceId
+    ? definition.resources?.find((resource) => resource.id === effectResourceId)
+    : undefined
+  let kind: ItemDraft['kind'] = 'accessory'
+  if (definition.category === 'consumable') kind = 'consumable'
+  else if (dnd5e?.kind === 'weapon') kind = 'weapon'
+  else if (dnd5e?.kind === 'armor') kind = 'armor'
+  else if (dnd5e?.kind === 'shield') kind = 'shield'
+  return {
+    ...draft,
+    id: definition.id,
+    name: definition.name,
+    description: definition.description,
+    rulesText: definition.rulesText,
+    kind,
+    slot: equipment?.slot ?? draft.slot,
+    weaponMode: dnd5e?.kind === 'weapon' ? dnd5e.mode : draft.weaponMode,
+    weaponCategory: dnd5e?.kind === 'weapon' ? dnd5e.category : draft.weaponCategory,
+    attackAbility: dnd5e?.kind === 'weapon' ? dnd5e.attackAbility : draft.attackAbility,
+    damageCount: dnd5e?.kind === 'weapon' ? dnd5e.damage.count : draft.damageCount,
+    damageSides: dnd5e?.kind === 'weapon' ? dnd5e.damage.sides : draft.damageSides,
+    damageType: dnd5e?.kind === 'weapon' ? dnd5e.damage.type : draft.damageType,
+    reachFeet: dnd5e?.kind === 'weapon' ? dnd5e.reachFeet ?? draft.reachFeet : draft.reachFeet,
+    rangeNormal: dnd5e?.kind === 'weapon' ? dnd5e.rangeFeet?.normal ?? draft.rangeNormal : draft.rangeNormal,
+    rangeLong: dnd5e?.kind === 'weapon' ? dnd5e.rangeFeet?.long ?? draft.rangeLong : draft.rangeLong,
+    armorCategory: dnd5e?.kind === 'armor' ? dnd5e.category : draft.armorCategory,
+    baseArmorClass: dnd5e?.kind === 'armor' ? dnd5e.baseArmorClass : draft.baseArmorClass,
+    dexterityBonus: dnd5e?.kind === 'armor' ? dnd5e.dexterityBonus : draft.dexterityBonus,
+    shieldBonus: dnd5e?.kind === 'shield' ? dnd5e.armorClassBonus : draft.shieldBonus,
+    weaponAttackBonus: equipment?.effects?.weaponAttackBonus ?? 0,
+    weaponDamageBonus: equipment?.effects?.weaponDamageBonus ?? 0,
+    armorClassBonus: equipment?.effects?.armorClassBonus ?? 0,
+    savingThrowBonus: equipment?.effects?.savingThrowBonus ?? 0,
+    speedBonusFeet: equipment?.effects?.speedBonusFeet ?? 0,
+    healingCount: healing?.dice.count ?? draft.healingCount,
+    healingSides: healing?.dice.sides ?? draft.healingSides,
+    healingBonus: healing?.dice.bonus ?? draft.healingBonus,
+    attackRerollEnabled: !!reroll,
+    attackRerollCharges: typeof charges?.maximum === 'number' ? charges.maximum : draft.attackRerollCharges,
+    attackRerollResetOn: charges?.resetOn ?? draft.attackRerollResetOn,
+    headlessEffectsUseCharges: !!effectResourceId,
+    onHitBonusDamageEnabled: !!bonusDamage,
+    onHitBonusDamageCount: bonusDamage?.damage.count ?? draft.onHitBonusDamageCount,
+    onHitBonusDamageSides: bonusDamage?.damage.sides ?? draft.onHitBonusDamageSides,
+    onHitBonusDamageBonus: bonusDamage?.damage.bonus ?? draft.onHitBonusDamageBonus,
+    onHitBonusDamageType: bonusDamage?.damageType ?? draft.onHitBonusDamageType,
+    onHitBonusDamageOncePerTurn: bonusDamage?.oncePerTurn === true,
+    damageReductionEnabled: !!damageReduction,
+    damageReductionAmount: damageReduction?.amount ?? draft.damageReductionAmount,
+    damageReductionOncePerTurn: damageReduction?.oncePerTurn === true,
+    deathPreventionEnabled: !!deathPrevention,
+    deathPreventionHitPoints: deathPrevention?.hitPointsAfter ?? draft.deathPreventionHitPoints,
+    deathPreventionMassiveDamage: deathPrevention?.preventsMassiveDamage === true,
+    spellSlotRecoveryEnabled: !!slotRecovery,
+    spellSlotRecoveryMaximumLevel: slotRecovery?.maximumSlotLevel ?? draft.spellSlotRecoveryMaximumLevel,
+    spellSlotRecoveryAmount: slotRecovery?.amount ?? draft.spellSlotRecoveryAmount,
+    spellSlotRecoveryEconomy: definition.use?.economy ?? draft.spellSlotRecoveryEconomy,
+    sourceDefinition: structuredClone(definition),
+  }
 }
 
 function numericList(value: string): number[] {
@@ -556,6 +1111,7 @@ function toRaceDefinition(race: RaceDraft): Dnd5ePluginRaceDefinition {
     ABILITIES.flatMap(({ key }) => race.abilityBonuses[key] === 0 ? [] : [[key, race.abilityBonuses[key]]]),
   ) as Partial<Record<AbilityKey, number>>
   return {
+    ...race.sourceDefinition,
     id: race.id.trim(),
     name: race.name.trim(),
     description: race.description.trim(),
@@ -573,8 +1129,9 @@ function toRaceDefinition(race: RaceDraft): Dnd5ePluginRaceDefinition {
 
 function toMethodDefinition(method: MethodDraft): Dnd5ePluginAbilityGenerationDefinition {
   const base = { id: method.id.trim(), name: method.name.trim(), summary: method.summary.trim() }
-  if (method.kind === 'standard-array') return { ...base, kind: 'standard-array', scores: numericList(method.scores) }
+  if (method.kind === 'standard-array') return { ...method.sourceDefinition, ...base, kind: 'standard-array', scores: numericList(method.scores) }
   if (method.kind === 'point-buy') return {
+    ...method.sourceDefinition,
     ...base,
     kind: 'point-buy',
     budget: method.budget,
@@ -583,6 +1140,7 @@ function toMethodDefinition(method: MethodDraft): Dnd5ePluginAbilityGenerationDe
     costs: costTable(method.costs),
   }
   return {
+    ...method.sourceDefinition,
     ...base,
     kind: 'roll',
     diceCount: method.diceCount,
@@ -594,6 +1152,7 @@ function toMethodDefinition(method: MethodDraft): Dnd5ePluginAbilityGenerationDe
 function toBackgroundDefinition(background: BackgroundDraft): Dnd5ePluginBackgroundDefinition {
   const tools = background.toolProficiencies.split(/[，,]+/).map((value) => value.trim()).filter(Boolean)
   return {
+    ...background.sourceDefinition,
     id: background.id.trim(), name: background.name.trim(), description: background.description.trim(),
     skillProficiencies: [...background.skillProficiencies],
     ...(tools.length > 0 ? { toolProficiencies: tools } : {}),
@@ -607,10 +1166,12 @@ function toBackgroundDefinition(background: BackgroundDraft): Dnd5ePluginBackgro
 function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinition {
   if (!feature.headless.enabled) {
     return {
+      ...feature.sourceDefinition,
       id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
       description: feature.description.trim(), minimumLevel: feature.minimumLevel,
       canModifyEnemyD20: feature.canModifyEnemyD20,
       automation: 'manual',
+      action: undefined,
     }
   }
   const targeting = feature.headless.targetingKind === 'self'
@@ -646,15 +1207,17 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
                 : {
                     shape: 'rect' as const, origin: 'point' as const,
                     widthFeet: feature.headless.areaWidthFeet, heightFeet: feature.headless.areaHeightFeet,
-                    placeRangeFeet: feature.headless.rangeFeet, rotatable: true,
+                    placeRangeFeet: feature.headless.rangeFeet, rotatable: feature.headless.areaRotatable,
                   },
         }
   return {
+    ...feature.sourceDefinition,
     id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
     description: feature.description.trim(), minimumLevel: feature.minimumLevel,
     canModifyEnemyD20: feature.canModifyEnemyD20,
     automation: 'full',
     action: {
+      ...feature.sourceDefinition?.action,
       id: feature.id.trim(),
       label: feature.headless.actionLabel.trim() || `使用${feature.name.trim()}`,
       description: feature.summary.trim(),
@@ -693,6 +1256,7 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
           },
           ...(feature.headless.persistentAreaTriggers.length > 0 ? {
             triggers: feature.headless.persistentAreaTriggers.map((trigger) => ({
+              ...trigger.sourceDeclaration,
               id: trigger.id.trim(),
               label: trigger.label.trim(),
               timing: trigger.timing,
@@ -756,6 +1320,7 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
   ) as Partial<Record<AbilityKey, number>>
   const raceIds = feat.prerequisiteRaceIds.split(/[，,]+/).map((entry) => entry.trim()).filter(Boolean)
   return {
+    ...feat.sourceFeatDefinition,
     ...feature,
     prerequisite: {
       ...(feat.minimumLevel > 1 ? { minimumLevel: feat.minimumLevel } : {}),
@@ -809,10 +1374,30 @@ function toHeadlessActionDraft(feature: FeatureDraft): Dnd5eCustomHeadlessAction
   return toHeadlessActionDraftFromEditor(feature.id, feature.name, feature.headless)
 }
 
-function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
+function spellHeadlessEffectDraft(spell: SpellDraft): HeadlessEffectEditorDraft {
   return {
+    ...spell.headless,
+    ...dnd5eCustomSpellHeadlessRangePatch({
+      rangeType: spell.rangeType,
+      rangeFeet: spell.rangeFeet,
+      rangeShape: spell.rangeShape,
+      rangeSizeFeet: spell.rangeSizeFeet,
+      rangeWidthFeet: spell.rangeWidthFeet,
+      rangeHeightFeet: spell.rangeHeightFeet,
+      rangeRotatable: spell.rangeRotatable,
+      currentRangeFeet: spell.headless.rangeFeet,
+      currentAreaWidthFeet: spell.headless.areaWidthFeet,
+    }),
+  }
+}
+
+function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
+  const headlessReady = dnd5eSpellWorkshopHeadlessReady(spell.headless)
+  return {
+    ...spell.sourceDefinition,
     id: spell.id.trim(), name: spell.name.trim(),
     ...(spell.englishName.trim() ? { englishName: spell.englishName.trim() } : {}),
+    ...(spell.iconAssetId ? { iconAssetId: spell.iconAssetId } : { iconAssetId: undefined }),
     level: spell.level, school: spell.school, ritual: spell.ritual,
     castingTime: {
       value: spell.castingTimeValue, unit: spell.castingTimeUnit,
@@ -823,7 +1408,20 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
     range: {
       type: spell.rangeType,
       ...(spell.rangeType === 'distance' ? { feet: spell.rangeFeet } : {}),
+      ...(spell.rangeShape === 'rect' ? {
+        shape: spell.rangeShape,
+        widthFeet: spell.rangeWidthFeet,
+        heightFeet: spell.rangeHeightFeet,
+        rotatable: spell.rangeType !== 'self' && spell.rangeRotatable,
+      } : spell.rangeShape !== 'none' ? { shape: spell.rangeShape, sizeFeet: spell.rangeSizeFeet } : {}),
     },
+    ...(headlessReady ? {
+      targeting: {
+        relation: spell.headless.relation,
+        includeSelf: spell.headless.includeSelf,
+        maximumTargets: spell.rangeShape === 'none' ? 1 : spell.headless.maximumTargets,
+      },
+    } : {}),
     components: {
       verbal: spell.verbal, somatic: spell.somatic, material: spell.material,
       ...(spell.material && spell.materialText.trim() ? { materialText: spell.materialText.trim() } : {}),
@@ -834,7 +1432,7 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
     },
     classes: [...spell.classes], description: spell.description.trim(),
     ...(spell.higherLevels.trim() ? { higherLevels: spell.higherLevels.trim() } : {}),
-    ...(spell.headless.enabled ? {
+    ...(headlessReady ? {
       mechanics: {
         kind: spell.headless.damageEnabled ? 'damage' as const : spell.headless.conditionEnabled ? 'control' as const : 'utility' as const,
         resolution: spell.resolution,
@@ -843,6 +1441,17 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
           damage: {
             dice: { count: spell.headless.damageCount, sides: spell.headless.damageSides, bonus: spell.headless.damageModifier },
             type: spell.headless.damageType,
+            ...(spell.level === 0 && spell.cantripScaling ? {
+              cantripScaling: {
+                basis: 'character-level' as const,
+                steps: spell.cantripScalingSteps.map((step) => ({
+                  level: step.level,
+                  diceCount: step.diceCount,
+                  ...((step.flatDamage ?? 0) > 0 ? { flatDamage: step.flatDamage } : {}),
+                })),
+              },
+            } : {}),
+            ...(spell.sourceDefinition?.mechanics?.damage?.addSpellcastingModifier ? { addSpellcastingModifier: true } : {}),
           },
         } : {}),
         ...(spell.headless.conditionEnabled ? {
@@ -856,9 +1465,26 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
                 : { kind: 'fixed-rounds' as const, rounds: spell.headless.conditionRounds },
           }],
         } : {}),
-        ...(spell.level > 0 && spell.headless.damageEnabled && spell.upcastDamageDicePerLevel > 0 ? {
-          upcast: { fromSlotLevel: spell.level, effects: [{ kind: 'damage-dice' as const, diceCountPerSlot: spell.upcastDamageDicePerLevel }] },
-        } : {}),
+        ...(spell.level > 0 ? (() => {
+          const effects = [
+            ...(spell.headless.damageEnabled && spell.upcastDamageDicePerLevel > 0
+              ? [{ kind: 'damage-dice' as const, diceCountPerSlot: spell.upcastDamageDicePerLevel }]
+              : []),
+            ...(spell.headless.damageEnabled && spell.upcastFlatDamagePerLevel > 0
+              ? [{ kind: 'flat-damage' as const, amountPerSlot: spell.upcastFlatDamagePerLevel }]
+              : []),
+            ...(spell.upcastAdditionalTargetsPerLevel > 0
+              ? [{ kind: 'additional-targets' as const, countPerSlot: spell.upcastAdditionalTargetsPerLevel }]
+              : []),
+            ...(spell.upcastAdditionalProjectilesPerLevel > 0
+              ? [{ kind: 'additional-projectiles' as const, countPerSlot: spell.upcastAdditionalProjectilesPerLevel }]
+              : []),
+            ...(spell.upcastDurationRoundsPerLevel > 0
+              ? [{ kind: 'duration-rounds' as const, roundsPerSlot: spell.upcastDurationRoundsPerLevel }]
+              : []),
+          ]
+          return effects.length > 0 ? { upcast: { fromSlotLevel: spell.upcastFromSlotLevel, effects } } : {}
+        })() : {}),
       },
       automation: { mode: 'headless-action' as const, actionId: spell.id.trim() },
     } : { automation: { mode: 'reference-only' as const } }),
@@ -877,24 +1503,102 @@ function staticEffects(item: ItemDraft) {
 }
 
 function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
+  const sourceDefinition = item.sourceDefinition ? structuredClone(item.sourceDefinition) : undefined
+  if (sourceDefinition) {
+    delete sourceDefinition.resources
+    delete sourceDefinition.headlessEffects
+    delete sourceDefinition.use
+  }
+  const chargeBound = item.attackRerollEnabled || item.headlessEffectsUseCharges
+  const chargeReference = chargeBound ? { resourceId: 'charges', resourceCost: 1 } : {}
+  const headlessEffects: NonNullable<Dnd5ePluginItemDefinition['headlessEffects']> = [
+    ...(item.attackRerollEnabled ? [{
+      schemaVersion: 1 as const,
+      id: 'attack-reroll',
+      kind: 'attack-roll-reroll' as const,
+      resourceId: 'charges',
+      resourceCost: 1,
+      maximumDice: 1 as const,
+      trigger: 'after-attack-roll' as const,
+      appliesTo: item.kind === 'weapon' ? 'attacks-with-this-weapon' as const : 'weapon-attacks' as const,
+    }] : []),
+    ...(item.onHitBonusDamageEnabled ? [{
+      schemaVersion: 1 as const,
+      id: 'on-hit-bonus-damage',
+      kind: 'on-hit-bonus-damage' as const,
+      trigger: 'after-attack-hit' as const,
+      appliesTo: item.kind === 'weapon' ? 'attacks-with-this-weapon' as const : 'weapon-attacks' as const,
+      damage: {
+        count: item.onHitBonusDamageCount,
+        sides: item.onHitBonusDamageSides,
+        bonus: item.onHitBonusDamageBonus,
+      },
+      damageType: item.onHitBonusDamageType,
+      doubleDiceOnCritical: true,
+      oncePerTurn: item.onHitBonusDamageOncePerTurn,
+      ...chargeReference,
+    }] : []),
+    ...(item.damageReductionEnabled ? [{
+      schemaVersion: 1 as const,
+      id: 'damage-reduction',
+      kind: 'damage-reduction' as const,
+      trigger: 'before-damage' as const,
+      amount: item.damageReductionAmount,
+      oncePerTurn: item.damageReductionOncePerTurn,
+      ...chargeReference,
+    }] : []),
+    ...(item.deathPreventionEnabled ? [{
+      schemaVersion: 1 as const,
+      id: 'death-prevention',
+      kind: 'death-prevention' as const,
+      trigger: 'before-drop-to-zero' as const,
+      hitPointsAfter: item.deathPreventionHitPoints,
+      preventsMassiveDamage: item.deathPreventionMassiveDamage,
+      ...chargeReference,
+    }] : []),
+  ]
+  const needsChargeResource = item.attackRerollEnabled || (
+    item.headlessEffectsUseCharges && (headlessEffects.length > 0 || item.spellSlotRecoveryEnabled)
+  )
+  const use: Dnd5ePluginItemDefinition['use'] = item.spellSlotRecoveryEnabled
+    ? {
+        economy: item.spellSlotRecoveryEconomy,
+        consumeQuantity: item.kind === 'consumable' ? 1 : 0,
+        ...(item.headlessEffectsUseCharges ? { resourceCost: { resourceId: 'charges', amount: 1 } } : {}),
+        effect: {
+          kind: 'spell-slot-recovery',
+          maximumSlotLevel: item.spellSlotRecoveryMaximumLevel,
+          amount: item.spellSlotRecoveryAmount,
+          selection: 'selected-expended-slot',
+        },
+      }
+    : item.kind === 'consumable'
+      ? {
+          economy: 'action', consumeQuantity: 1,
+          effect: { kind: 'healing', dice: { count: item.healingCount, sides: item.healingSides, bonus: item.healingBonus } },
+        }
+      : item.sourceDefinition?.use?.effect.kind === 'spell-slot-recovery'
+        ? undefined
+        : item.sourceDefinition?.use
   const common = {
+    ...sourceDefinition,
     id: item.id.trim(), name: item.name.trim(), description: item.description.trim(),
     rulesText: item.rulesText.trim(), weightLb: 0, stackable: false,
+    ...(needsChargeResource ? {
+      resources: [{
+        id: 'charges', label: '充能', maximum: item.attackRerollCharges,
+        initial: item.attackRerollCharges, resetOn: item.attackRerollResetOn,
+      }],
+    } : {}),
+    ...(headlessEffects.length > 0 ? { headlessEffects } : {}),
+    ...(use ? { use } : {}),
   }
   if (item.kind === 'consumable') return {
     ...common, category: 'consumable', icon: 'healing-potion', stackable: true,
-    use: {
-      economy: 'action', consumeQuantity: 1,
-      effect: { kind: 'healing', dice: { count: item.healingCount, sides: item.healingSides, bonus: item.healingBonus } },
-    },
   }
   const effects = staticEffects(item)
   if (item.kind === 'weapon') return {
     ...common, category: 'equipment', icon: 'weapon',
-    ...(item.attackRerollEnabled ? {
-      resources: [{ id: 'charges', label: '充能', maximum: item.attackRerollCharges, initial: item.attackRerollCharges, resetOn: item.attackRerollResetOn }],
-      headlessEffects: [{ kind: 'attack-roll-reroll' as const, resourceId: 'charges', maximumDice: 1 as const, trigger: 'after-attack-roll' as const, appliesTo: 'attacks-with-this-weapon' as const }],
-    } : {}),
     equipment: {
       slot: item.slot, ...(effects ? { effects } : {}),
       dnd5e: {
@@ -935,38 +1639,131 @@ export default function Dnd5eCustomPluginBuilder({
   busy = false,
   onInstall,
   installLabel = '保存、启用并发布',
+  onPublish,
+  publishLabel = '上传插件中心并定价',
   alwaysExpanded = false,
   categoryControl = 'tabs',
+  monsterWorkshopImport,
+  onMonsterWorkshopImportClose,
+  contentWorkshopImport,
+  onContentWorkshopImportClose,
+  draftStorageScope = 'local',
 }: Props) {
+  const [defaultMetadata] = useState(() => defaultBuilderMetadata(defaultPublisher))
+  const [draftStorageKey] = useState(() => scopedBuilderDraftStorageKey(draftStorageScope))
+  const [restoredDraft] = useState(() => readSavedBuilderDraft(draftStorageKey))
   const [open, setOpen] = useState(alwaysExpanded)
   const [activeSection, setActiveSection] = useState<BuilderSection>('monsters')
-  const [metadata, setMetadata] = useState({
-    id: 'local.dm.custom-rules',
-    name: '房间自定义规则',
-    version: '1.0.0',
-    publisher: defaultPublisher || '房间 DM',
-    license: '自定义内容；由房间 DM 负责授权',
-    description: '由 Astral Trace 扩展工作室生成。',
-    minimumGameProtocolVersion: 5,
-    dependencies: '',
-    conflicts: '',
-    declaredCapabilities: [] as Dnd5ePluginDeclaredCapability[],
-    distributionPolicy: 'room-distributable' as Dnd5ePluginDistributionPolicy,
-    contentCategory: 'mixed' as Dnd5ePluginContentCategory,
-  })
-  const [races, setRaces] = useState<RaceDraft[]>([])
-  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>([])
-  const [features, setFeatures] = useState<FeatureDraft[]>([])
-  const [feats, setFeats] = useState<FeatDraft[]>([])
-  const [spells, setSpells] = useState<SpellDraft[]>([])
-  const [items, setItems] = useState<ItemDraft[]>([])
-  const [methods, setMethods] = useState<MethodDraft[]>([])
-  const [subclasses, setSubclasses] = useState<DeclarativeSubclassDefinitionV1[]>([])
-  const [classes, setClasses] = useState<DeclarativeClassDefinitionV1[]>([])
-  const [monsters, setMonsters] = useState<Dnd5eMonsterStatBlock[]>([])
+  const [metadata, setMetadata] = useState(() => ({ ...defaultMetadata, ...(restoredDraft?.metadata ?? {}) }))
+  const [races, setRaces] = useState<RaceDraft[]>(() => Array.isArray(restoredDraft?.races) ? restoredDraft.races : [])
+  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>(() => Array.isArray(restoredDraft?.backgrounds) ? restoredDraft.backgrounds : [])
+  const [features, setFeatures] = useState<FeatureDraft[]>(() => Array.isArray(restoredDraft?.features)
+    ? restoredDraft.features.map((feature, index) => restoreFeatureDraft(feature, index))
+    : [])
+  const [feats, setFeats] = useState<FeatDraft[]>(() => Array.isArray(restoredDraft?.feats)
+    ? restoredDraft.feats.map((feat, index) => restoreFeatDraft(feat, index))
+    : [])
+  const [spells, setSpells] = useState<SpellDraft[]>(() => Array.isArray(restoredDraft?.spells)
+    ? restoredDraft.spells.map((spell, index) => restoreSpellDraft(spell, index))
+    : [])
+  const [expandedSpellIndex, setExpandedSpellIndex] = useState<number | null>(null)
+  const [items, setItems] = useState<ItemDraft[]>(() => Array.isArray(restoredDraft?.items)
+    ? restoredDraft.items.map((item, index) => restoreItemDraft(item, index))
+    : [])
+  const [methods, setMethods] = useState<MethodDraft[]>(() => Array.isArray(restoredDraft?.methods) ? restoredDraft.methods : [])
+  const [subclasses, setSubclasses] = useState<DeclarativeSubclassDefinitionV1[]>(() => Array.isArray(restoredDraft?.subclasses) ? restoredDraft.subclasses : [])
+  const [classes, setClasses] = useState<DeclarativeClassDefinitionV1[]>(() => Array.isArray(restoredDraft?.classes) ? restoredDraft.classes : [])
+  const [monsters, setMonsters] = useState<Dnd5eMonsterStatBlock[]>(() => Array.isArray(restoredDraft?.monsters) ? restoredDraft.monsters : [])
+  const [assets, setAssets] = useState<Dnd5ePluginImageAssetDefinition[]>(() =>
+    Array.isArray(restoredDraft?.assets) ? restoredDraft.assets : [])
+  const [importedHeadlessActions, setImportedHeadlessActions] = useState<Dnd5eCustomHeadlessActionDraft[]>(() =>
+    Array.isArray(restoredDraft?.importedHeadlessActions) ? restoredDraft.importedHeadlessActions : [])
   const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
+  const [selectedMonsterWorkshopEdit, setSelectedMonsterWorkshopEdit] = useState<Dnd5eMonsterWorkshopEditRequest | null>(null)
+  const monsterWorkshopEditRequestId = useRef(0)
+  const [openSpellsAfterMonsterWorkshop, setOpenSpellsAfterMonsterWorkshop] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
-  const [localNotice, setLocalNotice] = useState<string | null>(null)
+  const [localNotice, setLocalNotice] = useState<string | null>(() => restoredDraft ? '已自动恢复当前房间的本地草稿。' : null)
+  const lastContentImportRequestId = useRef<number | null>(null)
+  const contentMonster = contentWorkshopImport?.targetKind === 'monster'
+    ? contentWorkshopImport.package.content.monsters[0]
+    : undefined
+  const importedMonsterWorkshopEdit = monsterWorkshopImport ?? (contentMonster && contentWorkshopImport
+    ? {
+        requestId: contentWorkshopImport.requestId,
+        monster: contentMonster,
+        review: contentWorkshopImport.review,
+      }
+    : null)
+  const effectiveMonsterWorkshopImport = importedMonsterWorkshopEdit ?? selectedMonsterWorkshopEdit
+  const displayedSection: BuilderSection = effectiveMonsterWorkshopImport ? 'monsters' : activeSection
+
+  useEffect(() => {
+    if (!contentWorkshopImport || lastContentImportRequestId.current === contentWorkshopImport.requestId) return
+    lastContentImportRequestId.current = contentWorkshopImport.requestId
+    const content = contentWorkshopImport.package.content
+    const timer = window.setTimeout(() => {
+      setOpen(true)
+      setAssets((current) => upsertById(current, contentWorkshopImport.package.assets))
+      setImportedHeadlessActions((current) => upsertById(current, content.headlessActions))
+      switch (contentWorkshopImport.targetKind) {
+      case 'monster':
+        setActiveSection('monsters')
+        if (content.monsters.length > 1) {
+          setMonsters((current) => upsertById(current, content.monsters.slice(1)))
+        }
+        break
+      case 'spell': {
+        const incoming = content.spells.map((spell) => importedSpellDraft(spell, content.headlessActions))
+        const firstId = incoming[0]?.id
+        const existingIndex = firstId ? spells.findIndex((spell) => spell.id === firstId) : -1
+        const nextIndex = existingIndex >= 0 ? existingIndex : spells.length
+        setSpells((current) => upsertById(current, incoming))
+        setExpandedSpellIndex(incoming.length > 0 ? nextIndex : null)
+        setActiveSection('spells')
+        break
+      }
+      case 'class':
+        setClasses((current) => upsertById(current, content.classes ?? []))
+        setActiveSection('classes')
+        break
+      case 'subclass':
+        setSubclasses((current) => upsertById(current, content.subclasses))
+        setActiveSection('subclasses')
+        break
+      case 'race':
+        setRaces((current) => upsertById(current, content.races.map(importedRaceDraft)))
+        setActiveSection('races')
+        break
+      case 'background':
+        setBackgrounds((current) => upsertById(current, content.backgrounds.map(importedBackgroundDraft)))
+        setActiveSection('backgrounds')
+        break
+      case 'feat':
+        setFeats((current) => upsertById(current, content.feats.map((feat) => importedFeatDraft(feat, content.headlessActions))))
+        setActiveSection('feats')
+        break
+      case 'feature':
+        setFeatures((current) => upsertById(current, content.features.map((feature) => importedFeatureDraft(feature, content.headlessActions))))
+        setActiveSection('features')
+        break
+      case 'item':
+        setItems((current) => upsertById(current, content.items.map(importedItemDraft)))
+        setActiveSection('items')
+        break
+      case 'ability-generation':
+        setMethods((current) => upsertById(current, content.abilityGenerationMethods.map(importedMethodDraft)))
+        setActiveSection('methods')
+        break
+      }
+      setLocalError(null)
+      setLocalNotice(`AI 结构化内容已载入“${builderSectionLabel(
+        builderSectionForAiTarget(contentWorkshopImport.targetKind),
+      )}”编辑器；同 ID 条目已更新，其他草稿保持不变。`)
+      document.querySelector('[data-testid="custom-rules-plugin-builder"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [contentWorkshopImport, spells])
 
   const draft = useMemo<Dnd5eCustomRulesPluginDraft>(() => ({
     manifest: {
@@ -992,7 +1789,7 @@ export default function Dnd5eCustomPluginBuilder({
     spells: spells.map(toSpellDefinition),
     items: items.map(toItemDefinition),
     abilityGenerationMethods: methods.map(toMethodDefinition),
-    headlessActions: [
+    headlessActions: upsertById(importedHeadlessActions, [
       ...features.flatMap((feature) => {
         const action = toHeadlessActionDraft(feature)
         return action ? [action] : []
@@ -1002,14 +1799,19 @@ export default function Dnd5eCustomPluginBuilder({
         return action ? [action] : []
       }),
       ...spells.flatMap((spell) => {
-        const action = toHeadlessActionDraftFromEditor(spell.id, spell.name, { ...spell.headless, healingEnabled: false, interruptEnabled: false })
+        if (!dnd5eSpellWorkshopHeadlessReady(spell.headless)) return []
+        const action = toHeadlessActionDraftFromEditor(spell.id, spell.name, {
+          ...spellHeadlessEffectDraft(spell),
+          healingEnabled: false,
+          interruptEnabled: false,
+        })
         return action ? [action] : []
       }),
-    ],
+    ]),
     subclasses,
     classes,
     monsters,
-  }), [backgrounds, classes, feats, features, items, metadata, methods, monsters, races, spells, subclasses])
+  }), [backgrounds, classes, feats, features, importedHeadlessActions, items, metadata, methods, monsters, races, spells, subclasses])
 
   const sectionCounts = useMemo<Record<BuilderSection, number>>(() => ({
     monsters: monsters.length,
@@ -1025,7 +1827,7 @@ export default function Dnd5eCustomPluginBuilder({
   }), [backgrounds.length, classes.length, feats.length, features.length, items.length, methods.length, monsters.length, races.length, spells.length, subclasses.length])
 
   const resourceInventoryEntries = useMemo<readonly Dnd5eBuilderResourceInventoryEntry[]>(() => {
-    if (activeSection === 'classes') return classes.map((definition) => {
+    if (displayedSection === 'classes') return classes.map((definition) => {
       const report = dnd5eCustomClassAutomationReportV1({ classes: [definition] })
       const reasons = [...new Set(report.features.flatMap((feature) => feature.reasons))]
       return {
@@ -1038,7 +1840,7 @@ export default function Dnd5eCustomPluginBuilder({
         ...(reasons.length > 0 ? { reasons } : {}),
       }
     })
-    if (activeSection === 'subclasses') return subclasses.map((subclass) => {
+    if (displayedSection === 'subclasses') return subclasses.map((subclass) => {
       const report = dnd5eCustomPluginAutomationReportV1({ subclasses: [subclass] })
       const reasons = [...new Set(report.abilities.flatMap((ability) => ability.reasons))]
       return {
@@ -1051,7 +1853,7 @@ export default function Dnd5eCustomPluginBuilder({
         ...(reasons.length > 0 ? { reasons } : {}),
       }
     })
-    if (activeSection === 'monsters') return monsters.map((monster) => {
+    if (displayedSection === 'monsters') return monsters.map((monster) => {
       const actions = [
         ...monster.actions,
         ...(monster.bonusActions ?? []),
@@ -1081,61 +1883,105 @@ export default function Dnd5eCustomPluginBuilder({
         ...(manualCount > 0 ? { reasons: [`仍有 ${manualCount} 项能力或机制需要 DM 裁定或仅作资料展示`] } : {}),
       }
     })
-    if (activeSection === 'races') return races.map((race) => ({
+    if (displayedSection === 'races') return races.map((race) => ({
       id: race.id,
       name: race.name,
       summary: race.description,
       automation: singleAutomationCount('full'),
     }))
-    if (activeSection === 'backgrounds') return backgrounds.map((background) => ({
+    if (displayedSection === 'backgrounds') return backgrounds.map((background) => ({
       id: background.id,
       name: background.name,
       summary: background.description,
       automation: singleAutomationCount('full'),
     }))
-    if (activeSection === 'features') return features.map((feature) => ({
+    if (displayedSection === 'features') return features.map((feature) => ({
       id: feature.id,
       name: feature.name,
       summary: feature.summary,
       automation: singleAutomationCount(feature.headless.enabled ? 'full' : 'manual'),
       ...(!feature.headless.enabled ? { reasons: ['尚未启用声明式 Headless 效果，由 DM 依据规则正文裁定'] } : {}),
     }))
-    if (activeSection === 'feats') return feats.map((feat) => ({
+    if (displayedSection === 'feats') return feats.map((feat) => ({
       id: feat.id,
       name: feat.name,
       summary: feat.summary,
       automation: singleAutomationCount(feat.headless.enabled ? 'full' : 'manual'),
       ...(!feat.headless.enabled ? { reasons: ['尚未启用声明式 Headless 效果，由 DM 依据规则正文裁定'] } : {}),
     }))
-    if (activeSection === 'spells') return spells.map((spell) => ({
-      id: spell.id,
-      name: spell.name,
-      summary: `${spell.level === 0 ? '戏法' : `${spell.level} 环`} · ${spell.school}`,
-      automation: singleAutomationCount(spell.headless.enabled ? 'full' : 'reference-only'),
-      ...(!spell.headless.enabled ? { reasons: ['只接入法术资料，尚未声明可由 Host 安全执行的机械效果'] } : {}),
-    }))
-    if (activeSection === 'items') return items.map((item) => ({
+    if (displayedSection === 'spells') return spells.map((spell) => {
+      const status = dnd5eSpellWorkshopHeadlessStatus(spell.headless)
+      return {
+        id: spell.id,
+        name: spell.name,
+        summary: `${spell.level === 0 ? '戏法' : `${spell.level} 环`} · ${spell.school}`,
+        automation: singleAutomationCount(status),
+        ...(status === 'reference-only'
+          ? { reasons: ['只接入法术资料，尚未启用 Host 自动结算'] }
+          : status === 'partial'
+            ? { reasons: ['已开启自动结算，但尚未配置伤害或标准状态；保存时会安全回落为仅资料'] }
+            : {}),
+      }
+    })
+    if (displayedSection === 'items') return items.map((item) => ({
       id: item.id,
       name: item.name,
       summary: item.description,
       automation: singleAutomationCount('full'),
     }))
-    if (activeSection === 'methods') return methods.map((method) => ({
+    if (displayedSection === 'methods') return methods.map((method) => ({
       id: method.id,
       name: method.name,
       summary: method.summary,
       automation: singleAutomationCount('full'),
     }))
     return []
-  }, [activeSection, backgrounds, classes, feats, features, items, methods, monsters, races, spells, subclasses])
+  }, [displayedSection, backgrounds, classes, feats, features, items, methods, monsters, races, spells, subclasses])
 
-  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, feats, spells, items, methods, subclasses, classes, monsters })
+  const openMonsterInWorkshop = (entry: Dnd5eBuilderResourceInventoryEntry) => {
+    const monster = monsters.find((candidate) => candidate.id === entry.id)
+    if (!monster) return
+    monsterWorkshopEditRequestId.current += 1
+    setSelectedMonsterWorkshopEdit({
+      requestId: monsterWorkshopEditRequestId.current,
+      monster,
+    })
+    setMonsterWorkshopOpen(true)
+  }
+
+  const savedBuilderDraft = useMemo<SavedBuilderDraft>(() => ({
+    metadata,
+    races,
+    backgrounds,
+    features,
+    feats,
+    spells,
+    items,
+    methods,
+    subclasses,
+    classes,
+    monsters,
+    assets,
+    importedHeadlessActions,
+  }), [assets, backgrounds, classes, feats, features, importedHeadlessActions, items, metadata, methods, monsters, races, spells, subclasses])
+
+  useEffect(() => {
+    try {
+      if (builderDraftHasContent(savedBuilderDraft, defaultMetadata)) {
+        localStorage.setItem(draftStorageKey, JSON.stringify(savedBuilderDraft))
+      } else {
+        localStorage.removeItem(draftStorageKey)
+      }
+    } catch {
+      // 自动保存是尽力而为；“保存本地草稿”按钮仍会给出明确错误。
+    }
+  }, [defaultMetadata, draftStorageKey, savedBuilderDraft])
 
   const saveDraft = () => {
     try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(savedDraft()))
+      localStorage.setItem(draftStorageKey, JSON.stringify(savedBuilderDraft))
       setLocalError(null)
-      setLocalNotice('草稿已保存在当前浏览器。')
+      setLocalNotice('草稿已保存在当前浏览器，并会在刷新后自动恢复。')
     } catch {
       setLocalError('浏览器无法保存规则包草稿。')
     }
@@ -1143,7 +1989,7 @@ export default function Dnd5eCustomPluginBuilder({
 
   const loadDraft = () => {
     try {
-      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+      const raw = localStorage.getItem(draftStorageKey)
       if (!raw) return setLocalError('尚未保存本地草稿。')
       const saved = JSON.parse(raw) as Partial<SavedBuilderDraft>
       if (!saved.metadata || !Array.isArray(saved.races) || !Array.isArray(saved.methods)) {
@@ -1157,16 +2003,45 @@ export default function Dnd5eCustomPluginBuilder({
         : [])
       setFeats(Array.isArray(saved.feats) ? saved.feats.map((feat, index) => restoreFeatDraft(feat, index)) : [])
       setSpells(Array.isArray(saved.spells) ? saved.spells.map((spell, index) => restoreSpellDraft(spell, index)) : [])
+      setExpandedSpellIndex(null)
       setItems(Array.isArray(saved.items) ? saved.items.map((item, index) => restoreItemDraft(item, index)) : [])
       setMethods(saved.methods)
       setSubclasses(Array.isArray(saved.subclasses) ? saved.subclasses : [])
       setClasses(Array.isArray(saved.classes) ? saved.classes : [])
       setMonsters(Array.isArray(saved.monsters) ? saved.monsters : [])
+      setAssets(Array.isArray(saved.assets) ? saved.assets : [])
+      setImportedHeadlessActions(Array.isArray(saved.importedHeadlessActions) ? saved.importedHeadlessActions : [])
       setLocalError(null)
       setLocalNotice('已载入当前浏览器保存的草稿。')
     } catch {
       setLocalError('读取本地草稿失败。')
     }
+  }
+
+  const deleteDraft = async () => {
+    if (!await showAppConfirm({
+      title: '删除当前房间草稿',
+      message: '这会删除当前浏览器中本房间的工坊草稿和当前表单内容；已经启用的规则与扩展不会被移除。',
+      confirmLabel: '确认删除草稿',
+      tone: 'danger',
+    })) return
+    localStorage.removeItem(draftStorageKey)
+    setMetadata({ ...defaultMetadata })
+    setRaces([])
+    setBackgrounds([])
+    setFeatures([])
+    setFeats([])
+    setSpells([])
+    setExpandedSpellIndex(null)
+    setItems([])
+    setMethods([])
+    setSubclasses([])
+    setClasses([])
+    setMonsters([])
+    setAssets([])
+    setImportedHeadlessActions([])
+    setLocalError(null)
+    setLocalNotice('已删除当前房间的本地工坊草稿；已启用内容不受影响。')
   }
 
   const buildFile = () => {
@@ -1177,7 +2052,7 @@ export default function Dnd5eCustomPluginBuilder({
       return null
     }
     setLocalError(null)
-    const source = buildDnd5eCustomRulesPluginPackageV1(draft)
+    const source = buildDnd5eCustomRulesContentPackageV2(draft, assets)
     return new File([source], dnd5eCustomRulesPluginFileName(draft.manifest.id), { type: 'application/json' })
   }
 
@@ -1199,6 +2074,11 @@ export default function Dnd5eCustomPluginBuilder({
     if (file) await onInstall(file)
   }
 
+  const publish = async () => {
+    const file = buildFile()
+    if (file && onPublish) await onPublish(file)
+  }
+
   const patchRace = (index: number, patch: Partial<RaceDraft>) => {
     setRaces((current) => current.map((race, itemIndex) => itemIndex === index ? { ...race, ...patch } : race))
   }
@@ -1213,6 +2093,71 @@ export default function Dnd5eCustomPluginBuilder({
     current.map((feat, itemIndex) => itemIndex === index ? { ...feat, ...patch } : feat))
   const patchSpell = (index: number, patch: Partial<SpellDraft>) => setSpells((current) =>
     current.map((spell, itemIndex) => itemIndex === index ? { ...spell, ...patch } : spell))
+  const patchCantripScalingStep = (spellIndex: number, stepIndex: number, patch: Partial<Dnd5eCantripScalingStep>) => {
+    const spell = spells[spellIndex]
+    if (!spell) return
+    patchSpell(spellIndex, {
+      cantripScalingSteps: spell.cantripScalingSteps.map((step, index) => index === stepIndex ? { ...step, ...patch } : step),
+    })
+  }
+  const addCantripScalingStep = (spellIndex: number) => {
+    const spell = spells[spellIndex]
+    if (!spell) return
+    const level = Array.from({ length: 19 }, (_, index) => index + 2)
+      .find((candidate) => !spell.cantripScalingSteps.some((step) => step.level === candidate))
+    if (!level) return
+    patchSpell(spellIndex, {
+      cantripScalingSteps: [...spell.cantripScalingSteps, { level, diceCount: 1 }]
+        .sort((left, right) => left.level - right.level),
+    })
+  }
+  const removeCantripScalingStep = (spellIndex: number, stepIndex: number) => {
+    const spell = spells[spellIndex]
+    if (!spell || spell.cantripScalingSteps.length <= 1) return
+    patchSpell(spellIndex, {
+      cantripScalingSteps: spell.cantripScalingSteps.filter((_, index) => index !== stepIndex),
+    })
+  }
+  const uploadSpellIcon = async (index: number, file: File) => {
+    try {
+      const spell = spells[index]
+      if (!spell) return
+      const asset = await dnd5eSpellIconAssetFromFile(spell.id, file)
+      setAssets((current) => upsertById(current, [asset]))
+      patchSpell(index, { iconAssetId: asset.id })
+      setLocalError(null)
+      setLocalNotice(`已为“${spell.name || spell.id}”加入本地法术图标；图标会写入 V2 内容包。`)
+    } catch (cause) {
+      setLocalNotice(null)
+      setLocalError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+  const removeSpellIcon = (index: number) => {
+    const assetId = spells[index]?.iconAssetId
+    patchSpell(index, { iconAssetId: undefined })
+    if (assetId && !spells.some((spell, spellIndex) => spellIndex !== index && spell.iconAssetId === assetId)) {
+      setAssets((current) => current.filter((asset) => asset.id !== assetId))
+    }
+  }
+  const addSpell = () => {
+    const index = spells.length
+    setSpells((current) => [...current, newSpell(current.length + 1)])
+    setExpandedSpellIndex(index)
+  }
+  const removeSpell = (index: number) => {
+    const assetId = spells[index]?.iconAssetId
+    setSpells((current) => current.filter((_, itemIndex) => itemIndex !== index))
+    if (assetId && !spells.some((spell, spellIndex) => spellIndex !== index && spell.iconAssetId === assetId)) {
+      setAssets((current) => current.filter((asset) => asset.id !== assetId))
+    }
+    setExpandedSpellIndex((current) => current == null
+      ? null
+      : current === index
+        ? null
+        : current > index
+          ? current - 1
+          : current)
+  }
   const patchItem = (index: number, patch: Partial<ItemDraft>) => setItems((current) =>
     current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
 
@@ -1235,42 +2180,9 @@ export default function Dnd5eCustomPluginBuilder({
 
       {(alwaysExpanded || open) && (
         <div className="mt-5 space-y-5 border-t border-white/8 pt-5">
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {([
-              ['插件 ID', 'id'], ['插件名称', 'name'], ['版本', 'version'],
-              ['发布者', 'publisher'], ['许可证', 'license'], ['说明', 'description'],
-            ] as const).map(([label, key]) => (
-              <label key={key} className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-500">{label}</span>
-                <input
-                  aria-label={label}
-                  value={metadata[key]}
-                  onChange={(event) => setMetadata((current) => ({ ...current, [key]: event.target.value }))}
-                  className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
-                />
-              </label>
-            ))}
-          </div>
-          <div className="grid gap-3 rounded-2xl border border-white/8 bg-black/10 p-4 md:grid-cols-2 lg:grid-cols-3">
-            <BuilderNumber
-              label="最低游戏协议版本"
-              value={metadata.minimumGameProtocolVersion}
-              min={1}
-              max={10_000}
-              onChange={(minimumGameProtocolVersion) => setMetadata((current) => ({
-                ...current,
-                minimumGameProtocolVersion,
-              }))}
-            />
-            <BuilderSelect
-              label="分发策略"
-              value={metadata.distributionPolicy}
-              options={PLUGIN_DISTRIBUTION_POLICIES}
-              onChange={(distributionPolicy) => setMetadata((current) => ({
-                ...current,
-                distributionPolicy: distributionPolicy as Dnd5ePluginDistributionPolicy,
-              }))}
-            />
+          <div className="grid gap-3 rounded-2xl border border-white/8 bg-black/10 p-4 md:grid-cols-[minmax(220px,1fr)_150px_minmax(180px,0.6fr)]">
+            <BuilderInput label="插件名称" value={metadata.name} onChange={(name) => setMetadata((current) => ({ ...current, name }))} />
+            <BuilderInput label="版本" value={metadata.version} onChange={(version) => setMetadata((current) => ({ ...current, version }))} />
             <BuilderSelect
               label="内容分类"
               value={metadata.contentCategory}
@@ -1280,52 +2192,87 @@ export default function Dnd5eCustomPluginBuilder({
                 contentCategory: contentCategory as Dnd5ePluginContentCategory,
               }))}
             />
-            <BuilderInput
-              label="依赖（逗号分隔：插件ID 版本范围 [optional]）"
-              value={metadata.dependencies}
-              onChange={(dependencies) => setMetadata((current) => ({ ...current, dependencies }))}
-            />
-            <BuilderInput
-              label="冲突插件 ID（逗号分隔）"
-              value={metadata.conflicts}
-              onChange={(conflicts) => setMetadata((current) => ({ ...current, conflicts }))}
-            />
-            <fieldset>
-              <legend className="mb-1.5 text-xs font-semibold text-slate-500">声明的 Headless 能力</legend>
-              <div className="flex flex-wrap gap-1.5">
-                {PLUGIN_CAPABILITIES.map((capability) => {
-                  const selected = metadata.declaredCapabilities.includes(capability)
-                  return (
-                    <button
-                      key={capability}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => setMetadata((current) => ({
-                        ...current,
-                        declaredCapabilities: selected
-                          ? current.declaredCapabilities.filter((entry) => entry !== capability)
-                          : [...current.declaredCapabilities, capability],
-                      }))}
-                      className={`rounded-lg border px-2 py-1 text-[10px] ${
-                        selected
-                          ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100'
-                          : 'border-white/8 text-slate-500'
-                      }`}
-                    >
-                      {dnd5ePluginCapabilityLabel(capability)}
-                    </button>
-                  )
-                })}
-              </div>
-            </fieldset>
           </div>
+
+          <details className="group rounded-2xl border border-white/8 bg-black/10">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-white/[0.025] [&::-webkit-details-marker]:hidden">
+              <span>
+                高级扩展信息
+                <span className="ml-2 text-[11px] font-normal text-slate-600">ID、授权、分发、依赖与能力声明</span>
+              </span>
+              <ChevronDown className="h-4 w-4 text-slate-500 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="grid gap-3 border-t border-white/8 p-4 md:grid-cols-2 lg:grid-cols-3">
+              <BuilderInput label="插件 ID" value={metadata.id} onChange={(id) => setMetadata((current) => ({ ...current, id }))} />
+              <BuilderInput label="发布者" value={metadata.publisher} onChange={(publisher) => setMetadata((current) => ({ ...current, publisher }))} />
+              <BuilderInput label="许可证" value={metadata.license} onChange={(license) => setMetadata((current) => ({ ...current, license }))} />
+              <BuilderInput label="说明" value={metadata.description} onChange={(description) => setMetadata((current) => ({ ...current, description }))} />
+              <BuilderNumber
+                label="最低游戏协议版本"
+                value={metadata.minimumGameProtocolVersion}
+                min={1}
+                max={10_000}
+                onChange={(minimumGameProtocolVersion) => setMetadata((current) => ({
+                  ...current,
+                  minimumGameProtocolVersion,
+                }))}
+              />
+              <BuilderSelect
+                label="分发策略"
+                value={metadata.distributionPolicy}
+                options={PLUGIN_DISTRIBUTION_POLICIES}
+                onChange={(distributionPolicy) => setMetadata((current) => ({
+                  ...current,
+                  distributionPolicy: distributionPolicy as Dnd5ePluginDistributionPolicy,
+                }))}
+              />
+              <BuilderInput
+                label="依赖（逗号分隔：插件ID 版本范围 [optional]）"
+                value={metadata.dependencies}
+                onChange={(dependencies) => setMetadata((current) => ({ ...current, dependencies }))}
+              />
+              <BuilderInput
+                label="冲突插件 ID（逗号分隔）"
+                value={metadata.conflicts}
+                onChange={(conflicts) => setMetadata((current) => ({ ...current, conflicts }))}
+              />
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">声明的 Headless 能力</legend>
+                <div className="flex flex-wrap gap-1.5">
+                  {PLUGIN_CAPABILITIES.map((capability) => {
+                    const selected = metadata.declaredCapabilities.includes(capability)
+                    return (
+                      <button
+                        key={capability}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setMetadata((current) => ({
+                          ...current,
+                          declaredCapabilities: selected
+                            ? current.declaredCapabilities.filter((entry) => entry !== capability)
+                            : [...current.declaredCapabilities, capability],
+                        }))}
+                        className={`rounded-lg border px-2 py-1 text-[10px] ${
+                          selected
+                            ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100'
+                            : 'border-white/8 text-slate-500'
+                        }`}
+                      >
+                        {dnd5ePluginCapabilityLabel(capability)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </fieldset>
+            </div>
+          </details>
 
           {categoryControl === 'select' ? (
             <label className="block max-w-sm">
               <span className="mb-1.5 block text-xs font-semibold text-slate-500">内容类型</span>
               <select
                 aria-label="规则内容分类"
-                value={activeSection}
+                value={displayedSection}
                 onChange={(event) => setActiveSection(event.target.value as BuilderSection)}
                 className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
               >
@@ -1341,9 +2288,9 @@ export default function Dnd5eCustomPluginBuilder({
                   key={section.id}
                   type="button"
                   role="tab"
-                  aria-selected={activeSection === section.id}
+                  aria-selected={displayedSection === section.id}
                   onClick={() => setActiveSection(section.id)}
-                  className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${activeSection === section.id ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100 shadow-[0_0_24px_rgba(139,92,246,0.08)]' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:border-white/15 hover:text-slate-200'}`}
+                  className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${displayedSection === section.id ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100 shadow-[0_0_24px_rgba(139,92,246,0.08)]' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:border-white/15 hover:text-slate-200'}`}
                 >
                   {section.label} · {sectionCounts[section.id]}
                 </button>
@@ -1351,48 +2298,60 @@ export default function Dnd5eCustomPluginBuilder({
             </nav>
           )}
 
-          {activeSection === 'subclasses' && <Dnd5eDeclarativeSubclassEditor value={subclasses} onChange={setSubclasses} />}
-          {activeSection === 'classes' && <Dnd5eDeclarativeClassEditor value={classes} onChange={setClasses} />}
+          {displayedSection === 'subclasses' && <Dnd5eDeclarativeSubclassEditor value={subclasses} onChange={setSubclasses} />}
+          {displayedSection === 'classes' && <Dnd5eDeclarativeClassEditor value={classes} onChange={setClasses} />}
 
-          {activeSection === 'monsters' && (
-            <div className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.04] p-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-100">怪物工坊</h3>
-                  <p className="mt-1 max-w-2xl text-xs leading-6 text-slate-500">
-                    使用与战斗地图完全相同的编辑器创建属性、动作、特性、施法、传奇能力和 Headless 机制。
-                    怪物会随扩展一起校验、安装和分发。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMonsterWorkshopOpen(true)}
-                  className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"
-                >
-                  打开怪物工坊
-                </button>
-              </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {monsters.length === 0 ? (
-                  <p className="col-span-full rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-slate-600">当前扩展还没有怪物。</p>
-                ) : monsters.map((monster) => (
-                  <div key={monster.id} className="rounded-xl border border-white/8 bg-black/15 p-3">
-                    <p className="truncate text-sm font-semibold text-slate-200">{monster.name}</p>
-                    <p className="mt-1 text-xs text-slate-500">CR {monster.challenge.rating} · AC {monster.armorClass.value} · HP {monster.hitPoints.average}</p>
-                  </div>
-                ))}
-              </div>
+          {displayedSection === 'monsters' && (
+            <>
               <Dnd5eMonsterWorkshopDialog
-                open={monsterWorkshopOpen}
-                onClose={() => setMonsterWorkshopOpen(false)}
+                key={effectiveMonsterWorkshopImport?.requestId ?? 'monster-workshop'}
+                open={monsterWorkshopOpen || !!effectiveMonsterWorkshopImport}
+                onClose={() => {
+                  setMonsterWorkshopOpen(false)
+                  setSelectedMonsterWorkshopEdit(null)
+                  if (openSpellsAfterMonsterWorkshop) {
+                    setOpenSpellsAfterMonsterWorkshop(false)
+                    setActiveSection('spells')
+                  }
+                  if (importedMonsterWorkshopEdit) {
+                    if (!openSpellsAfterMonsterWorkshop) setActiveSection('monsters')
+                    onMonsterWorkshopImportClose?.()
+                    onContentWorkshopImportClose?.()
+                  }
+                }}
                 monsters={monsters}
                 onMonstersChange={setMonsters}
+                knownCustomSpells={spells.map((spell) => ({ id: spell.id, name: spell.name, level: spell.level }))}
+                onCreateCustomSpellDraft={(request) => {
+                  const inferredRange = inferDnd5eCustomSpellRangeFromText(request.sourceText)
+                  const existingIndex = spells.findIndex((spell) => spell.id === request.id || spell.name === request.name)
+                  if (existingIndex >= 0) {
+                    setSpells((current) => current.map((spell, index) => index === existingIndex
+                      ? { ...spell, ...inferredRange, id: request.id, name: request.name, level: request.level, description: request.sourceText }
+                      : spell))
+                    setExpandedSpellIndex(existingIndex)
+                  } else {
+                    const nextIndex = spells.length
+                    setSpells((current) => [...current, {
+                      ...newSpell(current.length + 1),
+                      ...inferredRange,
+                      id: request.id,
+                      name: request.name,
+                      level: request.level,
+                      description: request.sourceText,
+                    }])
+                    setExpandedSpellIndex(nextIndex)
+                  }
+                  setOpenSpellsAfterMonsterWorkshop(true)
+                }}
                 context="plugin"
+                editRequest={effectiveMonsterWorkshopImport}
+                draftStorageScope={draftStorageScope}
               />
-            </div>
+            </>
           )}
 
-          {activeSection === 'races' && <div>
+          {displayedSection === 'races' && <div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <div><h3 className="text-sm font-semibold text-slate-200">自定义种族</h3><p className="mt-1 text-xs text-slate-600">固定调整与“任选若干属性”可以同时使用。</p></div>
               <button type="button" onClick={() => setRaces((current) => [...current, newRace(current.length + 1)])} className="inline-flex items-center gap-1.5 rounded-xl bg-arcane-500/12 px-3 py-2 text-xs font-semibold text-arcane-100"><Plus className="h-3.5 w-3.5" /> 添加种族</button>
@@ -1423,7 +2382,7 @@ export default function Dnd5eCustomPluginBuilder({
             </div>
           </div>}
 
-          {activeSection === 'backgrounds' && <div>
+          {displayedSection === 'backgrounds' && <div>
             <SectionHeader
               title="自定义背景"
               description="背景技能会自动进入角色与 Headless 熟练项；工具、语言和背景特性作为结构化资料保存。"
@@ -1461,7 +2420,7 @@ export default function Dnd5eCustomPluginBuilder({
             </div>
           </div>}
 
-          {activeSection === 'feats' && <div>
+          {displayedSection === 'feats' && <div>
             <SectionHeader
               title="独立专长编辑器"
               description="专长拥有独立的等级、属性与种族前提；角色选择和 Headless 执行都会由 Host 重新验证。"
@@ -1507,7 +2466,7 @@ export default function Dnd5eCustomPluginBuilder({
             </div>
           </div>}
 
-          {activeSection === 'features' && <div>
+          {displayedSection === 'features' && <div>
             <SectionHeader
               title="自定义特性"
               description="可保持 DM 裁定，也可用声明式效果编辑器生成受控 Headless Action；所有目标、骰子和结果仍由 DM 权威 Host 复核。"
@@ -1545,30 +2504,106 @@ export default function Dnd5eCustomPluginBuilder({
             </div>
           </div>}
 
-          {activeSection === 'spells' && <div>
+          {displayedSection === 'spells' && <div>
             <SectionHeader
-              title="自定义法术"
-              description="法术资料与机械效果分开配置；启用法术效果编辑器后，Host 会接管法术位、成分、命中／豁免、升环和专注事务。"
+              title="法术工坊"
+              description="在同一列表中创建、查看和编辑当前扩展的全部法术；每个条目会直接显示资料完整度与 Headless 接入状态。"
               actionLabel="添加法术"
-              onAdd={() => setSpells((current) => [...current, newSpell(current.length + 1)])}
+              onAdd={addSpell}
             />
             <div className="space-y-3">
               {spells.length === 0 && <EmptyState>尚未添加法术。</EmptyState>}
-              {spells.map((spell, index) => <article key={index} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+              {spells.map((spell, index) => {
+                const expanded = expandedSpellIndex === index
+                const levelLabel = spell.level === 0 ? '戏法' : `${spell.level} 环`
+                const schoolLabel = SPELL_SCHOOLS.find(([id]) => id === spell.school)?.[1] ?? spell.school
+                const rangeSummary = dnd5eCustomSpellRangeSummary(spell)
+                const headlessStatus = dnd5eSpellWorkshopHeadlessStatus(spell.headless)
+                const headlessLabel = headlessStatus === 'full'
+                  ? '完整 Headless'
+                  : headlessStatus === 'partial'
+                    ? '待补充 Headless'
+                    : '仅资料'
+                const iconAsset = assets.find((asset) => asset.id === spell.iconAssetId)
+                const iconUrl = dnd5eSpellIconAssetDataUrl(iconAsset)
+                return <article key={index} className={`overflow-hidden rounded-2xl border bg-black/15 ${expanded ? 'border-violet-400/20' : 'border-white/8'}`}>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={`custom-spell-editor-${index}`}
+                  onClick={() => setExpandedSpellIndex(expanded ? null : index)}
+                  className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-white/[0.025]"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-100">{spell.name || '未命名法术'}</span>
+                    <span className="mt-1 block truncate text-[11px] text-slate-500">{levelLabel} · {schoolLabel} · {rangeSummary} · {headlessLabel}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2 text-[11px] text-slate-500">
+                    {expanded ? '收起' : '编辑'}
+                    <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                {expanded && <div id={`custom-spell-editor-${index}`} className="border-t border-white/8 p-4">
                 <div className="grid gap-3 md:grid-cols-4">
                   <BuilderInput label="法术 ID" value={spell.id} onChange={(value) => patchSpell(index, { id: value })} />
                   <BuilderInput label="中文名称" value={spell.name} onChange={(value) => patchSpell(index, { name: value })} />
                   <BuilderInput label="英文名称（可选）" value={spell.englishName} onChange={(value) => patchSpell(index, { englishName: value })} />
-                  <BuilderNumber label="环级" value={spell.level} min={0} max={9} onChange={(value) => patchSpell(index, { level: value })} />
+                  <BuilderNumber label="环级" value={spell.level} min={0} max={9} onChange={(value) => patchSpell(index, { level: value, upcastFromSlotLevel: Math.max(1, value) })} />
                 </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <section className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-white/8 bg-black/10 p-3">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-void-950 text-[10px] text-slate-600">
+                    {iconUrl ? <img src={iconUrl} alt={`${spell.name || '法术'}图标预览`} className="h-full w-full object-cover" /> : '无图标'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-slate-200">法术图标</p>
+                    <p className="mt-1 text-[11px] leading-5 text-slate-500">PNG、JPG 或 WebP，最大 384 KiB；保存后会随 V2 内容包进入法术书和战斗快捷栏。</p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/25">
+                      <Upload className="h-3.5 w-3.5" />{iconUrl ? '更换图标' : '上传图标'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        aria-label={`上传法术图标 ${spell.name || spell.id}`}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0]
+                          event.currentTarget.value = ''
+                          if (file) void uploadSpellIcon(index, file)
+                        }}
+                      />
+                    </label>
+                    {iconUrl && <button type="button" onClick={() => removeSpellIcon(index)} className="rounded-xl border border-rose-400/20 px-3 py-2 text-xs font-semibold text-rose-200">移除图标</button>}
+                  </div>
+                </section>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <BuilderSelect label="学派" value={spell.school} options={SPELL_SCHOOLS} onChange={(value) => patchSpell(index, { school: value as SpellDraft['school'] })} />
                   <BuilderSelect label="施法时间" value={spell.castingTimeUnit} options={CASTING_UNITS} onChange={(value) => patchSpell(index, { castingTimeUnit: value as SpellDraft['castingTimeUnit'] })} />
                   <BuilderNumber label="施法时间数值" value={spell.castingTimeValue} min={1} max={1000} onChange={(value) => patchSpell(index, { castingTimeValue: value })} />
-                  <BuilderSelect label="射程类型" value={spell.rangeType} options={RANGE_TYPES} onChange={(value) => patchSpell(index, { rangeType: value as SpellDraft['rangeType'] })} />
                 </div>
                 {spell.castingTimeUnit === 'reaction' && <div className="mt-3"><BuilderInput label="反应触发条件" value={spell.reactionTrigger} onChange={(value) => patchSpell(index, { reactionTrigger: value })} /></div>}
-                {spell.rangeType === 'distance' && <div className="mt-3 max-w-48"><BuilderNumber label="射程（尺）" value={spell.rangeFeet} min={0} max={10000} onChange={(value) => patchSpell(index, { rangeFeet: value })} /></div>}
+                <section className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.025] p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div><h4 className="text-xs font-semibold text-cyan-100">射程、范围与目标</h4><p className="mt-1 text-[11px] leading-5 text-slate-500">这里是法术范围的唯一来源；启用自动结算后会同步生成对应 Headless 目标模板。</p></div>
+                    <span className="rounded-lg border border-cyan-300/15 px-2 py-1 text-[10px] text-cyan-100/70">{rangeSummary}</span>
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <BuilderSelect label="射程类型" value={spell.rangeType} options={RANGE_TYPES} onChange={(value) => patchSpell(index, { rangeType: value as SpellDraft['rangeType'] })} />
+                    {spell.rangeType === 'distance' && <BuilderNumber label="施法距离（尺）" value={spell.rangeFeet} min={1} max={10000} onChange={(value) => patchSpell(index, { rangeFeet: value })} />}
+                    <BuilderSelect label="范围形状" value={spell.rangeShape} options={RANGE_SHAPES} onChange={(rangeShape) => patchSpell(index, { rangeShape: rangeShape as Dnd5eCustomSpellRangeShape })} />
+                    {spell.rangeShape !== 'none' && spell.rangeShape !== 'rect' && <BuilderNumber label="范围尺寸（尺）" value={spell.rangeSizeFeet} min={1} max={10000} onChange={(rangeSizeFeet) => patchSpell(index, { rangeSizeFeet })} />}
+                    {spell.rangeShape === 'rect' && <><BuilderNumber label="长方形长度（尺）" value={spell.rangeWidthFeet} min={1} max={10000} onChange={(rangeWidthFeet) => patchSpell(index, { rangeWidthFeet })} /><BuilderNumber label="长方形宽度（尺）" value={spell.rangeHeightFeet} min={1} max={10000} onChange={(rangeHeightFeet) => patchSpell(index, { rangeHeightFeet })} /></>}
+                  </div>
+                  {spell.rangeShape === 'rect' && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-300/10 bg-black/10 px-3 py-2">
+                    <Toggle label="远程放置后可自由旋转" value={spell.rangeType !== 'self' && spell.rangeRotatable} onChange={(rangeRotatable) => patchSpell(index, { rangeRotatable })} />
+                    <span className="text-[11px] leading-5 text-slate-500">类似火墙术：先在射程内选择中心，再用角度控制条或 Q/E 调整朝向。自身起源的长方形固定朝向。</span>
+                  </div>}
+                  <div className="mt-3 flex flex-wrap items-end gap-3">
+                    <div className="min-w-44"><BuilderSelect label="影响目标" value={spell.headless.relation} options={TARGET_RELATIONS} onChange={(relation) => patchSpell(index, { headless: { ...spell.headless, relation: relation as HeadlessEffectEditorDraft['relation'] } })} /></div>
+                    {spell.rangeShape !== 'none' && <div className="w-36"><BuilderNumber label="最多目标" value={spell.headless.maximumTargets} min={1} max={256} onChange={(maximumTargets) => patchSpell(index, { headless: { ...spell.headless, maximumTargets } })} /></div>}
+                    <div className="pb-0.5"><Toggle label="可以影响施法者" value={spell.headless.includeSelf} onChange={(includeSelf) => patchSpell(index, { headless: { ...spell.headless, includeSelf } })} /></div>
+                  </div>
+                </section>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
                   <BuilderSelect label="持续时间" value={spell.durationType} options={DURATION_TYPES} onChange={(value) => patchSpell(index, { durationType: value as SpellDraft['durationType'] })} />
                   {spell.durationType === 'timed' && <><BuilderNumber label="持续数值" value={spell.durationValue} min={1} max={10000} onChange={(value) => patchSpell(index, { durationValue: value })} /><BuilderSelect label="持续单位" value={spell.durationUnit} options={DURATION_UNITS} onChange={(value) => patchSpell(index, { durationUnit: value as SpellDraft['durationUnit'] })} /></>}
@@ -1591,15 +2626,75 @@ export default function Dnd5eCustomPluginBuilder({
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <BuilderSelect label="结算方式" value={spell.resolution} options={[["spell-attack", "法术攻击"], ["saving-throw", "目标豁免"], ["automatic", "自动生效"]]} onChange={(resolution) => patchSpell(index, { resolution: resolution as SpellDraft['resolution'] })} />
                   {spell.resolution === 'saving-throw' && <><BuilderSelect label="豁免属性" value={spell.saveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(saveAbility) => patchSpell(index, { saveAbility: saveAbility as AbilityKey })} /><BuilderSelect label="豁免成功" value={spell.saveOnSuccess} options={[["none", "无伤害"], ["half", "伤害减半"], ["full", "仍受全额"]]} onChange={(saveOnSuccess) => patchSpell(index, { saveOnSuccess: saveOnSuccess as SpellDraft['saveOnSuccess'] })} /></>}
-                  {spell.level > 0 && <BuilderNumber label="每升一环增加伤害骰" value={spell.upcastDamageDicePerLevel} min={0} max={100} onChange={(upcastDamageDicePerLevel) => patchSpell(index, { upcastDamageDicePerLevel })} />}
                 </div>
-                <HeadlessEffectEditor title="法术效果编辑器" mode="spell" value={spell.headless} onChange={(headless) => patchSpell(index, { headless })} />
-                <div className="mt-3 flex justify-end"><DeleteButton label={`删除法术 ${spell.name}`} onClick={() => setSpells((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
-              </article>)}
+                <details className="mt-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.025] px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-semibold text-violet-100">
+                    等级缩放通用模板 · {spell.level === 0 ? '戏法角色等级成长' : '升环效果'}
+                  </summary>
+                  <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                    缩放直接作用于下方“法术效果编辑器”的主要伤害组件；增加伤害骰会沿用基础骰面。Host 使用同一配方生成预览、Activity 与最终结算。
+                  </p>
+                  {!spell.headless.damageEnabled && <p className="mt-2 rounded-lg border border-amber-400/15 bg-amber-500/[0.04] px-3 py-2 text-[11px] text-amber-100">
+                    当前尚未启用主要伤害组件；伤害骰和固定伤害缩放会保留，但只有启用伤害后才能执行。
+                  </p>}
+                  {spell.level === 0 ? <div className="mt-3 space-y-3">
+                    <Toggle
+                      label="启用角色等级缩放"
+                      value={spell.cantripScaling}
+                      onChange={(cantripScaling) => patchSpell(index, {
+                        cantripScaling,
+                        ...((cantripScaling && spell.cantripScalingSteps.length === 0)
+                          ? { cantripScalingSteps: DEFAULT_CANTRIP_SCALING_STEPS.map((step) => ({ ...step })) }
+                          : {}),
+                      })}
+                    />
+                    {spell.cantripScaling && <>
+                      <div className="overflow-x-auto rounded-xl border border-white/8">
+                        <div className="min-w-[620px] divide-y divide-white/8">
+                          <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-3 bg-black/15 px-3 py-2 text-[10px] font-semibold text-slate-500">
+                            <span>角色等级阈值</span><span>额外伤害骰数量</span><span>额外固定伤害</span><span className="w-8" />
+                          </div>
+                          {spell.cantripScalingSteps.map((step, stepIndex) => <div key={`${step.level}:${stepIndex}`} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-3 px-3 py-2">
+                            <BuilderNumber label="等级" value={step.level} min={2} max={20} onChange={(level) => patchCantripScalingStep(index, stepIndex, { level })} />
+                            <BuilderNumber label={`额外 d${spell.headless.damageSides || 6}`} value={step.diceCount} min={0} max={100} onChange={(diceCount) => patchCantripScalingStep(index, stepIndex, { diceCount })} />
+                            <BuilderNumber label="固定伤害" value={step.flatDamage ?? 0} min={0} max={1000000} onChange={(flatDamage) => patchCantripScalingStep(index, stepIndex, { flatDamage })} />
+                            <button type="button" disabled={spell.cantripScalingSteps.length <= 1} onClick={() => removeCantripScalingStep(index, stepIndex)} aria-label={`删除 ${step.level} 级缩放`} className="mb-0.5 rounded-lg p-2 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>)}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-500">默认 5／11／17 级各增加 1 颗基础伤害骰；也可以设置不同阈值或固定伤害。</p>
+                        <button type="button" disabled={spell.cantripScalingSteps.length >= 19} onClick={() => addCantripScalingStep(index)} className="inline-flex items-center gap-1 rounded-lg border border-violet-300/15 px-2.5 py-1.5 text-[11px] font-semibold text-violet-100 disabled:opacity-40"><Plus className="h-3.5 w-3.5" />添加等级阈值</button>
+                      </div>
+                    </>}
+                  </div> : <div className="mt-3">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <BuilderNumber label="缩放起算环位" value={spell.upcastFromSlotLevel} min={spell.level} max={9} onChange={(upcastFromSlotLevel) => patchSpell(index, { upcastFromSlotLevel })} />
+                      <BuilderNumber label={`每高一环增加 d${spell.headless.damageSides || 6}`} value={spell.upcastDamageDicePerLevel} min={0} max={100} onChange={(upcastDamageDicePerLevel) => patchSpell(index, { upcastDamageDicePerLevel })} />
+                      <BuilderNumber label="每高一环增加固定伤害" value={spell.upcastFlatDamagePerLevel} min={0} max={1000000} onChange={(upcastFlatDamagePerLevel) => patchSpell(index, { upcastFlatDamagePerLevel })} />
+                      <BuilderNumber label="每高一环增加目标" value={spell.upcastAdditionalTargetsPerLevel} min={0} max={100} onChange={(upcastAdditionalTargetsPerLevel) => patchSpell(index, { upcastAdditionalTargetsPerLevel })} />
+                      <BuilderNumber label="每高一环增加投射物" value={spell.upcastAdditionalProjectilesPerLevel} min={0} max={100} onChange={(upcastAdditionalProjectilesPerLevel) => patchSpell(index, { upcastAdditionalProjectilesPerLevel })} />
+                      <BuilderNumber label="每高一环增加持续轮数" value={spell.upcastDurationRoundsPerLevel} min={0} max={10000} onChange={(upcastDurationRoundsPerLevel) => patchSpell(index, { upcastDurationRoundsPerLevel })} />
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-500">额外目标不可重复；额外投射物允许多个投射物指向同一目标。所有为 0 时不生成升环配方。</p>
+                  </div>}
+                </details>
+                <div className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${headlessStatus === 'full' ? 'border-emerald-400/20 bg-emerald-500/[0.055] text-emerald-100' : headlessStatus === 'partial' ? 'border-amber-400/20 bg-amber-500/[0.055] text-amber-100' : 'border-white/8 bg-black/10 text-slate-400'}`}>
+                  {headlessStatus === 'full'
+                    ? <>Headless 已接入：Host 将执行{spell.resolution === 'saving-throw' ? `${spell.saveAbility.toUpperCase()} 豁免、` : spell.resolution === 'spell-attack' ? '法术攻击、' : ''}{spell.headless.damageEnabled ? `${spell.headless.damageCount}d${spell.headless.damageSides} ${spell.headless.damageType}伤害` : '标准状态'}{spell.level === 0 && spell.headless.damageEnabled ? (spell.cantripScaling ? `，并应用 ${spell.cantripScalingSteps.length} 个角色等级缩放阈值` : '；当前没有角色等级缩放') : ''}。</>
+                    : headlessStatus === 'partial'
+                      ? 'Headless 尚未完成：自动结算开关已开启，但没有伤害或标准状态配方。保存时会安全回落为“仅资料”，不会错误执行。'
+                      : '当前仅接入法术资料；启用法术效果编辑器并配置至少一种效果后，才会生成 Host 可执行事务。'}
+                </div>
+                <HeadlessEffectEditor title="法术效果编辑器" mode="spell" value={spellHeadlessEffectDraft(spell)} onChange={(headless) => patchSpell(index, { headless })} />
+                <div className="mt-3 flex justify-end"><DeleteButton label={`删除法术 ${spell.name}`} onClick={() => removeSpell(index)} /></div>
+                </div>}
+              </article>
+              })}
             </div>
           </div>}
 
-          {activeSection === 'items' && <div>
+          {displayedSection === 'items' && <div>
             <SectionHeader
               title="自定义装备与物品"
               description="支持武器、护甲、盾牌、饰品和治疗消耗品；固定效果由 Host 写入 Headless。"
@@ -1627,18 +2722,34 @@ export default function Dnd5eCustomPluginBuilder({
                 </div>}
                 {item.kind === 'armor' && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderSelect label="护甲类别" value={item.armorCategory} options={ARMOR_CATEGORIES} onChange={(value) => patchItem(index, { armorCategory: value as ItemDraft['armorCategory'] })} /><BuilderNumber label="基础 AC" value={item.baseArmorClass} min={0} max={50} onChange={(value) => patchItem(index, { baseArmorClass: value })} /><BuilderSelect label="敏捷调整" value={item.dexterityBonus} options={DEXTERITY_BONUSES} onChange={(value) => patchItem(index, { dexterityBonus: value as ItemDraft['dexterityBonus'] })} /></div>}
                 {item.kind === 'shield' && <div className="mt-3 max-w-48"><BuilderNumber label="盾牌 AC 加值" value={item.shieldBonus} min={-20} max={20} onChange={(value) => patchItem(index, { shieldBonus: value })} /></div>}
-                {item.kind === 'consumable' && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderNumber label="治疗骰数量" value={item.healingCount} min={1} max={40} onChange={(value) => patchItem(index, { healingCount: value })} /><BuilderNumber label="治疗骰面数" value={item.healingSides} min={2} max={100} onChange={(value) => patchItem(index, { healingSides: value })} /><BuilderNumber label="固定治疗" value={item.healingBonus} min={-1000} max={1000} onChange={(value) => patchItem(index, { healingBonus: value })} /></div>}
+                {item.kind === 'consumable' && !item.spellSlotRecoveryEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderNumber label="治疗骰数量" value={item.healingCount} min={1} max={40} onChange={(value) => patchItem(index, { healingCount: value })} /><BuilderNumber label="治疗骰面数" value={item.healingSides} min={2} max={100} onChange={(value) => patchItem(index, { healingSides: value })} /><BuilderNumber label="固定治疗" value={item.healingBonus} min={-1000} max={1000} onChange={(value) => patchItem(index, { healingBonus: value })} /></div>}
                 {item.kind !== 'consumable' && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5"><BuilderNumber label="武器命中" value={item.weaponAttackBonus} min={-20} max={20} onChange={(value) => patchItem(index, { weaponAttackBonus: value })} /><BuilderNumber label="武器伤害" value={item.weaponDamageBonus} min={-20} max={20} onChange={(value) => patchItem(index, { weaponDamageBonus: value })} /><BuilderNumber label="AC" value={item.armorClassBonus} min={-20} max={20} onChange={(value) => patchItem(index, { armorClassBonus: value })} /><BuilderNumber label="全部豁免" value={item.savingThrowBonus} min={-20} max={20} onChange={(value) => patchItem(index, { savingThrowBonus: value })} /><BuilderNumber label="速度（尺）" value={item.speedBonusFeet} min={-500} max={500} onChange={(value) => patchItem(index, { speedBonusFeet: value })} /></div>}
-                {item.kind === 'weapon' && <section className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.04] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-cyan-100">装备效果编辑器</h4><p className="mt-1 text-xs text-slate-500">当前开放的安全纵向切片：实例充能＋攻击骰后重掷一枚 d20。资源与骰子只由 Host 事务修改。</p></div><Toggle label="4 充能重掷攻击骰" value={item.attackRerollEnabled} onChange={(attackRerollEnabled) => patchItem(index, { attackRerollEnabled })} /></div>
-                  {item.attackRerollEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2"><BuilderNumber label="最大充能" value={item.attackRerollCharges} min={1} max={1000000} onChange={(attackRerollCharges) => patchItem(index, { attackRerollCharges })} /><BuilderSelect label="恢复时点" value={item.attackRerollResetOn} options={[["none", "不自动恢复"], ["short-rest", "短休"], ["long-rest", "长休"], ["dawn", "黎明（暂由 DM／战役日历推进）"]]} onChange={(attackRerollResetOn) => patchItem(index, { attackRerollResetOn: attackRerollResetOn as ItemDraft['attackRerollResetOn'] })} /></div>}
-                </section>}
+                <section className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.04] p-4">
+                  <div>
+                    <h4 className="text-sm font-semibold text-cyan-100">装备 Headless 效果编辑器</h4>
+                    <p className="mt-1 text-xs text-slate-500">工坊与 Host 使用同一份 V1 声明：目标、骰子、伤害、资源和法术位都会在权威事务中重新校验。</p>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {item.kind === 'weapon' && <Toggle label="攻击骰后重掷 1 枚 d20" value={item.attackRerollEnabled} onChange={(attackRerollEnabled) => patchItem(index, { attackRerollEnabled })} />}
+                    {item.kind !== 'consumable' && <Toggle label="命中后造成额外伤害" value={item.onHitBonusDamageEnabled} onChange={(onHitBonusDamageEnabled) => patchItem(index, { onHitBonusDamageEnabled })} />}
+                    {item.kind !== 'consumable' && <Toggle label="受到伤害时减伤" value={item.damageReductionEnabled} onChange={(damageReductionEnabled) => patchItem(index, { damageReductionEnabled })} />}
+                    {item.kind !== 'consumable' && <Toggle label="降至 0 HP 时保命" value={item.deathPreventionEnabled} onChange={(deathPreventionEnabled) => patchItem(index, { deathPreventionEnabled })} />}
+                    <Toggle label="恢复已消耗法术位" value={item.spellSlotRecoveryEnabled} onChange={(spellSlotRecoveryEnabled) => patchItem(index, { spellSlotRecoveryEnabled })} />
+                    <Toggle label="上述效果消耗共享充能" value={item.headlessEffectsUseCharges || item.attackRerollEnabled} onChange={(headlessEffectsUseCharges) => patchItem(index, { headlessEffectsUseCharges })} />
+                  </div>
+                  {(item.attackRerollEnabled || item.headlessEffectsUseCharges) && <div className="mt-3 grid gap-3 sm:grid-cols-2"><BuilderNumber label="最大充能" value={item.attackRerollCharges} min={1} max={1000000} onChange={(attackRerollCharges) => patchItem(index, { attackRerollCharges })} /><BuilderSelect label="充能恢复时点" value={item.attackRerollResetOn} options={[["none", "不自动恢复"], ["short-rest", "短休"], ["long-rest", "长休"], ["dawn", "黎明（由战役日历推进）"]]} onChange={(attackRerollResetOn) => patchItem(index, { attackRerollResetOn: attackRerollResetOn as ItemDraft['attackRerollResetOn'] })} /></div>}
+                  {item.onHitBonusDamageEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3 xl:grid-cols-6"><BuilderNumber label="额外伤害骰数量" value={item.onHitBonusDamageCount} min={1} max={40} onChange={(onHitBonusDamageCount) => patchItem(index, { onHitBonusDamageCount })} /><BuilderNumber label="骰子面数" value={item.onHitBonusDamageSides} min={2} max={100} onChange={(onHitBonusDamageSides) => patchItem(index, { onHitBonusDamageSides })} /><BuilderNumber label="固定加值" value={item.onHitBonusDamageBonus} min={-1000} max={1000} onChange={(onHitBonusDamageBonus) => patchItem(index, { onHitBonusDamageBonus })} /><BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} /><Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} /></div>}
+                  {item.damageReductionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2"><BuilderNumber label="每次减伤" value={item.damageReductionAmount} min={1} max={1000000} onChange={(damageReductionAmount) => patchItem(index, { damageReductionAmount })} /><Toggle label="每回合一次" value={item.damageReductionOncePerTurn} onChange={(damageReductionOncePerTurn) => patchItem(index, { damageReductionOncePerTurn })} /></div>}
+                  {item.deathPreventionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2"><BuilderNumber label="保命后 HP" value={item.deathPreventionHitPoints} min={1} max={1000000} onChange={(deathPreventionHitPoints) => patchItem(index, { deathPreventionHitPoints })} /><Toggle label="允许阻止巨量伤害即死" value={item.deathPreventionMassiveDamage} onChange={(deathPreventionMassiveDamage) => patchItem(index, { deathPreventionMassiveDamage })} /></div>}
+                  {item.spellSlotRecoveryEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3"><BuilderNumber label="最高可恢复环级" value={item.spellSlotRecoveryMaximumLevel} min={1} max={9} onChange={(spellSlotRecoveryMaximumLevel) => patchItem(index, { spellSlotRecoveryMaximumLevel })} /><BuilderNumber label="恢复法术位数量" value={item.spellSlotRecoveryAmount} min={1} max={9} onChange={(spellSlotRecoveryAmount) => patchItem(index, { spellSlotRecoveryAmount })} /><BuilderSelect label="使用行动经济" value={item.spellSlotRecoveryEconomy} options={[["action", "动作"], ["bonusAction", "附赠动作"], ["none", "不消耗行动"]]} onChange={(spellSlotRecoveryEconomy) => patchItem(index, { spellSlotRecoveryEconomy: spellSlotRecoveryEconomy as ItemDraft['spellSlotRecoveryEconomy'] })} /></div>}
+                  {(item.attackRerollEnabled || item.onHitBonusDamageEnabled || item.damageReductionEnabled || item.deathPreventionEnabled || item.spellSlotRecoveryEnabled) && <p className="mt-3 text-xs text-emerald-300">兼容报告：所选效果可由 Host 完整 Headless 结算；插件不能执行 JavaScript，也不能直接修改角色或战斗 Store。</p>}
+                </section>
                 <div className="mt-3 flex justify-end"><DeleteButton label={`删除物品 ${item.name}`} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
               </article>)}
             </div>
           </div>}
 
-          {activeSection === 'methods' && <div>
+          {displayedSection === 'methods' && <div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <div><h3 className="text-sm font-semibold text-slate-200">属性生成／加点规则</h3><p className="mt-1 text-xs text-slate-600">支持标准数组、购点成本表和自定义投骰。</p></div>
               <button type="button" onClick={() => setMethods((current) => [...current, newMethod(current.length + 1)])} className="inline-flex items-center gap-1.5 rounded-xl bg-arcane-500/12 px-3 py-2 text-xs font-semibold text-arcane-100"><Plus className="h-3.5 w-3.5" /> 添加加点规则</button>
@@ -1664,18 +2775,31 @@ export default function Dnd5eCustomPluginBuilder({
             </div>
           </div>}
 
-          <Dnd5eBuilderResourceInventory
-            key={activeSection}
-            sectionLabel={builderSectionLabel(activeSection)}
+          {displayedSection !== 'spells' && <Dnd5eBuilderResourceInventory
+            key={displayedSection}
+            sectionLabel={builderSectionLabel(displayedSection)}
             entries={resourceInventoryEntries}
-          />
+            headerAction={displayedSection === 'monsters' ? (
+              <button
+                type="button"
+                onClick={() => setMonsterWorkshopOpen(true)}
+                className="rounded-xl bg-violet-500 px-3.5 py-2 text-xs font-semibold text-white hover:bg-violet-400"
+              >
+                打开怪物工坊
+              </button>
+            ) : undefined}
+            entryActionLabel={displayedSection === 'monsters' ? '在怪物工坊中打开' : undefined}
+            onEntryAction={displayedSection === 'monsters' ? openMonsterInWorkshop : undefined}
+          />}
 
           {localError && <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">{localError}</p>}
           {localNotice && <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">{localNotice}</p>}
           <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" disabled={busy} onClick={() => void deleteDraft()} className="mr-auto inline-flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/5 px-4 py-2.5 text-sm font-semibold text-rose-200 disabled:opacity-50"><Trash2 className="h-4 w-4" /> 删除当前房间草稿</button>
             <button type="button" disabled={busy} onClick={loadDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><FolderOpen className="h-4 w-4" /> 载入本地草稿</button>
             <button type="button" disabled={busy} onClick={saveDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Save className="h-4 w-4" /> 保存本地草稿</button>
             <button type="button" disabled={busy} onClick={download} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Download className="h-4 w-4" /> 下载插件文件</button>
+            {onPublish && <button type="button" disabled={busy} onClick={() => void publish()} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-2.5 text-sm font-semibold text-emerald-100 disabled:opacity-50"><BadgeDollarSign className="h-4 w-4" /> {busy ? '正在处理…' : publishLabel}</button>}
             <button type="button" disabled={busy} onClick={() => void install()} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? '正在保存…' : installLabel}</button>
           </div>
         </div>
@@ -1745,7 +2869,7 @@ function HeadlessEffectEditor({
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {value.areaShape === 'circle' && <BuilderNumber label="半径（尺）" value={value.areaRadiusFeet} min={0} max={10000} onChange={(areaRadiusFeet) => patch({ areaRadiusFeet })} />}
             {(value.areaShape === 'line' || value.areaShape === 'rect') && <BuilderNumber label="宽度（尺）" value={value.areaWidthFeet} min={0} max={10000} onChange={(areaWidthFeet) => patch({ areaWidthFeet })} />}
-            {value.areaShape === 'rect' && <BuilderNumber label="高度（尺）" value={value.areaHeightFeet} min={0} max={10000} onChange={(areaHeightFeet) => patch({ areaHeightFeet })} />}
+            {value.areaShape === 'rect' && <><BuilderNumber label="高度（尺）" value={value.areaHeightFeet} min={0} max={10000} onChange={(areaHeightFeet) => patch({ areaHeightFeet })} /><div className="self-end pb-0.5"><Toggle label="允许自由旋转" value={value.areaRotatable} onChange={(areaRotatable) => patch({ areaRotatable })} /></div></>}
             {(value.areaShape === 'line' || value.areaShape === 'cone') && <BuilderNumber label="长度（尺）" value={value.areaLengthFeet} min={0} max={10000} onChange={(areaLengthFeet) => patch({ areaLengthFeet })} />}
           </div>
           <div className="mt-3 rounded-xl border border-lime-400/20 bg-lime-500/[0.045] p-3">
@@ -1806,7 +2930,7 @@ function HeadlessEffectEditor({
                 max={10000}
                 onChange={(persistentAreaHeightFeet) => patch({ persistentAreaHeightFeet })}
               />}
-              <BuilderSelect label="动画预设" value={value.persistentAreaVisualPreset} options={[["arcane", "奥术边界"], ["toxic-cloud", "毒云漂移"]]} onChange={(persistentAreaVisualPreset) => patch({ persistentAreaVisualPreset: persistentAreaVisualPreset as HeadlessEffectEditorDraft['persistentAreaVisualPreset'] })} />
+              <BuilderSelect label="动画预设" value={value.persistentAreaVisualPreset} options={DND5E_PERSISTENT_AREA_VISUAL_PRESETS.map((preset) => [preset, preset] as const)} onChange={(persistentAreaVisualPreset) => patch({ persistentAreaVisualPreset: persistentAreaVisualPreset as HeadlessEffectEditorDraft['persistentAreaVisualPreset'] })} />
               <BuilderSelect label="动画强度" value={value.persistentAreaVisualIntensity} options={[["subtle", "轻微"], ["normal", "标准"], ["strong", "强烈"]]} onChange={(persistentAreaVisualIntensity) => patch({ persistentAreaVisualIntensity: persistentAreaVisualIntensity as HeadlessEffectEditorDraft['persistentAreaVisualIntensity'] })} />
               <div className="self-end pb-0.5"><Toggle label="需要专注" value={value.persistentAreaConcentration} onChange={(persistentAreaConcentration) => patch({ persistentAreaConcentration })} /></div>
             </div>}

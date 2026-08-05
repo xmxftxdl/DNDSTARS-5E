@@ -14,6 +14,7 @@ import {
   type RoomRoster,
 } from '../lib/roomApi'
 import { getRoomSession } from '../lib/roomSession'
+import { showAppConfirm } from '../lib/appDialog'
 
 export default function RoomManagementPanel() {
   const session = useMemo(() => getRoomSession(), [])
@@ -153,8 +154,12 @@ export default function RoomManagementPanel() {
                     data-testid={`room-transfer-${player.memberId}`}
                     disabled={busy !== null || !player.ready || !player.online}
                     title={!player.online ? '玩家必须在线才能接管 DM' : player.ready ? '转让 DM' : '规则包未就绪，不能接管 DM'}
-                    onClick={() => {
-                      if (!window.confirm(`确定把 DM 权限转让给「${player.displayName}」吗？你会变为 ${roomRosterMemberLabel(player)}。`)) return
+                    onClick={async () => {
+                      if (!await showAppConfirm({
+                        title: '转让 DM 权限',
+                        message: `确定把 DM 权限转让给「${player.displayName}」吗？你会变为 ${roomRosterMemberLabel(player)}。`,
+                        confirmLabel: '确认转让',
+                      })) return
                       void run(`transfer:${player.memberId}`, async () => {
                         await transferRoomDm(session, player.memberId)
                         window.location.assign(`/campaign/${encodeURIComponent(session.campaignId ?? session.roomId)}/maps`)
@@ -169,8 +174,13 @@ export default function RoomManagementPanel() {
                     data-testid={`room-kick-${player.memberId}`}
                     disabled={busy !== null}
                     title="移出房间"
-                    onClick={() => {
-                      if (!window.confirm(`确定将「${player.displayName}」移出房间吗？`)) return
+                    onClick={async () => {
+                      if (!await showAppConfirm({
+                        title: '移出房间',
+                        message: `确定将「${player.displayName}」移出房间吗？`,
+                        confirmLabel: '确认移出',
+                        tone: 'danger',
+                      })) return
                       void run(`kick:${player.memberId}`, () => kickRoomPlayer(session, player.memberId), `${player.displayName} 已被移出房间。`)
                     }}
                     className="rounded-lg border border-rose-400/20 p-2 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30"

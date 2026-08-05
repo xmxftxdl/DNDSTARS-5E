@@ -1040,14 +1040,14 @@ export default function PlayerCombatHotbar({
           data-testid="combat-backpack-dialog"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
-          className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-amber-300/20 bg-[#0b0d14]/98 shadow-[0_30px_100px_rgba(0,0,0,0.8)]"
+          className="flex max-h-[92vh] w-[min(96vw,1500px)] flex-col overflow-hidden rounded-2xl border border-amber-300/20 bg-[#0b0d14]/98 shadow-[0_30px_100px_rgba(0,0,0,0.8)]"
         >
           <header className="flex shrink-0 items-start gap-3 border-b border-white/10 px-5 py-4">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-300/20 bg-amber-400/10 text-amber-100">
               <Backpack className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <h3 id="combat-backpack-title" className="text-base font-bold text-white">战斗背包</h3>
+              <h3 id="combat-backpack-title" className="text-base font-bold text-white">角色物品栏</h3>
               <p className="mt-1 text-xs leading-5 text-slate-400">
                 背包包含角色的全部装备与道具。可直接使用已接入 Headless 的物品，也可选择物品后放入或交换 1–7 号快捷槽。
               </p>

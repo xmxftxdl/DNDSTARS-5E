@@ -294,7 +294,7 @@ export function normalizeDnd5eCharacterEquipment(
   const useLegacyDefaults = character.equipment == null
   const result: CharacterEquipment = {}
   const slots: Array<keyof CharacterEquipment> = [
-    'mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace',
+    'mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'ring2', 'belt', 'necklace',
   ]
   for (const slot of slots) {
     const item = character.equipment?.[slot]

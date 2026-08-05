@@ -49,6 +49,41 @@ describe('D&D 5e map bridge', () => {
     setDnd5eRoomMonsterCatalog([])
   })
 
+  it('fails closed when a player token references a character that has not synchronized', () => {
+    const playerToken = token({
+      id: 'pending-player-token',
+      type: 'player',
+      characterId: 'pending-character',
+    })
+    const map: BattleMap = {
+      id: 'pending-character-map',
+      name: 'Pending character map',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [playerToken],
+    }
+
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'pending-character-combat',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: playerToken.id,
+        label: playerToken.label,
+        emoji: '',
+        color: '',
+        roll: 10,
+      }],
+    })
+
+    expect(snapshot.state.combatants[playerToken.id]).toBeUndefined()
+  })
+
   it('preserves distinct initiative slots when one combatant owns multiple turns', () => {
     const hero = character()
     const heroToken = token({

@@ -1,9 +1,6 @@
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import type { AbilityKey } from '../../lib/dnd'
-import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import {
-  cellKey,
   occupiedCells,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
@@ -22,7 +19,6 @@ import {
   mapGeometryLineOfEffectBlocked,
   mapGeometryLineOfSightBlocked,
   mapGeometryMovementBlocked,
-  mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
   mapGeometrySegments,
   mapGeometrySegmentsIntersect,
@@ -76,7 +72,6 @@ import {
   dnd5eConditionIncapacitated,
   dnd5eConditionImposesAttackDisadvantage,
   dnd5eStandardConditionId,
-  type Dnd5eStandardConditionId,
 } from './conditions'
 import {
   dnd5eMonsterAssassinateAutomaticCritical,
@@ -101,17 +96,37 @@ import {
   selectDnd5eMonsterPreferredTarget,
 } from './monsterAutomation'
 import {
-  DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
-  rankMonsterDecisionCandidates,
   type MonsterDecisionCandidate,
   type MonsterDecisionContext,
-  type MonsterDecisionMetrics,
-  type MonsterDecisionProvider,
-} from './monsterDecisionProvider'
+} from './monsterDecisionContracts'
+import { rankMonsterDecisionCandidates } from './monsterDecisionRanking'
+import { DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3 } from './monsterDecisionScoring'
+import { collectMonsterDecisionCandidates } from './monsterCandidatePipeline'
+import {
+  createMonsterHealingCandidates,
+  createMonsterHealingTouchCandidates,
+  createMonsterProtectionCandidates,
+  createMonsterRestorationCandidates,
+  type MonsterSupportCandidateServices,
+} from './monsterSupportCandidateGenerators'
+import {
+  createMonsterStructuredSpecialActionCandidates as createStructuredSpecialCandidates,
+  type MonsterStructuredSpecialCandidateServices,
+} from './monsterStructuredSpecialCandidates'
 import {
   dnd5ePersistentAreaDifficultTerrainMultiplierAt,
   dnd5ePersistentAreaSpeedCostMultiplierAt,
 } from './persistentAreaGeometry'
+import {
+  expectedPersistentAreaTurnEndDamageAt as scorePersistentAreaTurnEndDamage,
+  type MonsterPersistentAreaHazardServices,
+} from './monsterPersistentAreaHazardScoring'
+import {
+  createMonsterEscapeDecisionCandidates,
+  createMonsterReleaseDecisionCandidates,
+  type MonsterEscapeCandidateServices,
+  type MonsterReleaseCandidateServices,
+} from './monsterControlCandidateGenerators'
 import {
   dnd5eActiveSizeRankDelta,
   dnd5eActiveActionOrBonusActionOnly,
@@ -143,6 +158,18 @@ import {
   dnd5eForcedPushDestination,
 } from './spellAction'
 import { dnd5eFallingDamageDice } from './traversal'
+import type {
+  Dnd5eMonsterSimulationReachablePosition,
+  Dnd5eMonsterSimulationRuntimeCache,
+  Dnd5eMonsterTurnPlan,
+  Dnd5eMonsterTurnPlannerOptions,
+} from './monsterTurnPlan'
+export type {
+  Dnd5eMonsterSimulationReachablePosition,
+  Dnd5eMonsterSimulationRuntimeCache,
+  Dnd5eMonsterTurnPlan,
+  Dnd5eMonsterTurnPlannerOptions,
+} from './monsterTurnPlan'
 
 const monsterTraversalGeometryCache = new WeakMap<
   object,
@@ -187,186 +214,6 @@ function monsterTraversalGeometry(mapId: string) {
   }
   monsterTraversalGeometryCache.set(geometry, transformed)
   return transformed
-}
-
-export interface Dnd5eMonsterTurnPlan {
-  moved: boolean
-  /** 被驱散的亡灵及战术规划器可以用动作疾走。 */
-  dashed?: boolean
-  /** Tactical Planner V2 可在没有有效攻击时使用闪避。 */
-  dodged?: boolean
-  /** 已由 Host 验证并在移动事务内消耗附赠动作的灵巧脱逃。 */
-  nimbleEscape?: 'disengage'
-  moveApSpent?: number
-  newPosition?: { x: number; y: number }
-  newElevationFeet?: number
-  movementMode?: 'walk' | 'fly'
-  attacked: boolean
-  spellCast?: {
-    spellId: string
-    spellName: string
-    slotLevel: number
-    targetTokenIds: readonly string[]
-    /** 自动命中法术逐枚投射物的目标；同一目标可重复。 */
-    projectileTargetIds?: readonly string[]
-    effect: Dnd5eSrdSpellDefinition['effect']
-    diceCount: number
-    diceSides: number
-    castingTime: Dnd5eSrdSpellDefinition['castingTime']
-    saveAbility?: Dnd5eSrdSpellDefinition['saveAbility']
-    area?: Dnd5eSrdSpellDefinition['area']
-    areaTargetCell?: GridCell
-    areaTargetOrientation?: 0 | 1 | 2 | 3
-    areaTargetElevationFeet?: number
-    conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
-  }
-  specialAction?:
-    | {
-        kind: 'healing-touch'
-        actionId: string
-        actionName: string
-        targetTokenId: string
-        healing: { diceCount: number; diceSides: number; bonus: number }
-      }
-    | {
-        kind: 'teleport'
-        actionId: string
-        actionName: string
-        destinationCell: GridCell
-        destinationElevationFeet: number
-      }
-    | {
-        kind: 'invisibility'
-        actionId: string
-        actionName: string
-      }
-  areaAction?: {
-    actionId: string
-    /** Stable child effect selected from an action-level shared resource pool. */
-    variantId?: string
-    actionName: string
-    targetTokenIds: readonly string[]
-    area: SkillAoeTargeting
-    areaTargetCell: GridCell
-    areaTargetOrientation?: 0 | 1 | 2 | 3
-    areaTargetElevationFeet?: number
-    saveAbility: AbilityKey
-    saveDc: number
-    damage?: {
-      diceCount: number
-      diceSides: number
-      damageBonus: number
-      damageType: Dnd5eDamageType
-    }
-    conditionOnFailedSave?: {
-      condition: Dnd5eStandardConditionId
-      durationRounds: number
-    }
-  }
-  /** Fixed-DC escape generated from an authoritative active-effect relation. */
-  escapeActiveEffect?: {
-    effectId: string
-    dc: number
-  }
-  /** Opposed Athletics/Acrobatics escape from a player-created basic grapple. */
-  escapeGrapple?: {
-    grapplerId: string
-  }
-  /**
-   * A source may freely end one of its own grapple relations before resolving
-   * the rest of this plan. This does not consume the action selected below.
-   */
-  releaseGrapple?: {
-    targetId: string
-    effectId: string
-  }
-  attackerTokenId?: string
-  targetTokenId?: string
-  /** One stable target id for each concrete monster action occurrence. */
-  attackTargetTokenIds?: readonly string[]
-  actionIndex?: number
-  attack?: {
-    values: number[]
-    sides: number
-    bonus: number
-    total: number
-    label: string
-    targetName: string
-  }
-  damageType?: 'physical'
-  targetCharacterId?: string
-  damage?: number
-  message: string
-  decision?: {
-    providerId: string
-    candidateId: string
-    candidateCount: number
-    score: number
-    reasons: readonly string[]
-    metrics?: Readonly<MonsterDecisionMetrics>
-  }
-}
-
-export interface Dnd5eMonsterSimulationReachablePosition {
-  cell: GridCell
-  steps: number
-  position: { x: number; y: number }
-}
-
-export interface Dnd5eMonsterSimulationRuntimeCache {
-  reachablePositions: Map<string, readonly Dnd5eMonsterSimulationReachablePosition[]>
-}
-
-export interface Dnd5eMonsterTurnPlannerOptions {
-  decisionProvider?: MonsterDecisionProvider
-  turnEconomy?: Dnd5eTurnEconomyCounts
-  /**
-   * Restricts planning to one exact monster action. Used after a committed
-   * Multiattack occurrence to plan only the next Headless-authorized strike.
-   */
-  requiredActionId?: string
-  /**
-   * Restricts the next strike to one target while continuing a Multiattack.
-   * The Host may retry without this restriction when that target is no longer
-   * reachable or legal.
-   */
-  requiredTargetId?: string
-  /** Targets forbidden by an earlier Multiattack occurrence constraint. */
-  excludedTargetIds?: readonly string[]
-  /** Remaining movement in the current turn, after any earlier movement. */
-  movementBudgetFeet?: number
-  /** Current authoritative combat identity used by surprise-dependent traits. */
-  combatId?: string
-  round?: number
-  simulationOptimization?: {
-    /**
-     * Simulation-only deterministic search bound. Live turns remain exhaustive,
-     * while large Monte Carlo jobs sample representative reachable cells.
-     */
-    maxReachablePositions?: number
-    /**
-     * Score candidate routes from the already-authoritative reachability search.
-     * The selected candidate is still checked with the full pathfinder.
-     */
-    approximateCandidateRoutes?: boolean
-    /** Avoid a second double-speed flood fill when a normal attack is available. */
-    skipDashWhenAttackAvailable?: boolean
-    /**
-     * Generated simulation candidates already passed the authoritative
-     * step-by-step reachability search, so avoid re-running full pathfinding
-     * for every ranked option.
-     */
-    skipFinalRouteValidation?: boolean
-    /**
-     * Test/rollback switch. The shared tree is exact and is the live default;
-     * per-destination preserves the former repeated A* implementation.
-     */
-    candidateRouteSearch?: 'shared-tree' | 'per-destination'
-    /** Test/diagnostic override; a truncated tree falls back to exact A*. */
-    candidateRouteTreeMaximumVisited?: number
-    /** Per-job cache keyed by dynamic token occupancy and movement profile. */
-    reachabilityCache?: Dnd5eMonsterSimulationRuntimeCache
-  }
 }
 
 type ReachableMonsterPosition = Dnd5eMonsterSimulationReachablePosition
@@ -1067,6 +914,27 @@ function monsterEscapeSuccessProbability(input: {
     dnd5eAbilityCheckSuccessProbability(option.modifier, check.dc, option.mode)))
 }
 
+const monsterEscapeCandidateServices: MonsterEscapeCandidateServices<PlannerReconciledActiveEffects> = {
+  activeEffects: tokenActiveEffects,
+  hitPoints: targetHitPoints,
+  linkedRootEffects: sourceLinkedGrappleRootEffects,
+  successProbability(input) {
+    return input.fixedDc
+      ? monsterEscapeSuccessProbability({
+          enemy: input.enemy,
+          monster: input.monster,
+          effects: input.effects,
+          effect: input.effect,
+        })
+      : monsterGrappleEscapeSuccessProbability({
+          enemy: input.enemy,
+          monster: input.monster,
+          source: input.source,
+          characters: input.characters,
+        })
+  },
+}
+
 function createMonsterEscapeCandidates(input: {
   map: BattleMap
   enemy: Token
@@ -1075,89 +943,7 @@ function createMonsterEscapeCandidates(input: {
   canUseAction: boolean
   reconciledActiveEffects?: PlannerReconciledActiveEffects
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  if (!input.canUseAction) return []
-  const effects = tokenActiveEffects(input.enemy, input.characters)
-  const hp = targetHitPoints(input.enemy, input.characters)
-  return sourceLinkedGrappleRootEffects(
-    input.enemy,
-    input.characters,
-    input.reconciledActiveEffects,
-  )
-    .filter((effect) =>
-      (
-        effect.escapeCheck?.economy === 'action' ||
-        (
-          effect.source.rulesId === 'basic-action:grapple' &&
-          effect.relation?.sourceActionId === 'basic-action:grapple'
-        )
-      ) &&
-      input.map.tokens.some((candidate) =>
-        candidate.id === effect.source.actorId &&
-        targetHitPoints(candidate, input.characters).current > 0))
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((effect) => {
-      const source = input.map.tokens.find((candidate) => candidate.id === effect.source.actorId)!
-      const fixedDc = effect.escapeCheck?.economy === 'action'
-      const successProbability = fixedDc
-        ? monsterEscapeSuccessProbability({
-            enemy: input.enemy,
-            monster: input.monster,
-            effects,
-            effect,
-          })
-        : monsterGrappleEscapeSuccessProbability({
-            enemy: input.enemy,
-            monster: input.monster,
-            source,
-            characters: input.characters,
-          })
-      const restrained = effects.some((candidate) =>
-        candidate.standardCondition === 'restrained' &&
-        candidate.dependsOnEffectId === effect.id)
-      const escapeControlValue = restrained
-        ? fixedDc ? 120 : 180
-        : 45
-      return {
-        id: fixedDc
-          ? `escape-active-effect:${effect.id}`
-          : `escape-grapple:${effect.id}:${source.id}`,
-        kind: 'control' as const,
-        payload: {
-          moved: false,
-          attacked: false,
-          attackerTokenId: input.enemy.id,
-          targetTokenId: source.id,
-          ...(fixedDc
-            ? {
-                escapeActiveEffect: {
-                  effectId: effect.id,
-                  dc: effect.escapeCheck!.dc,
-                },
-              }
-            : { escapeGrapple: { grapplerId: source.id } }),
-          message: `${input.enemy.label} 尝试挣脱 ${source.label} 的擒抱。`,
-        },
-        metrics: {
-          expectedDamage: 0,
-          targetCurrentHp: hp.current,
-          targetMaximumHp: hp.maximum,
-          hitProbability: successProbability,
-          controlValue: successProbability * escapeControlValue,
-          targetDistanceFeet: 0,
-          preferredDistanceFeet: 0,
-          movementFeet: 0,
-          distanceImprovementFeet: 0,
-          defensiveCoverBonus: 0,
-          opportunityAttackRisk: 0,
-          attacksThisTurn: false,
-          consumesAction: true,
-          dodges: false,
-          dashes: false,
-          usesNimbleEscape: false,
-          usesPreciseCoverRoute: false,
-        },
-      }
-    })
+  return createMonsterEscapeDecisionCandidates(input, monsterEscapeCandidateServices)
 }
 
 function targetIsDodging(target: Token, characters: readonly Character[]): boolean {
@@ -1205,6 +991,19 @@ function plannerTargetMonster(target: Token): Dnd5eMonsterStatBlock | undefined 
   return target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
 }
 
+const monsterSupportCandidateServices: MonsterSupportCandidateServices = {
+  hitPoints: targetHitPoints,
+  armorClass: targetArmorClass,
+  distanceFeet: (map, left, right) => tokenThreeDimensionalDistanceFeet(
+    map,
+    mapGeometryRuntimeForMap(map.id),
+    left,
+    right,
+  ),
+  activeEffects: tokenActiveEffects,
+  monsterForToken: plannerTargetMonster,
+}
+
 function plannerSleepTargetIsEligible(
   target: Token,
   characters: readonly Character[],
@@ -1250,6 +1049,23 @@ function resolvePlannerDamage(
       damageDefenseRules: monster.damageDefenseRules,
     },
   }).finalDamage
+}
+
+const monsterPersistentAreaHazardServices: MonsterPersistentAreaHazardServices = {
+  monsterForToken: plannerTargetMonster,
+  savingThrowModifier: targetSavingThrowModifier,
+  resolveDamage: resolvePlannerDamage,
+  moralAlignment: plannerMoralAlignment,
+}
+
+function expectedPersistentAreaTurnEndDamageAt(input: {
+  map: BattleMap
+  token: Token
+  characters: readonly Character[]
+  position: { x: number; y: number }
+  elevationFeet?: number
+}): number {
+  return scorePersistentAreaTurnEndDamage(input, monsterPersistentAreaHazardServices)
 }
 
 function offensiveMonsterSpellExpectedValue(input: {
@@ -3907,220 +3723,21 @@ function createTacticalCandidates(input: {
   return candidates
 }
 
-function createMonsterHealingCandidates(input: {
-  map: BattleMap
-  enemy: Token
-  monster: Dnd5eMonsterStatBlock
-  characters: readonly Character[]
-  canUseAction: boolean
-  canUseBonusAction: boolean
-}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  const { map, enemy, monster, characters } = input
-  const geometry = mapGeometryRuntimeForMap(map.id)
-  const healingSpells = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
-    const spell = getDnd5eSrdCombatSpell(listedSpell.id)
-    if (
-      !spell ||
-      dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full' ||
-      spell.effect !== 'healing' ||
-      spell.castingTime === 'reaction' ||
-      (spell.castingTime === 'action' && !input.canUseAction) ||
-      (spell.castingTime === 'bonus-action' && !input.canUseBonusAction)
-    ) return []
-    return dnd5eAvailableMonsterSpellSlotLevels({ monster, token: enemy, spell: listedSpell })
-      .map((slotLevel) => ({ spell, slotLevel }))
-  })
-  if (healingSpells.length === 0) return []
-  const allies = map.tokens.filter((target) => {
-    if (target.type === 'obstacle' || areOpposedCombatTokens(enemy, target)) return false
-    const hp = targetHitPoints(target, characters)
-    if (hp.current <= 0 || hp.current >= hp.maximum) return false
-    const targetMonster = target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
-    const creatureType = (targetMonster?.creatureType ?? '').toLowerCase()
-    return !['undead', 'construct'].includes(creatureType) &&
-      !creatureType.includes('亡灵') &&
-      !creatureType.includes('构装')
-  })
-  return allies.flatMap((target) => healingSpells.flatMap(({ spell, slotLevel }) => {
-    const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
-    if (distanceFeet > spell.rangeFeet) return []
-    const cover = target.id === enemy.id
-      ? undefined
-      : mapGeometryCoverBetween(geometry, enemy, target, map)
-    if (cover?.blocksLineOfEffect) return []
-    const hp = targetHitPoints(target, characters)
-    const diceCount = dnd5eSpellDiceCount(
-      spell,
-      Math.max(1, monster.spellcasting?.casterLevel ?? 1),
-      slotLevel,
-    )
-    const modifier = spell.addSpellcastingModifier && monster.spellcasting?.ability
-      ? rules.abilityModifier(monster.abilities[monster.spellcasting.ability])
-      : 0
-    const expectedHealing = Math.min(
-      hp.maximum - hp.current,
-      diceCount * (spell.dice.sides + 1) / 2 + spell.dice.bonus + modifier,
-    )
-    const missingRatio = 1 - hp.current / hp.maximum
-    const plan: Dnd5eMonsterTurnPlan = {
-      moved: false,
-      attacked: false,
-      attackerTokenId: enemy.id,
-      targetTokenId: target.id,
-      targetCharacterId: target.characterId,
-      spellCast: {
-        spellId: spell.id,
-        spellName: spell.name,
-        slotLevel,
-        targetTokenIds: [target.id],
-        effect: spell.effect,
-        diceCount,
-        diceSides: spell.dice.sides,
-        castingTime: spell.castingTime,
-      },
-      message: `${enemy.label}施放${spell.name}治疗 ${target.label}。`,
-    }
-    return [{
-      id: `heal:${target.id}:${spell.id}:${slotLevel}`,
-      kind: 'heal' as const,
-      payload: plan,
-      metrics: {
-        expectedDamage: 0,
-        targetCurrentHp: hp.current,
-        targetMaximumHp: hp.maximum,
-        targetArmorClass: targetArmorClass(target, characters),
-        targetPriorityWeight: 0,
-        hitProbability: 1,
-        supportValue: expectedHealing * 4 + missingRatio * 140,
-        resourceCost: spell.level === 0 ? 0 : slotLevel * 3,
-        targetDistanceFeet: distanceFeet,
-        preferredDistanceFeet: 0,
-        movementFeet: 0,
-        distanceImprovementFeet: 0,
-        defensiveCoverBonus: 0,
-        opportunityAttackRisk: 0,
-        attacksThisTurn: false,
-        consumesAction: true,
-        dodges: false,
-        dashes: false,
-        usesNimbleEscape: false,
-        usesPreciseCoverRoute: false,
-      },
-    }]
-  }))
+const monsterStructuredSpecialCandidateServices: MonsterStructuredSpecialCandidateServices = {
+  hitPoints: targetHitPoints,
+  armorClass: targetArmorClass,
+  distanceFeet: (map, actor, target) => tokenThreeDimensionalDistanceFeet(
+    map,
+    mapGeometryRuntimeForMap(map.id),
+    actor,
+    target,
+  ),
+  preferredDistanceFeet,
+  conditions: targetConditions,
+  tacticalDistanceImprovement,
+  coverBonus: defensiveCoverBonusAgainstTarget,
 }
 
-function createMonsterHealingTouchCandidates(input: {
-  map: BattleMap
-  enemy: Token
-  monster: Dnd5eMonsterStatBlock
-  characters: readonly Character[]
-  canUseAction: boolean
-}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  if (!input.canUseAction) return []
-  const { map, enemy, monster, characters } = input
-  const actorSide = dnd5eCombatTokenSide(enemy)
-  if (!actorSide) return []
-  const geometry = mapGeometryRuntimeForMap(map.id)
-  const actions = monster.actions.filter((action) =>
-    action.kind === 'other' &&
-    action.rule?.kind === 'healing-touch' &&
-    dnd5eMonsterActionAutomation(action) === 'headless' &&
-    (
-      action.usage?.kind !== 'per-day' ||
-      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ??
-        action.usage.max) > 0
-    ))
-  if (actions.length === 0) return []
-
-  return actions.flatMap<MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>>((action) => {
-    const rule = action.rule
-    if (rule?.kind !== 'healing-touch') return []
-    return map.tokens.flatMap((target) => {
-      const targetSide = dnd5eCombatTokenSide(target)
-      const hp = targetHitPoints(target, characters)
-      if (
-        target.id === enemy.id ||
-        target.type === 'obstacle' ||
-        targetSide !== actorSide ||
-        hp.current <= 0 ||
-        hp.current >= hp.maximum
-      ) return []
-      const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
-      if (distanceFeet > rule.rangeFeet) return []
-      if (mapGeometryCoverBetween(geometry, enemy, target, map)?.blocksLineOfEffect) return []
-
-      const removable = new Set<string>()
-      for (const effect of target.dnd5eCombatState?.activeEffects ?? []) {
-        const standard = effect.standardCondition ??
-          (effect.legacyCondition ? dnd5eStandardConditionId(effect.legacyCondition) : undefined)
-        const legacy = effect.legacyCondition?.trim().toLowerCase()
-        if (rule.removes.includes('poisoned') && standard === 'poisoned') removable.add('poisoned')
-        if (rule.removes.includes('blinded') && standard === 'blinded') removable.add('blinded')
-        if (rule.removes.includes('deafened') && standard === 'deafened') removable.add('deafened')
-        if (rule.removes.includes('disease') && ['disease', 'diseased', '疾病'].includes(legacy ?? '')) {
-          removable.add('disease')
-        }
-        if (rule.removes.includes('curse') && ['curse', 'cursed', '诅咒'].includes(legacy ?? '')) {
-          removable.add('curse')
-        }
-      }
-      const expectedRawHealing =
-        rule.healing.count * (rule.healing.sides + 1) / 2 + rule.healing.bonus
-      const effectiveHealing = Math.min(hp.maximum - hp.current, expectedRawHealing)
-      const missingRatio = 1 - hp.current / hp.maximum
-      const plan: Dnd5eMonsterTurnPlan = {
-        moved: false,
-        attacked: false,
-        attackerTokenId: enemy.id,
-        targetTokenId: target.id,
-        targetCharacterId: target.characterId,
-        specialAction: {
-          kind: 'healing-touch',
-          actionId: action.id,
-          actionName: action.name,
-          targetTokenId: target.id,
-          healing: {
-            diceCount: rule.healing.count,
-            diceSides: rule.healing.sides,
-            bonus: rule.healing.bonus,
-          },
-        },
-        message: `${enemy.label}使用${action.name}治疗${target.label}。`,
-      }
-      return [{
-        id: `heal-touch:${target.id}:${action.id}`,
-        kind: 'heal' as const,
-        payload: plan,
-        metrics: {
-          expectedDamage: 0,
-          targetCurrentHp: hp.current,
-          targetMaximumHp: hp.maximum,
-          targetArmorClass: targetArmorClass(target, characters),
-          targetPriorityWeight: 0,
-          hitProbability: 1,
-          supportValue: effectiveHealing * 4 + missingRatio * 140 + removable.size * 50,
-          allyEmergency: missingRatio,
-          resourceCost: action.usage?.kind === 'per-day' ? 8 : 0,
-          targetDistanceFeet: distanceFeet,
-          preferredDistanceFeet: 0,
-          movementFeet: 0,
-          distanceImprovementFeet: 0,
-          defensiveCoverBonus: 0,
-          opportunityAttackRisk: 0,
-          attacksThisTurn: false,
-          consumesAction: true,
-          dodges: false,
-          dashes: false,
-          usesNimbleEscape: false,
-          usesPreciseCoverRoute: false,
-        },
-      }]
-    })
-  })
-}
-
-/** 规划 SRD 怪物的 5e 回合；所有候选仍须由地图几何与 Headless 权威复核。 */
 function createMonsterStructuredSpecialActionCandidates(input: {
   map: BattleMap
   enemy: Token
@@ -4132,452 +3749,16 @@ function createMonsterStructuredSpecialActionCandidates(input: {
   role: MonsterDecisionContext['tacticalRole']
   behaviorStyle: Dnd5eMonsterBehaviorStyle
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  if (!input.canUseAction) return []
-  const { map, enemy, monster, target, characters } = input
-  const geometry = mapGeometryRuntimeForMap(map.id)
-  const hp = targetHitPoints(target, characters)
-  const targetAc = targetArmorClass(target, characters)
-  const startDistanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
-  const preferred = preferredDistanceFeet(monster, input.role, input.behaviorStyle)
-  const actions = monster.actions.filter((action) =>
-    action.kind === 'other' &&
-    dnd5eMonsterActionAutomation(action) === 'headless' &&
-    (action.rule?.kind === 'teleport' || action.rule?.kind === 'invisibility') &&
-    (input.requiredActionId == null || action.id === input.requiredActionId) &&
-    (
-      action.usage?.kind !== 'recharge' ||
-      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[action.id] !== false
-    ) &&
-    (
-      action.usage?.kind !== 'per-day' ||
-      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ??
-        action.usage.max) > 0
-    ))
-  if (actions.length === 0) return []
-
-  return actions.flatMap<MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>>((action) => {
-    const rule = action.rule
-    if (rule?.kind === 'invisibility') {
-      const alreadyInvisible = targetConditions(enemy, characters).some((condition) =>
-        dnd5eStandardConditionId(condition) === 'invisible')
-      if (alreadyInvisible || enemy.dnd5eCombatState?.concentrationSpellId) return []
-      const actorHp = targetHitPoints(enemy, characters)
-      return [{
-        id: `special:invisibility:${action.id}`,
-        kind: 'support' as const,
-        payload: {
-          moved: false,
-          attacked: false,
-          attackerTokenId: enemy.id,
-          targetTokenId: target.id,
-          specialAction: {
-            kind: 'invisibility' as const,
-            actionId: action.id,
-            actionName: action.name,
-          },
-          message: `${enemy.label}使用${action.name}进入隐形。`,
-        },
-        metrics: {
-          expectedDamage: 0,
-          targetCurrentHp: hp.current,
-          targetMaximumHp: hp.maximum,
-          targetArmorClass: targetAc,
-          hitProbability: 1,
-          supportValue: 16 + (1 - actorHp.current / actorHp.maximum) * 24,
-          resourceCost: action.usage ? 4 : 0,
-          targetDistanceFeet: startDistanceFeet,
-          preferredDistanceFeet: preferred,
-          movementFeet: 0,
-          distanceImprovementFeet: 0,
-          defensiveCoverBonus: 0,
-          opportunityAttackRisk: 0,
-          attacksThisTurn: false,
-          consumesAction: true,
-          dodges: false,
-          dashes: false,
-          usesNimbleEscape: false,
-          usesPreciseCoverRoute: false,
-        },
-      }]
-    }
-    if (rule?.kind !== 'teleport') return []
-
-    const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
-    const columns = Math.max(1, Math.floor((map.width - map.gridOffsetX) / Math.max(1, map.gridSize)))
-    const rows = Math.max(1, Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)))
-    const startCell = tokenAnchorCellFromPixel(enemy.x, enemy.y, enemy, map)
-    const occupied = occupiedCells(map.tokens, map, enemy.id)
-    const legal: Array<{
-      cell: GridCell
-      elevationFeet: number
-      targetDistanceFeet: number
-      improvement: number
-      coverBonus: number
-    }> = []
-    for (let row = 0; row < rows; row += 1) {
-      for (let col = 0; col < columns; col += 1) {
-        const cell = { col, row }
-        const horizontalDistanceFeet = Math.max(
-          Math.abs(col - startCell.col),
-          Math.abs(row - startCell.row),
-        ) * feetPerCell
-        if (horizontalDistanceFeet > rule.rangeFeet + 1e-4) continue
-        const position = tokenCenterForAnchorCell(cell, enemy, map)
-        const elevationFeet = mapGeometryTerrainElevationAtPoint(geometry, position)
-        if (Math.max(
-          horizontalDistanceFeet,
-          Math.abs(elevationFeet - mapGeometryTokenElevation(geometry, enemy)),
-        ) > rule.rangeFeet + 1e-4) continue
-        const footprint = tokenOccupiedCellsAt(enemy, map, position)
-        if (footprint.some((candidate) =>
-          candidate.col < 0 || candidate.row < 0 ||
-          candidate.col >= columns || candidate.row >= rows ||
-          occupied.has(cellKey(candidate)),
-        )) continue
-        if (mapGeometryPlacementBlocked({
-          geometry,
-          map,
-          token: enemy,
-          at: position,
-          elevationFeet,
-        }).blocked) continue
-        const at = { ...enemy, ...position, elevationFeet }
-        if (!mapGeometryCanSeeToken({
-          geometry,
-          map,
-          viewer: enemy,
-          target: at,
-          forceEnabled: true,
-          fallbackRangeFeet: rule.rangeFeet,
-        })) continue
-        const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, at, target)
-        const improvement = tacticalDistanceImprovement(
-          input.role,
-          startDistanceFeet,
-          distanceFeet,
-          preferred,
-        )
-        if (improvement <= 0 && input.requiredActionId == null) continue
-        legal.push({
-          cell,
-          elevationFeet,
-          targetDistanceFeet: distanceFeet,
-          improvement,
-          coverBonus: defensiveCoverBonusAgainstTarget(map, at, target),
-        })
-      }
-    }
-    legal.sort((left, right) =>
-      right.improvement - left.improvement ||
-      right.coverBonus - left.coverBonus ||
-      left.targetDistanceFeet - right.targetDistanceFeet ||
-      left.cell.row - right.cell.row ||
-      left.cell.col - right.cell.col)
-    return legal.slice(0, 16).map((destination) => ({
-      id: `special:teleport:${action.id}:${destination.cell.col},${destination.cell.row}:${destination.elevationFeet}`,
-      kind: 'support' as const,
-      payload: {
-        moved: false,
-        attacked: false,
-        attackerTokenId: enemy.id,
-        targetTokenId: target.id,
-        specialAction: {
-          kind: 'teleport' as const,
-          actionId: action.id,
-          actionName: action.name,
-          destinationCell: destination.cell,
-          destinationElevationFeet: destination.elevationFeet,
-        },
-        message: `${enemy.label}使用${action.name}传送到合法可见空位。`,
-      },
-      metrics: {
-        expectedDamage: 0,
-        targetCurrentHp: hp.current,
-        targetMaximumHp: hp.maximum,
-        targetArmorClass: targetAc,
-        hitProbability: 1,
-        controlValue: Math.min(12, destination.improvement / 5),
-        resourceCost: action.usage ? 4 : 0,
-        targetDistanceFeet: destination.targetDistanceFeet,
-        preferredDistanceFeet: preferred,
-        movementFeet: 0,
-        distanceImprovementFeet: destination.improvement,
-        defensiveCoverBonus: destination.coverBonus,
-        opportunityAttackRisk: 0,
-        attacksThisTurn: false,
-        consumesAction: true,
-        dodges: false,
-        dashes: false,
-        usesNimbleEscape: false,
-        usesPreciseCoverRoute: destination.coverBonus > 0,
-      },
-    }))
+  return createStructuredSpecialCandidates({
+    ...input,
+    services: monsterStructuredSpecialCandidateServices,
   })
 }
 
-function createMonsterRestorationCandidates(input: {
-  map: BattleMap
-  enemy: Token
-  monster: Dnd5eMonsterStatBlock
-  characters: readonly Character[]
-  canUseAction: boolean
-}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  if (!input.canUseAction) return []
-  const { map, enemy, monster, characters } = input
-  const geometry = mapGeometryRuntimeForMap(map.id)
-  const spells = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
-    const spell = getDnd5eSrdCombatSpell(listedSpell.id)
-    if (
-      !spell ||
-      spell.id !== 'lesser-restoration' ||
-      spell.effect !== 'remove-condition' ||
-      dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full'
-    ) return []
-    return dnd5eAvailableMonsterSpellSlotLevels({ monster, token: enemy, spell: listedSpell })
-      .map((slotLevel) => ({ listedSpell, spell, slotLevel }))
-  })
-  if (spells.length === 0) return []
-  const actorSide = dnd5eCombatTokenSide(enemy)
-  if (!actorSide) return []
-  const conditionPriority = [
-    'paralyzed',
-    'blinded',
-    'poisoned',
-    'deafened',
-    'disease',
-  ] as const
-
-  return map.tokens.flatMap((target) => {
-    if (
-      target.type === 'obstacle' ||
-      dnd5eCombatTokenSide(target) !== actorSide ||
-      targetHitPoints(target, characters).current <= 0
-    ) return []
-    const effects = tokenActiveEffects(target, characters)
-    const conditionChoice = conditionPriority.find((condition) => effects.some((effect) => {
-      const standard = effect.standardCondition ??
-        (effect.legacyCondition ? dnd5eStandardConditionId(effect.legacyCondition) : undefined)
-      if (condition === 'disease') {
-        return ['disease', 'diseased', '疾病'].includes(
-          effect.legacyCondition?.trim().toLowerCase() ?? '',
-        )
-      }
-      return standard === condition
-    }))
-    if (!conditionChoice) return []
-
-    return spells.flatMap(({ listedSpell, spell, slotLevel }) => {
-      const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
-      if (distanceFeet > spell.rangeFeet) return []
-      const cover = target.id === enemy.id
-        ? undefined
-        : mapGeometryCoverBetween(geometry, enemy, target, map)
-      if (cover?.blocksLineOfEffect || cover?.cover === 'total') return []
-      const hp = targetHitPoints(target, characters)
-      const plan: Dnd5eMonsterTurnPlan = {
-        moved: false,
-        attacked: false,
-        attackerTokenId: enemy.id,
-        targetTokenId: target.id,
-        targetCharacterId: target.characterId,
-        spellCast: {
-          spellId: spell.id,
-          spellName: spell.name,
-          slotLevel,
-          targetTokenIds: [target.id],
-          effect: spell.effect,
-          diceCount: 0,
-          diceSides: spell.dice.sides,
-          castingTime: spell.castingTime,
-          conditionChoice,
-        },
-        message: `${enemy.label}施放${spell.name}，结束${target.label}的${conditionChoice}状态。`,
-      }
-      return [{
-        id: `restore:${target.id}:${spell.id}:${conditionChoice}:${slotLevel}`,
-        kind: 'support' as const,
-        payload: plan,
-        metrics: {
-          expectedDamage: 0,
-          targetCurrentHp: hp.current,
-          targetMaximumHp: hp.maximum,
-          targetArmorClass: targetArmorClass(target, characters),
-          targetPriorityWeight: 0,
-          hitProbability: 1,
-          supportValue: conditionChoice === 'paralyzed' ? 110
-            : conditionChoice === 'blinded' ? 78
-              : conditionChoice === 'poisoned' ? 68
-                : 52,
-          allyEmergency: 1 - Math.max(0, Math.min(1, hp.current / Math.max(1, hp.maximum))),
-          resourceCost: listedSpell.usage?.kind === 'per-day' ? 8 : slotLevel * 3,
-          targetDistanceFeet: distanceFeet,
-          preferredDistanceFeet: 0,
-          movementFeet: 0,
-          distanceImprovementFeet: 0,
-          defensiveCoverBonus: 0,
-          opportunityAttackRisk: 0,
-          attacksThisTurn: false,
-          consumesAction: true,
-          dodges: false,
-          dashes: false,
-          usesNimbleEscape: false,
-          usesPreciseCoverRoute: false,
-        },
-      }]
-    })
-  })
-}
-
-function createMonsterProtectionCandidates(input: {
-  map: BattleMap
-  enemy: Token
-  monster: Dnd5eMonsterStatBlock
-  characters: readonly Character[]
-  canUseAction: boolean
-  canUseBonusAction: boolean
-}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  const { map, enemy, monster, characters } = input
-  const geometry = mapGeometryRuntimeForMap(map.id)
-  const supportedSpellIds = new Set([
-    'barkskin',
-    'blur',
-    'fly',
-    'greater-invisibility',
-    'invisibility',
-    'longstrider',
-    'mage-armor',
-    'protection-from-poison',
-    'sanctuary',
-  ])
-  const supportSpells = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
-    const spell = getDnd5eSrdCombatSpell(listedSpell.id)
-    if (
-      !spell ||
-      !supportedSpellIds.has(spell.id) ||
-      spell.effect !== 'active-effect' ||
-      !spell.appliedEffect ||
-      dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full' ||
-      (spell.id === 'sanctuary' && (
-        !Number.isInteger(monster.spellcasting?.saveDc) ||
-        (monster.spellcasting?.saveDc ?? 0) <= 0
-      )) ||
-      (spell.concentration && enemy.dnd5eCombatState?.concentrationSpellId != null) ||
-      spell.castingTime === 'reaction' ||
-      (spell.castingTime === 'action' && !input.canUseAction) ||
-      (spell.castingTime === 'bonus-action' && !input.canUseBonusAction)
-    ) return []
-    return dnd5eAvailableMonsterSpellSlotLevels({ monster, token: enemy, spell: listedSpell })
-      .map((slotLevel) => ({ listedSpell, spell, slotLevel }))
-  })
-  if (supportSpells.length === 0) return []
-
-  const actorSide = dnd5eCombatTokenSide(enemy)
-  const allies = map.tokens.filter((target) => {
-    if (
-      target.type === 'obstacle' ||
-      !actorSide ||
-      dnd5eCombatTokenSide(target) !== actorSide ||
-      targetHitPoints(target, characters).current <= 0
-    ) return false
-    return true
-  })
-
-  return allies.flatMap((target) => supportSpells.flatMap(({ listedSpell, spell, slotLevel }) => {
-    if (
-      (spell.rangeFeet === 0 && target.id !== enemy.id) ||
-      target.dnd5eCombatState?.activeEffects?.some((effect) =>
-        effect.source.rulesId === spell.id)
-    ) return []
-    const targetMonster = plannerTargetMonster(target)
-    const armorNote = targetMonster?.armorClass.note?.trim().toLowerCase() ?? ''
-    const wearingArmor = [
-      '皮甲', '兽皮甲', '镶钉皮甲', '链甲衫', '链甲', '鳞甲', '胸甲', '半身板甲',
-      '环甲', '板条甲', '条板甲', '板甲', 'leather', 'hide', 'chain', 'scale',
-      'breastplate', 'half plate', 'ring mail', 'splint', 'plate',
-    ].some((name) => armorNote.includes(name))
-    const armorClass = targetArmorClass(target, characters)
-    if (
-      (spell.id === 'mage-armor' && wearingArmor) ||
-      (spell.id === 'barkskin' && armorClass >= 16) ||
-      (spell.id === 'fly' && (targetMonster?.speed.fly ?? 0) >= 60)
-    ) return []
-    const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
-    if (distanceFeet > spell.rangeFeet) return []
-    const cover = target.id === enemy.id
-      ? undefined
-      : mapGeometryCoverBetween(geometry, enemy, target, map)
-    if (cover?.blocksLineOfEffect || cover?.cover === 'total') return []
-    const hp = targetHitPoints(target, characters)
-    const missingRatio = 1 - Math.max(0, Math.min(1, hp.current / Math.max(1, hp.maximum)))
-    const nearbyHostiles = map.tokens.filter((candidate) =>
-      candidate.type !== 'obstacle' &&
-      areOpposedCombatTokens(target, candidate) &&
-      targetHitPoints(candidate, characters).current > 0 &&
-      tokenThreeDimensionalDistanceFeet(map, geometry, target, candidate) <= 30,
-    ).length
-    const hasPoisonedCondition = target.dnd5eCombatState?.activeEffects?.some((effect) =>
-      effect.standardCondition === 'poisoned' ||
-      ['poisoned', '中毒'].includes(effect.legacyCondition?.trim().toLowerCase() ?? '')) === true
-    const baseSupportValue = spell.id === 'greater-invisibility' ? 68
-      : spell.id === 'invisibility' ? 46
-        : spell.id === 'blur' ? 48
-          : spell.id === 'fly' ? 38
-            : spell.id === 'barkskin' ? 24 + Math.max(0, 16 - armorClass) * 16
-              : spell.id === 'mage-armor' ? 42
-                : spell.id === 'longstrider' ? 22
-                  : spell.id === 'protection-from-poison' ? (hasPoisonedCondition ? 72 : 18)
-                    : 28
-    const plan: Dnd5eMonsterTurnPlan = {
-      moved: false,
-      attacked: false,
-      attackerTokenId: enemy.id,
-      targetTokenId: target.id,
-      targetCharacterId: target.characterId,
-      spellCast: {
-        spellId: spell.id,
-        spellName: spell.name,
-        slotLevel,
-        targetTokenIds: [target.id],
-        effect: spell.effect,
-        diceCount: 0,
-        diceSides: spell.dice.sides,
-        castingTime: spell.castingTime,
-      },
-      message: `${enemy.label}施放${spell.name}保护 ${target.label}。`,
-    }
-    return [{
-      id: `support:${target.id}:${spell.id}:${slotLevel}`,
-      kind: 'support' as const,
-      payload: plan,
-      metrics: {
-        expectedDamage: 0,
-        targetCurrentHp: hp.current,
-        targetMaximumHp: hp.maximum,
-        targetArmorClass: targetArmorClass(target, characters),
-        targetPriorityWeight: 0,
-        hitProbability: 1,
-        supportValue: baseSupportValue + missingRatio * 38 + Math.min(3, nearbyHostiles) * 6,
-        allyEmergency: missingRatio,
-        resourceCost: listedSpell.usage?.kind === 'at-will' || listedSpell.level === 0
-          ? 0
-          : listedSpell.usage?.kind === 'per-day'
-            ? 8
-            : slotLevel * 3,
-        targetDistanceFeet: distanceFeet,
-        preferredDistanceFeet: 0,
-        movementFeet: 0,
-        distanceImprovementFeet: 0,
-        defensiveCoverBonus: 0,
-        opportunityAttackRisk: 0,
-        attacksThisTurn: false,
-        consumesAction: spell.castingTime === 'action',
-        dodges: false,
-        dashes: false,
-        usesNimbleEscape: false,
-        usesPreciseCoverRoute: false,
-      },
-    }]
-  }))
+const monsterReleaseCandidateServices: MonsterReleaseCandidateServices<PlannerReconciledActiveEffects> = {
+  linkedRootEffects: sourceLinkedGrappleRootEffects,
+  activeEffectsAfterRelease: plannerActiveEffectsAfterRelease,
+  tacticalCandidates: createTacticalCandidates,
 }
 
 function createMonsterReleaseCandidates(input: {
@@ -4596,57 +3777,7 @@ function createMonsterReleaseCandidates(input: {
   reconciledActiveEffects?: PlannerReconciledActiveEffects
   currentTacticalCandidates: readonly MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[]
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
-  const reconciled = input.reconciledActiveEffects
-  if (!reconciled) return []
-  const currentIds = new Set(input.currentTacticalCandidates.map((candidate) => candidate.id))
-  const candidates = new Map<string, MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>>()
-
-  for (const heldTarget of input.map.tokens) {
-    const roots = sourceLinkedGrappleRootEffects(
-      heldTarget,
-      input.characters,
-      reconciled,
-    ).filter((effect) => effect.relation?.sourceActorId === input.enemy.id)
-    for (const root of roots) {
-      const releasedEffects = plannerActiveEffectsAfterRelease(
-        reconciled,
-        heldTarget.id,
-        root.id,
-      )
-      const unlocked = input.targets.flatMap((target) => createTacticalCandidates({
-        map: input.map,
-        enemy: input.enemy,
-        monster: input.monster,
-        target,
-        characters: input.characters,
-        canUseBonusAction: input.canUseBonusAction,
-        canUseAction: input.canUseAction,
-        combatId: input.combatId,
-        round: input.round,
-        preferredTargetId: input.preferredTargetId,
-        simulationOptimization: input.simulationOptimization,
-        exactRouteTrees: input.exactRouteTrees,
-        reconciledActiveEffects: releasedEffects,
-      }))
-      for (const candidate of unlocked) {
-        // Releasing is useful only when it unlocks a new action, target, route,
-        // or destination. Avoid tie candidates that would drop a grapple for
-        // no tactical gain.
-        if (currentIds.has(candidate.id)) continue
-        const id = `release-grapple:${heldTarget.id}:${root.id}:${candidate.id}`
-        candidates.set(id, {
-          ...candidate,
-          id,
-          payload: {
-            ...candidate.payload,
-            releaseGrapple: { targetId: heldTarget.id, effectId: root.id },
-            message: `${input.enemy.label}释放对${heldTarget.label}的擒抱；${candidate.payload.message}`,
-          },
-        })
-      }
-    }
-  }
-  return [...candidates.values()]
+  return createMonsterReleaseDecisionCandidates(input, monsterReleaseCandidateServices)
 }
 
 export function planDnd5eMonsterTurn(
@@ -4746,65 +3877,128 @@ export function planDnd5eMonsterTurn(
   const candidates = berserk
     ? tacticalCandidates
     : options.requiredActionId
-    ? [...tacticalCandidates, ...structuredSpecialCandidates]
-    : [
-    ...createMonsterEscapeCandidates({
-      map,
-      enemy,
-      monster,
-      characters,
-      canUseAction,
-      reconciledActiveEffects,
-    }),
-    ...tacticalCandidates,
-    ...structuredSpecialCandidates,
-    ...createMonsterReleaseCandidates({
-      map,
-      enemy,
-      monster,
-      targets,
-      characters,
-      canUseBonusAction,
-      canUseAction,
-      combatId: options.combatId,
-      round: options.round,
-      preferredTargetId: preferredTarget.id,
-      simulationOptimization,
-      exactRouteTrees,
-      reconciledActiveEffects,
-      currentTacticalCandidates: tacticalCandidates,
-    }),
-    ...createMonsterHealingCandidates({
-      map,
-      enemy,
-      monster,
-      characters,
-      canUseAction,
-      canUseBonusAction,
-    }),
-    ...createMonsterHealingTouchCandidates({
-      map,
-      enemy,
-      monster,
-      characters,
-      canUseAction,
-    }),
-    ...createMonsterRestorationCandidates({
-      map,
-      enemy,
-      monster,
-      characters,
-      canUseAction,
-    }),
-    ...createMonsterProtectionCandidates({
-      map,
-      enemy,
-      monster,
-      characters,
-      canUseAction,
-      canUseBonusAction,
-    }),
-  ]
+      ? [...tacticalCandidates, ...structuredSpecialCandidates]
+      : collectMonsterDecisionCandidates<
+          { actorTokenId: string },
+          Dnd5eMonsterTurnPlan
+        >({ actorTokenId: enemy.id }, [
+          {
+            id: 'escape',
+            generate: () => createMonsterEscapeCandidates({
+              map,
+              enemy,
+              monster,
+              characters,
+              canUseAction,
+              reconciledActiveEffects,
+            }),
+          },
+          { id: 'tactical', generate: () => tacticalCandidates },
+          { id: 'structured-special', generate: () => structuredSpecialCandidates },
+          {
+            id: 'release',
+            generate: () => createMonsterReleaseCandidates({
+              map,
+              enemy,
+              monster,
+              targets,
+              characters,
+              canUseBonusAction,
+              canUseAction,
+              combatId: options.combatId,
+              round: options.round,
+              preferredTargetId: preferredTarget.id,
+              simulationOptimization,
+              exactRouteTrees,
+              reconciledActiveEffects,
+              currentTacticalCandidates: tacticalCandidates,
+            }),
+          },
+          {
+            id: 'healing',
+            generate: () => createMonsterHealingCandidates({
+              map,
+              enemy,
+              monster,
+              characters,
+              canUseAction,
+              canUseBonusAction,
+            }, monsterSupportCandidateServices),
+          },
+          {
+            id: 'healing-touch',
+            generate: () => createMonsterHealingTouchCandidates({
+              map,
+              enemy,
+              monster,
+              characters,
+              canUseAction,
+            }, monsterSupportCandidateServices),
+          },
+          {
+            id: 'restoration',
+            generate: () => createMonsterRestorationCandidates({
+              map,
+              enemy,
+              monster,
+              characters,
+              canUseAction,
+            }, monsterSupportCandidateServices),
+          },
+          {
+            id: 'protection',
+            generate: () => createMonsterProtectionCandidates({
+              map,
+              enemy,
+              monster,
+              characters,
+              canUseAction,
+              canUseBonusAction,
+            }, monsterSupportCandidateServices),
+          },
+        ]).candidates
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  const currentElevationFeet = mapGeometryTokenElevation(geometry, enemy)
+  const currentHazardKey = `${enemy.x},${enemy.y}:${currentElevationFeet}`
+  const currentHazardDamage = expectedPersistentAreaTurnEndDamageAt({
+    map,
+    token: enemy,
+    characters,
+    position: enemy,
+    elevationFeet: currentElevationFeet,
+  })
+  const hazardDamageByPosition = new Map<string, number>([
+    [currentHazardKey, currentHazardDamage],
+  ])
+  const hazardAwareCandidates = candidates.map((candidate) => {
+    const position = candidate.payload.newPosition ?? { x: enemy.x, y: enemy.y }
+    const elevationFeet = candidate.payload.newElevationFeet ?? (
+      candidate.payload.newPosition && candidate.payload.movementMode !== 'fly'
+        ? mapGeometryTerrainElevationAtPoint(geometry, position)
+        : mapGeometryTokenElevation(geometry, enemy)
+    )
+    const key = `${position.x},${position.y}:${elevationFeet}`
+    let hazardDamage = hazardDamageByPosition.get(key)
+    if (hazardDamage == null) {
+      hazardDamage = expectedPersistentAreaTurnEndDamageAt({
+        map,
+        token: enemy,
+        characters,
+        position,
+        elevationFeet,
+      })
+      hazardDamageByPosition.set(key, hazardDamage)
+    }
+    if (hazardDamage <= 0) return candidate
+    return {
+      ...candidate,
+      metrics: {
+        ...candidate.metrics,
+        expectedIncomingDamage:
+          (candidate.metrics.expectedIncomingDamage ?? 0) + hazardDamage,
+      },
+    }
+  })
   const provider = options.decisionProvider ?? DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3
   const ranked = rankMonsterDecisionCandidates(provider, {
     monsterId: monster.id,
@@ -4813,7 +4007,7 @@ export function planDnd5eMonsterTurn(
     maxHp: hp.maximum,
     tacticalRole: role,
     behaviorStyle,
-  }, candidates)
+  }, hazardAwareCandidates)
   const selected = options.simulationOptimization?.skipFinalRouteValidation
     ? ranked.find((entry) => Number.isFinite(entry.score))
     : ranked.find((entry) =>
@@ -4828,6 +4022,22 @@ export function planDnd5eMonsterTurn(
       message: `${enemy.label} 没有可通过权威几何复核的战术方案。`,
     }
   }
+  const selectedPosition = selected.candidate.payload.newPosition ?? enemy
+  const selectedElevationFeet = selected.candidate.payload.newElevationFeet ?? (
+    selected.candidate.payload.newPosition && selected.candidate.payload.movementMode !== 'fly'
+      ? mapGeometryTerrainElevationAtPoint(geometry, selectedPosition)
+      : currentElevationFeet
+  )
+  const selectedHazardDamage = hazardDamageByPosition.get(
+    `${selectedPosition.x},${selectedPosition.y}:${selectedElevationFeet}`,
+  ) ?? 0
+  const avoidedHazardDamage = currentHazardDamage - selectedHazardDamage
+  const decisionReasons = avoidedHazardDamage > 0.05
+    ? [
+        `避开回合结束预计伤害 ${Math.round(avoidedHazardDamage * 10) / 10}`,
+        ...selected.reasons,
+      ].slice(0, 12)
+    : selected.reasons
   return {
     ...selected.candidate.payload,
     decision: {
@@ -4835,7 +4045,7 @@ export function planDnd5eMonsterTurn(
       candidateId: selected.candidate.id,
       candidateCount: candidates.length,
       score: selected.score,
-      reasons: selected.reasons,
+      reasons: decisionReasons,
       metrics: selected.candidate.metrics,
     },
   }

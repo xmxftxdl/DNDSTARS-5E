@@ -444,6 +444,32 @@ function motifFromText(value: string): Dnd5eActionIconMotif | undefined {
   return TEXT_RULES.find(([pattern]) => pattern.test(value))?.[1]
 }
 
+/**
+ * Builds a deterministic icon for actions that are supplied by room content.
+ * Unlike the painted spell catalog this intentionally has no id allowlist:
+ * newly-authored monster actions and plugin actions still receive a semantic,
+ * class-coloured banner icon on their first use.
+ */
+export function dnd5eNamedActionIcon(input: {
+  id: string
+  name: string
+  classId?: string
+}): Dnd5eActionIconSpec {
+  const motif = motifFromText(`${input.id} ${input.name}`) ?? 'arcane'
+  const spec = paletteFor(`action:${input.id}`, motif)
+  const classPalette = input.classId ? DND5E_CLASS_ICON_PALETTES[input.classId] : undefined
+  return {
+    ...spec,
+    ...(classPalette ? {
+      background: classPalette[0],
+      backgroundDeep: classPalette[1],
+      accent: classPalette[2],
+      glow: classPalette[3],
+    } : {}),
+    classBackdropId: input.classId,
+  }
+}
+
 function motifFromSchool(school: string | undefined): Dnd5eActionIconMotif {
   const normalized = school?.toLowerCase() ?? ''
   if (/illusion|幻术/.test(normalized)) return 'illusion'

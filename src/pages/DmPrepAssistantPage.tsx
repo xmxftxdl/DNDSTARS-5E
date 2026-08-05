@@ -201,13 +201,11 @@ export default function DmPrepAssistantPage() {
     : estimatePdfAnalysisWorkload(pdfPageCount, pdfAnalysisDepth)
   const usesLocalPdfModel = aiProviderSelection.providerId === 'local-bridge'
   const localWorkloadRecommendation = usesLocalPdfModel ? pdfWorkload?.recommendation : null
-
   const changeAiProviderSelection = useCallback((selection: AiProviderSelectionV1) => {
     setAiProviderSelection(selection)
     setPendingAiJobAction((current) => current?.mode === 'resume' ? null : current)
     setPdfNotice(null)
   }, [])
-
   const selectPdfFiles = (files: readonly File[]) => {
     const accepted = files.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
     setPdfFiles(accepted)
@@ -269,7 +267,7 @@ export default function DmPrepAssistantPage() {
       setPdfAnalysisProgress(null)
       const errorCode = error instanceof Error ? error.message : String(error)
       setPdfNotice(errorCode === 'selected-cloud-provider-not-configured'
-        ? '当前平台云端 Provider 尚未配置。可选择“本地免费模型”，或在 Local AI Bridge 中配置“自己的模型 API”。'
+        ? '当前平台云端 Provider 尚未配置。可在本机 Bridge 中配置“自己的模型 API”。'
         : errorCode === 'ai-job-source-mismatch'
           ? '请选择与中断任务完全相同的原始 PDF（文件名和大小必须一致），服务器不会保存原始 PDF。'
           : /^(?:pdf-|provider-|local-|external-|bridge-)|structured-output/.test(errorCode)
@@ -658,16 +656,16 @@ export default function DmPrepAssistantPage() {
                       : 'text-slate-500'}`}
                     >
                       {aiProviderSelection.providerId === 'external-account'
-                        ? '将通过模型 API Bridge 使用已配置的提取模型和综合模型执行；无需启动 Ollama。实际耗时取决于模型供应商的响应与限流。'
-                          : aiProviderSelection.providerId === 'astraltrace-cloud'
+                        ? '将通过模型 API Bridge 使用已配置的提取模型和综合模型执行；实际耗时取决于模型供应商的响应与限流。'
+                        : aiProviderSelection.providerId === 'astraltrace-cloud'
                           ? '文件将按平台 AI 任务策略处理，并计入本次任务的 AI Credit。'
                           : pdfWorkload.recommendation === 'prefer-cloud'
-                        ? '超过 30 页：建议使用云端长上下文模型；仍可继续本地分析，并会按页段缓存，失败后可续跑。'
-                        : pdfWorkload.recommendation === 'prefer-quick'
-                          ? pdfAnalysisDepth === 'deep'
-                            ? '11-30 页的深度分析耗时较长；建议先快速提取，确认文本质量后再运行深度分析。'
-                            : '11-30 页优先使用快速提取；需要跨章节关系和因果链时再切换深度分析。'
-                          : '1-10 页适合直接使用本地模型；可按需要选择快速或深度分析。'}
+                            ? '超过 30 页：建议使用云端长上下文模型；仍可继续本地分析，并会按页段缓存，失败后可续跑。'
+                            : pdfWorkload.recommendation === 'prefer-quick'
+                              ? pdfAnalysisDepth === 'deep'
+                                ? '11-30 页的深度分析耗时较长；建议先快速提取，确认文本质量后再运行深度分析。'
+                                : '11-30 页优先使用快速提取；需要跨章节关系和因果链时再切换深度分析。'
+                              : '1-10 页适合直接使用本地模型；可按需要选择快速或深度分析。'}
                     </p>
                   </>
                 )}

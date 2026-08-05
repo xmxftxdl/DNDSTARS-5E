@@ -135,6 +135,7 @@ const COLLECTION_KEYS: readonly CollectionKey[] = [
   'abilityGenerationMethods',
   'headlessActions',
   'subclasses',
+  'classes',
   'monsters',
 ]
 const COLLECTION_KEY_SET = new Set<string>(COLLECTION_KEYS)
@@ -418,7 +419,7 @@ function buildCollectionAudit(
     image.targets.map((target) => `${target.category}:${target.id}`)))
   const categories = {} as Record<CollectionKey, Dnd5eLocalContentCollectionCategoryAudit>
   for (const key of COLLECTION_KEYS) {
-    const entries = value.content[key]
+    const entries = value.content[key] ?? []
     const actualIds = new Set(entries.map((entry) => entry.id))
     const expectation = expected[key]
     const expectedCount = expectation?.count ?? expectation?.ids.length ?? 0
@@ -709,7 +710,7 @@ export async function prepareDnd5eLocalContentJson(
     ? collectionFromJson(parsed)
     : await shorthandCollectionFromJson(parsed)
   if (!collection) {
-    throw new Error('未找到可导入的 races、backgrounds、features、feats、spells、items、subclasses、monsters 或其他受支持分类')
+    throw new Error('未找到可导入的 races、backgrounds、features、feats、spells、items、classes、subclasses、monsters 或其他受支持分类')
   }
   const compiled = await compileDnd5eLocalContentCollection([
     new File([JSON.stringify(collection)], 'collection.json', { type: 'application/json' }),

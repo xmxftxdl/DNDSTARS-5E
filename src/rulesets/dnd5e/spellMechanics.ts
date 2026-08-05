@@ -33,6 +33,19 @@ export type Dnd5eSpellUpcastEffect =
   | { kind: 'additional-projectiles'; countPerSlot: number }
   | { kind: 'duration-rounds'; roundsPerSlot: number }
 
+export interface Dnd5eCantripScalingStep {
+  level: number
+  /** Extra copies of the primary damage die added at this threshold. */
+  diceCount: number
+  /** Optional flat damage added at this threshold. */
+  flatDamage?: number
+}
+
+export interface Dnd5eCantripScalingDefinition {
+  basis: 'character-level'
+  steps: Dnd5eCantripScalingStep[]
+}
+
 export interface Dnd5eSpellMechanicsDefinition {
   kind: 'damage' | 'healing' | 'control' | 'utility'
   resolution: Dnd5eSpellResolutionKind
@@ -44,13 +57,74 @@ export interface Dnd5eSpellMechanicsDefinition {
     dice: { count: number; sides: number; bonus: number }
     type: Dnd5eDamageType
     addSpellcastingModifier?: boolean
-    cantripScaling?: boolean
+    /** `true` preserves the legacy 5/11/17 multiplier; new content uses an explicit threshold table. */
+    cantripScaling?: boolean | Dnd5eCantripScalingDefinition
   }
   conditions?: Dnd5eSpellConditionEffectDefinition[]
   upcast?: {
     fromSlotLevel: number
     effects: Dnd5eSpellUpcastEffect[]
   }
+}
+
+export interface Dnd5eSpellUpcastTotals {
+  slotDelta: number
+  damageDice: number
+  flatDamage: number
+  additionalTargets: number
+  additionalProjectiles: number
+  durationRounds: number
+}
+
+export interface Dnd5eCantripScalingTotals {
+  damageDice: number
+  flatDamage: number
+}
+
+/** Shared workshop preview/Host calculation for explicit cantrip level thresholds. */
+export function dnd5eSpellCantripScalingTotals(
+  damage: Dnd5eSpellMechanicsDefinition['damage'] | undefined,
+  characterLevel: number,
+): Dnd5eCantripScalingTotals {
+  const scaling = damage?.cantripScaling
+  if (!damage || !scaling) return { damageDice: 0, flatDamage: 0 }
+  if (scaling === true) {
+    const thresholds = characterLevel >= 17 ? 3 : characterLevel >= 11 ? 2 : characterLevel >= 5 ? 1 : 0
+    return { damageDice: damage.dice.count * thresholds, flatDamage: 0 }
+  }
+  return scaling.steps.reduce<Dnd5eCantripScalingTotals>((totals, step) => {
+    if (characterLevel >= step.level) {
+      totals.damageDice += step.diceCount
+      totals.flatDamage += step.flatDamage ?? 0
+    }
+    return totals
+  }, { damageDice: 0, flatDamage: 0 })
+}
+
+/** Shared preview/Host calculation for every structured higher-slot effect. */
+export function dnd5eSpellUpcastTotals(
+  mechanics: Pick<Dnd5eSpellMechanicsDefinition, 'upcast'> | undefined,
+  slotLevel: number,
+  fallbackBaseLevel = 0,
+): Dnd5eSpellUpcastTotals {
+  const fromSlotLevel = mechanics?.upcast?.fromSlotLevel ?? fallbackBaseLevel
+  const slotDelta = Math.max(0, Math.floor(slotLevel) - fromSlotLevel)
+  const totals: Dnd5eSpellUpcastTotals = {
+    slotDelta,
+    damageDice: 0,
+    flatDamage: 0,
+    additionalTargets: 0,
+    additionalProjectiles: 0,
+    durationRounds: 0,
+  }
+  for (const effect of mechanics?.upcast?.effects ?? []) {
+    if (effect.kind === 'damage-dice') totals.damageDice += effect.diceCountPerSlot * slotDelta
+    else if (effect.kind === 'flat-damage') totals.flatDamage += effect.amountPerSlot * slotDelta
+    else if (effect.kind === 'additional-targets') totals.additionalTargets += effect.countPerSlot * slotDelta
+    else if (effect.kind === 'additional-projectiles') totals.additionalProjectiles += effect.countPerSlot * slotDelta
+    else totals.durationRounds += effect.roundsPerSlot * slotDelta
+  }
+  return totals
 }
 
 const ABILITIES = new Set<AbilityKey>(['str', 'dex', 'con', 'int', 'wis', 'cha'])
@@ -128,17 +202,41 @@ export function parseDnd5eSpellMechanics(
         : undefined
       if (!damageType) problems.push(`${label}.damage.type 无效`)
       const addSpellcastingModifier = value.damage.addSpellcastingModifier === true
-      const cantripScaling = value.damage.cantripScaling === true
+      let cantripScaling: boolean | Dnd5eCantripScalingDefinition | undefined
       if (value.damage.addSpellcastingModifier != null && typeof value.damage.addSpellcastingModifier !== 'boolean') {
         problems.push(`${label}.damage.addSpellcastingModifier 必须是布尔值`)
       }
-      if (value.damage.cantripScaling != null && typeof value.damage.cantripScaling !== 'boolean') {
-        problems.push(`${label}.damage.cantripScaling 必须是布尔值`)
+      if (value.damage.cantripScaling === true) {
+        cantripScaling = true
+      } else if (value.damage.cantripScaling != null && value.damage.cantripScaling !== false) {
+        if (!objectValue(value.damage.cantripScaling) || value.damage.cantripScaling.basis !== 'character-level' || !Array.isArray(value.damage.cantripScaling.steps)) {
+          problems.push(`${label}.damage.cantripScaling 必须是布尔值或 character-level 缩放表`)
+        } else {
+          const seenLevels = new Set<number>()
+          const steps = value.damage.cantripScaling.steps.slice(0, 20).flatMap((entry, index): Dnd5eCantripScalingStep[] => {
+            const stepLabel = `${label}.damage.cantripScaling.steps[${index}]`
+            if (!objectValue(entry)) {
+              problems.push(`${stepLabel}必须是对象`)
+              return []
+            }
+            const level = boundedInteger(entry.level, `${stepLabel}.level`, problems, 2, 20)
+            const diceCount = boundedInteger(entry.diceCount, `${stepLabel}.diceCount`, problems, 0, 100)
+            const flatDamage = entry.flatDamage == null
+              ? 0
+              : boundedInteger(entry.flatDamage, `${stepLabel}.flatDamage`, problems, 0, 1_000_000)
+            if (seenLevels.has(level)) problems.push(`${stepLabel}.level 不能重复`)
+            seenLevels.add(level)
+            if (diceCount === 0 && flatDamage === 0) problems.push(`${stepLabel}必须增加伤害骰或固定伤害`)
+            return [{ level, diceCount, ...(flatDamage > 0 ? { flatDamage } : {}) }]
+          }).sort((left, right) => left.level - right.level)
+          if (steps.length === 0) problems.push(`${label}.damage.cantripScaling.steps 不能为空`)
+          cantripScaling = { basis: 'character-level', steps }
+        }
       }
       if (damageType) damage = {
         dice: { count, sides, bonus }, type: damageType,
         ...(addSpellcastingModifier ? { addSpellcastingModifier: true } : {}),
-        ...(cantripScaling ? { cantripScaling: true } : {}),
+        ...(cantripScaling ? { cantripScaling } : {}),
       }
     }
   }

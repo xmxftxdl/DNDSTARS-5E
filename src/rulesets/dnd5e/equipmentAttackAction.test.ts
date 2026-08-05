@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { DND5E_CLUB, DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
 import {
+  dnd5ePreparedEquipmentAttackMagicWeaponBonus,
   dnd5eEquipmentClassDamageDefinitions,
   prepareDnd5eEquipmentAttack,
   previewDnd5eEquipmentAttack,
@@ -217,6 +218,10 @@ describe('D&D 5e equipment attack authority', () => {
       weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id,
       magical: true,
     })
+    expect(dnd5ePreparedEquipmentAttackMagicWeaponBonus(prepared.prepared)).toBe(1)
+    expect(previewDnd5eEquipmentAttack(prepared.prepared, 10).roll.modifier).toBe(
+      prepared.prepared.profile.attackModifier + 1,
+    )
   })
 
   it('separates weapon proficiency from armor proficiency for a wizard attack', () => {

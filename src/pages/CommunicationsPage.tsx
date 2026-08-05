@@ -26,7 +26,7 @@ import {
   type SharedNoteKind,
 } from '../lib/roomCommunications'
 import { getRoomSession } from '../lib/roomSession'
-import { deleteSharedImage, getSharedImage, putSharedImage } from '../lib/sharedApi'
+import { browserSharedRoomService } from '../composition/browserSharedRoomService'
 import { useCombatStatisticsStore } from '../store/combatStatistics'
 import { useMapStore } from '../store/maps'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
@@ -78,7 +78,7 @@ function SharedHandoutImage({ handout }: { handout: RoomHandout }) {
     if (!handout.imageId) return
     let disposed = false
     let objectUrl = ''
-    void getSharedImage(handout.imageId).then((blob) => {
+    void browserSharedRoomService.getSharedImage(handout.imageId).then((blob) => {
       if (!blob || disposed) return
       objectUrl = URL.createObjectURL(blob)
       setUrl(objectUrl)
@@ -421,7 +421,7 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
     let imageId: string | undefined
     if (image) {
       imageId = `handout-image-${crypto.randomUUID()}`
-      if (!await putSharedImage(imageId, image, 'handout')) throw new Error('讲义图片上传失败')
+      if (!await browserSharedRoomService.putSharedImage(imageId, image, 'handout')) throw new Error('讲义图片上传失败')
     }
     try {
       await onMutate({
@@ -435,7 +435,7 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
       setBody('')
       setImage(null)
     } catch (cause) {
-      if (imageId) await deleteSharedImage(imageId)
+      if (imageId) await browserSharedRoomService.deleteSharedImage(imageId)
       throw cause
     }
   }
@@ -485,7 +485,7 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
             <article key={handout.id} className="rounded-2xl border border-white/8 bg-slate-950/45 p-5">
               <div className="flex items-start justify-between gap-3">
                 <div><h3 className="font-bold text-slate-100">{handout.title}</h3><p className="mt-1 text-xs text-slate-600">{formatTime(handout.createdAt, true)} · {handout.authorName}</p></div>
-                {isDm && <button type="button" onClick={() => void onMutate({ operation: 'remove-handout', id: handout.id }).then(() => handout.imageId ? deleteSharedImage(handout.imageId) : undefined)} className="rounded-lg p-2 text-slate-600 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>}
+                {isDm && <button type="button" onClick={() => void onMutate({ operation: 'remove-handout', id: handout.id }).then(() => handout.imageId ? browserSharedRoomService.deleteSharedImage(handout.imageId) : undefined)} className="rounded-lg p-2 text-slate-600 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>}
               </div>
               {handout.body && <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{handout.body}</p>}
               <SharedHandoutImage handout={handout} />

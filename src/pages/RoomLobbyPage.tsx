@@ -9,9 +9,9 @@ import {
   LoaderCircle,
   Network,
   ShieldCheck,
-  Sparkles,
   Users,
 } from 'lucide-react'
+import starMarkLogo from '../assets/starmark-logo.png'
 import {
   getAccountSession,
   subscribeAccountSession,
@@ -37,7 +37,7 @@ import {
   saveRoomSession,
 } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
-import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
+import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/plugins/pluginRequirementProjection'
 import {
   clearLocalRoomCampaignCache,
   requestedRoomLobbyMode,
@@ -195,12 +195,14 @@ export default function RoomLobbyPage({
 
       <div className={`relative mx-auto flex max-w-6xl flex-col ${embedded ? 'min-h-[calc(100vh-12rem)]' : 'min-h-[calc(100vh-4rem)]'}`}>
         {!embedded && <header className="flex items-center gap-3">
-          <div className="glow-arcane flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600">
-            <Sparkles className="h-6 w-6 text-white" />
+          <div className="glow-arcane flex h-11 w-11 items-center justify-center">
+            <img src={starMarkLogo} alt="" aria-hidden="true" className="h-11 w-11 object-contain" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gradient">星界</h1>
-            <p className="text-xs text-slate-500">D&D 5e 跑团助手</p>
+            <h1 className="text-xl font-bold text-gradient">星痕</h1>
+            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-violet-300">
+              Astral Trace
+            </p>
           </div>
         </header>}
 

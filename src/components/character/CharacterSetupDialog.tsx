@@ -58,9 +58,11 @@ import {
   dnd5ePluginSubclassChoiceLimit,
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginBackgrounds,
+  registeredDnd5ePluginAbilityGenerationMethods,
   registeredDnd5ePluginFeats,
   registeredDnd5ePluginRaces,
   registeredDnd5ePluginSubclasses,
+  dnd5ePluginAbilityGenerationMethod,
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e/pluginApi'
 import { dnd5eCoreRaceMechanics } from '../../rulesets/dnd5e/coreRaceMechanics'
@@ -378,6 +380,16 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const pluginRaces = registeredDnd5ePluginRaces()
   const pluginBackgrounds = registeredDnd5ePluginBackgrounds()
   const pluginFeats = registeredDnd5ePluginFeats()
+  const pluginAbilityMethods = registeredDnd5ePluginAbilityGenerationMethods()
+  const methodOptions = [
+    ...METHOD_OPTIONS,
+    ...pluginAbilityMethods.map((pluginMethod) => ({
+      id: pluginMethod.id as Exclude<Dnd5eAbilityGenerationMethod, 'beginner-recommended'>,
+      name: `${pluginMethod.name} · ${pluginMethod.ownerPluginName}`,
+      summary: pluginMethod.summary,
+      kind: pluginMethod.kind,
+    })),
+  ]
   const raceOptions = [
     ...DND5E_2014_RACE_OPTIONS.map((value) => ({ value, label: value })),
     ...pluginRaces.map((race) => ({
@@ -420,6 +432,20 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const [startingEquipment, setStartingEquipment] = useState<Dnd5eStartingEquipmentSelection>(() =>
     defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan('战士', '自定义背景')),
   )
+
+  const selectedPluginAbilityMethod = dnd5ePluginAbilityGenerationMethod(method)
+  const methodKind = selectedPluginAbilityMethod?.kind ?? (
+    method === 'standard-array' ? 'standard-array' : method === 'point-buy' ? 'point-buy' : 'roll'
+  )
+  const standardArray = selectedPluginAbilityMethod?.kind === 'standard-array'
+    ? selectedPluginAbilityMethod.scores
+    : DND5E_STANDARD_ARRAY
+  const pointBuyRule = selectedPluginAbilityMethod?.kind === 'point-buy'
+    ? selectedPluginAbilityMethod
+    : DND5E_CORE_POINT_BUY_RULE
+  const rollRule = selectedPluginAbilityMethod?.kind === 'roll'
+    ? selectedPluginAbilityMethod
+    : { diceCount: 4, dieSides: 6, dropLowest: 1 }
 
   const definition = dnd5eClassDefinition(identity.charClass)
   const selectedPluginRace = dnd5ePluginRaceDefinition(identity.race)
@@ -532,15 +558,15 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     ? initialSpellSelections ?? initialSpellPlan.defaultSelections
     : undefined
 
-  const pointBuyRemaining = method === 'point-buy'
-    ? dnd5ePointBuyRemainingForRule(baseAbilities, DND5E_CORE_POINT_BUY_RULE)
+  const pointBuyRemaining = methodKind === 'point-buy'
+    ? dnd5ePointBuyRemainingForRule(baseAbilities, pointBuyRule)
     : 0
   const assignedRollAbilities = new Set(rolls.map((roll) => roll.ability))
-  const abilityAllocationComplete = method === 'roll-4d6'
+  const abilityAllocationComplete = methodKind === 'roll'
     ? rolls.length === 6
-    : method === 'point-buy'
+    : methodKind === 'point-buy'
       ? pointBuyRemaining === 0
-      : sameScoreMultiset(baseAbilities, DND5E_STANDARD_ARRAY)
+      : sameScoreMultiset(baseAbilities, standardArray)
   const racialBonusChoicesComplete = !flexibleRacialBonus ||
     racialBonusChoices.length === flexibleRacialBonus.count
   const racialChoicesComplete =
@@ -585,10 +611,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   }
 
   const startAbilityMethod = () => {
-    if (method === 'standard-array') {
-      setBaseAbilities(recommendedDnd5eBaseAbilitiesFromArray(identity.charClass, DND5E_STANDARD_ARRAY))
-    } else if (method === 'point-buy') {
-      setBaseAbilities(emptyAbilities(DND5E_CORE_POINT_BUY_RULE.minimum))
+    if (methodKind === 'standard-array') {
+      setBaseAbilities(recommendedDnd5eBaseAbilitiesFromArray(identity.charClass, standardArray))
+    } else if (methodKind === 'point-buy') {
+      setBaseAbilities(emptyAbilities(pointBuyRule.minimum))
     } else {
       setBaseAbilities(emptyAbilities())
       setCurrentRoll(null)
@@ -609,11 +635,11 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     setBaseAbilities((current) => {
       const before = current[ability]
       const after = before + delta
-      if (after < DND5E_CORE_POINT_BUY_RULE.minimum || after > DND5E_CORE_POINT_BUY_RULE.maximum) return current
+      if (after < pointBuyRule.minimum || after > pointBuyRule.maximum) return current
       const costDelta =
-        dnd5ePointBuyCostForRule(after, DND5E_CORE_POINT_BUY_RULE) -
-        dnd5ePointBuyCostForRule(before, DND5E_CORE_POINT_BUY_RULE)
-      if (costDelta > dnd5ePointBuyRemainingForRule(current, DND5E_CORE_POINT_BUY_RULE)) return current
+        dnd5ePointBuyCostForRule(after, pointBuyRule) -
+        dnd5ePointBuyCostForRule(before, pointBuyRule)
+      if (!Number.isFinite(costDelta) || costDelta > dnd5ePointBuyRemainingForRule(current, pointBuyRule)) return current
       return { ...current, [ability]: after }
     })
   }
@@ -746,7 +772,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
 
           {stage === 'ability-method' && (
             <div className="grid gap-4 md:grid-cols-3">
-              {METHOD_OPTIONS.map((option) => (
+              {methodOptions.map((option) => (
                 <button
                   key={option.id}
                   type="button"
@@ -772,16 +798,16 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
 
           {stage === 'abilities' && (
             <div className="space-y-5">
-              {method === 'point-buy' && (
+              {methodKind === 'point-buy' && (
                 <div className={`rounded-2xl border px-4 py-3 text-sm ${
                   pointBuyRemaining === 0
                     ? 'border-emerald-400/20 bg-emerald-500/5 text-emerald-200'
                     : 'border-arcane-400/20 bg-arcane-500/5 text-arcane-100'
                 }`}>
-                  27 点购点：已使用 {27 - pointBuyRemaining}，剩余 {pointBuyRemaining} 点。
+                  {pointBuyRule.budget} 点购点：已使用 {pointBuyRule.budget - pointBuyRemaining}，剩余 {pointBuyRemaining} 点。
                 </div>
               )}
-              {method === 'roll-4d6' && (
+              {methodKind === 'roll' && (
                 <div className="rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-5 text-center">
                   {currentRoll ? (
                     <>
@@ -800,10 +826,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                   ) : rolls.length < 6 ? (
                     <button
                       type="button"
-                      onClick={() => setCurrentRoll(rollDnd5eAbilityScore({ diceCount: 4, dieSides: 6, dropLowest: 1 }))}
+                      onClick={() => setCurrentRoll(rollDnd5eAbilityScore(rollRule))}
                       className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-3 text-sm font-semibold text-white"
                     >
-                      <Dices className="h-4 w-4" /> 投掷 4d6（第 {rolls.length + 1}/6 次）
+                      <Dices className="h-4 w-4" /> 投掷 {rollRule.diceCount}d{rollRule.dieSides}（第 {rolls.length + 1}/6 次）
                     </button>
                   ) : (
                     <div className="flex items-center justify-center gap-2 text-emerald-200"><Check className="h-5 w-5" /> 六项属性已完成</div>
@@ -818,16 +844,16 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                         <p className="font-semibold text-slate-100">{ability.label}</p>
                         <p className="text-[11px] text-slate-600">{ability.full}</p>
                       </div>
-                      {method === 'standard-array' ? (
+                      {methodKind === 'standard-array' ? (
                         <select
                           aria-label={`${ability.label}基础值`}
                           value={baseAbilities[ability.key]}
                           onChange={(event) => assignStandardValue(ability.key, Number(event.target.value))}
                           className="rounded-xl border border-white/10 bg-void-900 px-3 py-2 font-mono text-lg font-bold text-slate-100"
                         >
-                          {DND5E_STANDARD_ARRAY.map((value) => <option key={value} value={value}>{value}</option>)}
+                          {standardArray.map((value) => <option key={value} value={value}>{value}</option>)}
                         </select>
-                      ) : method === 'point-buy' ? (
+                      ) : methodKind === 'point-buy' ? (
                         <div className="flex items-center gap-2">
                           <button type="button" aria-label={`降低${ability.label}`} onClick={() => adjustPointBuy(ability.key, -1)} className="h-8 w-8 rounded-lg border border-white/10 text-slate-300">−</button>
                           <span className="w-8 text-center font-mono text-xl font-bold text-slate-100">{baseAbilities[ability.key]}</span>
@@ -849,7 +875,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                   </div>
                 ))}
               </div>
-              {method === 'roll-4d6' && rolls.length > 0 && (
+              {methodKind === 'roll' && rolls.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {

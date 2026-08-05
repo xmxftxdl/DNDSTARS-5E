@@ -4,6 +4,7 @@ import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import { getEnemyTemplate, type EnemyTemplate } from '../../lib/enemyPool'
 import { getEnemyStatBlock, type EnemyStatBlock } from '../../lib/enemyStatBlocks'
+import { buildEnemyPlayerVisibleDetail } from '../../lib/enemyPlayerVisibleDetail'
 import {
   getEnemyDerivedCombatStats,
   getEnemyEquipmentSlots,
@@ -76,7 +77,8 @@ function resolveEnemyDetail(token: Token): {
   stats: EnemyStatBlock | undefined
 } {
   const template = token.poolId ? getEnemyTemplate(token.poolId) : undefined
-  const stats = token.poolId ? getEnemyStatBlock(token.poolId) : undefined
+  const stats = (token.poolId ? getEnemyStatBlock(token.poolId) : undefined)
+    ?? token.playerVisibleEnemyDetail?.statBlock
   return { template, stats }
 }
 
@@ -140,7 +142,7 @@ export default function EnemyDetailPanel({
   const emoji = token.emoji || template?.emoji || '👹'
   const tokenThumbnail = token.tokenPortrait || template?.tokenPortrait
   const color = token.color || template?.color || '#f87171'
-  const templateTags = template?.tags ?? []
+  const templateTags = template?.tags ?? token.playerVisibleEnemyDetail?.tags ?? []
   const creatureTypes = token.creatureTypes?.length
     ? token.creatureTypes
     : template?.creatureTypes ?? inferCreatureTypesFromTags(templateTags)
@@ -150,7 +152,7 @@ export default function EnemyDetailPanel({
     creatureSize,
     ...templateTags.filter((tag) => !creatureTypes.includes(tag as CreatureType) && tag !== creatureSize),
   ]
-  const description = template?.description
+  const description = template?.description ?? token.playerVisibleEnemyDetail?.description
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
   const authoritativeCurrentHp = linked?.currentHp ?? curHp
   const authoritativeMaxHp = linked?.maxHp ?? maxHp
@@ -216,9 +218,16 @@ export default function EnemyDetailPanel({
         await deleteImage(nextId)
         throw new Error('怪物立绘未能上传到房间，请确认 DM 主机在线后重试。')
       }
-      const previousId = token.portraitImageId
-      updateToken!(mapId!, token.id, { portraitImageId: nextId })
-      if (previousId) void deleteImage(previousId)
+      const previousIds = new Set([token.portraitImageId, token.tokenPortraitImageId].filter(
+        (candidate): candidate is string => !!candidate,
+      ))
+      updateToken!(mapId!, token.id, {
+        portraitImageId: nextId,
+        tokenPortraitImageId: nextId,
+      })
+      for (const previousId of previousIds) {
+        if (previousId !== nextId) void deleteImage(previousId)
+      }
     } catch (cause) {
       setPortraitError(cause instanceof Error ? cause.message : '怪物立绘上传失败。')
     } finally {
@@ -406,13 +415,18 @@ export default function EnemyDetailPanel({
                 <ImagePlus className="h-3.5 w-3.5" />
                 {portraitBusy ? '处理中…' : token.portraitImageId ? '替换怪物立绘' : '上传怪物立绘'}
               </button>
-              {token.portraitImageId && (
+              {(token.portraitImageId || token.tokenPortraitImageId) && (
                 <button
                   type="button"
                   onClick={() => {
-                    const imageId = token.portraitImageId
-                    updateToken!(mapId!, token.id, { portraitImageId: undefined })
-                    if (imageId) void deleteImage(imageId)
+                    const imageIds = new Set([token.portraitImageId, token.tokenPortraitImageId].filter(
+                      (candidate): candidate is string => !!candidate,
+                    ))
+                    updateToken!(mapId!, token.id, {
+                      portraitImageId: undefined,
+                      tokenPortraitImageId: undefined,
+                    })
+                    for (const imageId of imageIds) void deleteImage(imageId)
                   }}
                   className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-200"
                 >
@@ -432,7 +446,15 @@ export default function EnemyDetailPanel({
                 <input
                   type="checkbox"
                   checked={token.showDetailOnToken !== false}
-                  onChange={(e) => updateToken!(mapId!, token.id, { showDetailOnToken: e.target.checked })}
+                  onChange={(event) => {
+                    const visible = event.target.checked
+                    updateToken!(mapId!, token.id, {
+                      showDetailOnToken: visible,
+                      playerVisibleEnemyDetail: visible && token.poolId
+                        ? buildEnemyPlayerVisibleDetail(token.poolId)
+                        : undefined,
+                    })
+                  }}
                   className="accent-arcane-500"
                 />
                 玩家可见详情

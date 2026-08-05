@@ -1,4 +1,5 @@
 import type { EquipmentItem, EquipmentSlot } from './equipment'
+import type { Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 
 export type Dnd5eInventoryIconId =
   | 'weapon'
@@ -84,6 +85,8 @@ export type Dnd5eAmmunitionKind = 'arrow' | 'crossbow-bolt' | 'sling-bullet' | '
 
 export type Dnd5eInventoryResourceReset = 'none' | 'short-rest' | 'long-rest' | 'dawn'
 
+export const DND5E_INVENTORY_HEADLESS_EFFECT_SCHEMA_VERSION = 1 as const
+
 /** 模板声明每一件物品提供的实例资源；实际当前值只保存在库存实例中。 */
 export interface Dnd5eInventoryResourceDefinition {
   id: string
@@ -102,14 +105,76 @@ export interface Dnd5eInventoryResourceState {
 }
 
 export interface Dnd5eAttackRollRerollEffect {
+  /** Optional on legacy packages; the Host normalizes an absent value to V1. */
+  schemaVersion?: typeof DND5E_INVENTORY_HEADLESS_EFFECT_SCHEMA_VERSION
+  /** Stable within one item template. Legacy packages receive a deterministic id. */
+  id?: string
   kind: 'attack-roll-reroll'
   resourceId: string
+  resourceCost?: number
   maximumDice: 1
   trigger: 'after-attack-roll'
   appliesTo: 'attacks-with-this-weapon' | 'weapon-attacks'
 }
 
-export type Dnd5eInventoryHeadlessEffect = Dnd5eAttackRollRerollEffect
+interface Dnd5eInventoryHeadlessEffectBase {
+  /** Optional on legacy packages; the Host normalizes an absent value to V1. */
+  schemaVersion?: typeof DND5E_INVENTORY_HEADLESS_EFFECT_SCHEMA_VERSION
+  /** Stable within one item template. Legacy packages receive a deterministic id. */
+  id?: string
+  /** Optional instance resource spent atomically with the combat result. */
+  resourceId?: string
+  resourceCost?: number
+}
+
+export interface Dnd5eOnHitBonusDamageEffect extends Dnd5eInventoryHeadlessEffectBase {
+  kind: 'on-hit-bonus-damage'
+  trigger: 'after-attack-hit'
+  appliesTo: 'attacks-with-this-weapon' | 'weapon-attacks'
+  damage: { count: number; sides: number; bonus: number }
+  damageType: 'inherit' | Dnd5eDamageType
+  /** Damage dice are doubled on a critical hit unless explicitly disabled. */
+  doubleDiceOnCritical?: boolean
+  oncePerTurn?: boolean
+}
+
+export interface Dnd5eDamageReductionEffect extends Dnd5eInventoryHeadlessEffectBase {
+  kind: 'damage-reduction'
+  trigger: 'before-damage'
+  amount: number
+  damageTypes?: readonly Dnd5eDamageType[]
+  oncePerTurn?: boolean
+}
+
+export interface Dnd5eDeathPreventionEffect extends Dnd5eInventoryHeadlessEffectBase {
+  kind: 'death-prevention'
+  trigger: 'before-drop-to-zero'
+  hitPointsAfter: number
+  /** Defaults to false so massive-damage instant death still wins. */
+  preventsMassiveDamage?: boolean
+}
+
+export type Dnd5eInventoryHeadlessEffect =
+  | Dnd5eAttackRollRerollEffect
+  | Dnd5eOnHitBonusDamageEffect
+  | Dnd5eDamageReductionEffect
+  | Dnd5eDeathPreventionEffect
+
+/**
+ * Immutable item/effect identity plus mutable instance resources projected into
+ * the authoritative combat snapshot. Combat actions never re-read a mutable
+ * plugin catalog while they are settling.
+ */
+export interface Dnd5eInventoryHeadlessEffectSnapshot {
+  instanceId: string
+  templateId: string
+  itemName: string
+  equipmentId?: string
+  equippedSlot?: EquipmentSlot
+  effectId: string
+  effect: Dnd5eInventoryHeadlessEffect
+  resources: Record<string, Dnd5eInventoryResourceState>
+}
 
 export interface Dnd5eItemCost {
   amount: number
@@ -124,6 +189,12 @@ export type Dnd5eInventoryUseEffect =
   | {
       kind: 'dm-adjudication'
       adjudication: string
+    }
+  | {
+      kind: 'spell-slot-recovery'
+      maximumSlotLevel: number
+      amount: number
+      selection: 'selected-expended-slot'
     }
 
 export type Dnd5eInventoryTargeting =
@@ -168,6 +239,8 @@ export interface Dnd5eInventoryItemTemplate {
   use?: {
     economy: 'action' | 'bonusAction' | 'none'
     consumeQuantity: number
+    /** Optional rechargeable instance resource spent by this use transaction. */
+    resourceCost?: { resourceId: string; amount: number }
     /** 需要地图或生物目标的物品先完成目标选择，再由 DM 权威端结算。 */
     targeting?: Dnd5eInventoryTargeting
     /** 例如医疗包每件有 10 次使用；存在时优先消费充能，归零后才移除物品。 */
@@ -208,6 +281,11 @@ export interface Dnd5eInventoryEntry {
 export interface Dnd5eInventory {
   /** 允许读入 V1/V2 旧存档；所有规范化和写入都会升级为 V3。 */
   schemaVersion: 1 | 2 | typeof DND5E_INVENTORY_SCHEMA_VERSION
+  /**
+   * Monotonic instance-state revision. Item Activity intents carry the value
+   * they were prepared from so the Host can reject stale charge/quantity use.
+   */
+  revision?: number
   entries: Dnd5eInventoryEntry[]
   /** V1/V2 存档可缺失；规范化后总会补齐五种币值。 */
   currency?: Dnd5eCurrencyWallet
@@ -216,6 +294,11 @@ export interface Dnd5eInventory {
    * 用于在 SSE 重放、刷新或 CAS 重试后避免重复发放。
    */
   authorityGrantReceipts?: string[]
+  /**
+   * Durable receipts for authoritative item-use transactions. Unlike the
+   * transport's in-memory request cache these survive refresh and SSE replay.
+   */
+  authorityUseReceipts?: string[]
 }
 
 export interface Dnd5eInventoryGrant {
@@ -233,7 +316,7 @@ export type Dnd5eInventoryMutation =
   | { type: 'grant'; characterId: string; templateId: string; quantity: number; identified?: boolean }
   | { type: 'discard'; characterId: string; instanceId: string; quantity: number }
   | { type: 'transfer'; characterId: string; targetCharacterId: string; instanceId: string; quantity: number }
-  | { type: 'equip'; characterId: string; instanceId: string }
+  | { type: 'equip'; characterId: string; instanceId: string; slot?: EquipmentSlot }
   | { type: 'unequip'; characterId: string; instanceId: string }
   | { type: 'prepare-attunement'; characterId: string; instanceId: string; dmPrerequisiteConfirmed?: boolean }
   | { type: 'cancel-attunement'; characterId: string; instanceId: string }
@@ -241,21 +324,38 @@ export type Dnd5eInventoryMutation =
   | { type: 'set-container'; characterId: string; instanceId: string; containerInstanceId?: string }
   | { type: 'adjust-currency'; characterId: string; currency: Dnd5eCurrency; delta: number }
   | { type: 'identify'; characterId: string; instanceId: string }
-  | { type: 'use'; characterId: string; instanceId: string; healingRolls?: number[] }
+  | {
+      type: 'use'
+      characterId: string
+      instanceId: string
+      /** Creature-targeted healing applies to this character; the source still pays the item cost. */
+      targetCharacterId?: string
+      healingRolls?: number[]
+      /** Required only by spell-slot-recovery and revalidated by the Host. */
+      spellSlotLevel?: number
+      /** Stable Host transaction id used for durable idempotency. */
+      receiptId?: string
+      /** Inventory revision observed while the action was prepared. */
+      expectedInventoryRevision?: number
+    }
 
 export type Dnd5eInventoryMutationFailure =
   | 'character-not-found'
   | 'target-not-found'
+  | 'invalid-target'
   | 'item-not-found'
   | 'template-not-found'
   | 'invalid-quantity'
   | 'insufficient-quantity'
   | 'not-equipment'
+  | 'invalid-equipment-slot'
   | 'not-usable'
   | 'attunement-not-required'
   | 'attunement-limit'
   | 'attunement-prerequisite'
   | 'invalid-rolls'
+  | 'invalid-spell-slot'
+  | 'spell-slot-unavailable'
   | 'action-unavailable'
   | 'bonus-action-unavailable'
   | 'same-character'
@@ -268,6 +368,7 @@ export type Dnd5eInventoryMutationFailure =
   | 'not-magic-item'
   | 'ammunition-unavailable'
   | 'invalid-receipt'
+  | 'stale-inventory-revision'
   | 'unauthorized'
 
 export interface Dnd5eInventoryMutationResult {
@@ -277,6 +378,8 @@ export interface Dnd5eInventoryMutationResult {
   message?: string
   healingRolled?: number
   healingApplied?: number
+  spellSlotLevel?: number
+  spellSlotsRecovered?: number
   requiresDmAdjudication?: string
   spentEconomy?: 'action' | 'bonusAction'
   deduplicated?: boolean

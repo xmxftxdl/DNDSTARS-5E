@@ -1,7 +1,7 @@
 import {
   missingDnd5eRulesPluginRequirements,
   roomActiveDnd5eRulesPluginRequirements,
-} from '../rulesets/dnd5e/pluginApi'
+} from '../rulesets/dnd5e/plugins/pluginRequirementProjection'
 import { downloadRoomPlugin, heartbeatRoom } from './roomApi'
 import type { RoomRulesSnapshot, RoomSession } from './roomSession'
 

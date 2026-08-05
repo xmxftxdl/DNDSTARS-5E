@@ -66,7 +66,7 @@
           }
         ],
         "upcast": {
-          "fromSlotLevel": 2,
+          "fromSlotLevel": 1,
           "effects": [
             {
               "kind": "damage-dice",
@@ -83,6 +83,43 @@
       "automation": {
         "mode": "reference-only"
       }
+    },
+    {
+      "id": "my-rules:resonant-pulse",
+      "name": "共鸣脉冲",
+      "englishName": "Resonant Pulse",
+      "level": 0,
+      "school": "evocation",
+      "ritual": false,
+      "castingTime": { "value": 1, "unit": "action" },
+      "range": { "type": "self", "shape": "radius", "sizeFeet": 5 },
+      "components": { "verbal": false, "somatic": true, "material": false },
+      "duration": { "type": "instantaneous", "concentration": false },
+      "classes": ["bard", "sorcerer", "wizard"],
+      "description": "你释放一阵原创的共鸣脉冲。这里填写完整规则正文。",
+      "mechanics": {
+        "kind": "damage",
+        "resolution": "saving-throw",
+        "savingThrow": { "ability": "con", "onSuccess": "none" },
+        "damage": {
+          "dice": { "count": 1, "sides": 6, "bonus": 0 },
+          "type": "thunder",
+          "cantripScaling": {
+            "basis": "character-level",
+            "steps": [
+              { "level": 5, "diceCount": 1 },
+              { "level": 11, "diceCount": 1 },
+              { "level": 17, "diceCount": 1 }
+            ]
+          }
+        }
+      },
+      "source": {
+        "title": "我的房间规则",
+        "publisher": "DM 名称",
+        "license": "仅限本房间使用"
+      },
+      "automation": { "mode": "reference-only" }
     }
   ]
 }

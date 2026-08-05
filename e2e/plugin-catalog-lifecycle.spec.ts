@@ -139,7 +139,6 @@ test('账号插件可发布到公开目录、由另一账号保存并原子启�
   await publisherPage.goto(`${DM}/plugins`, { waitUntil: 'domcontentloaded' })
   const privateVersion = publisherPage.locator('article').filter({ hasText: pluginId })
   await expect(privateVersion).toBeVisible()
-  publisherPage.once('dialog', (dialog) => dialog.accept('首次公开发布'))
   await privateVersion.getByRole('button', { name: '发布到目录' }).click()
   const publicationDialog = publisherPage.getByRole('dialog', { name: '提交扩展市场审核' })
   await publicationDialog.locator('textarea').first().fill('用于验证扩展市场公开发布、账号保存与房间原子启用的完整生命周期测试。')

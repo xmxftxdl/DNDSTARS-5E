@@ -8,6 +8,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { createDnd5eEffectiveRulesContextV1 } from '../src/rulesets/dnd5e/effectiveRulesContext'
+import { submitPlayerActionFromPage } from './support/playerAction'
 
 const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
 const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
@@ -52,11 +53,13 @@ interface SavedCharacter {
   id: string
   classResources?: Record<string, { current: number; max: number }>
   dnd5eCombatState?: {
-    battleMasterDroppedWeaponIds?: string[]
-    eldritchKnightBondedWeaponIds?: string[]
+    droppedEquipmentIds?: string[]
+    linkedEquipmentIds?: string[]
+    spellBonusWeaponAttackTurnKey?: string
     eldritchKnightWarMagicCantripTurnKey?: string
     eldritchKnightWarMagicTurnKey?: string
     eldritchKnightArcaneChargeTurnKey?: string
+    extraActionTeleportTurnKey?: string
     eldritchKnightArcaneChargeUsedTurnKey?: string
   }
 }
@@ -67,7 +70,7 @@ interface SavedToken {
   y: number
   hp?: number
   dnd5eCombatState?: {
-    eldritchStrikeBySource?: Record<string, {
+    spellSavePressureBySource?: Record<string, {
       appliedTurnKey: string
       sourceTurnsRemaining: number
     }>
@@ -166,8 +169,8 @@ function eldritchKnight(input: {
       [ACTION_SURGE_RESOURCE]: { current: 1, max: level >= 17 ? 2 : 1 },
     },
     dnd5eCombatState: {
-      eldritchKnightBondedWeaponIds: [WEAPON_ID],
-      ...(input.droppedWeapon ? { battleMasterDroppedWeaponIds: [WEAPON_ID] } : {}),
+      linkedEquipmentIds: [WEAPON_ID],
+      ...(input.droppedWeapon ? { droppedEquipmentIds: [WEAPON_ID] } : {}),
     },
   }
 }
@@ -278,19 +281,7 @@ async function installFastDiceFrame(context: BrowserContext) {
 }
 
 async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
-    const [{ publishPlayerActionRequest }, sharedApi] = await Promise.all([
-      import('/src/lib/playerActionSync.ts'),
-      import('/src/lib/sharedApi.ts'),
-    ])
-    await publishPlayerActionRequest({
-      action: payload as never,
-      loadQueue: () => sharedApi.loadSharedResource('player-action-requests'),
-      saveQueue: (queue) => sharedApi.saveSharedResource('player-action-requests', queue),
-      publishAction: (eventAction) =>
-        sharedApi.publishSharedEvent('player-action-player-to-dm', eventAction),
-    })
-  }, action)
+  await submitPlayerActionFromPage(page, action)
 }
 
 async function waitForAcceptedAck(
@@ -534,14 +525,13 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
   ])
   const dm = await dmContext.newPage()
   const player = await playerContext.newPage()
-  dm.on('dialog', (dialog) => void dialog.accept())
-
   try {
     await Promise.all([
       enterRoom(dm, DM, created),
       enterRoom(player, PLAYER, joined),
     ])
     await dm.locator('input[type="file"][webkitdirectory]').setInputFiles(COLLECTION_DIRECTORY)
+    await dm.getByTestId('app-dialog-confirm').click()
     await expect(dm.getByText(
       `已临时导入 ${PLUGIN_ID}；原始 JSON/CSV、提示词和规则正文未传输，关闭房间后需重新导入。`,
     )).toBeVisible({ timeout: 30_000 })
@@ -615,17 +605,20 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
     const afterFirstSpell = await getRoomState<{
       characters: SavedCharacter[]
     }>(request, created.roomId, 'characters', created.member)
-    expect(afterFirstSpell.characters[0].dnd5eCombatState?.eldritchKnightWarMagicTurnKey)
+    expect(afterFirstSpell.characters[0].dnd5eCombatState?.spellBonusWeaponAttackTurnKey)
       .toBeTruthy()
-    const afterFirstSpellMaps = await getRoomState<{
-      maps: Array<{ id: string; tokens: SavedToken[] }>
-    }>(request, created.roomId, 'maps', created.member)
-    const hpAfterFirstSpell = afterFirstSpellMaps.maps
-      .find((map) => map.id === battlefield.mapId)?.tokens
-      .find((candidate) => candidate.id === enemyToken.id)?.hp
-    expect(hpAfterFirstSpell).toBeLessThan(100)
+    let hpAfterFirstSpell: number | undefined
+    await expect.poll(async () => {
+      const maps = await getRoomState<{
+        maps: Array<{ id: string; tokens: SavedToken[] }>
+      }>(request, created.roomId, 'maps', created.member)
+      hpAfterFirstSpell = maps.maps
+        .find((map) => map.id === battlefield.mapId)?.tokens
+        .find((candidate) => candidate.id === enemyToken.id)?.hp
+      return hpAfterFirstSpell
+    }, { timeout: 20_000 }).toBeLessThan(100)
     await expect(player.getByRole('button', {
-      name: /战争魔法：附赠动作武器攻击/,
+      name: /特性附赠武器攻击/,
     })).toBeVisible({ timeout: 20_000 })
 
     const actionSurge = playerAction({
@@ -649,11 +642,11 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       const saved = state.characters.find((candidate) => candidate.id === hero.id)
       return {
         actionSurge: saved?.classResources?.[ACTION_SURGE_RESOURCE]?.current,
-        arcaneCharge: !!saved?.dnd5eCombatState?.eldritchKnightArcaneChargeTurnKey,
+        arcaneCharge: !!saved?.dnd5eCombatState?.extraActionTeleportTurnKey,
       }
     }).toEqual({ actionSurge: 0, arcaneCharge: true })
     await player.getByRole('button', { name: '下一页职业特性' }).click()
-    await expect(player.getByRole('button', { name: /奥术冲锋/ }))
+    await expect(player.getByRole('button', { name: /额外动作传送/ }))
       .toBeVisible({ timeout: 20_000 })
 
     const arcaneCharge = playerAction({
@@ -665,7 +658,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       seq: 3,
       payload: {
         dnd5eClassFeature: {
-          feature: 'eldritch-knight-arcane-charge',
+          feature: 'feature-extra-action-teleport',
           targetCell: { col: 6, row: 1 },
         },
       },
@@ -684,7 +677,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       const moved = await clientToken(player, battlefield.mapId, heroToken.id)
       return moved ? { x: moved.x, y: moved.y } : null
     }).toEqual({ x: 455, y: 105 })
-    await expect(player.getByRole('button', { name: /奥术冲锋/ })).toHaveCount(0)
+    await expect(player.getByRole('button', { name: /额外动作传送/ })).toHaveCount(0)
 
     const warMagicAttack = playerAction({
       ...battlefield,
@@ -696,7 +689,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       seq: 4,
       payload: {
         dnd5eWeaponAttackOptions: {
-          eldritchKnightWarMagicAttack: true,
+          featureBonusWeaponAttack: true,
         },
       },
     })
@@ -712,7 +705,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
     }).toMatchObject({
       hp: expect.any(Number),
       dnd5eCombatState: {
-        eldritchStrikeBySource: {
+        spellSavePressureBySource: {
           [heroToken.id]: expect.objectContaining({
             appliedTurnKey: expect.any(String),
           }),
@@ -727,7 +720,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       .find((candidate) => candidate.id === enemyToken.id)?.hp
     expect(hpAfterWarMagic).toBeLessThan(hpAfterFirstSpell ?? 100)
     await expect(player.getByRole('button', {
-      name: /战争魔法：附赠动作武器攻击/,
+      name: /特性附赠武器攻击/,
     })).toHaveCount(0)
 
     const strikeSave = playerAction({
@@ -757,7 +750,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
         .find((candidate) => candidate.id === enemyToken.id)
       return {
         hp: target?.hp,
-        strike: target?.dnd5eCombatState?.eldritchStrikeBySource?.[heroToken.id],
+        strike: target?.dnd5eCombatState?.spellSavePressureBySource?.[heroToken.id],
       }
     }).toEqual({
       hp: expect.any(Number),
@@ -810,7 +803,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       seq: 6,
       payload: {
         dnd5eClassFeature: {
-          feature: 'eldritch-knight-summon-bonded-weapon',
+          feature: 'linked-equipment-recall',
           weaponId: WEAPON_ID,
         },
       },
@@ -825,7 +818,7 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
         created.member,
       )
       return state.characters.find((candidate) => candidate.id === summoner.id)
-        ?.dnd5eCombatState?.battleMasterDroppedWeaponIds
+        ?.dnd5eCombatState?.droppedEquipmentIds
     }).toBeUndefined()
     const log = await getRoomState<{
       entries: Array<{ text?: string; message?: string }>

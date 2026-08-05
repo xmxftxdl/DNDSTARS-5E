@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { canWriteSharedState } from '../lib/appMode'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 import {
   SCENE_MAX_HISTORY,

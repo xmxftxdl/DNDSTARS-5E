@@ -4,6 +4,7 @@ import {
   DND5E_SRD_GEAR_ITEM_TEMPLATES,
   DND5E_SRD_ITEM_TEMPLATES,
   applyDnd5eInventoryGrantBundle,
+  applyDnd5eInventoryActivityCosts,
   applyDnd5eInventoryMutation,
   createDnd5eInventoryForCharacter,
   consumeDnd5eWeaponAmmunition,
@@ -98,6 +99,30 @@ describe('SRD 5.1 inventory', () => {
     }
   })
 
+  it('equips two different rings without replacing the first ring', () => {
+    const hero = character('two-rings')
+    let characters = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:magic-item:ring-of-protection', quantity: 1,
+    }).characters
+    characters = applyDnd5eInventoryMutation(characters, {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:magic-item:ring-of-warmth', quantity: 1,
+    }).characters
+    const protection = inventoryEntry(characters[0], 'srd-5.1:magic-item:ring-of-protection')
+    const warmth = inventoryEntry(characters[0], 'srd-5.1:magic-item:ring-of-warmth')
+
+    const first = applyDnd5eInventoryMutation(characters, {
+      type: 'equip', characterId: hero.id, instanceId: protection.instanceId,
+    })
+    const second = applyDnd5eInventoryMutation(first.characters, {
+      type: 'equip', characterId: hero.id, instanceId: warmth.instanceId,
+    })
+
+    expect(second.ok).toBe(true)
+    expect(second.characters[0].equipment?.ring?.id).toBe(protection.item.equipment?.id)
+    expect(second.characters[0].equipment?.ring2?.id).toBe(warmth.item.equipment?.id)
+    expect(normalizeDnd5eInventory(second.characters[0]).entries.filter((entry) => entry.equippedSlot === 'ring' || entry.equippedSlot === 'ring2')).toHaveLength(2)
+  })
+
   it('migrates currently equipped gear into deterministic inventory instances', () => {
     const inventory = createDnd5eInventoryForCharacter({
       id: 'fighter',
@@ -167,6 +192,140 @@ describe('SRD 5.1 inventory', () => {
     expect(used.transaction?.rollLedger.entries).toContainEqual(expect.objectContaining({
       kind: 'healing', dice: { sides: 4, values: [4, 3] }, modifier: 2,
     }))
+  })
+
+  it('heals the selected creature while the source pays the item cost', () => {
+    const source = character('healer', 20)
+    const target = character('wounded-ally', 4)
+    const granted = applyDnd5eInventoryMutation([source, target], {
+      type: 'grant', characterId: source.id, templateId: 'srd-5.1:item:potion-of-healing', quantity: 2,
+    })
+    const stack = inventoryEntry(granted.characters[0], 'srd-5.1:item:potion-of-healing')
+    const revision = normalizeDnd5eInventory(granted.characters[0]).revision ?? 0
+
+    const used = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'use',
+      characterId: source.id,
+      targetCharacterId: target.id,
+      instanceId: stack.instanceId,
+      healingRolls: [3, 2],
+      receiptId: 'combat:item-use:heal-ally',
+      expectedInventoryRevision: revision,
+    })
+
+    expect(used).toMatchObject({ ok: true, healingRolled: 7, healingApplied: 7 })
+    expect(used.characters.find((candidate) => candidate.id === source.id)?.currentHp).toBe(20)
+    expect(used.characters.find((candidate) => candidate.id === target.id)?.currentHp).toBe(11)
+    expect(inventoryEntry(used.characters[0], stack.templateId).quantity).toBe(1)
+  })
+
+  it('restores only a selected expended spell slot and spends a rechargeable item resource', () => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.slot-recovery', name: 'Slot Recovery', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerItem({
+          id: 'pearl', name: '回魔珍珠', category: 'equipment', icon: 'magic-wondrous',
+          description: '测试。', rulesText: '恢复一个至多 3 环的已消耗法术位。', stackable: false,
+          equipment: { slot: 'necklace' },
+          resources: [{ id: 'charges', label: '充能', maximum: 1, resetOn: 'long-rest' }],
+          use: {
+            economy: 'action', consumeQuantity: 0,
+            resourceCost: { resourceId: 'charges', amount: 1 },
+            effect: {
+              kind: 'spell-slot-recovery', maximumSlotLevel: 3, amount: 1,
+              selection: 'selected-expended-slot',
+            },
+          },
+        })
+      },
+    })
+    try {
+      const wizard = {
+        ...character('slot-wizard'),
+        classResources: {
+          'dnd5e-spell-slot-1': { current: 0, max: 2 },
+          'dnd5e-spell-slot-3': { current: 1, max: 1 },
+        },
+      }
+      const granted = applyDnd5eInventoryMutation([wizard], {
+        type: 'grant', characterId: wizard.id,
+        templateId: 'com.example.slot-recovery:pearl', quantity: 1,
+      })
+      const entry = inventoryEntry(granted.characters[0], 'com.example.slot-recovery:pearl')
+      const used = applyDnd5eInventoryMutation(granted.characters, {
+        type: 'use', characterId: wizard.id, instanceId: entry.instanceId,
+        spellSlotLevel: 1, receiptId: 'slot-recovery:1',
+      })
+      expect(used).toMatchObject({ ok: true, spellSlotLevel: 1, spellSlotsRecovered: 1 })
+      expect(used.characters[0].classResources?.['dnd5e-spell-slot-1']).toEqual({ current: 1, max: 2 })
+      expect(inventoryEntry(used.characters[0], entry.templateId).resources?.charges.current).toBe(0)
+
+      const unavailable = applyDnd5eInventoryMutation(granted.characters, {
+        type: 'use', characterId: wizard.id, instanceId: entry.instanceId, spellSlotLevel: 3,
+      })
+      expect(unavailable).toMatchObject({ ok: false, reason: 'spell-slot-unavailable' })
+      const invalid = applyDnd5eInventoryMutation(granted.characters, {
+        type: 'use', characterId: wizard.id, instanceId: entry.instanceId, spellSlotLevel: 4,
+      })
+      expect(invalid).toMatchObject({ ok: false, reason: 'invalid-spell-slot' })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('persists item-use receipts and rejects stale inventory revisions', () => {
+    const hero = character('receipt-hero')
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:item:potion-of-healing', quantity: 1,
+    })
+    const stack = inventoryEntry(granted.characters[0], 'srd-5.1:item:potion-of-healing')
+    const revision = normalizeDnd5eInventory(granted.characters[0]).revision ?? 0
+    const mutation = {
+      type: 'use' as const,
+      characterId: hero.id,
+      instanceId: stack.instanceId,
+      healingRolls: [1, 1],
+      receiptId: 'combat:item-use:once',
+      expectedInventoryRevision: revision,
+    }
+    const used = applyDnd5eInventoryMutation(granted.characters, mutation)
+    expect(used.ok).toBe(true)
+    expect(normalizeDnd5eInventory(used.characters[0]).authorityUseReceipts).toContain(mutation.receiptId)
+    expect(applyDnd5eInventoryMutation(used.characters, mutation)).toMatchObject({ ok: true, deduplicated: true })
+
+    expect(applyDnd5eInventoryMutation(granted.characters, {
+      ...mutation,
+      receiptId: 'combat:item-use:stale',
+      expectedInventoryRevision: revision + 1,
+    })).toMatchObject({ ok: false, reason: 'stale-inventory-revision' })
+  })
+
+  it('spends Activity charges from the item instance, not class resources', () => {
+    const hero = character('charged-item')
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:item:potion-of-healing', quantity: 2,
+    })
+    const stack = inventoryEntry(granted.characters[0], 'srd-5.1:item:potion-of-healing')
+    const revision = normalizeDnd5eInventory(granted.characters[0]).revision ?? 0
+    const spent = applyDnd5eInventoryActivityCosts(granted.characters[0], {
+      instanceId: stack.instanceId,
+      costs: [{ kind: 'quantity', amount: 1 }],
+      receiptId: 'activity:item:quantity',
+      expectedInventoryRevision: revision,
+    })
+    expect(spent.ok).toBe(true)
+    if (!spent.ok) return
+    expect(inventoryEntry(spent.character, stack.templateId).quantity).toBe(1)
+    expect(spent.character.classResources?.['item:srd-5.1:item:potion-of-healing:quantity']).toBeUndefined()
+    expect(applyDnd5eInventoryActivityCosts(spent.character, {
+      instanceId: stack.instanceId,
+      costs: [{ kind: 'quantity', amount: 1 }],
+      receiptId: 'activity:item:quantity',
+      expectedInventoryRevision: revision,
+    })).toMatchObject({ ok: true, deduplicated: true })
   })
 
   it('does not consume an item when the combat action is unavailable', () => {

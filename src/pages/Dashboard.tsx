@@ -12,6 +12,7 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import CampaignAdvancedAnalyticsPanel from '../components/CampaignAdvancedAnalyticsPanel'
 import RoomPartyOverview from '../components/RoomPartyOverview'
+import CampaignCombatLogArchivePanel from '../components/CampaignCombatLogArchivePanel'
 
 interface DashboardProps {
   onCreateCampaign?: () => void
@@ -67,6 +68,10 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
 
       <div className="mt-8">
         <RoomPartyOverview />
+      </div>
+
+      <div className="mt-8">
+        <CampaignCombatLogArchivePanel />
       </div>
 
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">

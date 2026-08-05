@@ -47,4 +47,25 @@ describe('Dnd5eBuilderResourceInventory', () => {
     expect(markup).toContain('资料职业')
     expect(markup).not.toContain('怪物工坊')
   })
+
+  it('允许在标题右侧放置分类专用操作', () => {
+    const markup = renderToStaticMarkup(createElement(Dnd5eBuilderResourceInventory, {
+      sectionLabel: '怪物',
+      entries,
+      headerAction: createElement('button', { type: 'button' }, '打开怪物工坊'),
+    }))
+    expect(markup).toContain('已接入的怪物')
+    expect(markup).toContain('打开怪物工坊')
+  })
+
+  it('允许为每个已接入资源提供编辑入口', () => {
+    const markup = renderToStaticMarkup(createElement(Dnd5eBuilderResourceInventory, {
+      sectionLabel: '怪物',
+      entries,
+      entryActionLabel: '在怪物工坊中打开',
+      onEntryAction: () => undefined,
+    }))
+    expect(markup.match(/在怪物工坊中打开/g)).toHaveLength(entries.length * 2)
+    expect(markup).toContain('aria-label="在怪物工坊中打开：自定义战士"')
+  })
 })

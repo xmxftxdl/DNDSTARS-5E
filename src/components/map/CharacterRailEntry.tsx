@@ -16,6 +16,7 @@ export default function CharacterRailEntry({
   return (
     <button
       type="button"
+      data-testid={`character-rail-${character.id}`}
       onClick={onAvatarClick}
       title={`${character.name} · 打开底部行动栏`}
       aria-label={`${character.name}的行动栏`}

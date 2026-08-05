@@ -297,7 +297,27 @@ describe('D&D 5e rules plugin API', () => {
           headlessEffects: [{
             kind: 'attack-roll-reroll', resourceId: 'charges', maximumDice: 1,
             trigger: 'after-attack-roll', appliesTo: 'attacks-with-this-weapon',
+          }, {
+            schemaVersion: 1, id: 'bonus-fire', kind: 'on-hit-bonus-damage',
+            trigger: 'after-attack-hit', appliesTo: 'attacks-with-this-weapon',
+            damage: { count: 1, sides: 6, bonus: 0 }, damageType: 'fire',
+            resourceId: 'charges', resourceCost: 1,
+          }, {
+            schemaVersion: 1, id: 'ward', kind: 'damage-reduction', trigger: 'before-damage',
+            amount: 2, oncePerTurn: true, resourceId: 'charges', resourceCost: 1,
+          }, {
+            schemaVersion: 1, id: 'last-stand', kind: 'death-prevention',
+            trigger: 'before-drop-to-zero', hitPointsAfter: 1,
+            resourceId: 'charges', resourceCost: 1,
           }],
+          use: {
+            economy: 'action', consumeQuantity: 0,
+            resourceCost: { resourceId: 'charges', amount: 1 },
+            effect: {
+              kind: 'spell-slot-recovery', maximumSlotLevel: 3, amount: 1,
+              selection: 'selected-expended-slot',
+            },
+          },
           equipment: {
             slot: 'mainWeapon', effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
             dnd5e: {
@@ -318,7 +338,16 @@ describe('D&D 5e rules plugin API', () => {
             effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
           }),
           resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' }],
-          headlessEffects: [expect.objectContaining({ kind: 'attack-roll-reroll', resourceId: 'charges' })],
+          headlessEffects: expect.arrayContaining([
+            expect.objectContaining({ kind: 'attack-roll-reroll', resourceId: 'charges' }),
+            expect.objectContaining({ kind: 'on-hit-bonus-damage', damageType: 'fire' }),
+            expect.objectContaining({ kind: 'damage-reduction', amount: 2 }),
+            expect.objectContaining({ kind: 'death-prevention', hitPointsAfter: 1 }),
+          ]),
+          use: expect.objectContaining({
+            resourceCost: { resourceId: 'charges', amount: 1 },
+            effect: expect.objectContaining({ kind: 'spell-slot-recovery', maximumSlotLevel: 3 }),
+          }),
         }),
       ])
     } finally {

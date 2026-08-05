@@ -10,7 +10,7 @@ import {
   type SharedRoomJournalState,
 } from '../lib/roomCommunications'
 import { getRoomSession } from '../lib/roomSession'
-import { loadSharedResource, mutateSharedRoomResource } from '../lib/sharedApi'
+import { loadSharedResource, mutateSharedRoomResource } from '../composition/browserSharedRoomResources'
 
 interface RoomCommunicationsState {
   chat: SharedRoomChatState

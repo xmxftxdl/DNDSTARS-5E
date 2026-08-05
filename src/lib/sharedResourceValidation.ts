@@ -499,6 +499,15 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   if (name === COMBAT_STATISTICS_RESOURCE && !normalizeSharedCombatStatistics(input)) {
     reasons.push('进阶数据资源结构损坏')
   }
+  if (
+    name === 'combat-log' &&
+    input.rollbackCutoffEntryId != null &&
+    (typeof input.rollbackCutoffEntryId !== 'number' ||
+      !Number.isFinite(input.rollbackCutoffEntryId) ||
+      input.rollbackCutoffEntryId < 0)
+  ) {
+    reasons.push('战斗日志回滚检查点损坏')
+  }
   if (name === CAMPAIGN_TIME_RESOURCE && !validateSharedCampaignTime(input)) {
     reasons.push('战役时间资源结构损坏')
   }

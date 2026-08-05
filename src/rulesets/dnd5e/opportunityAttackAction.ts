@@ -348,6 +348,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   damageRolls: readonly number[]
   savageAttacksRoll?: number
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
+  inventoryEffectRolls?: Readonly<Record<string, readonly number[]>>
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
   result: Dnd5eActionResult
@@ -383,6 +384,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     savageAttacksRoll: input.savageAttacksRoll,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
+    inventoryEffectRolls: input.inventoryEffectRolls,
   }, input.airborneFallDamageRollsByCombatantId)
   if (!result.ok) return { result, airborneFalls }
   return {

@@ -42,6 +42,7 @@ export interface LocalAiPortraitGenerationInput {
 export interface LocalAiPortraitGenerationResult {
   dataUrl: string
   modelId: string
+  quality?: 'low' | 'medium' | 'high'
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
 }
 
@@ -247,18 +248,20 @@ export async function generateLocalAiPortrait(
     schemaVersion: number
     dataUrl: string
     modelId: string
+    quality?: LocalAiPortraitGenerationResult['quality']
     mimeType: LocalAiPortraitGenerationResult['mimeType']
   }>('/api/generate-image', {
     method: 'POST',
     body: JSON.stringify({
       prompt,
       aspect: input.aspect ?? 'portrait-3:4',
-      quality: input.quality ?? 'medium',
+      ...(input.quality ? { quality: input.quality } : {}),
     }),
   }, true, 310_000)
   if (
     result.schemaVersion !== LOCAL_AI_BRIDGE_API_VERSION ||
     typeof result.modelId !== 'string' ||
+    (result.quality !== undefined && !['low', 'medium', 'high'].includes(result.quality)) ||
     !['image/png', 'image/jpeg', 'image/webp'].includes(result.mimeType) ||
     typeof result.dataUrl !== 'string' ||
     !result.dataUrl.startsWith(`data:${result.mimeType};base64,`) ||

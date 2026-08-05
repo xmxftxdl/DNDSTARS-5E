@@ -4,12 +4,22 @@ import type {
   Dnd5eActionResult,
   Dnd5eCombatEvent,
   Dnd5eHeadlessCombatState,
+  Dnd5eHeadlessResolutionObservation,
+} from '../rulesets/dnd5e/headlessCombatEngine'
+import {
+  observeCommittedDnd5ePersistentAreaTrigger,
+  setDnd5eHeadlessResolutionObserver,
 } from '../rulesets/dnd5e/headlessCombatEngine'
 import {
   applyDnd5eCombatStatisticsObservation,
   applyCombatExperienceSettlement,
+  archiveCombatStatisticsLog,
+  combatLogArchiveFilename,
   combatantDefensiveContributionIndex,
   combatantOffensiveContributionIndex,
+  createCombatStatisticsSession,
+  deleteCombatStatisticsLog,
+  formatCombatLogArchiveText,
   normalizeSharedCombatStatistics,
   type CombatStatisticsSide,
 } from './combatStatistics'
@@ -113,6 +123,77 @@ describe('Headless combat statistics', () => {
     expect(session.combatants.cleric.combatD20FaceCounts[11]).toBe(1)
   })
 
+  it('records committed persistent-area save damage, including half damage on a successful save', () => {
+    const base = state()
+    const source = state({
+      combatants: {
+        ...base.combatants,
+        goblin: { ...base.combatants.goblin, currentHp: 30 },
+        hobgoblin: {
+          ...base.combatants.goblin,
+          id: 'hobgoblin',
+          name: 'Hobgoblin',
+          currentHp: 30,
+        },
+      },
+    })
+    const resultState = state({
+      combatants: {
+        ...source.combatants,
+        goblin: { ...source.combatants.goblin, currentHp: 20 },
+        hobgoblin: { ...source.combatants.hobgoblin, currentHp: 10 },
+      },
+    })
+    const result: Dnd5eActionResult = {
+      ok: true,
+      state: resultState,
+      events: [
+        { type: 'saving-throw-resolved', targetId: 'goblin', ability: 'dex', d20: 18, modifier: 2, total: 20, dc: 15, success: true },
+        { type: 'damage-applied', sourceId: 'fighter', targetId: 'goblin', amount: 10, hpBefore: 30, hpAfter: 20, temporaryHpBefore: 0, temporaryHpAfter: 0 },
+        { type: 'saving-throw-resolved', targetId: 'hobgoblin', ability: 'dex', d20: 4, modifier: 2, total: 6, dc: 15, success: false },
+        { type: 'damage-applied', sourceId: 'fighter', targetId: 'hobgoblin', amount: 20, hpBefore: 30, hpAfter: 10, temporaryHpBefore: 0, temporaryHpAfter: 0 },
+      ],
+    }
+    let captured: Dnd5eHeadlessResolutionObservation | undefined
+    const dispose = setDnd5eHeadlessResolutionObserver((observation) => {
+      captured = observation
+    })
+    try {
+      // Merely resolving/previewing the area does not publish telemetry. The
+      // map transaction calls this boundary exactly once after final approval.
+      expect(captured).toBeUndefined()
+      observeCommittedDnd5ePersistentAreaTrigger({
+        source,
+        areaId: 'wall-of-fire-area',
+        sourceId: 'fighter',
+        targetId: 'goblin',
+        triggerId: 'wall-of-fire-create',
+        result,
+      })
+    } finally {
+      dispose()
+    }
+    expect(captured).toBeDefined()
+    if (!captured) throw new Error('committed persistent-area observation was not published')
+    expect(captured.action).toMatchObject({
+      type: 'persistent-area-trigger',
+      actorId: 'fighter',
+      areaId: 'wall-of-fire-area',
+    })
+
+    const session = applyDnd5eCombatStatisticsObservation(undefined, {
+      mapId: 'map-1',
+      ...captured,
+      receiptId: 'persistent-area-1',
+      observedAt: 10,
+      sideByCombatantId: { ...sides, hobgoblin: 'enemy' },
+    })
+    expect(session.combatants.fighter.damageDealt).toBe(30)
+    expect(session.combatants.fighter.turnTrackedDamageDealt).toBe(30)
+    expect(session.combatants.goblin).toMatchObject({ damageTaken: 10, successfulSaves: 1 })
+    expect(session.combatants.hobgoblin).toMatchObject({ damageTaken: 20, failedSaves: 1 })
+  })
+
   it('deduplicates replayed Headless transactions and fails closed on damaged shared data', () => {
     const observation = observe({
       receiptId: 'same', actorId: 'fighter',
@@ -199,5 +280,86 @@ describe('Headless combat statistics', () => {
     const recorded = applyCombatExperienceSettlement(session, settlement)
     expect(recorded?.experienceSettlement?.awards[0].xp).toBe(50)
     expect(applyCombatExperienceSettlement(recorded, settlement)).toBeUndefined()
+  })
+
+  it('archives, validates, and exports a completed combat log in chronological order', () => {
+    const base = createCombatStatisticsSession({
+      combatId: 'combat-log-1',
+      mapId: 'map-1',
+      now: 1_000,
+    })
+    const archived = archiveCombatStatisticsLog(base, {
+      combatId: base.combatId,
+      mapId: base.mapId,
+      mapName: 'Goblin/Cave',
+      endedAt: 2_000,
+      lastRound: 2,
+      entries: [
+        { id: 2.25, round: 2, text: '战斗结束', kind: 'system', time: '10:02' },
+        { id: 1.25, round: 1, text: '战士攻击哥布林', kind: 'attack', time: '10:01', details: ['命中 18 vs AC 15'] },
+      ],
+    })
+
+    expect(archived).toMatchObject({
+      mapName: 'Goblin/Cave',
+      endedAt: 2_000,
+      lastRound: 2,
+      logEntries: [{ id: 2.25 }, { id: 1.25 }],
+    })
+    const normalized = normalizeSharedCombatStatistics({
+      schemaVersion: 3,
+      sessions: [archived],
+      updatedAt: 2_000,
+    })
+    expect(normalized?.sessions[0].logEntries).toHaveLength(2)
+
+    const text = formatCombatLogArchiveText(archived)
+    expect(text.indexOf('战士攻击哥布林')).toBeLessThan(text.indexOf('战斗结束'))
+    expect(text).toContain('  - 命中 18 vs AC 15')
+    expect(combatLogArchiveFilename(archived)).toMatch(/^DNDSTARS-Goblin-Cave-/)
+  })
+
+  it('rejects malformed archived combat log rows at the shared-state boundary', () => {
+    const base = createCombatStatisticsSession({ combatId: 'bad-log', mapId: 'map-1', now: 1 })
+    expect(normalizeSharedCombatStatistics({
+      schemaVersion: 3,
+      sessions: [{
+        ...base,
+        endedAt: 2,
+        logEntries: [{ id: 1, round: 1, text: '', kind: 'attack', time: '10:00' }],
+      }],
+      updatedAt: 2,
+    })).toBeUndefined()
+  })
+
+  it('deletes only the archived log and preserves a validated tombstone', () => {
+    const base = createCombatStatisticsSession({ combatId: 'deleted-log', mapId: 'map-1', now: 100 })
+    const archived = archiveCombatStatisticsLog(base, {
+      combatId: base.combatId,
+      mapId: base.mapId,
+      entries: [{ id: 1, round: 1, text: '战斗开始', kind: 'system', time: '10:00' }],
+      endedAt: 200,
+      lastRound: 1,
+    })
+    const deleted = deleteCombatStatisticsLog(archived, 300)
+
+    expect(deleted.logEntries).toBeUndefined()
+    expect(deleted.logDeletedAt).toBe(300)
+    expect(deleted.combatants).toBe(archived.combatants)
+    expect(deleted.receipts).toBe(archived.receipts)
+    expect(normalizeSharedCombatStatistics({
+      schemaVersion: 3,
+      sessions: [deleted],
+      updatedAt: 300,
+    })?.sessions[0]).toMatchObject({
+      combatId: 'deleted-log',
+      logDeletedAt: 300,
+      lastRound: 1,
+    })
+    expect(normalizeSharedCombatStatistics({
+      schemaVersion: 3,
+      sessions: [{ ...deleted, logEntries: archived.logEntries }],
+      updatedAt: 300,
+    })).toBeUndefined()
   })
 })

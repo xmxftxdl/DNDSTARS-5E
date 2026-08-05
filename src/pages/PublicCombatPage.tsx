@@ -12,7 +12,7 @@ export default function PublicCombatPage() {
         <div className="relative mx-auto max-w-7xl px-5 lg:px-8">
           <div className="max-w-3xl">
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-violet-300">Combat</p>
-            <h1 className="mt-4 font-display text-4xl font-bold text-white sm:text-5xl">
+            <h1 className="mt-4 font-display text-4xl font-bold text-slate-100 sm:text-5xl">
               规则在后台运行，故事留在桌面上
             </h1>
             <p className="mt-5 text-lg leading-8 text-slate-400">

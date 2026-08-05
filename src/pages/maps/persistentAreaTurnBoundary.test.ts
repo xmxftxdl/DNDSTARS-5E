@@ -352,9 +352,13 @@ describe('persistent-area authoritative turn boundaries', () => {
     })
   })
 
-  it.each(['player', 'enemy'] as const)(
-    'settles Flaming Sphere inside the %s end-turn path once, including a legacy snapshot',
-    async (targetType) => {
+  it.each([
+    { label: 'player', targetType: 'player' as const, poolOnly: false },
+    { label: 'linked enemy', targetType: 'enemy' as const, poolOnly: false },
+    { label: 'pool-only monster', targetType: 'enemy' as const, poolOnly: true },
+  ])(
+    'settles Flaming Sphere inside the $label end-turn path once, including a legacy snapshot',
+    async ({ targetType, poolOnly }) => {
       const declaration = getDnd5eCoreSpellAreaDeclaration('flaming-sphere')!
       const anchorCell = { col: 2, row: 2 }
       const createdArea = createDnd5eCoreSpellArea({
@@ -382,7 +386,13 @@ describe('persistent-area authoritative turn boundaries', () => {
         characterId: 'caster', x: 25, y: 125,
       })
       const targetToken = token('target-token', {
-        characterId: 'target', type: targetType, x: 175, y: 125,
+        characterId: poolOnly ? undefined : 'target',
+        poolId: poolOnly ? 'srd-5.1:flesh-golem' : undefined,
+        type: targetType,
+        x: 175,
+        y: 125,
+        hp: poolOnly ? 93 : 100,
+        maxHp: poolOnly ? 93 : 100,
       })
       const nextToken = token('next-token', {
         characterId: 'next', type: targetType === 'player' ? 'enemy' : 'player', x: 425, y: 425,
@@ -413,7 +423,7 @@ describe('persistent-area authoritative turn boundaries', () => {
             concentrationSpellLevel: 2,
           },
         }),
-        character('target'),
+        ...(poolOnly ? [] : [character('target')]),
         character('next'),
       ]
       const previous = dnd5ePersistentAreaTurnCursor({
@@ -456,12 +466,29 @@ describe('persistent-area authoritative turn boundaries', () => {
               })
               expect(prepared.ok).toBe(true)
               if (!prepared.ok) continue
+              if (poolOnly) {
+                expect(prepared.prepared.save?.mode).toBe('advantage')
+                expect(resolvePreparedDnd5ePersistentAreaTrigger({
+                  prepared: prepared.prepared,
+                  d20: 2,
+                  damageRolls: [6, 6],
+                }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+              }
               const resolved = resolvePreparedDnd5ePersistentAreaTrigger({
                 prepared: prepared.prepared,
-                d20: 20,
+                d20: poolOnly ? 2 : 20,
+                d20Second: poolOnly ? 20 : undefined,
                 damageRolls: [6, 6],
               })
               expect(resolved.result.ok).toBe(true)
+              if (poolOnly) {
+                expect(resolved.result.events).toContainEqual(expect.objectContaining({
+                  type: 'persistent-area-triggered',
+                  triggerId: 'flaming-sphere-turn-end',
+                  saveSuccess: true,
+                  damage: 6,
+                }))
+              }
               if (resolved.application) {
                 nextMap = resolved.application.map
                 nextCharacters = resolved.application.characters
@@ -479,7 +506,11 @@ describe('persistent-area authoritative turn boundaries', () => {
         })
 
       const first = await settle(transition, map, characters)
-      expect(first.characters.find((candidate) => candidate.id === 'target')?.currentHp).toBe(94)
+      if (poolOnly) {
+        expect(first.map.tokens.find((candidate) => candidate.id === targetToken.id)?.hp).toBe(87)
+      } else {
+        expect(first.characters.find((candidate) => candidate.id === 'target')?.currentHp).toBe(94)
+      }
       expect(first.map.dnd5ePluginAreas?.[0].triggerReceipts).toHaveLength(1)
       expect(first.map.dnd5ePluginAreas?.[0].triggerReceipts?.[0]).toMatchObject({
         targetTokenId: 'target-token',
@@ -489,13 +520,21 @@ describe('persistent-area authoritative turn boundaries', () => {
       // A duplicate action retry still carries the same stable turnKey. Even if
       // it reaches settlement again, the persisted receipt prevents double damage.
       const duplicate = await settle(transition, first.map, first.characters)
-      expect(duplicate.characters.find((candidate) => candidate.id === 'target')?.currentHp).toBe(94)
+      if (poolOnly) {
+        expect(duplicate.map.tokens.find((candidate) => candidate.id === targetToken.id)?.hp).toBe(87)
+      } else {
+        expect(duplicate.characters.find((candidate) => candidate.id === 'target')?.currentHp).toBe(94)
+      }
       expect(duplicate.map.dnd5ePluginAreas?.[0].triggerReceipts).toHaveLength(1)
 
       const replayCursor = planDnd5ePersistentAreaTurnTransition(current, current)
       expect(replayCursor.boundaries).toEqual([])
       const replay = await settle(replayCursor, duplicate.map, duplicate.characters)
-      expect(replay.characters.find((candidate) => candidate.id === 'target')?.currentHp).toBe(94)
+      if (poolOnly) {
+        expect(replay.map.tokens.find((candidate) => candidate.id === targetToken.id)?.hp).toBe(87)
+      } else {
+        expect(replay.characters.find((candidate) => candidate.id === 'target')?.currentHp).toBe(94)
+      }
     },
   )
 })

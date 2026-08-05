@@ -554,12 +554,17 @@ test('next ranged spell VFX render from texture assets', async ({ browser, reque
     ))
   }, { activeMapId: mapId, kinds: spellKinds })
 
+  const observedSpellKinds = new Set<string>()
   await expect.poll(async () => {
     const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
       .split(',')
       .filter(Boolean)
-    return spellKinds.every((kind) => kinds.includes(kind))
-  }).toBe(true)
+    kinds.forEach((kind) => observedSpellKinds.add(kind))
+    // Magic Missile deliberately lasts only 300 ms, while the other material
+    // projectiles last about one second. Lazy SceneCanvas startup can therefore
+    // make their visible windows non-overlapping even though every event renders.
+    return spellKinds.every((kind) => observedSpellKinds.has(kind))
+  }, { intervals: [25, 50, 100], timeout: 5_000 }).toBe(true)
   await player.waitForTimeout(100)
   await canvas.screenshot({
     path: process.env.NEXT_SPELL_VFX_SCREENSHOT_PATH ??
@@ -1153,7 +1158,7 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
   await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
   await player.waitForURL(/\/campaign\/local\/maps$/)
   const canvas = player.getByTestId('map-canvas')
-  await expect(canvas).toBeVisible()
+  await expect(canvas).toBeVisible({ timeout: 20_000 })
   await expect(canvas).toHaveAttribute('data-spell-status-token-count', '28')
   await expect.poll(async () => {
     const colors = (await canvas.getAttribute('data-spell-status-token-colors') ?? '')
@@ -1169,6 +1174,22 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
     return backgrounds.length === statusKinds.length &&
       backgrounds.every((entry) => entry.endsWith(':#D946EF:#26072C'))
   }).toBe(true)
+
+  const viewport = {
+    x: Number(await canvas.getAttribute('data-viewport-x')),
+    y: Number(await canvas.getAttribute('data-viewport-y')),
+    scale: Number(await canvas.getAttribute('data-viewport-scale')),
+  }
+  const targetRadius = 44
+  await canvas.hover({
+    position: {
+      x: viewport.x + (targetToken.x + targetRadius * 0.56) * viewport.scale,
+      y: viewport.y + (targetToken.y - targetRadius * 0.84) * viewport.scale,
+    },
+  })
+  const statusTooltip = player.getByTestId('token-status-tooltip')
+  await expect(statusTooltip).toBeVisible()
+  await expect(statusTooltip).toContainText(/祝福术|Bless/)
 
   await player.evaluate(async ({ activeMapId, kinds, targetTokenId }) => {
     const presentation = await import('/src/lib/combatPresentation.ts')

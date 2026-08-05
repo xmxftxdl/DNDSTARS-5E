@@ -4,7 +4,7 @@ import {
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
 } from './headlessCombatEngine'
-import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
+import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog, type Dnd5eMonsterStatBlock } from './monsters'
 import { createDnd5eConditionEffect } from './activeEffects'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 
@@ -31,6 +31,70 @@ function combatant(id: string, initiative: number, patch: Record<string, unknown
 
 describe('D&D 5e monster resource actions', () => {
   afterEach(() => setDnd5eRoomMonsterCatalog([]))
+
+  it('validates Host count dice and emits an authoritative multi-creature summon event', () => {
+    const base = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const summoner: Dnd5eMonsterStatBlock = {
+      ...base,
+      id: 'room-monster:test-summoner',
+      slug: 'test-summoner',
+      source: 'DM 自定义',
+      actions: [{
+        id: 'call-wolves',
+        name: '呼唤狼群',
+        description: '召唤 1d3 只狼。',
+        kind: 'other',
+        automation: 'headless',
+        rule: {
+          kind: 'summon',
+          monsterId: 'srd-5.1:wolf',
+          count: { kind: 'dice', count: 1, sides: 3, bonus: 0 },
+          timing: 'source-next-turn-start',
+          durationRounds: 10,
+          concentration: true,
+          concentrationEndsOnAppearance: true,
+          side: 'ally',
+        },
+      }],
+    }
+    setDnd5eRoomMonsterCatalog([summoner])
+    const actor = combatant('summoner', 20, { statBlockId: summoner.id })
+    const hero = combatant('hero', 10, { controller: 'player' })
+    const state = startDnd5eHeadlessCombat('summon-count', [actor, hero])
+
+    const invalid = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action',
+      actorId: actor.id,
+      actionId: 'call-wolves',
+      summonCountRolls: [4],
+    })
+    expect(invalid).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    expect(state.combatants.summoner.turn.actionAvailable).toBe(true)
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action',
+      actorId: actor.id,
+      actionId: 'call-wolves',
+      summonCountRolls: [2],
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.summoner.turn.actionAvailable).toBe(false)
+    expect(result.state.combatants.summoner.concentrating).toBe(true)
+    expect(result.events).toContainEqual({
+      type: 'monster-summon-resolved',
+      actorId: 'summoner',
+      actionId: 'call-wolves',
+      legendary: false,
+      monsterId: 'srd-5.1:wolf',
+      count: 2,
+      timing: 'source-next-turn-start',
+      durationRounds: 10,
+      concentration: true,
+      concentrationEndsOnAppearance: true,
+      side: 'ally',
+    })
+  })
 
   it('spends legendary action points for an off-turn structured attack', () => {
     const hero = combatant('hero', 20, { controller: 'player', position: { x: 5, y: 0 } })

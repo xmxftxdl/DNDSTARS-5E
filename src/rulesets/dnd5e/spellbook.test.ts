@@ -67,6 +67,17 @@ describe('D&D 5e room spellbook import', () => {
     })
   })
 
+  it('accepts a freely rotatable rectangular spell template and target filters', () => {
+    const parsed = parseDnd5eSpellImport(bundle(spell({
+      range: { type: 'distance', feet: 120, shape: 'rect', widthFeet: 60, heightFeet: 5, rotatable: true },
+      targeting: { relation: 'enemy', includeSelf: false, maximumTargets: 64 },
+    })))
+    expect(parsed.spells[0]).toMatchObject({
+      range: { shape: 'rect', widthFeet: 60, heightFeet: 5, rotatable: true },
+      targeting: { relation: 'enemy', includeSelf: false, maximumTargets: 64 },
+    })
+  })
+
   it('rejects executable automation in a plain JSON spell import', () => {
     expect(() => parseDnd5eSpellImport(bundle(spell({ automation: { mode: 'javascript', code: 'fetch("https://example.com")' } }))))
       .toThrow(/reference-only/)
@@ -91,9 +102,26 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference?.sourcePage).toBe(118)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
       .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(106)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(86)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(20)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(107)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(78)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(29)
+    expect(entries.find((entry) => entry.id === 'meteor-swarm')).toMatchObject({
+      headless: true,
+      automationLevel: 'partial',
+      automationReason: expect.stringContaining('四个不同落点'),
+      combat: {
+        areaTargetCount: 4,
+        damageType: 'fire',
+        additionalDamageComponents: [{ damageType: 'bludgeoning' }],
+      },
+    })
+    for (const spellId of ['mage-hand', 'darkness', 'daylight', 'spike-growth', 'spirit-guardians', 'see-invisibility', 'faerie-fire', 'shillelagh']) {
+      expect(entries.find((entry) => entry.id === spellId)).toMatchObject({
+        headless: true,
+        automationLevel: 'partial',
+        automationReason: expect.any(String),
+      })
+    }
     expect(entries.find((entry) => entry.id === 'prayer-of-healing')).toMatchObject({
       headless: true,
       automationLevel: 'partial',

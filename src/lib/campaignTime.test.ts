@@ -39,6 +39,49 @@ describe('campaign time model', () => {
     expect(canBenefitFromLongRest(960, 2_400)).toBe(true)
   })
 
+  it('preserves selected rest beneficiaries and rejects malformed authority fields', () => {
+    const state = {
+      schemaVersion: 2,
+      worldMinute: 540,
+      displayMode: 'campaign-day',
+      displayMinuteOffset: 0,
+      timers: [],
+      advances: [{
+        id: 'short-rest',
+        kind: 'short-rest',
+        fromWorldMinute: 480,
+        toWorldMinute: 540,
+        minutes: 60,
+        reason: '短休',
+        dawnsCrossed: 0,
+        expiredTimerIds: [],
+        beneficiaryCharacterIds: ['hero'],
+        restRecoveryReports: [{
+          characterId: 'hero',
+          characterName: '测试角色',
+          entries: [{
+            category: 'item-resource',
+            label: '魔杖 · 充能',
+            outcome: 'restored',
+            before: 0,
+            after: 3,
+            maximum: 3,
+          }],
+        }],
+        createdAt: 1,
+      }],
+      updatedAt: 1,
+    }
+    expect(validateSharedCampaignTime(state)).toBe(true)
+    expect(normalizeSharedCampaignTime(state).advances[0].beneficiaryCharacterIds).toEqual(['hero'])
+    expect(normalizeSharedCampaignTime(state).advances[0].restRecoveryReports?.[0].entries[0])
+      .toMatchObject({ label: '魔杖 · 充能', before: 0, after: 3 })
+    expect(validateSharedCampaignTime({
+      ...state,
+      advances: [{ ...state.advances[0], beneficiaryCharacterIds: ['hero', 'hero'] }],
+    })).toBe(false)
+  })
+
   it('creates timed light patches and expires them on the authoritative clock', () => {
     const torch = campaignLightPresetPatch('torch', 480)
     expect(torch).toMatchObject({ brightRadiusFeet: 20, dimRadiusFeet: 20, expiresAtWorldMinute: 540 })

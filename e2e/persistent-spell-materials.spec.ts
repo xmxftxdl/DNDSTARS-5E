@@ -95,7 +95,7 @@ test('persistent spells use material atlases without duplicate effect tokens', a
       make('moonbeam', [{ col: 8, row: 2 }], { col: 8, row: 2 }),
       make('spirit-guardians', square(10, 1, 5), { col: 12, row: 3 }),
       make('insect-plague', square(15, 1, 4), { col: 16, row: 2 }),
-      make('wall-of-fire', Array.from({ length: 10 }, (_, col) => ({ col: col + 2, row: 7 })), { col: 2, row: 7 }),
+      { ...make('wall-of-fire', square(2, 6, 5), { col: 4, row: 8 }), wallOfFireGeometry: { shape: 'ring' as const, angleDegrees: 0, damagingSide: 'outside' as const } },
       make('blade-barrier', Array.from({ length: 15 }, (_, col) => ({ col: col + 2, row: 10 })), { col: 2, row: 10 }),
     ].map((area) => ({
       ...area,
@@ -172,8 +172,11 @@ test('persistent spells use material atlases without duplicate effect tokens', a
     'persistent-area-sprite-atlas persistent-area-moonbeam',
     'persistent-area-sprite-atlas persistent-area-spirit-guardians',
     'persistent-area-sprite-atlas persistent-area-spiritual-weapon',
-    'persistent-area-sprite-atlas persistent-area-wall-of-fire',
   ].sort())
+  await expect.poll(() => dm.evaluate(async () => {
+    const Konva = (await import('/node_modules/.vite/deps/konva.js')).default
+    return Konva.stages.flatMap((stage) => stage.find('.wall-of-fire-ring-visual')).length
+  })).toBe(1)
   await dm.waitForTimeout(5_500)
   await canvas.screenshot({
     path: process.env.PERSISTENT_SPELL_MATERIALS_SCREENSHOT_PATH ??

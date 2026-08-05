@@ -99,4 +99,36 @@ describe('DM campaign long-rest transaction', () => {
       'dnd5e-spell-slot-3': { current: 2, max: 2 },
     })
   })
+
+  it('writes selected short-rest beneficiaries into the authoritative time mutation', async () => {
+    const current = clock(480)
+    const after = clock(540, [{
+      id: 'dm-short-rest',
+      kind: 'short-rest',
+      fromWorldMinute: 480,
+      toWorldMinute: 540,
+      minutes: 60,
+      reason: 'DM 短休',
+      dawnsCrossed: 0,
+      expiredTimerIds: [],
+      beneficiaryCharacterIds: ['wizard'],
+      createdAt: 1,
+    }])
+    const mutate = vi.fn(async () => after)
+
+    await runDnd5eCampaignLongRestTransaction({
+      currentClock: current,
+      restKind: 'short-rest',
+      reason: 'DM 短休',
+      beneficiaryCharacterIds: ['wizard'],
+      mutate,
+      reconcileCharacters: async () => undefined,
+    })
+
+    expect(mutate).toHaveBeenCalledWith({
+      operation: 'short-rest',
+      reason: 'DM 短休',
+      beneficiaryCharacterIds: ['wizard'],
+    })
+  })
 })

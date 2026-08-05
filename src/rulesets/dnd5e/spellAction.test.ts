@@ -1815,6 +1815,79 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepared.prepared.savingThrow).toMatchObject({ dc: 14 })
   })
 
+  it('resolves Meteor Swarm from four distinct Host-validated origins and deduplicates overlapping targets', () => {
+    const wizard = character('meteor-wizard', '法师', {
+      level: 17,
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['meteor-swarm'] } } } },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const first = token('meteor-first', 'enemy', 125)
+    const second = token('meteor-second', 'enemy', 875)
+    const input = fixture(wizard, 'meteor-swarm', 9, first)
+    input.map.tokens.push(second)
+    input.initiativeOrder.push({ tokenId: second.id, label: second.label, emoji: '', color: '', roll: 5 })
+    input.action.dnd5eSpellCast = {
+      spellId: 'meteor-swarm',
+      slotLevel: 9,
+      targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [],
+      areaTargetCells: [
+        { col: 2, row: 0 },
+        { col: 3, row: 0 },
+        { col: 16, row: 0 },
+        { col: 17, row: 0 },
+      ],
+    }
+
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.areaAnchorCells).toEqual(input.action.dnd5eSpellCast.areaTargetCells)
+    expect(prepared.prepared.damageDiceCounts).toEqual([20, 20])
+    expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([
+      input.action.actorTokenId,
+      first.id,
+      second.id,
+    ])
+
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      targetSavingThrows: prepared.prepared.targetTokens.map((entry) => ({ targetId: entry.id, d20: 1 })),
+      effectRolls: Array.from({ length: 20 }, () => 1),
+      additionalEffectRolls: [Array.from({ length: 20 }, () => 1)],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === first.id)?.hp).toBe(0)
+    expect(resolved.result.events.filter((event) =>
+      event.type === 'damage-applied' && event.targetId === first.id,
+    )).toHaveLength(1)
+    expect(resolved.application?.characters.find((entry) => entry.id === wizard.id)?.classResources)
+      .toMatchObject({ 'dnd5e-spell-slot-9': { current: 0, max: 1 } })
+  })
+
+  it('rejects Meteor Swarm unless four different origins are submitted', () => {
+    const wizard = character('meteor-wizard', '法师', {
+      level: 17,
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['meteor-swarm'] } } } },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const input = fixture(wizard, 'meteor-swarm', 9, token('meteor-target', 'enemy', 125))
+    input.action.dnd5eSpellCast = {
+      spellId: 'meteor-swarm', slotLevel: 9, targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [],
+      areaTargetCells: [
+        { col: 2, row: 0 },
+        { col: 2, row: 0 },
+        { col: 8, row: 0 },
+        { col: 12, row: 0 },
+      ],
+    }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'spell-area-target-required' })
+
+    input.action.dnd5eSpellCast.areaTargetCells = input.action.dnd5eSpellCast.areaTargetCells!.slice(0, 3)
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'spell-area-target-required' })
+  })
+
   it('casts Darkness as a concentration-linked magical-darkness map effect', () => {
     const wizard = character('wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['darkness'] } } } },

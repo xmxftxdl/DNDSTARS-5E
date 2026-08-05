@@ -2,8 +2,8 @@ import type { Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import {
   missingDnd5eRulesPluginRequirements,
   roomActiveDnd5eRulesPluginRequirements,
-  type Dnd5eRulesPluginRequirement,
-} from './pluginApi'
+} from './plugins/pluginRequirementProjection'
+import type { Dnd5eRulesPluginRequirement } from './plugins/pluginManifestContracts'
 
 export interface SharedDnd5eTurnEconomy {
   actionAvailable: boolean

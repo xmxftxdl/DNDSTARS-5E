@@ -63,7 +63,7 @@ export interface Dnd5eCustomMonsterActionDraft {
   id: string
   name: string
   description: string
-  kind: 'weapon-attack' | 'movement' | 'other'
+  kind: 'weapon-attack' | 'area-saving-throw' | 'summon' | 'movement' | 'other'
   automation: 'headless' | 'dm-adjudication'
   mode: 'melee' | 'ranged' | 'melee-or-ranged'
   toHit: number
@@ -89,6 +89,26 @@ export interface Dnd5eCustomMonsterActionDraft {
   referencedActionId: string
   movementSpeedFraction: number
   reactionTriggerActionId: string
+  areaShape: 'circle' | 'cone' | 'line'
+  areaSizeFeet: number
+  areaWidthFeet: number
+  areaSaveAbility: AbilityKey
+  areaSaveDc: number
+  areaDamageDice: string
+  /** 空字符串表示 AI／原文没有提供，必须由 DM 明确补齐。 */
+  areaDamageType: Dnd5eDamageType | ''
+  areaDamageOnSuccessfulSave: 'none' | 'half'
+  areaTarget: 'hostile' | 'all-creatures-except-self'
+  areaMagical: boolean
+  summonMonsterId: string
+  summonCountMode: 'fixed' | 'dice'
+  summonCount: number
+  summonCountDice: string
+  summonDurationRounds: number
+  summonTiming: 'immediate' | 'source-next-turn-start'
+  summonConcentration: boolean
+  summonConcentrationEndsOnAppearance: boolean
+  summonSide: 'ally' | 'enemy'
 }
 
 export interface Dnd5eCustomMonsterEquipmentDraft {
@@ -213,6 +233,7 @@ export interface Dnd5eCustomMonsterDraft {
   challengeRating: string
   xp: number
   description: string
+  portrait?: string
   tokenPortrait?: string
   initiativePortrait?: string
   equipment: Dnd5eCustomMonsterEquipmentDraft[]
@@ -300,6 +321,25 @@ export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionD
     referencedActionId: '',
     movementSpeedFraction: 0.5,
     reactionTriggerActionId: '',
+    areaShape: 'cone',
+    areaSizeFeet: 15,
+    areaWidthFeet: 5,
+    areaSaveAbility: 'dex',
+    areaSaveDc: 12,
+    areaDamageDice: '2d6',
+    areaDamageType: '',
+    areaDamageOnSuccessfulSave: 'half',
+    areaTarget: 'all-creatures-except-self',
+    areaMagical: false,
+    summonMonsterId: '',
+    summonCountMode: 'fixed',
+    summonCount: 1,
+    summonCountDice: '1d3',
+    summonDurationRounds: 10,
+    summonTiming: 'immediate',
+    summonConcentration: false,
+    summonConcentrationEndsOnAppearance: false,
+    summonSide: 'ally',
   }
 }
 
@@ -375,6 +415,7 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
     challengeRating: '1/4',
     xp: 50,
     description: '由 DM 创建的房间怪物。',
+    portrait: undefined,
     tokenPortrait: undefined,
     initiativePortrait: undefined,
     equipment: [],
@@ -407,6 +448,170 @@ function parseDice(value: string): { count: number; sides: number; bonus: number
   return { count, sides, bonus }
 }
 
+const AREA_ACTION_DAMAGE_TYPE_PATTERNS: readonly [RegExp, Dnd5eDamageType][] = [
+  [/强酸|酸蚀|acid/i, 'acid'],
+  [/钝击|bludgeoning/i, 'bludgeoning'],
+  [/寒冷|冰冷|cold/i, 'cold'],
+  [/火焰|fire/i, 'fire'],
+  [/力场|force/i, 'force'],
+  [/闪电|雷电|lightning/i, 'lightning'],
+  [/黯蚀|死灵|necrotic/i, 'necrotic'],
+  [/穿刺|piercing/i, 'piercing'],
+  [/毒素|毒液|poison/i, 'poison'],
+  [/心灵|psychic/i, 'psychic'],
+  [/光耀|radiant/i, 'radiant'],
+  [/挥砍|slashing/i, 'slashing'],
+  [/雷鸣|thunder/i, 'thunder'],
+]
+
+const AREA_ACTION_ABILITY_PATTERNS: readonly [RegExp, AbilityKey][] = [
+  [/力量|strength|\bstr\b/i, 'str'],
+  [/敏捷|dexterity|\bdex\b/i, 'dex'],
+  [/体质|constitution|\bcon\b/i, 'con'],
+  [/智力|intelligence|\bint\b/i, 'int'],
+  [/感知|wisdom|\bwis\b/i, 'wis'],
+  [/魅力|charisma|\bcha\b/i, 'cha'],
+]
+
+export function validateDnd5eCustomMonsterAreaActionDraft(
+  action: Dnd5eCustomMonsterActionDraft,
+): string[] {
+  if (action.kind !== 'area-saving-throw') return []
+  const issues: string[] = []
+  if (!action.name.trim()) issues.push('名称不能为空')
+  if (!action.description.trim()) issues.push('必须保留完整规则描述')
+  if (!/^[a-z][a-z0-9-]*$/.test(action.id)) issues.push('动作 ID 必须使用小写字母、数字和连字符')
+  if (action.category !== 'action' && action.category !== 'legendary') {
+    issues.push('范围豁免动作目前只支持普通动作或传奇动作')
+  }
+  try {
+    parseDice(action.areaDamageDice)
+  } catch {
+    issues.push('伤害骰格式无效（例如 2d6）')
+  }
+  if (!action.areaDamageType || !DND5E_DAMAGE_TYPES.includes(action.areaDamageType)) {
+    issues.push('请选择伤害类型')
+  }
+  if (!ABILITY_KEYS.includes(action.areaSaveAbility)) issues.push('请选择豁免属性')
+  if (!Number.isInteger(action.areaSaveDc) || action.areaSaveDc < 1 || action.areaSaveDc > 100) {
+    issues.push('豁免 DC 必须是 1–100 的整数')
+  }
+  if (!Number.isInteger(action.areaSizeFeet) || action.areaSizeFeet < 1) {
+    issues.push(action.areaShape === 'circle' ? '半径必须大于 0 尺' : '范围长度必须大于 0 尺')
+  }
+  if (action.areaShape === 'line' && (!Number.isInteger(action.areaWidthFeet) || action.areaWidthFeet < 1)) {
+    issues.push('线形宽度必须大于 0 尺')
+  }
+  if (action.usageKind === 'recharge' && (
+    !Number.isInteger(action.rechargeDieSides) || action.rechargeDieSides < 2 ||
+    !Number.isInteger(action.rechargeMinimum) || action.rechargeMinimum < 1 ||
+    action.rechargeMinimum > action.rechargeDieSides
+  )) issues.push('充能下限必须在充能骰范围内')
+  return issues
+}
+
+export function validateDnd5eCustomMonsterSummonActionDraft(
+  action: Dnd5eCustomMonsterActionDraft,
+): string[] {
+  if (action.kind !== 'summon') return []
+  const issues: string[] = []
+  if (!action.name.trim()) issues.push('名称不能为空')
+  if (!/^[a-z][a-z0-9-]*$/.test(action.id)) issues.push('动作 ID 必须使用小写字母、数字和连字符')
+  if (!/^(?:srd-5\.1|room-monster):[a-z0-9][a-z0-9-]{0,95}$/.test(action.summonMonsterId)) {
+    issues.push('请选择当前目录中的召唤怪物')
+  }
+  if (action.category !== 'action' && action.category !== 'legendary') {
+    issues.push('召唤目前仅支持普通动作或传奇动作')
+  }
+  if (action.summonCountMode === 'fixed') {
+    if (!Number.isInteger(action.summonCount) || action.summonCount < 1 || action.summonCount > 20) {
+      issues.push('固定召唤数量必须是 1–20 的整数')
+    }
+  } else {
+    try {
+      const dice = parseDice(action.summonCountDice)
+      const minimum = dice.count + dice.bonus
+      const maximum = dice.count * dice.sides + dice.bonus
+      if (minimum < 1 || maximum > 20) issues.push('随机召唤数量的结果范围必须在 1–20 内')
+    } catch {
+      issues.push('随机数量必须使用骰式，例如 1d3 或 1d6')
+    }
+  }
+  if (!Number.isInteger(action.summonDurationRounds) || action.summonDurationRounds < 1 || action.summonDurationRounds > 10_000) {
+    issues.push('持续轮数必须是 1–10000 的整数')
+  }
+  if (action.summonConcentrationEndsOnAppearance && (
+    !action.summonConcentration || action.summonTiming !== 'source-next-turn-start'
+  )) issues.push('“出现后结束专注”只能用于下回合开始时出现的召唤')
+  return issues
+}
+
+/**
+ * Only offer the one-click area-action conversion when the source text
+ * actually declares every structural ingredient needed by Headless. This
+ * prevents passive traits and spell-list headings from inheriting synthetic
+ * cone/DC/damage defaults merely because they contain a die expression.
+ */
+export function canConvertDnd5eCustomMonsterTraitToAreaAction(
+  trait: Pick<Dnd5eCustomMonsterTraitDraft, 'name' | 'description'>,
+): boolean {
+  const text = `${trait.name} ${trait.description}`
+  const hasArea = /(锥(?:形|状)?|线形|直线|半径|范围|尺内|英尺内|cone|line|radius|area|within\s+\d+\s*(?:feet|ft))/i.test(text)
+  const hasSave = /(豁免|saving\s+throw|\bsave\b)/i.test(text)
+  const hasDc = /\bdc\s*\d+/i.test(text)
+  const hasDamageDice = /\d+\s*d\s*\d+/i.test(text) && /(伤害|damage)/i.test(text)
+  return hasArea && hasSave && hasDc && hasDamageDice
+}
+
+/**
+ * 将 AI 放错到“特性”里的主动范围能力转成可编辑的 Headless 动作草稿。
+ * 只提取原文明确给出的数值；伤害类型缺失时故意保持为空，等待 DM 确认。
+ */
+export function createDnd5eCustomMonsterAreaActionDraftFromTrait(
+  trait: Pick<Dnd5eCustomMonsterTraitDraft, 'name' | 'description'>,
+): Dnd5eCustomMonsterActionDraft {
+  if (!canConvertDnd5eCustomMonsterTraitToAreaAction(trait)) {
+    throw new Error('该特性没有同时提供范围、豁免 DC 与伤害骰，不能自动转为 Headless 范围动作')
+  }
+  const text = `${trait.name} ${trait.description}`
+  const draft = createDnd5eCustomMonsterActionDraft()
+  const dice = text.match(/(\d+)\s*d\s*(\d+)(?:\s*([+-])\s*(\d+))?/i)
+  const dc = text.match(/\bdc\s*(\d+)/i)
+  const distance = text.match(/(\d+)\s*(?:尺|英尺|ft\.?)/i)
+  const recharge = text.match(/充能\s*(\d+)(?:\s*[-–—至~]\s*(\d+))?/i)
+  const damageType = AREA_ACTION_DAMAGE_TYPE_PATTERNS.find(([pattern]) => pattern.test(text))?.[1] ?? ''
+  const saveAbility = AREA_ACTION_ABILITY_PATTERNS.find(([pattern]) => pattern.test(text))?.[1] ?? 'dex'
+  const areaShape = /线形|直线|line/i.test(text)
+    ? 'line' as const
+    : /圆形|半径|radius|circle/i.test(text)
+      ? 'circle' as const
+      : 'cone' as const
+  const rechargeMinimum = recharge ? Number(recharge[1]) : 5
+  const rechargeDieSides = recharge ? Number(recharge[2] ?? 6) : 6
+  return {
+    ...draft,
+    id: `area-action-${uid().slice(0, 8)}`,
+    name: trait.name.trim() || '范围豁免能力',
+    description: trait.description.trim(),
+    kind: 'area-saving-throw',
+    automation: 'headless',
+    category: 'action',
+    areaShape,
+    areaSizeFeet: distance ? Number(distance[1]) : 15,
+    areaWidthFeet: 5,
+    areaSaveAbility: saveAbility,
+    areaSaveDc: dc ? Number(dc[1]) : 12,
+    areaDamageDice: dice
+      ? `${dice[1]}d${dice[2]}${dice[3] ? `${dice[3]}${dice[4]}` : ''}`
+      : '2d6',
+    areaDamageType: damageType,
+    areaDamageOnSuccessfulSave: /减半|一半|half/i.test(text) ? 'half' : 'none',
+    usageKind: recharge ? 'recharge' : 'at-will',
+    rechargeMinimum,
+    rechargeDieSides,
+  }
+}
+
 function actionDescription(action: Dnd5eCustomMonsterActionDraft, dice: ReturnType<typeof parseDice>): string {
   if (action.description.trim()) return action.description.trim()
   const mode = action.mode === 'melee' ? '近战' : action.mode === 'ranged' ? '远程' : '近战或远程'
@@ -437,6 +642,79 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
     ...(action.category === 'reaction' && action.reactionTriggerActionId.trim()
       ? { reactionTrigger: { kind: 'after-action' as const, actionId: action.reactionTriggerActionId.trim() } }
       : {}),
+  }
+  if (action.kind === 'area-saving-throw') {
+    const issues = validateDnd5eCustomMonsterAreaActionDraft(action)
+    if (issues.length > 0) {
+      throw new Error(`动作“${action.name || action.id}”无法接入 Headless：${issues.join('；')}`)
+    }
+    const dice = parseDice(action.areaDamageDice)
+    const area = action.areaShape === 'circle'
+      ? { shape: 'circle' as const, origin: 'self' as const, radiusFeet: Math.trunc(action.areaSizeFeet) }
+      : action.areaShape === 'line'
+        ? {
+            shape: 'line' as const,
+            origin: 'self' as const,
+            lengthFeet: Math.trunc(action.areaSizeFeet),
+            widthFeet: Math.trunc(action.areaWidthFeet),
+            aimRangeFeet: Math.trunc(action.areaSizeFeet),
+          }
+        : {
+            shape: 'cone' as const,
+            origin: 'self' as const,
+            lengthFeet: Math.trunc(action.areaSizeFeet),
+            aimRangeFeet: Math.trunc(action.areaSizeFeet),
+          }
+    return {
+      id: action.id,
+      name: action.name.trim(),
+      description: action.description.trim(),
+      kind: 'other',
+      automation: 'headless',
+      rule: {
+        kind: 'area-saving-throw',
+        area,
+        target: action.areaTarget,
+        ability: action.areaSaveAbility,
+        dc: Math.trunc(action.areaSaveDc),
+        ...(action.areaMagical ? { magical: true } : {}),
+        damage: {
+          average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+          ...dice,
+          type: action.areaDamageType as Dnd5eDamageType,
+        },
+        damageOnSuccessfulSave: action.areaDamageOnSuccessfulSave,
+      },
+      ...metadata,
+    }
+  }
+  if (action.kind === 'summon') {
+    const issues = validateDnd5eCustomMonsterSummonActionDraft(action)
+    if (issues.length > 0) {
+      throw new Error(`动作“${action.name || action.id}”无法接入 Headless：${issues.join('；')}`)
+    }
+    const count = action.summonCountMode === 'fixed'
+      ? { kind: 'fixed' as const, value: Math.trunc(action.summonCount) }
+      : { kind: 'dice' as const, ...parseDice(action.summonCountDice) }
+    return {
+      id: action.id,
+      name: action.name.trim(),
+      description: action.description.trim() ||
+        `召唤 ${action.summonCountMode === 'fixed' ? action.summonCount : action.summonCountDice} 个目录生物。`,
+      kind: 'other',
+      automation: 'headless',
+      rule: {
+        kind: 'summon',
+        monsterId: action.summonMonsterId,
+        count,
+        timing: action.summonTiming,
+        durationRounds: Math.trunc(action.summonDurationRounds),
+        concentration: action.summonConcentration,
+        concentrationEndsOnAppearance: action.summonConcentrationEndsOnAppearance,
+        side: action.summonSide,
+      },
+      ...metadata,
+    }
   }
   if (action.kind === 'movement') {
     return {
@@ -515,9 +793,10 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
     name: action.name.trim(),
     description: actionDescription(action, parsed),
     kind: 'weapon-attack',
-    automation: action.category === 'action' || action.category === 'legendary'
-      ? action.automation
-      : 'dm-adjudication',
+    automation: action.category === 'lair' ||
+      (action.category === 'reaction' && !action.reactionTriggerActionId.trim())
+      ? 'dm-adjudication'
+      : action.automation,
     attack,
     ...metadata,
   }
@@ -854,6 +1133,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     legendaryResistanceUses: Math.max(0, Math.min(99, Math.trunc(draft.legendaryResistanceUses))),
     legendaryActionPoints: Math.max(0, Math.min(99, Math.trunc(draft.legendaryActionPoints))),
     lairInitiative: Math.max(0, Math.min(99, Math.trunc(draft.lairInitiative))),
+    ...(draft.portrait ? { portrait: draft.portrait } : {}),
     ...(draft.tokenPortrait ? { tokenPortrait: draft.tokenPortrait } : {}),
     ...(draft.initiativePortrait ? { initiativePortrait: draft.initiativePortrait } : {}),
     equipment: draft.equipment.filter((item) => item.name.trim()).map((item) => ({
@@ -902,6 +1182,52 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
   return parsed.value
 }
 
+const WRAPPED_ACTION_DAMAGE_TYPES: readonly [RegExp, Dnd5eDamageType][] = [
+  [/强酸|酸蚀|acid/i, 'acid'], [/钝击|bludgeoning/i, 'bludgeoning'],
+  [/寒冷|cold/i, 'cold'], [/火焰|fire/i, 'fire'], [/力场|force/i, 'force'],
+  [/闪电|lightning/i, 'lightning'], [/黯蚀|死灵|necrotic/i, 'necrotic'],
+  [/穿刺|piercing/i, 'piercing'], [/毒素|poison/i, 'poison'], [/心灵|psychic/i, 'psychic'],
+  [/光耀|radiant/i, 'radiant'], [/挥砍|slashing/i, 'slashing'], [/雷鸣|thunder/i, 'thunder'],
+]
+
+function repairWrappedActionDrafts(
+  actions: readonly Dnd5eCustomMonsterActionDraft[],
+): Dnd5eCustomMonsterActionDraft[] {
+  const repaired: Dnd5eCustomMonsterActionDraft[] = []
+  for (let index = 0; index < actions.length; index += 1) {
+    const action = actions[index]
+    const continuation = actions[index + 1]
+    const continuationHeading = continuation?.name.match(
+      /^([+−-]\s*\d+)\s*[,，]\s*(?:伤害|damage)$/i,
+    )
+    const canMerge = action.kind === 'weapon-attack' &&
+      continuation?.kind === 'other' &&
+      continuation.category === action.category &&
+      /(?:命中|to hit)\s*$/i.test(action.description.trim()) &&
+      !!continuationHeading &&
+      /\d+\s*d\s*\d+/i.test(continuation.description)
+    if (!canMerge || !continuation || !continuationHeading) {
+      repaired.push(action)
+      continue
+    }
+    const combinedDescription = `${action.description.trim()} ${continuation.name}：${continuation.description.trim()}`
+    const dice = combinedDescription.match(/(\d+)\s*d\s*(\d+)(?:\s*([+−-])\s*(\d+))?/i)
+    const damageType = WRAPPED_ACTION_DAMAGE_TYPES.find(([pattern]) => pattern.test(combinedDescription))?.[1]
+    repaired.push({
+      ...action,
+      description: combinedDescription,
+      toHit: Number(continuationHeading[1].replace(/\s+/g, '').replace('−', '-')),
+      damageDice: dice
+        ? `${dice[1]}d${dice[2]}${dice[3] ? `${dice[3].replace('−', '-')}${dice[4]}` : ''}`
+        : action.damageDice,
+      damageType: damageType ?? action.damageType,
+      automation: 'headless',
+    })
+    index += 1
+  }
+  return repaired
+}
+
 export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBlock): Dnd5eCustomMonsterDraft {
   const actionGroups: readonly [
     Dnd5eCustomMonsterActionDraft['category'],
@@ -913,15 +1239,28 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     ['legendary', monster.legendaryActions ?? []],
     ['lair', monster.lairActions ?? []],
   ]
-  const draftActions: Dnd5eCustomMonsterActionDraft[] = actionGroups.flatMap(([category, entries]) =>
+  const mappedDraftActions: Dnd5eCustomMonsterActionDraft[] = actionGroups.flatMap(([category, entries]) =>
     entries.map((action) => {
       const damage = action.attack?.damage[0]
       const usage = action.usage
+      const areaRule = action.rule?.kind === 'area-saving-throw' && !action.rule.variants
+        ? action.rule
+        : undefined
+      const summonRule = action.rule?.kind === 'summon' ? action.rule : undefined
+      const areaDamage = areaRule?.damage
       return {
         id: action.id,
         name: action.name,
         description: action.description,
-        kind: action.kind === 'weapon-attack' ? 'weapon-attack' : action.movement ? 'movement' : 'other',
+        kind: action.kind === 'weapon-attack'
+          ? 'weapon-attack'
+          : areaRule
+            ? 'area-saving-throw'
+            : summonRule
+              ? 'summon'
+            : action.movement
+              ? 'movement'
+              : 'other',
         automation: action.automation ?? (action.kind === 'weapon-attack' ? 'headless' : 'dm-adjudication'),
         mode: action.attack?.mode ?? 'melee',
         toHit: action.attack?.toHit ?? 0,
@@ -957,9 +1296,41 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         referencedActionId: action.referencedActionId ?? '',
         movementSpeedFraction: action.movement?.maximumSpeedFraction ?? 0.5,
         reactionTriggerActionId: action.reactionTrigger?.actionId ?? '',
+        areaShape: areaRule?.area.shape === 'circle'
+          ? 'circle'
+          : areaRule?.area.shape === 'line'
+            ? 'line'
+            : 'cone',
+        areaSizeFeet: areaRule?.area.shape === 'circle'
+          ? areaRule.area.radiusFeet
+          : areaRule?.area.shape === 'line' || areaRule?.area.shape === 'cone'
+            ? areaRule.area.lengthFeet
+            : 15,
+        areaWidthFeet: areaRule?.area.shape === 'line' ? areaRule.area.widthFeet : 5,
+        areaSaveAbility: areaRule?.ability ?? 'dex',
+        areaSaveDc: areaRule?.dc ?? 12,
+        areaDamageDice: areaDamage
+          ? `${areaDamage.count}d${areaDamage.sides}${areaDamage.bonus === 0 ? '' : areaDamage.bonus > 0 ? `+${areaDamage.bonus}` : areaDamage.bonus}`
+          : '2d6',
+        areaDamageType: areaDamage?.type ?? '',
+        areaDamageOnSuccessfulSave: areaRule?.damageOnSuccessfulSave ?? 'none',
+        areaTarget: areaRule?.target ?? 'all-creatures-except-self',
+        areaMagical: areaRule?.magical ?? false,
+        summonMonsterId: summonRule?.monsterId ?? '',
+        summonCountMode: summonRule?.count.kind ?? 'fixed',
+        summonCount: summonRule?.count.kind === 'fixed' ? summonRule.count.value : 1,
+        summonCountDice: summonRule?.count.kind === 'dice'
+          ? `${summonRule.count.count}d${summonRule.count.sides}${summonRule.count.bonus === 0 ? '' : summonRule.count.bonus > 0 ? `+${summonRule.count.bonus}` : summonRule.count.bonus}`
+          : '1d3',
+        summonDurationRounds: summonRule?.durationRounds ?? 10,
+        summonTiming: summonRule?.timing ?? 'immediate',
+        summonConcentration: summonRule?.concentration ?? false,
+        summonConcentrationEndsOnAppearance: summonRule?.concentrationEndsOnAppearance ?? false,
+        summonSide: summonRule?.side ?? 'ally',
       }
     }),
   )
+  const draftActions = repairWrappedActionDrafts(mappedDraftActions)
   return {
     preservedStatBlock: structuredClone(monster),
     id: monster.id,
@@ -1003,6 +1374,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     challengeRating: monster.challenge.rating,
     xp: monster.challenge.xp,
     description: monster.description,
+    portrait: monster.portrait,
     tokenPortrait: monster.tokenPortrait,
     initiativePortrait: monster.initiativePortrait,
     equipment: (monster.equipment ?? []).map((item) => ({

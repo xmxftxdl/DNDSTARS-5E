@@ -41,7 +41,6 @@ export type AiProviderExecutionError =
   | 'provider-not-found'
   | 'provider-unavailable'
   | 'provider-cannot-run-task'
-  | 'paid-fallback-unavailable'
   | 'unsupported-ai-task'
   | 'invalid-provider-selection-schema'
   | 'invalid-provider-selection'
@@ -218,7 +217,7 @@ export const BUILTIN_AI_PROVIDER_CATALOG: readonly AiProviderDescriptorV1[] = [
 
 export const DEFAULT_AI_PROVIDER_SELECTION: AiProviderSelectionV1 = {
   schemaVersion: 1,
-  providerId: 'local-bridge',
+  providerId: 'external-account',
   allowPaidFallback: false,
   maxCreditsPerTask: 0,
 }

@@ -120,6 +120,13 @@ describe('SpellSettlementCoordinator', () => {
       'power-word-stun',
       'power-word-kill',
       'false-life',
+      'hypnotic-pattern',
+      'slow',
+      'phantasmal-killer',
+      'banishment',
+      'hold-monster',
+      'dispel-magic',
+      'lesser-restoration',
     ]) {
       expect(spellPresentationsBeforeRoll({
         spellId,
@@ -129,6 +136,17 @@ describe('SpellSettlementCoordinator', () => {
         targetTokenIds: ['target'],
       })).toEqual([expect.objectContaining({ spellId, targetTokenId: 'target' })])
     }
+    expect(spellPresentationsBeforeRoll({
+      spellId: 'misty-step',
+      transactionId: 'misty-step-tx',
+      mapId: 'map',
+      actorTokenId: 'wizard',
+      targetTokenIds: [],
+    })).toEqual([expect.objectContaining({
+      spellId: 'misty-step',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'wizard',
+    })])
     expect(spellPresentationsBeforeRoll({
       spellId: 'eldritch-blast',
       transactionId: 'blast-tx',

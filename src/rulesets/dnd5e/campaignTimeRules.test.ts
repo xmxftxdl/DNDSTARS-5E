@@ -65,4 +65,50 @@ describe('D&D 5e campaign-time reconciliation', () => {
     expect(result.character.currentHp).toBe(12)
     expect(result.character.dnd5eLastLongRestWorldMinute).toBe(960)
   })
+
+  it('applies a short rest only to the DM-selected beneficiaries', () => {
+    const rest = {
+      id: 'short-rest', kind: 'short-rest' as const, fromWorldMinute: 480, toWorldMinute: 540,
+      minutes: 60, reason: '短休', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1,
+      beneficiaryCharacterIds: ['hero'],
+    }
+    const selected = reconcileDnd5eCharacterCampaignTime(character({
+      dnd5eWorldTimeAppliedMinute: 480,
+      classResources: { fighterSecondWind: { current: 0, max: 1 } },
+    }), clock(540, [rest]))
+    const skipped = reconcileDnd5eCharacterCampaignTime(character({
+      id: 'other',
+      dnd5eWorldTimeAppliedMinute: 480,
+      classResources: { fighterSecondWind: { current: 0, max: 1 } },
+    }), clock(540, [rest]))
+
+    expect(selected.character.classResources?.fighterSecondWind.current).toBe(1)
+    expect(skipped.character.classResources?.fighterSecondWind.current).toBe(0)
+    expect(skipped.character.dnd5eWorldTimeAppliedMinute).toBe(540)
+  })
+
+  it('lets a DM override the 24-hour long-rest limit for selected characters only', () => {
+    const rest = {
+      id: 'forced-long-rest', kind: 'long-rest' as const, fromWorldMinute: 960, toWorldMinute: 1_440,
+      minutes: 480, reason: 'DM 覆盖长休', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1,
+      beneficiaryCharacterIds: ['hero'], ignoreLongRestCooldown: true,
+    }
+    const selected = reconcileDnd5eCharacterCampaignTime(character({
+      currentHp: 1,
+      dnd5eWorldTimeAppliedMinute: 960,
+      dnd5eLastLongRestWorldMinute: 900,
+    }), clock(1_440, [rest]))
+    const skipped = reconcileDnd5eCharacterCampaignTime(character({
+      id: 'other',
+      currentHp: 1,
+      dnd5eWorldTimeAppliedMinute: 960,
+      dnd5eLastLongRestWorldMinute: 900,
+    }), clock(1_440, [rest]))
+
+    expect(selected.longRestsApplied).toBe(1)
+    expect(selected.character.currentHp).toBe(12)
+    expect(selected.character.dnd5eLastLongRestWorldMinute).toBe(1_440)
+    expect(skipped.longRestsApplied).toBe(0)
+    expect(skipped.character.currentHp).toBe(1)
+  })
 })

@@ -13,6 +13,7 @@ import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesSta
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 import { nextCampaignRoomPath } from './lib/campaignNavigation'
+import { showAppConfirm } from './lib/appDialog'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
 const Sidebar = lazy(() => import('./components/Sidebar'))
@@ -30,7 +31,7 @@ const DmWorkshopPage = lazy(() => import('./pages/DmWorkshopPage'))
 const ActiveRulesExtensionsPage = lazy(() => import('./pages/ActiveRulesExtensionsPage'))
 const MapsPage = lazy(() => import('./pages/MapsPage'))
 const CharactersPage = lazy(() => import('./pages/CharactersPage'))
-const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
+const CampaignSettingsPage = lazy(() => import('./pages/CampaignSettingsPage'))
 const PluginsPage = lazy(() => import('./pages/PluginsPage'))
 const PluginPublisherPage = lazy(() => import('./pages/PluginPublisherPage'))
 const PluginCatalogDetailPage = lazy(() => import('./pages/PluginCatalogDetailPage'))
@@ -101,10 +102,20 @@ export default function App() {
       if (pulsing) return
       pulsing = true
       try {
-        const [{ useCharacterStore }, { roomActiveDnd5eRulesPluginRequirements }] = await Promise.all([
+        const [
+          { useCharacterStore },
+          { roomActiveDnd5eRulesPluginRequirements },
+          { ensureDnd5eRulesPluginHost },
+        ] = await Promise.all([
           import('./store/characters'),
-          import('./rulesets/dnd5e/pluginApi'),
+          import('./rulesets/dnd5e/plugins/pluginRequirementProjection'),
+          import('./rulesets/dnd5e/pluginLoader'),
         ])
+        // A user can log in on the public landing page and enter the campaign
+        // through BrowserRouter without a document reload. In that path
+        // main.tsx intentionally did not load the rules runtime, so initialize
+        // it here before reporting active room plugins to the server.
+        await ensureDnd5eRulesPluginHost()
         const characterState = useCharacterStore.getState()
         const assignedCharacterId = roomSession.role === 'player'
           ? getAssignedPlayerCharacterId(roomSession.slot)
@@ -320,7 +331,7 @@ export default function App() {
     const confirmation = intent === 'new-room'
       ? '建立下一场房间会结束当前临时房间，但地图、角色、讲义和战役总览数据会继续保留在当前战役中。确定继续吗？'
       : '离开后房间不会关闭；下次可从战役列表恢复并继续使用。确定离开吗？'
-    if (roomSession.role === 'dm' && !window.confirm(confirmation)) return
+    if (roomSession.role === 'dm' && !(await showAppConfirm(confirmation))) return
     setRoomTransition(intent)
     try {
       if (intent === 'new-room') await closeRoom(roomSession)
@@ -427,7 +438,7 @@ export default function App() {
           {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/extensions" element={lazyPage('规则与扩展', <ActiveRulesExtensionsPage />)} />}
-          {!isSpectator && <Route path="/campaign/:campaignId/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
+          {!isSpectator && <Route path="/campaign/:campaignId/settings" element={lazyPage('设置页面', <CampaignSettingsPage />)} />}
           <Route path="/campaign/:campaignId" element={<Navigate to={defaultCampaignPath} replace />} />
           <Route path="/" element={<Navigate to={defaultCampaignPath} replace />} />
           <Route path="/maps" element={<Navigate to={`${campaignBasePath}/maps`} replace />} />

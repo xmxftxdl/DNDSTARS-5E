@@ -83,4 +83,38 @@ describe('EnemyDetailPanel monster thumbnail', () => {
     expect(markup).toContain('80 / 80')
     expect(markup).toContain('width:100%')
   })
+
+  it('renders a DM-approved room-monster snapshot without the private catalogue', () => {
+    const markup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken({
+          label: '房间测试怪物',
+          poolId: 'room-monster:player-visible-test',
+          playerVisibleEnemyDetail: {
+            schemaVersion: 1,
+            monsterId: 'room-monster:player-visible-test',
+            description: '玩家可以阅读的怪物简介。',
+            tags: ['中型', '类人生物'],
+            statBlock: {
+              cr: '2',
+              ac: 14,
+              maxHp: 27,
+              speed: '30 尺',
+              abilities: { str: 14, dex: 12, con: 14, int: 10, wis: 11, cha: 8 },
+              traits: [{ name: '公开特性', description: '玩家可见的特性说明。' }],
+              actions: [{ name: '长剑', description: '近战武器攻击。', toHit: 4, damageDice: '1d8+2' }],
+              source: 'DM 自定义',
+            },
+          },
+        })}
+        onClose={() => {}}
+      />,
+    )
+
+    expect(markup).toContain('CR 2')
+    expect(markup).toContain('玩家可以阅读的怪物简介。')
+    expect(markup).toContain('公开特性')
+    expect(markup).toContain('长剑')
+    expect(markup).not.toContain('尚未关联怪物种类')
+  })
 })

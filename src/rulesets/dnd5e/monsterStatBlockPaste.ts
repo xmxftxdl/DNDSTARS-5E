@@ -14,6 +14,7 @@ import {
   parseDnd5eFeatureMechanicText,
   parseDnd5eSpellcastingText,
 } from './monsterContentAutoParser'
+import { dnd5eMonsterContentSlug, normalizeDnd5eMonsterDraftContent } from './monsterContentDeepAnalysis'
 
 export interface Dnd5ePastedMonsterParseResult {
   draft: Dnd5eCustomMonsterDraft
@@ -73,7 +74,18 @@ const SKILL_NAMES: Record<string, string> = {
   persuasion: '游说', athletics: '运动',
   杂技: '杂技', 巧手: '巧手', 隐匿: '隐匿', 奥秘: '奥秘', 历史: '历史', 调查: '调查',
   自然: '自然', 宗教: '宗教', 驯兽: '驯兽', 洞悉: '洞悉', 医药: '医药', 察觉: '察觉',
-  生存: '生存', 欺瞒: '欺瞒', 威吓: '威吓', 表演: '表演', 游说: '游说', 运动: '运动',
+  生存: '生存', 欺瞒: '欺瞒', 威吓: '威吓', 表演: '表演', 游说: '游说', 说服: '说服', 运动: '运动',
+}
+
+const SKILL_KEYS: Record<string, string> = {
+  acrobatics: 'acrobatics', 杂技: 'acrobatics', 'sleight of hand': 'sleight-of-hand', 巧手: 'sleight-of-hand',
+  stealth: 'stealth', 隐匿: 'stealth', arcana: 'arcana', 奥秘: 'arcana', history: 'history', 历史: 'history',
+  investigation: 'investigation', 调查: 'investigation', nature: 'nature', 自然: 'nature', religion: 'religion', 宗教: 'religion',
+  'animal handling': 'animal-handling', 驯兽: 'animal-handling', insight: 'insight', 洞悉: 'insight',
+  medicine: 'medicine', 医药: 'medicine', perception: 'perception', 察觉: 'perception', survival: 'survival', 生存: 'survival',
+  deception: 'deception', 欺瞒: 'deception', intimidation: 'intimidation', 威吓: 'intimidation',
+  performance: 'performance', 表演: 'performance', persuasion: 'persuasion', 游说: 'persuasion', 说服: 'persuasion',
+  athletics: 'athletics', 运动: 'athletics',
 }
 
 function normalizeText(value: string): string {
@@ -133,18 +145,38 @@ function parseBonuses(value: string, kind: 'saving-throw' | 'skill') {
   return [...value.matchAll(/([A-Za-z][A-Za-z ]+|[\u4e00-\u9fff]{2,6})\s*([+−-]\s*\d+)/g)]
     .map((match) => ({ label: match[1].trim(), bonus: signedInteger(match[2]) }))
     .filter((entry) => Number.isFinite(entry.bonus) && (
-      kind === 'saving-throw' || SKILL_NAMES[entry.label.toLowerCase()] || SKILL_NAMES[entry.label]
+      kind === 'saving-throw' || SKILL_KEYS[entry.label.toLowerCase()] || SKILL_KEYS[entry.label]
     ))
 }
 
 function splitNamedEntries(lines: readonly string[]): Array<{ name: string; description: string }> {
   const entries: Array<{ name: string; description: string }> = []
   for (const line of lines) {
-    const match = line.match(/^(.{1,80}?)[.。]\s*(.+)$/)
-    if (match) {
+    const match = line.match(/^(.{1,80}?)[.。:：]\s*(.+)$/)
+    const separator = match ? line[match[1].length] : ''
+    const possibleHeading = match?.[1].trim() ?? ''
+    const previousDescription = entries.at(-1)?.description ?? ''
+    const previousLooksIncomplete = !/[.!。！？?）)]$/.test(previousDescription)
+    const wrappedSentenceFragment = !!match && (separator === '.' || separator === '。') && entries.length > 0 && (
+      possibleHeading.length <= 1 ||
+      (previousLooksIncomplete && (
+        /\d|\bDC\b|\bd\d+|伤害|豁免|命中|失败|成功|目标|生物|回合|尺/i.test(possibleHeading) ||
+        /^(?:量|败者|成功者|失败者|则|并且|以及|目标|该|所有|每个)/.test(possibleHeading)
+      ))
+    )
+    const wrappedColonFragment = !!match && (separator === ':' || separator === '：') &&
+      entries.length > 0 && previousLooksIncomplete && (
+        /^[+−-]\s*\d+(?:\s*[,，]\s*(?:伤害|damage|命中|to hit))?$/i.test(possibleHeading) ||
+        /^(?:伤害|damage|命中|to hit|豁免|saving throw)\s*[+−-]?\s*\d*/i.test(possibleHeading)
+      )
+    if (match && !wrappedSentenceFragment && !wrappedColonFragment) {
       entries.push({ name: match[1].trim(), description: match[2].trim() })
+    } else if (/^.{1,80}?[（(](?:Recharge|充能)\s*\d(?:\s*[–—-]\s*6)?[）)]\s*$/i.test(line)) {
+      entries.push({ name: line.trim(), description: '' })
     } else if (entries.length > 0) {
-      entries[entries.length - 1].description += ` ${line}`
+      const previous = entries[entries.length - 1].description
+      const joiner = /[\u3400-\u9fff]$/.test(previous) && /^[\u3400-\u9fff]/.test(line) ? '' : ' '
+      entries[entries.length - 1].description = `${previous}${joiner}${line}`.trim()
     }
   }
   return entries
@@ -170,8 +202,20 @@ function actionDraft(name: string, description: string): Dnd5eCustomMonsterActio
   const mode = /Melee or Ranged|近战或远程/i.test(description)
     ? 'melee-or-ranged'
     : /Ranged|远程/i.test(description) ? 'ranged' : 'melee'
+  const recharge = name.match(/(?:Recharge|充能)\s*(\d)(?:\s*[–—-]\s*6)?/i)
+  const normalizedName = name.replace(/\s*[（(](?:Recharge|充能).+?[）)]\s*$/i, '').trim()
+  const stableId = `action-${dnd5eMonsterContentSlug(normalizedName || 'pasted')}`
   if (!isAttack) {
-    return { ...base, name, description, kind: 'other', automation: 'dm-adjudication' }
+    return {
+      ...base,
+      id: stableId,
+      name: normalizedName,
+      description,
+      kind: 'other',
+      automation: 'dm-adjudication',
+      usageKind: recharge ? 'recharge' : 'at-will',
+      rechargeMinimum: recharge ? Number(recharge[1]) : base.rechargeMinimum,
+    }
   }
   const toHitMatch = description.match(/([+−-]\s*\d+)\s*to hit|命中\s*[：:]?\s*([+−-]\s*\d+)/i)
   const toHit = toHitMatch ? signedInteger(toHitMatch[1] ?? toHitMatch[2]) : base.toHit
@@ -179,7 +223,6 @@ function actionDraft(name: string, description: string): Dnd5eCustomMonsterActio
   const range = description.match(/(?:range|射程)\s*(\d+)(?:\s*\/\s*(\d+))?\s*(?:ft\.?|feet|尺)/i)
   const hitText = description.match(/(?:Hit|命中)[：:]\s*(.+)$/i)?.[1] ?? description
   const dice = hitText.match(/(\d+d\d+(?:\s*[+−-]\s*\d+)?)/i)?.[1]?.replace(/\s+/g, '').replace('−', '-')
-  const recharge = name.match(/(?:Recharge|充能)\s*(\d)(?:\s*[–—-]\s*6)?/i)
   const save = description.match(/DC\s*(\d+)\s*(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma|力量|敏捷|体质|智力|感知|魅力)/i)
   const saveAbility = save
     ? ({ strength: 'str', 力量: 'str', dexterity: 'dex', 敏捷: 'dex', constitution: 'con', 体质: 'con',
@@ -187,8 +230,8 @@ function actionDraft(name: string, description: string): Dnd5eCustomMonsterActio
     : base.onHitSaveAbility
   return {
     ...base,
-    id: `attack-${name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'pasted'}`,
-    name: name.replace(/\s*\((?:Recharge|充能).+?\)\s*$/i, '').trim(),
+    id: stableId,
+    name: normalizedName,
     description,
     kind: 'weapon-attack',
     automation: save && !/(?:knocked prone|倒地)/i.test(description) ? 'dm-adjudication' : 'headless',
@@ -248,7 +291,7 @@ export function parseDnd5ePastedMonster(value: string): Dnd5ePastedMonsterParseR
   const mark = (label: string) => { if (!recognizedFields.includes(label)) recognizedFields.push(label) }
 
   const firstStatIndex = lines.findIndex((line) =>
-    /^(?:Armor Class|Hit Points|Speed|护甲等级|护甲值|生命值|速度)\b/i.test(line))
+    /^(?:Armor Class|AC|Hit Points|HP|Speed|护甲等级|护甲值|生命值|速度)(?:\s|[:：]|$)/i.test(line))
   const headerLines = lines.slice(0, firstStatIndex >= 0 ? firstStatIndex : Math.min(2, lines.length))
   if (headerLines[0]) {
     draft.name = headerLines[0]
@@ -320,7 +363,7 @@ export function parseDnd5ePastedMonster(value: string): Dnd5ePastedMonsterParseR
       const label = entry.label.toLowerCase()
       return {
         id: `pasted-skill-${index}`,
-        key: label.replace(/\s+/g, '-'),
+        key: SKILL_KEYS[label] ?? SKILL_KEYS[entry.label] ?? label.replace(/\s+/g, '-'),
         name: SKILL_NAMES[label] ?? SKILL_NAMES[entry.label] ?? entry.label,
         bonus: entry.bonus,
       }
@@ -357,7 +400,7 @@ export function parseDnd5ePastedMonster(value: string): Dnd5ePastedMonsterParseR
 
   const sectionHeading = /^(?:Actions?|动作|Bonus Actions?|附赠动作|Reactions?|反应|Legendary Actions?|传奇动作|Lair Actions?|巢穴动作)\s*$/i
   const firstSection = lines.findIndex((line) => sectionHeading.test(line))
-  const traitStart = lines.findIndex((line) => /^(?:Challenge|挑战等级|CR)\b/i.test(line))
+  const traitStart = lines.findIndex((line) => /^(?:Challenge|挑战等级|CR)(?:\s|[:：]|$)/i.test(line))
   const traitLines = traitStart >= 0
     ? lines.slice(traitStart + 1, firstSection >= 0 ? firstSection : lines.length)
       .filter((line) => !/^(?:Proficiency Bonus|熟练加值)\b/i.test(line))
@@ -375,6 +418,15 @@ export function parseDnd5ePastedMonster(value: string): Dnd5ePastedMonsterParseR
     draft.spellcastingEnabled = true
     draft.spells = parsedSpellcasting.spells
     draft.spellSlots = parsedSpellcasting.slots
+    draft.spellcastingCasterLevel = integerMatch(text, /(?:作为(?:一个|一名)?\s*)?(\d+)\s*级施法者/i) ?? draft.spellcastingCasterLevel
+    const spellcastingAbility = text.match(/施法(?:主|关键)?属性(?:为|是)\s*(力量|敏捷|体质|智力|感知|魅力)/i)?.[1]
+    if (spellcastingAbility) {
+      const key = ({ 力量: 'str', 敏捷: 'dex', 体质: 'con', 智力: 'int', 感知: 'wis', 魅力: 'cha' } as Record<string, AbilityKey>)[spellcastingAbility]
+      if (key) draft.spellcastingAbility = key
+    }
+    draft.spellcastingSaveDc = integerMatch(text, /(?:法术)?豁免\s*DC\s*(\d+)/i) ?? draft.spellcastingSaveDc
+    draft.spellcastingAttackBonus = integerMatch(text, /法术(?:攻击)?加值\s*\+?\s*(\d+)/i) ?? draft.spellcastingAttackBonus
+    draft.spellcastingAutomation = parsedSpellcasting.unknown.length === 0 ? 'headless' : 'dm-adjudication'
     mark('法术列表')
     if (parsedSpellcasting.unknown.length > 0) {
       warnings.push(`以下法术未在 SRD 5.1 目录中识别：${parsedSpellcasting.unknown.join('、')}。`)
@@ -437,5 +489,9 @@ export function parseDnd5ePastedMonster(value: string): Dnd5ePastedMonsterParseR
   if (missing.length > 0) warnings.push(`关键字段未识别：${missing.join('、')}。请在覆盖表单前核对原文格式。`)
   draft.description = `由粘贴的 D&D 5e 属性块自动填写。原始文本中的复杂施法、多重攻击和特殊机制仍需人工核对。`
 
-  return { draft, recognizedFields, warnings, sourceFormat: 'stat-block-text' }
+  const normalizedContent = normalizeDnd5eMonsterDraftContent(draft)
+  if (normalizedContent.report.absorbedSpellTraits.length > 0) {
+    mark('施法段落归并')
+  }
+  return { draft: normalizedContent.draft, recognizedFields, warnings, sourceFormat: 'stat-block-text' }
 }

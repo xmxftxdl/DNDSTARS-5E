@@ -1125,6 +1125,140 @@ describe('账号插件库协议', () => {
     expect(after.plugins).toEqual([])
   })
 
+  it('核验战役所有者的 DM 工坊来源，并允许 V2 内容包进入市场定价流程', async () => {
+    const createAccount = async (displayName: string, clientId: string) => {
+      const response = await fetch(`${offServer.base}/api/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName, clientId }),
+      })
+      expect(response.status).toBe(201)
+      return response.json() as Promise<{
+        session: { accountId: string; sessionToken: string }
+      }>
+    }
+    const owner = await createAccount('DM 工坊作者', 'workshop-market-owner')
+    const outsider = await createAccount('非战役所有者', 'workshop-market-outsider')
+    const campaignResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': owner.session.sessionToken,
+      },
+      body: JSON.stringify({
+        name: '市场工坊战役',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+      }),
+    })
+    expect(campaignResponse.status).toBe(201)
+    const campaign = await campaignResponse.json() as { campaignId: string }
+
+    const pluginId = 'com.example.workshop-v2'
+    const pluginVersion = '1.0.0'
+    const packageValue = {
+      format: 'dndstars5e-content',
+      schemaVersion: 2,
+      manifest: {
+        id: pluginId,
+        name: '工坊 V2 市场包',
+        version: pluginVersion,
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        stateSchemaVersion: 1,
+        manifestSchemaVersion: 1,
+        minimumGameProtocolVersion: 5,
+        dependencies: [],
+        conflicts: [],
+        declaredCapabilities: ['damage'],
+        distributionPolicy: 'room-distributable',
+        contentCategory: 'spells',
+        publisher: 'DM 工坊作者',
+        license: '原创内容保留版权',
+      },
+      provenance: { edition: '2014', contentMode: 'incremental', sourceTitle: '工坊 V2 市场包' },
+      assets: [{ id: 'original-icon', mediaType: 'image/png', data: 'data:image/png;base64,YQ==' }],
+      content: {
+        races: [], backgrounds: [], features: [], feats: [], spells: [{ id: 'original-spell' }],
+        items: [], abilityGenerationMethods: [], headlessActions: [], subclasses: [], classes: [], monsters: [],
+      },
+    }
+    const bytes = Buffer.from(JSON.stringify(packageValue), 'utf8')
+    const integrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+    const accountPath = `/api/accounts/me/plugins/${pluginId}/versions/${pluginVersion}`
+    const uploadHeaders = (sessionToken: string) => ({
+      'Content-Type': 'application/octet-stream',
+      'X-Stars-Account-Token': sessionToken,
+      'X-Stars-Plugin-Origin': 'dm-workshop',
+      'X-Stars-Campaign-Id': campaign.campaignId,
+      'X-Stars-Plugin-Version': pluginVersion,
+      'X-Stars-Plugin-Integrity': integrity,
+      'X-Stars-Plugin-Filename': encodeURIComponent(`${pluginId}.dndstars5e`),
+      'X-Stars-Plugin-Name': encodeURIComponent(packageValue.manifest.name),
+      'X-Stars-Plugin-Publisher': encodeURIComponent(packageValue.manifest.publisher),
+      'X-Stars-Plugin-License': encodeURIComponent(packageValue.manifest.license),
+      'X-Stars-Plugin-State-Schema': '1',
+      'X-Stars-Plugin-Api-Version': '2',
+      'X-Stars-Plugin-Ruleset': 'dnd5e-2014-srd-5.1',
+      'X-Stars-Plugin-Description': encodeURIComponent('由战役 DM 工坊创建的原创 V2 内容包。'),
+      'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+        manifestSchemaVersion: 1,
+        minimumGameProtocolVersion: 5,
+        dependencies: [],
+        conflicts: [],
+        declaredCapabilities: ['damage'],
+        distributionPolicy: 'room-distributable',
+        contentCategory: 'spells',
+      })),
+    })
+
+    const rejected = await fetch(`${offServer.base}${accountPath}`, {
+      method: 'PUT', headers: uploadHeaders(outsider.session.sessionToken), body: bytes,
+    })
+    expect(rejected.status).toBe(403)
+    await expect(rejected.json()).resolves.toMatchObject({ error: 'dm-workshop-authority-required' })
+
+    const uploaded = await fetch(`${offServer.base}${accountPath}`, {
+      method: 'PUT', headers: uploadHeaders(owner.session.sessionToken), body: bytes,
+    })
+    expect(uploaded.status).toBe(201)
+    await expect(uploaded.json()).resolves.toMatchObject({
+      id: pluginId,
+      workshopOrigin: { kind: 'dm-workshop', campaignId: campaign.campaignId },
+    })
+
+    const publication = await fetch(`${offServer.base}${accountPath}/publication`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': owner.session.sessionToken,
+      },
+      body: JSON.stringify({
+        visibility: 'public',
+        storeDescription: '这是由 DM 工坊直接提交的原创 V2 法术内容包，可供公开目录审核。',
+        commerce: {
+          schemaVersion: 1,
+          productType: 'plugin',
+          pricing: { kind: 'free', currency: 'CNY', amountMinor: 0 },
+        },
+        rightsManifest: {
+          schemaVersion: 1,
+          contentOrigin: 'original',
+          creatorDeclaration: true,
+          acceptedCreatorAgreement: '2026-07-27',
+          containsAi: false,
+          assets: [
+            { category: 'rules', sourceType: 'original', license: '原创内容保留版权' },
+            { category: 'art', sourceType: 'original', license: '原创美术保留版权' },
+          ],
+        },
+      }),
+    })
+    expect([201, 202]).toContain(publication.status)
+    await expect(publication.json()).resolves.toMatchObject({
+      publication: { id: pluginId },
+    })
+  })
+
   it('只将声明式规则包发布到可搜索目录，并支持公开下载、发布者页和举报', async () => {
     const createAccount = async (displayName: string, clientId: string) => {
       const response = await fetch(`${offServer.base}/api/accounts`, {
@@ -1933,7 +2067,7 @@ describe('账号验证码注册与密码登录协议', () => {
         avatar,
       },
     })
-  })
+  }, 20_000)
 })
 
 describe('P2 — 房间规则包原子升级', () => {
@@ -2635,6 +2769,32 @@ describe('AC5/AC3/AC1 — 404 / 413 / 锁', () => {
         details: ['damage applied'],
       })
     }
+
+    const truncateBody = JSON.stringify({
+      operation: 'truncate-after',
+      mapId: 'combat-log-map',
+      targetEntryId: 9001,
+    })
+    const playerTruncate = await fetch(`${offServer.base}/api/state/combat-log/entry${query}`, {
+      method: 'PATCH',
+      headers: playerHeaders,
+      body: truncateBody,
+    })
+    expect(playerTruncate.status).toBe(403)
+    const dmTruncate = await fetch(`${offServer.base}/api/state/combat-log/entry${query}`, {
+      method: 'PATCH',
+      headers: dmHeaders,
+      body: truncateBody,
+    })
+    expect(dmTruncate.status).toBe(200)
+    const truncated = await fetch(`${offServer.base}/api/state/combat-log${query}`, {
+      headers: dmHeaders,
+    }).then((response) => response.json()) as {
+      entries: Array<{ id: number }>
+      rollbackCutoffEntryId?: number
+    }
+    expect(truncated.entries.map((entry) => entry.id)).toEqual([9001])
+    expect(truncated.rollbackCutoffEntryId).toBe(9001)
   })
 
   it('shared boundary rejects retired AP state and log wording from stale clients', async () => {

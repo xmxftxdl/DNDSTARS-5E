@@ -9,7 +9,7 @@ import {
   projectDnd5eActiveEffectState,
 } from '../rulesets/dnd5e/activeEffects'
 import { inspectDnd5eEffectStates } from '../rulesets/dnd5e/effectDiagnostics'
-import { loadSharedResource, subscribeSharedResourceInvalidation } from '../lib/sharedApi'
+import { browserSharedRoomService } from '../composition/browserSharedRoomService'
 import { COMBAT_INTERRUPT_RESOURCE, type SharedCombatInterruptQueueState } from '../lib/combatInterruptQueue'
 import { inspectCombatInterruptQueue } from '../lib/combatInterruptDiagnostics'
 
@@ -23,11 +23,11 @@ export default function Dnd5eEffectDiagnosticsPanel() {
     if (modeFromPort() !== 'dm') return
     let cancelled = false
     const load = async () => {
-      const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+      const queue = await browserSharedRoomService.loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
       if (!cancelled) setInterruptQueue(queue)
     }
     void load()
-    const unsubscribe = subscribeSharedResourceInvalidation(COMBAT_INTERRUPT_RESOURCE, load, { recoveryMs: 5_000 })
+    const unsubscribe = browserSharedRoomService.subscribeSharedResourceInvalidation(COMBAT_INTERRUPT_RESOURCE, load, { recoveryMs: 5_000 })
     return () => { cancelled = true; unsubscribe() }
   }, [])
   if (modeFromPort() !== 'dm') return null

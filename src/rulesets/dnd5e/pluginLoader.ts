@@ -27,7 +27,17 @@ import {
   type Dnd5eContentPackageSummaryV2,
   type Dnd5eContentPackageV2,
 } from './contentPackageV2'
+import {
+  dnd5eRulesPluginFromUnifiedContentBundleV1,
+  dnd5eUnifiedContentSummaryV1,
+  parseDnd5eUnifiedContentBundleV1,
+  type Dnd5eUnifiedContentBundleV1,
+} from './unifiedContent'
 import { getRoomSession } from '../../lib/roomSession'
+import {
+  dnd5ePluginTrustProfile,
+  type Dnd5ePluginTrustProfile,
+} from '../../domain/plugins/pluginKind'
 
 const STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v2'
 const LEGACY_STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v1'
@@ -288,6 +298,8 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string) {
         contentSummary: dnd5eContentPackageSummaryV2(artifact.package),
         automationCoverage: dnd5eContentPackageAutomationCoverageV2(artifact.package, integrity),
         provenance: structuredClone(artifact.package.provenance),
+      } : artifact.kind === 'unified-v1' ? {
+        contentSummary: dnd5eUnifiedContentSummaryV1(artifact.package),
       } : {}),
     }
   } finally {
@@ -313,17 +325,31 @@ async function descriptorBytes(descriptor: InstalledDnd5eRulesPlugin): Promise<A
 }
 
 type LoadedDnd5ePluginArtifact =
-  | { kind: 'worker'; manifest: Dnd5eRulesPluginManifest; session: Dnd5ePluginSandboxSession }
+  | {
+      kind: 'worker'
+      manifest: Dnd5eRulesPluginManifest
+      trust: Dnd5ePluginTrustProfile
+      session: Dnd5ePluginSandboxSession
+    }
   | {
       kind: 'declarative-v1'
       manifest: Dnd5eRulesPluginManifest
+      trust: Dnd5ePluginTrustProfile
       package: Dnd5eDeclarativeRulesPackageV1
       plugin: Dnd5eRulesPlugin
     }
   | {
       kind: 'content-v2'
       manifest: Dnd5eRulesPluginManifest
+      trust: Dnd5ePluginTrustProfile
       package: Dnd5eContentPackageV2
+      plugin: Dnd5eRulesPlugin
+    }
+  | {
+      kind: 'unified-v1'
+      manifest: Dnd5eRulesPluginManifest
+      trust: Dnd5ePluginTrustProfile
+      package: Dnd5eUnifiedContentBundleV1
       plugin: Dnd5eRulesPlugin
     }
 
@@ -331,17 +357,26 @@ async function loadPluginArtifact(bytes: ArrayBuffer): Promise<LoadedDnd5ePlugin
   const content = parseDnd5eContentPackageV2(bytes)
   if (content) {
     const plugin = dnd5eRulesPluginFromContentPackageV2(content)
-    return { kind: 'content-v2', manifest: { ...content.manifest }, package: content, plugin }
+    const trust = dnd5ePluginTrustProfile(content.manifest.pluginKind, 'content-v2')
+    return { kind: 'content-v2', manifest: { ...content.manifest }, trust, package: content, plugin }
+  }
+  const unified = parseDnd5eUnifiedContentBundleV1(bytes)
+  if (unified) {
+    const plugin = dnd5eRulesPluginFromUnifiedContentBundleV1(unified)
+    const trust = dnd5ePluginTrustProfile(unified.manifest.pluginKind, 'unified-v1')
+    return { kind: 'unified-v1', manifest: { ...unified.manifest }, trust, package: unified, plugin }
   }
   const declaration = parseDnd5eDeclarativeRulesPackageV1(bytes)
   if (declaration) {
     // Constructing the Host plugin performs the existing v2 contribution validation too.
     const { dnd5eRulesPluginFromDeclarativePackageV1 } = await import('./declarativePluginPackage')
     const plugin = dnd5eRulesPluginFromDeclarativePackageV1(declaration)
-    return { kind: 'declarative-v1', manifest: { ...declaration.manifest }, package: declaration, plugin }
+    const trust = dnd5ePluginTrustProfile(declaration.manifest.pluginKind, 'declarative-v1')
+    return { kind: 'declarative-v1', manifest: { ...declaration.manifest }, trust, package: declaration, plugin }
   }
   const session = await createDnd5ePluginSandbox(bytes)
-  return { kind: 'worker', manifest: { ...session.manifest }, session }
+  const trust = dnd5ePluginTrustProfile(session.manifest.pluginKind, 'worker-module')
+  return { kind: 'worker', manifest: { ...session.manifest }, trust, session }
 }
 
 function terminatePluginArtifact(artifact: LoadedDnd5ePluginArtifact): void {
@@ -523,6 +558,8 @@ export async function loadInstalledDnd5eRulesPlugins(): Promise<Dnd5eRulesPlugin
 }
 
 export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
+  const existing = window.DNDSTARS_5E_RULES_PLUGINS
+  if (existing) return existing
   const host: Dnd5eRulesPluginHost = {
     apiVersion: DND5E_RULES_PLUGIN_API_VERSION,
     async install(descriptor) {
@@ -562,7 +599,7 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
     async migrateState(input) {
       const artifact = await loadPluginArtifact(input.bytes)
       try {
-        if (artifact.kind === 'declarative-v1' || artifact.kind === 'content-v2') {
+        if (artifact.kind === 'declarative-v1' || artifact.kind === 'content-v2' || artifact.kind === 'unified-v1') {
           const target = artifact.manifest.stateSchemaVersion ?? 1
           if (input.fromVersion !== target) throw new Error('声明式内容包不包含可执行状态迁移；请保持 stateSchemaVersion 不变')
           return { state: input.state, fromVersion: input.fromVersion, toVersion: target }
@@ -600,4 +637,25 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
   }
   window.DNDSTARS_5E_RULES_PLUGINS = Object.freeze(host)
   return host
+}
+
+let pluginHostInitialization: Promise<Dnd5eRulesPluginLoadFailure[]> | null = null
+
+/**
+ * Public pages deliberately avoid loading the rules runtime. A login can then
+ * enter a campaign through client-side navigation without re-running
+ * `main.tsx`, so the workspace must be able to initialize the host lazily.
+ * Keep the operation shared and retryable because the app heartbeat and route
+ * bootstrap may reach it at the same time.
+ */
+export function ensureDnd5eRulesPluginHost(): Promise<Dnd5eRulesPluginLoadFailure[]> {
+  if (pluginHostInitialization) return pluginHostInitialization
+  pluginHostInitialization = (async () => {
+    exposeDnd5eRulesPluginHost()
+    return loadInstalledDnd5eRulesPlugins()
+  })().catch((error) => {
+    pluginHostInitialization = null
+    throw error
+  })
+  return pluginHostInitialization
 }

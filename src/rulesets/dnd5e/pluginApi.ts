@@ -1,7 +1,6 @@
 import type { ClassResourceDefinition, ClassResourceReset } from '../../lib/classDefinitionTypes'
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
-import type { RulesetAdapter } from '../contracts'
 import {
   registerFighterSubclassDefinition,
   type FighterFeatureDefinition,
@@ -10,8 +9,6 @@ import {
 } from './fighter'
 import type {
   Dnd5eCombatant,
-  Dnd5eActionFailure,
-  Dnd5eActionResult,
   Dnd5eCombatEvent,
   Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
@@ -20,7 +17,7 @@ import {
   DND5E_2014_CLASS_OPTIONS,
   DND5E_2014_RACE_OPTIONS,
 } from './characterOptions'
-import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
+import { DND5E_STANDARD_CONDITION_IDS } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { EquipmentItem } from '../../types/equipment'
@@ -28,7 +25,6 @@ import type { Dnd5eInventoryItemTemplate } from '../../types/inventory'
 import type {
   Dnd5ePersistentAreaVisual,
   Dnd5ePersistentAreaTriggerDeclaration,
-  Dnd5ePluginEffectDuration,
 } from './persistentAreaTypes'
 import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
@@ -41,7 +37,6 @@ import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import { registerDnd5ePluginMonsterCatalogEntry } from './roomMonsterCatalog'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './classLevels'
 import { dnd5ePluginSubclassRegistry as pluginSubclasses } from './pluginSubclassRegistry'
-import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
@@ -57,14 +52,8 @@ import {
   type DeclarativeSubclassCombatHookV1,
   type DeclarativeCombatManeuverMechanicV1,
   type DeclarativeDiceFormulaV1,
-  type DeclarativeEffectTargetV1,
   type DeclarativeSubclassAbilityV1,
   type DeclarativeSubclassDefinitionV1,
-  type DeclarativeSubclassDurationV1,
-  type DeclarativeSubclassResourceDieV1,
-  type DeclarativeSubclassResourceCostV1,
-  type DeclarativeSubclassResourceRequirementV1,
-  type DeclarativeSubclassSpellcastingV1,
   type DeclarativeValueFormulaV1,
 } from './declarativeSubclassAbility'
 import { dnd5ePluginImageAsset } from './pluginAssets'
@@ -73,81 +62,93 @@ import {
   validateDeclarativeClassDefinitionV1,
   type DeclarativeClassDefinitionV1,
 } from './declarativeClass'
-
-export const DND5E_RULES_PLUGIN_API_VERSION = 2 as const
-export const DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS = [1, 2] as const
-export const DND5E_RULES_PLUGIN_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
-export const DND5E_POST_D20_ADJUSTMENT_ROLL_ID = 'post-d20-adjustment' as const
-
-export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
-export type Dnd5eRulesPluginApiVersion = typeof DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS[number]
-export type Dnd5ePluginDistributionPolicy =
-  | 'room-distributable'
-  | 'room-ephemeral'
-  | 'account-entitled'
-  | 'local-only'
-export type Dnd5ePluginContentCategory =
-  | 'rules'
-  | 'classes'
-  | 'subclasses'
-  | 'feats'
-  | 'spells'
-  | 'items'
-  | 'monsters'
-  | 'adventure'
-  | 'mixed'
-export type Dnd5ePluginDeclaredCapability =
-  | 'damage'
-  | 'healing'
-  | 'temporary-hit-points'
-  | 'standard-condition'
-  | 'movement'
-  | 'resource'
-  | 'summon'
-  | 'persistent-area'
-  | 'spell-transaction'
-  | 'interrupt'
-
-export interface Dnd5ePluginDependency {
-  id: string
-  versionRange: string
-  optional?: boolean
-}
-
-export interface Dnd5eRulesPluginManifest {
-  /** Reverse-domain IDs are recommended, for example com.example.fighter-options. */
-  id: string
-  name: string
-  version: string
-  apiVersion: Dnd5eRulesPluginApiVersion
-  rulesetId: typeof DND5E_RULES_PLUGIN_RULESET_ID
-  publisher: string
-  description?: string
-  homepage?: string
-  /** The plugin publisher, not DNDSTARS, declares the license for plugin-supplied content. */
-  license: string
-  /**
-   * Version of the plugin-owned room state. Version 1 is assumed for legacy
-   * API V2 packages. Increasing this value requires a contiguous Worker
-   * migration for every intermediate version.
-   */
-  stateSchemaVersion?: number
-  /** Versioned management metadata; omitted by legacy packages and treated as v1. */
-  manifestSchemaVersion?: 1
-  /** Shared game protocol required before this package can be enabled. */
-  minimumGameProtocolVersion?: number
-  dependencies?: readonly Dnd5ePluginDependency[]
-  conflicts?: readonly string[]
-  declaredCapabilities?: readonly Dnd5ePluginDeclaredCapability[]
-  distributionPolicy?: Dnd5ePluginDistributionPolicy
-  contentCategory?: Dnd5ePluginContentCategory
-}
-
-export interface Dnd5eRulesPluginStateMigration {
-  fromVersion: number
-  toVersion: number
-  migrate(state: JsonValue): JsonValue | Promise<JsonValue>
-}
+import {
+  DND5E_POST_D20_ADJUSTMENT_ROLL_ID,
+  DND5E_RULES_PLUGIN_API_VERSION,
+  DND5E_RULES_PLUGIN_RULESET_ID,
+  DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS,
+  type Dnd5ePluginDeclaredCapability,
+  type Dnd5eRulesPluginManifest,
+  type Dnd5eRulesPluginStateMigration,
+} from './plugins/pluginManifestContracts'
+import type {
+  Dnd5ePluginAction,
+  Dnd5ePluginDiceRollDeclaration,
+  Dnd5ePluginHeadlessActionDefinition,
+  Dnd5ePluginInterruptDeclaration,
+} from './plugins/pluginHeadlessContracts'
+export type {
+  Dnd5ePluginAction,
+  Dnd5ePluginDiceRollDeclaration,
+  Dnd5ePluginDiceRollResult,
+  Dnd5ePluginHeadlessActionContext,
+  Dnd5ePluginHeadlessActionDefinition,
+  Dnd5ePluginInterruptDeclaration,
+  Dnd5ePluginInterruptOption,
+} from './plugins/pluginHeadlessContracts'
+export {
+  DND5E_POST_D20_ADJUSTMENT_ROLL_ID,
+  DND5E_RULES_PLUGIN_API_VERSION,
+  DND5E_RULES_PLUGIN_RULESET_ID,
+  DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS,
+} from './plugins/pluginManifestContracts'
+export type {
+  Dnd5ePluginContentCategory,
+  Dnd5ePluginDeclaredCapability,
+  Dnd5ePluginDependency,
+  Dnd5ePluginDistributionPolicy,
+  Dnd5ePluginKind,
+  Dnd5eRulesPluginApiVersion,
+  Dnd5eRulesPluginManifest,
+  Dnd5eRulesPluginRequirement,
+  Dnd5eRulesPluginStateMigration,
+  JsonValue,
+} from './plugins/pluginManifestContracts'
+import {
+  dnd5ePluginRegistryStore,
+  type RegisteredDnd5ePluginRuntime,
+} from './plugins/pluginRegistryStore'
+import type {
+  RegisteredDnd5ePluginAbilityGeneration,
+  RegisteredDnd5ePluginBackground,
+  RegisteredDnd5ePluginFeat,
+  RegisteredDnd5ePluginFeature,
+  RegisteredDnd5ePluginItem,
+  RegisteredDnd5ePluginMonster,
+  RegisteredDnd5ePluginRace,
+  RegisteredDnd5ePluginResource,
+  RegisteredDnd5ePluginSpell,
+  RegisteredDnd5ePluginSubclass,
+} from './plugins/pluginRegistryContracts'
+import { validateAndNormalizeDnd5ePluginItemHeadlessProtocol } from './plugins/pluginItemHeadlessProtocol'
+export type {
+  RegisteredDnd5ePluginAbilityGeneration,
+  RegisteredDnd5ePluginBackground,
+  RegisteredDnd5ePluginFeat,
+  RegisteredDnd5ePluginFeature,
+  RegisteredDnd5ePluginItem,
+  RegisteredDnd5ePluginMonster,
+  RegisteredDnd5ePluginRace,
+  RegisteredDnd5ePluginResource,
+  RegisteredDnd5ePluginSpell,
+  RegisteredDnd5ePluginSubclass,
+} from './plugins/pluginRegistryContracts'
+import {
+  createDeclarativeFeatureResolver as declarativeFeatureResolver,
+  declarativeDiceCount,
+  declarativeResourceMaximumByLevel,
+  declarativeResourceMaximumForCharacter,
+  declarativeTargeting,
+  dnd5eDeclarativeResourceKey,
+} from './plugins/pluginDeclarativeCompiler'
+export { dnd5eDeclarativeResourceKey } from './plugins/pluginDeclarativeCompiler'
+export {
+  activeDnd5eRulesPluginRequirements,
+  missingDnd5eRulesPluginRequirements,
+  roomActiveDnd5eRulesPluginRequirements,
+  roomDistributableDnd5eRulesPluginRequirements,
+} from './plugins/pluginRequirementProjection'
+export { dnd5ePluginHeadlessActionDefinition } from './plugins/pluginHeadlessRuntimeRegistry'
 
 export interface Dnd5ePluginFighterResource {
   id: string
@@ -170,112 +171,8 @@ export interface Dnd5ePluginFighterSubclass {
   fightingStyleSelectionLimit?: (character: Character) => number
 }
 
-export interface Dnd5ePluginAction {
-  type: 'plugin'
-  pluginId: string
-  actionId: string
-  /** DM 权威玩家动作事务 ID，用于持续实体和专注来源去重。 */
-  transactionId?: string
-  /** API v2 通用特性必须提供；省略时仅用于兼容 API v1 的直接 Headless Action。 */
-  featureId?: string
-  actorId: string
-  targetId?: string
-  /** 由 DM 地图权威层根据范围模板重建；玩家提交值不能直接采用。 */
-  targetIds?: string[]
-  /** 地图模板锚点，仅由 DM preflight 写入 Worker 快照。 */
-  targetCell?: { col: number; row: number }
-  /** 可旋转模板的四向朝向，由 DM preflight 校验后写入。 */
-  targetOrientation?: 0 | 1 | 2 | 3
-  /** 由 DM 地图权威层按 Token 占格重新计算，插件不得采用玩家提交的距离。 */
-  distanceFeet?: number
-  /** Host 按 action 的声明式骰子配方生成并校验，插件只能读取结果。 */
-  rolls?: Record<string, Dnd5ePluginDiceRollResult>
-  /** 主动 Interrupt 的受控选项；Host 会校验其属于 action 声明。 */
-  interruptChoiceId?: string
-  payload?: JsonValue
-}
-
-export interface Dnd5ePluginDiceRollDeclaration {
-  id: string
-  label: string
-  count: number
-  sides: number
-  modifier?: number
-  visibility?: 'public' | 'dm'
-}
-
-export interface Dnd5ePluginDiceRollResult {
-  values: number[]
-  modifier: number
-  total: number
-}
-
-export interface Dnd5ePluginInterruptOption {
-  id: string
-  label: string
-  description?: string
-}
-
-export interface Dnd5ePluginInterruptDeclaration {
-  prompt: string
-  audience: 'actor' | 'target' | 'dm'
-  options: readonly Dnd5ePluginInterruptOption[]
-  defaultOptionId: string
-  /** Host 在掷骰前终止事务的选项；不消费行动经济，也不调用 Worker resolver。 */
-  cancelOptionId?: string
-  timeoutMs?: number
-}
-
 /** 插件声明持续时间的 capability 输入；Host 会转换为 ActiveEffectInstance。 */
 export type { Dnd5ePluginEffectDuration } from './persistentAreaTypes'
-
-export interface Dnd5ePluginHeadlessActionContext {
-  /** A private clone of the authoritative state; the resolver may mutate and return it. */
-  state: Dnd5eHeadlessCombatState
-  action: Dnd5ePluginAction
-  events: Dnd5eCombatEvent[]
-  rules: RulesetAdapter
-  actor: Dnd5eCombatant
-  target?: Dnd5eCombatant
-  /** 范围模板覆盖的全部目标；单目标行动也会包含该目标。 */
-  targets: readonly Dnd5eCombatant[]
-  /** 由 Host 骰子盒公开生成且已按声明校验的结果。 */
-  rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>>
-  /** Only supplied by the private authoritative after-hit trigger path. */
-  parentAttackDamageType?: Dnd5eDamageType
-  /** 赋予临时生命值；同一效果不叠加，保留较高值。返回本次实际增加量。 */
-  grantTemporaryHitPoints(targetId: string, amount: number): number
-  /** 恢复生命值但不超过生命上限。返回本次实际恢复量。 */
-  heal(targetId: string, amount: number): number
-  /** 结算已由 DM 骰子事务验证的伤害值；Host 统一处理抗性、易伤与免疫。 */
-  dealDamage(targetId: string, amount: number, damageType: Dnd5eDamageType): number
-  /** 通过标准状态引擎施加一个有来源、可过期的状态。 */
-  applyStandardCondition(
-    targetId: string,
-    condition: Dnd5eStandardConditionId,
-    duration: Dnd5ePluginEffectDuration,
-  ): boolean
-  /** 只允许消费当前插件声明且角色可用的资源。 */
-  spendResource(resourceId: string, amount?: number): boolean
-  /** 恢复当前插件声明资源，不超过 Host 计算的上限。 */
-  restoreResource(resourceId: string, amount?: number): boolean
-  fail(reason: Dnd5eActionFailure): Dnd5eActionResult
-  succeed(): Dnd5eActionResult
-}
-
-export interface Dnd5ePluginHeadlessActionDefinition {
-  id: string
-  /** Reactions and interrupts must opt in; normal plugin actions are current-turn only. */
-  allowOffTurn?: boolean
-  /**
-   * Installed rules packages execute in an isolated Worker. `trusted` is reserved for
-   * built-in/test registrations created by the host itself.
-   */
-  execution?: 'trusted' | 'worker'
-  /** Worker 不得自行生成随机数；所有骰子必须在这里预先声明。 */
-  rolls?: readonly Dnd5ePluginDiceRollDeclaration[]
-  resolve?(context: Dnd5ePluginHeadlessActionContext): Dnd5eActionResult
-}
 
 export type Dnd5ePluginActionEconomy = 'action' | 'bonusAction' | 'reaction' | 'none'
 export type Dnd5ePluginAutomationLevel = 'full' | 'partial' | 'manual'
@@ -400,16 +297,6 @@ export interface Dnd5ePluginFeatureDefinition {
   automationReasons?: readonly string[]
 }
 
-export interface RegisteredDnd5ePluginFeature extends Omit<Dnd5ePluginFeatureDefinition, 'id' | 'action'> {
-  id: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-  action?: Dnd5ePluginFeatureAction
-  declarativeAbility?: DeclarativeSubclassAbilityV1
-  automationReasons?: readonly string[]
-}
-
 export interface Dnd5ePluginResourceDefinition {
   id: string
   label: string
@@ -420,18 +307,6 @@ export interface Dnd5ePluginResourceDefinition {
   /** 每级最大值表；数组不足 20 项时沿用最后一个值。 */
   maximum: number | readonly number[]
   resetOn: ClassResourceReset
-}
-
-export interface RegisteredDnd5ePluginResource extends Omit<Dnd5ePluginResourceDefinition, 'id' | 'subclassId'> {
-  id: string
-  subclassId?: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-  /** Host-only formula compiled from DeclarativeSubclassAbilityV1. */
-  declarativeMaximum?: DeclarativeValueFormulaV1
-  /** Host-only resource-die metadata compiled from a declarative subclass. */
-  declarativeDie?: DeclarativeSubclassResourceDieV1
 }
 
 export interface Dnd5ePluginSubclassChoiceGroup {
@@ -463,17 +338,6 @@ export interface Dnd5ePluginSubclassDefinition {
   summary: string
   features: readonly Dnd5ePluginSubclassFeature[]
   choiceGroups?: readonly Dnd5ePluginSubclassChoiceGroup[]
-}
-
-export interface RegisteredDnd5ePluginSubclass extends Omit<Dnd5ePluginSubclassDefinition, 'id' | 'features'> {
-  id: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-  features: readonly (Dnd5ePluginSubclassFeature & { id: string; featureId: string })[]
-  /** Host-only metadata compiled from the pure-data subclass protocol. */
-  declarativeSpellcasting?: DeclarativeSubclassSpellcastingV1
-  declarativeCombatHooks?: readonly DeclarativeSubclassCombatHookV1[]
 }
 
 export interface Dnd5ePluginFlexibleAbilityBonus {
@@ -546,13 +410,6 @@ export interface Dnd5ePluginRaceDefinition {
   automationReasons?: readonly string[]
 }
 
-export interface RegisteredDnd5ePluginRace extends Omit<Dnd5ePluginRaceDefinition, 'id'> {
-  id: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-}
-
 export interface Dnd5ePluginFeatPrerequisite {
   minimumLevel?: number
   abilityScores?: Partial<Record<AbilityKey, number>>
@@ -565,15 +422,6 @@ export interface Dnd5ePluginFeatDefinition
   prerequisite?: Dnd5ePluginFeatPrerequisite
 }
 
-export interface RegisteredDnd5ePluginFeat extends Omit<Dnd5ePluginFeatDefinition, 'id' | 'action'> {
-  id: string
-  featureId: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-  action?: Dnd5ePluginFeatureAction
-}
-
 export interface Dnd5ePluginBackgroundDefinition {
   id: string
   name: string
@@ -582,13 +430,6 @@ export interface Dnd5ePluginBackgroundDefinition {
   toolProficiencies?: readonly string[]
   languages?: number
   feature?: { name: string; description: string }
-}
-
-export interface RegisteredDnd5ePluginBackground extends Omit<Dnd5ePluginBackgroundDefinition, 'id'> {
-  id: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
 }
 
 export type Dnd5ePluginAbilityGenerationDefinition = {
@@ -601,29 +442,10 @@ export type Dnd5ePluginAbilityGenerationDefinition = {
   | { kind: 'roll'; diceCount: number; dieSides: number; dropLowest: number }
 )
 
-type WithPluginOwnership<T> = T extends unknown ? Omit<T, 'id'> & {
-  id: string
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-} : never
-
-export type RegisteredDnd5ePluginAbilityGeneration = WithPluginOwnership<Dnd5ePluginAbilityGenerationDefinition>
-
 export type Dnd5ePluginSpellDefinition = Omit<Dnd5eImportedSpell, 'id' | 'source' | 'automation'> & {
   id: string
   iconAssetId?: string
   automation?:
-    | { mode: 'reference-only' }
-    | { mode: 'headless-action'; actionId: string }
-}
-
-export interface RegisteredDnd5ePluginSpell extends Omit<Dnd5eImportedSpell, 'automation'> {
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-  iconAssetId?: string
-  automation:
     | { mode: 'reference-only' }
     | { mode: 'headless-action'; actionId: string }
 }
@@ -636,12 +458,6 @@ export interface Dnd5ePluginItemDefinition
   extends Omit<Dnd5eInventoryItemTemplate, 'id' | 'source' | 'equipment'> {
   id: string
   equipment?: Omit<EquipmentItem, 'id' | 'name'>
-}
-
-export interface RegisteredDnd5ePluginItem extends Dnd5eInventoryItemTemplate {
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
 }
 
 export interface Dnd5eRulesPluginApi {
@@ -675,36 +491,20 @@ export interface Dnd5eRulesPlugin {
   setup(api: Dnd5eRulesPluginApi): void | (() => void)
 }
 
-interface RegisteredPlugin {
-  plugin: Dnd5eRulesPlugin
-  integrity?: string
-  dispose(): void
-}
-
-interface OwnedHeadlessAction {
-  pluginId: string
-  definition: Dnd5ePluginHeadlessActionDefinition
-}
-
-const plugins = new Map<string, RegisteredPlugin>()
-const headlessActions = new Map<string, OwnedHeadlessAction>()
-const pluginFeatures = new Map<string, RegisteredDnd5ePluginFeature>()
-const pluginFeats = new Map<string, RegisteredDnd5ePluginFeat>()
-const pluginResources = new Map<string, RegisteredDnd5ePluginResource>()
-const pluginRaces = new Map<string, RegisteredDnd5ePluginRace>()
-const pluginBackgrounds = new Map<string, RegisteredDnd5ePluginBackground>()
-const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()
-const pluginSpells = new Map<string, RegisteredDnd5ePluginSpell>()
-const pluginItems = new Map<string, RegisteredDnd5ePluginItem>()
-export type RegisteredDnd5ePluginMonster = Dnd5eMonsterStatBlock & {
-  ownerPluginId: string
-  ownerPluginName: string
-  ownerPluginLicense: string
-}
-const pluginMonsters = new Map<string, RegisteredDnd5ePluginMonster>()
-const pluginListeners = new Set<() => void>()
-let pluginRevision = 0
-
+const {
+  plugins,
+  headlessActions,
+  features: pluginFeatures,
+  feats: pluginFeats,
+  resources: pluginResources,
+  races: pluginRaces,
+  backgrounds: pluginBackgrounds,
+  abilityGenerationMethods: pluginAbilityGenerationMethods,
+  spells: pluginSpells,
+  items: pluginItems,
+  monsters: pluginMonsters,
+  listeners: pluginListeners,
+} = dnd5ePluginRegistryStore
 function validId(value: string): boolean {
   return /^[a-z0-9][a-z0-9._-]*$/.test(value)
 }
@@ -726,7 +526,7 @@ const INVENTORY_ICONS = [
   'acid', 'alchemists-fire', 'holy-water', 'antitoxin', 'poison', 'healing-potion',
   'magic-ring', 'magic-wand', 'magic-staff', 'magic-scroll', 'magic-wondrous', 'generic',
 ] as const
-const EQUIPMENT_SLOTS = ['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace'] as const
+const EQUIPMENT_SLOTS = ['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'ring2', 'belt', 'necklace'] as const
 
 function boundedText(value: unknown, label: string, maximum: number, optional = false): string | undefined {
   if (value == null && optional) return undefined
@@ -840,61 +640,10 @@ function clonePluginItemDefinition(
     throw new Error(`Plugin equipment template is missing equipment data: ${itemId}`)
   }
 
-  const use = definition.use
-  if (use) {
-    if (!['action', 'bonusAction', 'none'].includes(use.economy) || !finiteInteger(use.consumeQuantity, 0, 999)) {
-      throw new Error(`Invalid plugin item use economy: ${itemId}`)
-    }
-    if (use.chargesPerItem != null && !finiteInteger(use.chargesPerItem, 1, 1_000_000)) {
-      throw new Error(`Invalid plugin item charges: ${itemId}`)
-    }
-    if (use.targeting?.kind === 'map-area') {
-      if (
-        !['ball-bearings', 'caltrops', 'hunting-trap'].includes(use.targeting.areaKind) ||
-        !finiteInteger(use.targeting.rangeFeet, 0, 10_000) ||
-        !finiteInteger(use.targeting.widthFeet, 0, 10_000) ||
-        !finiteInteger(use.targeting.heightFeet, 0, 10_000)
-      ) throw new Error(`Invalid plugin item map targeting: ${itemId}`)
-    } else if (use.targeting?.kind === 'creature') {
-      if (!finiteInteger(use.targeting.rangeFeet, 0, 10_000) ||
-        (use.targeting.includeSelf != null && typeof use.targeting.includeSelf !== 'boolean')) {
-        throw new Error(`Invalid plugin item creature targeting: ${itemId}`)
-      }
-    } else if (use.targeting != null) {
-      throw new Error(`Invalid plugin item targeting: ${itemId}`)
-    }
-    if (use.effect.kind === 'healing') {
-      if (
-        !finiteInteger(use.effect.dice.count, 1, 40) || !finiteInteger(use.effect.dice.sides, 2, 100) ||
-        !finiteInteger(use.effect.dice.bonus, -1_000, 1_000)
-      ) throw new Error(`Invalid plugin healing item: ${itemId}`)
-    } else if (use.effect.kind === 'dm-adjudication') {
-      boundedText(use.effect.adjudication, `${itemId} adjudication`, 4_000)
-    } else {
-      throw new Error(`Invalid plugin item effect: ${itemId}`)
-    }
-  }
-
-  const resources = definition.resources?.map((resource) => {
-    if (
-      !validId(resource.id) || typeof resource.label !== 'string' || !resource.label.trim() || resource.label.length > 120 ||
-      !finiteInteger(resource.maximum, 1, 1_000_000) ||
-      (resource.initial != null && !finiteInteger(resource.initial, 0, resource.maximum)) ||
-      !['none', 'short-rest', 'long-rest', 'dawn'].includes(resource.resetOn)
-    ) throw new Error(`Invalid plugin item resource: ${itemId}:${resource.id}`)
-    return { ...resource, label: resource.label.trim() }
-  })
-  if (resources && new Set(resources.map((resource) => resource.id)).size !== resources.length) {
-    throw new Error(`Duplicate plugin item resource: ${itemId}`)
-  }
-  const resourceIds = new Set(resources?.map((resource) => resource.id) ?? [])
-  const headlessEffects = definition.headlessEffects?.map((effect) => {
-    if (
-      effect.kind !== 'attack-roll-reroll' || !resourceIds.has(effect.resourceId) || effect.maximumDice !== 1 ||
-      effect.trigger !== 'after-attack-roll' || !['attacks-with-this-weapon', 'weapon-attacks'].includes(effect.appliesTo)
-    ) throw new Error(`Invalid plugin item Headless effect: ${itemId}`)
-    if (!equipment) throw new Error(`Plugin item Headless effect requires equipment: ${itemId}`)
-    return { ...effect }
+  const { use, resources, headlessEffects } = validateAndNormalizeDnd5ePluginItemHeadlessProtocol({
+    itemId,
+    definition,
+    hasEquipment: !!equipment,
   })
 
   return {
@@ -1229,6 +978,11 @@ function assertManifest(manifest: Dnd5eRulesPluginManifest): void {
     (manifest.homepage != null && typeof manifest.homepage !== 'string')
   ) throw new Error(`Invalid D&D 5e rules plugin manifest metadata: ${manifest.id}`)
   if (
+    manifest.pluginKind != null &&
+    manifest.pluginKind !== 'content-package' &&
+    manifest.pluginKind !== 'automation-plugin'
+  ) throw new Error(`Invalid D&D 5e plugin kind: ${manifest.id}`)
+  if (
     manifest.stateSchemaVersion != null &&
     (!Number.isInteger(manifest.stateSchemaVersion) || manifest.stateSchemaVersion < 1 || manifest.stateSchemaVersion > 1_000)
   ) throw new Error(`Invalid plugin state schema version: ${manifest.id}`)
@@ -1286,359 +1040,13 @@ export function validateDnd5eRulesPluginManifest(manifest: Dnd5eRulesPluginManif
 }
 
 function publishPluginRegistryChange(): void {
-  pluginRevision += 1
+  dnd5ePluginRegistryStore.revision += 1
   for (const listener of pluginListeners) listener()
 }
 
 function namespacedId(pluginId: string, localId: string): string {
   if (!validId(localId)) throw new Error(`Invalid plugin contribution id: ${localId}`)
   return `${pluginId}:${localId}`
-}
-
-export function dnd5eDeclarativeResourceKey(
-  pluginId: string,
-  reference: Pick<DeclarativeSubclassResourceCostV1, 'resourceId' | 'scope'> |
-    Pick<DeclarativeSubclassResourceRequirementV1, 'resourceId' | 'scope'>,
-): string {
-  return reference.scope === 'core'
-    ? reference.resourceId
-    : namespacedId(pluginId, reference.resourceId)
-}
-
-function declarativeFormulaValue(
-  formula: DeclarativeValueFormulaV1,
-  creature: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'abilities' | 'proficiencyBonus'>,
-  adapter: RulesetAdapter,
-): number {
-  let value: number
-  if (formula.kind === 'fixed') return formula.value
-  else if (formula.kind === 'proficiency-bonus') value = creature.proficiencyBonus
-  else if (formula.kind === 'ability-modifier') value = adapter.abilityModifier(creature.abilities[formula.ability])
-  else {
-    const classLevel = creature.classLevels?.[formula.classId] ?? (creature.classId === formula.classId ? creature.level : 0)
-    value = Math.floor(classLevel / (formula.divisor ?? 1))
-  }
-  return Math.max(formula.minimum ?? Number.NEGATIVE_INFINITY, Math.floor(value * (formula.multiplier ?? 1)))
-}
-
-function declarativeResourceMaximumByLevel(
-  formula: DeclarativeValueFormulaV1,
-  classId: Dnd5eClassId,
-  exactSteps?: readonly { level: number; maximum: number }[],
-): number[] {
-  const values = Array.from({ length: 20 }, (_, index) => {
-    const level = index + 1
-    if (formula.kind === 'fixed') return Math.max(0, formula.value)
-    if (formula.kind === 'proficiency-bonus') {
-      const base = 2 + Math.floor((level - 1) / 4)
-      return Math.max(0, formula.minimum ?? 0, Math.floor(base * (formula.multiplier ?? 1)))
-    }
-    if (formula.kind === 'class-level') {
-      if (formula.classId !== classId) return Math.max(0, formula.minimum ?? 0)
-      return Math.max(formula.minimum ?? 0, Math.floor((level / (formula.divisor ?? 1)) * (formula.multiplier ?? 1)))
-    }
-    // Ability-based maxima cannot be represented by the legacy static resource table.
-    return Math.max(0, formula.minimum ?? 0)
-  })
-  for (const step of exactSteps ?? []) {
-    for (let index = step.level - 1; index < values.length; index += 1) {
-      values[index] = step.maximum
-    }
-  }
-  return values
-}
-
-function declarativeResourceMaximumForCharacter(
-  formula: DeclarativeValueFormulaV1,
-  character: Character,
-): number {
-  let value: number
-  if (formula.kind === 'fixed') return Math.max(0, formula.value)
-  if (formula.kind === 'proficiency-bonus') value = 2 + Math.floor((Math.max(1, character.level) - 1) / 4)
-  else if (formula.kind === 'ability-modifier') value = Math.floor((character.abilities[formula.ability] - 10) / 2)
-  else value = Math.floor(dnd5eCharacterClassLevel(character, formula.classId) / (formula.divisor ?? 1))
-  return Math.max(0, formula.minimum ?? Number.NEGATIVE_INFINITY, Math.floor(value * (formula.multiplier ?? 1)))
-}
-
-function declarativeDurationToCapability(duration: DeclarativeSubclassDurationV1): Dnd5ePluginEffectDuration | undefined {
-  if (duration.kind === 'until-source-turn-start') return { expiresAt: 'source-next-turn-start' }
-  if (duration.kind === 'until-target-turn-start') return { expiresAt: 'target-next-turn-start' }
-  if (duration.kind === 'until-target-turn-end') return { expiresAt: 'target-turn-end', remainingRounds: duration.rounds ?? 1 }
-  if (duration.kind === 'fixed-rounds') return duration.repeatSave
-    ? {
-        expiresAt: 'target-turn-end-save',
-        remainingRounds: duration.rounds,
-        saveAbility: duration.repeatSave.ability,
-        saveDc: duration.repeatSave.dc,
-      }
-    : { expiresAt: 'target-turn-end', remainingRounds: duration.rounds }
-  return undefined
-}
-
-function declarativeTargeting(targeting: DeclarativeSubclassAbilityV1['targeting']): Dnd5ePluginTargeting {
-  if (targeting.kind === 'self') return { kind: 'self' }
-  if (targeting.kind === 'single-creature' || targeting.kind === 'multiple-creatures') return {
-    kind: 'single-creature',
-    relation: targeting.relation,
-    rangeFeet: targeting.rangeFeet,
-    includeSelf: targeting.includeSelf,
-  }
-  const common = {
-    kind: 'area' as const,
-    relation: targeting.relation,
-    includeSelf: targeting.includeSelf,
-    maximumTargets: targeting.maximumTargets ?? 64,
-  }
-  if (targeting.shape === 'circle') return {
-    ...common,
-    template: { shape: 'circle', origin: 'point', radiusFeet: targeting.radiusFeet ?? 5, placeRangeFeet: targeting.rangeFeet },
-  }
-  if (targeting.shape === 'cone') return {
-    ...common,
-    template: { shape: 'cone', origin: 'self', lengthFeet: targeting.lengthFeet ?? 15, aimRangeFeet: targeting.rangeFeet },
-  }
-  if (targeting.shape === 'line') return {
-    ...common,
-    template: { shape: 'line', origin: 'self', widthFeet: targeting.widthFeet ?? 5, lengthFeet: targeting.lengthFeet ?? 30, aimRangeFeet: targeting.rangeFeet },
-  }
-  return {
-    ...common,
-    template: { shape: 'rect', origin: 'point', widthFeet: targeting.widthFeet ?? 10, heightFeet: targeting.heightFeet ?? 10, placeRangeFeet: targeting.rangeFeet, rotatable: true },
-  }
-}
-
-function declarativeEffectTargets(
-  target: DeclarativeEffectTargetV1,
-  context: Dnd5ePluginHeadlessActionContext,
-): readonly Dnd5eCombatant[] {
-  if (target === 'actor') return [context.actor]
-  if (target === 'target') return context.target ? [context.target] : []
-  return context.targets
-}
-
-function declarativeDiceCount(dice: DeclarativeDiceFormulaV1): number {
-  // Static actions retain the invariant base declaration. Prearmed after-hit
-  // resource-die actions receive a private, combatant-specific override.
-  return dice.count
-}
-
-function declarativeFeatureResolver(input: {
-  pluginId: string
-  subclassId: string
-  classId: Dnd5eClassId
-  ability: DeclarativeSubclassAbilityV1
-  featureId: string
-  usesResourceId?: string
-  automation: Dnd5ePluginAutomationLevel
-}): Dnd5ePluginHeadlessActionDefinition['resolve'] {
-  return (context) => {
-    const { actor, action, state } = context
-    const { ability } = input
-    if (input.automation === 'partial' && action.interruptChoiceId !== 'dm-apply') {
-      return context.fail('invalid-plugin-action')
-    }
-    if (!action.transactionId || actor.classState.declarativeTransactionIds?.includes(action.transactionId)) {
-      return context.fail('invalid-plugin-action')
-    }
-    const classLevel = actor.classLevels?.[input.classId] ?? (actor.classId === input.classId ? actor.level : 0)
-    const selectedSubclass = actor.subclassIds?.[input.classId] ?? (actor.classId === input.classId ? actor.subclassId : undefined)
-    if (classLevel < ability.level || selectedSubclass !== input.subclassId || !actor.pluginFeatureIds.includes(input.featureId)) {
-      return context.fail('invalid-class-feature')
-    }
-    const predicates = ability.predicates
-    if (predicates?.minimumLevel != null && actor.level < predicates.minimumLevel) return context.fail('invalid-class-feature')
-    if (predicates?.classId && (actor.classLevels?.[predicates.classId] ?? (actor.classId === predicates.classId ? actor.level : 0)) < 1) return context.fail('invalid-class-feature')
-    if (predicates?.subclassId && selectedSubclass !== `${input.pluginId}:${predicates.subclassId}` && selectedSubclass !== predicates.subclassId) return context.fail('invalid-class-feature')
-    const primaryTarget = context.target
-    const pairKey = primaryTarget
-      ? (actor.id < primaryTarget.id ? `${actor.id}\u0000${primaryTarget.id}` : `${primaryTarget.id}\u0000${actor.id}`)
-      : undefined
-    const authoritativeDistance = primaryTarget?.id === actor.id
-      ? 0
-      : pairKey == null
-        ? Number.POSITIVE_INFINITY
-        : state.distanceFeetByCombatantPair?.[pairKey] ?? Number.POSITIVE_INFINITY
-    if (!Number.isFinite(authoritativeDistance) || authoritativeDistance < 0) return context.fail('invalid-target')
-    if (
-      (ability.targeting.kind === 'single-creature' || ability.targeting.kind === 'multiple-creatures') &&
-      ability.targeting.rangeFeet != null && authoritativeDistance > ability.targeting.rangeFeet
-    ) return context.fail('invalid-target')
-    if (predicates?.minimumDistanceFeet != null && authoritativeDistance < predicates.minimumDistanceFeet) return context.fail('invalid-target')
-    if (predicates?.maximumDistanceFeet != null && authoritativeDistance > predicates.maximumDistanceFeet) return context.fail('invalid-target')
-    if (predicates?.actorHasConditions?.some((condition) => !actor.conditions.includes(condition))) return context.fail('invalid-class-feature')
-    if (predicates?.actorLacksConditions?.some((condition) => actor.conditions.includes(condition))) return context.fail('invalid-class-feature')
-    if (context.targets.some((target) => predicates?.targetHasConditions?.some((condition) => !target.conditions.includes(condition)))) return context.fail('invalid-target')
-    if (context.targets.some((target) => predicates?.targetLacksConditions?.some((condition) => target.conditions.includes(condition)))) return context.fail('invalid-target')
-    if (predicates?.targetRelation) {
-      for (const target of context.targets) {
-        const allied = target.controller === actor.controller
-        if (predicates.targetRelation === 'self' && target.id !== actor.id) return context.fail('invalid-target')
-        if (predicates.targetRelation === 'ally' && !allied) return context.fail('invalid-target')
-        if (predicates.targetRelation === 'enemy' && allied) return context.fail('invalid-target')
-      }
-    }
-    for (const requirement of predicates?.resources ?? []) {
-      const resourceId = dnd5eDeclarativeResourceKey(input.pluginId, requirement)
-      if ((actor.classResources[resourceId]?.current ?? -1) < requirement.minimum) return context.fail('class-resource-unavailable')
-    }
-    for (const requirement of predicates?.subclassChoices ?? []) {
-      const selectionKey = `${input.subclassId}/${requirement.groupId}`
-      if (!actor.classSelections[selectionKey]?.includes(requirement.optionId)) {
-        return context.fail('invalid-class-feature')
-      }
-    }
-    const turnKey = `${state.combatId}:${state.round}:${state.turnSlotId ?? actor.id}`
-    const oncePerTurn = predicates?.oncePerTurn === true || ability.limits?.oncePerTurn === true
-    if (oncePerTurn && actor.classState.declarativeUsedTurnKeys?.[input.featureId] === turnKey) return context.fail('feature-already-used')
-    if (ability.mechanic?.kind === 'utility-projection-attack-advantage') {
-      if (!primaryTarget) return context.fail('invalid-target')
-      const projectionDistance = state.utilityProjectionDistanceFeetByPair?.[
-        dnd5eUtilityProjectionDistanceKey(actor.id, ability.mechanic.projectionId, primaryTarget.id)
-      ]
-      if (
-        projectionDistance == null ||
-        !Number.isFinite(projectionDistance) ||
-        projectionDistance > ability.mechanic.maximumDistanceFeet
-      ) return context.fail('invalid-target')
-    }
-    if (
-      ability.mechanic?.kind === 'next-d20-advantage' &&
-      actor.classState.nextD20Advantage != null
-    ) return context.fail('invalid-plugin-action')
-    const costs = [
-      ...(ability.cost?.resources ?? []).map((cost) => ({
-        resourceId: dnd5eDeclarativeResourceKey(input.pluginId, cost),
-        amount: cost.amount,
-      })),
-      ...(input.usesResourceId && (ability.cost?.uses ?? 1) > 0 ? [{ resourceId: input.usesResourceId, amount: ability.cost?.uses ?? 1 }] : []),
-    ]
-    if (costs.some((cost) => !actor.classResources[cost.resourceId] || actor.classResources[cost.resourceId].current < cost.amount)) {
-      return context.fail('class-resource-unavailable')
-    }
-    const operationCount = costs.length + ability.effects.reduce((total, effect) => {
-      if (effect.kind === 'move') return total
-      if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') return total + 1
-      return total + ('target' in effect ? declarativeEffectTargets(effect.target, context).length : 0)
-    }, 0)
-    if (operationCount > 64) return context.fail('invalid-plugin-action')
-    for (const effect of ability.effects) {
-      if (effect.kind === 'move') continue
-      if (
-        (effect.kind === 'damage' || effect.kind === 'healing' || effect.kind === 'temporary-hit-points') &&
-        effect.rollId &&
-        !context.rolls[effect.rollId]
-      ) {
-        const roll = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
-        if (!roll || (roll.kind !== 'damage' && roll.kind !== 'healing') || roll.dice.count > 0) return context.fail('invalid-dice')
-      }
-      if (
-        effect.kind === 'damage' &&
-        (() => {
-          const declaration = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
-          return declaration?.kind === 'damage' &&
-            declaration.damageType === 'parent-weapon' &&
-            !context.parentAttackDamageType
-        })()
-      ) return context.fail('invalid-plugin-action')
-      if ((effect.kind === 'standard-condition') && !declarativeDurationToCapability(effect.duration)) continue
-      if ((effect.kind === 'spend-resource' || effect.kind === 'restore-resource') && declarativeFormulaValue(effect.amount, actor, context.rules) <= 0) return context.fail('invalid-plugin-action')
-    }
-    for (const cost of costs) if (!context.spendResource(cost.resourceId, cost.amount)) return context.fail('class-resource-unavailable')
-
-    for (const effect of ability.effects) {
-      if (effect.kind === 'move') continue
-      if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') {
-        const amount = declarativeFormulaValue(effect.amount, actor, context.rules)
-        const resourceId = namespacedId(input.pluginId, effect.resourceId)
-        if (
-          effect.kind === 'restore-resource' &&
-          effect.whenEmpty === true &&
-          actor.classResources[resourceId]?.current !== 0
-        ) continue
-        const ok = effect.kind === 'spend-resource'
-          ? context.spendResource(resourceId, amount)
-          : context.restoreResource(resourceId, amount)
-        if (!ok) return context.fail('class-resource-unavailable')
-        continue
-      }
-      if (!('target' in effect)) return context.fail('invalid-plugin-action')
-      for (const target of declarativeEffectTargets(effect.target, context)) {
-        if (effect.kind === 'damage' || effect.kind === 'healing') {
-          const declaration = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
-          if (!declaration || (declaration.kind !== 'damage' && declaration.kind !== 'healing')) return context.fail('invalid-dice')
-          const supplied = context.rolls[effect.rollId]
-          const rolled = (supplied?.values.reduce((total, value) => total + value, 0) ?? 0) +
-            declarativeFormulaValue(declaration.dice.modifier ?? { kind: 'fixed', value: 0 }, actor, context.rules)
-          if (effect.kind === 'damage') {
-            const multiplier = state.effectiveRules?.houseRules.declarativeAbilityDamageMultiplier ?? 1
-            let damageType: Dnd5eDamageType | undefined
-            if (declaration.kind === 'damage') {
-              damageType = declaration.damageType === 'parent-weapon'
-                ? context.parentAttackDamageType
-                : declaration.damageType
-            } else damageType = 'force'
-            if (!damageType) return context.fail('invalid-plugin-action')
-            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier)), damageType)
-          } else context.heal(target.id, Math.max(0, rolled))
-        } else if (effect.kind === 'temporary-hit-points') {
-          const roll = effect.rollId
-            ? ability.rolls?.find((candidate) => candidate.id === effect.rollId)
-            : undefined
-          const amount = effect.rollId
-            ? (
-                context.rolls[effect.rollId]?.values.reduce((total, value) => total + value, 0) ?? 0
-              ) + (
-                roll && (roll.kind === 'damage' || roll.kind === 'healing')
-                  ? declarativeFormulaValue(roll.dice.modifier ?? { kind: 'fixed', value: 0 }, actor, context.rules)
-                  : 0
-              )
-            : declarativeFormulaValue(effect.amount!, actor, context.rules)
-          context.grantTemporaryHitPoints(target.id, Math.max(0, amount))
-        } else if (effect.kind === 'standard-condition') {
-          const duration = declarativeDurationToCapability(effect.duration)
-          if (duration) context.applyStandardCondition(target.id, effect.condition, duration)
-        }
-      }
-    }
-    if (ability.mechanic?.kind === 'utility-projection-attack-advantage' && primaryTarget) {
-      actor.classState.utilityProjectionAttackAdvantage = {
-        featureId: input.featureId,
-        targetId: primaryTarget.id,
-        turnKey,
-      }
-      context.events.push({
-        type: 'class-state-changed',
-        actorId: actor.id,
-        targetId: primaryTarget.id,
-        stateKey: 'utility-projection-attack-advantage',
-        active: true,
-      })
-    }
-    if (ability.mechanic?.kind === 'next-d20-advantage') {
-      actor.classState.nextD20Advantage = {
-        featureId: input.featureId,
-        rollKinds: [...ability.mechanic.rollKinds],
-      }
-      context.events.push({
-        type: 'class-state-changed',
-        actorId: actor.id,
-        stateKey: 'next-d20-advantage',
-        active: true,
-      })
-    }
-    if (oncePerTurn) {
-      actor.classState.declarativeUsedTurnKeys = { ...actor.classState.declarativeUsedTurnKeys, [input.featureId]: turnKey }
-    }
-    actor.classState.declarativeTransactionIds = [...(actor.classState.declarativeTransactionIds ?? []), action.transactionId].slice(-128)
-    context.events.push({
-      type: 'declarative-subclass-ability-resolved',
-      actorId: actor.id,
-      abilityId: input.featureId,
-      trigger: ability.trigger.kind,
-      targetIds: context.targets.map((target) => target.id),
-    })
-    return context.succeed()
-  }
 }
 
 function toFighterSubclassDefinition(
@@ -1679,13 +1087,6 @@ function toFighterSubclassDefinition(
 }
 
 export interface Dnd5eRulesPluginRegistrationOptions {
-  integrity?: string
-}
-
-export interface Dnd5eRulesPluginRequirement {
-  id: string
-  version: string
-  stateSchemaVersion?: number
   integrity?: string
 }
 
@@ -2648,7 +2049,7 @@ export function registerDnd5eRulesPlugin(
   }
 
   let active = true
-  const registered: RegisteredPlugin = {
+  const registered: RegisteredDnd5ePluginRuntime = {
     plugin,
     integrity: options.integrity,
     dispose() {
@@ -2673,71 +2074,6 @@ export function unregisterDnd5eRulesPlugin(pluginId: string): boolean {
 
 export function registeredDnd5eRulesPlugins(): readonly Dnd5eRulesPluginManifest[] {
   return [...plugins.values()].map(({ plugin }) => ({ ...plugin.manifest }))
-}
-
-export function activeDnd5eRulesPluginRequirements(): readonly Dnd5eRulesPluginRequirement[] {
-  return [...plugins.values()]
-    .map(({ plugin, integrity }) => ({
-      id: plugin.manifest.id,
-      version: plugin.manifest.version,
-      stateSchemaVersion: plugin.manifest.stateSchemaVersion ?? 1,
-      ...(integrity ? { integrity } : {}),
-    }))
-    .sort((left, right) => left.id.localeCompare(right.id))
-}
-
-/**
- * Network-safe room handshake projection. Device-local packages are intentionally
- * absent, so even their ID, version, and integrity are not sent to a room server.
- */
-export function roomDistributableDnd5eRulesPluginRequirements(): readonly Dnd5eRulesPluginRequirement[] {
-  const roomPluginIds = new Set(
-    [...plugins.values()]
-      .filter(({ plugin }) => plugin.manifest.distributionPolicy === 'room-distributable')
-      .map(({ plugin }) => plugin.manifest.id),
-  )
-  return activeDnd5eRulesPluginRequirements().filter((requirement) => roomPluginIds.has(requirement.id))
-}
-
-/**
- * Exact requirements that may participate in a live room. Ephemeral packages
- * are included while active in memory, but are never account-backed.
- */
-export function roomActiveDnd5eRulesPluginRequirements(): readonly Dnd5eRulesPluginRequirement[] {
-  const roomPluginIds = new Set(
-    [...plugins.values()]
-      .filter(({ plugin }) =>
-        plugin.manifest.distributionPolicy === 'room-distributable' ||
-        plugin.manifest.distributionPolicy === 'room-ephemeral')
-      .map(({ plugin }) => plugin.manifest.id),
-  )
-  return activeDnd5eRulesPluginRequirements().filter((requirement) => roomPluginIds.has(requirement.id))
-}
-
-export function missingDnd5eRulesPluginRequirements(
-  required: readonly Dnd5eRulesPluginRequirement[],
-  active: readonly Dnd5eRulesPluginRequirement[] = activeDnd5eRulesPluginRequirements(),
-): Dnd5eRulesPluginRequirement[] {
-  const activeById = new Map(active.map((plugin) => [plugin.id, plugin]))
-  return required.filter((requirement) => {
-    const installed = activeById.get(requirement.id)
-    if (
-      !installed || installed.version !== requirement.version ||
-      (installed.stateSchemaVersion ?? 1) !== (requirement.stateSchemaVersion ?? 1)
-    ) return true
-    return !!requirement.integrity && installed.integrity !== requirement.integrity
-  })
-}
-
-export function dnd5ePluginHeadlessActionDefinition(
-  pluginId: string,
-  actionId: string,
-): Dnd5ePluginHeadlessActionDefinition | undefined {
-  const definition = headlessActions.get(`${pluginId}:${actionId}`)?.definition
-  return definition ? {
-    ...definition,
-    rolls: definition.rolls?.map((roll) => ({ ...roll })),
-  } : undefined
 }
 
 function cloneRegisteredStaticModifiers(
@@ -2963,6 +2299,7 @@ export function registeredDnd5ePluginSpells(): readonly RegisteredDnd5ePluginSpe
       components: { ...spell.components },
       castingTime: { ...spell.castingTime },
       range: { ...spell.range },
+      targeting: spell.targeting ? { ...spell.targeting } : undefined,
       duration: { ...spell.duration },
       tags: spell.tags ? [...spell.tags] : undefined,
       mechanics: spell.mechanics ? structuredClone(spell.mechanics) : undefined,
@@ -3452,5 +2789,5 @@ export function subscribeDnd5eRulesPluginRegistry(listener: () => void): () => v
 }
 
 export function dnd5eRulesPluginRegistrySnapshot(): number {
-  return pluginRevision
+  return dnd5ePluginRegistryStore.revision
 }

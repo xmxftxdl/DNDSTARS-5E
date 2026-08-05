@@ -94,4 +94,34 @@ describe('扩展市场发布协议 V1', () => {
       legacy: { features: [{ description: '<script>alert(1)</script>' }] },
     })).toMatchObject({ riskLevel: 'blocked' })
   })
+
+  it('统计工坊 V2 与统一内容包，供市场审核展示实际资源数量', () => {
+    expect(analyzeMarketplaceDeclarativePackage({
+      format: 'dndstars5e-content',
+      manifest: { declaredCapabilities: ['damage', 'summon'] },
+      assets: [{ id: 'spell-icon' }],
+      content: {
+        races: [{}], backgrounds: [], features: [{}], feats: [{}], spells: [{}, {}],
+        items: [], headlessActions: [{}], subclasses: [{}], classes: [{}], monsters: [{}],
+      },
+    })).toMatchObject({
+      riskLevel: 'review',
+      summary: {
+        races: 1, features: 1, feats: 1, spells: 2, headlessActions: 1,
+        subclasses: 1, classes: 1, monsters: 1, imageAssets: 1, declaredCapabilities: 2,
+      },
+    })
+
+    expect(analyzeMarketplaceDeclarativePackage({
+      format: 'dndstars5e-unified-content',
+      manifest: { declaredCapabilities: [] },
+      assets: [],
+      definitions: [
+        { kind: 'spell' }, { kind: 'spell' }, { kind: 'monster' }, { kind: 'monster-action' },
+      ],
+    })).toMatchObject({
+      riskLevel: 'review',
+      summary: { spells: 2, monsters: 1, headlessActions: 1 },
+    })
+  })
 })

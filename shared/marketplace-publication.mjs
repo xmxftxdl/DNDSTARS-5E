@@ -129,6 +129,12 @@ function countArray(root, path) {
   return Array.isArray(current) ? current.length : 0
 }
 
+function countUnifiedKind(root, kind) {
+  return Array.isArray(root?.definitions)
+    ? root.definitions.filter((definition) => plainObject(definition) && definition.kind === kind).length
+    : 0
+}
+
 export function analyzeMarketplaceDeclarativePackage(parsed) {
   if (!plainObject(parsed)) {
     return { analyzerVersion: 1, riskLevel: 'blocked', findings: ['内容不是结构化对象。'], summary: {} }
@@ -141,12 +147,17 @@ export function analyzeMarketplaceDeclarativePackage(parsed) {
     /<script\b/i,
   ].filter((pattern) => pattern.test(serialized)).map((pattern) => pattern.source)
   const summary = {
-    subclasses: countArray(parsed, ['subclasses']),
-    races: countArray(parsed, ['legacy', 'races']),
-    backgrounds: countArray(parsed, ['legacy', 'backgrounds']),
-    features: countArray(parsed, ['legacy', 'features']),
-    spells: countArray(parsed, ['legacy', 'spells']),
-    items: countArray(parsed, ['legacy', 'items']),
+    subclasses: countArray(parsed, ['subclasses']) + countArray(parsed, ['content', 'subclasses']) + countUnifiedKind(parsed, 'subclass'),
+    classes: countArray(parsed, ['content', 'classes']) + countUnifiedKind(parsed, 'class'),
+    races: countArray(parsed, ['legacy', 'races']) + countArray(parsed, ['content', 'races']) + countUnifiedKind(parsed, 'race'),
+    backgrounds: countArray(parsed, ['legacy', 'backgrounds']) + countArray(parsed, ['content', 'backgrounds']) + countUnifiedKind(parsed, 'background'),
+    features: countArray(parsed, ['legacy', 'features']) + countArray(parsed, ['content', 'features']) + countUnifiedKind(parsed, 'feature'),
+    feats: countArray(parsed, ['content', 'feats']) + countUnifiedKind(parsed, 'feat'),
+    spells: countArray(parsed, ['legacy', 'spells']) + countArray(parsed, ['content', 'spells']) + countUnifiedKind(parsed, 'spell'),
+    items: countArray(parsed, ['legacy', 'items']) + countArray(parsed, ['content', 'items']) + countUnifiedKind(parsed, 'item'),
+    monsters: countArray(parsed, ['content', 'monsters']) + countUnifiedKind(parsed, 'monster'),
+    headlessActions: countArray(parsed, ['content', 'headlessActions']) + countUnifiedKind(parsed, 'monster-action'),
+    imageAssets: countArray(parsed, ['assets']),
     declaredCapabilities: Array.isArray(parsed.manifest?.declaredCapabilities)
       ? parsed.manifest.declaredCapabilities.length
       : 0,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, AlertTriangle, CheckCircle2, Download, FileJson, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, Download, FileJson, Moon, Palette, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Sun, Trash2, Upload } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
 import Dnd5eEffectDiagnosticsPanel from '../components/Dnd5eEffectDiagnosticsPanel'
@@ -40,6 +40,8 @@ import {
   DND5E_SRD_5_1_SOURCE_URL,
   DND5E_SRD_5_1_TRANSLATION_NOTICE,
 } from '../rulesets/dnd5e/srdContent'
+import { getAppTheme, setAppTheme, subscribeAppTheme, type AppTheme } from '../lib/appTheme'
+import { showAppConfirm } from '../lib/appDialog'
 
 export default function RulesPluginsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -69,7 +71,8 @@ export default function RulesPluginsPage() {
     bytes: ArrayBuffer
     fileName: string
   } | null>(null)
-  const [settingsSection, setSettingsSection] = useState<'plugins' | 'room' | 'diagnostics'>('plugins')
+  const [settingsSection, setSettingsSection] = useState<'appearance' | 'plugins' | 'room' | 'diagnostics'>('plugins')
+  const appTheme = useSyncExternalStore(subscribeAppTheme, getAppTheme, getAppTheme)
   const installed = host?.listInstalled() ?? []
   const activeById = new Map((host?.listActive() ?? []).map((plugin) => [plugin.id, plugin]))
   const activeRequirements = activeDnd5eRulesPluginRequirements()
@@ -145,12 +148,12 @@ export default function RulesPluginsPage() {
       if (inspected.contentSummary) {
         const summary = inspected.contentSummary
         const coverage = inspected.automationCoverage
-        const accepted = window.confirm([
+        const accepted = await showAppConfirm([
           `安装内容包：${inspected.manifest.name} v${inspected.manifest.version}`,
           `来源：${inspected.provenance?.sourceTitle ?? inspected.manifest.publisher}`,
           `许可：${inspected.manifest.license}`,
           `分发策略：${inspected.manifest.distributionPolicy ?? '未声明'}`,
-          `内容：种族 ${summary.races}、背景 ${summary.backgrounds}、特性 ${summary.features}、专长 ${summary.feats}、法术 ${summary.spells}、物品 ${summary.items}、子职 ${summary.subclasses}、怪物 ${summary.monsters}、图标 ${summary.imageAssets}`,
+          `内容：种族 ${summary.races}、背景 ${summary.backgrounds}、特性 ${summary.features}、专长 ${summary.feats}、法术 ${summary.spells}、物品 ${summary.items}、职业 ${summary.classes}、子职 ${summary.subclasses}、怪物 ${summary.monsters}、图标 ${summary.imageAssets}`,
           ...(coverage ? [
             `自动化：完整 ${coverage.totals.full}、部分 ${coverage.totals.partial}、手动 ${coverage.totals.manual}、仅资料 ${coverage.totals.referenceOnly}`,
           ] : []),
@@ -233,7 +236,7 @@ export default function RulesPluginsPage() {
       setCollectionAudit(compiled.audit)
       setPortableLocalJson({ bytes: compiled.bytes.slice(0), fileName: compiled.fileName })
       if (!compiled.audit.complete) {
-        const accepted = window.confirm([
+        const accepted = await showAppConfirm([
           '本地合集缺口审计未通过，仍要临时导入吗？',
           `条目：${compiled.audit.totals.entries}`,
           `数量缺口：${compiled.audit.totals.countShortfall}`,
@@ -269,7 +272,7 @@ export default function RulesPluginsPage() {
       setCollectionAudit(prepared.audit ?? null)
       setPortableLocalJson({ bytes: prepared.bytes.slice(0), fileName: prepared.fileName })
       if (prepared.audit && !prepared.audit.complete) {
-        const accepted = window.confirm([
+        const accepted = await showAppConfirm([
           '本地 JSON 缺口审计未通过，仍要临时导入吗？',
           `条目：${prepared.audit.totals.entries}`,
           `数量缺口：${prepared.audit.totals.countShortfall}`,
@@ -294,7 +297,12 @@ export default function RulesPluginsPage() {
     installPreparedLocalJson(() => prepareDnd5eLocalContentJsonFile(file))
 
   const remove = async (plugin: InstalledDnd5eRulesPlugin) => {
-    if (!host || !window.confirm(`卸载规则插件 ${plugin.id}？角色存档中的命名空间 ID 会保留。`)) return
+    if (!host) return
+    if (!(await showAppConfirm({
+      message: `卸载规则插件 ${plugin.id}？角色存档中的命名空间 ID 会保留。`,
+      tone: 'danger',
+      confirmLabel: '卸载',
+    }))) return
     setBusy(true)
     setNotice(null)
     setError(null)
@@ -494,6 +502,7 @@ export default function RulesPluginsPage() {
 
       <nav className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/15 p-2" aria-label="设置分类">
         {[
+          { id: 'appearance' as const, label: '界面外观', icon: Palette },
           { id: 'plugins' as const, label: '规则插件', icon: Puzzle },
           ...(roomSession?.role === 'player' ? [] : [
             { id: 'room' as const, label: '房间与恢复', icon: Shield },
@@ -515,6 +524,59 @@ export default function RulesPluginsPage() {
           </button>
         ))}
       </nav>
+
+      {settingsSection === 'appearance' && (
+        <section className="rounded-2xl border border-white/8 bg-black/15 p-5" data-testid="appearance-settings">
+          <div>
+            <h2 className="font-semibold text-slate-100">背景与文字颜色</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              默认使用黑底白字。这里的选择只保存到当前浏览器，不会改变房间规则，也不会影响其他玩家。
+            </p>
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {([
+              {
+                id: 'dark',
+                label: '深色主题',
+                description: '黑底白字，保持当前默认外观。',
+                icon: Moon,
+                previewClass: 'border-white/10 bg-[#080914] text-white',
+              },
+              {
+                id: 'light',
+                label: '浅色主题',
+                description: '白底黑字，适合明亮环境与长时间阅读。',
+                icon: Sun,
+                previewClass: 'border-slate-300 bg-white text-slate-950',
+              },
+            ] as const).map((option) => {
+              const selected = appTheme === option.id
+              const Icon = option.icon
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setAppTheme(option.id as AppTheme)}
+                  className={`flex items-center gap-4 rounded-2xl border p-4 text-left transition ${
+                    selected
+                      ? 'border-arcane-400/60 bg-arcane-500/10 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.2)]'
+                      : 'border-white/10 bg-black/10 hover:border-arcane-400/30'
+                  }`}
+                >
+                  <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border ${option.previewClass}`}>
+                    <Icon className="h-6 w-6" />
+                  </span>
+                  <span>
+                    <span className="block font-semibold text-slate-100">{option.label}</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {settingsSection === 'plugins' && <div className="contents">
       <section className="mb-5 flex flex-col gap-4 rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-5 sm:flex-row sm:items-center sm:justify-between">

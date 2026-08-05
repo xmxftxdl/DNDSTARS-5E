@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   appendDnd5eRepeatedProjectileTarget,
@@ -39,5 +40,24 @@ describe('repeated spell projectile targeting', () => {
       maximumTargets: 5,
       targetTokenIds: ['a', 'a'],
     })).toBe(3)
+  })
+
+  it('keeps the projectile-allocation prompt above the initiative toolbar and below banners', () => {
+    const source = readFileSync(new URL('../MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+    const promptLayer = source.match(
+      /data-testid="dnd5e-spell-targeting-overlay"[\s\S]{0,320}?z-\[(\d+)\]/,
+    )
+    const toolbarLayer = source.match(
+      /pointer-events-none absolute inset-x-2 top-2 z-\[(\d+)\] flex flex-col items-center/,
+    )
+    const bannerLayer = source.match(
+      /pointer-events-none absolute inset-x-0 top-\[3%\] z-\[(\d+)\] flex justify-center/,
+    )
+
+    expect(promptLayer?.[1]).toBeDefined()
+    expect(toolbarLayer?.[1]).toBeDefined()
+    expect(bannerLayer?.[1]).toBeDefined()
+    expect(Number(promptLayer?.[1])).toBeGreaterThan(Number(toolbarLayer?.[1]))
+    expect(Number(promptLayer?.[1])).toBeLessThan(Number(bannerLayer?.[1]))
   })
 })

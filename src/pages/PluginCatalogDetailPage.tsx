@@ -16,6 +16,7 @@ import {
 } from '../../shared/marketplace-entitlement.mjs'
 import PageHeader from '../components/PageHeader'
 import { accountApiErrorMessage } from '../lib/accountApi'
+import { showAppPrompt } from '../lib/appDialog'
 import {
   completeSandboxMarketplaceOrder,
   createMarketplaceOrder,
@@ -124,7 +125,7 @@ export default function PluginCatalogDetailPage() {
 
   const report = async () => {
     if (!plugin || !version) return
-    const details = window.prompt('请说明版权、安全、误导或其他问题：')?.trim()
+    const details = (await showAppPrompt('请说明版权、安全、误导或其他问题：'))?.trim()
     if (!details) return
     try {
       await reportPublicPlugin({ pluginId: plugin.id, version: version.version, category: 'copyright', details })

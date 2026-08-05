@@ -51,6 +51,7 @@ export default function MarketplacePublicationDialog({
   const [sourceUrl, setSourceUrl] = useState('')
   const [evidenceReference, setEvidenceReference] = useState('')
   const [containsAi, setContainsAi] = useState(false)
+  const [containsArtwork, setContainsArtwork] = useState(false)
   const [aiDisclosure, setAiDisclosure] = useState('')
   const [declared, setDeclared] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,7 +113,19 @@ export default function MarketplacePublicationDialog({
           license: license.trim(),
           ...(sourceUrl.trim() ? { sourceUrl: sourceUrl.trim() } : {}),
           ...(evidenceReference.trim() ? { evidenceReference: evidenceReference.trim() } : {}),
-        }],
+        }, ...(containsArtwork ? [{
+          category: 'art' as const,
+          sourceType: contentOrigin === 'original'
+            ? 'original' as const
+            : contentOrigin === 'commissioned'
+              ? 'commissioned' as const
+              : contentOrigin === 'open-license'
+                ? 'open-license' as const
+                : 'licensed' as const,
+          license: license.trim(),
+          ...(sourceUrl.trim() ? { sourceUrl: sourceUrl.trim() } : {}),
+          ...(evidenceReference.trim() ? { evidenceReference: evidenceReference.trim() } : {}),
+        }] : [])],
       },
     })
   }
@@ -170,6 +183,10 @@ export default function MarketplacePublicationDialog({
                 <input value={evidenceReference} onChange={(event) => setEvidenceReference(event.target.value)} placeholder="合同编号、源文件说明或登记号" className="mt-1 block w-full rounded-xl border border-white/10 bg-void-900 px-3 py-2.5 text-sm text-white" />
               </label>
             </div>
+            <label className="mt-4 flex items-start gap-3 text-sm text-slate-200">
+              <input className="mt-1" type="checkbox" checked={containsArtwork} onChange={(event) => setContainsArtwork(event.target.checked)} />
+              <span>包内含图标、Token、立绘或其他美术素材；将同时提交美术分发权声明。</span>
+            </label>
           </section>
 
           <section className="rounded-2xl border border-white/8 bg-white/[0.025] p-5">
@@ -186,6 +203,9 @@ export default function MarketplacePublicationDialog({
             <input className="mt-1" type="checkbox" checked={declared} onChange={(event) => setDeclared(event.target.checked)} />
             <span>我声明拥有发布、销售并授权平台分发这些内容所需的全部权利，并接受创作者协议 {MARKETPLACE_CREATOR_AGREEMENT_VERSION}。平台审核不构成对原创性或权属的法律确认。</span>
           </label>
+          <p className="rounded-2xl border border-rose-400/15 bg-rose-500/[0.04] px-4 py-3 text-xs leading-5 text-rose-100/80">
+            仅限本地使用的资料并不自动取得公开分发权。请勿提交 PHB 原文、官方美术或其他未获市场分发授权的内容；这类内容应保留为 local-only 或 room-ephemeral 包。
+          </p>
           {error && <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">{error}</p>}
         </div>
 

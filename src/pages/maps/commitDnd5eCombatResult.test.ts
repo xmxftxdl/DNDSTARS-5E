@@ -5,6 +5,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import {
   applyDnd5eCombatResultApplication,
   commitDnd5eCombatResult,
+  mergeDnd5eCharacterPatchIntoResult,
   mergeDnd5eCombatCharacterResult,
 } from './commitDnd5eCombatResult'
 
@@ -204,6 +205,29 @@ describe('战斗结果提交协调器', () => {
       tempHp: 0,
       playerNotes: 'DM edited while dice were rolling',
     })
+  })
+
+  it('merges inventory rewards into an existing Headless character patch', () => {
+    const inventory = {
+      schemaVersion: 3 as const,
+      entries: [],
+      currency: { cp: 0, sp: 0, ep: 0, gp: 5, pp: 0 },
+      authorityGrantReceipts: ['interaction:bookshelf'],
+    }
+    const application = plan({
+      characterPatches: { hero: { currentHp: 7 } },
+    })
+
+    const merged = mergeDnd5eCharacterPatchIntoResult(application, 'hero', {
+      dnd5eInventory: inventory,
+    })
+
+    expect(merged.characterPatches?.hero).toMatchObject({
+      currentHp: 7,
+      dnd5eInventory: inventory,
+    })
+    expect(merged.characters[0].dnd5eInventory).toEqual(inventory)
+    expect(merged.changedCharacterIds).toEqual(['hero'])
   })
 
   it('uses one coupled persistence operation when an atomic saver is available', async () => {

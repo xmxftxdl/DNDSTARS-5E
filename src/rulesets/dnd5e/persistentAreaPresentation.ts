@@ -1,5 +1,5 @@
 import type { Dnd5ePluginArea } from '../../store/maps'
-import { getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
+import { dnd5eCoreSpellAreaVisual } from './coreSpellAreaVisuals'
 import type { Dnd5ePersistentAreaVisual } from './persistentAreaTypes'
 
 type PersistentAreaPresentationSource = Pick<
@@ -19,6 +19,10 @@ export function dnd5ePersistentAreaPresentationVisual(
     ? 'arcane'
     : area.coreSpellId === 'insect-plague'
       ? 'toxic-cloud'
+      : area.coreSpellId === 'cloudkill'
+        ? 'toxic-cloud'
+      : area.coreSpellId === 'ice-storm'
+        ? 'arcane'
       : area.coreSpellId === 'blade-barrier'
         ? 'arcane'
         : undefined
@@ -27,6 +31,5 @@ export function dnd5ePersistentAreaPresentationVisual(
     !(area.sourceKind === 'core-spell' && legacyGenericPreset === area.visual.preset)
   ) return area.visual
   if (area.sourceKind !== 'core-spell' || !area.coreSpellId) return undefined
-  const visual = getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.visual
-  return visual ? { ...visual } : undefined
+  return dnd5eCoreSpellAreaVisual(area.coreSpellId)
 }

@@ -8,6 +8,7 @@ import {
 import { parseDnd5eDeclarativeRulesPackageV1 } from './declarativeSubclassAbility'
 import { dnd5eRulesPluginFromDeclarativePackageV1 } from './declarativePluginPackage'
 import {
+  dnd5ePluginSpellDefinition,
   dnd5ePluginSubclassDefinition,
   registerDnd5eRulesPlugin,
   registeredDnd5ePluginMonsters,
@@ -164,6 +165,32 @@ describe('DM custom rules plugin builder', () => {
     expect(source).toContain('"guiding-glow"')
     expect(source).toContain('api.registerBackground(background)')
     expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
+  })
+
+  it('keeps old room packages installable when a spell also lists a catalog-only class', () => {
+    const value = draft()
+    value.manifest.id = 'local.dm.legacy-spell-classes'
+    value.spells = [{
+      id: 'legacy-spark', name: 'Legacy Spark', level: 0, school: 'evocation', ritual: false,
+      castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+      components: { verbal: true, somatic: true, material: false },
+      duration: { type: 'instantaneous', concentration: false }, classes: ['wizard'],
+      description: 'Compatibility fixture.', automation: { mode: 'reference-only' },
+    }]
+    const serialized = JSON.parse(buildDnd5eCustomRulesPluginPackageV1(value)) as {
+      legacy: { spells: Array<{ classes: string[] }> }
+    }
+    serialized.legacy.spells[0].classes = ['artificer', 'wizard']
+    const parsed = parseDnd5eDeclarativeRulesPackageV1(
+      new TextEncoder().encode(JSON.stringify(serialized)).buffer as ArrayBuffer,
+    )
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromDeclarativePackageV1(parsed!))
+    try {
+      expect(dnd5ePluginSpellDefinition('local.dm.legacy-spell-classes:legacy-spark')?.classes)
+        .toEqual(['wizard'])
+    } finally {
+      dispose()
+    }
   })
 
   it('compiles damage, healing, condition and interrupt settings into a capability-only resolver', () => {

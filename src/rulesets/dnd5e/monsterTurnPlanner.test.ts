@@ -2908,6 +2908,65 @@ describe('SRD monster 5e turn planner', () => {
     expect(optimized.dashed).toBe(true)
   })
 
+  it('moves out of turn-end persistent damage when it can keep attacking safely', () => {
+    const wolf = token({
+      id: 'wolf', label: 'Wolf', poolId: 'srd-5.1:wolf',
+      x: 15, y: 15, hp: 11, maxHp: 11,
+    })
+    const hero = token({
+      id: 'hero-token', label: 'Hero', type: 'player',
+      characterId: 'hero', x: 25, y: 15, hp: 20, maxHp: 20,
+    })
+    const battleMap: BattleMap = {
+      ...map([wolf, hero]),
+      dnd5ePluginAreas: [{
+        id: 'flaming-sphere-area',
+        pluginId: 'srd-5.1',
+        featureId: 'srd-5.1:spell:flaming-sphere',
+        sourceKind: 'core-spell',
+        coreSpellId: 'flaming-sphere',
+        slotLevel: 2,
+        label: 'Flaming Sphere',
+        color: '#f97316',
+        sourceCharacterId: 'hero',
+        sourceTokenId: hero.id,
+        cells: [{ col: 1, row: 1 }],
+        createdRound: 1,
+        expiresAfterRound: 10,
+        relation: 'enemy',
+        includeSelf: false,
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 },
+        triggers: [{
+          id: 'flaming-sphere-turn-end',
+          label: 'Flaming Sphere · turn end',
+          timing: 'turn-end',
+          oncePerTurn: true,
+          savingThrow: { ability: 'dex', dc: 15, onSuccess: 'half' },
+          damage: { count: 2, sides: 6, type: 'fire' },
+        }],
+      }],
+    }
+
+    const baseline = planDnd5eMonsterTurn(map([wolf, hero]), wolf, [character()])
+    const plan = planDnd5eMonsterTurn(battleMap, wolf, [character()])
+
+    expect(baseline.moved).toBe(false)
+    expect(plan).toMatchObject({
+      moved: true,
+      attacked: true,
+      attackerTokenId: wolf.id,
+      targetTokenId: hero.id,
+      decision: {
+        providerId: 'dnd5e:deterministic-tactical-v3',
+      },
+    })
+    expect(plan.newPosition).not.toEqual({ x: wolf.x, y: wolf.y })
+    expect(plan.decision?.metrics?.expectedIncomingDamage ?? 0).toBe(0)
+    expect(plan.decision?.reasons).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^避开回合结束预计伤害 [1-9]/),
+    ]))
+  })
+
   it('falls back to per-destination A* when the shared route tree is truncated', () => {
     const barbedDevil = token({
       id: 'barbed-devil', label: 'Barbed Devil',

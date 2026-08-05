@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { createCoreFighter } from './support/characterCreation'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
@@ -48,15 +49,7 @@ test('DM distributes an SRD item and the player uses it through authority sync',
   await player.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [SESSION_KEY, session(joined)] as const)
   await Promise.all([dm.reload({ waitUntil: 'domcontentloaded' }), player.reload({ waitUntil: 'domcontentloaded' })])
 
-  await player.getByRole('button', { name: '新建角色' }).click()
-  await player.getByRole('button', { name: /经验丰富的冒险者/ }).click()
-  await player.getByRole('button', { name: '选择属性方式' }).click()
-  await player.getByRole('button', { name: /标准数组/ }).click()
-  await player.getByRole('button', { name: '开始分配' }).click()
-  await player.getByRole('button', { name: '加入种族调整并选择装备' }).click()
-  await player.getByRole('button', { name: '确认起始装备' }).click()
-  await player.getByRole('textbox', { name: '角色名称' }).fill('背包测试战士')
-  await player.getByRole('button', { name: '创建角色' }).click()
+  await createCoreFighter(player, { name: '背包测试战士' })
 
   const distributor = dm.getByTestId('dm-inventory-distributor')
   const targetOption = distributor.getByRole('option', { name: /背包测试战士/ })
@@ -68,7 +61,8 @@ test('DM distributes an SRD item and the player uses it through authority sync',
 
   await player.getByRole('button', { name: '物品栏' }).click()
   const inventory = player.getByTestId('dnd5e-inventory')
-  await inventory.getByRole('button', { name: '道具' }).click()
+  await expect(inventory.getByTestId('inventory-equipment-rail')).toBeVisible()
+  await expect(inventory.locator('[data-testid^="inventory-equipment-slot-"]')).toHaveCount(9)
   const potion = inventory.getByRole('button', { name: /治疗药水/ })
   await expect(potion).toBeVisible({ timeout: 20_000 })
   await potion.hover()

@@ -1,23 +1,27 @@
-import { useRef, useState } from 'react'
-import { ClipboardPaste, Download, ImagePlus, Plus, Save, Trash2, Upload, X } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardPaste, Dices, Download, Plus, Save, Search, Trash2, Upload, X } from 'lucide-react'
 import { useCustomMonsterStore } from '../../store/customMonsters'
 import {
   DND5E_DAMAGE_TYPES,
   buildDnd5eCustomMonster,
+  canConvertDnd5eCustomMonsterTraitToAreaAction,
   createDnd5eCustomMonsterActionDraft,
+  createDnd5eCustomMonsterAreaActionDraftFromTrait,
   createDnd5eCustomMonsterMechanicDraft,
   createDnd5eCustomMonsterTraitDraft,
   createDnd5eCustomMonsterDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
+  validateDnd5eCustomMonsterAreaActionDraft,
+  validateDnd5eCustomMonsterSummonActionDraft,
   type Dnd5eCustomMonsterDraft,
 } from '../../rulesets/dnd5e/customMonsterWorkshop'
 import type { AbilityKey } from '../../lib/dnd'
-import type { Dnd5eMonsterSize } from '../../rulesets/dnd5e/monsters'
-import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
+import { DND5E_SRD_MONSTERS, type Dnd5eMonsterSize, type Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
 import { parseDnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsterSchema'
 import { DND5E_MONSTER_TARGET_PRIORITY_OPTIONS } from '../../rulesets/dnd5e/monsterAutomation'
 import { DND5E_STANDARD_CONDITIONS } from '../../rulesets/dnd5e/conditions'
-import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { showAppConfirm } from '../../lib/appDialog'
+import Dnd5eMonsterPortraitStudio from './Dnd5eMonsterPortraitStudio'
 import { DND5E_DAMAGE_TYPE_LABELS } from '../../rulesets/dnd5e/damageTypes'
 import {
   parseDnd5ePastedMonster,
@@ -26,8 +30,32 @@ import {
 import { DND5E_SRD_SPELL_CATALOG } from '../../rulesets/dnd5e/spellCatalog'
 import {
   parseDnd5eFeatureMechanicText,
+  parseDnd5eSpellcastingText,
   parseDnd5eSpellListText,
 } from '../../rulesets/dnd5e/monsterContentAutoParser'
+import {
+  analyzeDnd5eMonsterDraftContent,
+  dnd5eMonsterContentSlug,
+  normalizeDnd5eMonsterDraftContent,
+  type Dnd5eMonsterContentSpellReference,
+  type Dnd5eMonsterContentSummonReference,
+  type Dnd5eMonsterContentUnresolvedSpell,
+} from '../../rulesets/dnd5e/monsterContentDeepAnalysis'
+import {
+  collectDnd5eMonsterWorkshopReviewIssues,
+  dnd5eMonsterActionReviewSummary,
+  dnd5eMonsterActionReviewTarget,
+  dnd5eMonsterTraitCoveredByFullMechanic,
+  dnd5eMonsterTraitReviewSummary,
+  dnd5eMonsterTraitReviewTarget,
+  summarizeDnd5eMonsterWorkshopReview,
+  type Dnd5eMonsterWorkshopAiReview,
+} from './monsterWorkshopReview'
+import Dnd5eMonsterHeadlessSandbox from './Dnd5eMonsterHeadlessSandbox'
+import {
+  commitDnd5eMonsterWorkshopMonster,
+  type Dnd5eMonsterWorkshopCommitDestination,
+} from './monsterWorkshopCommit'
 
 const ABILITY_LABELS: readonly [AbilityKey, string][] = [
   ['str', '力量'], ['dex', '敏捷'], ['con', '体质'], ['int', '智力'], ['wis', '感知'], ['cha', '魅力'],
@@ -63,6 +91,175 @@ function inputClass(): string {
   return 'w-full rounded-lg border border-white/10 bg-void-950/80 px-2.5 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500'
 }
 
+function monsterCatalogSourceLabel(monster: Dnd5eMonsterStatBlock): string {
+  return monster.id.startsWith('room-monster:') ? '房间' : 'SRD 5.1'
+}
+
+function normalizedMonsterCatalogSearch(value: string): string {
+  return value.trim().toLocaleLowerCase('zh-CN')
+}
+
+function filterMonsterCatalog(
+  monsters: readonly Dnd5eMonsterStatBlock[],
+  query: string,
+): readonly Dnd5eMonsterStatBlock[] {
+  const needle = normalizedMonsterCatalogSearch(query)
+  if (!needle) return monsters
+  return monsters.filter((monster) => normalizedMonsterCatalogSearch([
+    monster.name,
+    monster.englishName,
+    monster.id,
+    monster.source,
+    monsterCatalogSourceLabel(monster),
+  ].join(' ')).includes(needle))
+}
+
+interface MonsterCatalogComboboxProps {
+  actionName: string
+  value: string
+  monsters: readonly Dnd5eMonsterStatBlock[]
+  onChange: (monsterId: string) => void
+}
+
+function MonsterCatalogCombobox({ actionName, value, monsters, onChange }: MonsterCatalogComboboxProps) {
+  const listboxId = useId()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const selected = monsters.find((monster) => monster.id === value)
+  const filtered = useMemo(() => filterMonsterCatalog(monsters, query), [monsters, query])
+
+  const choose = (monsterId: string) => {
+    onChange(monsterId)
+    setOpen(false)
+    setQuery('')
+    setActiveIndex(0)
+  }
+
+  return <div className="col-span-2 text-xs text-slate-400">
+    <span>召唤怪物</span>
+    <button
+      type="button"
+      aria-label={`${actionName}召唤怪物`}
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      onClick={() => {
+        setOpen((current) => !current)
+        setQuery('')
+        setActiveIndex(0)
+      }}
+      className={`${inputClass()} mt-1 flex items-center justify-between gap-2 text-left`}
+    >
+      <span className={`min-w-0 flex-1 truncate ${selected || value ? 'text-slate-100' : 'text-slate-500'}`}>
+        {selected
+          ? `${selected.name}${selected.englishName && selected.englishName !== selected.name ? ` / ${selected.englishName}` : ''} · ${monsterCatalogSourceLabel(selected)}`
+          : value || '从当前怪物目录搜索选择…'}
+      </span>
+      <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+    {open && <div className="mt-1 overflow-hidden rounded-lg border border-violet-300/20 bg-void-950 shadow-xl">
+      <div className="relative border-b border-white/10 p-2">
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+        <input
+          autoFocus
+          role="combobox"
+          aria-label={`${actionName}搜索召唤怪物`}
+          aria-expanded="true"
+          aria-controls={listboxId}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setActiveIndex(0)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setOpen(false)
+              return
+            }
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setActiveIndex((current) => Math.min(current + 1, Math.max(0, filtered.length - 1)))
+              return
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setActiveIndex((current) => Math.max(0, current - 1))
+              return
+            }
+            if (event.key === 'Enter' && filtered[activeIndex]) {
+              event.preventDefault()
+              choose(filtered[activeIndex].id)
+            }
+          }}
+          placeholder="搜索中文名、英文名或怪物 ID…"
+          className="w-full rounded-md border border-white/10 bg-black/20 py-2 pl-8 pr-2 text-sm text-slate-100 outline-none focus:border-violet-400/50"
+        />
+      </div>
+      <div id={listboxId} role="listbox" aria-label={`${actionName}召唤怪物搜索结果`} className="max-h-56 overflow-y-auto p-1">
+        {value && <button type="button" role="option" aria-selected="false" onClick={() => choose('')} className="block w-full rounded-md px-2.5 py-2 text-left text-xs text-slate-500 hover:bg-white/5 hover:text-slate-300">清除当前选择</button>}
+        {filtered.map((monster, index) => <button
+          key={monster.id}
+          type="button"
+          role="option"
+          aria-selected={monster.id === value}
+          onMouseEnter={() => setActiveIndex(index)}
+          onClick={() => choose(monster.id)}
+          className={`block w-full rounded-md px-2.5 py-2 text-left ${index === activeIndex ? 'bg-violet-500/15' : 'hover:bg-white/5'}`}
+        >
+          <span className="block text-sm text-slate-100">{monster.name} <span className="text-[11px] text-slate-500">· {monsterCatalogSourceLabel(monster)}</span></span>
+          <span className="mt-0.5 block truncate text-[11px] text-slate-500">{monster.englishName || monster.id} · {monster.id}</span>
+        </button>)}
+        {filtered.length === 0 && <p className="px-3 py-5 text-center text-xs text-slate-500">没有匹配的怪物；请先在怪物工坊创建或导入它。</p>}
+      </div>
+      <p className="border-t border-white/10 px-3 py-1.5 text-[10px] text-slate-600">{filtered.length} / {monsters.length} 个怪物</p>
+    </div>}
+  </div>
+}
+
+interface SavedMonsterWorkshopDraftV1 {
+  schemaVersion: 1
+  draft: Dnd5eCustomMonsterDraft
+  selectedId: string | null
+  aiReview?: Dnd5eMonsterWorkshopAiReview
+  updatedAt: number
+}
+
+const MONSTER_WORKSHOP_DRAFT_KEY = 'dndstars5e:monster-workshop-draft:v1'
+
+function monsterWorkshopDraftStorageKey(context: Props['context'], scope: string): string {
+  return `${MONSTER_WORKSHOP_DRAFT_KEY}:${context ?? 'room'}:${encodeURIComponent(scope || 'local')}`
+}
+
+function readMonsterWorkshopDraft(storageKey: string): SavedMonsterWorkshopDraftV1 | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as Partial<SavedMonsterWorkshopDraftV1> | null
+    if (!parsed || parsed.schemaVersion !== 1 || !parsed.draft || typeof parsed.draft !== 'object') return null
+    return {
+      schemaVersion: 1,
+      draft: parsed.draft as Dnd5eCustomMonsterDraft,
+      selectedId: typeof parsed.selectedId === 'string' ? parsed.selectedId : null,
+      aiReview: parsed.aiReview,
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
+    }
+  } catch {
+    return null
+  }
+}
+
+export interface Dnd5eMonsterWorkshopEditRequest {
+  requestId: number
+  monster: Dnd5eMonsterStatBlock
+  review?: Dnd5eMonsterWorkshopAiReview
+}
+
+export interface Dnd5eMonsterWorkshopCustomSpellDraftRequest extends Dnd5eMonsterContentSpellReference {
+  sourceText: string
+}
+
+type MonsterWorkshopSupplementTarget =
+  | { kind: 'spell'; spell: Dnd5eMonsterContentUnresolvedSpell }
+  | { kind: 'monster'; reference: Dnd5eMonsterContentSummonReference }
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -70,6 +267,10 @@ interface Props {
   monsters?: readonly Dnd5eMonsterStatBlock[]
   onMonstersChange?: (monsters: Dnd5eMonsterStatBlock[]) => void
   context?: 'room' | 'plugin'
+  editRequest?: Dnd5eMonsterWorkshopEditRequest | null
+  draftStorageScope?: string
+  knownCustomSpells?: readonly Dnd5eMonsterContentSpellReference[]
+  onCreateCustomSpellDraft?: (request: Dnd5eMonsterWorkshopCustomSpellDraftRequest) => void
 }
 
 export default function Dnd5eMonsterWorkshopDialog({
@@ -78,26 +279,108 @@ export default function Dnd5eMonsterWorkshopDialog({
   monsters: controlledMonsters,
   onMonstersChange,
   context = 'room',
+  editRequest,
+  draftStorageScope = 'local',
+  knownCustomSpells = [],
+  onCreateCustomSpellDraft,
 }: Props) {
   const roomMonsters = useCustomMonsterStore((state) => state.monsters)
   const upsertRoomMonster = useCustomMonsterStore((state) => state.upsertMonster)
   const importRoomMonsters = useCustomMonsterStore((state) => state.importMonsters)
   const removeRoomMonster = useCustomMonsterStore((state) => state.removeMonster)
-  const monsters = controlledMonsters ? [...controlledMonsters] : roomMonsters
+  const monsters = useMemo(
+    () => controlledMonsters ? [...controlledMonsters] : roomMonsters,
+    [controlledMonsters, roomMonsters],
+  )
+  const summonMonsterOptions = useMemo(() => {
+    const byId = new Map<string, Dnd5eMonsterStatBlock>()
+    for (const monster of [...DND5E_SRD_MONSTERS, ...monsters]) byId.set(monster.id, monster)
+    return [...byId.values()].sort((left, right) =>
+      left.name.localeCompare(right.name, 'zh-CN'))
+  }, [monsters])
   const pluginMode = context === 'plugin' && !!onMonstersChange
-  const [draft, setDraft] = useState<Dnd5eCustomMonsterDraft>(() => createDnd5eCustomMonsterDraft())
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+  const [draftStorageKey] = useState(() => monsterWorkshopDraftStorageKey(context, draftStorageScope))
+  const [restoredLocalDraft] = useState(() => editRequest ? null : readMonsterWorkshopDraft(draftStorageKey))
+  const [draft, setDraft] = useState<Dnd5eCustomMonsterDraft>(() => normalizeDnd5eMonsterDraftContent(
+    editRequest
+      ? dnd5eCustomMonsterDraftFromStatBlock(editRequest.monster)
+      : restoredLocalDraft?.draft ?? createDnd5eCustomMonsterDraft(),
+    knownCustomSpells,
+  ).draft)
+  const [selectedId, setSelectedId] = useState<string | null>(() => restoredLocalDraft?.selectedId ?? null)
+  const [aiReview, setAiReview] = useState<Dnd5eMonsterWorkshopAiReview | undefined>(() => editRequest?.review ?? restoredLocalDraft?.aiReview)
+  const [message, setMessage] = useState<string | null>(() => editRequest
+    ? `已载入 AI 转换的“${editRequest.monster.name}”；请处理顶部待确认项。`
+    : restoredLocalDraft
+      ? '已自动恢复当前房间尚未加入扩展的怪物草稿。'
+      : null)
   const [busy, setBusy] = useState(false)
+  const [lastDraftSavedAt, setLastDraftSavedAt] = useState<number | null>(() => restoredLocalDraft?.updatedAt ?? null)
+  const [collapsedActionIds, setCollapsedActionIds] = useState<Set<string>>(() => new Set(
+    draft.actions
+      .filter((action) => action.kind !== 'area-saving-throw' || validateDnd5eCustomMonsterAreaActionDraft(action).length === 0)
+      .map((action) => action.id),
+  ))
+  const [collapsedTraitIndexes, setCollapsedTraitIndexes] = useState<Set<number>>(() => new Set(
+    draft.traits.flatMap((trait, index) => trait.ruleKind === 'none' ? [] : [index]),
+  ))
   const [pasteOpen, setPasteOpen] = useState(false)
+  const [sandboxOpen, setSandboxOpen] = useState(false)
   const [pastedText, setPastedText] = useState('')
   const [pasteResult, setPasteResult] = useState<Dnd5ePastedMonsterParseResult>()
   const [pasteError, setPasteError] = useState<string>()
   const [featureParseText, setFeatureParseText] = useState('')
   const [spellParseText, setSpellParseText] = useState('')
+  const [supplementText, setSupplementText] = useState('')
+  const [supplementTarget, setSupplementTarget] = useState<MonsterWorkshopSupplementTarget>()
+  const [supplementError, setSupplementError] = useState<string>()
   const importRef = useRef<HTMLInputElement>(null)
-  const tokenPortraitRef = useRef<HTMLInputElement>(null)
-  const initiativePortraitRef = useRef<HTMLInputElement>(null)
+  const skipNextDraftAutosaveRef = useRef(false)
+
+  const reviewIssues = useMemo(
+    () => collectDnd5eMonsterWorkshopReviewIssues(draft, aiReview),
+    [aiReview, draft],
+  )
+  const reviewSummary = useMemo(
+    () => summarizeDnd5eMonsterWorkshopReview(draft, reviewIssues),
+    [draft, reviewIssues],
+  )
+  const contentAnalysis = useMemo(
+    () => analyzeDnd5eMonsterDraftContent(draft, monsters, knownCustomSpells),
+    [draft, knownCustomSpells, monsters],
+  )
+  const missingSummonReferences = contentAnalysis.summonReferences.filter((reference) => !reference.resolvedMonsterId)
+  const contentCleanupCount = contentAnalysis.repairedActionIds.length +
+    contentAnalysis.absorbedSpellTraits.length +
+    contentAnalysis.absorbedSpellActions.length +
+    contentAnalysis.removedActionDuplicates.length +
+    contentAnalysis.removedMechanicActionDuplicates.length
+  const contentNeedsCleanup = contentCleanupCount > 0
+
+  useEffect(() => {
+    if (!open) return
+    if (skipNextDraftAutosaveRef.current) {
+      skipNextDraftAutosaveRef.current = false
+      return
+    }
+    const timer = window.setTimeout(() => {
+      try {
+        const saved: SavedMonsterWorkshopDraftV1 = {
+          schemaVersion: 1,
+          draft,
+          selectedId,
+          aiReview,
+          updatedAt: Date.now(),
+        }
+        localStorage.setItem(draftStorageKey, JSON.stringify(saved))
+        setLastDraftSavedAt(saved.updatedAt)
+      } catch {
+        // 显式保存仍会执行完整 Host 校验；自动保存失败不阻断编辑。
+      }
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [aiReview, draft, draftStorageKey, open, selectedId])
+
   const preservesAdvancedFields = !!draft.preservedStatBlock && (
     !!draft.preservedStatBlock.savingThrows || !!draft.preservedStatBlock.skills?.length ||
     !!draft.preservedStatBlock.senses.length || !!draft.preservedStatBlock.damageResistances?.length ||
@@ -113,19 +396,89 @@ export default function Dnd5eMonsterWorkshopDialog({
     setDraft((current) => ({ ...current, [key]: value }))
   }
 
-  const uploadPortrait = async (kind: 'tokenPortrait' | 'initiativePortrait', file?: File) => {
-    if (!file) return
-    setBusy(true)
-    setMessage(null)
+  const persistLocalDraft = (showNotice = false) => {
     try {
-      patchDraft(kind, await createCharacterPortraitDataUrl(file))
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy(false)
-      if (kind === 'tokenPortrait' && tokenPortraitRef.current) tokenPortraitRef.current.value = ''
-      if (kind === 'initiativePortrait' && initiativePortraitRef.current) initiativePortraitRef.current.value = ''
+      const saved: SavedMonsterWorkshopDraftV1 = {
+        schemaVersion: 1,
+        draft,
+        selectedId,
+        aiReview,
+        updatedAt: Date.now(),
+      }
+      localStorage.setItem(draftStorageKey, JSON.stringify(saved))
+      setLastDraftSavedAt(saved.updatedAt)
+      if (showNotice) setMessage('本地怪物草稿已保存；刷新页面后会自动恢复，且不会上传到服务器。')
+    } catch {
+      setMessage('浏览器无法保存怪物草稿；请导出 JSON 作为备份。')
     }
+  }
+
+  const deleteLocalDraft = async () => {
+    if (!await showAppConfirm({
+      title: '删除未加入扩展的怪物草稿',
+      message: '这会清空当前表单和 AI 审核记录；已经加入扩展草稿或当前房间的怪物不会被删除。',
+      confirmLabel: '确认删除草稿',
+      tone: 'danger',
+    })) return
+    localStorage.removeItem(draftStorageKey)
+    skipNextDraftAutosaveRef.current = true
+    setDraft(createDnd5eCustomMonsterDraft())
+    setSelectedId(null)
+    setAiReview(undefined)
+    setCollapsedActionIds(new Set())
+    setCollapsedTraitIndexes(new Set())
+    setLastDraftSavedAt(null)
+    setMessage('已删除未加入扩展的本地怪物草稿。')
+  }
+
+  const toggleActionCollapsed = (id: string) => {
+    setCollapsedActionIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleTraitCollapsed = (index: number) => {
+    setCollapsedTraitIndexes((current) => {
+      const next = new Set(current)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const removeTrait = (index: number) => {
+    patchDraft('traits', draft.traits.filter((_, entryIndex) => entryIndex !== index))
+    setCollapsedTraitIndexes((current) => new Set([...current]
+      .filter((entryIndex) => entryIndex !== index)
+      .map((entryIndex) => entryIndex > index ? entryIndex - 1 : entryIndex)))
+  }
+
+  const revealReviewTarget = (targetId: string) => {
+    if (targetId.startsWith('monster-workshop-action-')) {
+      const actionId = targetId.slice('monster-workshop-action-'.length)
+      setCollapsedActionIds((current) => {
+        const next = new Set(current)
+        next.delete(actionId)
+        return next
+      })
+    }
+    if (targetId.startsWith('monster-workshop-trait-')) {
+      const traitIndex = Number(targetId.slice('monster-workshop-trait-'.length))
+      setCollapsedTraitIndexes((current) => {
+        const next = new Set(current)
+        next.delete(traitIndex)
+        return next
+      })
+    }
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetId)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const focusTarget = target?.querySelector<HTMLElement>('[data-review-focus], input, select, textarea, button')
+      focusTarget?.focus({ preventScroll: true })
+    }))
   }
 
   const analyzePastedMonster = () => {
@@ -142,6 +495,11 @@ export default function Dnd5eMonsterWorkshopDialog({
     if (!pasteResult) return
     setSelectedId(null)
     setDraft(pasteResult.draft)
+    setAiReview(undefined)
+    setCollapsedActionIds(new Set(pasteResult.draft.actions
+      .filter((action) => action.kind !== 'area-saving-throw' || validateDnd5eCustomMonsterAreaActionDraft(action).length === 0)
+      .map((action) => action.id)))
+    setCollapsedTraitIndexes(new Set(pasteResult.draft.traits.flatMap((trait, index) => trait.ruleKind === 'none' ? [] : [index])))
     setMessage(`已自动填写 ${pasteResult.recognizedFields.length} 类字段；保存前请核对标记为手动裁定的复杂能力。`)
     setPasteOpen(false)
     setPasteResult(undefined)
@@ -175,26 +533,147 @@ export default function Dnd5eMonsterWorkshopDialog({
     setMessage(`已识别 ${result.spells.length} 个 SRD 5.1 法术${result.unknown.length > 0 ? `；未识别：${result.unknown.join('、')}` : ''}。`)
   }
 
-  const save = async () => {
+  const normalizeCurrentContent = () => {
+    const normalized = normalizeDnd5eMonsterDraftContent(draft, knownCustomSpells)
+    setDraft(normalized.draft)
+    setCollapsedTraitIndexes(new Set(normalized.draft.traits.map((_, index) => index)))
+    const moved = normalized.report.absorbedSpellTraits.length + normalized.report.absorbedSpellActions.length
+    const duplicates = normalized.report.removedActionDuplicates.length + normalized.report.removedMechanicActionDuplicates.length
+    const repairedIds = normalized.report.repairedActionIds.length
+    setMessage(moved + duplicates + repairedIds > 0
+      ? `深度整理完成：${repairedIds > 0 ? `修复 ${repairedIds} 个动作 ID` : ''}${repairedIds > 0 && moved > 0 ? '；' : ''}${moved > 0 ? `归并 ${moved} 个施法段落` : ''}${(repairedIds > 0 || moved > 0) && duplicates > 0 ? '；' : ''}${duplicates > 0 ? `移除 ${duplicates} 个动作副本` : ''}。未识别内容仍保留在缺失清单中。`
+      : '深度分析完成；当前没有可安全自动移动的重复段落。')
+  }
+
+  const beginSpellSupplement = (spell: Dnd5eMonsterContentUnresolvedSpell) => {
+    setSupplementTarget({ kind: 'spell', spell })
+    setSupplementText('')
+    setSupplementError(undefined)
+  }
+
+  const beginMonsterSupplement = (reference: Dnd5eMonsterContentSummonReference) => {
+    setSupplementTarget({ kind: 'monster', reference })
+    setSupplementText('')
+    setSupplementError(undefined)
+  }
+
+  const parseSupplement = async () => {
+    const source = supplementText.trim()
+    if (!source) {
+      setSupplementError('请先粘贴补充规则或完整怪物属性块。')
+      return
+    }
+    setSupplementError(undefined)
     setBusy(true)
-    setMessage(null)
     try {
-      const monster = buildDnd5eCustomMonster(draft)
+      if (supplementTarget?.kind === 'spell') {
+        const selected = supplementTarget.spell
+        const recognized = parseDnd5eSpellListText(source)
+        if (recognized.spells.length > 0) {
+          const spellById = new Map(draft.spells
+            .filter((spell) => spell.id !== selected.id)
+            .map((spell) => [spell.id, spell]))
+          for (const spell of recognized.spells) spellById.set(spell.id, spell)
+          setDraft((current) => ({
+            ...current,
+            spellcastingEnabled: true,
+            spells: [...spellById.values()],
+          }))
+          setMessage(`已用 ${recognized.spells.map((spell) => spell.name).join('、')} 替换未识别法术“${selected.name}”。`)
+        } else if (onCreateCustomSpellDraft) {
+          onCreateCustomSpellDraft({
+            id: selected.id,
+            name: selected.name,
+            level: selected.level,
+            sourceText: source,
+          })
+          setDraft((current) => ({ ...current, spellcastingEnabled: true, spellcastingAutomation: 'dm-adjudication' }))
+          setMessage(`已为“${selected.name}”建立自定义法术草稿并带入规则正文；请在关闭怪物工坊后进入“自定义法术”补齐并验证 Headless 字段。`)
+        } else {
+          throw new Error('当前房间模式不能在怪物表单内创建法术定义；请在自定义工坊中创建该法术后重新打开怪物。')
+        }
+        setSupplementText('')
+        setSupplementTarget(undefined)
+        return
+      }
+
+      const parsedMonster = parseDnd5ePastedMonster(source)
+      const required = ['名称', 'AC', 'HP', '六项属性']
+      const missing = required.filter((field) => !parsedMonster.recognizedFields.includes(field))
+      if (missing.length > 0 || !parsedMonster.recognizedFields.includes('动作')) {
+        if (supplementTarget?.kind === 'monster') {
+          throw new Error(`从属怪物还缺少可保存字段：${[...missing, ...(!parsedMonster.recognizedFields.includes('动作') ? ['动作'] : [])].join('、')}。`)
+        }
+        const parsedSpellcasting = parseDnd5eSpellcastingText(source)
+        const looseSpells = parseDnd5eSpellListText(source)
+        const recognizedSpells = parsedSpellcasting.spells.length > 0 ? parsedSpellcasting.spells : looseSpells.spells
+        if (recognizedSpells.length === 0) throw new Error('未识别为完整怪物属性块或已知法术列表；请先从缺失卡片选择补录目标。')
+        const spellById = new Map(draft.spells.map((spell) => [spell.id, spell]))
+        for (const spell of recognizedSpells) spellById.set(spell.id, spell)
+        setDraft((current) => ({
+          ...current,
+          spellcastingEnabled: true,
+          spellSlots: { ...current.spellSlots, ...parsedSpellcasting.slots },
+          spells: [...spellById.values()],
+        }))
+        setMessage(`已从补充文本合并 ${recognizedSpells.length} 个可确认法术。`)
+        setSupplementText('')
+        return
+      }
+
+      const dependencyName = supplementTarget?.kind === 'monster'
+        ? supplementTarget.reference.monsterName
+        : undefined
+      const slug = dnd5eMonsterContentSlug(parsedMonster.draft.englishName || parsedMonster.draft.name || dependencyName || 'dependency')
+      parsedMonster.draft.slug = slug
+      parsedMonster.draft.id = `room-monster:${slug}`
+      const dependency = buildDnd5eCustomMonster(parsedMonster.draft)
       if (pluginMode) {
         const nextMonsters = [
-          ...monsters.filter((entry) => entry.id !== monster.id && entry.slug !== monster.slug),
-          monster,
+          ...monsters.filter((entry) => entry.id !== dependency.id && entry.slug !== dependency.slug && entry.name !== dependency.name),
+          dependency,
         ].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
         if (nextMonsters.length > 128) throw new Error('单个扩展最多包含 128 个怪物模板。')
         onMonstersChange(nextMonsters)
       } else {
-        await upsertRoomMonster(monster)
+        await upsertRoomMonster(dependency)
       }
+      setMessage(`已解析并加入从属怪物“${dependency.name}”；当前怪物表单未被覆盖。召唤动作仍会按其延迟、随机数量或专注条件显示实际自动化边界。`)
+      setSupplementText('')
+      setSupplementTarget(undefined)
+    } catch (error) {
+      setSupplementError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = async (destination: Dnd5eMonsterWorkshopCommitDestination = 'default') => {
+    const firstBlockingIssue = reviewIssues.find((issue) => issue.severity === 'blocking')
+    if (firstBlockingIssue) {
+      setMessage(`还有 ${reviewSummary.blocking} 项必填内容未完成：${firstBlockingIssue.label}－${firstBlockingIssue.detail}`)
+      revealReviewTarget(firstBlockingIssue.targetId)
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const monster = buildDnd5eCustomMonster(draft)
+      const commit = await commitDnd5eMonsterWorkshopMonster({
+        monster,
+        pluginMode,
+        destination,
+        existingMonsters: monsters,
+        onPluginMonstersChange: onMonstersChange,
+        upsertRoomMonster,
+      })
       setSelectedId(monster.id)
       setDraft(dnd5eCustomMonsterDraftFromStatBlock(monster))
-      setMessage(pluginMode
-        ? `已将“${monster.name}”加入扩展草稿。`
-        : `已保存“${monster.name}”，房间内玩家会自动同步。`)
+      setMessage(commit.savedToPluginDraft && commit.savedToCurrentRoom
+        ? `已将“${monster.name}”加入扩展草稿和当前房间；现在可以从地图的“添加怪物”中选择。`
+        : commit.savedToPluginDraft
+          ? `已将“${monster.name}”加入扩展草稿；启用扩展后才会进入地图目录。`
+          : `已保存“${monster.name}”，现在可以从地图的“添加怪物”中选择。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -205,8 +684,15 @@ export default function Dnd5eMonsterWorkshopDialog({
   const selectMonster = (id: string) => {
     const monster = monsters.find((entry) => entry.id === id)
     if (!monster) return
+    const nextDraft = normalizeDnd5eMonsterDraftContent(
+      dnd5eCustomMonsterDraftFromStatBlock(monster),
+      knownCustomSpells,
+    ).draft
     setSelectedId(id)
-    setDraft(dnd5eCustomMonsterDraftFromStatBlock(monster))
+    setDraft(nextDraft)
+    setAiReview(undefined)
+    setCollapsedActionIds(new Set(nextDraft.actions.map((action) => action.id)))
+    setCollapsedTraitIndexes(new Set(nextDraft.traits.map((_, index) => index)))
     setMessage(null)
   }
 
@@ -283,7 +769,7 @@ export default function Dnd5eMonsterWorkshopDialog({
             ))}
           </div>
           <div className="space-y-2 border-t border-white/10 p-3">
-            <button type="button" onClick={() => { setSelectedId(null); setDraft(createDnd5eCustomMonsterDraft()); setMessage(null) }} className="flex w-full items-center justify-center gap-2 rounded-lg bg-arcane-500/20 px-3 py-2 text-xs font-semibold text-arcane-100 hover:bg-arcane-500/30">
+            <button type="button" onClick={() => { setSelectedId(null); setDraft(createDnd5eCustomMonsterDraft()); setAiReview(undefined); setCollapsedActionIds(new Set()); setCollapsedTraitIndexes(new Set()); setMessage(null) }} className="flex w-full items-center justify-center gap-2 rounded-lg bg-arcane-500/20 px-3 py-2 text-xs font-semibold text-arcane-100 hover:bg-arcane-500/30">
               <Plus className="h-3.5 w-3.5" /> 新建怪物
             </button>
             <div className="grid grid-cols-2 gap-2">
@@ -297,8 +783,16 @@ export default function Dnd5eMonsterWorkshopDialog({
         <main className="flex min-h-0 min-w-0 flex-col">
           <header className="flex items-center gap-3 border-b border-white/10 px-5 py-3">
             <div className="min-w-0 flex-1">
-              <h2 className="font-semibold text-slate-100">怪物工坊</h2>
-              <p className="text-xs text-slate-500">表单会生成结构化 stat block，并通过 monsterSchema 后才能{pluginMode ? '写入扩展' : '写入房间'}。</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-semibold text-slate-100">怪物工坊</h2>
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${reviewSummary.blocking > 0 ? 'border-rose-400/25 bg-rose-500/10 text-rose-200' : 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'}`}>
+                  {reviewSummary.blocking > 0 ? `${reviewSummary.blocking} 项必填` : '可保存'}
+                </span>
+                <span className="rounded-full border border-sky-400/15 bg-sky-500/[0.05] px-2 py-0.5 text-[10px] text-sky-100/70">
+                  {lastDraftSavedAt ? `草稿已自动保存 ${new Date(lastDraftSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : '正在建立本地草稿'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">AI 已填写确定字段；DM 只需处理顶部待确认项，Headless 状态会随编辑实时更新。</p>
             </div>
             <button
               type="button"
@@ -307,6 +801,17 @@ export default function Dnd5eMonsterWorkshopDialog({
             >
               <ClipboardPaste className="h-3.5 w-3.5" />
               粘贴自动填写
+            </button>
+            <button
+              data-testid="monster-headless-sandbox-open"
+              type="button"
+              disabled={reviewSummary.blocking > 0}
+              title={reviewSummary.blocking > 0 ? `请先处理 ${reviewSummary.blocking} 项必填内容` : '使用真实 Headless 事务进行隔离试运行'}
+              onClick={() => setSandboxOpen((current) => !current)}
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Dices className="h-3.5 w-3.5" />
+              Headless 试运行
             </button>
             <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
           </header>
@@ -373,15 +878,165 @@ export default function Dnd5eMonsterWorkshopDialog({
                 </div>
               </section>
             )}
+            <section
+              id="monster-workshop-ai-review"
+              data-testid="monster-workshop-review-dashboard"
+              className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.05] p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-violet-100">DM 审核摘要</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-violet-100/55">点击问题会展开并定位对应字段；绿色 Headless 状态会随输入实时更新。</p>
+                </div>
+                <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                  <span className="rounded-full border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-rose-200">必填 {reviewSummary.blocking}</span>
+                  <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-amber-200">待确认 {reviewSummary.review}</span>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-emerald-200">Headless {reviewSummary.headless}</span>
+                  <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-1 text-sky-200">部分 {reviewSummary.partial}</span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-slate-400">DM {reviewSummary.manual}</span>
+                </div>
+              </div>
+              <div className={`mt-3 grid gap-3 ${aiReview?.sourceText ? 'lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]' : ''}`}>
+                <div className="space-y-1.5" aria-live="polite">
+                  {reviewIssues.length === 0 ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-100">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />没有待处理问题，可以加入扩展草稿。
+                    </div>
+                  ) : reviewIssues.slice(0, 12).map((issue) => (
+                    <button
+                      key={issue.id}
+                      type="button"
+                      onClick={() => revealReviewTarget(issue.targetId)}
+                      className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left text-xs ${issue.severity === 'blocking' ? 'border-rose-400/20 bg-rose-500/[0.06] text-rose-100' : 'border-amber-400/15 bg-amber-500/[0.04] text-amber-100'}`}
+                    >
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span><strong>{issue.label}：</strong>{issue.detail}</span>
+                    </button>
+                  ))}
+                  {reviewIssues.length > 12 && <p className="px-2 text-[11px] text-slate-500">另有 {reviewIssues.length - 12} 项；处理前述项目后会自动补入列表。</p>}
+                </div>
+                {aiReview?.sourceText && (
+                  <details className="rounded-xl border border-white/10 bg-black/15 p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-300">对照原始粘贴文本</summary>
+                    <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-[10px] leading-4 text-slate-500">{aiReview.sourceText}</pre>
+                  </details>
+                )}
+              </div>
+            </section>
+            <section
+              id="monster-workshop-content-analysis"
+              data-testid="monster-workshop-content-analysis"
+              className="rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.045] p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-cyan-100">内容深度分析</h3>
+                  <p className="mt-1 max-w-3xl text-[11px] leading-5 text-cyan-100/55">
+                    施法标题只应存在于施法区，主动能力只应存在于动作区；无法识别的法术和召唤目标会作为依赖保留，不会静默删除。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={normalizeCurrentContent}
+                  className="rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20"
+                >
+                  {contentNeedsCleanup ? '整理重复分类' : '重新深度分析'}
+                </button>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className={`rounded-xl border px-3 py-2 text-xs ${contentNeedsCleanup ? 'border-amber-400/20 bg-amber-500/[0.06] text-amber-100' : 'border-emerald-400/20 bg-emerald-500/[0.06] text-emerald-100'}`}>
+                  <strong className="block">分类与重复</strong>
+                  <span className="mt-1 block text-[11px] opacity-70">{contentNeedsCleanup ? `可归并 ${contentCleanupCount} 项` : '未发现可安全删除的副本'}</span>
+                </div>
+                <div className={`rounded-xl border px-3 py-2 text-xs ${contentAnalysis.unresolvedSpells.length > 0 ? 'border-amber-400/20 bg-amber-500/[0.06] text-amber-100' : 'border-emerald-400/20 bg-emerald-500/[0.06] text-emerald-100'}`}>
+                  <strong className="block">法术依赖</strong>
+                  <span className="mt-1 block text-[11px] opacity-70">{contentAnalysis.unresolvedSpells.length > 0 ? `${contentAnalysis.unresolvedSpells.length} 个法术尚无可执行定义` : '全部法术已有已知定义'}</span>
+                </div>
+                <div className={`rounded-xl border px-3 py-2 text-xs ${missingSummonReferences.length > 0 ? 'border-amber-400/20 bg-amber-500/[0.06] text-amber-100' : 'border-emerald-400/20 bg-emerald-500/[0.06] text-emerald-100'}`}>
+                  <strong className="block">怪物依赖</strong>
+                  <span className="mt-1 block text-[11px] opacity-70">{missingSummonReferences.length > 0 ? `${missingSummonReferences.length} 个召唤目标尚未加入` : '召唤目标均已解析或未发现召唤'}</span>
+                </div>
+              </div>
+
+              {contentAnalysis.actionClassificationConflicts.length > 0 && (
+                <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/[0.05] px-3 py-2 text-xs leading-5 text-amber-100">
+                  同名但正文不同，已保留两份等待 DM 判断：{contentAnalysis.actionClassificationConflicts.join('、')}。只有名称和规则正文都重合时才会自动去重。
+                </div>
+              )}
+
+              {(contentAnalysis.unresolvedSpells.length > 0 || contentAnalysis.summonReferences.length > 0) && (
+                <div className="mt-3 space-y-2">
+                  {contentAnalysis.unresolvedSpells.map((spell) => (
+                    <div key={spell.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                      <div className="min-w-0 text-xs">
+                        <strong className="text-slate-200">未识别法术：{spell.name}</strong>
+                        <p className="mt-0.5 text-[11px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`} · 已保留引用 {spell.id} · 当前按 DM 裁定</p>
+                      </div>
+                      <button type="button" onClick={() => beginSpellSupplement(spell)} className="rounded-lg border border-sky-300/20 bg-sky-500/10 px-2.5 py-1.5 text-xs font-semibold text-sky-100 hover:bg-sky-500/20">
+                        补充规则并解析
+                      </button>
+                    </div>
+                  ))}
+                  {contentAnalysis.summonReferences.map((reference) => (
+                    <div key={`${reference.sourceId}:${reference.monsterId ?? reference.monsterName ?? 'unknown'}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                      <div className="min-w-0 text-xs">
+                        <strong className="text-slate-200">{reference.sourceName} → {reference.monsterName ?? reference.monsterId ?? '未识别召唤目标'}</strong>
+                        <p className={`mt-0.5 text-[11px] ${reference.resolvedMonsterId ? 'text-emerald-300/70' : 'text-amber-200/70'}`}>
+                          {reference.resolvedMonsterId ? `已解析为 ${reference.resolvedMonsterId}` : reference.reasons.join('；')}
+                        </p>
+                      </div>
+                      {!reference.resolvedMonsterId && <button type="button" onClick={() => beginMonsterSupplement(reference)} className="rounded-lg border border-violet-300/20 bg-violet-500/10 px-2.5 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/20">
+                        粘贴从属怪物并解析
+                      </button>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {supplementTarget && (
+                <div className="mt-3 rounded-xl border border-cyan-300/15 bg-black/20 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-cyan-100">
+                        正在补录：{supplementTarget.kind === 'spell' ? supplementTarget.spell.name : supplementTarget.reference.monsterName ?? supplementTarget.reference.monsterId ?? '召唤目标'}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                        {supplementTarget.kind === 'spell'
+                          ? '可粘贴一个已知 SRD 法术名称来重新映射；若为自定义法术，则粘贴完整规则，系统会在当前扩展建立法术草稿并带入正文。'
+                          : '请粘贴该从属怪物的完整名称、AC、HP、六项属性和动作。解析成功后会加入当前目录，不会覆盖正在编辑的怪物。'}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => { setSupplementTarget(undefined); setSupplementText(''); setSupplementError(undefined) }} className="rounded-lg p-1 text-slate-500 hover:bg-white/5 hover:text-slate-200"><X className="h-4 w-4" /></button>
+                  </div>
+                  <textarea
+                    data-testid="monster-workshop-supplement-input"
+                    value={supplementText}
+                    onChange={(event) => { setSupplementText(event.target.value); setSupplementError(undefined) }}
+                    rows={supplementTarget.kind === 'monster' ? 10 : 6}
+                    placeholder={supplementTarget.kind === 'spell' ? '粘贴法术名称或完整规则正文…' : '粘贴完整从属怪物属性块…'}
+                    className={`mt-2 resize-y font-mono text-xs leading-5 ${inputClass()}`}
+                  />
+                  {supplementError && <p className="mt-2 text-xs text-rose-300">{supplementError}</p>}
+                  <div className="mt-2 flex justify-end">
+                    <button data-testid="monster-workshop-supplement-parse" type="button" disabled={busy} onClick={() => void parseSupplement()} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-400 disabled:opacity-40">
+                      解析并合并
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+            {sandboxOpen && (
+              <Dnd5eMonsterHeadlessSandbox draft={draft} monsterCatalog={monsters} onClose={() => setSandboxOpen(false)} />
+            )}
             {preservesAdvancedFields && (
               <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
-                此怪物含表单未直接展示的高级字段（如豁免、技能、感官、抗性、多段伤害、反应、传奇动作或施法）。保存时这些字段会原样保留；如需修改，请导出 JSON 后编辑并重新导入。
+                此怪物包含来源相关的高级规则。常用豁免、技能、感官、抗性、动作和施法可直接在下方修改；暂未提供表单控件的原始规则会在保存时无损保留。
               </div>
             )}
-            <section>
+            <section id="monster-workshop-basic">
               <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">基本资料</h3>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <label className="text-xs text-slate-400">中文名称<input value={draft.name} onChange={(event) => patchDraft('name', event.target.value)} className={`mt-1 ${inputClass()}`} /></label>
+                <label className="text-xs text-slate-400">中文名称<input data-review-focus value={draft.name} onChange={(event) => patchDraft('name', event.target.value)} className={`mt-1 ${inputClass()}`} /></label>
                 <label className="text-xs text-slate-400">英文名称<input value={draft.englishName} onChange={(event) => patchDraft('englishName', event.target.value)} className={`mt-1 ${inputClass()}`} /></label>
                 <label className="text-xs text-slate-400">体型<select value={draft.size} onChange={(event) => patchDraft('size', event.target.value as Dnd5eMonsterSize)} className={`mt-1 ${inputClass()}`}>{SIZES.map((size) => <option key={size}>{size}</option>)}</select></label>
                 <label className="text-xs text-slate-400">生物类型<input value={draft.creatureType} onChange={(event) => patchDraft('creatureType', event.target.value)} className={`mt-1 ${inputClass()}`} /></label>
@@ -395,27 +1050,20 @@ export default function Dnd5eMonsterWorkshopDialog({
                 <label className="text-xs text-slate-400">语言<input value={draft.languages} onChange={(event) => patchDraft('languages', event.target.value)} placeholder="通用语、地精语" className={`mt-1 ${inputClass()}`} /></label>
               </div>
               <label className="mt-3 block text-xs text-slate-400">简介<textarea rows={2} value={draft.description} onChange={(event) => patchDraft('description', event.target.value)} className={`mt-1 resize-y ${inputClass()}`} /></label>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {([
-                  ['tokenPortrait', '地图 Token', tokenPortraitRef],
-                  ['initiativePortrait', '先攻立绘', initiativePortraitRef],
-                ] as const).map(([key, label, ref]) => (
-                  <div key={key} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
-                    <div className={`overflow-hidden border border-white/10 bg-void-950 ${key === 'tokenPortrait' ? 'h-20 w-20 rounded-full' : 'h-24 w-20 rounded-lg'}`}>
-                      {draft[key] ? <img src={draft[key]} alt={label} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-slate-600"><ImagePlus className="h-5 w-5" /></div>}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-slate-200">{label}</p>
-                      <p className="mt-1 text-[11px] text-slate-500">PNG、JPG 或 WebP，保存时压缩并随房间同步。</p>
-                      <div className="mt-2 flex gap-2">
-                        <button type="button" disabled={busy} onClick={() => ref.current?.click()} className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10">上传</button>
-                        {draft[key] && <button type="button" onClick={() => patchDraft(key, undefined)} className="rounded-lg px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10">移除</button>}
-                      </div>
-                      <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void uploadPortrait(key, event.target.files?.[0])} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <Dnd5eMonsterPortraitStudio
+                name={draft.name}
+                englishName={draft.englishName}
+                size={draft.size}
+                creatureType={draft.creatureType}
+                alignment={draft.alignment}
+                description={draft.description}
+                portrait={draft.portrait}
+                tokenPortrait={draft.tokenPortrait}
+                initiativePortrait={draft.initiativePortrait}
+                onPortraitChange={(portrait) => patchDraft('portrait', portrait)}
+                onTokenPortraitChange={(tokenPortrait) => patchDraft('tokenPortrait', tokenPortrait)}
+                onInitiativePortraitChange={(initiativePortrait) => patchDraft('initiativePortrait', initiativePortrait)}
+              />
             </section>
 
             <section>
@@ -485,8 +1133,8 @@ export default function Dnd5eMonsterWorkshopDialog({
               })}</div>
             </section>
 
-            <section className="rounded-xl border border-sky-400/15 bg-sky-500/[0.035] p-4">
-              <div className="flex items-center justify-between gap-3"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-sky-200">施法</h3><p className="mt-1 text-[11px] text-slate-500">可配置法术位、随意法术和每日法术；具体法术能否 Headless 仍由法术目录兼容性决定。</p></div><label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={draft.spellcastingEnabled} onChange={(event) => patchDraft('spellcastingEnabled', event.target.checked)} />启用施法</label></div>
+            <section id="monster-workshop-spellcasting" className="rounded-xl border border-sky-400/15 bg-sky-500/[0.035] p-4">
+              <div className="flex items-center justify-between gap-3"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-sky-200">施法</h3><p className="mt-1 text-[11px] text-slate-500">这里的每个法术都是可释放能力；选择时由怪物法术列表建立施法事务并消耗法术位／每日次数。“戏法”“一环”只负责分组和资源，绝不会生成同名普通动作。</p></div><label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={draft.spellcastingEnabled} onChange={(event) => patchDraft('spellcastingEnabled', event.target.checked)} />启用施法</label></div>
               {draft.spellcastingEnabled && <>
                 <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-5">
                   <label className="text-xs text-slate-400">施法者等级<input type="number" min={1} max={30} value={draft.spellcastingCasterLevel} onChange={(event) => patchDraft('spellcastingCasterLevel', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
@@ -650,7 +1298,14 @@ export default function Dnd5eMonsterWorkshopDialog({
                 {draft.traits.map((trait, index) => {
                   const update = (patch: Partial<typeof trait>) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
                   const headlessPreset = ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(trait.ruleKind)
-                  return <div key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  const coveredByFullMechanic = dnd5eMonsterTraitCoveredByFullMechanic(draft, trait)
+                  const collapsed = collapsedTraitIndexes.has(index)
+                  return <div id={dnd5eMonsterTraitReviewTarget(index)} key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <button type="button" aria-expanded={!collapsed} onClick={() => toggleTraitCollapsed(index)} className="mb-2 flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left">
+                      <span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{trait.name || `未命名特性 ${index + 1}`}</strong><span className={`mt-0.5 block truncate text-[11px] ${coveredByFullMechanic ? 'text-emerald-300/80' : 'text-slate-500'}`}>{dnd5eMonsterTraitReviewSummary(trait, coveredByFullMechanic)}</span></span>
+                      <span className="flex shrink-0 items-center gap-2 text-[10px] text-slate-500">{collapsed ? '展开' : '收起'}<ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? '' : 'rotate-180'}`} /></span>
+                    </button>
+                    {!collapsed && <>
                     <div className="grid grid-cols-2 gap-2 lg:grid-cols-[1fr_220px_150px_auto]"><input value={trait.name} onChange={(event) => update({ name: event.target.value })} placeholder="特性名称" className={inputClass()} /><select value={trait.ruleKind} onChange={(event) => {
                       const ruleKind = event.target.value as typeof trait.ruleKind
                       update({
@@ -659,7 +1314,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                           ? 'headless'
                           : 'dm-adjudication',
                       })
-                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">Headless</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => patchDraft('traits', draft.traits.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset || coveredByFullMechanic ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">{coveredByFullMechanic ? '同名机制接管' : 'Headless'}</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => removeTrait(index)} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
                     {(trait.ruleKind === 'regeneration' || trait.ruleKind === 'undead-fortitude') && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       {trait.ruleKind === 'regeneration' ? <label className="text-xs text-slate-400">每回合恢复<input type="number" min={1} value={trait.amount} onChange={(event) => update({ amount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <label className="text-xs text-slate-400">DC 基数<input type="number" min={1} value={trait.dcBase} onChange={(event) => update({ dcBase: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
                       <label className="col-span-2 text-xs text-slate-400">{trait.ruleKind === 'regeneration' ? '压制再生的伤害类型' : '不能触发的伤害类型'}<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ damageTypes: trait.damageTypes.includes(type) ? trait.damageTypes.filter((entry) => entry !== type) : [...trait.damageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.damageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{DND5E_DAMAGE_TYPE_LABELS[type]}</button>)}</div></label>
@@ -692,6 +1347,30 @@ export default function Dnd5eMonsterWorkshopDialog({
                       <label className="text-xs text-slate-400">每次命中总伤害加值<input type="number" value={trait.targetDamageBonus} onChange={(event) => update({ targetDamageBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                     </div>}
                     <textarea rows={2} value={trait.description} onChange={(event) => update({ description: event.target.value })} placeholder="完整规则描述" className={`mt-2 ${inputClass()} resize-y`} />
+                    {trait.ruleKind === 'none' && canConvertDnd5eCustomMonsterTraitToAreaAction(trait) && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-cyan-400/15 bg-cyan-500/5 px-3 py-2">
+                      <p className="text-[11px] leading-relaxed text-cyan-100/80">若这是吐息、爆发等主动范围能力，可转成可编辑的“范围＋豁免＋伤害”动作，再由 Host 重新验证。</p>
+                      <button type="button" onClick={() => {
+                        const action = createDnd5eCustomMonsterAreaActionDraftFromTrait(trait)
+                        setDraft((current) => ({
+                          ...current,
+                          traits: current.traits.filter((_, entryIndex) => entryIndex !== index),
+                          actions: [...current.actions, action],
+                        }))
+                        setCollapsedTraitIndexes((current) => new Set([...current]
+                          .filter((entryIndex) => entryIndex !== index)
+                          .map((entryIndex) => entryIndex > index ? entryIndex - 1 : entryIndex)))
+                        setCollapsedActionIds((current) => {
+                          const next = new Set(current)
+                          next.delete(action.id)
+                          return next
+                        })
+                        const issues = validateDnd5eCustomMonsterAreaActionDraft(action)
+                        setMessage(issues.length > 0
+                          ? `已将“${trait.name || '未命名特性'}”移到下方动作区；还需补齐：${issues.join('；')}`
+                          : `已将“${trait.name}”转成 Headless 范围动作；实时验证已通过。`)
+                      }} className="shrink-0 rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20">转为 Headless 范围动作</button>
+                    </div>}
+                    </>}
                   </div>
                 })}
               </div>
@@ -702,12 +1381,36 @@ export default function Dnd5eMonsterWorkshopDialog({
               <div className="space-y-3">
                 {draft.actions.map((action, index) => {
                   const update = (patch: Partial<typeof action>) => patchDraft('actions', draft.actions.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
-                  return <div key={action.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  const areaValidationErrors = validateDnd5eCustomMonsterAreaActionDraft(action)
+                  const summonValidationErrors = validateDnd5eCustomMonsterSummonActionDraft(action)
+                  const displayedAutomation = action.kind === 'area-saving-throw'
+                    ? areaValidationErrors.length === 0 ? 'headless' : 'dm-adjudication'
+                    : action.kind === 'summon'
+                      ? summonValidationErrors.length === 0 ? 'headless' : 'dm-adjudication'
+                    : action.kind === 'other' || action.kind === 'movement'
+                      ? 'dm-adjudication'
+                      : action.category === 'reaction' && !action.reactionTriggerActionId.trim()
+                        ? 'dm-adjudication'
+                      : action.automation
+                  const collapsed = collapsedActionIds.has(action.id)
+                  return <div id={dnd5eMonsterActionReviewTarget(action)} key={action.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <button type="button" aria-expanded={!collapsed} onClick={() => toggleActionCollapsed(action.id)} className="mb-2 flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left">
+                      <span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{action.name || `未命名动作 ${index + 1}`}</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{dnd5eMonsterActionReviewSummary(action)}</span></span>
+                      <span className="flex shrink-0 items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${displayedAutomation === 'headless' ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200' : 'border-amber-400/20 bg-amber-500/10 text-amber-200'}`}>{displayedAutomation === 'headless' ? 'Headless' : 'DM 裁定'}</span><span className="text-[10px] text-slate-500">{collapsed ? '展开' : '收起'}</span><ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${collapsed ? '' : 'rotate-180'}`} /></span>
+                    </button>
+                    {!collapsed && <>
                     <div className="grid grid-cols-2 gap-2 lg:grid-cols-6">
                       <label className="text-xs text-slate-400">名称<input value={action.name} onChange={(event) => update({ name: event.target.value })} className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">动作经济<select value={action.category} onChange={(event) => update({ category: event.target.value as typeof action.category })} className={`mt-1 ${inputClass()}`}><option value="action">动作</option><option value="bonus-action">附赠动作</option><option value="reaction">反应</option><option value="legendary">传奇动作</option><option value="lair">巢穴动作</option></select></label>
-                      <label className="text-xs text-slate-400">类型<select value={action.kind} onChange={(event) => update({ kind: event.target.value as typeof action.kind, automation: event.target.value === 'other' || event.target.value === 'movement' ? 'dm-adjudication' : action.automation })} className={`mt-1 ${inputClass()}`}><option value="weapon-attack">武器攻击</option><option value="movement">定向移动</option><option value="other">其他动作</option></select></label>
-                      <label className="text-xs text-slate-400">结算<select value={action.kind === 'other' || action.kind === 'movement' ? 'dm-adjudication' : action.automation} disabled={action.kind === 'other' || action.kind === 'movement' || action.category === 'bonus-action' || action.category === 'reaction' || action.category === 'lair'} onChange={(event) => update({ automation: event.target.value as typeof action.automation })} className={`mt-1 ${inputClass()}`}><option value="headless">Headless</option><option value="dm-adjudication">DM 裁定</option></select></label>
+                      <label className="text-xs text-slate-400">类型<select value={action.kind} onChange={(event) => {
+                        const kind = event.target.value as typeof action.kind
+                        update({
+                          kind,
+                          automation: kind === 'other' || kind === 'movement' ? 'dm-adjudication' : 'headless',
+                          ...((kind === 'area-saving-throw' || kind === 'summon') && !['action', 'legendary'].includes(action.category) ? { category: 'action' as const } : {}),
+                        })
+                      }} className={`mt-1 ${inputClass()}`}><option value="weapon-attack">武器攻击</option><option value="area-saving-throw">范围豁免伤害</option><option value="summon">召唤</option><option value="movement">定向移动</option><option value="other">其他动作</option></select></label>
+                      <label className="text-xs text-slate-400">结算<select value={displayedAutomation} disabled={action.kind === 'area-saving-throw' || action.kind === 'summon' || action.kind === 'other' || action.kind === 'movement' || action.category === 'lair' || (action.category === 'reaction' && !action.reactionTriggerActionId.trim())} onChange={(event) => update({ automation: event.target.value as typeof action.automation })} className={`mt-1 ${inputClass()}`}><option value="headless">Headless</option><option value="dm-adjudication">DM 裁定／待补齐</option></select></label>
                       <label className="text-xs text-slate-400">使用限制<select value={action.usageKind} onChange={(event) => update({ usageKind: event.target.value as typeof action.usageKind })} className={`mt-1 ${inputClass()}`}><option value="at-will">随意</option><option value="per-day">每日 N 次</option><option value="recharge">充能 N–骰面</option></select></label>
                       {action.category === 'legendary' ? <label className="text-xs text-slate-400">传奇动作点消耗<input type="number" min={1} max={10} value={action.legendaryCost} onChange={(event) => update({ legendaryCost: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <div />}
                     </div>
@@ -722,6 +1425,49 @@ export default function Dnd5eMonsterWorkshopDialog({
                       <label className="text-xs text-slate-400">最大速度比例<input type="number" min={0.05} max={1} step={0.05} value={action.movementSpeedFraction} onChange={(event) => update({ movementSpeedFraction: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                       <p className="col-span-1 flex items-end pb-2 text-xs text-slate-400 lg:col-span-3">目标固定为可见敌人，移动方式固定为朝目标直线移动；Host/DM 负责选择目标和落点。</p>
                     </div>}
+                    {action.kind === 'area-saving-throw' && <div className="mt-2 rounded-lg border border-cyan-400/15 bg-cyan-500/[0.04] p-3">
+                      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+                        <label className="text-xs text-slate-400">范围形状<select aria-label={`${action.name}范围形状`} value={action.areaShape} onChange={(event) => update({ areaShape: event.target.value as typeof action.areaShape })} className={`mt-1 ${inputClass()}`}><option value="cone">锥形</option><option value="line">线形</option><option value="circle">以自身为中心的圆形</option></select></label>
+                        <label className="text-xs text-slate-400">{action.areaShape === 'circle' ? '半径（尺）' : '长度（尺）'}<input aria-label={`${action.name}${action.areaShape === 'circle' ? '半径' : '长度'}`} type="number" min={1} step={5} value={action.areaSizeFeet} onChange={(event) => update({ areaSizeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                        {action.areaShape === 'line' && <label className="text-xs text-slate-400">宽度（尺）<input aria-label={`${action.name}宽度`} type="number" min={1} step={5} value={action.areaWidthFeet} onChange={(event) => update({ areaWidthFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
+                        <label className="text-xs text-slate-400">豁免属性<select aria-label={`${action.name}豁免属性`} value={action.areaSaveAbility} onChange={(event) => update({ areaSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                        <label className="text-xs text-slate-400">豁免 DC<input aria-label={`${action.name}豁免 DC`} type="number" min={1} max={100} value={action.areaSaveDc} onChange={(event) => update({ areaSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                        <label className="text-xs text-slate-400">伤害骰<input aria-label={`${action.name}伤害骰`} value={action.areaDamageDice} onChange={(event) => update({ areaDamageDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>
+                        <label className="text-xs text-slate-400">伤害类型<select data-review-focus={!action.areaDamageType ? true : undefined} aria-label={`${action.name}伤害类型`} value={action.areaDamageType} onChange={(event) => update({ areaDamageType: event.target.value as typeof action.areaDamageType })} className={`mt-1 ${inputClass()}`}><option value="">请选择（必填）</option>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>
+                        <label className="text-xs text-slate-400">成功豁免<select aria-label={`${action.name}成功豁免`} value={action.areaDamageOnSuccessfulSave} onChange={(event) => update({ areaDamageOnSuccessfulSave: event.target.value as typeof action.areaDamageOnSuccessfulSave })} className={`mt-1 ${inputClass()}`}><option value="half">伤害减半</option><option value="none">不受伤害</option></select></label>
+                        <label className="text-xs text-slate-400">范围目标<select aria-label={`${action.name}范围目标`} value={action.areaTarget} onChange={(event) => update({ areaTarget: event.target.value as typeof action.areaTarget })} className={`mt-1 ${inputClass()}`}><option value="all-creatures-except-self">除自身外所有生物</option><option value="hostile">仅敌对生物</option></select></label>
+                        <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={action.areaMagical} onChange={(event) => update({ areaMagical: event.target.checked })} />魔法效果</label>
+                      </div>
+                      <div data-testid={`monster-area-action-validation-${index}`} aria-live="polite" className={`mt-2 rounded-lg border px-2.5 py-2 text-[11px] ${areaValidationErrors.length > 0 ? 'border-amber-400/20 bg-amber-500/5 text-amber-100' : 'border-emerald-400/20 bg-emerald-500/5 text-emerald-100'}`}>
+                        <span>{areaValidationErrors.length > 0 ? `尚未接入 Headless：${areaValidationErrors.join('；')}` : 'Headless 验证通过：Host 将校验范围、目标、豁免、伤害与使用次数。'}</span>
+                      </div>
+                    </div>}
+                    {action.kind === 'summon' && <div className="mt-2 rounded-lg border border-violet-400/15 bg-violet-500/[0.04] p-3">
+                      <div className="grid grid-cols-2 gap-2 lg:grid-cols-6">
+                        <MonsterCatalogCombobox actionName={action.name} value={action.summonMonsterId} monsters={summonMonsterOptions} onChange={(summonMonsterId) => update({ summonMonsterId })} />
+                        <label className="text-xs text-slate-400">数量方式<select value={action.summonCountMode} onChange={(event) => update({ summonCountMode: event.target.value as typeof action.summonCountMode })} className={`mt-1 ${inputClass()}`}><option value="fixed">固定数量</option><option value="dice">Host 预掷骰式</option></select></label>
+                        {action.summonCountMode === 'fixed'
+                          ? <label className="text-xs text-slate-400">召唤个数<input aria-label={`${action.name}召唤个数`} type="number" min={1} max={20} value={action.summonCount} onChange={(event) => update({ summonCount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                          : <label className="text-xs text-slate-400">数量骰式<input aria-label={`${action.name}数量骰式`} value={action.summonCountDice} onChange={(event) => update({ summonCountDice: event.target.value })} placeholder="1d3" className={`mt-1 ${inputClass()}`} /></label>}
+                        <label className="text-xs text-slate-400">出现时机<select value={action.summonTiming} onChange={(event) => {
+                          const timing = event.target.value as typeof action.summonTiming
+                          update({
+                            summonTiming: timing,
+                            ...(timing === 'immediate' ? { summonConcentrationEndsOnAppearance: false } : {}),
+                          })
+                        }} className={`mt-1 ${inputClass()}`}><option value="immediate">动作结算后立即出现</option><option value="source-next-turn-start">召唤者下回合开始时</option></select></label>
+                        <label className="text-xs text-slate-400">出现后持续轮数<input type="number" min={1} max={10000} value={action.summonDurationRounds} onChange={(event) => update({ summonDurationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                        <label className="text-xs text-slate-400">阵营关系<select value={action.summonSide} onChange={(event) => update({ summonSide: event.target.value as typeof action.summonSide })} className={`mt-1 ${inputClass()}`}><option value="ally">与召唤者同阵营</option><option value="enemy">与召唤者敌对</option></select></label>
+                        <label className="text-xs text-slate-400">专注要求<select value={!action.summonConcentration ? 'none' : action.summonConcentrationEndsOnAppearance ? 'until-appearance' : 'while-active'} onChange={(event) => update(event.target.value === 'none'
+                          ? { summonConcentration: false, summonConcentrationEndsOnAppearance: false }
+                          : event.target.value === 'until-appearance'
+                            ? { summonTiming: 'source-next-turn-start', summonConcentration: true, summonConcentrationEndsOnAppearance: true }
+                            : { summonConcentration: true, summonConcentrationEndsOnAppearance: false })} className={`mt-1 ${inputClass()}`}><option value="none">不需要专注</option><option value="until-appearance">仅祈唤期间，出现时结束</option><option value="while-active">召唤物存在期间保持专注</option></select></label>
+                      </div>
+                      <div data-testid={`monster-summon-action-validation-${index}`} aria-live="polite" className={`mt-2 rounded-lg border px-2.5 py-2 text-[11px] ${summonValidationErrors.length > 0 ? 'border-amber-400/20 bg-amber-500/5 text-amber-100' : 'border-emerald-400/20 bg-emerald-500/5 text-emerald-100'}`}>
+                        {summonValidationErrors.length > 0 ? `尚未接入 Headless：${summonValidationErrors.join('；')}` : `Headless 验证通过：${action.summonTiming === 'immediate' ? '立即生成召唤事件' : '输出“召唤者下回合开始时出现”的权威配方'}；持续时间从真正出现后才开始计算。`}
+                      </div>
+                    </div>}
                     {action.kind === 'weapon-attack' && <div className="mt-2 grid grid-cols-3 gap-2 lg:grid-cols-8"><label className="text-xs text-slate-400">命中加值<input type="number" value={action.toHit} onChange={(event) => update({ toHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">重击阈值<input type="number" min={2} max={20} value={action.criticalThreshold} onChange={(event) => update({ criticalThreshold: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">触及<input type="number" min={0} value={action.reachFeet} onChange={(event) => update({ reachFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">正常射程<input type="number" min={0} value={action.rangeNormal} onChange={(event) => update({ rangeNormal: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">最远射程<input type="number" min={0} value={action.rangeLong} onChange={(event) => update({ rangeLong: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">伤害骰<input value={action.damageDice} onChange={(event) => update({ damageDice: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">伤害类型<select value={action.damageType} onChange={(event) => update({ damageType: event.target.value as typeof action.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label></div>}
                     {action.kind === 'weapon-attack' && <div className="mt-2 rounded-lg border border-white/8 bg-black/10 p-2">
                       <div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">附加伤害组件</p><button type="button" onClick={() => update({ additionalDamage: [...action.additionalDamage, { id: `damage-${Date.now()}`, dice: '1d6', damageType: 'fire' }] })} className="text-[11px] text-arcane-200">+ 添加</button></div>
@@ -733,31 +1479,46 @@ export default function Dnd5eMonsterWorkshopDialog({
                         {action.onHitSaveEnabled && <><label className="text-xs text-slate-400">豁免属性<select value={action.onHitSaveAbility} onChange={(event) => update({ onHitSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-slate-400">DC<input type="number" min={1} value={action.onHitSaveDc} onChange={(event) => update({ onHitSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">失败施加状态<select value={action.onHitCondition} onChange={(event) => update({ onHitCondition: event.target.value as typeof action.onHitCondition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label></>}
                       </div>
                     </div>}
-                    <div className="mt-2 grid grid-cols-[minmax(0,1fr),auto] gap-2"><textarea rows={2} value={action.description} onChange={(event) => update({ description: event.target.value })} placeholder={action.kind === 'weapon-attack' ? '可留空，系统会生成基础攻击描述；附带效果必须完整填写。' : '填写完整规则描述'} className={`${inputClass()} resize-y`} /><button type="button" onClick={() => patchDraft('actions', draft.actions.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    <div className="mt-2 grid grid-cols-[minmax(0,1fr),auto] gap-2"><textarea rows={2} value={action.description} onChange={(event) => update({ description: event.target.value })} placeholder={action.kind === 'weapon-attack' ? '可留空，系统会生成基础攻击描述；附带效果必须完整填写。' : '填写完整规则描述'} className={`${inputClass()} resize-y`} /><button type="button" onClick={() => { patchDraft('actions', draft.actions.filter((_, entryIndex) => entryIndex !== index)); setCollapsedActionIds((current) => { const next = new Set(current); next.delete(action.id); return next }) }} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    </>}
                   </div>
                 })}
               </div>
             </section>
           </div>
 
-          <footer className="flex items-center gap-3 border-t border-white/10 px-5 py-3">
-            <p className={`min-w-0 flex-1 truncate text-xs ${message?.includes('已保存') || message?.includes('导入完成') ? 'text-emerald-300' : 'text-amber-300'}`}>{message ?? '高级施法、传奇动作、变形与再生可通过 JSON 导入保留；当前自动结算边界会明确标注。'}</p>
-            {selectedId && <button type="button" disabled={busy} onClick={() => {
-              if (!window.confirm(pluginMode ? '从扩展草稿中删除这个怪物模板？' : '删除此房间怪物模板？地图上已存在的 Token 将保留，但失去 stat block。')) return
+          <footer className="flex flex-wrap items-center gap-3 border-t border-white/10 px-5 py-3">
+            <p className={`min-w-0 flex-1 truncate text-xs ${message?.includes('已保存') || message?.includes('已将') || message?.includes('导入完成') ? 'text-emerald-300' : 'text-amber-300'}`}>{message ?? (reviewSummary.blocking > 0 ? `还有 ${reviewSummary.blocking} 项必填内容；点击顶部问题可直接定位。` : '实时校验通过；可保存到本地草稿，或加入当前扩展。')}</p>
+            {!selectedId && <button type="button" disabled={busy} onClick={() => void deleteLocalDraft()} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /> 删除草稿</button>}
+            {selectedId && <button type="button" disabled={busy} onClick={async () => {
+              if (!await showAppConfirm({
+                title: '删除怪物模板',
+                message: pluginMode ? '从扩展草稿中删除这个怪物模板？' : '删除此房间怪物模板？地图上已存在的 Token 将保留，但失去 stat block。',
+                confirmLabel: '确认删除',
+                tone: 'danger',
+              })) return
               if (pluginMode) {
                 onMonstersChange(monsters.filter((monster) => monster.id !== selectedId))
                 setSelectedId(null)
                 setDraft(createDnd5eCustomMonsterDraft())
+                setAiReview(undefined)
+                setCollapsedActionIds(new Set())
+                setCollapsedTraitIndexes(new Set())
                 setMessage('已从扩展草稿删除怪物模板。')
               } else {
                 void removeRoomMonster(selectedId).then(() => {
                   setSelectedId(null)
                   setDraft(createDnd5eCustomMonsterDraft())
+                  setAiReview(undefined)
+                  setCollapsedActionIds(new Set())
+                  setCollapsedTraitIndexes(new Set())
                   setMessage('已删除怪物模板。')
                 })
               }
             }} className="flex items-center gap-1 rounded-lg bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"><Trash2 className="h-3.5 w-3.5" /> 删除</button>}
-            <button type="button" disabled={busy} onClick={() => void save()} className="flex items-center gap-2 rounded-lg bg-arcane-500 px-4 py-2 text-sm font-semibold text-white hover:bg-arcane-400 disabled:opacity-50"><Save className="h-4 w-4" />{busy ? '处理中…' : '校验并保存'}</button>
+            <button type="button" disabled={busy} onClick={() => persistLocalDraft(true)} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"><Save className="h-3.5 w-3.5" />保存本地草稿</button>
+            {pluginMode && <button type="button" disabled={busy || reviewSummary.blocking > 0} title={reviewSummary.blocking > 0 ? `请先处理 ${reviewSummary.blocking} 项必填内容` : '同时保留在扩展草稿，并写入当前房间怪物目录'} onClick={() => void save('current-room')} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"><Save className="h-4 w-4" />{busy ? '处理中…' : '保存并用于当前房间'}</button>}
+            <button type="button" disabled={busy || reviewSummary.blocking > 0} title={reviewSummary.blocking > 0 ? `请先处理 ${reviewSummary.blocking} 项必填内容` : undefined} onClick={() => void save()} className="flex items-center gap-2 rounded-lg bg-arcane-500 px-4 py-2 text-sm font-semibold text-white hover:bg-arcane-400 disabled:cursor-not-allowed disabled:opacity-50"><Save className="h-4 w-4" />{busy ? '处理中…' : pluginMode ? '仅加入扩展草稿' : '校验并保存到房间'}</button>
           </footer>
         </main>
       </div>
