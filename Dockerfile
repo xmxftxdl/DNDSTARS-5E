@@ -39,16 +39,10 @@ LABEL org.opencontainers.image.title="DNDSTARS-5E" \
       org.opencontainers.image.version="${STARS_BUILD_ID}"
 
 COPY --from=build --chown=node:node /app/dist ./dist
-COPY --from=build --chown=node:node /app/scripts/static-server.mjs ./scripts/static-server.mjs
-COPY --from=build --chown=node:node /app/scripts/art-asset-server.mjs ./scripts/art-asset-server.mjs
-COPY --from=build --chown=node:node /app/scripts/server-observability.mjs ./scripts/server-observability.mjs
-COPY --from=build --chown=node:node /app/scripts/shared-server-core.mjs ./scripts/shared-server-core.mjs
-COPY --from=build --chown=node:node /app/scripts/shared-server-system-routes.mjs ./scripts/shared-server-system-routes.mjs
-COPY --from=build --chown=node:node /app/scripts/account-storage-sqlite.mjs ./scripts/account-storage-sqlite.mjs
-COPY --from=build --chown=node:node /app/scripts/postgres-storage.mjs ./scripts/postgres-storage.mjs
-COPY --from=build --chown=node:node /app/scripts/migrate-json-indexes-to-sqlite.mjs ./scripts/migrate-json-indexes-to-sqlite.mjs
-COPY --from=build --chown=node:node /app/scripts/migrate-storage-to-postgres.mjs ./scripts/migrate-storage-to-postgres.mjs
-COPY --from=build --chown=node:node /app/scripts/tencent-verification-provider.mjs ./scripts/tencent-verification-provider.mjs
+# The server is split across root modules plus adapters/application/ports.
+# Copy the complete runtime module tree so a refactor cannot silently leave a
+# newly imported production module out of the image.
+COPY --from=build --chown=node:node /app/scripts ./scripts
 COPY --from=build --chown=node:node /app/shared ./shared
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 
