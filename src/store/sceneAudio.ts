@@ -22,7 +22,7 @@ import {
   putSharedImage,
   sampleSharedServerClock,
   saveSharedResourceWithResult,
-} from '../lib/sharedApi'
+} from '../composition/browserSharedRoomResources'
 import { useSceneOrchestrationStore } from './sceneOrchestration'
 
 interface SceneAudioStore {

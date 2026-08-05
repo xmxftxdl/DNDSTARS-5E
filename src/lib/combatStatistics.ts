@@ -1,15 +1,17 @@
 import type {
-  Dnd5eAction,
   Dnd5eActionResult,
   Dnd5eCombatEvent,
   Dnd5eHeadlessCombatState,
+  Dnd5eHeadlessObservedAction,
 } from '../rulesets/dnd5e/headlessCombatEngine'
 import type { CombatExperienceSettlement } from './combatExperience'
+import type { CombatLogEntry } from './sharedCombatTypes'
 
 export const COMBAT_STATISTICS_RESOURCE = 'combat-statistics'
 export const COMBAT_STATISTICS_SCHEMA_VERSION = 3
 export const COMBAT_STATISTICS_MAX_SESSIONS = 24
 export const COMBAT_STATISTICS_MAX_RECEIPTS = 4_096
+export const COMBAT_STATISTICS_MAX_LOG_ENTRIES = 200
 export const D20_FACE_COUNT = 20
 
 export type CombatStatisticsSide = 'player' | 'enemy' | 'npc'
@@ -59,8 +61,24 @@ export interface CombatStatisticsSession {
   lastRound: number
   combatants: Record<string, CombatantStatistics>
   receipts: string[]
+  /** Snapshot of the combat log when this encounter ended, newest entry first. */
+  logEntries?: CombatLogEntry[]
+  /** DM explicitly deleted the archived log; keeps retained legacy logs from being imported again. */
+  logDeletedAt?: number
+  mapName?: string
+  endedAt?: number
   /** DM 权威确认的本场经验结算；存在时同一 combatId 不得再次发奖。 */
   experienceSettlement?: CombatExperienceSettlement
+}
+
+export interface CombatLogArchiveInput {
+  combatId: string
+  mapId: string
+  mapName?: string
+  entries: readonly CombatLogEntry[]
+  endedAt: number
+  lastRound: number
+  startedAt?: number
 }
 
 export interface SharedCombatStatisticsState {
@@ -72,7 +90,7 @@ export interface SharedCombatStatisticsState {
 export interface Dnd5eCombatStatisticsObservation {
   mapId: string
   source: Dnd5eHeadlessCombatState
-  action: Dnd5eAction
+  action: Dnd5eHeadlessObservedAction
   result: Dnd5eActionResult
   receiptId: string
   observedAt: number
@@ -117,7 +135,7 @@ function safeAmount(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(0, value ?? 0) : 0
 }
 
-function actionActorId(action: Dnd5eAction): string | undefined {
+function actionActorId(action: Dnd5eHeadlessObservedAction): string | undefined {
   return 'actorId' in action && typeof action.actorId === 'string' ? action.actorId : undefined
 }
 
@@ -425,6 +443,97 @@ export function applyCombatExperienceSettlement(
   }
 }
 
+export function archiveCombatStatisticsLog(
+  current: CombatStatisticsSession | undefined,
+  input: CombatLogArchiveInput,
+): CombatStatisticsSession {
+  const base = current ?? createCombatStatisticsSession({
+    combatId: input.combatId,
+    mapId: input.mapId,
+    now: input.startedAt ?? input.endedAt,
+  })
+  if (base.combatId !== input.combatId || base.mapId !== input.mapId) return base
+  const entries = input.entries
+    .slice(0, COMBAT_STATISTICS_MAX_LOG_ENTRIES)
+    .map((entry) => ({
+      ...entry,
+      details: entry.details ? [...entry.details] : undefined,
+    }))
+  const next: CombatStatisticsSession = {
+    ...base,
+    mapName: input.mapName?.trim() || base.mapName,
+    endedAt: Math.max(base.startedAt, input.endedAt),
+    lastRound: Math.max(base.lastRound, input.lastRound),
+    updatedAt: Math.max(base.updatedAt, input.endedAt),
+    logEntries: entries,
+  }
+  delete next.logDeletedAt
+  return next
+}
+
+export function deleteCombatStatisticsLog(
+  current: CombatStatisticsSession,
+  deletedAt: number,
+): CombatStatisticsSession {
+  const timestamp = Math.max(current.startedAt, deletedAt)
+  const next: CombatStatisticsSession = {
+    ...current,
+    logDeletedAt: timestamp,
+    updatedAt: Math.max(current.updatedAt, timestamp),
+  }
+  delete next.logEntries
+  return next
+}
+
+export function formatCombatLogArchiveText(session: CombatStatisticsSession): string {
+  const endedAt = session.endedAt ?? session.updatedAt
+  const date = new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(endedAt)
+  const participants = Object.values(session.combatants)
+    .map((combatant) => combatant.name)
+    .filter(Boolean)
+  const kindLabel: Record<CombatLogEntry['kind'], string> = {
+    system: '规则',
+    turn: '回合',
+    attack: '攻击',
+    damage: '结算',
+  }
+  const lines = [
+    'DNDSTARS 5E 战斗记录',
+    `战斗 ID：${session.combatId}`,
+    `地图：${session.mapName ?? session.mapId}`,
+    `结束时间：${date}`,
+    `持续回合：${session.lastRound}`,
+    `参战者：${participants.length > 0 ? participants.join('、') : '未记录'}`,
+    '',
+  ]
+  const chronologicalEntries = [...session.logEntries ?? []].sort((left, right) =>
+    left.round - right.round || left.id - right.id)
+  for (const entry of chronologicalEntries) {
+    lines.push(`[R${entry.round} ${entry.time}] [${kindLabel[entry.kind]}] ${entry.text}`)
+    for (const detail of entry.details ?? []) lines.push(`  - ${detail}`)
+  }
+  return `${lines.join('\n').trimEnd()}\n`
+}
+
+export function combatLogArchiveFilename(session: CombatStatisticsSession): string {
+  const date = new Date(session.endedAt ?? session.updatedAt)
+  const stamp = Number.isNaN(date.getTime())
+    ? 'unknown-date'
+    : date.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const mapName = (session.mapName ?? session.mapId)
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, '_')
+    .slice(0, 60) || 'battle'
+  return `DNDSTARS-${mapName}-${stamp}.txt`
+}
+
 export function combatantDamagePerTurn(stats: CombatantStatistics): number {
   return stats.turnsTaken > 0 ? stats.turnTrackedDamageDealt / stats.turnsTaken : 0
 }
@@ -480,6 +589,40 @@ export function combatantDefensiveContributionIndex(
 
 function finiteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function normalizedCombatLogEntries(value: unknown): CombatLogEntry[] | undefined | null {
+  if (value == null) return undefined
+  if (!Array.isArray(value) || value.length > COMBAT_STATISTICS_MAX_LOG_ENTRIES) return null
+  const entries: CombatLogEntry[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const entry = raw as Record<string, unknown>
+    if (
+      !finiteNonNegative(entry.id) ||
+      !Number.isSafeInteger(entry.round) || Number(entry.round) < 0 ||
+      typeof entry.text !== 'string' || !entry.text.trim() || entry.text.length > 20_000 ||
+      !['system', 'turn', 'attack', 'damage'].includes(String(entry.kind)) ||
+      typeof entry.time !== 'string' || entry.time.length > 80 ||
+      (entry.actorTokenId != null &&
+        (typeof entry.actorTokenId !== 'string' || !entry.actorTokenId || entry.actorTokenId.length > 180)) ||
+      (entry.details != null &&
+        (!Array.isArray(entry.details) || entry.details.length > 200 ||
+          entry.details.some((detail) => typeof detail !== 'string' || detail.length > 2_000)))
+    ) return null
+    entries.push({
+      id: Number(entry.id),
+      round: Number(entry.round),
+      text: entry.text,
+      kind: entry.kind as CombatLogEntry['kind'],
+      time: entry.time,
+      ...(entry.actorTokenId ? { actorTokenId: entry.actorTokenId as string } : {}),
+      ...(Array.isArray(entry.details) && entry.details.length > 0
+        ? { details: [...entry.details] as string[] }
+        : {}),
+    })
+  }
+  return entries
 }
 
 function normalizedExperienceSettlement(
@@ -605,6 +748,17 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
       session.mapId,
     )
     if (experienceSettlement === null) return undefined
+    const logEntries = normalizedCombatLogEntries(session.logEntries)
+    if (logEntries === null ||
+      (session.mapName != null &&
+        (typeof session.mapName !== 'string' || !session.mapName.trim() || session.mapName.length > 240)) ||
+      (session.endedAt != null &&
+        (!finiteNonNegative(session.endedAt) || Number(session.endedAt) < Number(session.startedAt))) ||
+      (session.logDeletedAt != null &&
+        (!finiteNonNegative(session.logDeletedAt) || Number(session.logDeletedAt) < Number(session.startedAt))) ||
+      (logEntries?.length && session.logDeletedAt != null)) {
+      return undefined
+    }
     sessions.push({
       combatId: session.combatId,
       mapId: session.mapId,
@@ -613,6 +767,10 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
       lastRound: session.lastRound,
       combatants,
       receipts: [...session.receipts],
+      ...(logEntries ? { logEntries } : {}),
+      ...(finiteNonNegative(session.logDeletedAt) ? { logDeletedAt: session.logDeletedAt } : {}),
+      ...(typeof session.mapName === 'string' ? { mapName: session.mapName.trim() } : {}),
+      ...(finiteNonNegative(session.endedAt) ? { endedAt: session.endedAt } : {}),
       ...(experienceSettlement ? { experienceSettlement } : {}),
     })
   }
@@ -631,7 +789,7 @@ function fnv1a(value: string): string {
 
 export function dnd5eCombatStatisticsReceipt(input: {
   source: Dnd5eHeadlessCombatState
-  action: Dnd5eAction
+  action: Dnd5eHeadlessObservedAction
   result: Dnd5eActionResult
 }): string {
   const combatants = Object.values(input.source.combatants).map((combatant) => ({

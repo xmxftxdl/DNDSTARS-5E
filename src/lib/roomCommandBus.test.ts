@@ -6,6 +6,31 @@ interface TestCommand extends RoomCommandEnvelope {
 }
 
 describe('RoomCommandBus', () => {
+  it('reports queue and execution latency through the telemetry port', async () => {
+    const events: Array<{ kind: string; value: unknown }> = []
+    const timestamps = [10, 14, 21]
+    const bus = new RoomCommandBus<TestCommand, number>(
+      (command) => command.value,
+      {
+        now: () => timestamps.shift() ?? 21,
+        telemetry: {
+          queued: (value) => events.push({ kind: 'queued', value }),
+          started: (value) => events.push({ kind: 'started', value }),
+          finished: (value) => events.push({ kind: 'finished', value }),
+        },
+      },
+    )
+
+    await expect(bus.dispatch({
+      id: 'observed', type: 'test', aggregateId: 'character:a', issuedAt: 1, value: 3,
+    })).resolves.toBe(3)
+    expect(events).toMatchObject([
+      { kind: 'queued', value: { commandId: 'observed', queuedAt: 10 } },
+      { kind: 'started', value: { queueDurationMs: 4 } },
+      { kind: 'finished', value: { executionDurationMs: 7, totalDurationMs: 11, outcome: 'success' } },
+    ])
+  })
+
   it('serializes commands that target the same aggregate', async () => {
     const events: string[] = []
     const resolvers: Array<() => void> = []

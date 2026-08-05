@@ -26,7 +26,7 @@ import {
   type MapGeometryVisionSettings,
   type SharedMapGeometryState,
 } from '../lib/mapGeometry'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 import { campaignLightIsActive } from '../lib/campaignTime'
 import type { Dnd5eMapEnvironment } from '../rulesets/dnd5e/environmentRules'

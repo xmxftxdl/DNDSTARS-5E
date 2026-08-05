@@ -52,8 +52,18 @@ export interface Dnd5eImportedSpell {
   range: {
     type: Dnd5eSpellbookRangeType
     feet?: number
-    shape?: 'cone' | 'cube' | 'cylinder' | 'line' | 'radius' | 'sphere'
+    shape?: 'cone' | 'cube' | 'cylinder' | 'line' | 'radius' | 'rect' | 'sphere'
     sizeFeet?: number
+    /** Rectangular templates use independent dimensions and may opt into free rotation. */
+    widthFeet?: number
+    heightFeet?: number
+    rotatable?: boolean
+  }
+  /** Pure-data target filters used by plugin Headless spells. */
+  targeting?: {
+    relation?: 'any' | 'ally' | 'enemy'
+    includeSelf?: boolean
+    maximumTargets?: number
   }
   components: {
     verbal: boolean
@@ -110,11 +120,20 @@ export interface Dnd5eSpellbookEntry {
 }
 
 const DND5E_PARTIAL_CORE_SPELL_REASONS: Readonly<Record<string, string>> = {
+  'mage-hand': '手的持续时间与地图投影已支持；抓取、移动及操作具体物体仍需地图交互或 DM 裁定。',
+  darkness: '固定区域、魔法黑暗与视觉压制已自动化；物体载体、遮盖阻断及随物体移动仍需地图层处理。',
+  daylight: '固定光照区域及与黑暗区域的压制已自动化；施加到物体并随物体移动仍需地图层处理。',
+  'spike-growth': '困难地形与移动伤害已自动化；未目睹施法者的主动察觉识别流程仍需 DM 或地图层处理。',
+  'spirit-guardians': '范围、减速与伤害已自动化；施法时指定任意可见生物不受影响的选择仍需补充。',
+  'see-invisibility': '识破隐形已自动化；看入以太位面的地图语义仍需 DM 裁定。',
+  'faerie-fire': '生物豁免、显形和攻击优势已自动化；区域内物体的描边效果仍需地图层处理。',
+  shillelagh: '武器伤害骰和施法属性选择已自动化；武器离手时结束等完整生命周期仍需地图层处理。',
   'produce-flame': '投掷火焰的攻击与伤害已自动化；手持火焰的照明、熄灭和持续时间仍需地图层处理。',
   'fire-bolt': '生物目标的攻击与伤害已自动化；点燃未被穿戴或携带的易燃物仍需 DM 裁定。',
   'burning-hands': '范围豁免、伤害与升环已自动化；点燃区域内未被穿戴或携带的易燃物仍需 DM 裁定。',
   shatter: '生物目标的范围豁免、伤害与升环已自动化；非魔法物体伤害及无机生物的豁免劣势仍需 DM 裁定。',
   fireball: '范围豁免、伤害与升环已自动化；点燃区域内未被穿戴或携带的易燃物仍需 DM 裁定。',
+  'meteor-swarm': '四个不同落点、重叠目标去重、敏捷豁免及火焰/钝击伤害已自动化；物体伤害与点燃仍需 DM 裁定。',
   'lightning-bolt': '范围豁免、伤害与升环已自动化；点燃线内未被穿戴或携带的易燃物仍需 DM 裁定。',
   'cone-of-cold': '范围豁免、伤害与升环已自动化；被法术杀死的生物形成冰冻塑像仍需 DM 或地图层处理。',
   'dancing-lights': '光源位置、组合与移动仍需要地图层或 DM 处理。',
@@ -168,7 +187,7 @@ const CASTING_TIME_UNITS = new Set<Dnd5eSpellbookCastingTimeUnit>([
   'action', 'bonus-action', 'reaction', 'minute', 'hour',
 ])
 const RANGE_TYPES = new Set<Dnd5eSpellbookRangeType>(['self', 'touch', 'distance', 'sight', 'unlimited', 'special'])
-const RANGE_SHAPES = new Set(['cone', 'cube', 'cylinder', 'line', 'radius', 'sphere'])
+const RANGE_SHAPES = new Set(['cone', 'cube', 'cylinder', 'line', 'radius', 'rect', 'sphere'])
 const DURATION_TYPES = new Set(['instantaneous', 'timed', 'until-dispelled', 'special'])
 const DURATION_UNITS = new Set<Dnd5eSpellbookDurationUnit>(['round', 'minute', 'hour', 'day'])
 const SPELL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,79}$/
@@ -242,7 +261,36 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
   const shape = typeof rangeInput.shape === 'string' && RANGE_SHAPES.has(rangeInput.shape) ? rangeInput.shape as Dnd5eImportedSpell['range']['shape'] : undefined
   if (rangeInput.shape != null && !shape) problems.push(`${prefix}.range.shape 无效`)
   const sizeFeet = rangeInput.sizeFeet == null ? undefined : nonNegativeNumber(rangeInput.sizeFeet, `${prefix}.range.sizeFeet`, problems)
-  if (shape && (!sizeFeet || sizeFeet < 1)) problems.push(`${prefix}填写范围形状后必须填写大于 0 的 sizeFeet`)
+  const widthFeet = rangeInput.widthFeet == null ? undefined : nonNegativeNumber(rangeInput.widthFeet, `${prefix}.range.widthFeet`, problems)
+  const heightFeet = rangeInput.heightFeet == null ? undefined : nonNegativeNumber(rangeInput.heightFeet, `${prefix}.range.heightFeet`, problems)
+  const rotatable = rangeInput.rotatable == null
+    ? undefined
+    : booleanValue(rangeInput.rotatable, `${prefix}.range.rotatable`, problems)
+  if (shape && shape !== 'rect' && (!sizeFeet || sizeFeet < 1)) problems.push(`${prefix}填写范围形状后必须填写大于 0 的 sizeFeet`)
+  if (shape === 'rect' && ((!widthFeet || widthFeet < 1) || (!heightFeet || heightFeet < 1))) {
+    problems.push(`${prefix}的长方形范围必须填写大于 0 的 widthFeet 和 heightFeet`)
+  }
+  if (shape !== 'rect' && (widthFeet != null || heightFeet != null || rotatable != null)) {
+    problems.push(`${prefix}.range 的 widthFeet、heightFeet 与 rotatable 只适用于 rect`)
+  }
+
+  const targetingInput = value.targeting == null ? undefined : objectValue(value.targeting) ? value.targeting : undefined
+  if (value.targeting != null && !targetingInput) problems.push(`${prefix}.targeting 必须是对象`)
+  const targetRelation = targetingInput?.relation == null
+    ? undefined
+    : typeof targetingInput.relation === 'string' && ['any', 'ally', 'enemy'].includes(targetingInput.relation)
+      ? targetingInput.relation as 'any' | 'ally' | 'enemy'
+      : undefined
+  if (targetingInput?.relation != null && !targetRelation) problems.push(`${prefix}.targeting.relation 无效`)
+  const includeSelf = targetingInput?.includeSelf == null
+    ? undefined
+    : booleanValue(targetingInput.includeSelf, `${prefix}.targeting.includeSelf`, problems)
+  const maximumTargets = targetingInput?.maximumTargets == null
+    ? undefined
+    : nonNegativeNumber(targetingInput.maximumTargets, `${prefix}.targeting.maximumTargets`, problems, true)
+  if (maximumTargets != null && (maximumTargets < 1 || maximumTargets > 256)) {
+    problems.push(`${prefix}.targeting.maximumTargets 必须是 1 到 256 之间的整数`)
+  }
 
   const componentsInput = objectValue(value.components) ? value.components : {}
   if (!objectValue(value.components)) problems.push(`${prefix}.components 必须是对象`)
@@ -315,7 +363,17 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
         ...(rangeFeet != null ? { feet: rangeFeet } : {}),
         ...(shape ? { shape } : {}),
         ...(sizeFeet != null ? { sizeFeet } : {}),
+        ...(widthFeet != null ? { widthFeet } : {}),
+        ...(heightFeet != null ? { heightFeet } : {}),
+        ...(rotatable != null ? { rotatable } : {}),
       },
+      ...(targetingInput ? {
+        targeting: {
+          ...(targetRelation ? { relation: targetRelation } : {}),
+          ...(includeSelf != null ? { includeSelf } : {}),
+          ...(maximumTargets != null ? { maximumTargets } : {}),
+        },
+      } : {}),
       components: {
         verbal,
         somatic,

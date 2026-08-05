@@ -8,7 +8,7 @@ import { useRoomCommunicationsStore } from '../../store/roomCommunications'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
 import { useSceneAudioStore } from '../../store/sceneAudio'
 import { getEnemyTemplate } from '../../lib/enemyPool'
-import { publishSharedEvent, subscribeSharedEvent } from '../../lib/sharedApi'
+import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 import { playSceneAudioCue } from '../../lib/sceneAudio'
 import {
   SCENE_PRESENTATION_CHANNEL,
@@ -82,7 +82,7 @@ export default function SceneOrchestrationSystem({
 
   useEffect(() => () => onEditorVisibilityChange?.(false), [onEditorVisibilityChange])
 
-  useEffect(() => subscribeSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, (event) => {
+  useEffect(() => browserSharedRoomService.subscribeSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, (event) => {
     if (event.kind === 'sound' && event.cue) playSceneAudioCue(event.cue)
     if (event.text) {
       setNotice(event.text)
@@ -175,7 +175,7 @@ export default function SceneOrchestrationSystem({
     }
 
     if (action.kind === 'sound') {
-      await publishSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, {
+      await browserSharedRoomService.publishSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, {
         id: crypto.randomUUID(), kind: 'sound', cue: action.cue, createdAt: Date.now(),
       })
       return { summary, reversible: false }
@@ -325,7 +325,7 @@ export default function SceneOrchestrationSystem({
       return
     }
     if (scene.backgroundCue === 'none') return
-    await publishSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, {
+    await browserSharedRoomService.publishSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, {
       id: crypto.randomUUID(), kind: 'sound', cue: scene.backgroundCue, text: `场景氛围：${scene.name}`, createdAt: Date.now(),
     })
   }, [map.id])

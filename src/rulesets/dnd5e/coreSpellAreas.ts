@@ -24,6 +24,7 @@ import type {
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
+import type { Dnd5eWallOfFireGeometry } from './wallOfFireGeometry'
 import { dnd5eMovementPathCells } from './itemAreas'
 
 export interface Dnd5eCoreSpellAreaDamageDeclaration {
@@ -495,7 +496,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     relation: 'any',
     includeSelf: true,
     color: '#65a30d',
-    visual: { preset: 'toxic-cloud', intensity: 'strong' },
+    visual: { preset: 'cloudkill', intensity: 'strong' },
     triggers: [
       {
         id: 'cloudkill-enter',
@@ -581,7 +582,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     includeSelf: true,
     movementCostMultiplier: 2,
     color: '#bfdbfe',
-    visual: { preset: 'arcane', intensity: 'subtle' },
+    visual: { preset: 'ice-storm-ground', intensity: 'subtle' },
     triggers: [],
   },
 ]
@@ -651,6 +652,7 @@ export function createDnd5eCoreSpellArea(input: {
   durationRounds?: number
   sourceAlignment?: string
   triggerCellsById?: Readonly<Record<string, readonly GridCell[]>>
+  wallOfFireGeometry?: Dnd5eWallOfFireGeometry
 }): Dnd5ePluginArea {
   const declaration = input.declaration
   const sourceIsEvil = /邪恶|evil/i.test(input.sourceAlignment ?? '')
@@ -710,6 +712,7 @@ export function createDnd5eCoreSpellArea(input: {
       ? { ...declaration.lighting, spellLevel: input.slotLevel }
       : undefined,
     visual: { ...declaration.visual },
+    wallOfFireGeometry: input.wallOfFireGeometry ? { ...input.wallOfFireGeometry } : undefined,
     triggers: declaration.triggers.map((trigger) => {
       const resolved = resolvedTrigger(trigger, {
         slotLevel: input.slotLevel,

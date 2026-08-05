@@ -1,4 +1,4 @@
-import type { EquipmentItem } from '../../types/equipment'
+import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type {
   Dnd5eInventoryIconId,
   Dnd5eInventoryItemTemplate,
@@ -408,6 +408,11 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
   const rules = CATALOG_RULE_OVERRIDES[entry.id]
   const srdRules = DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED[entry.id]
   const rulesText = rules?.rulesText ?? srdRules?.rulesText
+  const wearableSlot: EquipmentSlot | undefined = entry.kind === 'ring'
+    ? 'ring'
+    : entry.id.startsWith('belt-')
+      ? 'belt'
+      : undefined
   if (!rulesText) {
     throw new Error(`SRD 5.1 魔法物品缺少已复核中文正文：${entry.id}`)
   }
@@ -420,6 +425,13 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
     rulesText,
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
+    ...(wearableSlot ? {
+      equipment: {
+        id: `srd-5.1:magic-item:${entry.id}`,
+        name: entry.name,
+        slot: wearableSlot,
+      },
+    } : {}),
     ...(rules?.use ? { use: rules.use } : {}),
     magicItem: {
       kind: entry.kind,

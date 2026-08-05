@@ -107,6 +107,15 @@ describe('SRD 5.1 magic items', () => {
     })
   })
 
+  it('marks rings and belts as wearable inventory equipment', () => {
+    expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:ring-of-warmth')).toMatchObject({
+      equipment: { slot: 'ring' },
+    })
+    expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:belt-of-dwarvenkind')).toMatchObject({
+      equipment: { slot: 'belt' },
+    })
+  })
+
   it('generates armor and shields with the correct distinct rarity progressions', () => {
     expect(DND5E_SRD_MAGIC_ARMOR_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:armor-chain-mail-plus-1')).toMatchObject({
       equipment: { effects: { armorClassBonus: 1 } },

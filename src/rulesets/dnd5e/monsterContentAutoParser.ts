@@ -20,10 +20,15 @@ const DAMAGE_TYPE_TERMS: ReadonlyArray<[RegExp, Dnd5eDamageType]> = [
 ]
 
 function slug(value: string): string {
-  const normalized = value.trim().toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
+  const normalized = value.normalize('NFKD').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return (normalized || 'feature').slice(0, 48)
+  if (normalized) return normalized.slice(0, 48)
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193)
+  }
+  return `feature-${(hash >>> 0).toString(16).padStart(8, '0')}`
 }
 
 function explicitDamageType(text: string): Dnd5eDamageType | undefined {
@@ -103,6 +108,15 @@ const SPELL_LOOKUP = new Map(
   ]),
 )
 
+const SPELL_NAME_ALIASES = new Map<string, string>([
+  [normalizedSpellNeedle('冰冻射线'), normalizedSpellNeedle('ray-of-frost')],
+  [normalizedSpellNeedle('冰霜射线'), normalizedSpellNeedle('ray-of-frost')],
+])
+
+const CHINESE_SPELL_LEVELS: Record<string, number> = {
+  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+}
+
 /** 从逗号、顿号或换行分隔的法术文本中识别 SRD 5.1 法术。 */
 export function parseDnd5eSpellListText(text: string): {
   spells: Dnd5eCustomMonsterSpellDraft[]
@@ -116,7 +130,8 @@ export function parseDnd5eSpellListText(text: string): {
   const spells: Dnd5eCustomMonsterSpellDraft[] = []
   const unknown: string[] = []
   for (const candidate of candidates) {
-    const found = SPELL_LOOKUP.get(normalizedSpellNeedle(candidate))
+    const needle = normalizedSpellNeedle(candidate)
+    const found = SPELL_LOOKUP.get(SPELL_NAME_ALIASES.get(needle) ?? needle)
     if (!found) {
       unknown.push(candidate)
       continue
@@ -138,19 +153,32 @@ export function parseDnd5eSpellcastingText(text: string): {
   spells: Dnd5eCustomMonsterSpellDraft[]
   slots: Record<string, number>
   unknown: string[]
+  unknownDetails: Array<{
+    name: string
+    level: number
+    usageKind: Dnd5eCustomMonsterSpellDraft['usageKind']
+    usageMax: number
+  }>
 } {
   const spells: Dnd5eCustomMonsterSpellDraft[] = []
   const slots: Record<string, number> = {}
   const unknown: string[] = []
+  const unknownDetails: Array<{
+    name: string
+    level: number
+    usageKind: Dnd5eCustomMonsterSpellDraft['usageKind']
+    usageMax: number
+  }> = []
   for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
     const match = line.trim().match(
-      /^(戏法|Cantrips?|\d+(?:st|nd|rd|th)?\s*level|\d+\s*环)\s*(?:\(([^)]*)\))?\s*[:：]\s*(.+)$/i,
+      /^(戏法|Cantrips?|\d+(?:st|nd|rd|th)?\s*level|(?:\d+|[一二三四五六七八九])\s*环)\s*(?:[（(]([^）)]*)[）)])?\s*[:：]\s*(.+)$/i,
     )
     if (!match) continue
     const levelText = match[1]
+    const chineseLevel = CHINESE_SPELL_LEVELS[levelText.trim()[0]]
     const level = /戏法|cantrip/i.test(levelText)
       ? 0
-      : Number(levelText.match(/\d+/)?.[0] ?? 0)
+      : Number(levelText.match(/\d+/)?.[0] ?? chineseLevel ?? 0)
     const usageText = match[2] ?? ''
     const parsed = parseDnd5eSpellListText(match[3])
     unknown.push(...parsed.unknown)
@@ -158,11 +186,18 @@ export function parseDnd5eSpellcastingText(text: string): {
     if (level > 0 && slotCount > 0) slots[String(level)] = slotCount
     const perDay = Number(usageText.match(/(\d+)\s*\/\s*(?:day|日)/i)?.[1] ?? 0)
     const atWill = level === 0 || /at will|随意/i.test(usageText)
+    const usageKind: Dnd5eCustomMonsterSpellDraft['usageKind'] = perDay > 0
+      ? 'per-day'
+      : atWill ? 'at-will' : 'slots'
+    for (const name of parsed.unknown) {
+      if (unknownDetails.some((entry) => normalizedSpellNeedle(entry.name) === normalizedSpellNeedle(name))) continue
+      unknownDetails.push({ name, level, usageKind, usageMax: perDay || 1 })
+    }
     for (const spell of parsed.spells) {
       const normalized: Dnd5eCustomMonsterSpellDraft = {
         ...spell,
         level,
-        usageKind: perDay > 0 ? 'per-day' : atWill ? 'at-will' : 'slots',
+        usageKind,
         usageMax: perDay || 1,
       }
       const existing = spells.findIndex((entry) => entry.id === spell.id)
@@ -170,7 +205,7 @@ export function parseDnd5eSpellcastingText(text: string): {
       else spells.push(normalized)
     }
   }
-  return { spells, slots, unknown }
+  return { spells, slots, unknown, unknownDetails }
 }
 
 export function isDnd5eDamageType(value: string): value is Dnd5eDamageType {

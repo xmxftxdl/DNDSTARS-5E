@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
 import {
-  BookOpen, Bot, ChevronRight, Download, FileJson, Filter, Search, ShieldCheck, Trash2, Upload,
+  BookOpen, Bot, ChevronRight, FileJson, Filter, Hammer, Search, ShieldCheck, Trash2,
 } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { modeFromPort } from '../lib/appMode'
+import { showAppConfirm } from '../lib/appDialog'
 import { getRoomSession } from '../lib/roomSession'
 import {
   DND5E_SPELL_CLASS_LABELS,
@@ -12,7 +14,6 @@ import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
   dnd5eSpellbookEntriesWithPlugins,
-  parseDnd5eSpellImportFile,
   type Dnd5eImportedSpell,
   type Dnd5eSpellbookEntry,
   type Dnd5eSpellcastingClassId,
@@ -60,7 +61,7 @@ function rangeLabel(spell: Dnd5eImportedSpell): string {
   const types = { self: '自身', touch: '触及', sight: '视线', unlimited: '无限', special: '特殊', distance: '' }
   const base = spell.range.type === 'distance' ? `${spell.range.feet ?? 0} 尺` : types[spell.range.type]
   if (!spell.range.shape) return base
-  const shapes = { cone: '锥形', cube: '立方体', cylinder: '柱形', line: '线形', radius: '半径', sphere: '球形' }
+  const shapes = { cone: '锥形', cube: '立方体', cylinder: '柱形', line: '线形', radius: '半径', rect: '矩形', sphere: '球形' }
   return `${base} · ${spell.range.sizeFeet ?? 0} 尺${shapes[spell.range.shape]}`
 }
 
@@ -121,9 +122,8 @@ function downloadJson(fileName: string, value: unknown): void {
 }
 
 export default function SpellbookPage() {
-  const fileRef = useRef<HTMLInputElement>(null)
+  const { campaignId = 'local' } = useParams()
   const imported = useSpellbookStore((state) => state.spells)
-  const importSpells = useSpellbookStore((state) => state.importSpells)
   const removeSpell = useSpellbookStore((state) => state.removeSpell)
   const [query, setQuery] = useState('')
   const [level, setLevel] = useState('all')
@@ -163,24 +163,12 @@ export default function SpellbookPage() {
   }, [automation, classId, entries, level, query, source])
   const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered[0]
 
-  const importFile = async (file: File) => {
-    setBusy(true)
-    setNotice(null)
-    setError(null)
-    try {
-      const bundle = await parseDnd5eSpellImportFile(file)
-      const result = await importSpells(bundle.spells)
-      setNotice(`已导入 ${bundle.spells.length} 个法术：新增 ${result.added} 个，更新 ${result.replaced} 个。房间玩家将自动同步。`)
-      setSelectedId(bundle.spells[0]?.id ?? null)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const remove = async (spell: Dnd5eImportedSpell) => {
-    if (!window.confirm(`从房间法术书移除“${spell.name}”？角色存档中的法术 ID 会保留，但在重新导入前只显示为缺失资料。`)) return
+    if (!(await showAppConfirm({
+      message: `从房间法术书移除“${spell.name}”？角色存档中的法术 ID 会保留，但在重新导入前只显示为缺失资料。`,
+      tone: 'danger',
+      confirmLabel: '删除',
+    }))) return
     setBusy(true)
     setError(null)
     try {
@@ -200,9 +188,12 @@ export default function SpellbookPage() {
         title="法术书"
         description="D&D 5e 2014 · SRD 5.1 法术目录、角色选法术资料与房间自定义法术。"
         actions={isDM ? <div className="flex flex-wrap gap-2">
-          <a href="/spell-templates/dnd5e-2014-spell-template.json" download className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 hover:text-white">
-            <Download className="h-4 w-4" />下载法术模板
-          </a>
+          <Link
+            to={`/campaign/${encodeURIComponent(campaignId)}/dm-tools/workshop`}
+            className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 hover:text-white"
+          >
+            <Hammer className="h-4 w-4" />在自定义工坊管理法术
+          </Link>
           {imported.length > 0 ? <button
             type="button"
             onClick={() => downloadJson('dndstars5e-room-spells.json', {
@@ -212,23 +203,6 @@ export default function SpellbookPage() {
             })}
             className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 hover:text-white"
           ><FileJson className="h-4 w-4" />导出房间法术</button> : null}
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,.dndstars5e-spells,application/json"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0]
-              if (file) void importFile(file)
-              event.currentTarget.value = ''
-            }}
-          />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => fileRef.current?.click()}
-            className="glow-arcane flex items-center gap-2 rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-          ><Upload className="h-4 w-4" />{busy ? '正在处理…' : '导入法术 JSON'}</button>
         </div> : undefined}
       />
 

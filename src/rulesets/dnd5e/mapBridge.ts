@@ -49,6 +49,7 @@ import {
 } from './monsterGenericAbilities'
 import { compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
 import { dnd5eWeaponDamageSource } from './equipment'
+import { applyDnd5eInventoryHeadlessSnapshotToCharacter } from './inventoryHeadlessRuntime'
 import type { Dnd5eMoralAlignment } from './damageDefenses'
 import { dnd5eUtilityProjectionDistanceKey } from './utilityProjectionState'
 import {
@@ -375,6 +376,11 @@ export function createDnd5eMapCombatSnapshot(input: {
     const initiative = initiativeByTokenId.get(token.id)
     if (initiative == null) return []
     const character = token.characterId ? charactersById.get(token.characterId) : undefined
+    // A player token that names a character must never silently fall through to
+    // the generic monster path while the character resource is still syncing.
+    // Omitting it makes the action fail closed instead of accepting an attack
+    // that loses class, subclass, equipment, and plugin mechanics.
+    if (token.type === 'player' && token.characterId && !character) return []
     if (character) {
       const migrated = migrateCharacterToDnd5e(character)
       const visionProfile = compileDnd5eEffectiveVisionProfile({
@@ -971,7 +977,13 @@ export function planDnd5eMapResultApplication(input: {
     const nextCharacterCurrentHp = combatant.classState.wildShapeFormId
       ? combatant.classState.wildShapeOriginalCurrentHp ?? character.currentHp
       : combatant.currentHp
+    const inventoryCharacter = applyDnd5eInventoryHeadlessSnapshotToCharacter({
+      character,
+      snapshots: combatant.inventoryHeadlessEffects,
+      revision: combatant.inventoryRevision,
+    })
     const resourcesUnchanged = JSON.stringify(character.classResources ?? {}) === JSON.stringify(nextClassResources ?? {})
+    const inventoryUnchanged = JSON.stringify(character.dnd5eInventory ?? {}) === JSON.stringify(inventoryCharacter.dnd5eInventory ?? {})
     const classStateUnchanged = JSON.stringify(character.dnd5eCombatState ?? {}) === JSON.stringify(nextClassState ?? {})
     const conditionsUnchanged = JSON.stringify(character.conditions) === JSON.stringify(combatant.conditions)
     if (
@@ -984,6 +996,7 @@ export function planDnd5eMapResultApplication(input: {
       (character.deathSaveStable ?? false) === combatant.deathSaves.stable &&
       (character.concentrating ?? false) === combatant.concentrating &&
       resourcesUnchanged &&
+      inventoryUnchanged &&
       classStateUnchanged &&
       conditionsUnchanged
     ) return character
@@ -998,6 +1011,7 @@ export function planDnd5eMapResultApplication(input: {
       concentrating: combatant.concentrating,
       conditions: [...combatant.conditions],
       classResources: nextClassResources,
+      dnd5eInventory: inventoryCharacter.dnd5eInventory,
       dnd5eCombatState: nextClassState,
     }
     changedCharacterIds.push(character.id)

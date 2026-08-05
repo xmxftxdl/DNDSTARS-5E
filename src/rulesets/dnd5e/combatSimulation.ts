@@ -113,13 +113,13 @@ import {
   type Dnd5eSrdSpellDefinition,
 } from './spells'
 import {
-  DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
-  rankMonsterDecisionCandidates,
   type MonsterDecisionCandidate,
   type MonsterDecisionContext,
   type MonsterDecisionMetrics,
   type MonsterDecisionProvider,
-} from './monsterDecisionProvider'
+} from './monsterDecisionContracts'
+import { rankMonsterDecisionCandidates } from './monsterDecisionRanking'
+import { DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3 } from './monsterDecisionScoring'
 import {
   planDnd5eMonsterTurn,
   type Dnd5eMonsterTurnPlan,

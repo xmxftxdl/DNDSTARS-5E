@@ -1,10 +1,5 @@
 import { useEffect, useRef } from 'react'
-import {
-  getSharedResourceRevisionWatermark,
-  loadSharedResource,
-  subscribeSharedEvent,
-  subscribeSharedResourceInvalidation,
-} from '../../lib/sharedApi'
+import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 import {
   consumePlayerActionAck,
   loadDmPlayerActionBatch,
@@ -143,15 +138,15 @@ export async function waitForAuthoritativePlayerActionSync(
         useMapStore.getState().loadShared(),
         useCharacterStore.getState().loadShared(),
         expectedCombatRevision
-          ? (loadCombatState?.() ?? loadSharedResource('combat').then(() => undefined))
+          ? (loadCombatState?.() ?? browserSharedRoomService.loadSharedResource('combat').then(() => undefined))
           : Promise.resolve(),
       ])
       const mapsReady = !expectedMapsRevision ||
-        getSharedResourceRevisionWatermark('maps') >= expectedMapsRevision
+        browserSharedRoomService.getSharedResourceRevisionWatermark('maps') >= expectedMapsRevision
       const charactersReady = !expectedCharactersRevision ||
-        getSharedResourceRevisionWatermark('characters') >= expectedCharactersRevision
+        browserSharedRoomService.getSharedResourceRevisionWatermark('characters') >= expectedCharactersRevision
       const combatReady = !expectedCombatRevision ||
-        getSharedResourceRevisionWatermark('combat') >= expectedCombatRevision
+        browserSharedRoomService.getSharedResourceRevisionWatermark('combat') >= expectedCombatRevision
       if (mapsReady && charactersReady && combatReady) return
       await new Promise((resolve) => window.setTimeout(resolve, 100))
     } while (Date.now() < deadline)
@@ -161,9 +156,9 @@ export async function waitForAuthoritativePlayerActionSync(
     appliedAt,
     syncAuthoritativeState: () => syncAuthoritativePlayerActionState({
       appliedAt,
-      loadMapsUpdatedAt: async () => (await loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
+      loadMapsUpdatedAt: async () => (await browserSharedRoomService.loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
       loadCharactersUpdatedAt: async () =>
-        (await loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
+        (await browserSharedRoomService.loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
       sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
       loadMaps: () => useMapStore.getState().loadShared(),
       loadCharacters: () => useCharacterStore.getState().loadShared(),
@@ -251,7 +246,7 @@ export function useMapsPlayerActionTransport(input: {
     const handle = (action: SharedPlayerActionState) => {
       void actionHandlerRef.current(normalizeRemotePlayerActionForDm(action))
     }
-    const unsubscribeEvent = subscribeSharedEvent<SharedPlayerActionState>(
+    const unsubscribeEvent = browserSharedRoomService.subscribeSharedEvent<SharedPlayerActionState>(
       'player-action-player-to-dm',
       handle,
     )
@@ -260,15 +255,15 @@ export function useMapsPlayerActionTransport(input: {
         mapId,
         combatId: getCombatIdRef.current(),
         processedActionIds: processedActionIdsRef.current,
-        loadProcessed: () => loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed'),
-        loadQueue: () => loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests'),
-        loadLatestAction: () => loadSharedResource<SharedPlayerActionState>('player-action'),
+        loadProcessed: () => browserSharedRoomService.loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed'),
+        loadQueue: () => browserSharedRoomService.loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests'),
+        loadLatestAction: () => browserSharedRoomService.loadSharedResource<SharedPlayerActionState>('player-action'),
         onProcessedActionIds: (ids) => { processedActionIdsRef.current = ids },
         onAction: (action) => actionHandlerRef.current(action),
         isCancelled: () => cancelled,
       })
     }
-    const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load, {
+    const unsubscribeQueue = browserSharedRoomService.subscribeSharedResourceInvalidation('player-action-requests', load, {
       recoveryMs: 2_000,
       recoverWhenHidden: true,
       refreshOnVisibilityRestore: true,
@@ -324,15 +319,15 @@ export function useMapsPlayerActionTransport(input: {
         },
       })
     }
-    const unsubscribeEvent = subscribeSharedEvent<SharedPlayerActionAckState>(
+    const unsubscribeEvent = browserSharedRoomService.subscribeSharedEvent<SharedPlayerActionAckState>(
       'player-action-dm-to-player',
       applyAck,
     )
     const load = async () => {
-      const ack = await loadSharedResource<SharedPlayerActionAckState>('player-action-ack')
+      const ack = await browserSharedRoomService.loadSharedResource<SharedPlayerActionAckState>('player-action-ack')
       if (!cancelled) applyAck(ack)
     }
-    const unsubscribeAck = subscribeSharedResourceInvalidation('player-action-ack', load)
+    const unsubscribeAck = browserSharedRoomService.subscribeSharedResourceInvalidation('player-action-ack', load)
     return () => {
       cancelled = true
       unsubscribeEvent()

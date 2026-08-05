@@ -114,7 +114,7 @@ const AUTOMATION = new Set<DeclarativeClassAutomationV1>(['full', 'partial', 'ma
 const SPELLCASTING = new Set<Dnd5eSpellcastingKind>([
   'full-known', 'full-prepared', 'half-known', 'half-prepared', 'one-third-known', 'pact',
 ])
-const EQUIPMENT_SLOTS = new Set(['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace'])
+const EQUIPMENT_SLOTS = new Set(['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'ring2', 'belt', 'necklace'])
 const registeredById = new Map<string, RegisteredDeclarativeClassV1>()
 
 function isRecord(value: unknown): value is Record<string, unknown> {

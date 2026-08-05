@@ -80,6 +80,7 @@ import {
   type MapGeometryState,
 } from '../../lib/mapGeometry'
 import { createDnd5eCoreSpellArea, dnd5eWallOfFireDamagingSideCells, getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
+import { dnd5eWallOfFireCells, dnd5eWallOfFireDamageCells, normalizeWallOfFireAngle, type Dnd5eWallOfFireGeometry } from './wallOfFireGeometry'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
 import { dnd5eSpellSavePressureApplies } from './martialSpellSynergy'
@@ -196,7 +197,9 @@ export interface PreparedDnd5eSpellCast {
   healingAllocations?: readonly { targetId: string; amount: number }[]
   areaCells?: readonly { col: number; row: number }[]
   areaAnchorCell?: { col: number; row: number }
+  areaAnchorCells?: readonly { col: number; row: number }[]
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  wallOfFireGeometry?: Dnd5eWallOfFireGeometry
   areaDurationRounds?: number
   teleportDestination?: Dnd5eSpellTeleportDestination
   /** 当前事务是在使用既有持续法术效果，而不是再次施法。 */
@@ -569,7 +572,8 @@ export function prepareDnd5eSpellCast(input: {
     payload.effectDamageType || payload.enlargeReduceChoice || payload.enhanceAbilityChoice ||
     payload.healingAllocations?.length ||
     (sustainedAttack.origin === 'caster' && payload.areaTargetCell) ||
-    payload.areaTargetOrientation != null ||
+    payload.areaTargetOrientation != null || payload.wallOfFireShape != null ||
+    payload.wallOfFireAngleDegrees != null || payload.wallOfFireDamagingSide != null ||
     payload.projectileTargetIds?.length || payload.sculptedTargetIds?.length ||
     (sustainedAttack.resolution !== 'saving-throw' && (payload.targetTokenIds?.length ?? 0) > 1)
   )) return { ok: false, reason: 'invalid-action' }
@@ -778,6 +782,8 @@ export function prepareDnd5eSpellCast(input: {
   let validTargetTokens = targetTokens as Token[]
   let areaCells: readonly { col: number; row: number }[] | undefined
   let areaAnchorCell: { col: number; row: number } | undefined
+  let areaAnchorCells: readonly { col: number; row: number }[] | undefined
+  let wallOfFireGeometry: Dnd5eWallOfFireGeometry | undefined
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
   const areaTargeting = spell.area && sustainedUsesArea
     ? {
@@ -787,7 +793,143 @@ export function prepareDnd5eSpellCast(input: {
           : sustainedAttack?.rangeFeet,
       }
     : spell.area
-  if (areaTargeting) {
+  const hasWallOfFireOptions = payload.wallOfFireShape != null || payload.wallOfFireAngleDegrees != null ||
+    payload.wallOfFireDamagingSide != null
+  if (hasWallOfFireOptions && spell.id !== 'wall-of-fire') return { ok: false, reason: 'invalid-action' }
+  if (spell.id === 'wall-of-fire') {
+    const shape = payload.wallOfFireShape ?? 'line'
+    const angle = payload.wallOfFireAngleDegrees ?? ((payload.areaTargetOrientation ?? 0) * 90)
+    const side = payload.wallOfFireDamagingSide ?? (shape === 'ring' ? 'outside' : 'right')
+    if (!Number.isFinite(angle) || angle < -3_600 || angle > 3_600 ||
+      (shape === 'line' && side !== 'left' && side !== 'right') ||
+      (shape === 'ring' && side !== 'inside' && side !== 'outside')) {
+      return { ok: false, reason: 'spell-area-orientation-invalid' }
+    }
+    wallOfFireGeometry = { shape, angleDegrees: normalizeWallOfFireAngle(angle), damagingSide: side }
+  }
+  if (areaTargeting && (spell.areaTargetCount ?? 1) > 1) {
+    const requiredAreaTargetCount = spell.areaTargetCount ?? 1
+    const submittedAreaCells = payload.areaTargetCells
+    if (
+      areaTargeting.shape !== 'circle' ||
+      areaTargeting.origin !== 'point' ||
+      !Array.isArray(submittedAreaCells) ||
+      submittedAreaCells.length !== requiredAreaTargetCount
+    ) return { ok: false, reason: 'spell-area-target-required' }
+    const uniqueAreaKeys = new Set(submittedAreaCells.map(cellKey))
+    if (uniqueAreaKeys.size !== requiredAreaTargetCount) {
+      return { ok: false, reason: 'spell-area-target-required' }
+    }
+    if (payload.areaTargetOrientation != null) {
+      return { ok: false, reason: 'spell-area-orientation-invalid' }
+    }
+
+    const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
+    const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
+    const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
+    const zoneTargets = new Map<string, Token>()
+    const unionCells = new Map<string, { col: number; row: number }>()
+
+    for (const areaCell of submittedAreaCells) {
+      if (!Number.isInteger(areaCell.col) || !Number.isInteger(areaCell.row)) {
+        return { ok: false, reason: 'spell-area-target-required' }
+      }
+      if (areaCell.col < 0 || areaCell.row < 0 || areaCell.col >= columns || areaCell.row >= rows) {
+        return { ok: false, reason: 'spell-area-target-out-of-bounds' }
+      }
+      if (!canPlaceAoe(areaTargeting, casterCell, areaCell)) {
+        return { ok: false, reason: 'spell-area-target-out-of-range' }
+      }
+      const areaPoint = {
+        x: input.map.gridOffsetX + (areaCell.col + 0.5) * input.map.gridSize,
+        y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
+      }
+      const areaPointElevation = mapGeometryTerrainElevationAtPoint(geometry, areaPoint)
+      const areaPointToken = {
+        ...actorToken,
+        id: `${actorToken.id}:spell-area-placement:${areaCell.col}:${areaCell.row}`,
+        characterId: undefined,
+        type: 'obstacle' as const,
+        size: 1,
+        ...areaPoint,
+        elevationFeet: areaPointElevation,
+      }
+      const horizontalPlacementDistanceFeet = tokenFootprintDistanceCells(
+        actorToken,
+        areaPointToken,
+        input.map,
+      ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      const placementRangeFeet = areaTargeting.placeRangeFeet ?? spell.rangeFeet
+      if (dnd5eTokenToPointDistanceFeet({
+        geometry,
+        token: actorToken,
+        pointElevationFeet: areaPointElevation,
+        horizontalDistanceFeet: horizontalPlacementDistanceFeet,
+      }) > placementRangeFeet + 1e-4) {
+        return { ok: false, reason: 'spell-area-target-out-of-range' }
+      }
+      if (
+        spell.requiresVisibleTarget === 'placement' &&
+        !mapGeometryCanSeeToken({
+          geometry,
+          map: input.map,
+          viewer: actorToken,
+          target: areaPointToken,
+          forceEnabled: true,
+          fallbackRangeFeet: placementRangeFeet,
+        })
+      ) return { ok: false, reason: 'spell-target-not-visible' }
+      if (mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: actorToken,
+        to: areaPoint,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
+        toElevationFeet: areaPointElevation,
+      })) return { ok: false, reason: 'effect-line-blocked' }
+
+      const cells = cellsForAoe(areaTargeting, casterCell, areaCell)
+      for (const cell of cells) unionCells.set(cellKey(cell), cell)
+      for (const candidate of tokensInCells(input.map, input.map.tokens, cells)) {
+        if (candidate.type === 'obstacle' || (candidate.id === actorToken.id && !spell.areaIncludesSelf)) continue
+        const opposed = areOpposedCombatTokens(actorToken, candidate)
+        if (spell.target === 'hostile' && !opposed) continue
+        if (spell.target === 'ally' && opposed) continue
+        if (!dnd5eInstantAoeAffectsTokenVertically({
+          spellId: spell.id,
+          area: areaTargeting,
+          map: input.map,
+          geometry,
+          sourceToken: actorToken,
+          targetToken: candidate,
+          effectOrigin: areaPoint,
+          effectOriginElevationFeet: areaPointElevation,
+          effectAim: areaPoint,
+          effectAimElevationFeet: areaPointElevation,
+        })) continue
+        if (mapGeometryLineOfEffectBlocked({
+          geometry,
+          from: areaPoint,
+          to: candidate,
+          fromElevationFeet: areaPointElevation,
+          toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
+        })) continue
+        zoneTargets.set(candidate.id, candidate)
+      }
+    }
+
+    areaCells = [...unionCells.values()]
+    areaAnchorCells = submittedAreaCells.map((cell) => ({ ...cell }))
+    areaAnchorCell = areaAnchorCells[0]
+    const authoritativeTargets = [...zoneTargets.values()]
+    if (!persistentArea && spell.target === 'area') {
+      requestedTargetIds = authoritativeTargets.map((candidate) => candidate.id)
+      if (requestedTargetIds.length > maximumTargets) {
+        return { ok: false, reason: 'spell-target-count-invalid' }
+      }
+      validTargetTokens = authoritativeTargets
+    }
+  } else if (areaTargeting) {
+    if (payload.areaTargetCells != null) return { ok: false, reason: 'invalid-target' }
     const casterCell = sustainedArea?.anchorCell ??
       tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
     const areaCell = areaTargeting.shape === 'circle' && areaTargeting.origin === 'self'
@@ -805,7 +947,7 @@ export function prepareDnd5eSpellCast(input: {
     if (!canPlaceAoe(areaTargeting, casterCell, areaCell)) {
       return { ok: false, reason: 'spell-area-target-out-of-range' }
     }
-    if (orientation != null && (
+    if (orientation != null && spell.id !== 'wall-of-fire' && (
       areaTargeting.shape !== 'rect' || !areaTargeting.rotatable ||
       !Number.isInteger(orientation) || orientation < 0 || orientation > 3
     )) return { ok: false, reason: 'spell-area-orientation-invalid' }
@@ -908,7 +1050,9 @@ export function prepareDnd5eSpellCast(input: {
       )) return { ok: false, reason: 'invalid-target' }
     }
     const orientFrom = aoeOrientFromCell(areaTargeting, casterCell, areaCell, { rectRotation: orientation })
-    const cells = cellsForAoe(areaTargeting, orientFrom, areaCell)
+    const cells = wallOfFireGeometry
+      ? dnd5eWallOfFireCells({ anchor: areaCell, ...wallOfFireGeometry, map: input.map })
+      : cellsForAoe(areaTargeting, orientFrom, areaCell)
     areaCells = cells
     areaAnchorCell = areaCell
     const effectAim = {
@@ -962,7 +1106,9 @@ export function prepareDnd5eSpellCast(input: {
         validTargetTokens = [...authoritativeTargets]
       }
     }
-  } else if (payload.areaTargetCell != null || payload.areaTargetOrientation != null) {
+  } else if (payload.areaTargetCell != null || payload.areaTargetCells != null || payload.areaTargetOrientation != null ||
+    payload.wallOfFireShape != null || payload.wallOfFireAngleDegrees != null ||
+    payload.wallOfFireDamagingSide != null) {
     return { ok: false, reason: 'invalid-target' }
   }
   for (let targetIndex = 0; targetIndex < validTargetTokens.length; targetIndex += 1) {
@@ -1501,7 +1647,9 @@ export function prepareDnd5eSpellCast(input: {
       healingAllocations,
       areaCells,
       areaAnchorCell,
+      areaAnchorCells,
       areaTargetOrientation: payload.areaTargetOrientation,
+      wallOfFireGeometry,
       sustainedEffectAttack,
       sustainedEffectAreaId: authorizedSustainedEffectAreaId,
       teleportDestination,
@@ -1799,11 +1947,18 @@ export function resolvePreparedDnd5eSpellCast(input: {
         : prepared.action.targetElevationFeet ??
           mapGeometryTerrainElevationAtPoint(coreAreaGeometry, coreAreaAnchorPoint)
       const wallDamageCells = declaration.spellId === 'wall-of-fire'
-        ? dnd5eWallOfFireDamagingSideCells({
-            wallCells: coreAreaCells,
-            orientation: prepared.areaTargetOrientation ?? 0,
-            map: application.map,
-          })
+        ? prepared.wallOfFireGeometry
+          ? dnd5eWallOfFireDamageCells({
+              anchor: coreAreaAnchorCell,
+              wallCells: coreAreaCells,
+              ...prepared.wallOfFireGeometry,
+              map: application.map,
+            })
+          : dnd5eWallOfFireDamagingSideCells({
+              wallCells: coreAreaCells,
+              orientation: prepared.areaTargetOrientation ?? 0,
+              map: application.map,
+            })
         : undefined
       const area = createDnd5eCoreSpellArea({
         declaration,
@@ -1823,6 +1978,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
         triggerCellsById: wallDamageCells
           ? { 'wall-of-fire-turn-end': wallDamageCells }
           : undefined,
+        wallOfFireGeometry: prepared.wallOfFireGeometry,
       })
       const effectToken = effectTokenId
         ? {

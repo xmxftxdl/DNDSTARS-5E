@@ -9,6 +9,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { createDnd5eEffectiveRulesContextV1 } from '../src/rulesets/dnd5e/effectiveRulesContext'
+import { submitPlayerActionFromPage } from './support/playerAction'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
@@ -20,11 +21,15 @@ const SUBCLASS_ID = `${PLUGIN_ID}:battle-master-2014`
 const RESOURCE_ID = `${PLUGIN_ID}:superiority-dice`
 const DETERMINISTIC_DICE_SCRIPT = `
   (() => {
-    const nativeRandom = Math.random.bind(Math)
-    Math.random = () => {
-      const stack = new Error().stack || ''
-      return stack.includes('randomDieValue') ? 0.75 : nativeRandom()
-    }
+    Math.random = () => 0.75
+    Object.defineProperty(globalThis.crypto, 'getRandomValues', {
+      configurable: true,
+      value(array) {
+        const value = Math.floor(0.75 * 0x1_0000_0000)
+        for (let index = 0; index < array.length; index += 1) array[index] = value
+        return array
+      },
+    })
   })()
 `
 
@@ -248,12 +253,11 @@ async function getRoomState<T>(
 }
 
 async function enterRoom(page: Page, origin: string, membership: RoomMembershipResponse) {
-  await page.goto(`${origin}/settings`, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(
+  await page.addInitScript(
     ([key, session]) => localStorage.setItem(key, JSON.stringify(session)),
     [SESSION_KEY, sessionFrom(membership)] as const,
   )
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.goto(`${origin}/settings`, { waitUntil: 'domcontentloaded' })
 }
 
 async function installFastDiceFrame(context: BrowserContext) {
@@ -279,19 +283,7 @@ async function installFastDiceFrame(context: BrowserContext) {
 }
 
 async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
-    const [{ publishPlayerActionRequest }, sharedApi] = await Promise.all([
-      import('/src/lib/playerActionSync.ts'),
-      import('/src/lib/sharedApi.ts'),
-    ])
-    await publishPlayerActionRequest({
-      action: payload as never,
-      loadQueue: () => sharedApi.loadSharedResource('player-action-requests'),
-      saveQueue: (queue) => sharedApi.saveSharedResource('player-action-requests', queue),
-      publishAction: (eventAction) =>
-        sharedApi.publishSharedEvent('player-action-player-to-dm', eventAction),
-    })
-  }, action)
+  await submitPlayerActionFromPage(page, action)
 }
 
 async function waitForAcceptedAck(
@@ -578,8 +570,6 @@ test('本地战斗大师合集在真实双玩家房间完成四类玩家确认�
   const dm = await dmContext.newPage()
   const player = await playerContext.newPage()
   const player2 = await player2Context.newPage()
-  dm.on('dialog', (dialog) => void dialog.accept())
-
   try {
     await Promise.all([
       enterRoom(dm, DM, created),
@@ -587,6 +577,7 @@ test('本地战斗大师合集在真实双玩家房间完成四类玩家确认�
       enterRoom(player2, PLAYER2, joined2),
     ])
     await dm.locator('input[type="file"][webkitdirectory]').setInputFiles(COLLECTION_DIRECTORY)
+    await dm.getByTestId('app-dialog-confirm').click()
     await expect(dm.getByText(
       `已临时导入 ${PLUGIN_ID}；原始 JSON/CSV、提示词和规则正文未传输，关闭房间后需重新导入。`,
     )).toBeVisible({ timeout: 30_000 })

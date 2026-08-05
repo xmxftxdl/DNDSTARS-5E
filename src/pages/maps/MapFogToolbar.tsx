@@ -1,5 +1,6 @@
 import { CloudFog, Eye, Hand, Redo2, Undo2 } from 'lucide-react'
 import type { FogTool, MapFogState } from '../../lib/fogOfWar'
+import { showAppConfirm } from '../../lib/appDialog'
 
 interface MapFogToolbarProps {
   mapId: string
@@ -73,9 +74,13 @@ export default function MapFogToolbar({
           {tool === 'pan' && <Hand className="h-3.5 w-3.5 text-sky-200" aria-label="移动地图" />}
           <button
             type="button"
-            onClick={() => {
-              if (shapeCount === 0 || window.confirm('填满整张地图会清除现有迷雾笔画，继续吗？')) onFill(mapId)
-            }}
+            onClick={() => void (async () => {
+              if (shapeCount === 0 || await showAppConfirm({
+                message: '填满整张地图会清除现有迷雾笔画，继续吗？',
+                tone: 'danger',
+                confirmLabel: '清除并填满',
+              })) onFill(mapId)
+            })()}
             className="rounded-md px-1.5 py-1 text-[11px] text-amber-200 hover:bg-amber-500/15"
             title="填满全图并清除现有笔画"
           >
@@ -83,9 +88,13 @@ export default function MapFogToolbar({
           </button>
           <button
             type="button"
-            onClick={() => {
-              if ((!fog?.filled && shapeCount === 0) || window.confirm('清空这张地图的全部战争迷雾吗？')) onClear(mapId)
-            }}
+            onClick={() => void (async () => {
+              if ((!fog?.filled && shapeCount === 0) || await showAppConfirm({
+                message: '清空这张地图的全部战争迷雾吗？',
+                tone: 'danger',
+                confirmLabel: '清空',
+              })) onClear(mapId)
+            })()}
             className="rounded-md px-1.5 py-1 text-[11px] text-emerald-200 hover:bg-emerald-500/15"
             title="清空全图迷雾"
           >

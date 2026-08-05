@@ -12,7 +12,7 @@ export default function PublicPricingPage() {
         <div className="pointer-events-none absolute left-1/2 top-0 h-96 w-[50rem] -translate-x-1/2 rounded-full bg-amber-400/8 blur-[120px]" />
         <div className="relative mx-auto max-w-5xl px-5 text-center lg:px-8">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-amber-300">Pricing</p>
-          <h1 className="mt-4 font-display text-4xl font-bold text-white sm:text-5xl">
+          <h1 className="mt-4 font-display text-4xl font-bold text-slate-100 sm:text-5xl">
             先把冒险跑顺，再决定价格
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-slate-400">

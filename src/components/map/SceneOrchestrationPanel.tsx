@@ -31,6 +31,7 @@ import {
 import type { SceneDrawTarget } from './SceneOrchestrationSystem'
 import type { SceneAudioAsset, SceneAudioKind } from '../../lib/sceneAudioLibrary'
 import SceneInteractionPointsEditor from './SceneInteractionPointsEditor'
+import { showAppConfirm } from '../../lib/appDialog'
 
 interface SceneOrchestrationPanelProps {
   map: BattleMap
@@ -188,7 +189,7 @@ export default function SceneOrchestrationPanel({
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <section className="space-y-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
-                <div className="flex items-center gap-2"><input value={scene.name} onChange={(event) => updateScene(scene.id, { name: event.target.value })} className={`${fieldClass()} font-bold`} /><button type="button" onClick={() => { if (window.confirm('删除此场景及全部触发器？')) removeScene(scene.id) }} className="rounded-lg p-2 text-slate-600 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button></div>
+                <div className="flex items-center gap-2"><input value={scene.name} onChange={(event) => updateScene(scene.id, { name: event.target.value })} className={`${fieldClass()} font-bold`} /><button type="button" onClick={async () => { if (await showAppConfirm({ title: '删除场景', message: '删除此场景及全部触发器？', confirmLabel: '确认删除', tone: 'danger' })) removeScene(scene.id) }} className="rounded-lg p-2 text-slate-600 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button></div>
                 <textarea value={scene.description} onChange={(event) => updateScene(scene.id, { description: event.target.value })} placeholder="场景说明与 DM 备注" rows={2} className={fieldClass()} />
                 <input value={scene.environmentLabel} onChange={(event) => updateScene(scene.id, { environmentLabel: event.target.value })} placeholder="环境：潮湿地牢、强风……" className={fieldClass()} />
                 <div className="grid grid-cols-2 gap-2"><select value={scene.backgroundAudioId ?? ''} onChange={(event) => updateScene(scene.id, { backgroundAudioId: event.target.value || undefined })} className={fieldClass()}><option value="">不绑定导入音频</option>{audioLibrary.assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.kind === 'music' ? '音乐' : asset.kind === 'ambience' ? '环境' : '音效'} · {asset.name}</option>)}</select><select value={scene.backgroundCue} disabled={!!scene.backgroundAudioId} onChange={(event) => updateScene(scene.id, { backgroundCue: event.target.value as SceneAudioCue })} className={fieldClass()}>{Object.entries(AUDIO_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>

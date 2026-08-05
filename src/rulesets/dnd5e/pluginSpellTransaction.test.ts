@@ -27,7 +27,133 @@ function token(id: string, type: 'player' | 'enemy', x: number, characterId?: st
 }
 
 describe('plugin spell CombatTransaction', () => {
-  it('multiplies every base damage die when a plugin cantrip scales', () => {
+  it('uses a higher slot to authorize and settle additional creature targets', () => {
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'com.example.chain-spark', name: 'Chain Spark', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'chain-spark', resolve: ({ succeed }) => succeed() })
+        spellId = api.registerSpell({
+          id: 'chain-spark', name: '连锁火花', level: 1, school: 'evocation', ritual: false,
+          castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+          targeting: { relation: 'enemy', maximumTargets: 1 },
+          components: { verbal: true, somatic: true, material: false },
+          duration: { type: 'instantaneous', concentration: false },
+          classes: ['wizard'], description: '升环增加目标测试。',
+          mechanics: {
+            kind: 'damage', resolution: 'automatic',
+            damage: { dice: { count: 1, sides: 6, bonus: 0 }, type: 'lightning' },
+            upcast: { fromSlotLevel: 1, effects: [
+              { kind: 'additional-targets', countPerSlot: 1 },
+              { kind: 'flat-damage', amountPerSlot: 2 },
+            ] },
+          },
+          automation: { mode: 'headless-action', actionId: 'chain-spark' },
+        })
+      },
+    })
+    try {
+      const actor = wizard(spellId)
+      const actorToken = token('wizard-token', 'player', 25, actor.id)
+      const enemy1 = token('enemy-1', 'enemy', 125)
+      const enemy2 = token('enemy-2', 'enemy', 175)
+      const map: BattleMap = { id: 'map', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actorToken, enemy1, enemy2] }
+      const action: SharedPlayerActionState = {
+        id: 'chain-spark-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy1.id,
+        dnd5eSpellCast: { spellId, slotLevel: 2, targetTokenId: enemy1.id, targetTokenIds: [enemy1.id, enemy2.id] },
+        round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const prepared = prepareDnd5ePluginSpellCast({
+        action, map, characters: [actor],
+        initiativeOrder: [actorToken, enemy1, enemy2].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.targetTokens).toHaveLength(2)
+      expect(prepared.prepared.damageDice.bonus).toBe(2)
+      const resolved = resolvePreparedDnd5ePluginSpellCast({
+        prepared: prepared.prepared,
+        rolls: { targetRolls: [{ damageRolls: [4] }, { damageRolls: [5] }] },
+      })
+      expect(resolved.result.ok).toBe(true)
+      expect(resolved.finalDamage).toBe(13)
+      expect(resolved.result.state.combatants[enemy1.id].currentHp).toBe(24)
+      expect(resolved.result.state.combatants[enemy2.id].currentHp).toBe(23)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('rebuilds a freely rotated rectangle on the Host and settles every target with shared upcast damage', () => {
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'com.example.rotated-wall', name: 'Rotated Wall', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'rotated-wall', resolve: ({ succeed }) => succeed() })
+        spellId = api.registerSpell({
+          id: 'rotated-wall', name: '旋转冰墙', level: 1, school: 'evocation', ritual: false,
+          castingTime: { value: 1, unit: 'action' },
+          range: { type: 'distance', feet: 60, shape: 'rect', widthFeet: 20, heightFeet: 10, rotatable: true },
+          targeting: { relation: 'enemy', includeSelf: false, maximumTargets: 64 },
+          components: { verbal: true, somatic: true, material: false },
+          duration: { type: 'timed', value: 1, unit: 'round', concentration: true },
+          classes: ['wizard'], description: '旋转长方形范围测试。',
+          mechanics: {
+            kind: 'damage', resolution: 'saving-throw', savingThrow: { ability: 'dex', onSuccess: 'half' },
+            damage: { dice: { count: 1, sides: 6, bonus: 0 }, type: 'cold' },
+            upcast: { fromSlotLevel: 1, effects: [
+              { kind: 'damage-dice', diceCountPerSlot: 1 },
+              { kind: 'duration-rounds', roundsPerSlot: 2 },
+            ] },
+          },
+          automation: { mode: 'headless-action', actionId: 'rotated-wall' },
+        })
+      },
+    })
+    try {
+      const actor = wizard(spellId)
+      const actorToken = token('wizard-token', 'player', 25, actor.id)
+      const enemy1 = token('enemy-1', 'enemy', 225)
+      const enemy2 = { ...token('enemy-2', 'enemy', 225), y: 75 }
+      const map: BattleMap = { id: 'map', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actorToken, enemy1, enemy2] }
+      const action: SharedPlayerActionState = {
+        id: 'rotated-wall-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy1.id,
+        dnd5eSpellCast: {
+          spellId, slotLevel: 2, targetTokenId: enemy1.id,
+          areaTargetCell: { col: 4, row: 0 }, areaTargetAngleDegrees: 45,
+        },
+        round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const prepared = prepareDnd5ePluginSpellCast({
+        action, map, characters: [actor],
+        initiativeOrder: [actorToken, enemy1, enemy2].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.targetTokens.map((entry) => entry.id).sort()).toEqual(['enemy-1', 'enemy-2'])
+      expect(prepared.prepared.damageDice).toMatchObject({ count: 2, sides: 6 })
+      expect(prepared.prepared.concentrationRounds).toBe(3)
+
+      const resolved = resolvePreparedDnd5ePluginSpellCast({
+        prepared: prepared.prepared,
+        rolls: {
+          damageRolls: [4, 5],
+          targetRolls: [{ savingThrowD20: 1 }, { savingThrowD20: 1 }],
+        },
+      })
+      expect(resolved.result.ok).toBe(true)
+      expect(resolved.targetResolutions).toHaveLength(2)
+      expect(resolved.finalDamage).toBe(18)
+      expect(resolved.result.state.combatants[enemy1.id].currentHp).toBe(21)
+      expect(resolved.result.state.combatants[enemy2.id].currentHp).toBe(21)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('applies the configured cantrip threshold through the Host damage recipe', () => {
     let spellId = ''
     const dispose = registerDnd5eRulesPlugin({
       manifest: { id: 'com.example.cantrip-scaling', name: 'Cantrip Scaling', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
@@ -41,7 +167,13 @@ describe('plugin spell CombatTransaction', () => {
           classes: ['wizard'], description: '原创测试戏法。',
           mechanics: {
             kind: 'damage', resolution: 'spell-attack',
-            damage: { dice: { count: 2, sides: 4, bonus: 0 }, type: 'fire', cantripScaling: true },
+            damage: {
+              dice: { count: 2, sides: 4, bonus: 0 }, type: 'fire',
+              cantripScaling: {
+                basis: 'character-level',
+                steps: [{ level: 5, diceCount: 1, flatDamage: 2 }, { level: 11, diceCount: 2 }],
+              },
+            },
           },
           automation: { mode: 'headless-action', actionId: 'twin-spark' },
         })
@@ -86,7 +218,7 @@ describe('plugin spell CombatTransaction', () => {
       })
       expect(prepared.ok).toBe(true)
       if (!prepared.ok) return
-      expect(prepared.prepared.damageDice).toMatchObject({ count: 4, sides: 4 })
+      expect(prepared.prepared.damageDice).toMatchObject({ count: 3, sides: 4, bonus: 2 })
     } finally {
       dispose()
     }

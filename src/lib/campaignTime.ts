@@ -25,15 +25,41 @@ export interface CampaignTimer {
   cancelledAt?: number
 }
 
+export type CampaignRestRecoveryCategory =
+  | 'hit-points'
+  | 'hit-dice'
+  | 'feature-resource'
+  | 'item-resource'
+  | 'state'
+
+export interface CampaignRestRecoveryEntry {
+  category: CampaignRestRecoveryCategory
+  label: string
+  outcome: 'restored' | 'cleared' | 'available' | 'unchanged' | 'blocked'
+  before?: number
+  after?: number
+  maximum?: number
+  detail?: string
+}
+
+export interface CampaignRestRecoveryReport {
+  characterId: string
+  characterName: string
+  entries: CampaignRestRecoveryEntry[]
+}
+
 export interface CampaignTimeAdvance {
   id: string
-  kind: 'advance' | 'long-rest'
+  kind: 'advance' | 'short-rest' | 'long-rest'
   fromWorldMinute: number
   toWorldMinute: number
   minutes: number
   reason: string
   dawnsCrossed: number
   expiredTimerIds: string[]
+  beneficiaryCharacterIds?: string[]
+  ignoreLongRestCooldown?: boolean
+  restRecoveryReports?: CampaignRestRecoveryReport[]
   createdAt: number
 }
 
@@ -50,7 +76,13 @@ export interface SharedCampaignTimeState {
 
 export type CampaignTimeMutation =
   | { operation: 'advance'; minutes: number; reason?: string }
-  | { operation: 'long-rest'; reason?: string }
+  | {
+      operation: 'short-rest' | 'long-rest'
+      reason?: string
+      beneficiaryCharacterIds?: string[]
+      ignoreLongRestCooldown?: boolean
+      restRecoveryReports?: CampaignRestRecoveryReport[]
+    }
   | {
       operation: 'set-time'
       displayMode: CampaignTimeDisplayMode
@@ -171,6 +203,55 @@ function normalizeTimer(value: unknown): CampaignTimer | null {
   }
 }
 
+function normalizeRestRecoveryEntry(value: unknown): CampaignRestRecoveryEntry | null {
+  if (!object(value)) return null
+  const categories: CampaignRestRecoveryCategory[] = [
+    'hit-points', 'hit-dice', 'feature-resource', 'item-resource', 'state',
+  ]
+  const outcomes: CampaignRestRecoveryEntry['outcome'][] = [
+    'restored', 'cleared', 'available', 'unchanged', 'blocked',
+  ]
+  const category = categories.includes(value.category as CampaignRestRecoveryCategory)
+    ? value.category as CampaignRestRecoveryCategory
+    : undefined
+  const outcome = outcomes.includes(value.outcome as CampaignRestRecoveryEntry['outcome'])
+    ? value.outcome as CampaignRestRecoveryEntry['outcome']
+    : undefined
+  const label = bounded(value.label, 160)
+  if (!category || !outcome || !label) return null
+  const before = value.before == null ? undefined : integer(value.before, 0, 1_000_000_000)
+  const after = value.after == null ? undefined : integer(value.after, 0, 1_000_000_000)
+  const maximum = value.maximum == null ? undefined : integer(value.maximum, 0, 1_000_000_000)
+  if (
+    (value.before != null && before == null) ||
+    (value.after != null && after == null) ||
+    (value.maximum != null && maximum == null)
+  ) return null
+  return {
+    category,
+    label,
+    outcome,
+    ...(before == null ? {} : { before }),
+    ...(after == null ? {} : { after }),
+    ...(maximum == null ? {} : { maximum }),
+    ...(bounded(value.detail, 240) ? { detail: bounded(value.detail, 240) } : {}),
+  }
+}
+
+function normalizeRestRecoveryReport(value: unknown): CampaignRestRecoveryReport | null {
+  if (!object(value)) return null
+  const characterId = bounded(value.characterId, 160)
+  const characterName = bounded(value.characterName, 80)
+  if (!characterId || !characterName || !Array.isArray(value.entries) || value.entries.length > 256) return null
+  const entries = value.entries.map(normalizeRestRecoveryEntry)
+  if (entries.some((entry) => entry == null)) return null
+  return {
+    characterId,
+    characterName,
+    entries: entries as CampaignRestRecoveryEntry[],
+  }
+}
+
 function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
   if (!object(value)) return null
   const id = bounded(value.id, 160)
@@ -181,22 +262,33 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
   const dawnsCrossed = integer(value.dawnsCrossed, 0, 366)
   const createdAt = integer(value.createdAt)
   if (
-    !id || (kind !== 'advance' && kind !== 'long-rest') || fromWorldMinute == null ||
+    !id || (kind !== 'advance' && kind !== 'short-rest' && kind !== 'long-rest') || fromWorldMinute == null ||
     toWorldMinute == null || minutes == null || toWorldMinute - fromWorldMinute !== minutes ||
     dawnsCrossed == null || createdAt == null
   ) return null
   const expiredTimerIds = Array.isArray(value.expiredTimerIds)
     ? [...new Set(value.expiredTimerIds.map((entry) => bounded(entry, 160)).filter(Boolean))].slice(0, CAMPAIGN_TIME_TIMER_LIMIT)
     : []
+  const beneficiaryCharacterIds = Array.isArray(value.beneficiaryCharacterIds)
+    ? [...new Set(value.beneficiaryCharacterIds.map((entry) => bounded(entry, 160)).filter(Boolean))].slice(0, 64)
+    : undefined
+  const restRecoveryReports = Array.isArray(value.restRecoveryReports)
+    ? value.restRecoveryReports.map(normalizeRestRecoveryReport).filter((entry): entry is CampaignRestRecoveryReport => entry !== null).slice(0, 64)
+    : undefined
   return {
     id,
     kind,
     fromWorldMinute,
     toWorldMinute,
     minutes,
-    reason: bounded(value.reason, 160) || (kind === 'long-rest' ? '完成长休' : '推进时间'),
+    reason: bounded(value.reason, 160) || (kind === 'long-rest' ? '完成长休' : kind === 'short-rest' ? '完成短休' : '推进时间'),
     dawnsCrossed,
     expiredTimerIds,
+    ...(beneficiaryCharacterIds ? { beneficiaryCharacterIds } : {}),
+    ...(kind === 'long-rest' && value.ignoreLongRestCooldown === true
+      ? { ignoreLongRestCooldown: true }
+      : {}),
+    ...(restRecoveryReports ? { restRecoveryReports } : {}),
     createdAt,
   }
 }
@@ -241,6 +333,23 @@ export function validateSharedCampaignTime(value: unknown): boolean {
   }
   const normalized = normalizeSharedCampaignTime(value)
   if (normalized.timers.length !== value.timers.length || normalized.advances.length !== value.advances.length) return false
+  if (!value.advances.every((entry) => {
+    if (!object(entry)) return false
+    if (entry.beneficiaryCharacterIds != null) {
+      if (!Array.isArray(entry.beneficiaryCharacterIds) || entry.beneficiaryCharacterIds.length > 64) return false
+      const ids = entry.beneficiaryCharacterIds
+      if (new Set(ids).size !== ids.length || ids.some((id) => !bounded(id, 160))) return false
+    }
+    if (entry.restRecoveryReports != null) {
+      if (
+        (entry.kind !== 'short-rest' && entry.kind !== 'long-rest') ||
+        !Array.isArray(entry.restRecoveryReports) || entry.restRecoveryReports.length > 64 ||
+        entry.restRecoveryReports.some((report) => normalizeRestRecoveryReport(report) == null)
+      ) return false
+    }
+    return entry.ignoreLongRestCooldown == null ||
+      (entry.kind === 'long-rest' && entry.ignoreLongRestCooldown === true)
+  })) return false
   if (new Set(normalized.timers.map((entry) => entry.id)).size !== normalized.timers.length) return false
   if (new Set(normalized.advances.map((entry) => entry.id)).size !== normalized.advances.length) return false
   return normalized.advances.every((advance, index, all) => {

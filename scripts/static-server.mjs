@@ -3,7 +3,6 @@ import { stat } from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
 import {
   accountStorageDiagnostics,
   applySecurityHeaders,
@@ -15,6 +14,7 @@ import {
 } from './shared-server-core.mjs'
 import { ServerObservability } from './server-observability.mjs'
 import { loadArtAssetPack, serveArtAsset } from './art-asset-server.mjs'
+import { createSharedServerContext } from './shared-server-context.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -137,21 +137,11 @@ if (!securityConfig.ok) {
   throw new Error(`Unsafe production configuration:\n- ${securityConfig.errors.join('\n- ')}`)
 }
 // /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只保留静态回退。
-const apiCtx = {
-  lobbyRoot: path.join(sharedRoot, 'lobby'),
-  stateRoot: path.join(sharedRoot, 'state'),
-  imageRoot: path.join(sharedRoot, 'images'),
-  quarantineRoot: path.join(sharedRoot, 'quarantine'),
-  snapshotRoot: path.join(sharedRoot, 'snapshots'),
-  legacyStateRoot: path.join(path.resolve(process.cwd(), '.stars-shared'), 'state'),
-  legacyImageRoot: path.join(path.resolve(process.cwd(), '.stars-shared'), 'images'),
-  eventClients: new Map(),
-  eventBacklog: new Map(),
-  eventSequences: new Map(),
-  serverInstanceId: randomUUID(),
-  serverStartedAt: Date.now(),
+const apiCtx = createSharedServerContext({
+  sharedRoot,
+  legacyRoot: path.resolve(process.cwd(), '.stars-shared'),
   serverBuildId: process.env.STARS_BUILD_ID ?? 'static-development',
-}
+})
 const accountStorage = await initializeAccountStorage(apiCtx)
 const observability = new ServerObservability({
   service: 'dndstars-5e-shared',

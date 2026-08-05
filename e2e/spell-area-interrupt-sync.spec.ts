@@ -68,6 +68,21 @@ async function loadPlayerState<T>(page: Page, name: string): Promise<T> {
   }, name) as Promise<T>
 }
 
+async function useDeterministicBrowserRandom(page: Page, unitValue: number) {
+  await page.evaluate((fixedUnitValue) => {
+    const normalized = Math.min(0.9999999997671694, Math.max(0, fixedUnitValue))
+    Math.random = () => normalized
+    const uint32 = Math.floor(normalized * 0x1_0000_0000)
+    Object.defineProperty(globalThis.crypto, 'getRandomValues', {
+      configurable: true,
+      value: (array: Uint32Array) => {
+        array.fill(uint32)
+        return array
+      },
+    })
+  }, unitValue)
+}
+
 async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
   await page.evaluate(async ({ payload, dmBase }) => {
     const protocolHeaders = {
@@ -482,7 +497,7 @@ test('普通法术攻击只结算一次：并发重复请求不会重复扣法�
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
-  await dm.evaluate(() => { Math.random = () => 0.5 })
+  await useDeterministicBrowserRandom(dm, 0.5)
 
   const now = Date.now()
   const action = {
@@ -537,7 +552,7 @@ test('无可用改骰特性时，普通豁免法术直接在 Headless 中结算�
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
-  await dm.evaluate(() => { Math.random = () => 0 })
+  await useDeterministicBrowserRandom(dm, 0)
 
   const now = Date.now()
   const action = {
@@ -671,7 +686,7 @@ test('低环法术反制检定失败后继续原法术，并仍消耗双方已�
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
-  await dm.evaluate(() => { Math.random = () => 0 })
+  await useDeterministicBrowserRandom(dm, 0)
 
   const now = Date.now()
   const action = {
@@ -744,7 +759,7 @@ test('DM 控制角色施放护盾术后重新判定命中，消耗反应与最�
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
   // d20=9, spell attack total=16. The target's derived AC is 12, so Shield
   // changes the triggering hit into a miss at AC 17.
-  await dm.evaluate(() => { Math.random = () => 0.4 })
+  await useDeterministicBrowserRandom(dm, 0.4)
 
   const now = Date.now()
   const action = {
@@ -809,7 +824,7 @@ test('火球术在骰子动画结束或超时后仍完成 8d6 权威伤害并跨
   ])
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
   // d20=11; the Ogre's Dexterity modifier makes the save fail. Every d6=4.
-  await dm.evaluate(() => { Math.random = () => 0.5 })
+  await useDeterministicBrowserRandom(dm, 0.5)
 
   const now = Date.now()
   const action = {
@@ -870,7 +885,7 @@ test('魔法飞弹逐枚接受目标分配并只执行一次权威事务', async
   ])
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
   // Every d4=3, then each dart adds +1: three darts deal 12 total damage.
-  await dm.evaluate(() => { Math.random = () => 0.5 })
+  await useDeterministicBrowserRandom(dm, 0.5)
 
   const now = Date.now()
   const action = {

@@ -187,6 +187,7 @@ export default function CharacterLevelUpDialog({
   if (!plan || !definition) return null
 
   const rollAllHitDice = () => {
+    if (hpRolls.length === levelsGained) return
     setHpRolls(Array.from(
       { length: levelsGained },
       () => 1 + Math.floor(Math.random() * plan.hitDie),
@@ -381,7 +382,6 @@ export default function CharacterLevelUpDialog({
                   aria-pressed={effectiveHpMethod === 'fixed'}
                   onClick={() => {
                     setHpMethod('fixed')
-                    setHpRolls([])
                   }}
                   className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
                     effectiveHpMethod === 'fixed'
@@ -423,11 +423,13 @@ export default function CharacterLevelUpDialog({
                 </div>
                 <button
                   type="button"
+                  disabled={hpRolls.length === levelsGained}
                   onClick={rollAllHitDice}
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white"
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-violet-500/25 disabled:text-violet-200/60"
                 >
-                  <Dices className="h-4 w-4" /> 投掷 {levelsGained}d{plan.hitDie}
+                  <Dices className="h-4 w-4" /> {hpRolls.length === levelsGained ? '投掷结果已锁定' : `投掷 ${levelsGained}d${plan.hitDie}`}
                 </button>
+                {hpRolls.length === levelsGained && <p className="mt-2 text-[11px] text-violet-200/60">升级生命骰只能投掷一次，确认后不可重骰。</p>}
               </div>
             )}
           </section>

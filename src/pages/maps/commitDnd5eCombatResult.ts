@@ -35,6 +35,35 @@ function unique(values: readonly string[]): string[] {
 }
 
 /**
+ * Adds a non-Headless authoritative field (for example an inventory reward) to
+ * an existing Headless application. Merely replacing `application.characters`
+ * is not sufficient: entity commits deliberately apply `characterPatches`
+ * when present so stale combat snapshots cannot overwrite newer sheet data.
+ */
+export function mergeDnd5eCharacterPatchIntoResult(
+  application: Dnd5eMapResultPlan,
+  characterId: string,
+  patch: Partial<Character>,
+): Dnd5eMapResultPlan {
+  const characterIndex = application.characters.findIndex((character) => character.id === characterId)
+  if (characterIndex < 0) throw new Error(`combat-result-character-missing:${characterId}`)
+  const characters = [...application.characters]
+  characters[characterIndex] = { ...characters[characterIndex], ...patch }
+  return {
+    ...application,
+    characters,
+    changedCharacterIds: unique([...application.changedCharacterIds, characterId]),
+    characterPatches: {
+      ...(application.characterPatches ?? {}),
+      [characterId]: {
+        ...(application.characterPatches?.[characterId] ?? {}),
+        ...patch,
+      },
+    },
+  }
+}
+
+/**
  * Headless transactions carry a full character snapshot, but class choices are
  * durable character-sheet data rather than combat-owned state. A transaction
  * that finishes after the sheet changed must not restore its stale copy (most

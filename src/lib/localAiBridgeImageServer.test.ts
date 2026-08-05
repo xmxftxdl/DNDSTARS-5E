@@ -44,12 +44,50 @@ describe('Local AI Bridge 图片生成边界', () => {
         headers: { Authorization: 'Bearer test-access-token', 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: '一名站在风暴海岸的精灵向导，竖版人物立绘，无文字无水印。', aspect: 'portrait-3:4' }),
       })
-      const body = await response.json() as { dataUrl: string; modelId: string }
+      const body = await response.json() as { dataUrl: string; modelId: string; quality: string }
 
       expect(response.status).toBe(200)
       expect(body.modelId).toBe('gpt-image-test')
+      expect(body.quality).toBe('low')
       expect(body.dataUrl).toMatch(/^data:image\/png;base64,/)
-      expect(upstreamBody).toMatchObject({ model: 'gpt-image-test', size: '1024x1536' })
+      expect(upstreamBody).toMatchObject({ model: 'gpt-image-test', size: '1024x1536', quality: 'low' })
+    } finally {
+      await bridge.close()
+    }
+  })
+
+  it('allows an explicit quality to override the configured low-cost default', async () => {
+    let upstreamBody: Record<string, unknown> | null = null
+    const upstream = createServer(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      upstreamBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ data: [{ b64_json: Buffer.alloc(128, 7).toString('base64') }] }))
+    })
+    const apiUrl = await listen(upstream)
+    const bridge = await startLocalAiBridge({
+      port: 0,
+      accessToken: 'test-access-token',
+      externalImageApiUrl: apiUrl,
+      externalImageApiKey: 'secret-key',
+      externalImageModelId: 'gpt-image-test',
+      externalImageDefaultQuality: 'low',
+      allowedOrigins: [],
+    })
+    try {
+      const response = await fetch(`${bridge.url}/api/generate-image`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-access-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'A sufficiently detailed fantasy portrait prompt for testing explicit quality.',
+          aspect: 'portrait-3:4',
+          quality: 'medium',
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(upstreamBody).toMatchObject({ quality: 'medium' })
     } finally {
       await bridge.close()
     }

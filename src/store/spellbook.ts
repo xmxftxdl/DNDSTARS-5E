@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { canWriteSharedState } from '../lib/appMode'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResource } from '../composition/browserSharedRoomResources'
 import { reportSharedIntegrityIssue } from '../lib/sharedResourceValidation'
 import {
   parseDnd5eSharedSpellCollection,

@@ -25,6 +25,7 @@ import {
   removePdfAnalysisEntry,
   renamePdfAnalysisEntity,
 } from './pdfCampaignAnalysisEditorModel'
+import { showAppConfirm } from '../../lib/appDialog'
 
 type EditorTab =
   | 'overview'
@@ -165,8 +166,13 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
-  const remove = (collection: keyof PdfCampaignAnalysisV1, index: number) => {
-    if (!window.confirm('确定删除这个分析条目吗？原始 PDF 不会受到影响。')) return
+  const remove = async (collection: keyof PdfCampaignAnalysisV1, index: number) => {
+    if (!await showAppConfirm({
+      title: '删除分析条目',
+      message: '确定删除这个分析条目吗？原始 PDF 不会受到影响。',
+      confirmLabel: '确认删除',
+      tone: 'danger',
+    })) return
     onChange(removePdfAnalysisEntry(analysis, collection, index))
   }
 
@@ -250,36 +256,36 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
                 )}
 
                 {activeTab === 'people' && analysis.people.map((person, index) => (
-                  <PersonEditor key={index} person={person} index={index} onChange={(next) => onChange({ ...analysis, people: replaceAt(analysis.people, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'people', index, name))} onRemove={() => remove('people', index)} />
+                  <PersonEditor key={index} person={person} index={index} onChange={(next) => onChange({ ...analysis, people: replaceAt(analysis.people, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'people', index, name))} onRemove={() => void remove('people', index)} />
                 ))}
                 {activeTab === 'relationships' && analysis.relationships.map((relationship, index) => (
-                  <RelationshipEditor key={index} relationship={relationship} index={index} entityNames={entityNames} onChange={(next) => onChange({ ...analysis, relationships: replaceAt(analysis.relationships, index, next) })} onRemove={() => remove('relationships', index)} />
+                  <RelationshipEditor key={index} relationship={relationship} index={index} entityNames={entityNames} onChange={(next) => onChange({ ...analysis, relationships: replaceAt(analysis.relationships, index, next) })} onRemove={() => void remove('relationships', index)} />
                 ))}
                 {activeTab === 'factions' && analysis.factions.map((record, index) => (
-                  <NamedEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, factions: replaceAt(analysis.factions, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'factions', index, name))} onRemove={() => remove('factions', index)} />
+                  <NamedEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, factions: replaceAt(analysis.factions, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'factions', index, name))} onRemove={() => void remove('factions', index)} />
                 ))}
                 {activeTab === 'locations' && analysis.locations.map((record, index) => (
-                  <NamedEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, locations: replaceAt(analysis.locations, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'locations', index, name))} onRemove={() => remove('locations', index)} />
+                  <NamedEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, locations: replaceAt(analysis.locations, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'locations', index, name))} onRemove={() => void remove('locations', index)} />
                 ))}
                 {activeTab === 'clues' && analysis.clues.map((record, index) => (
-                  <ClueEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, clues: replaceAt(analysis.clues, index, next) })} onRemove={() => remove('clues', index)} />
+                  <ClueEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, clues: replaceAt(analysis.clues, index, next) })} onRemove={() => void remove('clues', index)} />
                 ))}
                 {activeTab === 'scenes' && analysis.scenes.map((record, index) => (
-                  <SceneEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, scenes: replaceAt(analysis.scenes, index, next) })} onRemove={() => remove('scenes', index)} />
+                  <SceneEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, scenes: replaceAt(analysis.scenes, index, next) })} onRemove={() => void remove('scenes', index)} />
                 ))}
                 {activeTab === 'encounters' && analysis.encounters.map((record, index) => (
-                  <EncounterEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, encounters: replaceAt(analysis.encounters, index, next) })} onRemove={() => remove('encounters', index)} />
+                  <EncounterEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, encounters: replaceAt(analysis.encounters, index, next) })} onRemove={() => void remove('encounters', index)} />
                 ))}
                 {activeTab === 'imports' && analysis.importCandidates.map((record, index) => (
-                  <ImportEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, importCandidates: replaceAt(analysis.importCandidates, index, next) })} onRemove={() => remove('importCandidates', index)} />
+                  <ImportEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, importCandidates: replaceAt(analysis.importCandidates, index, next) })} onRemove={() => void remove('importCandidates', index)} />
                 ))}
                 {activeTab === 'tips' && analysis.prepTips.map((record, index) => (
-                  <PrepTipEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, prepTips: replaceAt(analysis.prepTips, index, next) })} onRemove={() => remove('prepTips', index)} />
+                  <PrepTipEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, prepTips: replaceAt(analysis.prepTips, index, next) })} onRemove={() => void remove('prepTips', index)} />
                 ))}
                 {activeTab === 'warnings' && analysis.warnings.map((warning, index) => (
                   <article key={index} className="flex items-start gap-3 rounded-2xl border border-white/8 bg-black/20 p-4">
                     <div className="min-w-0 flex-1"><Field label={`复核事项 ${index + 1}`} value={warning} multiline onChange={(value) => onChange({ ...analysis, warnings: replaceAt(analysis.warnings, index, value) })} /></div>
-                    <button type="button" onClick={() => remove('warnings', index)} className="mt-5 rounded-lg border border-rose-400/15 p-2 text-rose-300"><Trash2 className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => void remove('warnings', index)} className="mt-5 rounded-lg border border-rose-400/15 p-2 text-rose-300"><Trash2 className="h-4 w-4" /></button>
                   </article>
                 ))}
                 {activeTab !== 'overview' && tabCount(analysis, activeTab) === 0 && (

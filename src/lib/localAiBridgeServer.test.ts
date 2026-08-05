@@ -32,7 +32,7 @@ async function fakeOllama() {
       expect(body.stream).toBe(true)
       expect(body.think).toBe(false)
       expect(body.format).toMatchObject({ type: 'object' })
-      expect(body.options).toMatchObject({ temperature: 0, num_ctx: 8192, num_predict: 2048 })
+      expect(body.options).toMatchObject({ temperature: 0, num_ctx: 8192, num_predict: 6144 })
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         message: { content: JSON.stringify({ name: '测试怪物' }) },
@@ -62,6 +62,9 @@ async function fakeExternalModelApi() {
       for await (const chunk of req) chunks.push(chunk)
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       expect(body.model).toBe('cloud-test')
+      expect(body.max_completion_tokens).toBe(16_384)
+      expect(body).not.toHaveProperty('max_tokens')
+      expect(body).not.toHaveProperty('temperature')
       expect(body.response_format).toMatchObject({
         type: 'json_schema',
         json_schema: { strict: true },
@@ -86,15 +89,45 @@ async function fakeExternalModelApi() {
   return `http://127.0.0.1:${address.port}/v1`
 }
 
+async function fakeRejectingExternalModelApi() {
+  const server = createServer(async (req, res) => {
+    if (req.url === '/v1/chat/completions' && req.method === 'POST') {
+      for await (const _chunk of req) void _chunk
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: {
+          message: "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead.\n",
+          type: 'invalid_request_error',
+          param: 'max_tokens',
+          code: 'unsupported_parameter',
+        },
+      }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  servers.push(server)
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('missing-test-address')
+  return `http://127.0.0.1:${address.port}/v1`
+}
+
 async function fakeRoutedExternalModelApi(expectedKey: string) {
   const requestedModels: string[] = []
+  const requestedBodies: Array<Record<string, unknown>> = []
   const server = createServer(async (req, res) => {
     if (req.url === '/v1/chat/completions' && req.method === 'POST') {
       expect(req.headers.authorization).toBe(`Bearer ${expectedKey}`)
       const chunks: Buffer[] = []
       for await (const chunk of req) chunks.push(chunk)
-      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { model?: string }
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> & { model?: string }
       requestedModels.push(body.model ?? '')
+      requestedBodies.push(body)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         choices: [{ message: { content: JSON.stringify({ name: body.model }) } }],
@@ -115,6 +148,7 @@ async function fakeRoutedExternalModelApi(expectedKey: string) {
   return {
     apiUrl: `http://127.0.0.1:${address.port}/v1`,
     requestedModels,
+    requestedBodies,
   }
 }
 
@@ -594,6 +628,110 @@ describe('Astral Trace Local AI Bridge', () => {
     })
   })
 
+  it('为 GPT-5.6 低成本结构化调用显式关闭推理预算', async () => {
+    const external = await fakeRoutedExternalModelApi('test-secret')
+    const bridge = await startLocalAiBridge({
+      port: 0,
+      pairingCode: '135790',
+      externalApiUrl: external.apiUrl,
+      externalApiKey: 'test-secret',
+      externalModelId: 'gpt-5.6-luna',
+      allowedOrigins: ['https://astraltracevtt.com'],
+    })
+    servers.push(bridge)
+    const pairing = await fetch(`${bridge.url}/api/pair`, {
+      method: 'POST',
+      headers: { Origin: 'https://astraltracevtt.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '135790' }),
+    })
+    const { accessToken } = await pairing.json() as { accessToken: string }
+    const generation = await fetch(`${bridge.url}/api/generate-structured`, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://astraltracevtt.com',
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        engine: 'external',
+        modelId: 'external:gpt-5.6-luna',
+        request: {
+          schemaVersion: 1,
+          jobId: 'gpt-5-6-luna-structured',
+          task: 'resource-structuring',
+          systemPrompt: '只输出结构化草稿。',
+          userPrompt: '转换规则。',
+          outputSchema: {
+            type: 'object',
+            properties: { name: { type: 'string' } },
+            required: ['name'],
+          },
+        },
+      }),
+    })
+
+    expect(generation.status).toBe(200)
+    expect(await generation.json()).toMatchObject({
+      providerId: 'external-account',
+      modelId: 'external:gpt-5.6-luna',
+    })
+    expect(external.requestedBodies).toHaveLength(1)
+    expect(external.requestedBodies[0]).toMatchObject({
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'none',
+      max_completion_tokens: 16_384,
+    })
+  })
+
+  it('保留 OpenAI 风格的嵌套 400 错误详情且清除控制字符', async () => {
+    const externalApiUrl = await fakeRejectingExternalModelApi()
+    const bridge = await startLocalAiBridge({
+      port: 0,
+      pairingCode: '456789',
+      externalApiUrl,
+      externalApiKey: 'test-secret',
+      externalModelId: 'cloud-test',
+      allowedOrigins: ['https://astraltracevtt.com'],
+    })
+    servers.push(bridge)
+
+    const pairing = await fetch(`${bridge.url}/api/pair`, {
+      method: 'POST',
+      headers: { Origin: 'https://astraltracevtt.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '456789' }),
+    })
+    const { accessToken } = await pairing.json() as { accessToken: string }
+    const response = await fetch(`${bridge.url}/api/generate-structured`, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://astraltracevtt.com',
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        engine: 'external',
+        modelId: 'external:cloud-test',
+        request: {
+          schemaVersion: 1,
+          jobId: 'external-upstream-error',
+          task: 'resource-structuring',
+          systemPrompt: '只输出结构化草稿。',
+          userPrompt: '转换规则。',
+          outputSchema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { name: { type: 'string' } },
+            required: ['name'],
+          },
+        },
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      error: "upstream-400:Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead. | invalid_request_error | max_tokens | unsupported_parameter",
+    })
+  })
+
   it('为 PDF 分段提取与全书综合暴露独立外部模型并转发到正确的上游模型', async () => {
     const economyExternal = await fakeRoutedExternalModelApi('economy-secret')
     const advancedExternal = await fakeRoutedExternalModelApi('advanced-secret')
@@ -637,13 +775,17 @@ describe('Astral Trace Local AI Bridge', () => {
       expect.objectContaining({
         id: 'external:synthesis:advanced-model',
         displayName: '高级综合模型',
-        supportedTasks: ['campaign-analysis'],
+        supportedTasks: ['campaign-analysis', 'resource-structuring', 'session-summary', 'prep-recommendations'],
       }),
     ]))
     expect(JSON.stringify(modelBody)).not.toContain('economy-secret')
     expect(JSON.stringify(modelBody)).not.toContain('advanced-secret')
 
-    const generate = async (modelId: string, jobId: string, task: 'pdf-extraction' | 'campaign-analysis') => {
+    const generate = async (
+      modelId: string,
+      jobId: string,
+      task: 'pdf-extraction' | 'campaign-analysis' | 'resource-structuring',
+    ) => {
       const response = await fetch(`${bridge.url}/api/generate-structured`, {
         method: 'POST',
         headers,
@@ -678,8 +820,13 @@ describe('Astral Trace Local AI Bridge', () => {
         modelId: 'external:synthesis:advanced-model',
         output: { name: 'advanced-model' },
       })
+    expect(await generate('external:synthesis:advanced-model', 'route-resource', 'resource-structuring'))
+      .toMatchObject({
+        modelId: 'external:synthesis:advanced-model',
+        output: { name: 'advanced-model' },
+      })
     expect(economyExternal.requestedModels).toEqual(['economy-model'])
-    expect(advancedExternal.requestedModels).toEqual(['advanced-model'])
+    expect(advancedExternal.requestedModels).toEqual(['advanced-model', 'advanced-model'])
 
     const roleViolation = await fetch(`${bridge.url}/api/generate-structured`, {
       method: 'POST',

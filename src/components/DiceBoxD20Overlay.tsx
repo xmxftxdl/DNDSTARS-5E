@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 // FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
 import { DICE_TIMING, parseDiceBoxMessage, resolveFlyOffset } from '../lib/diceOverlayShared'
@@ -40,6 +40,7 @@ export default function DiceBoxD20Overlay({
   const generatedRequestId = `d20-${rawId}`
   const requestId = forcedRequestId ?? generatedRequestId
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const [frameReady, setFrameReady] = useState(false)
   const completedRef = useRef(false)
   const readyRef = useRef(false)
   const sentRequestRef = useRef<string | null>(null)
@@ -89,10 +90,12 @@ export default function DiceBoxD20Overlay({
     }, 22000)
 
     const handleMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return
       const data = parseDiceBoxMessage(event)
       if (!data) return
       if (data?.type === 'dice-box-ready' && !readyRef.current) {
         readyRef.current = true
+        setFrameReady(true)
         log('iframe-ready')
         sendRoll()
         return
@@ -129,7 +132,7 @@ export default function DiceBoxD20Overlay({
           ref={iframeRef}
           title="D20 dice roller"
           src="/dice-box-frame.html?badge=0"
-          className="dice-box-d20-frame"
+          className={`dice-box-d20-frame ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
           style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />

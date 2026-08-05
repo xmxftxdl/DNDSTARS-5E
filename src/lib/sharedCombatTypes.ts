@@ -126,6 +126,8 @@ export interface Dnd5eItemUsePayload {
   targetCell?: GridCell
   /** 生物目标仅是玩家请求；关系、距离、命中与效果由 DM/Headless 重建。 */
   targetTokenId?: string
+  /** Player-selected expended slot; the DM Host validates level and capacity. */
+  spellSlotLevel?: number
 }
 
 export interface Dnd5eWeaponAttackOptions {
@@ -196,8 +198,16 @@ export interface Dnd5eSpellCastPayload {
   guessedTargetCell?: GridCell
   /** 点起源范围法术的权威落点；DM 会据此重新计算效果线。 */
   areaTargetCell?: GridCell
+  /** Multi-origin area spells submit every distinct origin for Host validation. */
+  areaTargetCells?: GridCell[]
   /** 可旋转矩形模板的方向；DM 只接受 0–3 并据此重建覆盖格。 */
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  /** 通用可旋转长方形模板的自由角度；Host 会归一化为 0–359 度后重建覆盖格。 */
+  areaTargetAngleDegrees?: number
+  /** Wall of Fire uses host-validated geometry independent from the legacy four-way rectangle. */
+  wallOfFireShape?: 'line' | 'ring'
+  wallOfFireAngleDegrees?: number
+  wallOfFireDamagingSide?: 'left' | 'right' | 'inside' | 'outside'
   /** Ordered per-projectile targets; duplicates allocate multiple projectiles to one creature. */
   projectileTargetIds?: string[]
   /** 塑能学派14级“超限导能”：由DM端重新验证资格并掷后续反噬伤害。 */
@@ -272,6 +282,13 @@ export interface SharedCombatState {
   /** DM-pinned rules and exact plugin set; active room combat rejects plugin actions when absent. */
   effectiveRules?: Dnd5eEffectiveRulesContextV1
   updatedAt: number
+  /** Server authority revision. A DM rollback can restore an older domain timestamp at a newer revision. */
+  _sync?: {
+    schemaVersion: 1
+    revision: number
+    writerId: string
+    writtenAt: number
+  }
 }
 
 export type Dnd5eBasicActionPayload =
@@ -436,6 +453,8 @@ export type SharedRollRequestPayload = Omit<
 export interface SharedCombatLogState {
   mapId: string
   entries: CombatLogEntry[]
+  /** Entries newer than this checkpoint were explicitly removed by a DM rollback. */
+  rollbackCutoffEntryId?: number
   updatedAt: number
 }
 

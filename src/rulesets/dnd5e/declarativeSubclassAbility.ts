@@ -533,6 +533,7 @@ export interface Dnd5eDeclarativeRulesPackageV1 {
     rulesetId: 'dnd5e-2014-srd-5.1'
     stateSchemaVersion?: number
     manifestSchemaVersion?: 1
+    pluginKind?: import('./pluginApi').Dnd5ePluginKind
     minimumGameProtocolVersion?: number
     dependencies?: readonly import('./pluginApi').Dnd5ePluginDependency[]
     conflicts?: readonly string[]
@@ -1688,7 +1689,7 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
   assertKeys(parsed.manifest, [
     'id', 'name', 'version', 'publisher', 'license', 'description', 'apiVersion', 'rulesetId',
     'stateSchemaVersion', 'manifestSchemaVersion', 'minimumGameProtocolVersion', 'dependencies',
-    'conflicts', 'declaredCapabilities', 'distributionPolicy', 'contentCategory',
+    'conflicts', 'declaredCapabilities', 'distributionPolicy', 'contentCategory', 'pluginKind',
   ], '规则包清单')
   assertId(parsed.manifest.id, '规则包清单')
   for (const key of ['name', 'version', 'publisher', 'license'] as const) assertText(parsed.manifest[key], `规则包${key}`, 200)
@@ -1696,6 +1697,9 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
   if (parsed.manifest.apiVersion !== 2 || parsed.manifest.rulesetId !== 'dnd5e-2014-srd-5.1') throw new Error('规则包 API 或 Ruleset 不兼容')
   if (parsed.manifest.stateSchemaVersion != null && !finiteInteger(parsed.manifest.stateSchemaVersion, 1, 1_000)) throw new Error('规则包状态版本无效')
   if (parsed.manifest.manifestSchemaVersion != null && parsed.manifest.manifestSchemaVersion !== 1) throw new Error('规则包清单版本无效')
+  if (parsed.manifest.pluginKind != null && parsed.manifest.pluginKind !== 'content-package') {
+    throw new Error('声明式规则包必须声明为 content-package')
+  }
   if (parsed.manifest.minimumGameProtocolVersion != null && !finiteInteger(parsed.manifest.minimumGameProtocolVersion, 1, 10_000)) throw new Error('规则包最低游戏协议无效')
   const manifestId = parsed.manifest.id
   if (parsed.manifest.dependencies != null && (
@@ -1747,28 +1751,4 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
   return parsed as unknown as Dnd5eDeclarativeRulesPackageV1
 }
 
-/** Converts the existing feature/action data model into V1 without inventing unsupported semantics. */
-export function migrateLegacyFeatureActionToDeclarativeV1(input: {
-  id: string
-  name: string
-  description: string
-  level?: number
-  automation?: 'full' | 'partial' | 'manual'
-  action?: {
-    economy?: 'action' | 'bonusAction' | 'reaction' | 'none'
-    targeting?: DeclarativeSubclassTargetingV1
-  }
-}): DeclarativeSubclassAbilityV1 {
-  return {
-    schemaVersion: 1,
-    id: input.id,
-    name: input.name,
-    description: input.description,
-    level: Math.max(1, Math.min(20, Math.floor(input.level ?? 1))),
-    trigger: { kind: 'active-use' },
-    cost: { economy: input.action?.economy ?? 'none' },
-    targeting: input.action?.targeting ?? { kind: 'self' },
-    effects: [{ kind: 'temporary-hit-points', target: 'actor', amount: { kind: 'fixed', value: 0 } }],
-    automation: input.action ? 'partial' : 'manual',
-  }
-}
+export { migrateLegacyFeatureActionToDeclarativeV1 } from './plugins/pluginLegacyMigration'

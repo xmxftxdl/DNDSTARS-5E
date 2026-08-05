@@ -1,5 +1,5 @@
 import type { BattleMap } from '../../store/maps'
-import type { Dnd5eCombatEvent } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
   isCombatPresentationAreaSpellId,
@@ -27,6 +27,8 @@ export interface AreaSpellPresentationSettlement {
   widthFeet?: number
   heightFeet?: number
   radiusFeet?: number
+  wallOfFireShape?: 'line' | 'ring'
+  wallOfFireAngleDegrees?: number
 }
 
 export interface GuidancePresentationSettlement {
@@ -93,6 +95,23 @@ export type PreRollSpellPresentation = {
     | 'power-word-stun'
     | 'power-word-kill'
     | 'false-life'
+    | 'hypnotic-pattern'
+    | 'slow'
+    | 'phantasmal-killer'
+    | 'banishment'
+    | 'misty-step'
+    | 'hold-monster'
+    | 'dispel-magic'
+    | 'lesser-restoration'
+    | 'heal'
+    | 'mass-cure-wounds'
+    | 'mass-heal'
+    | 'mass-healing-word'
+    | 'prayer-of-healing'
+    | 'dancing-lights'
+    | 'minor-illusion'
+    | 'thaumaturgy'
+    | 'shillelagh'
   id: string
   mapId: string
   transactionId: string
@@ -166,10 +185,32 @@ export function spellPresentationsBeforeRoll(input: {
     'power-word-stun',
     'power-word-kill',
     'false-life',
+    'hypnotic-pattern',
+    'slow',
+    'phantasmal-killer',
+    'banishment',
+    'misty-step',
+    'hold-monster',
+    'dispel-magic',
+    'lesser-restoration',
+    'heal',
+    'mass-cure-wounds',
+    'mass-heal',
+    'mass-healing-word',
+    'prayer-of-healing',
+    'dancing-lights',
+    'minor-illusion',
+    'thaumaturgy',
+    'shillelagh',
   ])
   if (!supported.has(input.spellId as PreRollSpellPresentation['spellId'])) return []
   const spellId = input.spellId as PreRollSpellPresentation['spellId']
-  return input.targetTokenIds.map((targetTokenId, index) => ({
+  const selfManifestation = spellId === 'misty-step' || spellId === 'dancing-lights' ||
+    spellId === 'minor-illusion' || spellId === 'thaumaturgy' || spellId === 'shillelagh'
+  const targetTokenIds = selfManifestation && input.targetTokenIds.length === 0
+    ? [input.actorTokenId]
+    : input.targetTokenIds
+  return targetTokenIds.map((targetTokenId, index) => ({
     spellId,
     id: `${input.transactionId}:${spellId}:${index}`,
     mapId: input.mapId,
@@ -215,6 +256,7 @@ export function areaSpellPresentationForSettlement(input: {
   mapId: string
   actorTokenId: string
   areaAnchorCell?: { col: number; row: number }
+  wallOfFireGeometry?: { shape: 'line' | 'ring'; angleDegrees: number }
 }): AreaSpellPresentationSettlement | null {
   if (
     !input.areaAnchorCell ||
@@ -233,6 +275,10 @@ export function areaSpellPresentationForSettlement(input: {
     spellId: input.spellId,
     targetCell: { ...input.areaAnchorCell },
     ...area,
+    ...(input.spellId === 'wall-of-fire' && input.wallOfFireGeometry ? {
+      wallOfFireShape: input.wallOfFireGeometry.shape,
+      wallOfFireAngleDegrees: input.wallOfFireGeometry.angleDegrees,
+    } : {}),
   }
 }
 

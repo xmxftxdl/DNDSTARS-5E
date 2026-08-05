@@ -31,8 +31,9 @@ import {
 } from '../lib/roomSession'
 import { resumeCampaignRoom, roomApiErrorMessage } from '../lib/roomApi'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
-import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
+import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/plugins/pluginRequirementProjection'
 import type { AccountSession } from '../lib/accountSession'
+import { showAppConfirm } from '../lib/appDialog'
 
 function campaignStatusLabel(campaign: AccountCampaign): string {
   if (campaign.latestRoom?.status === 'online') return '游戏进行中'
@@ -123,7 +124,7 @@ export default function AccountCampaignsPage({
     const accountSession = account
     if (
       (campaign.latestRoom?.status === 'online' || campaign.latestRoom?.status === 'grace') &&
-      !window.confirm('当前房间可能仍在另一台设备上运行。继续会让旧设备的 DM 凭证立即失效，是否接管？')
+      !(await showAppConfirm('当前房间可能仍在另一台设备上运行。继续会让旧设备的 DM 凭证立即失效，是否接管？'))
     ) return
     setBusyId(campaign.campaignId)
     setError(null)

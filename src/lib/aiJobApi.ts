@@ -181,7 +181,7 @@ export function aiJobApiErrorMessage(error: unknown): string {
     'invalid-account-session': '账号登录已失效，请重新登录后继续。',
     'account-campaign-not-found': '当前战役不存在，或不属于这个账号。',
     'invalid-ai-job-request': 'AI 任务参数未通过服务器校验。',
-    'ai-provider-not-configured': '所选云端模型尚未配置，请先使用本地免费模型。',
+    'ai-provider-not-configured': '所选云端模型尚未配置，请配置自己的模型 API，或等待 Astral Trace 付费模型开放。',
     'ai-job-limit': '当前战役保留的 AI 任务已达到上限。',
     'ai-job-revision-conflict': '任务已在其他页面更新，请刷新后重试。',
     'ai-job-not-found': '这条 AI 任务已经被删除，请刷新任务列表。',

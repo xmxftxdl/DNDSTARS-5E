@@ -11,7 +11,7 @@ import {
   type SharedMapExplorationState,
 } from '../lib/mapExploration'
 import type { MapGeometryPoint } from '../lib/mapGeometry'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 
 interface MapExplorationStoreState {

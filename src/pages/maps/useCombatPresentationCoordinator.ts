@@ -21,7 +21,7 @@ import {
   type CombatPresentationSavingThrow,
   type CombatPresentationState,
 } from '../../lib/combatPresentation'
-import { subscribeSharedEvent } from '../../lib/sharedApi'
+import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 import type { BattleMap } from '../../store/maps'
 
 const PRESENTATION_PROJECTION_TICK_MS = 125
@@ -51,7 +51,7 @@ export function useCombatPresentationCoordinator(
     void refreshCombatPresentationClock().then(() => {
       if (!cancelled) setClockRevision((value) => value + 1)
     })
-    const unsubscribe = subscribeSharedEvent(COMBAT_PRESENTATION_CHANNEL, (event) => {
+    const unsubscribe = browserSharedRoomService.subscribeSharedEvent(COMBAT_PRESENTATION_CHANNEL, (event) => {
       setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
     })
     const unsubscribeLocal = subscribeLocalCombatPresentationEvent((event) => {

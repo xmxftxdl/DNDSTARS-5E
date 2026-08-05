@@ -2,6 +2,17 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
+import {
+  DND5E_CLASS_BORDER_BLUR_STD_DEVIATION,
+  DND5E_CLASS_BORDER_DEEP_STROKE_OPACITY,
+  DND5E_CLASS_BORDER_DEEP_STROKE_WIDTH,
+  DND5E_CLASS_BORDER_FLOW_DURATION,
+  DND5E_CLASS_BORDER_FLOW_PERIOD_MS,
+  DND5E_CLASS_BORDER_GRADIENT_STOPS,
+  DND5E_CLASS_BORDER_TOP_STROKE_WIDTH,
+  dnd5eClassBorderFlowBegin,
+  dnd5eClassBorderGradientStopColor,
+} from '../../lib/dnd5eClassBorderVisual'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
 import { dnd5eActionIconBackdropImage } from './dnd5eActionIconBackdropImage'
 
@@ -81,12 +92,79 @@ describe('Dnd5eActionIcon', () => {
     expect(html).toContain('data-class-border="wizard"')
     expect(html).toContain('data-border-detail="arcane-gems"')
     expect(html).toContain('dnd5e-class-border-line')
-    expect(html).toContain('attributeName="gradientTransform"')
-    expect(html).toContain('type="rotate"')
-    expect(html).toContain('dur="8s"')
-    expect(html.match(/<stop[^>]+stop-color="#ffffff"/g)).toHaveLength(1)
+    expect(html).toContain('data-class-border-flow="wizard"')
+    expect(html).toContain('dnd5e-class-border-flow__paint')
+    expect(html).not.toContain('attributeName="gradientTransform"')
+    expect(html).not.toContain('<animateTransform')
+    expect(html).not.toContain('attributeName="stroke-dashoffset"')
+    expect(html).toContain('animation-duration:14s')
+    expect(html).toMatch(/animation-delay:(?:0|-(?:[0-9]|1[0-3])(?:\.[0-9]{1,3})?)s/)
+    expect(html).toContain('data-border-detail="arcane-gems" fill="#DBEAFE"')
     expect(html.match(/<rect class="dnd5e-class-border-line"[^>]+>/)?.[0])
       .not.toContain('stroke-dasharray')
+  })
+
+  it('uses the shared single-line class border visual parameters', () => {
+    expect(DND5E_CLASS_BORDER_GRADIENT_STOPS).toEqual([
+      { offset: '0', color: 'accent', opacity: '.7' },
+      { offset: '.2', color: 'accent', opacity: '.74' },
+      { offset: '.38', color: 'glow', opacity: '.86' },
+      { offset: '.5', color: 'white' },
+      { offset: '.62', color: 'glow', opacity: '.86' },
+      { offset: '.8', color: 'accent', opacity: '.74' },
+      { offset: '1', color: 'accent', opacity: '.7' },
+    ])
+    expect(DND5E_CLASS_BORDER_FLOW_DURATION).toBe('14s')
+    expect(DND5E_CLASS_BORDER_FLOW_PERIOD_MS).toBe(14_000)
+    expect(DND5E_CLASS_BORDER_DEEP_STROKE_WIDTH).toBe(4.8)
+    expect(DND5E_CLASS_BORDER_TOP_STROKE_WIDTH).toBe(3.1)
+    expect(DND5E_CLASS_BORDER_DEEP_STROKE_OPACITY).toBe(0.82)
+    expect(DND5E_CLASS_BORDER_BLUR_STD_DEVIATION).toBe(0.8)
+
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eSpellActionIcon({ id: 'message', name: '传讯术', castingClassId: 'wizard' }),
+    }))
+    const deepLine = html.match(/<rect x="2\.75"[^>]+>/)?.[0] ?? ''
+    const topLine = html.match(/<rect class="dnd5e-class-border-line"[^>]+>/)?.[0] ?? ''
+    const borderGlow = html.match(/<filter id="[^"]+-border-glow"[^>]*>.*?<\/filter>/)?.[0] ?? ''
+
+    expect(deepLine).toContain(`stroke-opacity="${DND5E_CLASS_BORDER_DEEP_STROKE_OPACITY}"`)
+    expect(deepLine).toContain(`stroke-width="${DND5E_CLASS_BORDER_DEEP_STROKE_WIDTH}"`)
+    expect(topLine).toContain(`stroke-width="${DND5E_CLASS_BORDER_TOP_STROKE_WIDTH}"`)
+    expect(borderGlow).toContain(`stdDeviation="${DND5E_CLASS_BORDER_BLUR_STD_DEVIATION}"`)
+    expect(html).toContain(`animation-duration:${DND5E_CLASS_BORDER_FLOW_DURATION}`)
+    expect(html).toContain('--dnd5e-class-border-accent:#DBEAFE')
+    expect(html).toContain('--dnd5e-class-border-glow:#60A5FA')
+    expect(html).not.toContain('attributeName="gradientTransform"')
+    expect(html).not.toContain('dnd5e-class-border-flow-line')
+  })
+
+  it('keeps the shared flow phase continuous and makes loop boundaries equivalent', () => {
+    expect(dnd5eClassBorderFlowBegin(0)).toBe('0s')
+    expect(dnd5eClassBorderFlowBegin(DND5E_CLASS_BORDER_FLOW_PERIOD_MS)).toBe('0s')
+    expect(dnd5eClassBorderFlowBegin(DND5E_CLASS_BORDER_FLOW_PERIOD_MS * 3)).toBe('0s')
+    expect(dnd5eClassBorderFlowBegin(1_250)).toBe('-1.25s')
+    expect(dnd5eClassBorderFlowBegin(15_250)).toBe('-1.25s')
+    expect(dnd5eClassBorderFlowBegin(-1)).toBe('-13.999s')
+    expect(dnd5eClassBorderFlowBegin(Number.NaN)).toBe('0s')
+
+    const palette = {
+      background: '#3B82F6',
+      backgroundDeep: '#071A38',
+      accent: '#DBEAFE',
+      glow: '#60A5FA',
+    }
+    expect(DND5E_CLASS_BORDER_GRADIENT_STOPS.map((stop) => (
+      dnd5eClassBorderGradientStopColor(palette, stop)
+    ))).toEqual([
+      '#DBEAFE',
+      '#DBEAFE',
+      '#60A5FA',
+      '#ffffff',
+      '#60A5FA',
+      '#DBEAFE',
+      '#DBEAFE',
+    ])
   })
 
   it('gives every class a distinct semantic Message backdrop', () => {
@@ -138,7 +216,7 @@ describe('Dnd5eActionIcon', () => {
     expect(svg).toContain('stop-color="#26072C"')
   })
 
-  it('renders a distinct ornamental frame for magic-item rarity', () => {
+  it('renders magic items with a subtle gradient and a simple rarity-colored border', () => {
     const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
       spec: dnd5eItemActionIcon({
         id: 'srd-5.1:magic-item:amulet-of-health',
@@ -150,7 +228,10 @@ describe('Dnd5eActionIcon', () => {
       }),
     }))
     expect(html).toContain('data-rarity-border="rare"')
-    expect(html).toContain('data-rarity-detail="four-gems"')
+    expect(html).toContain('data-rarity-background="subtle-gradient"')
+    expect(html).toContain('stop-opacity=".3"')
+    expect(html).toContain('stroke="#60A5FA"')
+    expect(html).not.toContain('data-rarity-detail=')
     expect(html).toContain('data-icon-detail="painted-amulet-of-health"')
   })
 })

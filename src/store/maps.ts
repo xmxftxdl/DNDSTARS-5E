@@ -19,7 +19,7 @@ import {
   loadSharedResource,
   saveSharedResourceWithResult,
   type SharedResourceSaveResult,
-} from '../lib/sharedApi'
+} from '../composition/browserSharedRoomResources'
 import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
@@ -30,7 +30,7 @@ import {
   applyDnd5eEffectiveVisionProfile,
   compileDnd5eEffectiveVisionProfile,
 } from '../../shared/dnd5e-vision-profile.mjs'
-import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../application/combat/dnd5eCombatRules'
 import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
 import type {
   Dnd5eDamageType,
@@ -77,6 +77,7 @@ import {
   type TokenMovementAnimation,
 } from '../lib/tokenMovementAnimation'
 import { campaignLightIsActive, type CampaignLightSourceKind } from '../lib/campaignTime'
+import type { EnemyPlayerVisibleDetail } from '../lib/enemyPlayerVisibleDetail'
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -738,6 +739,8 @@ export interface Token {
   tokenPortrait?: string
   /** 怪物/NPC 立绘存放于共享图片通道，地图状态只保存引用。 */
   portraitImageId?: string
+  /** Square map-token crop for monsters; portraitImageId remains the legacy fallback. */
+  tokenPortraitImageId?: string
   size: number // 直径（格数的倍数，1 = 一格）
   type: 'player' | 'enemy' | 'npc' | 'obstacle'
   /** 玩家读取地图时由服务端临时投影；不会作为 DM 地图数据持久化。 */
@@ -751,6 +754,8 @@ export interface Token {
   showHpOnToken?: boolean
   /** 玩家端点击时是否显示怪物详情（DM 始终显示；默认对玩家可见） */
   showDetailOnToken?: boolean
+  /** DM 明确公开的房间怪物详情快照；不包含工坊目录或内联美术。 */
+  playerVisibleEnemyDetail?: EnemyPlayerVisibleDetail
   /** 来自怪物池的模板 id */
   poolId?: string
   /** 内置怪物外观变体；只持久化短 ID，图片由客户端静态资源解析。 */
@@ -1062,6 +1067,12 @@ export interface Dnd5ePluginArea {
   /** 与权威视线判定共享的声明式光照/魔法黑暗。 */
   lighting?: Dnd5ePersistentAreaLighting
   visual?: Dnd5ePersistentAreaVisual
+  /** Exact host-approved Wall of Fire placement used by presentation and turn-end damage. */
+  wallOfFireGeometry?: {
+    shape: 'line' | 'ring'
+    angleDegrees: number
+    damagingSide: 'left' | 'right' | 'inside' | 'outside'
+  }
   triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
@@ -1193,6 +1204,9 @@ function normalizeToken(raw: unknown): Token {
     emoji: typeof t.emoji === 'string' && t.emoji ? t.emoji : preset.emoji,
     portraitImageId: typeof t.portraitImageId === 'string' && /^[a-z0-9_-]{1,160}$/i.test(t.portraitImageId)
       ? t.portraitImageId
+      : undefined,
+    tokenPortraitImageId: typeof t.tokenPortraitImageId === 'string' && /^[a-z0-9_-]{1,160}$/i.test(t.tokenPortraitImageId)
+      ? t.tokenPortraitImageId
       : undefined,
     visualVariantId: typeof t.visualVariantId === 'string' && /^[a-z0-9_-]{1,80}$/i.test(t.visualVariantId)
       ? t.visualVariantId
@@ -1380,6 +1394,16 @@ function normalizeMap(raw: unknown): BattleMap {
             ? getDnd5eCoreSpellAreaDeclaration(coreSpellId)?.visual
             : undefined
         )
+        const wallOfFireGeometry = coreSpellId === 'wall-of-fire' && area.wallOfFireGeometry &&
+          (area.wallOfFireGeometry.shape === 'line' || area.wallOfFireGeometry.shape === 'ring') &&
+          Number.isFinite(area.wallOfFireGeometry.angleDegrees) &&
+          ['left', 'right', 'inside', 'outside'].includes(area.wallOfFireGeometry.damagingSide)
+          ? {
+              shape: area.wallOfFireGeometry.shape,
+              angleDegrees: ((Number(area.wallOfFireGeometry.angleDegrees) % 360) + 360) % 360,
+              damagingSide: area.wallOfFireGeometry.damagingSide,
+            }
+          : undefined
         return [{
           id: area.id,
           pluginId: area.pluginId,
@@ -1420,6 +1444,7 @@ function normalizeMap(raw: unknown): BattleMap {
           hiddenFromPlayers: area.hiddenFromPlayers === true,
           lighting,
           visual: visual ? { ...visual } : undefined,
+          wallOfFireGeometry,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
         } satisfies Dnd5ePluginArea]
@@ -1524,26 +1549,23 @@ export function projectCharacterTokenPresentations(
         return visionToken
       }
 
-      // A room-specific upload always overrides the bundled monster artwork.
-      if (token.portraitImageId) {
-        if (!token.portrait && !token.tokenPortrait) {
-          if (visionToken !== token) changed = true
-          return visionToken
-        }
-        changed = true
-        return { ...visionToken, portrait: undefined, tokenPortrait: undefined }
-      }
+      // Room image ids override inline/catalog artwork without distributing the
+      // DM-only custom-monster source record to player clients.
+      const portrait = token.portraitImageId ? undefined : presentation.initiativePortrait
+      const tokenPortrait = (token.tokenPortraitImageId ?? token.portraitImageId)
+        ? undefined
+        : presentation.tokenPortrait
 
       if (
-        token.portrait === presentation.initiativePortrait &&
-        token.tokenPortrait === presentation.tokenPortrait &&
+        token.portrait === portrait &&
+        token.tokenPortrait === tokenPortrait &&
         visionToken === token
       ) return token
       changed = true
       return {
         ...visionToken,
-        portrait: presentation.initiativePortrait,
-        tokenPortrait: presentation.tokenPortrait,
+        portrait,
+        tokenPortrait,
       }
     }
     const character = charactersById.get(token.characterId)
@@ -1677,7 +1699,8 @@ export const useMapStore = create<MapState>()(
         // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
         if (isPlayerPort()) void pruneOrphanImages(shared.maps.flatMap((map) => [
           map.id,
-          ...map.tokens.flatMap((token) => token.portraitImageId ? [token.portraitImageId] : []),
+          ...map.tokens.flatMap((token) => [token.portraitImageId, token.tokenPortraitImageId]
+            .filter((imageId): imageId is string => !!imageId)),
         ]))
       },
       saveSharedNow: () => publishMapsState(get(), { requireSaved: true }),
@@ -1775,7 +1798,11 @@ export const useMapStore = create<MapState>()(
       removeMap: (id) => {
         const removedMap = get().maps.find((map) => map.id === id)
         void deleteImage(id)
-        for (const imageId of removedMap?.tokens.flatMap((token) => token.portraitImageId ? [token.portraitImageId] : []) ?? []) {
+        const removedImageIds = new Set(removedMap?.tokens.flatMap((token) => [
+          token.portraitImageId,
+          token.tokenPortraitImageId,
+        ].filter((imageId): imageId is string => !!imageId)) ?? [])
+        for (const imageId of removedImageIds) {
           void deleteImage(imageId)
         }
         set((s) => {
@@ -1967,11 +1994,15 @@ export const useMapStore = create<MapState>()(
       },
 
       removeToken: (mapId, tokenId) => {
-        const portraitImageId = get().maps
+        const removedToken = get().maps
           .find((map) => map.id === mapId)
           ?.tokens.find((token) => token.id === tokenId)
-          ?.portraitImageId
-        if (portraitImageId) void deleteImage(portraitImageId)
+        for (const imageId of new Set([
+          removedToken?.portraitImageId,
+          removedToken?.tokenPortraitImageId,
+        ].filter((candidate): candidate is string => !!candidate))) {
+          void deleteImage(imageId)
+        }
         set((s) => ({
           maps: s.maps.map((m) =>
             m.id === mapId ? { ...m, tokens: m.tokens.filter((t) => t.id !== tokenId) } : m,

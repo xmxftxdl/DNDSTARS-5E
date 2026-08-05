@@ -124,6 +124,8 @@ export interface Dnd5eSrdSpellDefinition {
   secondaryTargetsWithinFeetOfFirst?: number
   /** 地图选区模板；尺寸属于法术效果，placeRangeFeet 仅限制模板原点。 */
   area?: SkillAoeTargeting
+  /** Number of distinct area origins that must be selected for one cast. */
+  areaTargetCount?: number
   /** 少数“选择区域内生物”的法术允许施法者选择自己。 */
   areaIncludesSelf?: boolean
   /** 每道射线单独攻击时的基础射线数。 */
@@ -1019,6 +1021,17 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     area: { shape: 'circle', origin: 'point', radiusFeet: 60, placeRangeFeet: 150 },
     onFailedSaveEffect: 'sunburst-blindness',
     description: '以射程内一点为中心形成60尺半径区域。区域内生物进行体质豁免；失败受到12d6光耀伤害并目盲1分钟，成功则伤害减半且不目盲。亡灵和泥怪以劣势豁免；目盲目标每回合结束时可再次豁免，成功则结束目盲。',
+  },
+  {
+    id: 'meteor-swarm', name: '流星爆', englishName: 'Meteor Swarm', level: 9, school: '塑能',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5_280,
+    target: 'area', effect: 'saving-throw', saveAbility: 'dex', requiresVisibleTarget: 'placement',
+    dice: { count: 20, sides: 6, bonus: 0 }, damageType: 'fire',
+    additionalDamageComponents: [{ dice: { count: 20, sides: 6, bonus: 0 }, damageType: 'bludgeoning' }],
+    damageOnSuccessfulSave: 'half', maximumTargets: 100, areaIncludesSelf: true,
+    areaTargetCount: 4,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 40, placeRangeFeet: 5_280 },
+    description: '选择射程内四个你能看见的不同落点；每个落点形成40尺半径球形爆炸。范围内生物进行敏捷豁免，失败受到20d6火焰伤害与20d6钝击伤害，成功时两种伤害均减半。重叠区域内的生物只受一次影响。物体伤害与点燃仍由DM裁定。',
   },
   {
     id: 'power-word-kill', name: '律令死亡', englishName: 'Power Word Kill', level: 9, school: '附魔',

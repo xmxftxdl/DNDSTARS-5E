@@ -95,7 +95,7 @@ describe('CombatActionBanner', () => {
   })
 
   it('keeps action and kill-streak banners above the combat toolbar stacking layer', () => {
-    const mapsPageSource = readFileSync(new URL('../../pages/MapsPage.tsx', import.meta.url), 'utf8')
+    const mapsPageSource = readFileSync(new URL('../../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
     const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
 
     expect(mapsPageSource).toContain(

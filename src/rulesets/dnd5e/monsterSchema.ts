@@ -1202,6 +1202,36 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         action.rule.requiresVisibleDestination !== true ||
         action.rule.requiresUnoccupiedDestination !== true
       ) return false
+    } else if (action.rule.kind === 'summon') {
+      const count = isRecord(action.rule.count) ? action.rule.count : undefined
+      const fixedCountValid = count?.kind === 'fixed' &&
+        finiteInteger(count.value, 1, 20) &&
+        Object.keys(count).every((key) => key === 'kind' || key === 'value')
+      const diceCountValid = count?.kind === 'dice' &&
+        finiteInteger(count.count, 1, 20) &&
+        finiteInteger(count.sides, 2, 100) &&
+        finiteInteger(count.bonus, -100, 100) &&
+        Number(count.count) + Number(count.bonus) >= 1 &&
+        Number(count.count) * Number(count.sides) + Number(count.bonus) <= 20 &&
+        Object.keys(count).every((key) =>
+          key === 'kind' || key === 'count' || key === 'sides' || key === 'bonus')
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' || key === 'monsterId' || key === 'count' ||
+          key === 'timing' || key === 'durationRounds' || key === 'concentration' ||
+          key === 'concentrationEndsOnAppearance' || key === 'side') ||
+        !requiredText(action.rule.monsterId, 120) ||
+        !ID_PATTERN.test(String(action.rule.monsterId)) ||
+        (!fixedCountValid && !diceCountValid) ||
+        (action.rule.timing !== 'immediate' && action.rule.timing !== 'source-next-turn-start') ||
+        !finiteInteger(action.rule.durationRounds, 1, 10_000) ||
+        typeof action.rule.concentration !== 'boolean' ||
+        typeof action.rule.concentrationEndsOnAppearance !== 'boolean' ||
+        (action.rule.concentrationEndsOnAppearance === true && (
+          action.rule.concentration !== true || action.rule.timing !== 'source-next-turn-start'
+        )) ||
+        (action.rule.side !== 'ally' && action.rule.side !== 'enemy')
+      ) return false
     } else if (action.rule.kind === 'invisibility') {
       const breakOn = Array.isArray(action.rule.breakOn)
         ? action.rule.breakOn
@@ -2039,7 +2069,7 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (raw.lairInitiative != null && !finiteInteger(raw.lairInitiative, 0, 99)) {
     issues.push(issue(monsterId, '巢穴动作先攻值无效'))
   }
-  for (const key of ['tokenPortrait', 'initiativePortrait'] as const) {
+  for (const key of ['portrait', 'tokenPortrait', 'initiativePortrait'] as const) {
     if (raw[key] != null && (
       typeof raw[key] !== 'string' || raw[key].length > 600_000 ||
       !/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=\r\n]+$/i.test(raw[key])

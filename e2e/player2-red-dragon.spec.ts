@@ -202,10 +202,94 @@ async function seedPlayer2VsRedDragon(request: APIRequestContext, mapId: string)
 }
 
 async function sendPlayer2Action(page: Page, action: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
+  return page.evaluate(async (payload) => {
     const protocolHeaders = {
       'X-Stars-Protocol': '5',
       'X-Stars-Writer': 'e2e-player2-direct-client',
+    }
+    if (payload.type === 'move-token' || payload.type === 'end-turn') {
+      const [combatResponse, mapsResponse] = await Promise.all([
+        fetch('http://127.0.0.1:6173/api/state/combat'),
+        fetch('http://127.0.0.1:6173/api/state/maps'),
+      ])
+      if (!combatResponse.ok || !mapsResponse.ok) {
+        throw new Error(`combat command precondition load failed: ${combatResponse.status}/${mapsResponse.status}`)
+      }
+      const combat = await combatResponse.json() as {
+        combatId?: string
+        _sync?: { revision?: number }
+      }
+      const maps = await mapsResponse.json() as {
+        maps?: Array<{
+          id?: string
+          tokens?: Array<{ id?: string; x?: number; y?: number; elevationFeet?: number }>
+        }>
+        _sync?: { revision?: number }
+      }
+
+      // Movement/end-turn always uses the production command API. This includes
+      // stale requests: they must receive a terminal authority receipt without
+      // ever entering the legacy queue or mutating player-action snapshots.
+        const commandStorageKey = `e2e-combat-command:${String(payload.id)}`
+        const storedCommand = sessionStorage.getItem(commandStorageKey)
+        const actor = maps.maps
+          ?.find((candidate) => candidate.id === payload.mapId)
+          ?.tokens?.find((candidate) => candidate.id === payload.actorTokenId)
+        const combatRevision = Number(
+          combatResponse.headers.get('X-Stars-State-Revision') ?? combat._sync?.revision ?? 0,
+        )
+        const mapsRevision = Number(
+          mapsResponse.headers.get('X-Stars-State-Revision') ?? maps._sync?.revision ?? 0,
+        )
+        const command = storedCommand
+          ? JSON.parse(storedCommand)
+          : {
+              schemaVersion: 1,
+              commandId: payload.id,
+              type: payload.type,
+              mapId: payload.mapId,
+              combatId: payload.combatId,
+              actorTokenId: payload.actorTokenId,
+              characterId: payload.characterId,
+              round: payload.round,
+              initiativeIndex: payload.initiativeIndex,
+              seq: payload.seq,
+              expectedRevisions: {
+                combat: Number.isInteger(combatRevision) ? combatRevision : 0,
+                ...(payload.type === 'move-token'
+                  ? { maps: Number.isInteger(mapsRevision) ? mapsRevision : 0 }
+                  : {}),
+              },
+              issuedAt: payload.updatedAt,
+              ...(payload.type === 'move-token'
+                ? {
+                    expectedPosition: { x: actor?.x ?? 0, y: actor?.y ?? 0 },
+                    expectedElevationFeet: actor?.elevationFeet ?? 0,
+                    targetPosition: payload.targetPosition,
+                    ...(payload.targetElevationFeet != null
+                      ? { targetElevationFeet: payload.targetElevationFeet }
+                      : {}),
+                  }
+                : {}),
+            }
+        sessionStorage.setItem(commandStorageKey, JSON.stringify(command))
+        const response = await fetch(
+          `http://127.0.0.1:6173/api/combat/commands/${encodeURIComponent(String(payload.id))}`,
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...protocolHeaders,
+              'X-Stars-Command-Source': 'player',
+            },
+            body: JSON.stringify({ schemaVersion: 1, command }),
+          },
+        )
+        const result = await response.json()
+        if (!response.ok && response.status !== 409) {
+          throw new Error(`combat command PUT failed: ${response.status}: ${JSON.stringify(result)}`)
+        }
+        return result
     }
     let queued = false
     let queueError = ''
@@ -516,16 +600,18 @@ test('three clients keep one authoritative transaction across duplicate, stale, 
     seq: 2,
     updatedAt: now + 1,
   }
-  await sendPlayer2Action(player2, staleAction)
-  await expect
-    .poll(async () => {
-      const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(
-        request,
-        'player-action-ack',
-      )
-      return ack.actionId === staleAction.id ? `${ack.status}:${ack.reason}` : ''
-    })
-    .toBe('rejected:stale-combat')
+  const staleResult = await sendPlayer2Action(player2, staleAction) as {
+    error?: string
+    receipt?: { commandId?: string; status?: string; reason?: string }
+  }
+  expect(staleResult).toMatchObject({
+    error: 'combat-command-entity-conflict',
+    receipt: {
+      commandId: staleAction.id,
+      status: 'conflict',
+      reason: 'combat-command-entity-conflict',
+    },
+  })
 
   await player2.reload({ waitUntil: 'domcontentloaded' })
   await expect

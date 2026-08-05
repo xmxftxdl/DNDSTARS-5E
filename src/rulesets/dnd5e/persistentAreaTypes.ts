@@ -24,6 +24,8 @@ export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'mage-hand',
   'insect-plague',
   'blade-barrier',
+  'cloudkill',
+  'ice-storm-ground',
 ] as const
 
 export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]

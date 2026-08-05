@@ -25,6 +25,7 @@ export interface LocalAiBridgeStartOptions {
   externalImageApiUrl?: string
   externalImageApiKey?: string
   externalImageModelId?: string
+  externalImageDefaultQuality?: string
   allowedOrigins?: readonly string[]
   pairingCode?: string
   accessToken?: string

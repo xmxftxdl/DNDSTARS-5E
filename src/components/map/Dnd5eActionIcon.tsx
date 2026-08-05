@@ -1,5 +1,14 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { Dnd5eActionIconMotif, Dnd5eActionIconSpec } from '../../lib/dnd5eActionIcons'
+import {
+  DND5E_CLASS_BORDER_BLUR_STD_DEVIATION,
+  DND5E_CLASS_BORDER_DEEP_STROKE_OPACITY,
+  DND5E_CLASS_BORDER_DEEP_STROKE_WIDTH,
+  DND5E_CLASS_BORDER_FLOW_DURATION,
+  DND5E_CLASS_BORDER_TOP_STROKE_WIDTH,
+  dnd5eClassBorderFlowBegin,
+} from '../../lib/dnd5eClassBorderVisual'
 
 interface Dnd5eActionIconProps {
   spec: Dnd5eActionIconSpec
@@ -8,6 +17,11 @@ interface Dnd5eActionIconProps {
   badge?: string | number
   active?: boolean
   disabled?: boolean
+}
+
+type Dnd5eClassBorderFlowStyle = CSSProperties & {
+  '--dnd5e-class-border-accent': string
+  '--dnd5e-class-border-glow': string
 }
 
 function Motif({ motif, color }: { motif: Dnd5eActionIconMotif; color: string }) {
@@ -196,29 +210,10 @@ function ClassBorderOrnaments({ classId, color }: { classId: string; color: stri
   }
 }
 
-function RarityBorderOrnaments({ rarity, color }: { rarity: NonNullable<Dnd5eActionIconSpec['rarityBackdropId']>; color: string }) {
-  const common = { fill: color, opacity: '.9' }
-  switch (rarity) {
-    case 'common':
-      return <g data-rarity-detail="plain" fill="none" stroke={color} strokeWidth="1" opacity=".55"><path d="M8 18V8h10M62 8h10v10M72 62v10H62M18 72H8V62" /></g>
-    case 'uncommon':
-      return <g data-rarity-detail="corner-leaves" {...common}><path d="M5 17C7 9 10 6 18 5c-5 3-8 6-9 12zm70 0C73 9 70 6 62 5c5 3 8 6 9 12zM5 63c2 8 5 11 13 12-5-3-8-6-9-12zm70 0c-2 8-5 11-13 12 5-3 8-6 9-12z" /></g>
-    case 'rare':
-      return <g data-rarity-detail="four-gems" {...common}><path d="m40 2.5 4 4-4 4-4-4zm0 67 4 4-4 4-4-4zM2.5 40l4-4 4 4-4 4zm67 0 4-4 4 4-4 4z" /></g>
-    case 'very-rare':
-      return <g data-rarity-detail="arcane-crescents" fill="none" stroke={color} strokeWidth="2" opacity=".9"><path d="M7 25C9 13 16 7 28 5M53 5c12 2 18 8 20 20M73 55c-2 12-8 18-20 20M27 75C15 73 9 67 7 55" /><circle cx="7" cy="40" r="2" fill={color} /><circle cx="73" cy="40" r="2" fill={color} /></g>
-    case 'legendary':
-      return <g data-rarity-detail="sun-crown" {...common}><path d="m40 1.5 3 6 6 1-4.5 4.5 1 6-5.5-3-5.5 3 1-6L31 8.5l6-1zm0 77-3-6-6-1 4.5-4.5-1-6 5.5 3 5.5-3-1 6 4.5 4.5-6 1zM1.5 40l6-3 1-6 4.5 4.5 6-1-3 5.5 3 5.5-6-1L8.5 49l-1-6zm77 0-6 3-1 6-4.5-4.5-6 1 3-5.5-3-5.5 6 1 4.5-4.5 1 6z" /></g>
-    case 'artifact':
-      return <g data-rarity-detail="relic-spikes" {...common}><path d="m40 1 5 10-5-3-5 3zm39 39-10 5 3-5-3-5zM40 79l-5-10 5 3 5-3zM1 40l10-5-3 5 3 5zM8 8l11 4-7 1-1 7zm64 0-4 11-1-7-7-1zm0 64-11-4 7-1 1-7zM8 72l4-11 1 7 7 1z" /></g>
-    case 'varies':
-      return <g data-rarity-detail="shifting-orbs" {...common}><circle cx="12" cy="12" r="2.2" /><circle cx="40" cy="5" r="2.2" /><circle cx="68" cy="12" r="2.2" /><circle cx="75" cy="40" r="2.2" /><circle cx="68" cy="68" r="2.2" /><circle cx="40" cy="75" r="2.2" /><circle cx="12" cy="68" r="2.2" /><circle cx="5" cy="40" r="2.2" /></g>
-  }
-}
-
 export default function Dnd5eActionIcon({ spec, className = '', level, badge, active = false, disabled = false }: Dnd5eActionIconProps) {
   const reactId = useId().replace(/:/g, '')
   const gradientId = `action-icon-${reactId}`
+  const [classBorderFlowBegin] = useState(() => dnd5eClassBorderFlowBegin())
   const paintedActionAsset = spec.asset ??
     (spec.motif === 'melee-attack'
       ? '/assets/icons/melee-attack-action.png'
@@ -241,34 +236,26 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
             <stop offset="0" stopColor={spec.background} />
             <stop offset="1" stopColor={spec.backgroundDeep} />
           </radialGradient>
-          <linearGradient
-            id={`${gradientId}-class-border`}
-            x1="0"
-            y1="0"
-            x2="80"
-            y2="80"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0" stopColor={spec.accent} stopOpacity=".7" />
-            <stop offset=".2" stopColor={spec.accent} stopOpacity=".74" />
-            <stop offset=".38" stopColor={spec.glow} stopOpacity=".86" />
-            <stop offset=".5" stopColor="#ffffff" />
-            <stop offset=".62" stopColor={spec.glow} stopOpacity=".86" />
-            <stop offset=".8" stopColor={spec.accent} stopOpacity=".74" />
-            <stop offset="1" stopColor={spec.accent} stopOpacity=".7" />
-            <animateTransform
-              attributeName="gradientTransform"
-              type="rotate"
-              from="0 40 40"
-              to="360 40 40"
-              dur="8s"
-              repeatCount="indefinite"
-            />
-          </linearGradient>
+          {spec.rarityBackdropId ? (
+            <linearGradient id={`${gradientId}-rarity-background`} x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stopColor={spec.background} stopOpacity=".3" />
+              <stop offset=".55" stopColor={spec.backgroundDeep} stopOpacity=".17" />
+              <stop offset="1" stopColor={spec.background} stopOpacity=".06" />
+            </linearGradient>
+          ) : null}
           <filter id={`${gradientId}-glow`} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.4" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-          <filter id={`${gradientId}-border-glow`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation=".8" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+          <filter id={`${gradientId}-border-glow`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation={DND5E_CLASS_BORDER_BLUR_STD_DEVIATION} result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
         </defs>
-        <rect width="80" height="80" rx="11" fill={`url(#${gradientId})`} />
+        <rect width="80" height="80" rx="11" fill={spec.rarityBackdropId ? '#070a10' : `url(#${gradientId})`} />
+        {spec.rarityBackdropId ? (
+          <rect
+            width="80"
+            height="80"
+            rx="11"
+            fill={`url(#${gradientId}-rarity-background)`}
+            data-rarity-background="subtle-gradient"
+          />
+        ) : null}
         {spec.classBackdropId ? (
           <g data-class-backdrop={spec.classBackdropId}>
             <rect width="80" height="80" rx="11" fill={spec.glow} opacity=".035" />
@@ -304,7 +291,7 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
         ) : null}
         {spec.classBackdropId ? (
           <g data-class-border={spec.classBackdropId}>
-            <rect x="2.75" y="2.75" width="74.5" height="74.5" rx="8.75" fill="none" stroke={spec.backgroundDeep} strokeOpacity=".82" strokeWidth="4.8" />
+            <rect x="2.75" y="2.75" width="74.5" height="74.5" rx="8.75" fill="none" stroke={spec.backgroundDeep} strokeOpacity={DND5E_CLASS_BORDER_DEEP_STROKE_OPACITY} strokeWidth={DND5E_CLASS_BORDER_DEEP_STROKE_WIDTH} />
             <rect
               className="dnd5e-class-border-line"
               x="2.75"
@@ -313,23 +300,35 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
               height="74.5"
               rx="8.75"
               fill="none"
-              stroke={`url(#${gradientId}-class-border)`}
-              strokeWidth="3.1"
+              stroke={spec.glow}
+              strokeOpacity=".3"
+              strokeWidth={DND5E_CLASS_BORDER_TOP_STROKE_WIDTH}
               filter={`url(#${gradientId}-border-glow)`}
             />
             <ClassBorderOrnaments classId={spec.classBackdropId} color={spec.accent} />
           </g>
         ) : spec.rarityBackdropId ? (
           <g data-rarity-border={spec.rarityBackdropId}>
-            <rect x="2" y="2" width="76" height="76" rx="9.5" fill="none" stroke={spec.backgroundDeep} strokeOpacity=".9" strokeWidth="4" />
-            <rect x="3.5" y="3.5" width="73" height="73" rx="8" fill="none" stroke={spec.glow} strokeOpacity=".95" strokeWidth={spec.rarityBackdropId === 'legendary' || spec.rarityBackdropId === 'artifact' ? '2.8' : '2.1'} filter={`url(#${gradientId}-border-glow)`} />
-            <rect x="6.5" y="6.5" width="67" height="67" rx="6" fill="none" stroke={spec.accent} strokeOpacity=".45" strokeWidth="1" />
-            <RarityBorderOrnaments rarity={spec.rarityBackdropId} color={spec.accent} />
+            <rect x="1.75" y="1.75" width="76.5" height="76.5" rx="9.75" fill="none" stroke="#02040a" strokeOpacity=".95" strokeWidth="3.5" />
+            <rect x="3" y="3" width="74" height="74" rx="8.5" fill="none" stroke={spec.glow} strokeOpacity=".92" strokeWidth="2" filter={`url(#${gradientId}-border-glow)`} />
           </g>
         ) : (
           <rect x="1.5" y="1.5" width="77" height="77" rx="10" fill="none" stroke={spec.accent} strokeOpacity={paintedActionAsset ? '.34' : '.52'} strokeWidth={paintedActionAsset ? '1.5' : '2'} />
         )}
       </svg>
+      {spec.classBackdropId ? (
+        <span className="dnd5e-class-border-flow" data-class-border-flow={spec.classBackdropId}>
+          <span
+            className="dnd5e-class-border-flow__paint"
+            style={{
+              '--dnd5e-class-border-accent': spec.accent,
+              '--dnd5e-class-border-glow': spec.glow,
+              animationDuration: DND5E_CLASS_BORDER_FLOW_DURATION,
+              animationDelay: classBorderFlowBegin,
+            } as Dnd5eClassBorderFlowStyle}
+          />
+        </span>
+      ) : null}
       {level != null ? <span className="absolute bottom-1 left-1 min-w-5 rounded-md border border-white/15 bg-black/70 px-1 text-center text-[10px] font-black text-white shadow">{level}</span> : null}
       {badge != null && badge !== '' ? <span className={`absolute rounded border border-white/15 bg-black/75 text-center font-black text-white shadow ${paintedActionAsset ? 'right-0.5 top-0.5 min-w-4 px-0.5 text-[9px]' : 'right-1 top-1 min-w-5 px-1 text-[10px]'}`}>{badge}</span> : null}
     </span>

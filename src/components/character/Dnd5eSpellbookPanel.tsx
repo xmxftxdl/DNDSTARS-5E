@@ -412,7 +412,7 @@ function importedRange(spell: ImportedSpell): string {
   const types = { self: '自身', touch: '触及', sight: '视线', unlimited: '无限', special: '特殊' } as const
   const base = spell.range.type === 'distance' ? `${spell.range.feet ?? 0} 尺` : types[spell.range.type]
   if (!spell.range.shape) return base
-  const shapes = { cone: '锥形', cube: '立方体', cylinder: '柱形', line: '线形', radius: '半径', sphere: '球形' } as const
+  const shapes = { cone: '锥形', cube: '立方体', cylinder: '柱形', line: '线形', radius: '半径', rect: '矩形', sphere: '球形' } as const
   return `${base} · ${spell.range.sizeFeet ?? 0} 尺${shapes[spell.range.shape]}`
 }
 

@@ -1,5 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
+import type { Dnd5eInventoryHeadlessEffectSnapshot } from '../../types/inventory'
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant, hydrateDnd5eWildShapeCombatant } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
@@ -18,6 +19,8 @@ import {
 } from './classes'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import { syncDnd5ePrimalChampion } from './hitPoints'
+import { dnd5eInventoryHeadlessEffectSnapshots } from './inventoryHeadlessRuntime'
+import { normalizeDnd5eInventory } from './items'
 import { normalizeDnd5eHitPointMaximumReductionLedger } from './hitPointMaximumReductions'
 import {
   dnd5eCharacterHasPluginFeature,
@@ -71,6 +74,8 @@ export interface Dnd5eCharacter {
   inspiration: boolean
   conditions: readonly string[]
   classResources: Record<string, { current: number; max: number }>
+  inventoryHeadlessEffects?: readonly Dnd5eInventoryHeadlessEffectSnapshot[]
+  inventoryRevision?: number
   classId?: Dnd5eClassId
   subclassId?: string
   classLevels: Dnd5eClassLevels
@@ -250,6 +255,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   const pluginDamageImmunities = normalizedDamageTypes(
     staticModifiers.flatMap((modifier) => modifier.damageImmunities ?? []),
   ) ?? []
+  const inventory = normalizeDnd5eInventory(character)
   return {
     id: character.id,
     name: character.name,
@@ -290,6 +296,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     inspiration: character.inspiration > 0,
     conditions: [...character.conditions],
     classResources: dnd5eClassResources(character),
+    inventoryHeadlessEffects: dnd5eInventoryHeadlessEffectSnapshots(character),
+    inventoryRevision: inventory.revision ?? 0,
     classId: classDefinition?.id,
     subclassId,
     classLevels,
@@ -378,6 +386,8 @@ export function createCombatantFromDnd5eCharacter(input: {
     concentrating: character.concentrating,
     creatureType: '类人生物',
     classResources: character.classResources,
+    inventoryHeadlessEffects: character.inventoryHeadlessEffects,
+    inventoryRevision: character.inventoryRevision,
     classId: character.classId,
     subclassId: character.subclassId,
     classLevels: character.classLevels,

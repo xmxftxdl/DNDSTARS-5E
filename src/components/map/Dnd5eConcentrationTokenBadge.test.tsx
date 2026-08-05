@@ -1,5 +1,5 @@
 import { Children, isValidElement, type ReactNode } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import Dnd5eConcentrationTokenBadge, {
   DND5E_CONCENTRATION_TOKEN_IMAGE_SRC,
   type ConcentrationTokenMark,
@@ -41,8 +41,14 @@ describe('Dnd5eConcentrationTokenBadge', () => {
       y: -20,
       listening: false,
     })
-    expect(children).toHaveLength(1)
+    expect(children).toHaveLength(2)
     expect(elementProps(children[0])).toMatchObject({
+      name: 'dnd5e-concentration-token-backdrop',
+      radius: 12,
+      stroke: '#93c5fd',
+      listening: false,
+    })
+    expect(elementProps(children[1])).toMatchObject({
       image,
       x: -12,
       y: -12,
@@ -69,5 +75,35 @@ describe('Dnd5eConcentrationTokenBadge', () => {
         glowColor: '#60a5fa',
       },
     })).toBeNull()
+  })
+
+  it('reports pointer coordinates while the concentration marker is hovered', () => {
+    const onTooltipChange = vi.fn()
+    const badge = Dnd5eConcentrationTokenBadge({
+      x: 0,
+      y: 0,
+      size: 24,
+      image: {} as HTMLImageElement,
+      mark: {
+        tokenId: 'wizard-token',
+        spellId: 'flaming-sphere',
+        backgroundHighlightColor: '#3b82f6',
+        backgroundColor: '#172554',
+        borderColor: '#93c5fd',
+        glowColor: '#60a5fa',
+      },
+      onTooltipChange,
+    })
+    const badgeProps = elementProps(badge)
+    const event = { evt: { clientX: 120, clientY: 80 } }
+
+    expect(badgeProps.listening).toBe(true)
+    ;(badgeProps.onMouseEnter as (input: typeof event) => void)(event)
+    ;(badgeProps.onMouseMove as (input: typeof event) => void)(event)
+    ;(badgeProps.onMouseLeave as () => void)()
+
+    expect(onTooltipChange).toHaveBeenNthCalledWith(1, { clientX: 120, clientY: 80 })
+    expect(onTooltipChange).toHaveBeenNthCalledWith(2, { clientX: 120, clientY: 80 })
+    expect(onTooltipChange).toHaveBeenNthCalledWith(3)
   })
 })

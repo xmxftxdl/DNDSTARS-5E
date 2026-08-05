@@ -26,6 +26,7 @@ import {
   type AccountSession,
 } from '../lib/accountSession'
 import { getRoomClientId } from '../lib/roomSession'
+import { showAppConfirm } from '../lib/appDialog'
 
 interface AccountAuthPanelProps {
   account: AccountSession | null
@@ -173,7 +174,11 @@ export default function AccountAuthPanel({
 
   const signOut = async () => {
     if (busy) return
-    if (!window.confirm('退出登录不会删除云端角色；之后可使用用户名和密码重新登录。确定退出吗？')) return
+    if (!await showAppConfirm({
+      title: '退出登录',
+      message: '退出登录不会删除云端角色；之后可使用用户名和密码重新登录。确定退出吗？',
+      confirmLabel: '退出登录',
+    })) return
     setBusy(true)
     try {
       await logoutAccount()

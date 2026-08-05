@@ -158,7 +158,8 @@ export function normalizeAiProviderSelection(value) {
       schemaVersion: AI_PROVIDER_SELECTION_SCHEMA_VERSION,
       providerId,
       ...(modelId ? { modelId } : {}),
-      allowPaidFallback: value.allowPaidFallback === true,
+      // Retain the V1 field for stored-selection compatibility, but automatic paid fallback is retired.
+      allowPaidFallback: false,
       maxCreditsPerTask,
     },
   }
@@ -308,13 +309,6 @@ export function selectAiProvider(input) {
   const selected = attempt(selectedProvider, selection.value.modelId, false)
   if (selected) return selected
   if (!selectedProvider) return { ok: false, error: 'provider-not-found' }
-  if (!selection.value.allowPaidFallback) {
-    if (selectedProvider.status !== 'ready') return { ok: false, error: 'provider-unavailable' }
-    return { ok: false, error: 'provider-cannot-run-task' }
-  }
-  const fallback = providers
-    .filter((provider) => provider.id !== selectedProvider.id && provider.pricing.mode === 'platform-credit')
-    .map((provider) => attempt(provider, undefined, true))
-    .find(Boolean)
-  return fallback ?? { ok: false, error: 'paid-fallback-unavailable' }
+  if (selectedProvider.status !== 'ready') return { ok: false, error: 'provider-unavailable' }
+  return { ok: false, error: 'provider-cannot-run-task' }
 }

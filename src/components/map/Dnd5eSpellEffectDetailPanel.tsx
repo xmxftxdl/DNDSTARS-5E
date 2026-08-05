@@ -1,6 +1,7 @@
 import { Flame, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import type { Token } from '../../store/maps'
+import { showAppConfirm } from '../../lib/appDialog'
 
 interface Dnd5eSpellEffectDetailPanelProps {
   token: Token
@@ -22,7 +23,12 @@ export default function Dnd5eSpellEffectDetailPanel({
 
   const remove = async () => {
     if (deleting) return
-    if (!window.confirm(`删除「${token.label || '法术实体'}」及其关联区域？`)) return
+    if (!await showAppConfirm({
+      title: '删除法术实体',
+      message: `删除「${token.label || '法术实体'}」及其关联区域？`,
+      confirmLabel: '确认删除',
+      tone: 'danger',
+    })) return
     setDeleting(true)
     setError(undefined)
     try {

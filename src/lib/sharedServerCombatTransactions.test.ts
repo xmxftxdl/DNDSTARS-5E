@@ -1015,7 +1015,7 @@ describe('combat authority state transaction', () => {
     expect(await maps.json()).toMatchObject({ maps: [{ tokens: [{ x: 10, y: 20 }] }] })
   })
 
-  it('rejects command-id payload conflicts, stale combat revisions, and another player acting for the current character', async () => {
+  it('rejects command-id payload conflicts, stale combat identity, and another player acting for the current character', async () => {
     const room = await createRoom()
     const owner = await joinRoom(room.roomId, 'Owner', `command-owner-${room.roomId}`)
     const stranger = await joinRoom(room.roomId, 'Stranger', `command-stranger-${room.roomId}`)
@@ -1045,16 +1045,18 @@ describe('combat authority state transaction', () => {
 
     const staleBody = moveCommand()
     staleBody.command.commandId = 'stale-command'
-    // This revision is initially in the future, then becomes current below.
-    // The first terminal receipt must still win after that state transition.
+    // A coarse revision mismatch is tolerated, but a different round is an
+    // authoritative semantic conflict. The first terminal receipt must still
+    // win even after unrelated combat state advances.
     staleBody.command.expectedRevisions.combat = 2
+    staleBody.command.round = 2
     const staleUrl = `${base}/api/combat/commands/stale-command?room=${room.roomId}`
     const stale = await fetch(staleUrl, {
       method: 'PUT', headers: memberHeaders(owner.member), body: JSON.stringify(staleBody),
     })
     expect(stale.status).toBe(409)
     expect(await stale.json()).toMatchObject({
-      error: 'combat-command-revision-conflict',
+      error: 'combat-command-entity-conflict',
       receipt: { commandId: 'stale-command', commandType: 'move-token', status: 'conflict' },
     })
     const advanceCombat = await fetch(`${base}/api/state/transaction?room=${room.roomId}`, {
@@ -1090,7 +1092,7 @@ describe('combat authority state transaction', () => {
 
     const validBody = moveCommand()
     validBody.command.commandId = 'valid-command'
-    validBody.command.expectedRevisions.combat = 2
+    validBody.command.expectedRevisions.combat = 999
     const validUrl = `${base}/api/combat/commands/valid-command?room=${room.roomId}`
     const accepted = await fetch(validUrl, {
       method: 'PUT', headers: memberHeaders(owner.member), body: JSON.stringify(validBody),

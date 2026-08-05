@@ -108,8 +108,11 @@ export type SharedCombatStateApplyDecision =
       monsterTurnProgress?: Dnd5eMonsterTurnProgressV1
       incomingCombatId: string
       incomingUpdatedAt: number
+      incomingRevision?: number
       snapshot: string
       combatChanged: boolean
+      /** The server restored an older domain snapshot as a new authoritative revision. */
+      authorityRollback: boolean
       shouldResetPlayerActionState: boolean
       playerCombatEndedLocked?: boolean
     }
@@ -121,6 +124,7 @@ export function resolveSharedCombatStateApply(input: {
   currentCombatId: string
   currentDnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   lastAppliedCombatId: string
+  lastAppliedRevision?: number
   lastAppliedUpdatedAt: number
   lastSnapshot: string
   isDm: boolean
@@ -158,6 +162,8 @@ export function resolveSharedCombatStateApply(input: {
   )
   const incomingCombatId = state.combatId ?? ''
   const incomingUpdatedAt = state.updatedAt ?? 0
+  const incomingRevision = Number(state._sync?.revision)
+  const lastAppliedRevision = Number(input.lastAppliedRevision)
   const settlementMode = normalizeCombatSettlementMode(state.settlementMode)
   const currentEntry = initiativeOrder[initiativeIndex]
   const monsterTurnProgress = normalizeDnd5eMonsterTurnProgress(
@@ -177,9 +183,18 @@ export function resolveSharedCombatStateApply(input: {
     },
   )
 
+  const staleByAuthorityRevision =
+    Number.isInteger(incomingRevision) &&
+    incomingRevision >= 0 &&
+    Number.isInteger(lastAppliedRevision) &&
+    lastAppliedRevision >= 0 &&
+    incomingRevision < lastAppliedRevision
+  const staleByDomainTime =
+    (!Number.isInteger(incomingRevision) || incomingRevision < 0) &&
+    incomingUpdatedAt < input.lastAppliedUpdatedAt
   if (
     incomingCombatId === input.lastAppliedCombatId &&
-    incomingUpdatedAt < input.lastAppliedUpdatedAt
+    (staleByAuthorityRevision || staleByDomainTime)
   ) {
     return { status: 'ignored', reason: 'stale' }
   }
@@ -194,6 +209,7 @@ export function resolveSharedCombatStateApply(input: {
   if (snapshot === input.lastSnapshot) return { status: 'ignored', reason: 'unchanged' }
 
   const combatChanged = incomingCombatId !== input.currentCombatId
+  const authorityRollback = state._sync?.writerId.startsWith('dm-undo:') === true
   return {
     status: 'apply',
     active,
@@ -211,8 +227,12 @@ export function resolveSharedCombatStateApply(input: {
     monsterTurnProgress,
     incomingCombatId,
     incomingUpdatedAt,
+    ...(Number.isInteger(incomingRevision) && incomingRevision >= 0
+      ? { incomingRevision }
+      : {}),
     snapshot,
     combatChanged,
+    authorityRollback,
     shouldResetPlayerActionState: combatChanged || !active,
     playerCombatEndedLocked: active ? false : !input.isDm && incomingCombatId ? true : undefined,
   }

@@ -5,6 +5,7 @@ import {
   clearPendingLocalPluginFeaturesForTest,
   clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterHitPointEditsForTest,
+  clearPendingLocalCharacterClassResourceEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
   clearPendingLocalAdvancementsForTest,
   filterLegacySampleCharacters,
@@ -14,10 +15,12 @@ import {
   mergePendingLocalPluginFeatures,
   mergePendingLocalCharacterLevelEdits,
   mergePendingLocalCharacterHitPointEdits,
+  mergePendingLocalCharacterClassResourceEdits,
   mergePendingLocalAdvancements,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
   markPendingLocalCharacterHitPointEdit,
+  markPendingLocalCharacterClassResourceEdit,
   markPendingLocalFighterChoices,
   markPendingLocalClassChoices,
   markPendingLocalPluginFeatures,
@@ -27,6 +30,7 @@ import {
   resetPendingLocalPluginFeaturesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
   resetPendingLocalCharacterHitPointEditMemoryForTest,
+  resetPendingLocalCharacterClassResourceEditMemoryForTest,
   resetPendingLocalAdvancementsMemoryForTest,
   shouldApplySharedCharactersSnapshot,
   useCharacterStore,
@@ -413,6 +417,59 @@ describe('pending local character-sheet hit point edits', () => {
   })
 })
 
+describe('pending local character class-resource edits', () => {
+  afterEach(() => {
+    clearPendingLocalCharacterClassResourceEditsForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps Arcane Recovery and restored spell slots until the room acknowledges them', () => {
+    const recovered = {
+      'dnd5e-arcane-recovery': { current: 0, max: 1 },
+      'dnd5e-spell-slot-1': { current: 3, max: 4 },
+    }
+    markPendingLocalCharacterClassResourceEdit('hero', recovered, 1_000)
+
+    const stale = mergePendingLocalCharacterClassResourceEdits([char({
+      classResources: {
+        'dnd5e-arcane-recovery': { current: 1, max: 1 },
+        'dnd5e-spell-slot-1': { current: 2, max: 4 },
+      },
+    })], 1_001)[0]
+    expect(stale.classResources).toEqual(recovered)
+
+    const acknowledged = mergePendingLocalCharacterClassResourceEdits([
+      char({ classResources: recovered }),
+    ], 1_002)[0]
+    expect(acknowledged.classResources).toEqual(recovered)
+    expect(mergePendingLocalCharacterClassResourceEdits([char({
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 4 } },
+    })], 1_003)[0].classResources).toEqual({
+      'dnd5e-spell-slot-1': { current: 1, max: 4 },
+    })
+  })
+
+  it('restores the pending resource choice after a page reload', () => {
+    const storage = new Map<string, string>()
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    })
+    clearPendingLocalCharacterClassResourceEditsForTest()
+    markPendingLocalCharacterClassResourceEdit('hero', {
+      'dnd5e-arcane-recovery': { current: 0, max: 1 },
+    }, 1_000)
+    resetPendingLocalCharacterClassResourceEditMemoryForTest()
+
+    expect(mergePendingLocalCharacterClassResourceEdits([char({
+      classResources: { 'dnd5e-arcane-recovery': { current: 1, max: 1 } },
+    })], 1_001)[0].classResources?.['dnd5e-arcane-recovery'].current).toBe(0)
+  })
+})
+
 describe('character shared snapshot ordering', () => {
   it('accepts a newer server revision even when the DM wall clock is behind the player', () => {
     expect(shouldApplySharedCharactersSnapshot({
@@ -606,17 +663,25 @@ describe('pending local level advancement receipts', () => {
       char({ id: 'hero', dnd5eLevelAdvancements: [] }),
     ], 1_001)[0]
     expect(merged.dnd5eLevelAdvancements).toEqual([record])
+    expect(merged.level).toBe(2)
+    expect(merged.dnd5eClassLevels).toEqual({ fighter: 2 })
     expect(merged.abilities.str).toBe(18)
     expect(merged.skills).toContain('perception')
     expect(merged.dnd5eFeatIds).toEqual(['srd5.1:grappler'])
+    expect(merged.maxHp).toBe(record.after.maxHp)
+    expect(merged.currentHp).toBe(record.after.currentHp)
     expect(values.size).toBe(1)
 
     expect(mergePendingLocalAdvancements([
       char({
         id: 'hero',
+        level: record.after.level,
+        dnd5eClassLevels: { ...record.after.dnd5eClassLevels },
         abilities: { ...record.after.abilities },
         skills: [...record.after.skills],
         dnd5eFeatIds: [...(record.after.dnd5eFeatIds ?? [])],
+        maxHp: record.after.maxHp,
+        currentHp: record.after.currentHp,
         dnd5eLevelAdvancements: [record],
       }),
     ], 1_002)[0].dnd5eLevelAdvancements).toEqual([record])

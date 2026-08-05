@@ -1,23 +1,21 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { getAccountSession } from '../lib/accountSession'
-import { restoreClassResources, syncCharacterClassResources } from '../lib/classResources'
+import { syncCharacterClassResources } from '../lib/classResources'
 import { migrateLegacyCharacterFields } from '../lib/legacyCharacterMigration'
 import { normalizeCharacterInitiativePortrait, normalizeCharacterPortrait, normalizeCharacterTokenPortrait } from '../lib/characterPortrait'
 import { normalizeCharacterAvatar } from '../lib/characterAvatar'
 import { defaultEquipmentForDnd5eCharacter, normalizeDnd5eCharacterEquipment } from '../rulesets/dnd5e/equipment'
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
 import { syncDnd5eHitPoints } from '../rulesets/dnd5e/hitPoints'
-import { applyDnd5eShortRestResourceFeatures, dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
+import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import {
   applyDnd5eInventoryGrantBundle,
   applyDnd5eInventoryMutation,
   normalizeDnd5eInventory,
-  resolveDnd5eAttunementAfterShortRest,
-  restoreDnd5eInventoryResources,
 } from '../rulesets/dnd5e/items'
 import { dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels } from '../rulesets/dnd5e/multiclass'
 import {
@@ -33,7 +31,11 @@ import type {
   Dnd5eInventoryMutationResult,
 } from '../types/inventory'
 import type { SharedCampaignTimeState } from '../lib/campaignTime'
-import { applyDnd5eLongRestBenefits, reconcileDnd5eCharacterCampaignTime } from '../rulesets/dnd5e/campaignTimeRules'
+import {
+  applyDnd5eLongRestBenefits,
+  applyDnd5eShortRestBenefits,
+  reconcileDnd5eCharacterCampaignTime,
+} from '../rulesets/dnd5e/campaignTimeRules'
 import { canBenefitFromLongRest } from '../lib/campaignTime'
 import { useCampaignTimeStore } from './campaignTime'
 
@@ -67,6 +69,14 @@ type PendingLocalCharacterHitPointEdit = Partial<Pick<
 }
 const pendingLocalCharacterHitPointEdits = new Map<string, PendingLocalCharacterHitPointEdit>()
 let pendingLocalCharacterHitPointEditsHydrated = false
+const LOCAL_CHARACTER_CLASS_RESOURCE_EDIT_TTL_MS = 30000
+const PENDING_LOCAL_CHARACTER_CLASS_RESOURCE_EDITS_STORAGE_KEY = 'stars-character-class-resource-edits-v1'
+type PendingLocalCharacterClassResourceEdit = {
+  classResources: NonNullable<Character['classResources']>
+  updatedAt: number
+}
+const pendingLocalCharacterClassResourceEdits = new Map<string, PendingLocalCharacterClassResourceEdit>()
+let pendingLocalCharacterClassResourceEditsHydrated = false
 
 function pendingLocalCharacterEditStorage(): Storage | null {
   if (typeof window === 'undefined') return null
@@ -327,6 +337,123 @@ export function mergePendingLocalCharacterHitPointEdits(
       ...(pending.hitPointRolls == null ? {} : { hitPointRolls: [...pending.hitPointRolls] }),
       ...(pending.hitPointDice == null ? {} : { hitPointDice: pending.hitPointDice.map((pool) => ({ ...pool })) }),
     }
+  })
+}
+
+function cloneClassResources(
+  resources: Character['classResources'],
+): NonNullable<Character['classResources']> {
+  return Object.fromEntries(Object.entries(resources ?? {}).map(([key, resource]) => [key, {
+    current: Math.max(0, Math.floor(Number(resource.current) || 0)),
+    max: Math.max(0, Math.floor(Number(resource.max) || 0)),
+  }]))
+}
+
+function classResourcesSnapshot(resources: Character['classResources']): string {
+  return JSON.stringify(Object.entries(resources ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, resource]) => [key, resource.current, resource.max]))
+}
+
+function persistPendingLocalCharacterClassResourceEdits(): void {
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalCharacterClassResourceEdits.size === 0) {
+      storage.removeItem(PENDING_LOCAL_CHARACTER_CLASS_RESOURCE_EDITS_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_CHARACTER_CLASS_RESOURCE_EDITS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalCharacterClassResourceEdits)),
+    )
+  } catch {
+    // The in-memory guard remains useful when localStorage is unavailable.
+  }
+}
+
+function hydratePendingLocalCharacterClassResourceEdits(): void {
+  if (pendingLocalCharacterClassResourceEditsHydrated) return
+  pendingLocalCharacterClassResourceEditsHydrated = true
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_CHARACTER_CLASS_RESOURCE_EDITS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, PendingLocalCharacterClassResourceEdit>
+    for (const [id, pending] of Object.entries(parsed)) {
+      const updatedAt = Number(pending?.updatedAt)
+      if (!id || !Number.isFinite(updatedAt) || !pending?.classResources || typeof pending.classResources !== 'object') continue
+      pendingLocalCharacterClassResourceEdits.set(id, {
+        classResources: cloneClassResources(pending.classResources),
+        updatedAt,
+      })
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_CHARACTER_CLASS_RESOURCE_EDITS_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject both reads and writes.
+    }
+  }
+}
+
+function gcPendingLocalCharacterClassResourceEdits(now: number = Date.now()): void {
+  hydratePendingLocalCharacterClassResourceEdits()
+  let changed = false
+  for (const [id, pending] of pendingLocalCharacterClassResourceEdits) {
+    if (now - pending.updatedAt > LOCAL_CHARACTER_CLASS_RESOURCE_EDIT_TTL_MS) {
+      pendingLocalCharacterClassResourceEdits.delete(id)
+      changed = true
+    }
+  }
+  if (changed) persistPendingLocalCharacterClassResourceEdits()
+}
+
+export function markPendingLocalCharacterClassResourceEdit(
+  id: string,
+  classResources: Character['classResources'],
+  now: number = Date.now(),
+): void {
+  hydratePendingLocalCharacterClassResourceEdits()
+  pendingLocalCharacterClassResourceEdits.set(id, {
+    classResources: cloneClassResources(classResources),
+    updatedAt: now,
+  })
+  persistPendingLocalCharacterClassResourceEdits()
+}
+
+function clearPendingLocalCharacterClassResourceEdit(id: string): void {
+  if (!pendingLocalCharacterClassResourceEdits.delete(id)) return
+  persistPendingLocalCharacterClassResourceEdits()
+}
+
+export function clearPendingLocalCharacterClassResourceEditsForTest(): void {
+  pendingLocalCharacterClassResourceEdits.clear()
+  pendingLocalCharacterClassResourceEditsHydrated = true
+  persistPendingLocalCharacterClassResourceEdits()
+}
+
+export function resetPendingLocalCharacterClassResourceEditMemoryForTest(): void {
+  pendingLocalCharacterClassResourceEdits.clear()
+  pendingLocalCharacterClassResourceEditsHydrated = false
+}
+
+/** Keep a player-owned rest/resource choice until the room snapshot acknowledges it. */
+export function mergePendingLocalCharacterClassResourceEdits(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingLocalCharacterClassResourceEdits(now)
+  if (pendingLocalCharacterClassResourceEdits.size === 0) return sharedCharacters
+  return sharedCharacters.map((character) => {
+    const pending = pendingLocalCharacterClassResourceEdits.get(character.id)
+    if (!pending) return character
+    if (classResourcesSnapshot(character.classResources) === classResourcesSnapshot(pending.classResources)) {
+      clearPendingLocalCharacterClassResourceEdit(character.id)
+      return character
+    }
+    return { ...character, classResources: cloneClassResources(pending.classResources) }
   })
 }
 
@@ -693,9 +820,17 @@ function pendingAdvancementAcknowledged(
   const after = records.at(-1)?.after
   return advancementRecordsSnapshot(character.dnd5eLevelAdvancements) === advancementRecordsSnapshot(records) &&
     (!after || (
+      character.level === after.level &&
+      JSON.stringify(character.dnd5eClassLevels ?? {}) === JSON.stringify(after.dnd5eClassLevels ?? {}) &&
       JSON.stringify(character.abilities) === JSON.stringify(after.abilities) &&
       JSON.stringify([...(character.skills ?? [])].sort()) === JSON.stringify([...(after.skills ?? [])].sort()) &&
-      JSON.stringify([...(character.dnd5eFeatIds ?? [])].sort()) === JSON.stringify([...(after.dnd5eFeatIds ?? [])].sort())
+      JSON.stringify(character.dnd5eClassChoices ?? {}) === JSON.stringify(after.dnd5eClassChoices ?? {}) &&
+      JSON.stringify([...(character.dnd5eFeatIds ?? [])].sort()) === JSON.stringify([...(after.dnd5eFeatIds ?? [])].sort()) &&
+      character.hitPointMaximumMode === after.hitPointMaximumMode &&
+      JSON.stringify(character.hitPointRolls ?? []) === JSON.stringify(after.hitPointRolls ?? []) &&
+      JSON.stringify(character.hitPointDice ?? []) === JSON.stringify(after.hitPointDice ?? []) &&
+      character.maxHp === after.maxHp &&
+      character.currentHp === after.currentHp
     ))
 }
 
@@ -703,9 +838,17 @@ function advancementProjectionSnapshot(character: Character | undefined): string
   if (!character) return ''
   return JSON.stringify({
     records: character.dnd5eLevelAdvancements ?? [],
+    level: character.level,
+    classLevels: character.dnd5eClassLevels ?? {},
     abilities: character.abilities,
     skills: [...(character.skills ?? [])].sort(),
+    classChoices: character.dnd5eClassChoices ?? {},
     featIds: [...(character.dnd5eFeatIds ?? [])].sort(),
+    hitPointMaximumMode: character.hitPointMaximumMode,
+    hitPointRolls: character.hitPointRolls ?? [],
+    hitPointDice: character.hitPointDice ?? [],
+    maxHp: character.maxHp,
+    currentHp: character.currentHp,
   })
 }
 
@@ -817,9 +960,17 @@ export function mergePendingLocalAdvancements(
       ...character,
       dnd5eLevelAdvancements: structuredClone(pending.records),
       ...(after ? {
+        level: after.level,
+        dnd5eClassLevels: after.dnd5eClassLevels ? { ...after.dnd5eClassLevels } : undefined,
         abilities: { ...after.abilities },
         skills: [...after.skills],
+        dnd5eClassChoices: after.dnd5eClassChoices ? structuredClone(after.dnd5eClassChoices) : undefined,
         dnd5eFeatIds: after.dnd5eFeatIds ? [...after.dnd5eFeatIds] : undefined,
+        hitPointMaximumMode: after.hitPointMaximumMode,
+        hitPointRolls: after.hitPointRolls ? [...after.hitPointRolls] : undefined,
+        hitPointDice: after.hitPointDice ? after.hitPointDice.map((pool) => ({ ...pool })) : undefined,
+        maxHp: after.maxHp,
+        currentHp: after.currentHp,
       } : {}),
     }
   })
@@ -1197,7 +1348,10 @@ interface CharacterState {
   applyAuthorityUpdate: (
     id: string,
     patch: Partial<Character>,
-    options?: { protectHitPointsUntilAcknowledged?: boolean },
+    options?: {
+      protectHitPointsUntilAcknowledged?: boolean
+      protectClassResourcesUntilAcknowledged?: boolean
+    },
   ) => void
   applyInventoryMutation: (mutation: Dnd5eInventoryMutation) => Dnd5eInventoryMutationResult
   applyInventoryGrantBundle: (input: {
@@ -1265,8 +1419,8 @@ export const useCharacterStore = create<CharacterState>()(
           if (seq !== characterSaveSeq) return
           if (shared?.characters) {
             if (isPlayerPort()) {
-              const protectedSharedCharacters = mergePendingLocalCharacterHitPointEdits(
-                shared.characters,
+              const protectedSharedCharacters = mergePendingLocalCharacterClassResourceEdits(
+                mergePendingLocalCharacterHitPointEdits(shared.characters, Date.now()),
                 Date.now(),
               )
               const sharedById = new Map(protectedSharedCharacters.map((ch) => [ch.id, ch]))
@@ -1355,8 +1509,12 @@ export const useCharacterStore = create<CharacterState>()(
             sharedCharactersWithPendingPluginFeatures,
             Date.now(),
           )
-          const sharedCharactersWithPendingAdvancements = mergePendingLocalAdvancements(
+          const sharedCharactersWithPendingClassResources = mergePendingLocalCharacterClassResourceEdits(
             sharedCharactersWithPendingHitPoints,
+            Date.now(),
+          )
+          const sharedCharactersWithPendingAdvancements = mergePendingLocalAdvancements(
+            sharedCharactersWithPendingClassResources,
             Date.now(),
           )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
@@ -1389,12 +1547,18 @@ export const useCharacterStore = create<CharacterState>()(
           const pendingAdvancementsMustBeRepublished = sharedCharactersWithPendingAdvancements.some(
             (character, index) =>
               advancementProjectionSnapshot(character) !==
-              advancementProjectionSnapshot(sharedCharactersWithPendingHitPoints[index]),
+              advancementProjectionSnapshot(sharedCharactersWithPendingClassResources[index]),
+          )
+          const pendingClassResourcesMustBeRepublished = sharedCharactersWithPendingClassResources.some(
+            (character, index) =>
+              classResourcesSnapshot(character.classResources) !==
+              classResourcesSnapshot(sharedCharactersWithPendingHitPoints[index]?.classResources),
           )
           const pendingCharacterEditMustBeRepublished =
             pendingLevelMustBeRepublished || pendingFighterChoicesMustBeRepublished ||
             pendingClassChoicesMustBeRepublished || pendingPluginFeaturesMustBeRepublished ||
-            pendingHitPointsMustBeRepublished || pendingAdvancementsMustBeRepublished
+            pendingHitPointsMustBeRepublished || pendingClassResourcesMustBeRepublished ||
+            pendingAdvancementsMustBeRepublished
           const snapshot = JSON.stringify(shared)
           // 普通重复快照可短路；若它仍落后于持久化的本地编辑，则必须重新应用并重试保存。
           if (snapshot === lastSharedCharactersSnapshot && !pendingCharacterEditMustBeRepublished) {
@@ -1599,6 +1763,13 @@ export const useCharacterStore = create<CharacterState>()(
               clearPendingLocalCharacterHitPointEdit(id)
             }
           }
+          if (patch.classResources != null) {
+            if (options?.protectClassResourcesUntilAcknowledged) {
+              markPendingLocalCharacterClassResourceEdit(id, patch.classResources)
+            } else {
+              clearPendingLocalCharacterClassResourceEdit(id)
+            }
+          }
           return set((state) => ({
             characters: state.characters.map((character) =>
               character.id === id
@@ -1637,19 +1808,7 @@ export const useCharacterStore = create<CharacterState>()(
         },
         shortRestAll: () => {
           set((s) => ({
-            characters: s.characters.map((character) =>
-              resolveDnd5eAttunementAfterShortRest(restoreDnd5eInventoryResources(
-                applyDnd5eShortRestResourceFeatures(restoreClassResources({
-                  ...character,
-                  dnd5eCombatState: character.dnd5eCombatState ? {
-                    ...character.dnd5eCombatState,
-                    relentlessRageDc: undefined,
-                    relentlessRagePendingDc: undefined,
-                  } : undefined,
-                }, 'short-rest')),
-                'short-rest',
-              )),
-            ),
+            characters: s.characters.map(applyDnd5eShortRestBenefits),
           }))
           saveCharacters()
         },

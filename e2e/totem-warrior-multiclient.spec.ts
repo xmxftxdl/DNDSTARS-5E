@@ -8,6 +8,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { createDnd5eEffectiveRulesContextV1 } from '../src/rulesets/dnd5e/effectiveRulesContext'
+import { submitPlayerActionFromPage } from './support/playerAction'
 
 const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
 const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
@@ -58,8 +59,8 @@ interface SavedCharacter {
   id: string
   dnd5eCombatState?: {
     raging?: boolean
-    totemWarriorWolfAttunementTargetIds?: string[]
-    totemWarriorWolfAttunementTurnKey?: string
+    bonusProneEligibleTargetIds?: string[]
+    bonusProneEligibilityTurnKey?: string
   }
 }
 
@@ -271,19 +272,7 @@ async function installFastDiceFrame(context: BrowserContext) {
 }
 
 async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
-    const [{ publishPlayerActionRequest }, sharedApi] = await Promise.all([
-      import('/src/lib/playerActionSync.ts'),
-      import('/src/lib/sharedApi.ts'),
-    ])
-    await publishPlayerActionRequest({
-      action: payload as never,
-      loadQueue: () => sharedApi.loadSharedResource('player-action-requests'),
-      saveQueue: (queue) => sharedApi.saveSharedResource('player-action-requests', queue),
-      publishAction: (eventAction) =>
-        sharedApi.publishSharedEvent('player-action-player-to-dm', eventAction),
-    })
-  }, action)
+  await submitPlayerActionFromPage(page, action)
 }
 
 async function waitForAcceptedAck(
@@ -523,14 +512,13 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
   ])
   const dm = await dmContext.newPage()
   const player = await playerContext.newPage()
-  dm.on('dialog', (dialog) => void dialog.accept())
-
   try {
     await Promise.all([
       enterRoom(dm, DM, created),
       enterRoom(player, PLAYER, joined),
     ])
     await dm.locator('input[type="file"][webkitdirectory]').setInputFiles(COLLECTION_DIRECTORY)
+    await dm.getByTestId('app-dialog-confirm').click()
     await expect.poll(async () => {
       const response = await request.get(`${DM}/api/rooms/${created.roomId}/rules`, {
         headers: {
@@ -569,7 +557,7 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
       character: dashHero,
     })
     await openScenario(dm, player, dashScenario.heroToken.id)
-    await expect(player.getByRole('button', { name: '鹰图腾疾走' }))
+    await expect(player.getByRole('button', { name: '狂暴特性疾走' }))
       .toBeVisible({ timeout: 20_000 })
 
     const dash = playerAction({
@@ -581,7 +569,7 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
       seq: 1,
       payload: {
         dnd5eClassFeature: {
-          feature: 'barbarian-totem-eagle-dash',
+          feature: 'feature-rage-bonus-dash',
         },
       },
     })
@@ -614,7 +602,21 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
       character: wolfHero,
     })
     await openScenario(dm, player, wolfScenario.heroToken.id)
-    await expect(player.getByRole('button', { name: '狼图腾击倒' })).toHaveCount(0)
+    await expect.poll(async () => player.evaluate(async ({ characterId, requiredFeatureId }) => {
+      const [{ useCharacterStore }, { migrateCharacterToDnd5e }] = await Promise.all([
+        import('/src/store/characters.ts'),
+        import('/src/rulesets/dnd5e/character.ts'),
+      ])
+      const character = useCharacterStore.getState().characters
+        .find((candidate) => candidate.id === characterId)
+      return character
+        ? migrateCharacterToDnd5e(character).pluginFeatureIds.includes(requiredFeatureId)
+        : false
+    }, {
+      characterId: wolfHero.id,
+      requiredFeatureId: `${SUBCLASS_ID}.totemic-attunement-wolf`,
+    }), { timeout: 20_000 }).toBe(true)
+    await expect(player.getByRole('button', { name: '狂暴特性击倒' })).toHaveCount(0)
 
     const attack = playerAction({
       ...wolfScenario,
@@ -637,9 +639,9 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
         created.member,
       )
       return characters.characters.find((candidate) => candidate.id === wolfHero.id)
-        ?.dnd5eCombatState?.totemWarriorWolfAttunementTargetIds
-    }).toEqual([wolfScenario.enemyToken.id])
-    await expect(player.getByRole('button', { name: '狼图腾击倒' }))
+        ?.dnd5eCombatState?.bonusProneEligibleTargetIds
+    }, { timeout: 20_000 }).toEqual([wolfScenario.enemyToken.id])
+    await expect(player.getByRole('button', { name: '狂暴特性击倒' }))
       .toBeVisible({ timeout: 20_000 })
 
     const knockdown = playerAction({
@@ -652,7 +654,7 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
       seq: 3,
       payload: {
         dnd5eClassFeature: {
-          feature: 'barbarian-totem-wolf-knockdown',
+          feature: 'feature-rage-bonus-prone',
           targetTokenId: wolfScenario.enemyToken.id,
         },
       },
@@ -679,7 +681,7 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
           effect.standardCondition === 'prone' || effect.legacyCondition === 'prone',
         )
     }).toBe(true)
-    await expect(player.getByRole('button', { name: '狼图腾击倒' })).toHaveCount(0)
+    await expect(player.getByRole('button', { name: '狂暴特性击倒' })).toHaveCount(0)
   } finally {
     await Promise.all([dmContext.close(), playerContext.close()])
   }

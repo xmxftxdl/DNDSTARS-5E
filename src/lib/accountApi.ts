@@ -5,6 +5,7 @@ import {
   DND5E_2014_RULESET_ID,
   type RoomPluginRequirement,
   type RoomRulesSnapshot,
+  type RoomSession,
 } from './roomSession'
 import {
   getAccountSession,
@@ -106,6 +107,12 @@ export interface AccountPluginVersion {
   publisher: string
   license: string
   description?: string
+  workshopOrigin?: {
+    kind: 'dm-workshop'
+    campaignId?: string
+    roomId?: string
+    verifiedAt: number
+  }
   fileName: string
   integrity: string
   sizeBytes: number
@@ -356,6 +363,11 @@ export async function uploadAccountPlugin(input: {
   fileName: string
   integrity: string
   bytes: ArrayBuffer
+  authority?: {
+    kind: 'dm-workshop'
+    campaignId?: string
+    room?: Pick<RoomSession, 'roomId' | 'memberId' | 'roomToken'>
+  }
 }): Promise<AccountPluginVersion> {
   if (input.manifest.distributionPolicy === 'local-only') {
     throw new AccountApiError('plugin-local-only', 409)
@@ -387,6 +399,17 @@ export async function uploadAccountPlugin(input: {
           distributionPolicy: input.manifest.distributionPolicy ?? 'room-distributable',
           contentCategory: input.manifest.contentCategory ?? 'mixed',
         })),
+        ...(input.authority ? {
+          'X-Stars-Plugin-Origin': input.authority.kind,
+          ...(input.authority.campaignId
+            ? { 'X-Stars-Campaign-Id': input.authority.campaignId }
+            : {}),
+          ...(input.authority.room ? {
+            'X-Stars-Room-Id': input.authority.room.roomId,
+            'X-Stars-Member': input.authority.room.memberId,
+            'X-Stars-Room-Token': input.authority.room.roomToken,
+          } : {}),
+        } : {}),
         ...(input.manifest.description
           ? { 'X-Stars-Plugin-Description': encodeURIComponent(input.manifest.description) }
           : {}),
@@ -507,6 +530,8 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-plugin-version-limit': '账号插件版本数量已达到上限。',
     'account-plugin-storage-limit': '账号插件库空间已达到上限。',
     'account-plugin-in-use': '该插件版本仍被账号角色或发布记录引用，不能删除。',
+    'invalid-plugin-upload-origin': '插件上传来源无效。',
+    'dm-workshop-authority-required': '只有目标战役的所有者账号或已验证的当前房间 DM 才能从工坊上传插件。',
     'plugin-local-only': 'local-only 内容包只能保存在当前设备，不能上传到账号云库、房间或市场。',
     'plugin-ephemeral-room-only': 'room-ephemeral 合集只能临时导入当前房间，不能保存到账号云库或市场。',
     'public-plugin-must-be-declarative-json': '公开目录只接受声明式 JSON 规则包，不接受 JavaScript 插件。',
@@ -523,6 +548,7 @@ export function accountApiErrorMessage(error: unknown): string {
     'marketplace-rights-manifest-required': '公开商品必须提交权利清单。',
     'invalid-marketplace-rights-manifest': '权利清单不完整，请检查来源、许可证和创作者声明。',
     'marketplace-ai-disclosure-required': '包含 AI 辅助内容时必须填写公开披露说明。',
+    'marketplace-art-rights-required': '插件包包含图标或美术素材，请勾选美术素材并提交对应的分发权声明。',
     'invalid-marketplace-price': '商品价格无效；付费商品价格范围为 ¥1～¥99。',
     'marketplace-paid-commerce-disabled': '当前为免费扩展市场 Beta，付费发布和购买尚未开放。',
     'invalid-marketplace-installation': '插件安装状态无效，未写入市场统计。',

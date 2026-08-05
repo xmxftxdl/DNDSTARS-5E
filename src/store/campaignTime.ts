@@ -5,7 +5,7 @@ import {
   type CampaignTimeMutation,
   type SharedCampaignTimeState,
 } from '../lib/campaignTime'
-import { loadSharedResource, mutateSharedRoomResource } from '../lib/sharedApi'
+import { loadSharedResource, mutateSharedRoomResource } from '../composition/browserSharedRoomResources'
 
 interface CampaignTimeStore {
   state: SharedCampaignTimeState

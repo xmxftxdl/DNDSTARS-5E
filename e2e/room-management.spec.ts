@@ -73,8 +73,8 @@ test('DM can manage room capacity, membership and transfer authority from the da
     return (await response.json() as { maxPlayers: number }).maxPlayers
   }).toBe(6)
 
-  page.once('dialog', (dialog) => dialog.accept())
   await page.getByTestId(`room-kick-${playerB.member.memberId}`).click()
+  await page.getByTestId('app-dialog-confirm').click()
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/rooms/${created.roomId}/roster`, {
       headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
@@ -83,8 +83,8 @@ test('DM can manage room capacity, membership and transfer authority from the da
     return roster.players.find((member) => member.memberId === playerB.member.memberId)?.status
   }).toBe('removed')
 
-  page.once('dialog', (dialog) => dialog.accept())
   await page.getByTestId(`room-transfer-${playerA.member.memberId}`).click()
+  await page.getByTestId('app-dialog-confirm').click()
   await expect(page).toHaveURL(/\/maps$/)
   await expect.poll(() => page.evaluate((key) => {
     const value = JSON.parse(localStorage.getItem(key) ?? '{}') as { role?: string }

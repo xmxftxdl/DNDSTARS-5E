@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BellPlus, CalendarClock, Clock3, MoonStar, X } from 'lucide-react'
+import { BellPlus, CalendarClock, Clock3, Coffee, MoonStar, X } from 'lucide-react'
 import {
   campaignDay,
   campaignDisplayMinute,
@@ -14,9 +14,11 @@ import {
 } from '../lib/campaignTime'
 import type { AppMode } from '../lib/appMode'
 import { useCampaignTimeStore } from '../store/campaignTime'
-import { completeDnd5eCampaignLongRest } from '../store/campaignLongRest'
+import {
+  completeDnd5eCampaignLongRest,
+  completeDnd5eCampaignShortRest,
+} from '../store/campaignLongRest'
 import { useCharacterStore } from '../store/characters'
-import { planDnd5eTravel, type Dnd5eTravelPace } from '../rulesets/dnd5e/travel'
 
 export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const [open, setOpen] = useState(false)
@@ -29,9 +31,9 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const [timerUnit, setTimerUnit] = useState<'minute' | 'hour'>('minute')
   const [timerKind, setTimerKind] = useState<CampaignTimerKind>('reminder')
   const [timerCharacterId, setTimerCharacterId] = useState('')
-  const [travelPace, setTravelPace] = useState<Dnd5eTravelPace>('normal')
-  const [travelHours, setTravelHours] = useState(8)
-  const [travelDifficultTerrain, setTravelDifficultTerrain] = useState(false)
+  const [restKind, setRestKind] = useState<'short-rest' | 'long-rest'>('long-rest')
+  const [restCharacterIds, setRestCharacterIds] = useState<string[]>([])
+  const [ignoreLongRestCooldown, setIgnoreLongRestCooldown] = useState(false)
   const [manualMode, setManualMode] = useState<CampaignTimeDisplayMode>('campaign-day')
   const [manualDay, setManualDay] = useState(1)
   const [manualDate, setManualDate] = useState('')
@@ -48,11 +50,12 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const eligibleLongRests = dndCharacters.filter((character) =>
     canBenefitFromLongRest(character.dnd5eLastLongRestWorldMinute, longRestCompletion),
   ).length
-  const travel = useMemo(() => planDnd5eTravel({
-    pace: travelPace,
-    hours: travelHours,
-    difficultTerrain: travelDifficultTerrain,
-  }), [travelDifficultTerrain, travelHours, travelPace])
+  const blockedSelectedLongRests = restKind === 'long-rest'
+    ? dndCharacters.filter((character) =>
+        restCharacterIds.includes(character.id) &&
+        !canBenefitFromLongRest(character.dnd5eLastLongRestWorldMinute, longRestCompletion),
+      ).length
+    : 0
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true)
@@ -66,9 +69,23 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
     }
   }
   const advance = (minutes: number, reason: string) => run(() => mutate({ operation: 'advance', minutes, reason }))
-  const startLongRest = () => run(() =>
-    completeDnd5eCampaignLongRest('队伍完成长休'),
-  )
+  const startRest = () => {
+    if (restCharacterIds.length === 0) {
+      setError('请至少选择一名获得休息收益的角色。')
+      return
+    }
+    if (restKind === 'long-rest' && blockedSelectedLongRests > 0 && !ignoreLongRestCooldown) {
+      setError('选中的角色中有人在 24 小时内已获得过长休收益；请取消选择或启用 DM 覆盖。')
+      return
+    }
+    void run(() => restKind === 'short-rest'
+      ? completeDnd5eCampaignShortRest('DM 安排队伍短休', restCharacterIds)
+      : completeDnd5eCampaignLongRest(
+          'DM 安排队伍长休',
+          restCharacterIds,
+          ignoreLongRestCooldown,
+        ))
+  }
   const createTimer = () => {
     const character = characters.find((entry) => entry.id === timerCharacterId)
     const durationMinutes = timerDuration * (timerUnit === 'hour' ? 60 : 1)
@@ -94,6 +111,8 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
     setManualDay(campaignDay(displayMinute))
     setManualDate(campaignGregorianDate(clock) ?? localDate)
     setManualTime(`${Math.floor(minuteOfDay / 60).toString().padStart(2, '0')}:${(minuteOfDay % 60).toString().padStart(2, '0')}`)
+    setRestCharacterIds(dndCharacters.map((character) => character.id))
+    setIgnoreLongRestCooldown(false)
     setError('')
     setOpen(true)
   }
@@ -178,8 +197,6 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
                       void advance(customAmount * multiplier, 'DM 自定义推进')
                     }} className="rounded-xl bg-violet-500/20 px-3 text-xs font-semibold text-violet-200 disabled:opacity-50">推进</button>
                   </div>
-                  <button type="button" disabled={busy} onClick={() => void startLongRest()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-500/20 px-3 py-2.5 text-sm font-semibold text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50"><MoonStar className="h-4 w-4" />完成长休并推进 8 小时</button>
-                  <p className="mt-2 text-[11px] text-slate-500">{eligibleLongRests}/{dndCharacters.length} 名角色可获得长休收益；24 小时内重复长休只推进时间。</p>
                 </section>
 
                 <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
@@ -196,22 +213,74 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-emerald-300/10 bg-emerald-500/[0.025] p-4 md:col-span-2">
-                  <h3 className="text-sm font-semibold text-slate-200">队伍旅行</h3>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-[160px_120px_auto_auto]">
-                    <select value={travelPace} onChange={(event) => setTravelPace(event.target.value as Dnd5eTravelPace)} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs text-slate-200">
-                      <option value="fast">快速（感知 -5）</option>
-                      <option value="normal">正常</option>
-                      <option value="slow">慢速（可隐匿）</option>
-                    </select>
-                    <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
-                      <input type="number" min={0.25} max={24} step={0.25} value={travelHours} onChange={(event) => setTravelHours(Math.max(0.25, Math.min(24, Number(event.target.value) || 0.25)))} className="w-14 bg-transparent text-slate-100 outline-none" />小时
-                    </label>
-                    <label className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={travelDifficultTerrain} onChange={(event) => setTravelDifficultTerrain(event.target.checked)} />困难地形</label>
-                    <button type="button" disabled={busy} onClick={() => void advance(travel.elapsedMinutes, `${travelPace === 'fast' ? '快速' : travelPace === 'slow' ? '慢速' : '正常'}旅行 ${travel.hours} 小时`)} className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-200 disabled:opacity-50">推进旅行</button>
+                <section className="rounded-2xl border border-indigo-300/15 bg-indigo-500/[0.035] p-4 md:col-span-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                        {restKind === 'long-rest' ? <MoonStar className="h-4 w-4 text-indigo-300" /> : <Coffee className="h-4 w-4 text-emerald-300" />}
+                        队伍休息
+                      </h3>
+                      <p className="mt-1 text-[11px] text-slate-500">由 DM 指定休息类型和实际获得收益的角色。</p>
+                    </div>
+                    <div className="flex rounded-xl border border-white/10 bg-black/20 p-1">
+                      <button type="button" onClick={() => setRestKind('short-rest')} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${restKind === 'short-rest' ? 'bg-emerald-500/20 text-emerald-100' : 'text-slate-500'}`}>短休</button>
+                      <button type="button" onClick={() => setRestKind('long-rest')} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${restKind === 'long-rest' ? 'bg-indigo-500/25 text-indigo-100' : 'text-slate-500'}`}>长休</button>
+                    </div>
                   </div>
-                  <p className="mt-2 text-xs text-slate-400">预计前进 {travel.distanceMiles.toFixed(1)} 英里 · 用时 {formatCampaignDuration(travel.elapsedMinutes)}{travel.canStealth ? ' · 可在旅行中隐匿' : ''}{travel.passivePerceptionModifier ? ` · 被动察觉 ${travel.passivePerceptionModifier}` : ''}</p>
-                  {travel.forcedMarchChecks.length > 0 && <p className="mt-1 text-[11px] text-amber-300">强行军：每名角色依次进行 {travel.forcedMarchChecks.map((check) => `DC ${check.constitutionSaveDc}`).join('、')} 体质豁免；每次失败获得 1 级力竭。掷骰与力竭仍由 DM 在推进前确认。</p>}
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-slate-300">受益角色 · 已选 {restCharacterIds.length}/{dndCharacters.length}</p>
+                    <div className="flex gap-2 text-[11px]">
+                      <button type="button" onClick={() => setRestCharacterIds(dndCharacters.map((character) => character.id))} className="text-violet-300 hover:text-violet-200">全选</button>
+                      <button type="button" onClick={() => setRestCharacterIds([])} className="text-slate-500 hover:text-slate-300">清空</button>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {dndCharacters.map((character) => {
+                      const selected = restCharacterIds.includes(character.id)
+                      const eligible = canBenefitFromLongRest(character.dnd5eLastLongRestWorldMinute, longRestCompletion)
+                      return (
+                        <label key={character.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 ${selected ? 'border-indigo-400/35 bg-indigo-500/10' : 'border-white/8 bg-black/15'}`}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) => setRestCharacterIds((current) => event.target.checked
+                              ? [...new Set([...current, character.id])]
+                              : current.filter((id) => id !== character.id))}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold text-slate-200">{character.name}</span>
+                            <span className={`mt-0.5 block text-[10px] ${restKind === 'long-rest' && !eligible ? 'text-amber-300' : 'text-slate-500'}`}>
+                              {restKind === 'short-rest' ? '恢复短休资源' : eligible ? '可正常获得长休收益' : '24 小时内已获得过长休收益'}
+                            </span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                    {dndCharacters.length === 0 && <p className="py-4 text-center text-xs text-slate-600 sm:col-span-2">当前房间没有可选择的 D&D 5e 角色</p>}
+                  </div>
+
+                  {restKind === 'long-rest' && (
+                    <label className="mt-3 flex items-start gap-2 rounded-xl border border-amber-300/15 bg-amber-500/[0.04] px-3 py-2.5 text-xs text-amber-100/80">
+                      <input type="checkbox" checked={ignoreLongRestCooldown} onChange={(event) => setIgnoreLongRestCooldown(event.target.checked)} className="mt-0.5" />
+                      <span>DM 覆盖 24 小时限制：允许选中的角色再次获得长休收益。当前正常可受益 {eligibleLongRests}/{dndCharacters.length} 名。</span>
+                    </label>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={busy || restCharacterIds.length === 0 || (restKind === 'long-rest' && blockedSelectedLongRests > 0 && !ignoreLongRestCooldown)}
+                    onClick={startRest}
+                    className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${restKind === 'long-rest' ? 'bg-indigo-500/25 text-indigo-100 hover:bg-indigo-500/35' : 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30'}`}
+                  >
+                    {restKind === 'long-rest' ? <MoonStar className="h-4 w-4" /> : <Coffee className="h-4 w-4" />}
+                    {restKind === 'long-rest' ? '完成长休并推进 8 小时' : '完成短休并推进 1 小时'}
+                  </button>
+                  <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                    {restKind === 'long-rest'
+                      ? '仅选中角色恢复生命值、生命骰、法术位与长休资源。'
+                      : '仅选中角色恢复短休资源；使用生命骰恢复生命值仍由玩家在角色卡中决定。'}
+                  </p>
                 </section>
               </div>
             )}

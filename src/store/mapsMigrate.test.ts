@@ -87,6 +87,27 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.visualVariantId).toBeUndefined()
   })
 
+  it('keeps safe room portrait references and drops unsafe token-crop references', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: 'Map', width: 100, height: 100,
+        tokens: [
+          {
+            id: 'safe',
+            portraitImageId: 'monster_initiative_safe',
+            tokenPortraitImageId: 'monster_token_safe',
+          },
+          { id: 'unsafe', tokenPortraitImageId: '../private' },
+        ],
+      }],
+    })
+    expect(result.maps[0].tokens.find((token) => token.id === 'safe')).toMatchObject({
+      portraitImageId: 'monster_initiative_safe',
+      tokenPortraitImageId: 'monster_token_safe',
+    })
+    expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.tokenPortraitImageId).toBeUndefined()
+  })
+
   it('normalizes valid persistent item areas and drops malformed entries', () => {
     const result = migrateMapsState({
       maps: [{

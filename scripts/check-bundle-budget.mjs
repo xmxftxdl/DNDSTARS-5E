@@ -15,13 +15,27 @@ if (mainBytes > mainBudgetBytes) {
 }
 
 const indexHtml = await readFile(path.join(distDir, 'index.html'), 'utf8')
-for (const deferredChunk of ['MapsPage-', 'srd-monster-catalog-', 'diceFrame-']) {
+for (const deferredChunk of [
+  'MapsPage-',
+  'monsterTurnPlanner-',
+  'SceneCanvas-',
+  'diceFrame-',
+]) {
   if (indexHtml.includes(deferredChunk)) {
     throw new Error(`首页不应预加载重型异步资源：${deferredChunk}`)
   }
 }
 
-for (const expectedChunk of ['MapsPage-', 'srd-monster-catalog-', 'diceFrame-']) {
+for (const expectedChunk of [
+  'MapsPage-',
+  'monsterTurnPlanner-',
+  'SceneCanvas-',
+  'dnd5e-plugin-protocol-',
+  'dnd5e-plugin-registry-',
+  'dnd5e-plugin-headless-runtime-',
+  'dnd5e-plugin-compiler-',
+  'diceFrame-',
+]) {
   if (!assets.some((name) => name.startsWith(expectedChunk) && name.endsWith('.js'))) {
     throw new Error(`缺少预期的独立生产资源：${expectedChunk}*.js`)
   }

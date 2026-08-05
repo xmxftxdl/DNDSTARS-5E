@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "packId": "astraltrace.dnd5e-2014.art",
-  "version": "content-e4811efe67419057",
+  "version": "content-03c87adfb36d4d37",
   "assetBasePath": "/assets/",
   "sourceCatalog": "src/lib/enemyPool.ts",
   "summary": {
-    "totalFiles": 2534,
-    "totalBytes": 3175436593,
-    "runtimeFiles": 1846,
-    "runtimeBytes": 516941117,
+    "totalFiles": 2546,
+    "totalBytes": 3194382297,
+    "runtimeFiles": 1858,
+    "runtimeBytes": 535886821,
     "authoringFiles": 688,
     "authoringBytes": 2658495476,
     "catalogTokenPortraits": 677,
@@ -18,7 +18,7 @@
     "authoringMasters": 426,
     "authoringRaw": 262,
     "icons": 403,
-    "vfx": 67
+    "vfx": 79
   },
   "files": [
     {
@@ -10720,6 +10720,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/banishment-sprite-v2.png",
+      "bytes": 1334215,
+      "sha256": "8709df4bb6c4e464c804ad5391820a9a8b57c1fcf56cafe697ef066f2d8248df",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/black-tentacles-sprite-v2.png",
       "bytes": 1789508,
       "sha256": "7eb01ed48744dea9fb092fd1577572a5ef025aa55a7dca8ba41baaeed06fdec8",
@@ -10780,6 +10786,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/cloudkill-sprite-v2.png",
+      "bytes": 1869537,
+      "sha256": "19e1a6cadbf32ee24a3b0dfbc142e61a630144fba00fdd10c324149414a1ced6",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/color-spray-sprite-v2.png",
       "bytes": 1171586,
       "sha256": "328723e9967cc0f0a5036b635b72ee2bbb3d26a09ad9968ba21658ebec54bf4e",
@@ -10789,6 +10801,12 @@
       "path": "assets/vfx/cone-of-cold-sprite-v2.png",
       "bytes": 1048860,
       "sha256": "f2a161b4a2b1c8b6ce458a822ddd354a70632079d581a425223d743f90cbc726",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/counterspell-sprite-v2.png",
+      "bytes": 1384403,
+      "sha256": "12feb693ee2a69e417b6d3f6717cbdfe1a02cd99d3e025a66a8357cae3c71a71",
       "contentType": "image/png"
     },
     {
@@ -10819,6 +10837,12 @@
       "path": "assets/vfx/disintegrate-sprite-v2.png",
       "bytes": 732333,
       "sha256": "c47357084efaa317c43d106eb2f918cc21541487beeee657cda4ceb602f7e984",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/dispel-magic-sprite-v2.png",
+      "bytes": 1176182,
+      "sha256": "eb14bab48c4c878a9169d7f1f005da80bf580d80afe5763e6590a9317b5bc876",
       "contentType": "image/png"
     },
     {
@@ -10930,6 +10954,24 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/hold-monster-sprite-v2.png",
+      "bytes": 2103805,
+      "sha256": "3aa91ec0775af08d65c353d63a2588d4783867f3cc60424fa7f43abf294a1cff",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/hypnotic-pattern-sprite-v2.png",
+      "bytes": 1829334,
+      "sha256": "93de308d855fa290e3121a67d574d825dd40856c52ef9bfdadddb112896d4685",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/ice-storm-ground-sprite-v2.png",
+      "bytes": 2227268,
+      "sha256": "51be57f9cf08031734155e523a983da7c944b957df7f04ca051711924831893f",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/ice-storm-sprite-v2.png",
       "bytes": 1780132,
       "sha256": "ba126801a7a1fd40e00844dd82e2bb62fb3615a6a3ae4509638ffe6a03205fb4",
@@ -10951,6 +10993,12 @@
       "path": "assets/vfx/insect-plague-sprite-v2.png",
       "bytes": 1580738,
       "sha256": "d7746160b22fafb62cad034475051bb9cfab88f639741912ee4527ee021a1bb1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/lesser-restoration-sprite-v2.png",
+      "bytes": 1301713,
+      "sha256": "4274746256167470ad9578070f409d0efc4af2d662bab54294cbc9cc04810d3d",
       "contentType": "image/png"
     },
     {
@@ -10978,9 +11026,21 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/misty-step-sprite-v2.png",
+      "bytes": 1223955,
+      "sha256": "32a7615da94efb7be262fbb838e189b32010772089159c4697516d0c71e838af",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/moonbeam-sprite-v2.png",
       "bytes": 1306439,
       "sha256": "af8ac4fc737b9322d3abfd8b4fe0aba1abcbad4d70614ab264f11933f224e74f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/phantasmal-killer-sprite-v2.png",
+      "bytes": 1913947,
+      "sha256": "9936ead595602cf5fdd55eb5904d7a7abef51e00729feb8b9db8e0a3e61e3284",
       "contentType": "image/png"
     },
     {
@@ -11056,9 +11116,21 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/shield-sprite-v2.png",
+      "bytes": 1064940,
+      "sha256": "f394665f901b8fe1325ddb9b3401e246c5c8f295e82a4c96a30f2b8aaf58fac6",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/vfx/sleep-sprite-v2.png",
       "bytes": 1636155,
       "sha256": "1620d6c93a8d7de7a326e30194b987346c2e8e53e7205acc4c3b0e237cabdf14",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/slow-sprite-v2.png",
+      "bytes": 1516405,
+      "sha256": "ca10b588e40c3490d17567c668c1a1996ec5970389d7e6fc26101f9e0cf76732",
       "contentType": "image/png"
     },
     {
@@ -21814,6 +21886,12 @@
           "sha256": "56ac587c0d9bc838b80f84d0b299a1f28050b6119c0b62f73ea8237e28831618"
         },
         {
+          "path": "/assets/vfx/banishment-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1334215,
+          "sha256": "8709df4bb6c4e464c804ad5391820a9a8b57c1fcf56cafe697ef066f2d8248df"
+        },
+        {
           "path": "/assets/vfx/black-tentacles-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1789508,
@@ -21874,6 +21952,12 @@
           "sha256": "c4ea7cfbc49aff7610582a1156a23839e8440df14882de3d14dc551031f8792a"
         },
         {
+          "path": "/assets/vfx/cloudkill-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1869537,
+          "sha256": "19e1a6cadbf32ee24a3b0dfbc142e61a630144fba00fdd10c324149414a1ced6"
+        },
+        {
           "path": "/assets/vfx/color-spray-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1171586,
@@ -21884,6 +21968,12 @@
           "mediaType": "image/png",
           "bytes": 1048860,
           "sha256": "f2a161b4a2b1c8b6ce458a822ddd354a70632079d581a425223d743f90cbc726"
+        },
+        {
+          "path": "/assets/vfx/counterspell-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1384403,
+          "sha256": "12feb693ee2a69e417b6d3f6717cbdfe1a02cd99d3e025a66a8357cae3c71a71"
         },
         {
           "path": "/assets/vfx/cure-wounds-fluid.png",
@@ -21914,6 +22004,12 @@
           "mediaType": "image/png",
           "bytes": 732333,
           "sha256": "c47357084efaa317c43d106eb2f918cc21541487beeee657cda4ceb602f7e984"
+        },
+        {
+          "path": "/assets/vfx/dispel-magic-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1176182,
+          "sha256": "eb14bab48c4c878a9169d7f1f005da80bf580d80afe5763e6590a9317b5bc876"
         },
         {
           "path": "/assets/vfx/eldritch-blast-fluid.png",
@@ -22024,6 +22120,24 @@
           "sha256": "04c5d987d8c29599f7105a147ee757ecb50229f4a31427baef915b20e663fb6a"
         },
         {
+          "path": "/assets/vfx/hold-monster-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 2103805,
+          "sha256": "3aa91ec0775af08d65c353d63a2588d4783867f3cc60424fa7f43abf294a1cff"
+        },
+        {
+          "path": "/assets/vfx/hypnotic-pattern-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1829334,
+          "sha256": "93de308d855fa290e3121a67d574d825dd40856c52ef9bfdadddb112896d4685"
+        },
+        {
+          "path": "/assets/vfx/ice-storm-ground-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 2227268,
+          "sha256": "51be57f9cf08031734155e523a983da7c944b957df7f04ca051711924831893f"
+        },
+        {
           "path": "/assets/vfx/ice-storm-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1780132,
@@ -22046,6 +22160,12 @@
           "mediaType": "image/png",
           "bytes": 1580738,
           "sha256": "d7746160b22fafb62cad034475051bb9cfab88f639741912ee4527ee021a1bb1"
+        },
+        {
+          "path": "/assets/vfx/lesser-restoration-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1301713,
+          "sha256": "4274746256167470ad9578070f409d0efc4af2d662bab54294cbc9cc04810d3d"
         },
         {
           "path": "/assets/vfx/lightning-bolt-fluid.png",
@@ -22072,10 +22192,22 @@
           "sha256": "71b83f3c89a0742267fb0dda5f11025e991819cdd41060976126aa6febb16fbe"
         },
         {
+          "path": "/assets/vfx/misty-step-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1223955,
+          "sha256": "32a7615da94efb7be262fbb838e189b32010772089159c4697516d0c71e838af"
+        },
+        {
           "path": "/assets/vfx/moonbeam-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1306439,
           "sha256": "af8ac4fc737b9322d3abfd8b4fe0aba1abcbad4d70614ab264f11933f224e74f"
+        },
+        {
+          "path": "/assets/vfx/phantasmal-killer-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1913947,
+          "sha256": "9936ead595602cf5fdd55eb5904d7a7abef51e00729feb8b9db8e0a3e61e3284"
         },
         {
           "path": "/assets/vfx/poison-spray-fluid.png",
@@ -22150,10 +22282,22 @@
           "sha256": "9e58d899f339f36a8ffc38bceae3f9463bb205c87bc34e7a1a9571dfa9628308"
         },
         {
+          "path": "/assets/vfx/shield-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1064940,
+          "sha256": "f394665f901b8fe1325ddb9b3401e246c5c8f295e82a4c96a30f2b8aaf58fac6"
+        },
+        {
           "path": "/assets/vfx/sleep-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1636155,
           "sha256": "1620d6c93a8d7de7a326e30194b987346c2e8e53e7205acc4c3b0e237cabdf14"
+        },
+        {
+          "path": "/assets/vfx/slow-sprite-v2.png",
+          "mediaType": "image/png",
+          "bytes": 1516405,
+          "sha256": "ca10b588e40c3490d17567c668c1a1996ec5970389d7e6fc26101f9e0cf76732"
         },
         {
           "path": "/assets/vfx/spike-growth-sprite-v2.png",
@@ -26328,5 +26472,5 @@
       ]
     }
   },
-  "contentSha256": "e4811efe674190576d749d7cbc958c4bca8e7150f17c69d3d9b30b0faa1841fe"
+  "contentSha256": "03c87adfb36d4d373c61ec3e75eb5f6edca126d45a06484f2be1111192cf5610"
 }

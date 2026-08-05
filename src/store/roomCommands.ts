@@ -9,10 +9,11 @@ import {
   validateDnd5eSourceBoundConditions,
   type Dnd5eActiveEffectInstance,
 } from '../rulesets/dnd5e'
-import { RoomCommandBus, type RoomCommandEnvelope } from '../lib/roomCommandBus'
+import { RoomCommandBus, type RoomCommandEnvelope } from '../application/commands/RoomCommandBus'
+import { browserRoomCommandTelemetry } from '../adapters/browser/performanceCommandTelemetry'
 import { appRoomAuthorityScheduler } from '../lib/roomAuthorityScheduler'
 import { getRoomSession } from '../lib/roomSession'
-import { saveSharedResourcesAtomically } from '../lib/sharedApi'
+import { browserSharedRoomService } from '../composition/browserSharedRoomService'
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
 import { useCharacterStore } from './characters'
@@ -150,7 +151,7 @@ async function persistRoomStores(resources: readonly ('characters' | 'maps')[]):
     const now = Date.now()
     const characters = useCharacterStore.getState()
     const maps = useMapStore.getState()
-    await saveSharedResourcesAtomically([
+    await browserSharedRoomService.saveSharedResourcesAtomically([
       {
         name: 'characters',
         data: { characters: characters.characters, selectedId: characters.selectedId ?? null, updatedAt: now },
@@ -549,6 +550,7 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
 
 export const appRoomCommandBus = new RoomCommandBus<AppRoomCommand, AppRoomCommandResult>(
   (command) => appRoomAuthorityScheduler.run(command.id, () => handleAppRoomCommand(command)),
+  { telemetry: browserRoomCommandTelemetry },
 )
 
 export function setRoomCharacterHitPoints(input: {

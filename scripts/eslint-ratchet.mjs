@@ -12,7 +12,17 @@ const baselinePath = path.join(repoRoot, '.eslint-ratchet.json')
 const { maxErrors } = JSON.parse(readFileSync(baselinePath, 'utf8'))
 
 // eslint exits non-zero when there are any errors; we parse JSON regardless of exit code.
-const res = spawnSync('npx', ['eslint', '.', '-f', 'json'], {
+const res = spawnSync('npx', [
+  'eslint',
+  '.',
+  '-f',
+  'json',
+  '--cache',
+  '--cache-location',
+  'node_modules/.cache/eslint/.eslintcache',
+  '--cache-strategy',
+  'content',
+], {
   cwd: repoRoot,
   encoding: 'utf8',
   shell: process.platform === 'win32',
@@ -28,7 +38,11 @@ let report
 try {
   report = JSON.parse(res.stdout)
 } catch {
-  console.error('[eslint-ratchet] could not parse eslint JSON output. stderr:\n', res.stderr)
+  console.error(
+    '[eslint-ratchet] could not parse eslint JSON output.',
+    `status=${res.status ?? 'null'} signal=${res.signal ?? 'none'} stdoutBytes=${res.stdout?.length ?? 0}`,
+    `stderr:\n${res.stderr}`,
+  )
   process.exit(2)
 }
 

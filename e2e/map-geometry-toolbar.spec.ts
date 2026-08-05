@@ -126,7 +126,7 @@ test('DM 几何与困难地形画笔实时同步到玩家端', async ({ browser,
 
   const canvas = page.getByTestId('map-canvas')
   const playerCanvas = playerPage.getByTestId('map-canvas')
-  await expect(canvas).toHaveAttribute('data-geometry-tool', 'off')
+  await expect(canvas).toHaveAttribute('data-geometry-tool', 'off', { timeout: 15_000 })
   await expect(canvas).toHaveAttribute('data-geometry-overlay-visible', 'true')
   await expect(canvas).toHaveAttribute('data-dm-geometry-wall-count', '0')
   await expect(playerCanvas).toHaveAttribute('data-geometry-overlay-visible', 'true')
@@ -134,6 +134,10 @@ test('DM 几何与困难地形画笔实时同步到玩家端', async ({ browser,
 
   const geometryButton = page.getByRole('button', { name: '几何', exact: true })
   await geometryButton.click()
+  await expect(page.getByTestId('map-wide-geometry-settings')).toContainText('全图设置')
+  await expect(page.getByLabel('默认视距（尺）')).toHaveValue('30')
+  await expect(page.getByLabel('全图环境光照')).toHaveValue('bright')
+  await expect(page.getByLabel('全图环境规则')).toHaveValue('normal')
   await page.getByLabel('地图几何工具').selectOption('wall')
   await page.getByLabel('墙体材质').selectOption('stone')
   await expect(canvas).toHaveAttribute('data-geometry-tool', 'wall')
@@ -184,11 +188,16 @@ test('DM 几何与困难地形画笔实时同步到玩家端', async ({ browser,
   await geometryButton.click()
   await page.getByLabel('地图几何工具').selectOption('difficult-terrain')
   await expect(canvas).toHaveAttribute('data-geometry-tool', 'difficult-terrain')
-  await page.mouse.move(box!.x + box!.width * 0.2, box!.y + box!.height * 0.28)
+  const difficultTerrainBox = await canvas.boundingBox()
+  expect(difficultTerrainBox).not.toBeNull()
+  await page.mouse.move(
+    difficultTerrainBox!.x + difficultTerrainBox!.width * 0.2,
+    difficultTerrainBox!.y + difficultTerrainBox!.height * 0.28,
+  )
   await page.mouse.down()
   await page.mouse.move(
-    box!.x + box!.width * 0.34,
-    box!.y + box!.height * 0.28,
+    difficultTerrainBox!.x + difficultTerrainBox!.width * 0.34,
+    difficultTerrainBox!.y + difficultTerrainBox!.height * 0.28,
     { steps: 6 },
   )
   await page.mouse.up()

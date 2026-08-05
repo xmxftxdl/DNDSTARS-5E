@@ -1,7 +1,7 @@
 // 共享服务端硬化核心：原子写锁 / 鉴权 / size cap / backlog cap / 图片配额 /
 // safeName 防碰撞 / API-404。两个服务端（vite-server.mjs + static-server.mjs）都从这里
 // import 同一份纯逻辑，避免双份漂移；纯函数集中在此以便 src/ 下的 vitest 直接 import .mjs。
-import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import {
   createHmac,
@@ -90,6 +90,41 @@ import {
   sharedAuthenticatedSystemRoute,
   sharedPublicSystemRoute,
 } from './shared-server-system-routes.mjs'
+import { createInMemorySseEventPublisher } from './adapters/in-memory-sse-event-publisher.mjs'
+import { listCampaignSnapshotSummaries, readCampaignSnapshot } from './application/campaign-snapshot-catalog.mjs'
+import {
+  applyCors,
+  applySecurityHeaders,
+  normalizedHttpOrigin,
+  productionSecurityEnabled,
+  validateProductionSecurityConfig,
+} from './application/server-security-config.mjs'
+import { observeServerOperation } from './ports/server-telemetry.mjs'
+export {
+  applyCors,
+  applySecurityHeaders,
+  productionSecurityEnabled,
+  validateProductionSecurityConfig,
+} from './application/server-security-config.mjs'
+import {
+  LockTimeoutError,
+  atomicRename,
+  atomicWriteImageLocked,
+  atomicWriteJsonStateFreshLocked,
+  atomicWriteLocked,
+  retryTransientWindowsRename,
+  safeName,
+  withWriteLock,
+} from './adapters/file-atomic-store.mjs'
+export {
+  LockTimeoutError,
+  atomicWriteImageLocked,
+  atomicWriteJsonStateFreshLocked,
+  atomicWriteLocked,
+  retryTransientWindowsRename,
+  safeName,
+  withWriteLock,
+} from './adapters/file-atomic-store.mjs'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
@@ -169,106 +204,6 @@ export const CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS = 2 * 60 * 1000
 const PROCESS_STARTED_AT = Date.now()
 const lastAutoSnapshotAt = new Map()
 
-export function productionSecurityEnabled(env = process.env) {
-  const explicit = String(env.STARS_SECURITY_MODE ?? '').trim().toLowerCase()
-  if (explicit === 'production') return true
-  if (explicit === 'development' || explicit === 'test') return false
-  return env.NODE_ENV === 'production'
-}
-
-function normalizedHttpOrigin(value) {
-  if (typeof value !== 'string' || !value.trim()) return null
-  try {
-    const parsed = new URL(value.trim())
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
-    if (parsed.username || parsed.password || parsed.search || parsed.hash) return null
-    if (parsed.pathname !== '/' && parsed.pathname !== '') return null
-    return parsed.origin
-  } catch {
-    return null
-  }
-}
-
-export function validateProductionSecurityConfig(env = process.env) {
-  if (!productionSecurityEnabled(env)) return { ok: true, production: false, errors: [] }
-  const errors = []
-  const publicOrigin = normalizedHttpOrigin(env.STARS_PUBLIC_ORIGIN)
-  if (!publicOrigin) errors.push('STARS_PUBLIC_ORIGIN must be an absolute http(s) origin')
-  if (
-    publicOrigin?.startsWith('http://') &&
-    !/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(publicOrigin)
-  ) {
-    errors.push('STARS_PUBLIC_ORIGIN must use https outside localhost')
-  }
-  if (typeof env.STARS_SHARED_ROOT !== 'string' || !env.STARS_SHARED_ROOT.trim()) {
-    errors.push('STARS_SHARED_ROOT must point to persistent storage')
-  }
-  const configuredOrigins = String(env.STARS_ALLOWED_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
-  if (configuredOrigins.includes('*')) errors.push('STARS_ALLOWED_ORIGINS cannot contain * in production')
-  for (const origin of configuredOrigins) {
-    if (!normalizedHttpOrigin(origin)) errors.push(`invalid STARS_ALLOWED_ORIGINS entry: ${origin}`)
-  }
-  if (String(env.STARS_ACCOUNT_STORAGE ?? '').trim().toLowerCase() === 'postgres') {
-    try {
-      const databaseUrl = new URL(String(env.STARS_DATABASE_URL ?? ''))
-      if (!['postgres:', 'postgresql:'].includes(databaseUrl.protocol)) {
-        errors.push('STARS_DATABASE_URL must use postgresql://')
-      }
-      if (
-        !databaseUrl.password ||
-        databaseUrl.password.length < 16 ||
-        databaseUrl.password === 'development-only-change-me'
-      ) {
-        errors.push('PostgreSQL password must be a non-default secret of at least 16 characters')
-      }
-    } catch {
-      errors.push('STARS_DATABASE_URL must be a valid PostgreSQL connection URL')
-    }
-  }
-  return {
-    ok: errors.length === 0,
-    production: true,
-    publicOrigin,
-    allowedOrigins: [...new Set([publicOrigin, ...configuredOrigins.map(normalizedHttpOrigin)].filter(Boolean))],
-    errors,
-  }
-}
-
-export function applySecurityHeaders(res, options = {}) {
-  const production = options.production ?? productionSecurityEnabled()
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('Referrer-Policy', 'no-referrer')
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
-  // The 3D dice renderer is an application-owned iframe, so same-origin
-  // framing must remain available while third-party framing stays blocked.
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN')
-  if (!production) return
-  res.setHeader(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'self'",
-      "form-action 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      "media-src 'self' blob:",
-      "worker-src 'self' blob:",
-      "frame-src 'self'",
-      "connect-src 'self'",
-    ].join('; '),
-  )
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-}
-
 /**
  * Dedicated SRD 5.1 servers must not relay retired AP balances even when an
  * older client reconnects and writes a pre-migration snapshot. Keeping this at
@@ -315,215 +250,6 @@ export const IMAGE_COUNT_LIMIT = 128
 // ── AC1：跨进程写锁（lockfile + 陈旧超时，崩溃不死锁）───────────────────────
 // 锁陈旧超时：持锁进程崩溃后，锁最多被视为有效这么久；超过即判为陈旧可抢占。
 // 这些时长运行时从 env 读取（默认值不变），便于测试用更短的超时触发 fail-closed 分支。
-const LOCK_RETRY_MS = 20
-function lockTimings() {
-  return {
-    staleMs: Number(process.env.STARS_LOCK_STALE_MS) || 10_000,
-    waitMaxMs: Number(process.env.STARS_LOCK_WAIT_MAX_MS) || 5_000,
-    // 持锁期间心跳刷新 mtime 的间隔，须显著小于 staleMs，否则慢写仍会被误判陈旧。
-    heartbeatMs: Number(process.env.STARS_LOCK_HEARTBEAT_MS) || 3_000,
-  }
-}
-
-// 抢锁超时的哨兵错误：withWriteLock 抛它 ⇒ 写 fail-closed，调用方映射 503/重试，
-// 绝不在未持锁的情况下继续执行 fn()（旧实现超时即 return，放任两个进程同时进入 read-compare-rename）。
-export class LockTimeoutError extends Error {
-  constructor(lockPath) {
-    super(`write lock acquire timed out: ${lockPath}`)
-    this.name = 'LockTimeoutError'
-    this.code = 'ELOCKTIMEOUT'
-    this.statusCode = 503
-  }
-}
-
-// 进程内串行化：同一文件路径的写在本进程内排队（关闭进程内交错）。
-const inProcessLockChain = new Map()
-
-async function isLockStale(lockPath) {
-  try {
-    const info = await stat(lockPath)
-    return Date.now() - info.mtimeMs > lockTimings().staleMs
-  } catch {
-    // 锁文件已不存在 → 不算陈旧（让抢占循环重试创建）。
-    return false
-  }
-}
-
-// 跨进程：用 wx（O_EXCL）独占创建 lockfile 作为锁。Windows 与 POSIX 都支持 wx 的
-// 原子「不存在才创建」语义，因此是可移植做法（不依赖 fcntl/flock 这类平台相关的字节锁）。
-// 崩溃安全：锁文件带 mtime，超过 staleMs 即被判陈旧并强制移除后重抢，绝不永久死锁。
-async function acquireCrossProcessLock(lockPath, pid) {
-  const { waitMaxMs } = lockTimings()
-  const deadline = Date.now() + waitMaxMs
-  for (;;) {
-    try {
-      await writeFile(lockPath, String(pid ?? process.pid), { flag: 'wx' })
-      return
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error
-      if (await isLockStale(lockPath)) {
-        // 陈旧锁（持锁者多半已崩溃）→ 移除后重抢。
-        await rm(lockPath, { force: true })
-        continue
-      }
-      if (Date.now() > deadline) {
-        // 等待超时 ⇒ fail-closed：抛哨兵错误，绝不放行 fn() 无锁运行。
-        throw new LockTimeoutError(lockPath)
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS))
-    }
-  }
-}
-
-// 持锁期间周期性 touch lockfile 的 mtime，使「合法持锁的慢写」不会因 mtime 老化
-// 被第二个进程当作陈旧锁抢占；进程崩溃后心跳停止，staleMs 后才被回收（保留崩溃兜底）。
-function startLockHeartbeat(lockPath) {
-  const { heartbeatMs } = lockTimings()
-  const timer = setInterval(() => {
-    const now = new Date()
-    void utimes(lockPath, now, now).catch(() => {})
-  }, heartbeatMs)
-  if (typeof timer.unref === 'function') timer.unref()
-  return () => clearInterval(timer)
-}
-
-/**
- * 串行化对同一资源文件的写：进程内 promise 链 + 跨进程 lockfile，二者叠加。
- * fn 在两层锁都到手后执行；无论 fn 成败都释放锁（finally），不会因抛错而泄漏锁。
- * 抢锁超时 ⇒ 抛 LockTimeoutError（fail-closed），fn 不会运行。
- */
-export async function withWriteLock(filePath, fn) {
-  const lockPath = `${filePath}.lock`
-  const prev = inProcessLockChain.get(filePath) ?? Promise.resolve()
-  let release
-  const current = new Promise((resolve) => {
-    release = resolve
-  })
-  const chained = prev.then(() => current)
-  inProcessLockChain.set(filePath, chained)
-  await prev.catch(() => {})
-  try {
-    // 抢锁超时会从这里抛出 ⇒ 跳过下面的 try，绝不运行 fn()，也不会误删他人持有的锁。
-    await acquireCrossProcessLock(lockPath)
-    const stopHeartbeat = startLockHeartbeat(lockPath)
-    try {
-      return await fn()
-    } finally {
-      stopHeartbeat()
-      await rm(lockPath, { force: true }).catch(() => {})
-    }
-  } finally {
-    release()
-    // 链尾消费完后清理 map，防止条目无限堆积。
-    if (inProcessLockChain.get(filePath) === chained) inProcessLockChain.delete(filePath)
-  }
-}
-
-/**
- * 原子写：临时文件 + rename，外裹 withWriteLock。保留既有 temp+rename 语义不变。
- */
-export async function atomicWriteLocked(filePath, body) {
-  await withWriteLock(filePath, async () => {
-    await atomicRename(filePath, body)
-  })
-}
-
-function updatedAtFromJsonBody(body) {
-  try {
-    const text = Buffer.isBuffer(body) ? body.toString('utf8') : String(body)
-    const parsed = JSON.parse(text)
-    const value = Number(parsed?.updatedAt)
-    return Number.isFinite(value) ? value : null
-  } catch {
-    return null
-  }
-}
-
-export async function atomicWriteJsonStateFreshLocked(filePath, body) {
-  return withWriteLock(filePath, async () => {
-    const incomingUpdatedAt = updatedAtFromJsonBody(body)
-    if (incomingUpdatedAt != null) {
-      try {
-        const existing = await readFile(filePath, 'utf8')
-        const existingUpdatedAt = updatedAtFromJsonBody(existing)
-        if (existingUpdatedAt != null && incomingUpdatedAt < existingUpdatedAt) {
-          return false
-        }
-      } catch {
-        // No existing state yet; accept the write.
-      }
-    }
-    await atomicRename(filePath, body)
-    return true
-  })
-}
-
-// 图片 PUT 走与 state 同一把锁 + temp+rename：blob 与 meta 在同一把锁内各自
-// 原子落盘，使 GET 永远看不到半写的 blob 或 blob/meta 不匹配；两个并发 PUT 在 imagePath 锁上串行，
-// 胜者的 blob 与 meta 必来自同一次 PUT（不交叉配对）。图片按 id 寻址，无 freshness 比较。
-const WINDOWS_RENAME_RETRY_DELAYS_MS = [8, 16, 32, 64, 128, 256, 512]
-const WINDOWS_TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
-
-export async function retryTransientWindowsRename(operation, options = {}) {
-  const platform = options.platform ?? process.platform
-  const delays = options.delays ?? WINDOWS_RENAME_RETRY_DELAYS_MS
-  const wait = options.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)))
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await operation()
-    } catch (error) {
-      const code = typeof error?.code === 'string' ? error.code : ''
-      if (
-        platform !== 'win32'
-        || !WINDOWS_TRANSIENT_RENAME_CODES.has(code)
-        || attempt >= delays.length
-      ) {
-        throw error
-      }
-      await wait(delays[attempt])
-    }
-  }
-}
-
-async function atomicRename(filePath, body) {
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-  await writeFile(tmpPath, body)
-  try {
-    await retryTransientWindowsRename(() => rename(tmpPath, filePath))
-  } finally {
-    await rm(tmpPath, { force: true }).catch(() => {})
-  }
-}
-
-export async function atomicWriteImageLocked(imagePath, metaPath, blob, metaBody) {
-  return withWriteLock(imagePath, async () => {
-    await atomicRename(imagePath, blob)
-    await atomicRename(metaPath, metaBody)
-  })
-}
-
-// ── AC5：safeName 防碰撞 ────────────────────────────────────────────────────
-// 旧实现把所有非 [a-zA-Z0-9_-] 直接删掉，会把 "a/b" 与 "ab"、"x.1" 与 "x1" 折叠成同一文件。
-// 现在：保留白名单字符原样，对任何含被删字符的输入追加一段确定性 hash 后缀，使不同逻辑名
-// 必映射到不同文件名（碰撞概率可忽略），同时输出仍只含文件系统安全字符。
-export function safeName(value) {
-  const raw = String(value ?? '')
-  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '')
-  if (cleaned === raw && raw.length > 0) return raw
-  // 含需要编码的字符（或为空）→ 追加 FNV-1a hash 后缀去碰撞。
-  const hash = fnv1a(raw).toString(36)
-  return `${cleaned}-${hash}`
-}
-
-function fnv1a(str) {
-  let h = 0x811c9dc5
-  for (let i = 0; i < str.length; i += 1) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
-  }
-  return h >>> 0
-}
-
 // ── AC2：鉴权（默认关闭，opt-in）────────────────────────────────────────────
 // 服务端镜像 sharedApi.ts 的「玩家可写白名单」。flag 开启时，仅 DM 权威资源（不在白名单内，
 // 主要是 combat / player-action-ack）才要求 secret；白名单资源玩家照常可写。
@@ -821,6 +547,10 @@ async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, 
 }
 
 async function readSharedStateFile(ctx, name) {
+  if (ctx.storage?.sharedStateRepository) {
+    const value = await ctx.storage.sharedStateRepository.read(name)
+    return value === undefined ? { body: null, value: null } : { body: JSON.stringify(value), value }
+  }
   try {
     const body = await readFile(path.join(ctx.stateRoot, `${name}.json`), 'utf8')
     return { body, value: JSON.parse(body) }
@@ -1411,21 +1141,14 @@ async function atomicAppendCombatCommand(ctx, normalized, member, role) {
     if (pendingSameTurn) {
       return persistTerminal('conflict', 'combat-command-pending-conflict', 409)
     }
-    const revisionConflicts = []
-    const currentCombatRevision = sharedStateRevision(combatState.value)
-    if (command.expectedRevisions.combat !== currentCombatRevision) {
-      revisionConflicts.push({ name: 'combat', expectedRevision: command.expectedRevisions.combat, currentRevision: currentCombatRevision })
-    }
-    // The maps watermark remains part of the immutable command payload for
-    // diagnostics, but it is deliberately not a coarse-grained intake CAS.
-    // HP edits, fog updates, or another token changing on the same map all
-    // advance this resource revision without invalidating the actor's move.
-    // The active combat identity/turn and the actor's exact x/y/elevation are
-    // checked below and revalidated again when the DM settles the command.
-    if (revisionConflicts.length > 0) {
-      const error = 'combat-command-revision-conflict'
-      return persistTerminal('conflict', error, 409, { conflicts: revisionConflicts })
-    }
+    // Resource revisions are immutable diagnostic watermarks, not coarse CAS
+    // gates for command intake. HP, presentation, another token, or turn-economy
+    // projection can legitimately advance `combat`/`maps` between a player's
+    // read and this request. Authority instead validates the exact semantic
+    // dependencies below (combat identity, round, initiative actor, character,
+    // and the moving token's x/y/elevation), then repeats those checks when the
+    // DM settles the command. This keeps unrelated multi-client writes from
+    // producing visible token rollback without weakening fail-closed behavior.
     const combat = combatState.value
     if (!plainObject(combat) || combat.active !== true || combat.mapId !== command.mapId ||
       (command.combatId && combat.combatId !== command.combatId) ||
@@ -2173,29 +1896,6 @@ export function extractSecret(req) {
 // 两个服务端（vite-server.mjs + static-server.mjs）此前各自复制了一份字节相同的 /api 分发逻辑
 // （events / state / image），极易漂移。现集中到此处单一定义，服务端只保留各自的静态回退差异。
 // ctx = { stateRoot, imageRoot, legacyStateRoot, legacyImageRoot, eventClients, eventBacklog }
-export function applyCors(req, res, env = process.env) {
-  const origin = typeof req?.headers?.origin === 'string' ? req.headers.origin : null
-  const production = productionSecurityEnabled(env)
-  const publicOrigin = normalizedHttpOrigin(env.STARS_PUBLIC_ORIGIN)
-  const configured = String(env.STARS_ALLOWED_ORIGINS ?? '')
-    .split(',')
-    .map(normalizedHttpOrigin)
-    .filter(Boolean)
-  const allowedOrigins = new Set([publicOrigin, ...configured].filter(Boolean))
-  if (origin) {
-    if (production && !allowedOrigins.has(origin)) return false
-    if (!production && allowedOrigins.size > 0 && !allowedOrigins.has(origin)) return false
-    res.setHeader('Access-Control-Allow-Origin', allowedOrigins.size > 0 ? origin : '*')
-    if (allowedOrigins.size > 0) res.setHeader('Vary', 'Origin')
-  } else if (!production && allowedOrigins.size === 0) {
-    res.setHeader('Access-Control-Allow-Origin', '*')
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, X-Stars-Command-Id, X-Stars-Command-Source, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
-  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
-  return true
-}
-
 function extractAccessToken(req, parsed) {
   const header = req?.headers?.['x-stars-token']
   if (typeof header === 'string' && header.length > 0) return header
@@ -2203,7 +1903,7 @@ function extractAccessToken(req, parsed) {
 }
 
 function scopedContext(ctx, roomId) {
-  if (roomId === 'default') return { ...ctx, roomId }
+  if (roomId === 'default') return { ...ctx, roomId, storage: ctx.storage?.scopeRoom('default') ?? ctx.storage }
   return {
     ...ctx,
     roomId,
@@ -2213,6 +1913,7 @@ function scopedContext(ctx, roomId) {
     legacyImageRoot: roomScopedPath(ctx.legacyImageRoot, roomId),
     quarantineRoot: roomScopedPath(ctx.quarantineRoot, roomId),
     snapshotRoot: roomScopedPath(ctx.snapshotRoot, roomId),
+    storage: ctx.storage?.scopeRoom(roomId) ?? ctx.storage,
   }
 }
 
@@ -2302,6 +2003,23 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
 }
 
 function mutateCombatLogState(current, mutation, now = Date.now()) {
+  if (mutation?.operation === 'truncate-after') {
+    const mapId = boundedText(mutation?.mapId, 160).trim()
+    const targetEntryId = Number(mutation?.targetEntryId)
+    if (!mapId || !Number.isFinite(targetEntryId) || targetEntryId < 0) {
+      return { ok: false, changed: false, status: 400, error: 'invalid-combat-log-truncate' }
+    }
+    if (current?.mapId !== mapId || !Array.isArray(current?.entries)) {
+      return { ok: false, changed: false, status: 409, error: 'combat-log-map-mismatch' }
+    }
+    const entries = current.entries.filter((candidate) =>
+      Number.isFinite(candidate?.id) && candidate.id <= targetEntryId)
+    return {
+      ok: true,
+      changed: entries.length !== current.entries.length,
+      next: { mapId, entries, rollbackCutoffEntryId: targetEntryId, updatedAt: now },
+    }
+  }
   if (mutation?.operation !== 'append') {
     return { ok: false, changed: false, status: 400, error: 'invalid-operation' }
   }
@@ -2357,6 +2075,9 @@ function mutateCombatLogState(current, mutation, now = Date.now()) {
     next: {
       mapId,
       entries: [entry, ...entries.filter((candidate) => candidate?.id !== entry.id)].slice(0, 200),
+      ...(current?.mapId === mapId && Number.isFinite(current?.rollbackCutoffEntryId)
+        ? { rollbackCutoffEntryId: current.rollbackCutoffEntryId }
+        : {}),
       updatedAt: now,
     },
   }
@@ -3102,7 +2823,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     if (
       !actorName ||
       !attackName ||
-      (attackKind !== 'melee' && attackKind !== 'ranged') ||
+      (attackKind !== 'melee' && attackKind !== 'ranged' && attackKind !== 'action') ||
       !classId ||
       (payload?.targetTokenId != null && !targetTokenId)
     ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
@@ -3121,7 +2842,6 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
       },
     }
   }
-
   if (common.type === 'spell-area-projectile' && common.spellId === 'fireball') {
     const col = payload?.targetCell?.col
     const row = payload?.targetCell?.row
@@ -3150,7 +2870,6 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
       },
     }
   }
-
   if (
     common.type === 'spell-area-effect' &&
     isCombatPresentationAreaSpellId(common.spellId)
@@ -3158,6 +2877,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     const expected = COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS[common.spellId]
     const col = payload?.targetCell?.col
     const row = payload?.targetCell?.row
+    const wallOfFireShape = common.spellId === 'wall-of-fire' ? (payload?.wallOfFireShape ?? 'line') : undefined; const wallOfFireAngleDegrees = common.spellId === 'wall-of-fire' ? (payload?.wallOfFireAngleDegrees ?? 0) : undefined
     if (
       !expected ||
       payload?.shape !== expected.shape ||
@@ -3166,7 +2886,8 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
       payload?.heightFeet !== expected.heightFeet ||
       payload?.radiusFeet !== expected.radiusFeet ||
       !Number.isInteger(col) || col < 0 || col > 10_000 ||
-      !Number.isInteger(row) || row < 0 || row > 10_000
+      !Number.isInteger(row) || row < 0 || row > 10_000 || (common.spellId === 'wall-of-fire' &&
+        (!['line', 'ring'].includes(wallOfFireShape) || !Number.isFinite(wallOfFireAngleDegrees) || wallOfFireAngleDegrees < 0 || wallOfFireAngleDegrees >= 360))
     ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     return {
       ok: true,
@@ -3178,12 +2899,12 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         ...(expected.widthFeet != null ? { widthFeet: expected.widthFeet } : {}),
         ...(expected.heightFeet != null ? { heightFeet: expected.heightFeet } : {}),
         ...(expected.radiusFeet != null ? { radiusFeet: expected.radiusFeet } : {}),
+        ...(common.spellId === 'wall-of-fire' ? { wallOfFireShape, wallOfFireAngleDegrees } : {}),
         createdAt: now,
-        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+        expiresAt: now + (common.spellId === 'wall-of-fire' ? 120_000 : common.spellId === 'flaming-sphere' ? 15_000 : COMBAT_PRESENTATION_LIFETIME_MS),
       },
     }
   }
-
   if (common.type === 'saving-throw-status') {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const targetName = normalizedLabel(payload?.targetName, 80)
@@ -3773,6 +3494,32 @@ function campaignGregorianDayNumber(value) {
   return Math.floor(date.getTime() / 86_400_000)
 }
 
+function validCampaignRestRecoveryReports(value) {
+  if (!Array.isArray(value) || value.length > 64) return false
+  const characterIds = new Set()
+  const categories = new Set(['hit-points', 'hit-dice', 'feature-resource', 'item-resource', 'state'])
+  const outcomes = new Set(['restored', 'cleared', 'available', 'unchanged', 'blocked'])
+  for (const report of value) {
+    if (
+      !plainObject(report) || typeof report.characterId !== 'string' || !report.characterId || report.characterId.length > 160 ||
+      characterIds.has(report.characterId) || typeof report.characterName !== 'string' || !report.characterName.trim() || report.characterName.length > 80 ||
+      !Array.isArray(report.entries) || report.entries.length > 256
+    ) return false
+    characterIds.add(report.characterId)
+    for (const entry of report.entries) {
+      if (
+        !plainObject(entry) || !categories.has(entry.category) || !outcomes.has(entry.outcome) ||
+        typeof entry.label !== 'string' || !entry.label.trim() || entry.label.length > 160 ||
+        (entry.detail != null && (typeof entry.detail !== 'string' || entry.detail.length > 240)) ||
+        ['before', 'after', 'maximum'].some((key) => entry[key] != null && (
+          !Number.isSafeInteger(entry[key]) || entry[key] < 0 || entry[key] > 1_000_000_000
+        ))
+      ) return false
+    }
+  }
+  return true
+}
+
 function validateCampaignTimeState(value) {
   if (
     ![1, CAMPAIGN_TIME_SCHEMA_VERSION].includes(value?.schemaVersion) || !Number.isSafeInteger(value.worldMinute) || value.worldMinute < 0 ||
@@ -3806,7 +3553,7 @@ function validateCampaignTimeState(value) {
   for (const advance of value.advances) {
     if (
       !plainObject(advance) || typeof advance.id !== 'string' || !advance.id || advance.id.length > 160 || advanceIds.has(advance.id) ||
-      !['advance', 'long-rest'].includes(advance.kind) ||
+      !['advance', 'short-rest', 'long-rest'].includes(advance.kind) ||
       !Number.isSafeInteger(advance.fromWorldMinute) || advance.fromWorldMinute < previousTo ||
       !Number.isSafeInteger(advance.toWorldMinute) || advance.toWorldMinute > value.worldMinute ||
       !Number.isSafeInteger(advance.minutes) || advance.minutes < 1 || advance.minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES ||
@@ -3814,6 +3561,18 @@ function validateCampaignTimeState(value) {
       !Number.isSafeInteger(advance.dawnsCrossed) || advance.dawnsCrossed < 0 ||
       !Array.isArray(advance.expiredTimerIds) || advance.expiredTimerIds.length > CAMPAIGN_TIME_TIMER_LIMIT ||
       advance.expiredTimerIds.some((id) => typeof id !== 'string' || !id || id.length > 160) ||
+      (advance.beneficiaryCharacterIds != null && (
+        !Array.isArray(advance.beneficiaryCharacterIds) || advance.beneficiaryCharacterIds.length > 64 ||
+        new Set(advance.beneficiaryCharacterIds).size !== advance.beneficiaryCharacterIds.length ||
+        advance.beneficiaryCharacterIds.some((id) => typeof id !== 'string' || !id || id.length > 160)
+      )) ||
+      (advance.ignoreLongRestCooldown != null && (
+        advance.kind !== 'long-rest' || advance.ignoreLongRestCooldown !== true
+      )) ||
+      (advance.restRecoveryReports != null && (
+        !['short-rest', 'long-rest'].includes(advance.kind) ||
+        !validCampaignRestRecoveryReports(advance.restRecoveryReports)
+      )) ||
       typeof advance.reason !== 'string' || advance.reason.length > 160 ||
       !Number.isFinite(advance.createdAt) || advance.createdAt < 0
     ) return 'invalid-campaign-time-advance'
@@ -3844,7 +3603,7 @@ function normalizeCampaignTimeState(value) {
   }
 }
 
-function advanceCampaignTimeState(base, minutes, reason, kind, now) {
+function advanceCampaignTimeState(base, minutes, reason, kind, now, options = {}) {
   const fromWorldMinute = base.worldMinute
   const toWorldMinute = fromWorldMinute + minutes
   if (!Number.isSafeInteger(toWorldMinute)) return null
@@ -3863,6 +3622,15 @@ function advanceCampaignTimeState(base, minutes, reason, kind, now) {
     reason,
     dawnsCrossed: campaignDawnsCrossed(fromWorldMinute, toWorldMinute),
     expiredTimerIds,
+    ...(Array.isArray(options.beneficiaryCharacterIds)
+      ? { beneficiaryCharacterIds: options.beneficiaryCharacterIds }
+      : {}),
+    ...(kind === 'long-rest' && options.ignoreLongRestCooldown === true
+      ? { ignoreLongRestCooldown: true }
+      : {}),
+    ...(Array.isArray(options.restRecoveryReports)
+      ? { restRecoveryReports: options.restRecoveryReports }
+      : {}),
     createdAt: now,
   }
   return {
@@ -3882,14 +3650,48 @@ export function mutateCampaignTimeState(current, mutation, now, member, context 
   const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
   if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
   const base = normalizeCampaignTimeState(current)
-  if (mutation?.operation === 'advance' || mutation?.operation === 'long-rest') {
-    const minutes = mutation.operation === 'long-rest' ? 8 * 60 : Number(mutation.minutes)
+  if (mutation?.operation === 'advance' || mutation?.operation === 'short-rest' || mutation?.operation === 'long-rest') {
+    const minutes = mutation.operation === 'long-rest'
+      ? 8 * 60
+      : mutation.operation === 'short-rest'
+        ? 60
+        : Number(mutation.minutes)
     if (!Number.isSafeInteger(minutes) || minutes < 1 || minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES) {
       return { ok: false, status: 400, error: 'invalid-campaign-time-advance' }
     }
-    const kind = mutation.operation === 'long-rest' ? 'long-rest' : 'advance'
-    const reason = boundedText(mutation.reason, 160) || (kind === 'long-rest' ? '完成长休' : '推进时间')
-    const advanced = advanceCampaignTimeState(base, minutes, reason, kind, now)
+    const kind = mutation.operation === 'long-rest'
+      ? 'long-rest'
+      : mutation.operation === 'short-rest'
+        ? 'short-rest'
+        : 'advance'
+    let beneficiaryCharacterIds
+    if (kind !== 'advance' && mutation.beneficiaryCharacterIds != null) {
+      if (
+        !Array.isArray(mutation.beneficiaryCharacterIds) || mutation.beneficiaryCharacterIds.length > 64 ||
+        mutation.beneficiaryCharacterIds.some((id) => typeof id !== 'string' || !id.trim() || id.trim().length > 160)
+      ) return { ok: false, status: 400, error: 'invalid-rest-beneficiaries' }
+      beneficiaryCharacterIds = [...new Set(mutation.beneficiaryCharacterIds.map((id) => id.trim()))]
+    }
+    if (mutation.ignoreLongRestCooldown != null && (
+      kind !== 'long-rest' || typeof mutation.ignoreLongRestCooldown !== 'boolean'
+    )) return { ok: false, status: 400, error: 'invalid-long-rest-override' }
+    let restRecoveryReports
+    if (mutation.restRecoveryReports != null) {
+      if (kind === 'advance' || !validCampaignRestRecoveryReports(mutation.restRecoveryReports)) {
+        return { ok: false, status: 400, error: 'invalid-rest-recovery-reports' }
+      }
+      const beneficiarySet = beneficiaryCharacterIds ? new Set(beneficiaryCharacterIds) : null
+      if (beneficiarySet && mutation.restRecoveryReports.some((report) => !beneficiarySet.has(report.characterId))) {
+        return { ok: false, status: 400, error: 'rest-report-beneficiary-mismatch' }
+      }
+      restRecoveryReports = mutation.restRecoveryReports
+    }
+    const reason = boundedText(mutation.reason, 160) || (kind === 'long-rest' ? '完成长休' : kind === 'short-rest' ? '完成短休' : '推进时间')
+    const advanced = advanceCampaignTimeState(base, minutes, reason, kind, now, {
+      beneficiaryCharacterIds,
+      ignoreLongRestCooldown: mutation.ignoreLongRestCooldown === true,
+      restRecoveryReports,
+    })
     if (!advanced) return { ok: false, status: 400, error: 'campaign-time-overflow' }
     return {
       ok: true,
@@ -4414,10 +4216,12 @@ function validateDnd5eResourceStates(name, value) {
       if (!plainObject(map) || !Array.isArray(map.tokens)) continue
       for (const token of map.tokens) {
         if (!plainObject(token)) continue
-        if (token.portraitImageId != null && (
-          typeof token.portraitImageId !== 'string' ||
-          !/^[a-z0-9_-]{1,160}$/i.test(token.portraitImageId)
-        )) return 'invalid-token-portrait-image'
+        for (const imageField of ['portraitImageId', 'tokenPortraitImageId']) {
+          if (token[imageField] != null && (
+            typeof token[imageField] !== 'string' ||
+            !/^[a-z0-9_-]{1,160}$/i.test(token[imageField])
+          )) return 'invalid-token-portrait-image'
+        }
         if (token.visualVariantId != null && (
           typeof token.visualVariantId !== 'string' ||
           !/^[a-z0-9_-]{1,80}$/i.test(token.visualVariantId)
@@ -5173,6 +4977,7 @@ function redactUnseenToken(token) {
     maxHp: _maxHp,
     poolId: _poolId,
     dnd5eCombatState: _dnd5eCombatState,
+    playerVisibleEnemyDetail: _playerVisibleEnemyDetail,
     obstacleKind: _obstacleKind,
     ...position
   } = token
@@ -5186,6 +4991,12 @@ function redactUnseenToken(token) {
     showDetailOnToken: false,
     perceptionVisibility: 'detected-unseen',
   }
+}
+
+function stripDisabledEnemyDetail(token) {
+  if (token?.type !== 'enemy' || token?.showDetailOnToken !== false) return token
+  const { playerVisibleEnemyDetail: _playerVisibleEnemyDetail, ...publicToken } = token
+  return publicToken
 }
 
 export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null, fogState = null, worldMinute = null) {
@@ -5218,9 +5029,10 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         tokens: map.tokens.map((token) => {
           if (!plainObject(token)) return token
           const bounded = clampTokenToMap(map, token)
-          return plainObject(bounded.lightSource) && !campaignLightActive(bounded.lightSource, worldMinute)
+          const lightProjected = plainObject(bounded.lightSource) && !campaignLightActive(bounded.lightSource, worldMinute)
             ? { ...bounded, lightSource: { ...bounded.lightSource, enabled: false } }
             : bounded
+          return stripDisabledEnemyDetail(lightProjected)
         }),
       }
       const rawGeometry = geometryByMapId.get(map.id)
@@ -5511,6 +5323,13 @@ export function validateSharedStateShape(name, value) {
   if (arrayField && !Array.isArray(value[arrayField])) {
     return { ok: false, reason: `missing-array:${arrayField}` }
   }
+  if (
+    name === 'combat-log' &&
+    value.rollbackCutoffEntryId != null &&
+    (!Number.isFinite(value.rollbackCutoffEntryId) || value.rollbackCutoffEntryId < 0)
+  ) {
+    return { ok: false, reason: 'invalid-combat-log-rollback-cutoff' }
+  }
   if (name === COMBAT_COMMAND_RECEIPT_RESOURCE) {
     const commands = Array.isArray(value.commands) ? value.commands : []
     const receipts = Array.isArray(value.receipts) ? value.receipts : []
@@ -5697,6 +5516,7 @@ const DM_UNDOABLE_STATE = new Set([
   'combat',
   'combat-interrupts',
   'combat-log',
+  'combat-statistics',
   'map-geometry',
   'map-fog',
   'map-exploration',
@@ -5988,6 +5808,20 @@ async function quarantineSharedState(ctx, name, payload, reason) {
 async function readValidStateDirectory(ctx) {
   const states = {}
   const invalid = []
+  if (ctx.storage?.sharedStateRepository) {
+    for (const name of await ctx.storage.sharedStateRepository.list()) {
+      try {
+        const value = normalizeDedicatedDnd5eSharedState(name, await ctx.storage.sharedStateRepository.read(name))
+        if (value?._deleted === true) continue
+        const validation = validateSharedStateShape(name, value)
+        if (!validation.ok) invalid.push({ name, reason: validation.reason })
+        else states[name] = value
+      } catch {
+        invalid.push({ name, reason: 'invalid-json' })
+      }
+    }
+    return { states, invalid }
+  }
   let entries = []
   try {
     entries = await readdir(ctx.stateRoot)
@@ -6011,6 +5845,11 @@ async function readValidStateDirectory(ctx) {
 
 async function readRoomForCampaign(ctx) {
   if ((ctx.roomId ?? 'default') === 'default') return null
+  if (ctx.storage?.roomRepository) {
+    const room = await ctx.storage.roomRepository.read(ctx.roomId)
+    if (room === undefined) throw new RoomProtocolError(404, 'room-not-found')
+    return room
+  }
   try {
     return JSON.parse(await readFile(roomLobbyFile(ctx, ctx.roomId), 'utf8'))
   } catch (error) {
@@ -6020,56 +5859,48 @@ async function readRoomForCampaign(ctx) {
 }
 
 async function readMapGeometryForProjection(ctx) {
-  const filePath = path.join(ctx.stateRoot, 'map-geometry.json')
   try {
-    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const value = (await readSharedStateFile(ctx, 'map-geometry')).value
+    if (value == null) return { value: null, corrupted: false }
     const validation = validateSharedStateShape('map-geometry', value)
     return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
-  } catch (error) {
-    return error?.code === 'ENOENT'
-      ? { value: null, corrupted: false }
-      : { value: null, corrupted: true }
+  } catch {
+    return { value: null, corrupted: true }
   }
 }
 
 async function readCampaignTimeForProjection(ctx) {
-  const filePath = path.join(ctx.stateRoot, 'campaign-time.json')
   try {
-    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const value = (await readSharedStateFile(ctx, 'campaign-time')).value
+    if (value == null) return { value: null, worldMinute: CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE, corrupted: false }
     const validation = validateSharedStateShape('campaign-time', value)
     return validation.ok
       ? { value, worldMinute: value.worldMinute, corrupted: false }
       : { value: null, worldMinute: Number.MAX_SAFE_INTEGER, corrupted: true }
-  } catch (error) {
-    return error?.code === 'ENOENT'
-      ? { value: null, worldMinute: CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE, corrupted: false }
-      : { value: null, worldMinute: Number.MAX_SAFE_INTEGER, corrupted: true }
+  } catch {
+    return { value: null, worldMinute: Number.MAX_SAFE_INTEGER, corrupted: true }
   }
 }
 
 async function readMapFogForProjection(ctx) {
-  const filePath = path.join(ctx.stateRoot, 'map-fog.json')
   try {
-    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const value = (await readSharedStateFile(ctx, 'map-fog')).value
+    if (value == null) return { value: null, corrupted: false }
     const validation = validateSharedStateShape('map-fog', value)
     return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
-  } catch (error) {
-    return error?.code === 'ENOENT'
-      ? { value: null, corrupted: false }
-      : { value: null, corrupted: true }
+  } catch {
+    return { value: null, corrupted: true }
   }
 }
 
 async function readCharactersForProjection(ctx) {
-  const filePath = path.join(ctx.stateRoot, 'characters.json')
   try {
-    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const value = (await readSharedStateFile(ctx, 'characters')).value
+    if (value == null) return { value: null, corrupted: false }
     const validation = validateSharedStateShape('characters', value)
     return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
-  } catch (error) {
-    return error?.code === 'ENOENT'
-      ? { value: null, corrupted: false }
-      : { value: null, corrupted: true }
+  } catch {
+    return { value: null, corrupted: true }
   }
 }
 
@@ -6107,6 +5938,15 @@ function campaignRoomManifest(room) {
 
 async function collectCampaignImages(ctx) {
   const images = []
+  if (ctx.storage?.assetStore) {
+    for (const id of await ctx.storage.assetStore.list()) {
+      const asset = await ctx.storage.assetStore.read(id)
+      if (!asset) continue
+      const meta = plainObject(asset.metadata) ? asset.metadata : {}
+      images.push({ id, type: meta.type || 'application/octet-stream', data: asset.bytes.toString('base64') })
+    }
+    return images
+  }
   let entries = []
   try {
     entries = await readdir(ctx.imageRoot)
@@ -6160,17 +6000,33 @@ function snapshotId(bundle) {
 }
 
 async function writeCampaignSnapshot(ctx, kind = 'manual') {
-  await mkdir(ctx.stateRoot, { recursive: true })
-  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
-    await recoverSharedStateTransaction(ctx)
-    const bundle = await buildCampaignBundle(ctx, { kind, includeAssets: false })
-    const id = snapshotId(bundle)
-    const root = snapshotRoot(ctx)
-    await mkdir(root, { recursive: true })
-    await atomicWriteLocked(path.join(root, `${id}.json`), JSON.stringify({ ...bundle, snapshotId: id }))
-    await rotateJsonDirectory(root, CAMPAIGN_SNAPSHOT_LIMIT)
-    return { id, createdAt: bundle.exportedAt, kind, stateCount: Object.keys(bundle.states).length }
-  })
+  const startedAt = performance.now()
+  let outcome = 'success'
+  try {
+    await mkdir(ctx.stateRoot, { recursive: true })
+    return await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+      await recoverSharedStateTransaction(ctx)
+      const bundle = await buildCampaignBundle(ctx, { kind, includeAssets: false })
+      const id = snapshotId(bundle)
+      const root = snapshotRoot(ctx)
+      await mkdir(root, { recursive: true })
+      if (ctx.storage?.snapshotStore) await ctx.storage.snapshotStore.write(id, { ...bundle, snapshotId: id })
+      else await atomicWriteLocked(path.join(root, `${id}.json`), JSON.stringify({ ...bundle, snapshotId: id }))
+      await rotateJsonDirectory(root, CAMPAIGN_SNAPSHOT_LIMIT)
+      return { id, createdAt: bundle.exportedAt, kind, stateCount: Object.keys(bundle.states).length }
+    })
+  } catch (error) {
+    outcome = 'failure'
+    throw error
+  } finally {
+    observeServerOperation(ctx.telemetry, {
+      operation: 'snapshot.write',
+      durationMs: Math.max(0, performance.now() - startedAt),
+      outcome,
+      observedAt: Date.now(),
+      attributes: { kind, roomId: ctx.roomId ?? 'default' },
+    })
+  }
 }
 
 const pendingAutoSnapshots = new Map()
@@ -7582,10 +7438,18 @@ function validateDeclarativePackageForPublication(bytes, plugin) {
   } catch {
     throw new RoomProtocolError(400, 'public-plugin-must-be-declarative-json')
   }
+  const contentV2Arrays = ['races', 'backgrounds', 'features', 'feats', 'spells', 'items', 'abilityGenerationMethods', 'headlessActions', 'subclasses', 'monsters']
+  const validPackageStructure =
+    (parsed?.format === 'dndstars5e-declarative' && parsed.schemaVersion === 1 &&
+      Array.isArray(parsed.subclasses) && plainObject(parsed.legacy)) ||
+    (parsed?.format === 'dndstars5e-content' && parsed.schemaVersion === 2 &&
+      plainObject(parsed.provenance) && plainObject(parsed.content) && Array.isArray(parsed.assets) &&
+      contentV2Arrays.every((key) => Array.isArray(parsed.content[key])) &&
+      (parsed.content.classes == null || Array.isArray(parsed.content.classes))) ||
+    (parsed?.format === 'dndstars5e-unified-content' && parsed.schemaVersion === 1 &&
+      Array.isArray(parsed.definitions) && parsed.definitions.every(plainObject) && Array.isArray(parsed.assets))
   if (
-    !plainObject(parsed) ||
-    parsed.format !== 'dndstars5e-declarative' ||
-    parsed.schemaVersion !== 1 ||
+    !plainObject(parsed) || !validPackageStructure ||
     !plainObject(parsed.manifest) ||
     parsed.manifest.id !== plugin.id ||
     parsed.manifest.name !== plugin.name ||
@@ -7596,9 +7460,6 @@ function validateDeclarativePackageForPublication(bytes, plugin) {
     parsed.manifest.rulesetId !== DND5E_2014_RULESET_ID ||
     parsed.manifest.distributionPolicy !== 'room-distributable'
   ) throw new RoomProtocolError(400, 'invalid-public-plugin-package')
-  if (!Array.isArray(parsed.subclasses) || !plainObject(parsed.legacy)) {
-    throw new RoomProtocolError(400, 'invalid-public-plugin-package')
-  }
   const packageMetadata = {
     stateSchemaVersion: Number(parsed.manifest.stateSchemaVersion ?? 1),
     manifestSchemaVersion: Number(parsed.manifest.manifestSchemaVersion ?? 1),
@@ -8402,6 +8263,7 @@ function normalizeAccountPluginVersion(value) {
   const declaredCapabilities = normalizePluginCapabilities(value.declaredCapabilities)
   const distributionPolicy = normalizePluginDistributionPolicy(value.distributionPolicy)
   const contentCategory = normalizePluginContentCategory(value.contentCategory)
+  const workshopOrigin = normalizeAccountPluginWorkshopOrigin(value.workshopOrigin)
   if (
     !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(id) ||
     !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(version) ||
@@ -8435,12 +8297,26 @@ function normalizeAccountPluginVersion(value) {
     publisher,
     license,
     ...(description ? { description } : {}),
+    ...(workshopOrigin ? { workshopOrigin } : {}),
     fileName,
     integrity,
     sizeBytes,
     visibility: 'private',
     createdAt: Number(value.createdAt),
     updatedAt: Number(value.updatedAt),
+  }
+}
+
+function normalizeAccountPluginWorkshopOrigin(value) {
+  if (!plainObject(value) || value.kind !== 'dm-workshop' || !Number.isFinite(value.verifiedAt)) return null
+  const campaignId = normalizeCampaignId(value.campaignId)
+  const roomId = normalizeLobbyRoomCode(value.roomId)
+  if (campaignId.length !== 12 && roomId.length !== 6) return null
+  return {
+    kind: 'dm-workshop',
+    ...(campaignId.length === 12 ? { campaignId } : {}),
+    ...(roomId.length === 6 ? { roomId } : {}),
+    verifiedAt: Number(value.verifiedAt),
   }
 }
 
@@ -8522,7 +8398,14 @@ function accountPluginVersions(account) {
     .filter(Boolean)
 }
 
-function accountPluginVersionFromUpload(req, pluginId, pluginVersion, sizeBytes, now = Date.now()) {
+function accountPluginVersionFromUpload(
+  req,
+  pluginId,
+  pluginVersion,
+  sizeBytes,
+  workshopOrigin = null,
+  now = Date.now(),
+) {
   const metadata = decodedPluginMetadataHeader(req)
   const stateSchemaVersion = Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1)
   const apiVersion = Number(req?.headers?.['x-stars-plugin-api-version'])
@@ -8562,6 +8445,7 @@ function accountPluginVersionFromUpload(req, pluginId, pluginVersion, sizeBytes,
     publisher,
     license,
     description,
+    workshopOrigin,
     fileName,
     integrity,
     sizeBytes,
@@ -8570,6 +8454,35 @@ function accountPluginVersionFromUpload(req, pluginId, pluginVersion, sizeBytes,
   })
   if (!record) throw new RoomProtocolError(400, 'invalid-account-plugin')
   return record
+}
+
+async function verifiedDmWorkshopOrigin(req, ctx, account, now = Date.now()) {
+  const requestedOrigin = req?.headers?.['x-stars-plugin-origin']
+  if (requestedOrigin == null || requestedOrigin === '') return null
+  if (requestedOrigin !== 'dm-workshop') throw new RoomProtocolError(400, 'invalid-plugin-upload-origin')
+  const campaignId = normalizeCampaignId(req?.headers?.['x-stars-campaign-id'])
+  const roomId = normalizeLobbyRoomCode(req?.headers?.['x-stars-room-id'])
+  if (campaignId.length !== 12 && roomId.length !== 6) throw new RoomProtocolError(403, 'dm-workshop-authority-required')
+  if (campaignId.length === 12) {
+    const ownsCampaign = accountCampaigns(account).some((campaign) => campaign.campaignId === campaignId)
+    if (!ownsCampaign) throw new RoomProtocolError(403, 'dm-workshop-authority-required')
+  }
+  if (roomId.length === 6) {
+    const room = await readLobbyRoomOptional(ctx, roomId)
+    const member = lobbyRoomMember(room, req?.headers?.['x-stars-member'])
+    if (
+      !room || !member || member !== room.host ||
+      member.accountId !== account.accountId ||
+      !roomMemberSessionAuthorized(member, req?.headers?.['x-stars-room-token']) ||
+      (campaignId.length === 12 && room.campaignId !== campaignId)
+    ) throw new RoomProtocolError(403, 'dm-workshop-authority-required')
+  }
+  return {
+    kind: 'dm-workshop',
+    ...(campaignId.length === 12 ? { campaignId } : {}),
+    ...(roomId.length === 6 ? { roomId } : {}),
+    verifiedAt: now,
+  }
 }
 
 function roomPluginDirectory(ctx, roomId) {
@@ -8812,7 +8725,7 @@ function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distribut
   } catch {
     throw new RoomProtocolError(400, 'invalid-plugin-manifest')
   }
-  if (!['dndstars5e-content', 'dndstars5e-declarative'].includes(parsed?.format)) {
+  if (!['dndstars5e-content', 'dndstars5e-declarative', 'dndstars5e-unified-content'].includes(parsed?.format)) {
     if (distributionPolicy === 'room-ephemeral') {
       throw new RoomProtocolError(403, 'room-ephemeral-must-be-content-v2')
     }
@@ -8845,7 +8758,7 @@ function assertAccountPluginPackagePolicy(bytes, pluginId, version, distribution
   } catch {
     throw new RoomProtocolError(400, 'invalid-account-plugin')
   }
-  if (!['dndstars5e-content', 'dndstars5e-declarative'].includes(parsed?.format)) return
+  if (!['dndstars5e-content', 'dndstars5e-declarative', 'dndstars5e-unified-content'].includes(parsed?.format)) return
   if (
     parsed?.manifest?.id !== pluginId ||
     parsed?.manifest?.version !== version ||
@@ -10209,6 +10122,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
     const parsedPackage = validateDeclarativePackageForPublication(bytes, plugin)
     const marketplaceResult = normalizeMarketplacePublication(payload, { allowLegacyFree: true })
     if (!marketplaceResult.ok) throw new RoomProtocolError(400, marketplaceResult.error)
+    if (Array.isArray(parsedPackage.assets) && parsedPackage.assets.length > 0 && !marketplaceResult.value.rightsManifest?.assets.some((asset) => asset.category === 'art')) throw new RoomProtocolError(400, 'marketplace-art-rights-required')
     const creatorRegistry = await readPluginRegistry(ctx)
     const creator = creatorRegistry.creators.find((candidate) => candidate.accountId === account.accountId)
     if (marketplaceResult.value.pricing.kind === 'paid' && !marketplacePaidPublishingEnabled()) {
@@ -10333,7 +10247,15 @@ async function handleAccountApi(req, res, parsed, ctx) {
         uploadDistributionPolicy ?? 'room-distributable',
       )
       const now = Date.now()
-      const record = accountPluginVersionFromUpload(req, pluginId, pluginVersion, bytes.length, now)
+      const workshopOrigin = await verifiedDmWorkshopOrigin(req, ctx, account, now)
+      const record = accountPluginVersionFromUpload(
+        req,
+        pluginId,
+        pluginVersion,
+        bytes.length,
+        workshopOrigin,
+        now,
+      )
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== record.integrity) {
         throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
@@ -11370,85 +11292,34 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
   return true
 }
 
-function addEventClient(ctx, channel, res, viewer) {
-  const storageKey = eventStorageKey(ctx, channel)
-  const clients = ctx.eventClients.get(storageKey) ?? new Set()
-  res._starsEventViewer = viewer
-  clients.add(res)
-  ctx.eventClients.set(storageKey, clients)
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    // no-transform + X-Accel-Buffering keep room invalidations streaming through
-    // reverse proxies instead of being released in a delayed batch.
-    'Cache-Control': 'no-store, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  })
-  res.flushHeaders?.()
-  res.write(`event: ready\ndata: ${JSON.stringify({
-    channel,
+function eventPublisher(ctx) {
+  return createInMemorySseEventPublisher({
+    eventClients: ctx.eventClients,
+    eventBacklog: ctx.eventBacklog,
+    storageKey: (channel) => eventStorageKey(ctx, channel),
+    projectPayload: projectEventPayloadForViewer,
+    replaySlice,
+    pushBacklog,
+    capChannels: capEventChannels,
+    channelLimit: EVENT_CHANNEL_LIMIT,
     streamId: ctx.serverInstanceId ?? 'legacy-stream',
-    sequence: ctx.eventSequences?.get(ctx.roomId ?? 'default') ?? 0,
-  })}\n\n`)
-  // 只回放最近 EVENT_REPLAY_LIMIT 条，而非整 backlog。
-  const backlog = replaySlice(ctx.eventBacklog.get(storageKey) ?? [])
-  for (const payload of backlog) {
-    const projected = projectEventPayloadForViewer(channel, payload, viewer)
-    if (projected !== undefined) res.write(`event: message\ndata: ${JSON.stringify(projected)}\n\n`)
-  }
-  const heartbeat = setInterval(() => {
-    if (res.destroyed || res.writableEnded) return
-    res.write(`: heartbeat ${Date.now()}\n\n`)
-  }, 15_000)
-  heartbeat.unref?.()
-  let removed = false
-  return () => {
-    if (removed) return
-    removed = true
-    clearInterval(heartbeat)
-    delete res._starsEventViewer
-    clients.delete(res)
-    if (clients.size === 0) ctx.eventClients.delete(storageKey)
-  }
+    currentSequence: () => ctx.eventSequences?.get(ctx.roomId ?? 'default') ?? 0,
+    nextSequence: () => nextRoomEventSequence(ctx),
+    telemetry: ctx.telemetry,
+  })
 }
 
-function publishEventToChannel(ctx, channel, payload) {
-  const storageKey = eventStorageKey(ctx, channel)
-  const backlog = pushBacklog(ctx.eventBacklog.get(storageKey) ?? [], payload)
-  // LRU touch：delete+set 把该 channel 移到 Map 末尾，使「活跃 channel」始终最新、最后才被 cap 淘汰。
-  ctx.eventBacklog.delete(storageKey)
-  ctx.eventBacklog.set(storageKey, backlog)
-  // channel 总数封顶；有活跃订阅者的 channel 受保护。
-  capEventChannels(ctx.eventBacklog, EVENT_CHANNEL_LIMIT, new Set(ctx.eventClients.keys()))
-  const clients = ctx.eventClients.get(storageKey)
-  if (!clients) return
-  for (const client of clients) {
-    const projected = projectEventPayloadForViewer(channel, payload, client._starsEventViewer)
-    if (projected !== undefined) client.write(`event: message\ndata: ${JSON.stringify(projected)}\n\n`)
-  }
+function addEventClient(ctx, channel, res, viewer) {
+  return eventPublisher(ctx).subscribe(channel, res, viewer)
 }
 
 function publishEvent(ctx, channel, payload) {
-  publishEventToChannel(ctx, channel, payload)
-  if (channel !== '_all') {
-    publishEventToChannel(ctx, '_all', {
-      channel,
-      payload,
-      sequence: nextRoomEventSequence(ctx),
-      streamId: ctx.serverInstanceId ?? 'legacy-stream',
-      emittedAt: Date.now(),
-    })
-  }
+  eventPublisher(ctx).publish(channel, payload)
 }
 
 /** A committed state transaction must not be reported as failed when SSE delivery throws. */
 export function publishEventBestEffort(ctx, channel, payload) {
-  try {
-    publishEvent(ctx, channel, payload)
-    return true
-  } catch {
-    return false
-  }
+  return eventPublisher(ctx).publishBestEffort(channel, payload)
 }
 
 async function handleCampaignApi(req, res, parsed, ctx) {
@@ -11479,28 +11350,10 @@ async function handleCampaignApi(req, res, parsed, ctx) {
   }
 
   if (parsed.pathname === '/api/campaign/snapshots' && req.method === 'GET') {
-    let entries = []
-    try {
-      entries = await readdir(snapshotRoot(ctx))
-    } catch {
-      writeJson(res, 200, { snapshots: [], limit: CAMPAIGN_SNAPSHOT_LIMIT })
-      return true
-    }
-    const snapshots = []
-    for (const fileName of entries.filter((entry) => entry.endsWith('.json'))) {
-      try {
-        const bundle = JSON.parse(await readFile(path.join(snapshotRoot(ctx), fileName), 'utf8'))
-        snapshots.push({
-          id: bundle.snapshotId ?? fileName.slice(0, -5),
-          createdAt: bundle.exportedAt,
-          kind: bundle.snapshotKind ?? 'manual',
-          stateCount: Object.keys(bundle.states ?? {}).length,
-        })
-      } catch {
-        // A broken snapshot must not hide other recovery points.
-      }
-    }
-    snapshots.sort((left, right) => right.createdAt - left.createdAt)
+    const snapshots = await listCampaignSnapshotSummaries(
+      ctx.storage?.snapshotStore,
+      snapshotRoot(ctx),
+    )
     writeJson(res, 200, { snapshots, limit: CAMPAIGN_SNAPSHOT_LIMIT })
     return true
   }
@@ -11515,7 +11368,8 @@ async function handleCampaignApi(req, res, parsed, ctx) {
     const id = safeName(restoreMatch[1])
     let bundle
     try {
-      bundle = JSON.parse(await readFile(path.join(snapshotRoot(ctx), `${id}.json`), 'utf8'))
+      bundle = await readCampaignSnapshot(ctx.storage?.snapshotStore, snapshotRoot(ctx), id)
+      if (!bundle) throw new Error('snapshot-not-found')
     } catch {
       throw new RoomProtocolError(404, 'snapshot-not-found')
     }
@@ -11706,7 +11560,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 200, {
           schemaVersion: DM_UNDO_SCHEMA_VERSION,
           transactions: journal.transactions
-            .slice(-30)
+            .slice(-DM_UNDO_HISTORY_LIMIT)
             .reverse()
             .map(dmUndoPublicTransaction),
         })
@@ -12189,6 +12043,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         mutation = JSON.parse((await readBody(req)).toString('utf8'))
       } catch {
         writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      if (mutation?.operation === 'truncate-after' && !['dm', 'open'].includes(ctx.accessRole)) {
+        writeJson(res, 403, { error: 'dm-authority-required' })
         return true
       }
       const now = Date.now()

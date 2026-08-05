@@ -4,12 +4,20 @@ import {
   createDnd5eCombatant,
   createDnd5eMechanicalEffect,
   dnd5eConditionsFromActiveEffects,
+  dnd5ePendingMonsterMechanicResolutions,
   registerDnd5eRulesPlugin,
+  resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
   type DeclarativeSubclassDefinitionV1,
 } from '../../rulesets/dnd5e'
+import {
+  buildDnd5eCustomMonster,
+  createDnd5eCustomMonsterDraft,
+  createDnd5eCustomMonsterMechanicDraft,
+} from '../../rulesets/dnd5e/customMonsterWorkshop'
+import { setDnd5eRoomMonsterCatalog } from '../../rulesets/dnd5e/monsters'
 import type { BattleMap, Token } from '../../store/maps'
 import { settleDnd5eConcentrationChecks } from './settleDnd5eCombatResult'
 
@@ -100,6 +108,70 @@ describe('地图战斗结果结算器', () => {
 
     expect(settled.application.changedTokenIds).toContain('hero')
     expect(settled.application.changedCharacterIds).toContain('character-hero')
+  })
+
+  it('使用 Host 骰自动结算低生命值造成伤害后的怪物机制', async () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '伊利法统领虚体'
+    draft.actions[0].damageType = 'slashing'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'desperate-damage',
+      name: '不退斗志',
+      trigger: 'after-dealt-damage',
+      triggerSubject: 'self',
+      hpPercentageAtOrBelow: undefined,
+      hpBelow: 10,
+      effectKind: 'damage',
+      effectTarget: 'trigger-target',
+      healingDice: '1d6',
+      damageType: 'inherit-trigger',
+      limit: 'unlimited',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    try {
+      const attacker = combatant('enemy', 20, false, {
+        statBlockId: monster.id,
+        currentHp: 9,
+        maxHp: 20,
+      })
+      const target = combatant('hero', 10, false, { currentHp: 30, maxHp: 30 })
+      const state = startDnd5eHeadlessCombat('pending-mechanic', [attacker, target])
+      state.distanceFeetByCombatantPair = { ['enemy\u0000hero']: 5 }
+      const attacked = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: attacker.id,
+        actionId: monster.actions[0].id,
+        rolls: [{ targetId: target.id, d20: 18, damageRolls: [[3]] }],
+      })
+      expect(attacked.ok, attacked.ok ? undefined : attacked.reason).toBe(true)
+      if (!attacked.ok) return
+      expect(dnd5ePendingMonsterMechanicResolutions(attacked.state)).toHaveLength(1)
+      const hpBeforeMechanic = attacked.state.combatants.hero.currentHp
+      const rollDice = vi.fn(async () => [4])
+
+      const settled = await settleDnd5eConcentrationChecks({
+        result: attacked,
+        map: map(),
+        characters: [],
+        characterIdByCombatantId: {},
+        rollD20: unusedRoll,
+        rollD4: unusedRoll,
+        rollDice,
+      })
+
+      expect(rollDice).toHaveBeenCalledWith(1, 6, '不退斗志·额外伤害', 'enemy')
+      expect(settled.result.state.combatants.hero.currentHp).toBe(hpBeforeMechanic - 4)
+      expect(dnd5ePendingMonsterMechanicResolutions(settled.result.state)).toEqual([])
+      expect(settled.result.events).toContainEqual(expect.objectContaining({
+        type: 'monster-mechanic-v2-triggered',
+        actorId: attacker.id,
+        mechanicId: 'desperate-damage',
+      }))
+    } finally {
+      setDnd5eRoomMonsterCatalog([])
+    }
   })
 
   it('依序结算专注豁免，失败时解除专注并保留结算事件', async () => {

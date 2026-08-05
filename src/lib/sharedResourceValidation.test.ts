@@ -10,7 +10,7 @@ describe('shared resource runtime validation', () => {
       spellbook: { spells: [], updatedAt: 1 },
       'custom-monsters': { schemaVersion: 1, monsters: [], updatedAt: 1 },
       combat: { active: false, updatedAt: 1 },
-      'combat-log': { entries: [], updatedAt: 1 },
+      'combat-log': { entries: [], rollbackCutoffEntryId: 12.5, updatedAt: 1 },
       'room-chat': { schemaVersion: 1, messages: [], updatedAt: 1 },
       'room-journal': { schemaVersion: 1, handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 1 },
       'campaign-time': { schemaVersion: 2, worldMinute: 480, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], advances: [], updatedAt: 1 },
@@ -40,6 +40,10 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('spellbook', { spells: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('custom-monsters', { monsters: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('combat-log', {
+      entries: [],
+      rollbackCutoffEntryId: 'broken',
+    }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', {
       active: true,
       flowPause: {

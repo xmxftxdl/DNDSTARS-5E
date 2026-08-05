@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { createCoreFighter } from './support/characterCreation'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
@@ -57,15 +58,7 @@ test('DM character page is a read-only room-player roster', async ({ browser, re
   await player.evaluate(([key, session]) => localStorage.setItem(key, JSON.stringify(session)), [SESSION_KEY, sessionFrom(joined)] as const)
   await player.reload({ waitUntil: 'domcontentloaded' })
 
-  await player.getByRole('button', { name: '新建角色' }).click()
-  await player.getByRole('button', { name: /经验丰富的冒险者/ }).click()
-  await player.getByRole('button', { name: '选择属性方式' }).click()
-  await player.getByRole('button', { name: /标准数组/ }).click()
-  await player.getByRole('button', { name: '开始分配' }).click()
-  await player.getByRole('button', { name: '加入种族调整并选择装备' }).click()
-  await player.getByRole('button', { name: '确认起始装备' }).click()
-  await player.getByRole('textbox', { name: '角色名称' }).fill('爱丽丝的战士')
-  await player.getByRole('button', { name: '创建角色' }).click()
+  await createCoreFighter(player, { name: '爱丽丝的战士' })
 
   const currentHp = player.getByRole('spinbutton', { name: '当前生命值' })
   await currentHp.fill('1')
@@ -87,7 +80,7 @@ test('DM character page is a read-only room-player roster', async ({ browser, re
   await roster.getByRole('button', { name: '查看角色卡：爱丽丝的战士' }).click()
   const detail = dm.getByRole('dialog', { name: '爱丽丝的战士的角色卡详情' })
   await expect(detail).toBeVisible()
-  await expect(detail.getByText('DM 只读检视：这里展示玩家同步到房间的角色快照，任何字段都不能从此窗口修改。')).toBeVisible()
+  await expect(detail.getByText('DM 检视：普通角色字段保持只读；可修订任意一次升级记录，系统会重新推演后续等级。')).toBeVisible()
   await expect(detail.getByRole('textbox', { name: '角色名称' })).toBeDisabled()
   await detail.getByRole('button', { name: '物品栏' }).click()
   await expect(detail.getByTestId('dnd5e-inventory')).toBeVisible()

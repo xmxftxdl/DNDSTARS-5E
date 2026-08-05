@@ -5,6 +5,7 @@ import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { migrateLegacyApCombatLogText } from '../mapsPageHelpers'
 import {
+  combatLogEntryIsRoundBoundary,
   resolveCombatLogSubject,
   type CombatLogSubjectPresentation,
 } from './combatLogPresentation'
@@ -77,6 +78,7 @@ export default function CombatLogEntryCard({
     characters,
     currentTurnTokenId,
   })
+  const isRoundBoundary = combatLogEntryIsRoundBoundary(entry)
   const tone =
     entry.kind === 'damage'
       ? 'bg-rose-500/10 text-rose-100'
@@ -133,7 +135,7 @@ export default function CombatLogEntryCard({
             </details>
           )}
         </div>
-        <CombatLogSubjectToken subject={subject} />
+        {!isRoundBoundary && <CombatLogSubjectToken subject={subject} />}
       </div>
     </article>
   )

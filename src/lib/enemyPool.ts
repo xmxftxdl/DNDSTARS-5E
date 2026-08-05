@@ -5927,11 +5927,17 @@ const SRD_MONSTER_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = 
 export function getEnemyVisualVariants(id: string): readonly EnemyVisualVariant[] {
   const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
   if (!monster) return []
-  if (monster.tokenPortrait && monster.initiativePortrait) return [{
+  return dnd5eMonsterVisualVariants(monster)
+}
+
+function dnd5eMonsterVisualVariants(monster: Dnd5eMonsterStatBlock): readonly EnemyVisualVariant[] {
+  const customTokenPortrait = monster.tokenPortrait ?? monster.portrait ?? monster.initiativePortrait
+  const customInitiativePortrait = monster.initiativePortrait ?? monster.portrait ?? monster.tokenPortrait
+  if (customTokenPortrait && customInitiativePortrait) return [{
     id: 'custom',
     label: '自定义形象',
-    tokenPortrait: monster.tokenPortrait,
-    initiativePortrait: monster.initiativePortrait,
+    tokenPortrait: customTokenPortrait,
+    initiativePortrait: customInitiativePortrait,
   }]
   const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
   if (presentation?.visualVariants?.length) return presentation.visualVariants
@@ -5960,10 +5966,10 @@ export function getEnemyVisualPresentation(
   }
   const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
   if (!monster) return undefined
-  if (monster.tokenPortrait || monster.initiativePortrait) {
+  if (monster.tokenPortrait || monster.initiativePortrait || monster.portrait) {
     return {
-      tokenPortrait: monster.tokenPortrait ?? monster.initiativePortrait!,
-      initiativePortrait: monster.initiativePortrait ?? monster.tokenPortrait!,
+      tokenPortrait: monster.tokenPortrait ?? monster.portrait ?? monster.initiativePortrait!,
+      initiativePortrait: monster.initiativePortrait ?? monster.portrait ?? monster.tokenPortrait!,
     }
   }
   const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
@@ -5987,6 +5993,8 @@ function srdCreatureTypes(type: string): CreatureType[] {
 
 export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): EnemyTemplate {
   const presentation = SRD_MONSTER_PRESENTATION[monster.slug] ?? { emoji: '👾', color: '#f87171' }
+  const visualVariants = dnd5eMonsterVisualVariants(monster)
+  const selectedVisual = visualVariants[0]
   const capabilityTags = [
     monster.capabilities?.spellcaster ? '施法者' : null,
     monster.capabilities?.legendary ? '传奇动作' : null,
@@ -6020,9 +6028,9 @@ export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): Ene
     experiencePoints: monster.challenge.xp,
     hitDice: monster.hitPoints.dice,
     source: monster.source,
-    tokenPortrait: presentation.tokenPortrait,
-    initiativePortrait: presentation.initiativePortrait,
-    visualVariants: getEnemyVisualVariants(monster.id),
+    tokenPortrait: selectedVisual?.tokenPortrait ?? monster.portrait ?? presentation.tokenPortrait,
+    initiativePortrait: selectedVisual?.initiativePortrait ?? monster.portrait ?? presentation.initiativePortrait,
+    visualVariants,
     searchAliases: [...(SRD_MONSTER_SEARCH_ALIASES[monster.slug] ?? [])],
   }
 }

@@ -12,6 +12,17 @@ export function appendSharedCombatLogEntry(
   )
 }
 
+export function truncateSharedCombatLogAfterEntry(
+  mapId: string,
+  targetEntryId: number,
+): Promise<SharedCombatLogState> {
+  return mutateSharedRoomResource<SharedCombatLogState>(
+    'combat-log',
+    '/state/combat-log/entry',
+    { operation: 'truncate-after', mapId, targetEntryId },
+  )
+}
+
 export function mergeSharedCombatLogEntries(
   current: CombatLogEntry[],
   incoming: CombatLogEntry[],

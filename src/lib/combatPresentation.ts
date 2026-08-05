@@ -2,7 +2,6 @@ import {
   publishSharedEvent as publishSharedTransportEvent,
   sampleSharedServerClock,
 } from './sharedApi'
-import { preloadBrowserImage } from './browserImageCache'
 import { getRoomRulesSnapshot } from './roomRulesState'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
@@ -36,7 +35,11 @@ export const ACID_SPLASH_ANIMATION_DURATION_MS = 1_050
 export const POISON_SPRAY_ANIMATION_DURATION_MS = 1_150
 export const VICIOUS_MOCKERY_ANIMATION_DURATION_MS = 1_100
 export const MAGIC_MISSILE_ANIMATION_DURATION_MS = 300
-export const MAGIC_MISSILE_SEQUENCE_GAP_MS = 300
+// Keep a small server/SSE/frame-scheduling guard between darts. Using a gap
+// exactly equal to the animation duration allowed adjacent projectiles to
+// overlap for one rendered frame when their independently sampled server
+// timestamps differed by a few milliseconds.
+export const MAGIC_MISSILE_SEQUENCE_GAP_MS = 340
 export const SCORCHING_RAY_ANIMATION_DURATION_MS = 1_000
 export const GUIDING_BOLT_ANIMATION_DURATION_MS = 1_050
 export const ACID_ARROW_ANIMATION_DURATION_MS = 1_050
@@ -62,17 +65,39 @@ export const COLOR_SPRAY_ANIMATION_DURATION_MS = 1_200
 export const FAERIE_FIRE_ANIMATION_DURATION_MS = 1_300
 export const SLEEP_ANIMATION_DURATION_MS = 1_350
 export const FALSE_LIFE_ANIMATION_DURATION_MS = 1_250
+export const HYPNOTIC_PATTERN_ANIMATION_DURATION_MS = 1_350
+export const SLOW_ANIMATION_DURATION_MS = 1_250
+export const PHANTASMAL_KILLER_ANIMATION_DURATION_MS = 1_400
+export const BANISHMENT_ANIMATION_DURATION_MS = 1_350
+export const MISTY_STEP_ANIMATION_DURATION_MS = 1_050
+export const HOLD_MONSTER_ANIMATION_DURATION_MS = 1_300
+export const COUNTERSPELL_ANIMATION_DURATION_MS = 1_050
+export const DISPEL_MAGIC_ANIMATION_DURATION_MS = 1_200
+export const SHIELD_ANIMATION_DURATION_MS = 1_000
+export const LESSER_RESTORATION_ANIMATION_DURATION_MS = 1_200
+export const HEAL_ANIMATION_DURATION_MS = 1_250
+export const MASS_CURE_WOUNDS_ANIMATION_DURATION_MS = 1_300
+export const MASS_HEAL_ANIMATION_DURATION_MS = 1_400
+export const MASS_HEALING_WORD_ANIMATION_DURATION_MS = 1_250
+export const PRAYER_OF_HEALING_ANIMATION_DURATION_MS = 1_350
+export const DANCING_LIGHTS_ANIMATION_DURATION_MS = 1_250
+export const MINOR_ILLUSION_ANIMATION_DURATION_MS = 1_250
+export const THAUMATURGY_ANIMATION_DURATION_MS = 1_200
+export const SHILLELAGH_ANIMATION_DURATION_MS = 1_200
 export const ENTANGLE_ANIMATION_DURATION_MS = 1_300
 export const GREASE_ANIMATION_DURATION_MS = 1_250
 export const DARKNESS_ANIMATION_DURATION_MS = 1_300
 /** Time before Headless settlement may continue after the summon entrance. */
 export const FLAMING_SPHERE_ENTRANCE_DURATION_MS = 1_300
 /**
- * Keep the mature summon frame alive briefly while the authoritative map area
- * is committed and delivered to both clients. Projection stops earlier as soon
- * as the matching persistent area is present.
+ * Atlas playback reaches and holds the mature summon frame at the settlement
+ * boundary. The entrance itself may remain projected longer while waiting for
+ * the persistent Konva layer to report that it has actually painted.
  */
 export const FLAMING_SPHERE_ANIMATION_DURATION_MS = 2_100
+/** Safety bound for a failed or abandoned entrance-to-area visual handoff. */
+export const FLAMING_SPHERE_HANDOFF_TIMEOUT_MS = 120_000
+export const WALL_OF_FIRE_HANDOFF_TIMEOUT_MS = 120_000
 export const MOONBEAM_ANIMATION_DURATION_MS = 1_350
 export const DAYLIGHT_ANIMATION_DURATION_MS = 1_350
 export const BLACK_TENTACLES_ANIMATION_DURATION_MS = 1_400
@@ -85,8 +110,36 @@ export const CALL_LIGHTNING_STRIKE_ANIMATION_DURATION_MS = 950
 export const INSECT_PLAGUE_ANIMATION_DURATION_MS = 1_350
 export const WALL_OF_FIRE_ANIMATION_DURATION_MS = 1_400
 export const BLADE_BARRIER_ANIMATION_DURATION_MS = 1_350
+export const CLOUDKILL_ANIMATION_DURATION_MS = 1_400
 export const CHAIN_LIGHTNING_ANIMATION_DURATION_MS = 1_050
 export const DISINTEGRATE_ANIMATION_DURATION_MS = 1_150
+
+/** Core spells whose entrance must remain painted until the authoritative area is visible. */
+export const PERSISTENT_AREA_PRESENTATION_SPELL_IDS: ReadonlySet<CombatPresentationAreaSpellId> = new Set([
+  'mage-hand',
+  'darkness',
+  'daylight',
+  'grease',
+  'entangle',
+  'black-tentacles',
+  'flaming-sphere',
+  'spiritual-weapon',
+  'spike-growth',
+  'spirit-guardians',
+  'moonbeam',
+  'call-lightning',
+  'wall-of-fire',
+  'insect-plague',
+  'cloudkill',
+  'blade-barrier',
+  'ice-storm',
+])
+
+export function isPersistentAreaPresentationSpellId(
+  spellId: CombatPresentationAreaSpellId,
+): boolean {
+  return PERSISTENT_AREA_PRESENTATION_SPELL_IDS.has(spellId)
+}
 export const BLESS_MANIFESTATION_DURATION_MS = 1_000
 export const BANE_MANIFESTATION_DURATION_MS = 1_000
 export const SHIELD_OF_FAITH_MANIFESTATION_DURATION_MS = 1_000
@@ -130,7 +183,7 @@ export const KILL_STREAK_PRESENTATION_EVENT_TTL_MS = 5_800
 export const SAVING_THROW_PENDING_TTL_MS = 300_000
 export const SAVING_THROW_RESULT_TTL_MS = 3_000
 export const SAVING_THROW_RESULT_HOLD_MS = 1_100
-export const ATTACK_TARGET_EFFECT_DURATION_MS = 1_200
+export const ATTACK_TARGET_EFFECT_DURATION_MS = 1_600
 
 let combatPresentationClockOffsetMs = 0
 let combatPresentationClockSampledAt = 0
@@ -247,6 +300,8 @@ export interface CombatPresentationAreaSpellEventV1 {
   widthFeet?: number
   heightFeet?: number
   radiusFeet?: number
+  wallOfFireShape?: 'line' | 'ring'
+  wallOfFireAngleDegrees?: number
   createdAt: number
   expiresAt: number
 }
@@ -277,7 +332,7 @@ export interface CombatPresentationAttackBannerEventV1 {
   targetTokenId?: string
   actorName: string
   attackName: string
-  attackKind: 'melee' | 'ranged'
+  attackKind: 'melee' | 'ranged' | 'action'
   classId: string
   createdAt: number
   expiresAt: number
@@ -500,6 +555,26 @@ export interface CombatPresentationMapProjectile {
     | 'hideous-laughter'
     | 'hold-person'
     | 'blindness-deafness'
+    | 'hypnotic-pattern'
+    | 'slow'
+    | 'phantasmal-killer'
+    | 'banishment'
+    | 'misty-step'
+    | 'hold-monster'
+    | 'counterspell'
+    | 'dispel-magic'
+    | 'shield'
+    | 'lesser-restoration'
+    | 'heal'
+    | 'mass-cure-wounds'
+    | 'mass-heal'
+    | 'mass-healing-word'
+    | 'prayer-of-healing'
+    | 'dancing-lights'
+    | 'minor-illusion'
+    | 'thaumaturgy'
+    | 'shillelagh'
+    | 'cloudkill'
   hit: boolean
   issuedAt: number
   durationMs: number
@@ -508,6 +583,9 @@ export interface CombatPresentationMapProjectile {
   areaHeightPx?: number
   accentColor?: string
   glowColor?: string
+  /** Persistent area whose painted visual explicitly releases this entrance. */
+  handoffAreaId?: string
+  areaShape?: 'line' | 'ring'
 }
 
 export interface CombatPresentationSpellBanner {
@@ -525,7 +603,7 @@ export interface CombatPresentationAttackBanner {
   id: string
   actorName: string
   attackName: string
-  attackKind: 'melee' | 'ranged'
+  attackKind: 'melee' | 'ranged' | 'action'
   classId: string
   createdAt: number
   expiresAt: number
@@ -614,7 +692,9 @@ export function parseCombatPresentationEvent(
     Number(event.expiresAt) - Number(event.createdAt) >
       (event.type === 'saving-throw-status'
         ? SAVING_THROW_PENDING_TTL_MS
-        : Math.max(5_000, KILL_STREAK_PRESENTATION_EVENT_TTL_MS))
+        : event.type === 'spell-area-effect' && event.spellId != null && isPersistentAreaPresentationSpellId(event.spellId)
+          ? WALL_OF_FIRE_HANDOFF_TIMEOUT_MS
+          : Math.max(5_000, KILL_STREAK_PRESENTATION_EVENT_TTL_MS))
   ) return null
   if (event.type === 'spell-projectile') {
     if (
@@ -658,6 +738,10 @@ export function parseCombatPresentationEvent(
       area.widthFeet !== expected.widthFeet ||
       area.heightFeet !== expected.heightFeet ||
       area.radiusFeet !== expected.radiusFeet ||
+      (area.spellId === 'wall-of-fire' && (
+        (area.wallOfFireShape != null && area.wallOfFireShape !== 'line' && area.wallOfFireShape !== 'ring') ||
+        (area.wallOfFireAngleDegrees != null && (!Number.isFinite(area.wallOfFireAngleDegrees) || area.wallOfFireAngleDegrees < 0 || area.wallOfFireAngleDegrees >= 360))
+      )) ||
       !area.targetCell ||
       !Number.isInteger(area.targetCell.col) ||
       !Number.isInteger(area.targetCell.row) ||
@@ -681,7 +765,7 @@ export function parseCombatPresentationEvent(
     if (
       !boundedId(banner.actorName, 80) ||
       !boundedId(banner.attackName, 80) ||
-      (banner.attackKind !== 'melee' && banner.attackKind !== 'ranged') ||
+      (banner.attackKind !== 'melee' && banner.attackKind !== 'ranged' && banner.attackKind !== 'action') ||
       !boundedId(banner.classId, 40) ||
       (banner.targetTokenId != null && !boundedId(banner.targetTokenId, 160))
     ) return null
@@ -892,6 +976,44 @@ export function combatPresentationProjectilesForMap(
             ? BLADE_BARRIER_ANIMATION_DURATION_MS
           : event.spellId === 'false-life'
             ? FALSE_LIFE_ANIMATION_DURATION_MS
+          : event.spellId === 'hypnotic-pattern'
+            ? HYPNOTIC_PATTERN_ANIMATION_DURATION_MS
+          : event.spellId === 'slow'
+            ? SLOW_ANIMATION_DURATION_MS
+          : event.spellId === 'phantasmal-killer'
+            ? PHANTASMAL_KILLER_ANIMATION_DURATION_MS
+          : event.spellId === 'banishment'
+            ? BANISHMENT_ANIMATION_DURATION_MS
+          : event.spellId === 'misty-step'
+            ? MISTY_STEP_ANIMATION_DURATION_MS
+          : event.spellId === 'hold-monster'
+            ? HOLD_MONSTER_ANIMATION_DURATION_MS
+          : event.spellId === 'counterspell'
+            ? COUNTERSPELL_ANIMATION_DURATION_MS
+          : event.spellId === 'dispel-magic'
+            ? DISPEL_MAGIC_ANIMATION_DURATION_MS
+          : event.spellId === 'shield'
+            ? SHIELD_ANIMATION_DURATION_MS
+          : event.spellId === 'lesser-restoration'
+            ? LESSER_RESTORATION_ANIMATION_DURATION_MS
+          : event.spellId === 'heal'
+            ? HEAL_ANIMATION_DURATION_MS
+          : event.spellId === 'mass-cure-wounds'
+            ? MASS_CURE_WOUNDS_ANIMATION_DURATION_MS
+          : event.spellId === 'mass-heal'
+            ? MASS_HEAL_ANIMATION_DURATION_MS
+          : event.spellId === 'mass-healing-word'
+            ? MASS_HEALING_WORD_ANIMATION_DURATION_MS
+          : event.spellId === 'prayer-of-healing'
+            ? PRAYER_OF_HEALING_ANIMATION_DURATION_MS
+          : event.spellId === 'dancing-lights'
+            ? DANCING_LIGHTS_ANIMATION_DURATION_MS
+          : event.spellId === 'minor-illusion'
+            ? MINOR_ILLUSION_ANIMATION_DURATION_MS
+          : event.spellId === 'thaumaturgy'
+            ? THAUMATURGY_ANIMATION_DURATION_MS
+          : event.spellId === 'shillelagh'
+            ? SHILLELAGH_ANIMATION_DURATION_MS
           : event.spellId === 'chain-lightning'
             ? CHAIN_LIGHTNING_ANIMATION_DURATION_MS
           : event.spellId === 'disintegrate'
@@ -964,23 +1086,12 @@ export function combatPresentationProjectilesForMap(
     const animationStartsAt = event.type === 'spell-area-projectile'
       ? event.animationStartsAt
       : event.createdAt
+    const awaitsPersistentVisual = event.type === 'spell-area-effect' &&
+      isPersistentAreaPresentationSpellId(event.spellId)
     if (
       event.mapId !== map.id ||
       now < animationStartsAt ||
-      animationStartsAt + animationDuration <= now
-    ) return []
-    // A Flaming Sphere presentation is only the entrance for the authoritative
-    // persistent area created by the same Headless transaction. Drop the
-    // entrance in the exact render that receives that area, so there is neither
-    // an empty frame nor a delayed duplicate sphere.
-    if (
-      event.type === 'spell-area-effect' &&
-      event.spellId === 'flaming-sphere' &&
-      map.dnd5ePluginAreas?.some((area) =>
-        area.id === `core-spell-area:${event.transactionId}` &&
-        area.sourceKind === 'core-spell' &&
-        area.coreSpellId === 'flaming-sphere',
-      )
+      (!awaitsPersistentVisual && animationStartsAt + animationDuration <= now)
     ) return []
     const source = map.tokens.find((token) => token.id === event.sourceTokenId)
     // Missing source generally means the server projection has hidden the caster
@@ -1087,24 +1198,41 @@ export function combatPresentationProjectilesForMap(
           hit: true,
           issuedAt: combatPresentationLocalTime(event.createdAt),
           durationMs: animationDuration,
-          radiusPx: (event.radiusFeet ?? 10) / feetPerCell * gridSize,
+          // Flaming Sphere is a one-cell effect token. Its presentation size is
+          // deliberately independent of a map's feet-per-cell display setting.
+          radiusPx: event.spellId === 'flaming-sphere'
+            ? gridSize
+            : (event.radiusFeet ?? 10) / feetPerCell * gridSize,
+          handoffAreaId: isPersistentAreaPresentationSpellId(event.spellId)
+            ? `core-spell-area:${event.transactionId}`
+            : undefined,
         } satisfies CombatPresentationMapProjectile]
       }
       if (event.shape === 'rect') {
         const widthPx = (event.widthFeet ?? 20) / feetPerCell * gridSize
         const heightPx = (event.heightFeet ?? 20) / feetPerCell * gridSize
         const orientedStrip = event.spellId === 'wall-of-fire' || event.spellId === 'blade-barrier'
+        const wallRadians = (event.wallOfFireAngleDegrees ?? 0) * Math.PI / 180
+        const wallFrom = event.spellId === 'wall-of-fire'
+          ? { x: targetPoint.x - Math.cos(wallRadians), y: targetPoint.y - Math.sin(wallRadians) }
+          : source
         return [{
           id: event.id,
-          from: orientedStrip ? source : targetPoint,
+          from: orientedStrip ? wallFrom : targetPoint,
           to: targetPoint,
           kind: event.spellId,
           hit: true,
           issuedAt: combatPresentationLocalTime(event.createdAt),
           durationMs: animationDuration,
-          radiusPx: Math.max(widthPx, heightPx) / 2,
+          radiusPx: event.spellId === 'wall-of-fire' && event.wallOfFireShape === 'ring'
+            ? 10 / feetPerCell * gridSize
+            : Math.max(widthPx, heightPx) / 2,
           areaWidthPx: widthPx,
           areaHeightPx: heightPx,
+          handoffAreaId: isPersistentAreaPresentationSpellId(event.spellId)
+            ? `core-spell-area:${event.transactionId}`
+            : undefined,
+          areaShape: event.wallOfFireShape,
         } satisfies CombatPresentationMapProjectile]
       }
       const aimDx = targetPoint.x - source.x
@@ -1193,6 +1321,7 @@ export function combatPresentationAttackTargetEffectsForMap(
   return state.spellProjectiles.flatMap<CombatPresentationAttackTargetEffect>((event) => {
     if (
       event.type !== 'attack-banner' ||
+      event.attackKind === 'action' ||
       !event.targetTokenId ||
       event.mapId !== map.id ||
       event.createdAt > now ||
@@ -1317,10 +1446,10 @@ export async function publishAttackBannerPresentation(input: {
   mapId: string
   transactionId: string
   sourceTokenId: string
-  targetTokenId: string
+  targetTokenId?: string
   actorName: string
   attackName: string
-  attackKind: 'melee' | 'ranged'
+  attackKind: 'melee' | 'ranged' | 'action'
   classId: string
 }): Promise<{ completesAt: number }> {
   if (getRoomRulesSnapshot()?.houseRules.combatBannersEnabled === false) {
@@ -1365,7 +1494,6 @@ export async function publishRayOfFrostPresentation(input: {
   sourceTokenId: string
   targetTokenId: string
 }): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/ray-of-frost-sprite-v2.png')
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
@@ -1386,7 +1514,6 @@ export async function publishEldritchBlastPresentation(input: {
   sourceTokenId: string
   targetTokenId: string
 }): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/eldritch-blast-sprite-v2.png')
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
@@ -1487,42 +1614,36 @@ export function publishMagicMissilePresentation(
 export async function publishScorchingRayPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/scorching-ray-sprite-v2.png')
   return publishMaterialProjectile('scorching-ray', SCORCHING_RAY_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishGuidingBoltPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/guiding-bolt-sprite-v2.png')
   return publishMaterialProjectile('guiding-bolt', GUIDING_BOLT_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishAcidArrowPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/acid-arrow-sprite-v2.png')
   return publishMaterialProjectile('acid-arrow', ACID_ARROW_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishHealingWordPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/healing-word-sprite-v2.png')
   return publishMaterialProjectile('healing-word', HEALING_WORD_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishInflictWoundsPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/inflict-wounds-sprite-v2.png')
   return publishMaterialProjectile('inflict-wounds', INFLICT_WOUNDS_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishChainLightningPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/chain-lightning-sprite-v2.png')
   return publishMaterialProjectile(
     'chain-lightning',
     CHAIN_LIGHTNING_ANIMATION_DURATION_MS,
@@ -1533,7 +1654,6 @@ export async function publishChainLightningPresentation(
 export async function publishDisintegratePresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/disintegrate-sprite-v2.png')
   return publishMaterialProjectile('disintegrate', DISINTEGRATE_ANIMATION_DURATION_MS, input)
 }
 
@@ -1552,12 +1672,6 @@ async function publishColoredCantripProjectile(
   durationMs: number,
   input: ColoredCantripPresentationInput,
 ): Promise<{ completesAt: number }> {
-  const materialAsset = spellId === 'acid-splash'
-    ? '/assets/vfx/acid-splash-sprite-v2.png'
-    : spellId === 'poison-spray'
-      ? '/assets/vfx/poison-spray-sprite-v2.png'
-      : undefined
-  if (materialAsset) await preloadBrowserImage(materialAsset)
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
@@ -1625,7 +1739,26 @@ async function publishMaterialTargetEffect(
     | 'finger-of-death'
     | 'power-word-stun'
     | 'power-word-kill'
-    | 'false-life',
+    | 'false-life'
+    | 'hypnotic-pattern'
+    | 'slow'
+    | 'phantasmal-killer'
+    | 'banishment'
+    | 'misty-step'
+    | 'hold-monster'
+    | 'counterspell'
+    | 'dispel-magic'
+    | 'shield'
+    | 'lesser-restoration'
+    | 'heal'
+    | 'mass-cure-wounds'
+    | 'mass-heal'
+    | 'mass-healing-word'
+    | 'prayer-of-healing'
+    | 'dancing-lights'
+    | 'minor-illusion'
+    | 'thaumaturgy'
+    | 'shillelagh',
   durationMs: number,
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
@@ -1645,28 +1778,24 @@ async function publishMaterialTargetEffect(
 export async function publishCureWoundsPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/cure-wounds-sprite-v2.png')
   return publishMaterialTargetEffect('cure-wounds', CURE_WOUNDS_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishHellishRebukePresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/hellish-rebuke-sprite-v2.png')
   return publishMaterialTargetEffect('hellish-rebuke', HELLISH_REBUKE_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishBlightPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/blight-sprite-v2.png')
   return publishMaterialTargetEffect('blight', BLIGHT_ANIMATION_DURATION_MS, input)
 }
 
 export async function publishFingerOfDeathPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/finger-of-death-sprite-v2.png')
   return publishMaterialTargetEffect(
     'finger-of-death',
     FINGER_OF_DEATH_ANIMATION_DURATION_MS,
@@ -1677,7 +1806,6 @@ export async function publishFingerOfDeathPresentation(
 export async function publishPowerWordStunPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/power-word-stun-sprite-v2.png')
   return publishMaterialTargetEffect(
     'power-word-stun',
     POWER_WORD_STUN_ANIMATION_DURATION_MS,
@@ -1688,7 +1816,6 @@ export async function publishPowerWordStunPresentation(
 export async function publishPowerWordKillPresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/power-word-kill-sprite-v2.png')
   return publishMaterialTargetEffect(
     'power-word-kill',
     POWER_WORD_KILL_ANIMATION_DURATION_MS,
@@ -1699,13 +1826,66 @@ export async function publishPowerWordKillPresentation(
 export async function publishFalseLifePresentation(
   input: MaterialProjectilePresentationInput,
 ): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/false-life-sprite-v2.png')
   return publishMaterialTargetEffect(
     'false-life',
     FALSE_LIFE_ANIMATION_DURATION_MS,
     input,
   )
 }
+
+async function publishNewMaterialTargetPresentation(
+  spellId:
+    | 'hypnotic-pattern'
+    | 'slow'
+    | 'phantasmal-killer'
+    | 'banishment'
+    | 'misty-step'
+    | 'hold-monster'
+    | 'counterspell'
+    | 'dispel-magic'
+    | 'shield'
+    | 'lesser-restoration',
+  durationMs: number,
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialTargetEffect(spellId, durationMs, input)
+}
+
+export const publishHypnoticPatternPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('hypnotic-pattern', HYPNOTIC_PATTERN_ANIMATION_DURATION_MS, input)
+export const publishSlowPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('slow', SLOW_ANIMATION_DURATION_MS, input)
+export const publishPhantasmalKillerPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('phantasmal-killer', PHANTASMAL_KILLER_ANIMATION_DURATION_MS, input)
+export const publishBanishmentPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('banishment', BANISHMENT_ANIMATION_DURATION_MS, input)
+export const publishMistyStepPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('misty-step', MISTY_STEP_ANIMATION_DURATION_MS, input)
+export const publishHoldMonsterPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('hold-monster', HOLD_MONSTER_ANIMATION_DURATION_MS, input)
+export const publishCounterspellPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('counterspell', COUNTERSPELL_ANIMATION_DURATION_MS, input)
+export const publishDispelMagicPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('dispel-magic', DISPEL_MAGIC_ANIMATION_DURATION_MS, input)
+export const publishShieldPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation('shield', SHIELD_ANIMATION_DURATION_MS, input)
+export const publishLesserRestorationPresentation = (input: MaterialProjectilePresentationInput) =>
+  publishNewMaterialTargetPresentation(
+    'lesser-restoration',
+    LESSER_RESTORATION_ANIMATION_DURATION_MS,
+    input,
+  )
+const NEW_TARGET_PRESENTATION_DURATIONS = {
+  heal: HEAL_ANIMATION_DURATION_MS, 'mass-cure-wounds': MASS_CURE_WOUNDS_ANIMATION_DURATION_MS,
+  'mass-heal': MASS_HEAL_ANIMATION_DURATION_MS, 'mass-healing-word': MASS_HEALING_WORD_ANIMATION_DURATION_MS,
+  'prayer-of-healing': PRAYER_OF_HEALING_ANIMATION_DURATION_MS, 'dancing-lights': DANCING_LIGHTS_ANIMATION_DURATION_MS,
+  'minor-illusion': MINOR_ILLUSION_ANIMATION_DURATION_MS, thaumaturgy: THAUMATURGY_ANIMATION_DURATION_MS,
+  shillelagh: SHILLELAGH_ANIMATION_DURATION_MS,
+} as const
+export const publishNewTargetSpellPresentation = (
+  spellId: keyof typeof NEW_TARGET_PRESENTATION_DURATIONS,
+  input: MaterialProjectilePresentationInput,
+) => publishMaterialTargetEffect(spellId, NEW_TARGET_PRESENTATION_DURATIONS[spellId], input)
 
 async function publishStatusSpellManifestation(
   spellId:
@@ -2090,7 +2270,6 @@ export async function publishSacredFlamePresentation(input: {
   sourceTokenId: string
   targetTokenId: string
 }): Promise<{ completesAt: number }> {
-  await preloadBrowserImage('/assets/vfx/sacred-flame-sprite-v2.png')
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
@@ -2174,42 +2353,9 @@ export async function publishAreaSpellPresentation(input: {
   widthFeet?: number
   heightFeet?: number
   radiusFeet?: number
+  wallOfFireShape?: 'line' | 'ring'
+  wallOfFireAngleDegrees?: number
 }): Promise<{ completesAt: number }> {
-  const asset = {
-    'burning-hands': '/assets/vfx/burning-hands-sprite-v2.png',
-    thunderwave: '/assets/vfx/thunderwave-fluid.webp',
-    shatter: '/assets/vfx/shatter-sprite-v2.png',
-    'lightning-bolt': '/assets/vfx/lightning-bolt-sprite-v2.png',
-    'flame-strike': '/assets/vfx/flame-strike-sprite-v2.png',
-    sunburst: '/assets/vfx/sunburst-sprite-v2.png',
-    'cone-of-cold': '/assets/vfx/cone-of-cold-sprite-v2.png',
-    'circle-of-death': '/assets/vfx/circle-of-death-sprite-v2.png',
-    'ice-storm': '/assets/vfx/ice-storm-sprite-v2.png',
-    'freezing-sphere': '/assets/vfx/freezing-sphere-sprite-v2.png',
-    'color-spray': '/assets/vfx/color-spray-sprite-v2.png',
-    'faerie-fire': '/assets/vfx/faerie-fire-sprite-v2.png',
-    sleep: '/assets/vfx/sleep-sprite-v2.png',
-    entangle: '/assets/vfx/entangle-sprite-v2.png',
-    grease: '/assets/vfx/grease-sprite-v2.png',
-    darkness: '/assets/vfx/darkness-sprite-v2.png',
-    'flaming-sphere': '/assets/vfx/flaming-sphere-sprite-v2.png',
-    moonbeam: '/assets/vfx/moonbeam-sprite-v2.png',
-    daylight: '/assets/vfx/daylight-sprite-v2.png',
-    'black-tentacles': '/assets/vfx/black-tentacles-sprite-v2.png',
-    'spike-growth': '/assets/vfx/spike-growth-sprite-v2.png',
-    'mage-hand': '/assets/vfx/mage-hand-sprite-v2.png',
-    'spiritual-weapon': '/assets/vfx/spiritual-weapon-sprite-v2.png',
-    'spirit-guardians': '/assets/vfx/spirit-guardians-sprite-v2.png',
-    'call-lightning': '/assets/vfx/call-lightning-sprite-v2.png',
-    'call-lightning-strike': '/assets/vfx/call-lightning-strike-sprite-v2.png',
-    'insect-plague': '/assets/vfx/insect-plague-sprite-v2.png',
-    'wall-of-fire': '/assets/vfx/wall-of-fire-sprite-v2.png',
-    'blade-barrier': '/assets/vfx/blade-barrier-sprite-v2.png',
-  }[input.spellId]
-  // Start the presentation clock only after the material texture is available.
-  // On a cold route load these PNGs can otherwise finish downloading after the
-  // entire one-second event has expired.
-  await preloadBrowserImage(asset)
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
   const duration = {
@@ -2242,13 +2388,16 @@ export async function publishAreaSpellPresentation(input: {
     'insect-plague': INSECT_PLAGUE_ANIMATION_DURATION_MS,
     'wall-of-fire': WALL_OF_FIRE_ANIMATION_DURATION_MS,
     'blade-barrier': BLADE_BARRIER_ANIMATION_DURATION_MS,
+    cloudkill: CLOUDKILL_ANIMATION_DURATION_MS,
   }[input.spellId]
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
     schemaVersion: 1,
     type: 'spell-area-effect',
     ...input,
     createdAt,
-    expiresAt: createdAt + Math.max(COMBAT_PRESENTATION_EVENT_TTL_MS, duration + 500),
+    expiresAt: createdAt + (isPersistentAreaPresentationSpellId(input.spellId)
+      ? WALL_OF_FIRE_HANDOFF_TIMEOUT_MS
+      : Math.max(COMBAT_PRESENTATION_EVENT_TTL_MS, duration + 500)),
   })
   const settlementDelay = input.spellId === 'flaming-sphere'
     ? FLAMING_SPHERE_ENTRANCE_DURATION_MS

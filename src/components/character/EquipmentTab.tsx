@@ -1,16 +1,19 @@
-import { useMemo, useState, useSyncExternalStore, type ComponentType } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ComponentType, type DragEvent } from 'react'
 import {
   Backpack,
   BedDouble,
   Beef,
   Cable,
   CircleDot,
+  Crown,
   Droplets,
   Flame,
   FlaskConical,
+  Footprints,
   Gem,
   HandHelping,
   PackageOpen,
+  Search,
   Shield,
   ShieldPlus,
   Skull,
@@ -24,10 +27,10 @@ import {
 } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
-import { EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
-import { formatEquipmentStatLine } from '../../lib/combatStats'
+import { EQUIPMENT_SLOTS, EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
 import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
+import { showAppConfirm } from '../../lib/appDialog'
 import { getRoomSession } from '../../lib/roomSession'
 import {
   getRoomRulesSnapshot,
@@ -39,6 +42,7 @@ import {
   dnd5eInventoryLoad,
   normalizeDnd5eInventory,
 } from '../../rulesets/dnd5e/items'
+import { planDnd5eInventoryUse } from '../../rulesets/dnd5e/inventoryUsePlanning'
 import {
   DND5E_MAGIC_ITEM_KIND_LABELS,
   DND5E_MAGIC_ITEM_RARITY_LABELS,
@@ -50,8 +54,18 @@ import {
   DND5E_EDITABLE_CURRENCY_LABELS,
 } from '../../types/inventory'
 import type { Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
+import type { Dnd5eInventoryCategory } from '../../types/inventory'
 import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type { Character } from '../../types/character'
+import {
+  dnd5eInventoryBrowserEntries,
+  type Dnd5eInventoryCategoryFilter,
+  type Dnd5eInventorySort,
+} from './inventoryBrowserModel'
+import {
+  DND5E_INVENTORY_DRAG_MIME,
+  dnd5eInventoryDropDecision,
+} from './inventoryDragModel'
 
 const ICONS: Record<Dnd5eInventoryIconId, ComponentType<{ className?: string }>> = {
   weapon: Sword,
@@ -86,11 +100,13 @@ const SLOT_ICONS: Partial<Record<EquipmentSlot, ComponentType<{ className?: stri
   mainWeapon: Sword,
   offHand: Sword,
   armor: Shield,
+  helmet: Crown,
+  shoes: Footprints,
   ring: Gem,
+  ring2: Gem,
+  belt: Cable,
   necklace: Gem,
 }
-
-const DND5E_EQUIPMENT_SLOTS: EquipmentSlot[] = ['mainWeapon', 'offHand', 'armor']
 
 const CATEGORY_LABELS = {
   equipment: '装备',
@@ -100,6 +116,23 @@ const CATEGORY_LABELS = {
   tool: '工具',
   container: '容器',
 } as const
+
+const INVENTORY_CATEGORY_FILTERS: readonly [Dnd5eInventoryCategoryFilter, string][] = [
+  ['all', '全部'],
+  ['equipment', '装备'],
+  ['magic-item', '魔法物品'],
+  ['consumable', '消耗品'],
+  ['adventuring-gear', '冒险用品'],
+  ['tool', '工具'],
+  ['container', '容器'],
+]
+
+const INVENTORY_SORTS: readonly [Dnd5eInventorySort, string][] = [
+  ['name', '名称'],
+  ['category', '类型'],
+  ['weight', '重量'],
+  ['newest', '最近获得'],
+]
 
 export interface EquipmentTabProps {
   charId: string
@@ -143,24 +176,6 @@ function equipmentProficiency(
   }
 }
 
-function EquipmentProficiencyLine({
-  character,
-  item,
-  spellcastingPrerequisitesEnabled,
-}: {
-  character: Character
-  item: EquipmentItem
-  spellcastingPrerequisitesEnabled: boolean
-}) {
-  const result = equipmentProficiency(character, item, spellcastingPrerequisitesEnabled)
-  if (!result) return null
-  return (
-    <p className={`mt-1 text-[11px] ${result.proficient ? 'text-emerald-300/75' : 'text-amber-300/85'}`}>
-      {result.category} · {result.proficient ? '熟练' : '未熟练'}
-    </p>
-  )
-}
-
 function EquipmentProficiencyNotice({
   character,
   item,
@@ -197,11 +212,14 @@ export default function EquipmentTab({
   const character = useCharacterStore((state) => state.characters.find((candidate) => candidate.id === charId))
   const characters = useCharacterStore((state) => state.characters)
   const updateCharacter = useCharacterStore((state) => state.update)
-  const [group, setGroup] = useState<'equipment' | 'items'>(compact ? 'items' : 'equipment')
+  const [categoryFilter, setCategoryFilter] = useState<Dnd5eInventoryCategoryFilter>('all')
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<Dnd5eInventorySort>('name')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transferTargetId, setTransferTargetId] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [notice, setNotice] = useState('')
+  const [draggedInstanceId, setDraggedInstanceId] = useState<string | null>(null)
   const roomRules = useSyncExternalStore(
     subscribeRoomRules,
     getRoomRulesSnapshot,
@@ -217,9 +235,11 @@ export default function EquipmentTab({
   const inventory = useMemo(() => character ? normalizeDnd5eInventory(character) : null, [character])
   if (!character || !inventory) return null
 
-  const entries = inventory.entries.filter((entry) => group === 'equipment'
-    ? entry.item.category === 'equipment'
-    : entry.item.category !== 'equipment')
+  const entries = dnd5eInventoryBrowserEntries(inventory.entries, {
+    query,
+    category: categoryFilter,
+    sort,
+  })
   const selected = inventory.entries.find((entry) => entry.instanceId === selectedId)
   const attunementDecision = selected
     ? dnd5eAttunementRequirementDecision(character, selected)
@@ -235,13 +255,17 @@ export default function EquipmentTab({
   const linkedEquipmentLimit = linkedEquipmentFeature?.mechanic.linkedEquipmentLimit ?? 0
   const linkedEquipmentIds = character.dnd5eCombatState?.linkedEquipmentIds ?? []
 
-  const toggleLinkedEquipment = (weaponId: string, weaponName: string) => {
+  const toggleLinkedEquipment = async (weaponId: string, weaponName: string) => {
     const alreadyLinked = linkedEquipmentIds.includes(weaponId)
     if (!alreadyLinked && linkedEquipmentIds.length >= linkedEquipmentLimit) {
       setNotice(`该特性最多登记 ${linkedEquipmentLimit} 件联结武器；请先解除一件现有联结。`)
       return
     }
-    if (!alreadyLinked && !window.confirm(`确认已完成联结仪式，并将“${weaponName}”登记为联结武器吗？`)) return
+    if (!alreadyLinked && !await showAppConfirm({
+      title: '登记联结武器',
+      message: `确认已完成联结仪式，并将“${weaponName}”登记为联结武器吗？`,
+      confirmLabel: '确认登记',
+    })) return
     const nextLinked = alreadyLinked
       ? linkedEquipmentIds.filter((id) => id !== weaponId)
       : [...linkedEquipmentIds, weaponId]
@@ -272,13 +296,75 @@ export default function EquipmentTab({
       setNotice(submitted === false ? '当前战斗中不能使用该物品。' : '已提交给 DM/Headless 进行战斗结算。')
       return
     }
-    run({ type: 'use', characterId: character.id, instanceId: entry.instanceId })
+    const usePlan = planDnd5eInventoryUse(character, entry)
+    if (!usePlan.ok) {
+      setNotice(`没有可由 ${entry.item.name} 恢复的已消耗法术位。`)
+      return
+    }
+    run({ type: 'use', characterId: character.id, instanceId: entry.instanceId, spellSlotLevel: usePlan.spellSlotLevel })
   }
 
   const useSelected = () => selected && activateEntry(selected)
 
+  const beginInventoryDrag = (event: DragEvent<HTMLElement>, entry: Dnd5eInventoryEntry) => {
+    if (!editable || pending) {
+      event.preventDefault()
+      return
+    }
+    event.dataTransfer.effectAllowed = 'copyMove'
+    event.dataTransfer.setData(DND5E_INVENTORY_DRAG_MIME, entry.instanceId)
+    event.dataTransfer.setData('text/plain', entry.instanceId)
+    setDraggedInstanceId(entry.instanceId)
+    setSelectedId(entry.instanceId)
+    setQuantity(1)
+  }
+
+  const droppedInstanceId = (event: DragEvent<HTMLElement>): string => (
+    event.dataTransfer.getData(DND5E_INVENTORY_DRAG_MIME) ||
+    event.dataTransfer.getData('text/plain')
+  ).trim()
+
+  const dropOnEquipmentSlot = (event: DragEvent<HTMLElement>, slot: EquipmentSlot) => {
+    event.preventDefault()
+    const instanceId = droppedInstanceId(event)
+    const entry = inventory.entries.find((candidate) => candidate.instanceId === instanceId)
+    if (!editable || pending || combatManagementLocked) {
+      setNotice(combatManagementLocked ? '战斗中不能通过背包更换穿戴装备。' : '当前不能更换装备。')
+      setDraggedInstanceId(null)
+      return
+    }
+    const decision = dnd5eInventoryDropDecision(entry, { kind: 'equipment', slot })
+    if (!decision.accepted) {
+      setNotice(decision.reason)
+      setDraggedInstanceId(null)
+      return
+    }
+    setSelectedId(instanceId)
+    run({ type: 'equip', characterId: character.id, instanceId, slot })
+    setDraggedInstanceId(null)
+  }
+
+  const dropOnQuickbarSlot = (event: DragEvent<HTMLElement>, slotIndex: number) => {
+    event.preventDefault()
+    const instanceId = droppedInstanceId(event)
+    const entry = inventory.entries.find((candidate) => candidate.instanceId === instanceId)
+    const decision = dnd5eInventoryDropDecision(entry, { kind: 'quickbar', slotIndex })
+    if (!decision.accepted || !onAssignQuickbarSlot) {
+      setNotice(decision.accepted ? '当前页面没有可编辑的战斗快捷栏。' : decision.reason)
+      setDraggedInstanceId(null)
+      return
+    }
+    onAssignQuickbarSlot(instanceId, slotIndex)
+    setSelectedId(instanceId)
+    setNotice(`已将 ${entry ? displayItemName(entry) : '物品'} 放入快捷栏 ${slotIndex + 1}。`)
+    setDraggedInstanceId(null)
+  }
+
   return (
     <div className="space-y-4" data-testid="dnd5e-inventory">
+      <div className={`grid items-start gap-4 ${compact
+        ? 'xl:grid-cols-[minmax(0,1fr)_minmax(300px,0.42fr)]'
+        : '2xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]'}`}>
       <section className="glass rounded-2xl p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -289,9 +375,45 @@ export default function EquipmentTab({
                 ? `${inventory.entries.length} 个物品栏位 · ${formatWeight(load.totalWeightLb)} / ${load.carryingCapacityLb} 磅`
                 : `${inventory.entries.length} 个物品栏位`}</p>
           </div>
-          <div className="flex rounded-xl border border-white/8 bg-black/20 p-1">
-            <GroupButton active={group === 'equipment'} onClick={() => { setGroup('equipment'); setSelectedId(null) }} icon={Shield}>装备</GroupButton>
-            <GroupButton active={group === 'items'} onClick={() => { setGroup('items'); setSelectedId(null) }} icon={Backpack}>道具</GroupButton>
+          <span className="rounded-lg border border-white/8 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-400">全部物品统一浏览</span>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3" data-testid="inventory-browser-toolbar">
+          <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_150px]">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+              <input
+                aria-label="搜索物品"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索名称、说明或规则效果"
+                className="w-full rounded-lg border border-white/10 bg-void-950/70 py-2 pl-9 pr-3 text-xs text-slate-100 outline-none focus:border-amber-300/40"
+              />
+            </label>
+            <select
+              aria-label="物品排序"
+              value={sort}
+              onChange={(event) => setSort(event.target.value as Dnd5eInventorySort)}
+              className="rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-xs text-slate-200 outline-none focus:border-amber-300/40"
+            >
+              {INVENTORY_SORTS.map(([value, label]) => <option key={value} value={value}>按{label}排序</option>)}
+            </select>
+          </div>
+          <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+            {INVENTORY_CATEGORY_FILTERS.map(([value, label]) => {
+              const count = value === 'all'
+                ? inventory.entries.length
+                : inventory.entries.filter((entry) => entry.item.category === value as Dnd5eInventoryCategory).length
+              return <button
+                key={value}
+                type="button"
+                aria-pressed={categoryFilter === value}
+                onClick={() => setCategoryFilter(value)}
+                className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] transition ${categoryFilter === value
+                  ? 'border-amber-300/35 bg-amber-400/12 text-amber-100'
+                  : 'border-white/8 bg-white/[0.025] text-slate-500 hover:text-slate-200'}`}
+              >{label} <span className="ml-1 text-[9px] opacity-60">{count}</span></button>
+            })}
           </div>
         </div>
 
@@ -335,9 +457,18 @@ export default function EquipmentTab({
                           setQuantity(1)
                         }
                       }}
+                      onDragOver={(event) => {
+                        if (onAssignQuickbarSlot && draggedInstanceId) {
+                          event.preventDefault()
+                          event.dataTransfer.dropEffect = 'copy'
+                        }
+                      }}
+                      onDrop={(event) => dropOnQuickbarSlot(event, slotIndex)}
                       className={[
                         'relative flex aspect-square w-full items-center justify-center rounded-xl border p-1 transition',
-                        selected
+                        draggedInstanceId && onAssignQuickbarSlot
+                          ? 'border-amber-200/60 bg-amber-400/15 ring-1 ring-amber-200/20'
+                          : selected
                           ? 'border-amber-300/35 bg-amber-400/10 hover:border-amber-200/70 hover:bg-amber-400/20'
                           : entry
                             ? 'border-white/10 bg-black/20 hover:border-white/25'
@@ -407,81 +538,126 @@ export default function EquipmentTab({
           </div>}
         </div>}
 
-        {!compact && group === 'equipment' && (
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {DND5E_EQUIPMENT_SLOTS.map((slot) => {
-              const item = character.equipment?.[slot]
-              const entry = inventory.entries.find((candidate) => candidate.equippedSlot === slot)
-              const Icon = SLOT_ICONS[slot] ?? Shield
-              return (
-                <div key={slot} className="rounded-xl border border-white/8 bg-void-900/35 p-3">
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    <Icon className="h-4 w-4 text-amber-300/80" />
-                    {EQUIPMENT_SLOT_LABELS[slot]}
-                  </div>
-                  <p className="mt-2 text-sm font-semibold text-slate-100">{item?.name ?? '空'}</p>
-                  {item && <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{formatEquipmentStatLine(item)}</p>}
-                  {item && <EquipmentProficiencyLine
-                    character={character}
-                    item={item}
-                    spellcastingPrerequisitesEnabled={spellcastingPrerequisitesEnabled}
-                  />}
-                  {editable && entry && (
-                    <button
-                      type="button"
-                      onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: entry.instanceId })}
-                      disabled={pending || combatManagementLocked}
-                      className="mt-2 rounded-lg border border-white/8 px-2 py-1 text-[11px] text-slate-400 hover:bg-white/5 hover:text-slate-200 disabled:opacity-40"
-                    >
-                      卸下
-                    </button>
-                  )}
-                  {editable && !combatManagementLocked && linkedEquipmentFeature && item?.dnd5e?.kind === 'weapon' && (
-                    <button
-                      type="button"
-                      onClick={() => toggleLinkedEquipment(item.id, item.name)}
-                      disabled={
-                        pending ||
-                        (!linkedEquipmentIds.includes(item.id) && linkedEquipmentIds.length >= linkedEquipmentLimit)
-                      }
-                      className="mt-2 ml-1 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.06] px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/15 disabled:opacity-40"
-                    >
-                      {linkedEquipmentIds.includes(item.id) ? '解除联结' : '登记联结'}
-                    </button>
-                  )}
+        <div className="mt-4 grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+          <aside className="rounded-2xl border border-amber-300/12 bg-gradient-to-b from-amber-500/[0.045] to-black/20 p-3" data-testid="inventory-equipment-rail">
+            <div className="relative mx-auto aspect-[3/4] max-h-64 w-full overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-violet-700/35 to-void-950 shadow-inner">
+              {character.portrait ? (
+                <img src={character.portrait} alt={`${character.name}的人物立绘`} className="h-full w-full object-cover object-top" />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-3">
+                  <span className="text-6xl drop-shadow-lg">{character.avatar}</span>
+                  <span className="text-xs font-semibold text-slate-300">{character.name}</span>
                 </div>
-              )
-            })}
-          </div>
-        )}
+              )}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-2 pt-8">
+                <p className="truncate text-sm font-bold text-white">{character.name}</p>
+                <p className="mt-0.5 text-[10px] text-slate-300">{character.charClass} · Lv.{character.level} · HP {character.currentHp}/{character.maxHp}</p>
+              </div>
+            </div>
 
-        <div className={`mt-4 grid gap-3 ${compact ? 'grid-cols-4 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-11' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
-          {entries.map((entry) => (
-            <InventoryTile
-              key={entry.instanceId}
-              entry={entry}
-              selected={entry.instanceId === selectedId}
-              compact={compact}
-              combatQuickUse={compact && !!onUseItem}
-              onSelect={() => {
-                setSelectedId(entry.instanceId === selectedId ? null : entry.instanceId)
-                setQuantity(1)
-              }}
-              onActivate={() => activateEntry(entry)}
-            />
-          ))}
-        </div>
-        {entries.length === 0 && (
-          <div className="mt-4 rounded-xl border border-dashed border-white/10 px-4 py-10 text-center">
-            <PackageOpen className="mx-auto h-8 w-8 text-slate-700" />
-            <p className="mt-3 text-sm text-slate-500">这个分类目前是空的</p>
-            <p className="mt-1 text-xs text-slate-600">DM 可以从房间玩家页分发 SRD 物品。</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {EQUIPMENT_SLOTS.map((slot) => {
+                const item = character.equipment?.[slot]
+                const entry = inventory.entries.find((candidate) => candidate.equippedSlot === slot)
+                const Icon = SLOT_ICONS[slot] ?? Shield
+                const decision = draggedInstanceId
+                  ? dnd5eInventoryDropDecision(
+                      inventory.entries.find((candidate) => candidate.instanceId === draggedInstanceId),
+                      { kind: 'equipment', slot },
+                    )
+                  : undefined
+                const canDrop = decision?.accepted === true && editable && !pending && !combatManagementLocked
+                return (
+                  <div
+                    key={slot}
+                    data-testid={`inventory-equipment-slot-${slot}`}
+                    onDragOver={(event) => {
+                      if (draggedInstanceId && editable) {
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = canDrop ? 'move' : 'none'
+                      }
+                    }}
+                    onDrop={(event) => dropOnEquipmentSlot(event, slot)}
+                    className={`group/slot relative min-h-24 rounded-xl border p-2 transition ${canDrop
+                      ? 'border-emerald-300/65 bg-emerald-400/12 ring-2 ring-emerald-300/15'
+                      : draggedInstanceId && decision && !decision.accepted
+                        ? 'border-rose-400/20 bg-rose-500/[0.035]'
+                        : 'border-white/8 bg-void-950/45'}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => entry && setSelectedId(entry.instanceId)}
+                      className="flex w-full flex-col items-center text-center"
+                      aria-label={`${EQUIPMENT_SLOT_LABELS[slot]}：${item?.name ?? '空'}`}
+                    >
+                      {entry ? (
+                        <Dnd5eActionIcon
+                          spec={dnd5eItemActionIcon(entry.item)}
+                          disabled={entry.identified === false}
+                          className="h-11 w-11"
+                        />
+                      ) : (
+                        <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-dashed border-white/10 text-slate-700">
+                          <Icon className="h-5 w-5" />
+                        </span>
+                      )}
+                      <span className="mt-1 block text-[9px] font-semibold uppercase tracking-wider text-amber-100/65">{EQUIPMENT_SLOT_LABELS[slot]}</span>
+                      <span className="mt-0.5 block max-w-full truncate text-[10px] text-slate-300">{item?.name ?? '拖入装备'}</span>
+                    </button>
+                    {editable && entry && (
+                      <button
+                        type="button"
+                        aria-label={`卸下${item?.name ?? '装备'}`}
+                        onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: entry.instanceId })}
+                        disabled={pending || combatManagementLocked}
+                        className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-void-950 text-slate-500 hover:text-rose-200 disabled:opacity-40 group-hover/slot:flex"
+                      ><X className="h-3 w-3" /></button>
+                    )}
+                    {canDrop && <span className="pointer-events-none absolute inset-x-1 bottom-1 rounded bg-emerald-500/20 py-0.5 text-center text-[8px] font-bold text-emerald-100">松开放入</span>}
+                  </div>
+                )
+              })}
+            </div>
+            {combatManagementLocked && <p className="mt-2 text-center text-[10px] leading-4 text-amber-300/65">战斗中可查看穿戴，但不能换装。</p>}
+            {!combatManagementLocked && linkedEquipmentFeature && (
+              <p className="mt-2 text-center text-[10px] leading-4 text-cyan-200/65">武器联结仍可在右侧物品详情中管理。</p>
+            )}
+          </aside>
+
+          <div className="min-w-0">
+            <div className={`grid gap-2 ${compact ? 'grid-cols-4 sm:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8' : 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'}`}>
+              {entries.map((entry) => (
+                <InventoryTile
+                  key={entry.instanceId}
+                  entry={entry}
+                  selected={entry.instanceId === selectedId}
+                  compact={compact}
+                  combatQuickUse={compact && !!onUseItem}
+                  draggable={editable && !pending}
+                  dragging={entry.instanceId === draggedInstanceId}
+                  onDragStart={(event) => beginInventoryDrag(event, entry)}
+                  onDragEnd={() => setDraggedInstanceId(null)}
+                  onSelect={() => {
+                    setSelectedId(entry.instanceId === selectedId ? null : entry.instanceId)
+                    setQuantity(1)
+                  }}
+                  onActivate={() => activateEntry(entry)}
+                />
+              ))}
+            </div>
+            {entries.length === 0 && (
+              <div className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center">
+                <PackageOpen className="mx-auto h-8 w-8 text-slate-700" />
+                <p className="mt-3 text-sm text-slate-500">没有符合筛选条件的物品</p>
+                <p className="mt-1 text-xs text-slate-600">清除搜索或切换分类；DM 也可以从房间玩家页分发 SRD 物品。</p>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </section>
 
       {selected && (
-        <section className="glass rounded-2xl p-4" data-testid="inventory-item-actions">
+        <section className="glass max-h-[76vh] overflow-y-auto rounded-2xl p-4 xl:sticky xl:top-3" data-testid="inventory-item-actions">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="font-semibold text-slate-100">{displayItemName(selected)}</p>
@@ -496,6 +672,18 @@ export default function EquipmentTab({
               {selected.equippedSlot && (
                 <ActionButton icon={Shield} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: selected.instanceId })}>卸下</ActionButton>
               )}
+              {linkedEquipmentFeature && selected.item.equipment?.dnd5e?.kind === 'weapon' && (
+                <ActionButton
+                  icon={Cable}
+                  disabled={
+                    pending || combatManagementLocked ||
+                    (!linkedEquipmentIds.includes(selected.item.equipment.id) && linkedEquipmentIds.length >= linkedEquipmentLimit)
+                  }
+                  onClick={() => void toggleLinkedEquipment(selected.item.equipment!.id, selected.item.equipment!.name)}
+                >
+                  {linkedEquipmentIds.includes(selected.item.equipment.id) ? '解除联结' : '武器联结'}
+                </ActionButton>
+              )}
               {selected.item.magicItem?.attunement === 'required' && !selected.attuned && !selected.attunementPending && (
                 <ActionButton
                   icon={Sparkles}
@@ -503,10 +691,14 @@ export default function EquipmentTab({
                     pending || combatManagementLocked || attunementDecision === 'unmet' ||
                     (!isDm && attunementDecision === 'dm-confirmation-required')
                   }
-                  onClick={() => {
+                  onClick={async () => {
                     const requirement = selected.item.magicItem?.attunementRequirement
                     const dmPrerequisiteConfirmed = attunementDecision !== 'dm-confirmation-required' ||
-                      (isDm && window.confirm(`确认当前环境满足同调条件：${requirement}？\n该确认只允许由 DM 权威端完成。`))
+                      (isDm && await showAppConfirm({
+                        title: '确认同调条件',
+                        message: `确认当前环境满足同调条件：${requirement}？\n该确认只允许由 DM 权威端完成。`,
+                        confirmLabel: '确认满足',
+                      }))
                     if (dmPrerequisiteConfirmed) run({
                       type: 'prepare-attunement',
                       characterId: character.id,
@@ -624,8 +816,13 @@ export default function EquipmentTab({
                 icon={Trash2}
                 tone="danger"
                 disabled={pending || combatManagementLocked}
-                onClick={() => {
-                  if (window.confirm(`确定丢弃 ${displayItemName(selected)} ×${quantity} 吗？`)) {
+                onClick={async () => {
+                  if (await showAppConfirm({
+                    title: '丢弃物品',
+                    message: `确定丢弃 ${displayItemName(selected)} ×${quantity} 吗？`,
+                    confirmLabel: '确认丢弃',
+                    tone: 'danger',
+                  })) {
                     run({ type: 'discard', characterId: character.id, instanceId: selected.instanceId, quantity })
                   }
                 }}
@@ -640,6 +837,15 @@ export default function EquipmentTab({
         </section>
       )}
 
+      {!selected && (
+        <aside className="glass hidden min-h-64 rounded-2xl border border-dashed border-white/10 p-6 text-center text-slate-600 xl:flex xl:flex-col xl:items-center xl:justify-center">
+          <PackageOpen className="h-9 w-9" />
+          <p className="mt-3 text-sm font-semibold text-slate-400">选择一个物品查看详情</p>
+          <p className="mt-1 max-w-56 text-xs leading-5">这里会显示规则正文、重量、同调、装备与使用操作。</p>
+        </aside>
+      )}
+      </div>
+
       {notice && (
         <p className={`rounded-xl border px-3 py-2 text-xs ${notice.includes('不能') || notice.includes('未能')
           ? 'border-red-400/20 bg-red-500/10 text-red-200'
@@ -652,11 +858,26 @@ export default function EquipmentTab({
   )
 }
 
-function InventoryTile({ entry, selected, compact, combatQuickUse, onSelect, onActivate }: {
+function InventoryTile({
+  entry,
+  selected,
+  compact,
+  combatQuickUse,
+  draggable,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onSelect,
+  onActivate,
+}: {
   entry: Dnd5eInventoryEntry
   selected: boolean
   compact?: boolean
   combatQuickUse?: boolean
+  draggable?: boolean
+  dragging?: boolean
+  onDragStart?: (event: DragEvent<HTMLButtonElement>) => void
+  onDragEnd?: () => void
   onSelect: () => void
   onActivate?: () => void
 }) {
@@ -667,9 +888,13 @@ function InventoryTile({ entry, selected, compact, combatQuickUse, onSelect, onA
   return (
     <button
       type="button"
+      draggable={draggable}
+      aria-grabbed={dragging}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={() => combatQuickUse && selected && usable ? onActivate?.() : onSelect()}
       title={entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name}\n${entry.item.rulesText}${combatQuickUse && usable ? '\n再次点击使用' : ''}`}
-      className={`group relative rounded-2xl border p-2 text-left transition ${compact ? 'min-h-24' : 'min-h-28'} ${selected
+      className={`group relative rounded-2xl border p-2 text-left transition ${compact ? 'min-h-24' : 'min-h-28'} ${dragging ? 'scale-95 opacity-45' : ''} ${selected
         ? 'border-arcane-400/60 bg-arcane-500/15 shadow-[0_0_22px_rgba(124,92,255,0.16)]'
         : 'border-white/8 bg-gradient-to-b from-white/[0.045] to-black/20 hover:-translate-y-0.5 hover:border-white/20'}`}
     >
@@ -714,7 +939,7 @@ function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
   if (entry.identified === false) {
     return (
       <span className="pointer-events-none invisible absolute bottom-[calc(100%+8px)] left-0 z-[100] w-72 translate-y-1 rounded-xl border border-fuchsia-300/15 bg-void-950/95 p-4 text-left opacity-0 shadow-2xl backdrop-blur-xl transition group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
-        <span className="block text-sm font-semibold text-white">未鉴定魔法物品</span>
+        <span className="block text-sm font-semibold text-slate-100">未鉴定魔法物品</span>
         <span className="mt-2 block text-xs leading-relaxed text-slate-300">需由 DM 权威端完成鉴定后，才公开物品身份和规则效果。</span>
       </span>
     )
@@ -723,7 +948,7 @@ function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
     <span className="pointer-events-none invisible absolute bottom-[calc(100%+8px)] left-0 z-[100] w-80 translate-y-1 rounded-xl border border-white/15 bg-void-950/95 p-4 text-left opacity-0 shadow-2xl backdrop-blur-xl transition group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
       <span className="flex items-start justify-between gap-3">
         <span>
-          <span className="block text-sm font-semibold text-white">{item.name}</span>
+          <span className="block text-sm font-semibold text-slate-100">{item.name}</span>
           {item.englishName && <span className="mt-0.5 block text-[11px] text-slate-500">{item.englishName}</span>}
         </span>
         <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-slate-400">{CATEGORY_LABELS[item.category]}</span>
@@ -749,15 +974,6 @@ function inventoryResourceSummary(entry: Dnd5eInventoryEntry): string {
 
 function displayItemName(entry: Dnd5eInventoryEntry): string {
   return entry.item.magicItem && entry.identified === false ? '未鉴定魔法物品' : entry.item.name
-}
-
-function GroupButton({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: ComponentType<{ className?: string }>; children: string }) {
-  return (
-    <button type="button" onClick={onClick} className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${active ? 'bg-arcane-500/25 text-arcane-100' : 'text-slate-500 hover:text-slate-200'}`}>
-      <Icon className="h-3.5 w-3.5" />
-      {children}
-    </button>
-  )
 }
 
 function ActionButton({ icon: Icon, children, onClick, disabled, tone = 'normal' }: { icon: ComponentType<{ className?: string }>; children: string; onClick: () => void; disabled?: boolean; tone?: 'normal' | 'danger' }) {

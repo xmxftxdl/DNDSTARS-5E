@@ -546,10 +546,7 @@ export function previewDnd5eEquipmentAttack(
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
 ) {
   const mode = dnd5ePreparedEquipmentAttackMode(prepared, protectedAttack)
-  const magicWeaponBonus = dnd5eActiveMagicWeaponBonus(
-    prepared.state.combatants[prepared.actorToken.id]?.classState.activeEffects,
-    prepared.classDamageContext.weaponId,
-  )
+  const magicWeaponBonus = dnd5ePreparedEquipmentAttackMagicWeaponBonus(prepared)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   const resolved = rules.resolveAttack({
     rolls,
@@ -577,6 +574,21 @@ export function previewDnd5eEquipmentAttack(
       prepared.state.combatants[prepared.targetToken.id],
     ),
   })
+}
+
+/**
+ * Authoritative Magic Weapon bonus for the exact weapon captured by a prepared
+ * equipment attack. Presentation and interrupt code must use this accessor too;
+ * otherwise Headless applies the bonus while the dice ledger and combat log
+ * incorrectly continue to display the mundane weapon modifier.
+ */
+export function dnd5ePreparedEquipmentAttackMagicWeaponBonus(
+  prepared: PreparedDnd5eEquipmentAttack,
+): 0 | 1 | 2 | 3 {
+  return dnd5eActiveMagicWeaponBonus(
+    prepared.state.combatants[prepared.actorToken.id]?.classState.activeEffects,
+    prepared.classDamageContext.weaponId,
+  )
 }
 
 export function dnd5eEquipmentClassDamageDefinitions(
@@ -631,6 +643,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   declarativeTargetReaction?: Dnd5eCombatManeuverTargetReaction
   damageRolls: readonly number[]
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
+  inventoryEffectRolls?: Readonly<Record<string, readonly number[]>>
   transaction?: CombatTransaction
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
@@ -686,6 +699,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     mode: prepared.attackMode,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
+    inventoryEffectRolls: input.inventoryEffectRolls,
     damage: {
       count: prepared.profile.damage.count,
       sides: prepared.profile.damage.sides,

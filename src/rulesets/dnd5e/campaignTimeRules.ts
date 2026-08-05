@@ -2,7 +2,11 @@ import type { SharedCampaignTimeState } from '../../lib/campaignTime'
 import { campaignDawnsCrossed, canBenefitFromLongRest } from '../../lib/campaignTime'
 import { restoreClassResources } from '../../lib/classResources'
 import type { Character } from '../../types/character'
-import { restoreDnd5eInventoryResources } from './items'
+import { applyDnd5eShortRestResourceFeatures } from './classes'
+import {
+  resolveDnd5eAttunementAfterShortRest,
+  restoreDnd5eInventoryResources,
+} from './items'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { advanceDnd5eDivineInterventionCalendarDays } from './restFeatures'
 import {
@@ -24,6 +28,20 @@ function applyDawn(character: Character, dawns: number): Character {
     advanceDnd5eDivineInterventionCalendarDays(character, dawns),
     'dawn',
   )
+}
+
+export function applyDnd5eShortRestBenefits(character: Character): Character {
+  return resolveDnd5eAttunementAfterShortRest(restoreDnd5eInventoryResources(
+    applyDnd5eShortRestResourceFeatures(restoreClassResources({
+      ...character,
+      dnd5eCombatState: character.dnd5eCombatState ? {
+        ...character.dnd5eCombatState,
+        relentlessRageDc: undefined,
+        relentlessRagePendingDc: undefined,
+      } : undefined,
+    }, 'short-rest')),
+    'short-rest',
+  ))
 }
 
 export function applyDnd5eLongRestBenefits(character: Character, completionWorldMinute: number): Character {
@@ -113,8 +131,16 @@ export function reconcileDnd5eCharacterCampaignTime(
       next = applyDawn(next, dawns)
       dawnsApplied += dawns
     }
-    if (advance.kind === 'long-rest') {
-      if (canBenefitFromLongRest(next.dnd5eLastLongRestWorldMinute, advance.toWorldMinute)) {
+    const isRestBeneficiary = advance.beneficiaryCharacterIds == null ||
+      advance.beneficiaryCharacterIds.includes(character.id)
+    if (advance.kind === 'short-rest' && isRestBeneficiary) {
+      next = applyDnd5eShortRestBenefits(next)
+    }
+    if (advance.kind === 'long-rest' && isRestBeneficiary) {
+      if (
+        advance.ignoreLongRestCooldown === true ||
+        canBenefitFromLongRest(next.dnd5eLastLongRestWorldMinute, advance.toWorldMinute)
+      ) {
         next = applyDnd5eLongRestBenefits(next, advance.toWorldMinute)
         longRestsApplied += 1
       } else {

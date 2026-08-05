@@ -24,6 +24,7 @@ import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { generateLocalAiPortrait, localAiPortraitErrorMessage } from '../../lib/localAiBridgeApi'
 import type {
   PdfCampaignAnalysisV1,
+  PdfImportCandidateV1,
   PdfNamedRecordV1,
   PdfPersonRecordV1,
   PdfSourceCitationV1,
@@ -93,6 +94,17 @@ function KnowledgeCard({ title, description, citations, children }: {
       {!!citations?.length && <p className="mt-3 text-[10px] font-medium leading-5 text-slate-400">{citationText(citations)}</p>}
     </article>
   )
+}
+
+function importTypeExplanation(entry: PdfImportCandidateV1): string {
+  if (entry.kind === 'npc') return '这是 AI 识别出的 NPC 草稿，不是已经进入怪物图鉴的战斗怪物。若它需要参与战斗，请在“编辑知识库”中改为怪物，并补齐属性、动作、生命值与 Headless 机制。'
+  if (entry.kind === 'monster') return '这是怪物导入候选，但尚未写入怪物工坊。导入前仍需确认属性、动作、挑战等级与 Headless 自动化。'
+  return `这是${KIND_LABELS[entry.kind]}导入候选。当前只保存在 DM 审阅草稿中，尚未写入正式战役资源。`
+}
+
+function likelyCombatNpc(entry: PdfImportCandidateV1): boolean {
+  if (entry.kind !== 'npc') return false
+  return /(?:军兵|士兵|守卫|护卫|战斗|法术能力|召唤单位|敌人|怪物)/u.test(`${entry.name} ${entry.description}`)
 }
 
 function filterRecords<T extends PdfNamedRecordV1>(records: readonly T[], query: string, extras?: (record: T) => unknown[]): T[] {
@@ -188,6 +200,7 @@ interface PdfCampaignKnowledgeBaseProps {
   mapHref: string
   onEdit: () => void
   onPortraitChange: (personName: string, portraitDataUrl: string) => void
+  initialTab?: PdfKnowledgeTabV1
 }
 
 export default function PdfCampaignKnowledgeBase({
@@ -195,10 +208,12 @@ export default function PdfCampaignKnowledgeBase({
   mapHref,
   onEdit,
   onPortraitChange,
+  initialTab = 'overview',
 }: PdfCampaignKnowledgeBaseProps) {
-  const [activeTab, setActiveTab] = useState<PdfKnowledgeTabV1>('overview')
+  const [activeTab, setActiveTab] = useState<PdfKnowledgeTabV1>(initialTab)
   const [query, setQuery] = useState('')
   const [searchScope, setSearchScope] = useState<'current' | 'all'>('current')
+  const [selectedImport, setSelectedImport] = useState<PdfImportCandidateV1 | null>(null)
   const counts = useMemo(() => pdfKnowledgeTabCounts(analysis), [analysis])
   const monsterCodex = useMemo(() => buildPdfMonsterCodex(analysis), [analysis])
   const mapIndex = useMemo(() => buildPdfMapIndex(analysis), [analysis])
@@ -297,7 +312,26 @@ export default function PdfCampaignKnowledgeBase({
     if (activeTab === 'maps') return maps.length === 0 ? <EmptyState>没有识别到地图或可建立场景的地点。</EmptyState> : <div className="space-y-3"><div className="flex justify-end"><Link to={mapHref} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-2 text-[10px] font-semibold text-emerald-100 hover:bg-emerald-500/20"><ExternalLink className="h-3.5 w-3.5" />进入地图与场景编排</Link></div><div className="grid gap-3 lg:grid-cols-2">{maps.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200">{entry.source === 'map-candidate' ? '地图资源' : '地点索引'}</span>{entry.sceneNames.map((scene) => <span key={scene} className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{scene}</span>)}</div></KnowledgeCard>)}</div></div>
     if (activeTab === 'monsters') return monsters.length === 0 ? <EmptyState>没有识别到怪物。遭遇中的生物和怪物导入候选都会显示在这里。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{monsters.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-[9px] ${entry.automation === 'full' ? 'bg-emerald-500/10 text-emerald-200' : entry.automation === 'partial' ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-500/10 text-slate-400'}`}>{KIND_LABELS[entry.automation]}</span>{entry.encounterNames.map((encounter) => <span key={encounter} className="rounded-full bg-rose-500/10 px-2 py-1 text-[9px] text-rose-200">{encounter}</span>)}</div></KnowledgeCard>)}</div>
     if (activeTab === 'relationships') return <PdfRelationshipGraph people={people} factions={factions} locations={locations} relationships={relationships} scenes={scenes} onPortraitChange={onPortraitChange} />
-    return imports.length === 0 ? <EmptyState>没有匹配的待导入资源。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{imports.map((entry, index) => <KnowledgeCard key={`${entry.kind}:${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex gap-2"><span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] text-cyan-200">{KIND_LABELS[entry.kind]}</span><span className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{KIND_LABELS[entry.automation]}</span></div></KnowledgeCard>)}</div>
+    return imports.length === 0 ? <EmptyState>没有匹配的待导入资源。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{imports.map((entry, index) => (
+      <button
+        key={`${entry.kind}:${entry.name}:${index}`}
+        type="button"
+        onClick={() => setSelectedImport(entry)}
+        className="rounded-2xl border border-white/8 bg-white/[0.018] p-4 text-left transition hover:border-violet-400/30 hover:bg-violet-500/[0.035] focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h4 className="text-sm font-semibold text-slate-100">{entry.name}</h4>
+          <span className="shrink-0 text-[9px] font-semibold text-violet-300">查看详情</span>
+        </div>
+        {entry.description && <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-xs leading-6 text-slate-400">{entry.description}</p>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] text-cyan-200">{KIND_LABELS[entry.kind]}</span>
+          <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{KIND_LABELS[entry.automation]}</span>
+          {likelyCombatNpc(entry) && <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[9px] text-amber-200">可能应归类为怪物</span>}
+        </div>
+        {!!entry.citations.length && <p className="mt-3 text-[10px] font-medium leading-5 text-slate-400">{citationText(entry.citations)}</p>}
+      </button>
+    ))}</div>
   }
 
   return (
@@ -334,6 +368,35 @@ export default function PdfCampaignKnowledgeBase({
 
       {hasGlobalQuery && <div className="border-b border-sky-400/10 bg-sky-500/[0.035] px-4 py-2 text-[10px] text-sky-200"><Bot className="mr-1.5 inline h-3.5 w-3.5" />正在全库搜索“{query}”；点击任意分类可切回分类视图。</div>}
       <div className="p-4">{renderTab()}</div>
+
+      {selectedImport && (
+        <div className="fixed inset-0 z-[560] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setSelectedImport(null)
+        }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="pdf-import-detail-title" className="w-full max-w-2xl rounded-3xl border border-violet-400/20 bg-slate-950 p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">待导入资源详情</p>
+                <h3 id="pdf-import-detail-title" className="mt-2 text-xl font-bold text-slate-100">{selectedImport.name}</h3>
+              </div>
+              <button type="button" onClick={() => setSelectedImport(null)} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400 hover:bg-white/5 hover:text-slate-100">关闭</button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-200">AI 归类：{KIND_LABELS[selectedImport.kind]}</span>
+              <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[10px] text-slate-300">预期自动化：{KIND_LABELS[selectedImport.automation]}</span>
+            </div>
+            <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{selectedImport.description || '没有提取到进一步说明。'}</p>
+            <div className={`mt-4 rounded-2xl border p-4 text-xs leading-6 ${likelyCombatNpc(selectedImport) ? 'border-amber-400/20 bg-amber-500/[0.06] text-amber-100' : 'border-sky-400/15 bg-sky-500/[0.045] text-sky-100'}`}>
+              {importTypeExplanation(selectedImport)}
+              {likelyCombatNpc(selectedImport) && <span className="mt-1 block text-amber-200">该条目包含明显战斗语义，建议 DM 检查 AI 是否误把怪物或敌对战斗单位归类成 NPC。</span>}
+            </div>
+            {!!selectedImport.citations.length && <p className="mt-4 text-xs font-medium leading-6 text-slate-400">来源：{citationText(selectedImport.citations)}</p>}
+            <div className="mt-5 flex justify-end">
+              <button type="button" onClick={() => { setSelectedImport(null); onEdit() }} className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-semibold text-white hover:bg-violet-400"><PencilLine className="h-3.5 w-3.5" />编辑类型与内容</button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   )
 }

@@ -32,6 +32,7 @@ import {
   type WallDetectionCandidate,
 } from '../../lib/mapImageGeometryDetection'
 import { deriveMapRoomGraph } from '../../lib/mapRooms'
+import { showAppAlert, showAppConfirm } from '../../lib/appDialog'
 
 interface MapGeometryToolbarProps {
   mapId: string
@@ -197,28 +198,35 @@ export default function MapGeometryToolbar({
   const selectedLightHeightAboveGround = selectedEntity?.kind === 'light'
     ? selectedLightElevation - selectedLightGroundElevation
     : 0
-  const runWallDetection = (file: File) => {
+  const runWallDetection = async (file: File) => {
     if (!activeMap) return
     const requestId = ++detectionRequestRef.current
     setDetectionRunning(true)
-    void detectWallsFromImageFile(file, activeMap, {
-      edgeThreshold: detectionEdgeThreshold,
-      minimumRunRatio: detectionMinimumRatio,
-      focusMode: detectionFocusOnDominant ? 'dominant' : 'all',
-    }).then((candidates) => {
+    try {
+      const candidates = await detectWallsFromImageFile(file, activeMap, {
+        edgeThreshold: detectionEdgeThreshold,
+        minimumRunRatio: detectionMinimumRatio,
+        focusMode: detectionFocusOnDominant ? 'dominant' : 'all',
+      })
       if (requestId !== detectionRequestRef.current) return
       if (candidates.length === 0) {
-        alert('没有识别到可靠的墙线候选。')
+        await showAppAlert({
+          title: '未识别到墙线',
+          message: '没有识别到可靠的墙线候选。',
+        })
         return
       }
       onDetectionCandidatesChange(candidates)
       onDiagnosticsEnabledChange(true)
-    }).catch((error) => {
+    } catch (error) {
       if (requestId !== detectionRequestRef.current) return
-      alert(`无法识别地图墙体：${error instanceof Error ? error.message : '图像无效'}`)
-    }).finally(() => {
+      await showAppAlert({
+        title: '墙体识别失败',
+        message: `无法识别地图墙体：${error instanceof Error ? error.message : '图像无效'}`,
+      })
+    } finally {
       if (requestId === detectionRequestRef.current) setDetectionRunning(false)
-    })
+    }
   }
   const selectedTokenGroundElevation = selectedToken
     ? mapGeometryTerrainElevationAtPoint(geometry, selectedToken)
@@ -268,9 +276,12 @@ export default function MapGeometryToolbar({
             </span>
           )}
           {tool === 'elevation' && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-200" title="单击选择一格，按住拖动可连续选择地图格；松开后只保留选区外边界">
+            <span
+              className="flex items-center gap-1 text-[10px] text-emerald-200"
+              title="未标记的基础地表按绝对标高 0 尺计算；单击或拖动选择地图格后，可在所选高度区上修改绝对标高"
+            >
               <Mountain className="h-3.5 w-3.5" />
-              点击／拖动选格
+              选格设高 · 地表 0 尺
             </span>
           )}
           {terrainEditingLocked && (
@@ -302,52 +313,66 @@ export default function MapGeometryToolbar({
             </>
           )}
 
-          <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用墙体遮挡视线和服务端 Token 可见性过滤；地图黑幕由战争迷雾层单独控制">
-            <input
-              type="checkbox"
-              checked={geometry.vision.enabled}
-              onChange={(event) => setVision(mapId, { enabled: event.target.checked })}
+          <div
+            className="flex flex-wrap items-center gap-1 rounded-md border border-sky-400/15 bg-sky-500/[0.05] px-1 py-0.5"
+            title="这些设置只修改当前地图，并对当前地图的全部区域生效"
+            data-testid="map-wide-geometry-settings"
+          >
+            <span className="rounded bg-sky-400/10 px-1 py-0.5 text-[9px] font-semibold text-sky-200">
+              全图设置
+            </span>
+            <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用墙体遮挡视线和服务端 Token 可见性过滤；地图黑幕由战争迷雾层单独控制">
+              <input
+                type="checkbox"
+                checked={geometry.vision.enabled}
+                onChange={(event) => setVision(mapId, { enabled: event.target.checked })}
+              />
+              动态视野
+            </label>
+            <NumberField
+              label="默认视距（尺）"
+              help="当角色或 Token 没有单独设置视距时使用的兜底视距；这不是地表高度"
+              min={0}
+              value={geometry.vision.defaultRangeFeet}
+              onChange={(defaultRangeFeet) => setVision(mapId, { defaultRangeFeet })}
             />
-            动态视野
-          </label>
-          <NumberField
-            label="默认尺"
-            min={0}
-            value={geometry.vision.defaultRangeFeet}
-            onChange={(defaultRangeFeet) => setVision(mapId, { defaultRangeFeet })}
-          />
-          <select
-            value={geometry.vision.ambientLight}
-            onChange={(event) => setVision(mapId, { ambientLight: event.target.value as MapGeometryState['vision']['ambientLight'] })}
-            className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-            title="场景环境光照"
-            aria-label="场景环境光照"
-          >
-            <option value="bright">明亮光照</option>
-            <option value="dim">微光</option>
-            <option value="darkness">黑暗</option>
-          </select>
-          <select
-            value={geometry.environment ?? 'normal'}
-            onChange={(event) => setEnvironment(mapId, event.target.value as 'normal' | 'underwater')}
-            className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-            title="环境规则与地图亮度无关；水下规则会应用 SRD 水下武器攻击限制"
-            aria-label="地图环境规则"
-          >
-            <option value="normal">地表规则</option>
-            <option value="underwater">水下规则</option>
-          </select>
-          <label
-            className="flex items-center gap-1 text-[10px] text-slate-300"
-            title="开启后玩家看到全队感官的并集；关闭后只使用当前控制角色的黑暗视觉与特殊感官"
-          >
-            <input
-              type="checkbox"
-              checked={geometry.vision.sharePartyVision}
-              onChange={(event) => setVision(mapId, { sharePartyVision: event.target.checked })}
-            />
-            共享视野
-          </label>
+            <label className="flex items-center gap-1 text-[10px] text-slate-400" title="当前地图全部区域的基础环境光照；局部光源仍可另外放置">
+              全图光照
+              <select
+                value={geometry.vision.ambientLight}
+                onChange={(event) => setVision(mapId, { ambientLight: event.target.value as MapGeometryState['vision']['ambientLight'] })}
+                className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+                aria-label="全图环境光照"
+              >
+                <option value="bright">明亮</option>
+                <option value="dim">微光</option>
+                <option value="darkness">黑暗</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-slate-400" title="当前地图全部区域使用的环境战斗规则；它与地图亮度无关，水下规则会应用 SRD 水下武器攻击限制">
+              全图环境
+              <select
+                value={geometry.environment ?? 'normal'}
+                onChange={(event) => setEnvironment(mapId, event.target.value as 'normal' | 'underwater')}
+                className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+                aria-label="全图环境规则"
+              >
+                <option value="normal">地表</option>
+                <option value="underwater">水下</option>
+              </select>
+            </label>
+            <label
+              className="flex items-center gap-1 text-[10px] text-slate-300"
+              title="开启后玩家看到全队感官的并集；关闭后只使用当前控制角色的黑暗视觉与特殊感官"
+            >
+              <input
+                type="checkbox"
+                checked={geometry.vision.sharePartyVision}
+                onChange={(event) => setVision(mapId, { sharePartyVision: event.target.checked })}
+              />
+              共享视野
+            </label>
+          </div>
           <button
             type="button"
             onClick={() => onPreviewChange(!previewAsPlayer)}
@@ -432,7 +457,11 @@ export default function MapGeometryToolbar({
                     : undefined
                   if (
                     imported?.embeddedImageDataUrl &&
-                    confirm('该 UVTT 包含地图背景图片。是否创建一张新地图并同时导入网格、墙、门和光源？')
+                    await showAppConfirm({
+                      title: '导入 UVTT 背景',
+                      message: '该 UVTT 包含地图背景图片。是否创建一张新地图并同时导入网格、墙、门和光源？',
+                      confirmLabel: '创建新地图',
+                    })
                   ) {
                     imported = importUvttGeometry(raw, { mapId: 'uvtt-pending' })
                     await onCreateMapFromUvtt({
@@ -449,10 +478,16 @@ export default function MapGeometryToolbar({
                   if (!parsed) throw new Error('结构不符合地图几何 schema')
                   if (!replaceMap(mapId, { ...parsed, mapId })) throw new Error('地图标识不一致')
                   if (imported && imported.warnings.length > 0) {
-                    alert(`UVTT 已导入，但有以下提示：\n${imported.warnings.join('\n')}`)
+                    await showAppAlert({
+                      title: 'UVTT 已导入',
+                      message: `UVTT 已导入，但有以下提示：\n${imported.warnings.join('\n')}`,
+                    })
                   }
                 } catch (error) {
-                  alert(`无法导入地图几何：${error instanceof Error ? error.message : '文件无效'}`)
+                  await showAppAlert({
+                    title: '地图几何导入失败',
+                    message: `无法导入地图几何：${error instanceof Error ? error.message : '文件无效'}`,
+                  })
                 }
               })
             }}
@@ -476,7 +511,7 @@ export default function MapGeometryToolbar({
                event.currentTarget.value = ''
                if (!file || !activeMap || terrainEditingLocked) return
                setDetectionSourceFile(file)
-               runWallDetection(file)
+               void runWallDetection(file)
              }}
            />
            {detectionSourceFile && (
@@ -524,7 +559,7 @@ export default function MapGeometryToolbar({
                  type="button"
                  disabled={!detectionSourceFile || detectionRunning}
                  onClick={() => {
-                   if (detectionSourceFile) runWallDetection(detectionSourceFile)
+                   if (detectionSourceFile) void runWallDetection(detectionSourceFile)
                  }}
                  className="rounded bg-cyan-500/20 px-1 text-cyan-50 hover:bg-cyan-500/30 disabled:opacity-40"
                >
@@ -605,8 +640,13 @@ export default function MapGeometryToolbar({
           <button
             type="button"
             disabled={count === 0 || terrainEditingLocked}
-            onClick={() => {
-              if (confirm('清除当前地图的全部墙、门、窗户、障碍物和场景光源吗？')) clearMap(mapId)
+            onClick={async () => {
+              if (await showAppConfirm({
+                title: '清空地图几何',
+                message: '清除当前地图的全部墙、门、窗户、障碍物和场景光源吗？',
+                confirmLabel: '确认清空',
+                tone: 'danger',
+              })) clearMap(mapId)
             }}
             className="rounded-md p-1 text-rose-300 hover:bg-rose-500/15 disabled:opacity-30"
             title="清空地图几何"

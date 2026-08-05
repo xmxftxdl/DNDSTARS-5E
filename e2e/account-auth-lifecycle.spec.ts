@@ -45,8 +45,8 @@ for (const registration of [
     await expect(firstPage).toHaveURL(`${DM}/app/extensions`)
     await expect(firstPage.getByTestId('account-nav-extensions')).toHaveAttribute('aria-current', 'page')
 
-    firstPage.once('dialog', (dialog) => dialog.accept())
     await auth.getByRole('button', { name: '退出' }).click()
+    await firstPage.getByTestId('app-dialog-confirm').click()
     await expect(auth.getByRole('button', { name: '登录账号' })).toBeVisible()
     await firstContext.close()
 

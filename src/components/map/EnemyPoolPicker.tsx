@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Skull, Swords, X } from 'lucide-react'
+import { Hammer, Search, Skull, Swords, X } from 'lucide-react'
 import {
   DND5E_SRD_ENEMY_POOL,
-  dnd5eMonsterToEnemyTemplate,
   searchEnemyPool,
   selectNextEnemyVisualVariantId,
   type EnemyTemplate,
@@ -14,6 +13,8 @@ import {
   registeredDnd5ePluginMonsters,
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e/pluginApi'
+import Dnd5eMonsterWorkshopDialog from './Dnd5eMonsterWorkshopDialog'
+import { composeDnd5eEnemyPool } from './enemyPoolComposition'
 
 function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
   const [failedSource, setFailedSource] = useState<string>()
@@ -62,21 +63,31 @@ export default function EnemyPoolPicker({
   const [query, setQuery] = useState('')
   const [autoSelectNextAppearance, setAutoSelectNextAppearance] = useState(false)
   const [encounterOpen, setEncounterOpen] = useState(false)
+  const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [appearanceTarget, setAppearanceTarget] = useState<EnemyTemplate>()
   const customMonsters = useCustomMonsterStore((state) => state.monsters)
+  const customMonstersLoaded = useCustomMonsterStore((state) => state.loaded)
+  const [customMonsterLoadError, setCustomMonsterLoadError] = useState<string>()
   const [pluginMonsters, setPluginMonsters] = useState(() => registeredDnd5ePluginMonsters())
   useEffect(() => subscribeDnd5eRulesPluginRegistry(() => {
     setPluginMonsters(registeredDnd5ePluginMonsters())
   }), [])
-  const pool = useMemo(() => {
-    const entries = [
-      ...DND5E_SRD_ENEMY_POOL,
-      ...pluginMonsters.map(dnd5eMonsterToEnemyTemplate),
-      // 旧房间内已保存的同 ID 怪物继续拥有最高优先级，避免迁移后战役内容被扩展覆盖。
-      ...customMonsters.map(dnd5eMonsterToEnemyTemplate),
-    ]
-    return [...new Map(entries.map((entry) => [entry.id, entry])).values()]
-  }, [customMonsters, pluginMonsters])
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void useCustomMonsterStore.getState().loadShared().then(() => {
+      if (active) setCustomMonsterLoadError(undefined)
+    }).catch((error) => {
+      if (active) setCustomMonsterLoadError(error instanceof Error ? error.message : String(error))
+    })
+    return () => {
+      active = false
+    }
+  }, [open])
+  const pool = useMemo(
+    () => composeDnd5eEnemyPool(customMonsters, pluginMonsters),
+    [customMonsters, pluginMonsters],
+  )
 
   const allResults = useMemo(() => searchEnemyPool(query, pool), [pool, query])
   const results = allResults
@@ -110,7 +121,15 @@ export default function EnemyPoolPicker({
             <h2 className="text-base font-semibold text-slate-100">{title}</h2>
             {hint && <p className="text-xs text-slate-500">{hint}</p>}
           </div>
-          {canManageCustom && (
+          {canManageCustom && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setMonsterWorkshopOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-arcane-500/15 px-2.5 py-1.5 text-xs font-semibold text-arcane-100 hover:bg-arcane-500/25"
+            >
+              <Hammer className="h-3.5 w-3.5" />
+              房间怪物工坊
+            </button>
             <button
               type="button"
               onClick={() => setEncounterOpen(true)}
@@ -119,7 +138,7 @@ export default function EnemyPoolPicker({
               <Swords className="h-3.5 w-3.5" />
               遭遇构建
             </button>
-          )}
+          </div>}
           <button
             type="button"
             onClick={closePicker}
@@ -157,9 +176,13 @@ export default function EnemyPoolPicker({
             </label>
           )}
           <p className="mt-2 text-xs text-slate-500">
-            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间兼容数据：{customMonsters.length}
+            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间怪物：{customMonsters.length}
             {' '}· 扩展怪物：{pluginMonsters.length} · 显示 {results.length}/{allResults.length} 项
           </p>
+          {!customMonstersLoaded && <p className="mt-1 text-xs text-cyan-200">正在恢复当前房间的怪物目录…</p>}
+          {customMonsterLoadError && (
+            <p className="mt-1 text-xs text-rose-300">房间怪物目录恢复失败：{customMonsterLoadError}</p>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -301,5 +324,13 @@ export default function EnemyPoolPicker({
         closePicker()
       }}
     />
+    {monsterWorkshopOpen && (
+      <Dnd5eMonsterWorkshopDialog
+        open
+        context="room"
+        draftStorageScope="map-room-monsters"
+        onClose={() => setMonsterWorkshopOpen(false)}
+      />
+    )}
   </>
 }

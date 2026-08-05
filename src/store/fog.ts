@@ -11,7 +11,7 @@ import {
   type MapFogState,
   type SharedMapFogState,
 } from '../lib/fogOfWar'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 
 interface FogStoreState {

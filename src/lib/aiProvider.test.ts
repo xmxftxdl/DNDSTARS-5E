@@ -126,20 +126,10 @@ describe('AiProviderV1', () => {
     expect(result).toEqual({ ok: false, error: 'provider-unavailable' })
   })
 
-  it('只有明确允许且未超过额度时才使用付费回退', () => {
+  it('忽略旧选择中的付费回退标记，不会在 Provider 失败后自动换模型', () => {
     const providers = [provider({ status: 'offline' }), cloudProvider()]
     const models = [model('local'), model('cloud')]
-    const denied = selectAiProvider({
-      providers,
-      models,
-      selection: selection({ allowPaidFallback: true, maxCreditsPerTask: 10 }),
-      task: 'campaign-analysis',
-      estimatedInputTokens: 100_000,
-      estimatedOutputTokens: 20_000,
-    })
-    expect(denied).toEqual({ ok: false, error: 'paid-fallback-unavailable' })
-
-    const allowed = selectAiProvider({
+    const result = selectAiProvider({
       providers,
       models,
       selection: selection({ allowPaidFallback: true, maxCreditsPerTask: 200 }),
@@ -147,12 +137,7 @@ describe('AiProviderV1', () => {
       estimatedInputTokens: 100_000,
       estimatedOutputTokens: 20_000,
     })
-    expect(allowed.ok).toBe(true)
-    if (allowed.ok) {
-      expect(allowed.provider.id).toBe('cloud')
-      expect(allowed.estimatedCredits).toBe(180)
-      expect(allowed.fallback).toBe(true)
-    }
+    expect(result).toEqual({ ok: false, error: 'provider-unavailable' })
   })
 
   it('注册表拒绝重复 Provider', () => {

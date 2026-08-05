@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildDnd5eCustomMonster,
+  canConvertDnd5eCustomMonsterTraitToAreaAction,
   createDnd5eCustomMonsterActionDraft,
+  createDnd5eCustomMonsterAreaActionDraftFromTrait,
   createDnd5eCustomMonsterDraft,
   createDnd5eCustomMonsterMechanicDraft,
   createDnd5eCustomMonsterTraitDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
+  validateDnd5eCustomMonsterAreaActionDraft,
 } from './customMonsterWorkshop'
 import { dnd5eMonsterActionAutomation, parseDnd5eMonsterStatBlock } from './monsterSchema'
 
@@ -16,6 +19,155 @@ describe('D&D 5e custom monster workshop', () => {
     expect(monster.source).toBe('DM 自定义')
     expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
     expect(dnd5eMonsterActionAutomation(monster.actions[0])).toBe('headless')
+  })
+
+  it('repairs an already-saved action that was split before "+6，伤害："', () => {
+    const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const savedWithSplitAction = {
+      ...original,
+      actions: [
+        {
+          ...original.actions[0],
+          name: '法杖敲击',
+          description: '近战武器攻击，单一目标，命中',
+          attack: {
+            ...original.actions[0].attack!,
+            toHit: 3,
+            damage: [{ average: 4, count: 1, sides: 6, bonus: 1, type: 'bludgeoning' as const }],
+          },
+        },
+        {
+          id: 'attack-wrapped-damage',
+          name: '+6，伤害',
+          description: '8（1d6+4）钝击伤害',
+          kind: 'other' as const,
+          automation: 'dm-adjudication' as const,
+        },
+      ],
+    }
+
+    const restored = dnd5eCustomMonsterDraftFromStatBlock(savedWithSplitAction)
+    expect(restored.actions).toEqual([
+      expect.objectContaining({
+        name: '法杖敲击',
+        kind: 'weapon-attack',
+        toHit: 6,
+        damageDice: '1d6+4',
+        damageType: 'bludgeoning',
+        automation: 'headless',
+      }),
+    ])
+    expect(buildDnd5eCustomMonster(restored).actions).toHaveLength(1)
+  })
+
+  it('lets the DM complete and revalidate an AI-imported breath weapon as a Headless area action', () => {
+    expect(canConvertDnd5eCustomMonsterTraitToAreaAction({
+      name: '吐息武器',
+      description: '使用吐息时，15尺锥状内每个生物进行敏捷豁免（DC14），失败受到2d6点伤害，成功伤害减半。',
+    })).toBe(true)
+    const action = createDnd5eCustomMonsterAreaActionDraftFromTrait({
+      name: '吐息武器',
+      description: '使用吐息时，15尺锥状内每个生物进行敏捷豁免（DC14），失败受到2d6点伤害，成功伤害减半。',
+    })
+
+    expect(action).toMatchObject({
+      kind: 'area-saving-throw',
+      areaShape: 'cone',
+      areaSizeFeet: 15,
+      areaSaveAbility: 'dex',
+      areaSaveDc: 14,
+      areaDamageDice: '2d6',
+      areaDamageType: '',
+      areaDamageOnSuccessfulSave: 'half',
+    })
+    expect(validateDnd5eCustomMonsterAreaActionDraft(action)).toContain('请选择伤害类型')
+
+    action.areaDamageType = 'fire'
+    expect(validateDnd5eCustomMonsterAreaActionDraft(action)).toEqual([])
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.actions = [action]
+    const monster = buildDnd5eCustomMonster(draft)
+    const breath = monster.actions[0]
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(dnd5eMonsterActionAutomation(breath)).toBe('headless')
+    expect(breath).toMatchObject({
+      name: '吐息武器',
+      kind: 'other',
+      automation: 'headless',
+      rule: {
+        kind: 'area-saving-throw',
+        area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
+        target: 'all-creatures-except-self',
+        ability: 'dex',
+        dc: 14,
+        damage: { count: 2, sides: 6, bonus: 0, type: 'fire' },
+        damageOnSuccessfulSave: 'half',
+      },
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).actions[0]).toMatchObject({
+      kind: 'area-saving-throw',
+      areaShape: 'cone',
+      areaSizeFeet: 15,
+      areaDamageType: 'fire',
+    })
+  })
+
+  it('does not offer an area-action conversion for a passive damage mechanism', () => {
+    const trait = {
+      name: '不退斗志',
+      description: '当生命值低于10时，造成的所有伤害额外增加1d6。',
+    }
+    expect(canConvertDnd5eCustomMonsterTraitToAreaAction(trait)).toBe(false)
+    expect(() => createDnd5eCustomMonsterAreaActionDraftFromTrait(trait)).toThrow('不能自动转为')
+  })
+
+  it('round-trips a catalog-backed dice-count summon as a Headless action', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.actions = [{
+      ...createDnd5eCustomMonsterActionDraft(),
+      id: 'call-wolves',
+      name: '呼唤狼群',
+      kind: 'summon',
+      summonMonsterId: 'srd-5.1:wolf',
+      summonCountMode: 'dice',
+      summonCountDice: '1d3',
+      summonDurationRounds: 10,
+      summonTiming: 'source-next-turn-start',
+      summonConcentration: true,
+      summonConcentrationEndsOnAppearance: true,
+    }]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(monster.actions[0]).toMatchObject({
+      automation: 'headless',
+      rule: {
+        kind: 'summon',
+        monsterId: 'srd-5.1:wolf',
+        count: { kind: 'dice', count: 1, sides: 3, bonus: 0 },
+        timing: 'source-next-turn-start',
+        durationRounds: 10,
+        concentration: true,
+        concentrationEndsOnAppearance: true,
+      },
+    })
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).actions[0]).toMatchObject({
+      kind: 'summon',
+      summonMonsterId: 'srd-5.1:wolf',
+      summonCountMode: 'dice',
+      summonCountDice: '1d3',
+      summonTiming: 'source-next-turn-start',
+      summonConcentrationEndsOnAppearance: true,
+    })
+  })
+
+  it('refuses to save an incomplete Headless area action', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.actions = [createDnd5eCustomMonsterAreaActionDraftFromTrait({
+      name: '未完成吐息',
+      description: '15尺锥形，敏捷豁免 DC 12，失败受到 2d6 点伤害。',
+    })]
+    expect(() => buildDnd5eCustomMonster(draft)).toThrow('请选择伤害类型')
   })
 
   it('round-trips target priority and a low-hit-point Headless healing mechanism', () => {
@@ -481,6 +633,7 @@ describe('D&D 5e custom monster workshop', () => {
     draft.savingThrows = { con: 6, wis: 4 }
     draft.damageResistances = ['fire']
     draft.conditionImmunities = ['frightened']
+    draft.portrait = 'data:image/jpeg;base64,AA=='
     draft.tokenPortrait = 'data:image/png;base64,AA=='
     draft.initiativePortrait = 'data:image/webp;base64,AA=='
     draft.actions[0] = {
@@ -536,6 +689,7 @@ describe('D&D 5e custom monster workshop', () => {
       })],
     })
     expect(dnd5eCustomMonsterDraftFromStatBlock(monster)).toMatchObject({
+      portrait: draft.portrait,
       tokenPortrait: draft.tokenPortrait,
       initiativePortrait: draft.initiativePortrait,
       actions: [

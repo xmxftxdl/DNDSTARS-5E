@@ -1,7 +1,7 @@
 import { modeFromPort } from './appMode'
 import { publishSharedEvent, subscribeSharedEvent } from './sharedApi'
 import { getRoomSession } from './roomSession'
-import { rollDnd5eInventoryHealing } from '../rulesets/dnd5e/items'
+import { normalizeDnd5eInventory, rollDnd5eInventoryHealing } from '../rulesets/dnd5e/items'
 import { useCharacterStore } from '../store/characters'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
 
@@ -34,7 +34,7 @@ export function submitDnd5eInventoryMutation(
   const mode = session?.role ?? modeFromPort()
   if (mode !== 'player') {
     const authoritativeMutation = mutation.type === 'use'
-      ? withAuthorityHealingRolls(mutation)
+      ? withAuthorityUseContext(mutation, inventoryRequestId())
       : mutation
     const result = useCharacterStore.getState().applyInventoryMutation(authoritativeMutation)
     return {
@@ -86,7 +86,7 @@ export function startDnd5eInventoryAuthoritySync(): () => void {
         if (!target || (source.roomId && target.roomId && source.roomId !== target.roomId)) return
       }
       state.applyInventoryMutation(
-        mutation.type === 'use' ? withAuthorityHealingRolls(mutation) : mutation,
+        mutation.type === 'use' ? withAuthorityUseContext(mutation, request.id) : mutation,
       )
     },
   )
@@ -99,18 +99,23 @@ export function startDnd5eInventoryAuthoritySync(): () => void {
 
 export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['reason']): string {
   switch (reason) {
+    case 'stale-inventory-revision': return '库存已经在另一端发生变化，本次操作未执行；请刷新后重试。'
     case 'character-not-found': return '找不到持有该物品的角色。'
     case 'target-not-found': return '找不到转交目标。'
+    case 'invalid-target': return '该物品只能对规则允许的目标使用。'
     case 'item-not-found': return '物品已不存在，可能刚刚在另一端被使用或转交。'
     case 'template-not-found': return '规则包中找不到该物品模板。'
     case 'invalid-quantity': return '数量必须是正整数。'
     case 'insufficient-quantity': return '库存数量不足。'
     case 'not-equipment': return '该物品不能装备或卸下。'
+    case 'invalid-equipment-slot': return '该物品不能放入指定的穿戴槽。'
     case 'not-usable': return '该物品没有可执行的使用规则。'
     case 'attunement-not-required': return '该物品不需要同调。'
     case 'attunement-limit': return '同调上限为三件魔法物品；请先结束一项同调。'
     case 'attunement-prerequisite': return '角色不满足该物品的同调先决条件，或尚未由 DM 确认环境条件。'
     case 'invalid-rolls': return '权威骰值无效。'
+    case 'invalid-spell-slot': return '所选法术位环级无效。'
+    case 'spell-slot-unavailable': return '所选法术位没有消耗，或当前角色没有该环级法术位。'
     case 'action-unavailable': return '本回合已经没有可用动作。'
     case 'bonus-action-unavailable': return '本回合已经没有可用附赠动作。'
     case 'same-character': return '不能把物品转交给自己。'
@@ -128,18 +133,31 @@ export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['r
   }
 }
 
-function withAuthorityHealingRolls(
+function withAuthorityUseContext(
   mutation: Extract<Dnd5eInventoryMutation, { type: 'use' }>,
+  receiptId: string,
 ): Extract<Dnd5eInventoryMutation, { type: 'use' }> {
   const character = useCharacterStore.getState().characters.find((candidate) => candidate.id === mutation.characterId)
   const item = character?.dnd5eInventory?.entries.find((entry) => entry.instanceId === mutation.instanceId)?.item
-  return { ...mutation, healingRolls: item ? rollDnd5eInventoryHealing(item) : [] }
+  return {
+    ...mutation,
+    targetCharacterId: mutation.targetCharacterId ?? mutation.characterId,
+    healingRolls: item ? rollDnd5eInventoryHealing(item) : [],
+    receiptId,
+    expectedInventoryRevision: character ? normalizeDnd5eInventory(character).revision : undefined,
+  }
 }
 
 export function sanitizeDnd5ePlayerInventoryMutation(
   mutation: Exclude<Dnd5eInventoryMutation, { type: 'grant' }>,
 ): Exclude<Dnd5eInventoryMutation, { type: 'grant' }> {
-  if (mutation.type === 'use') return { ...mutation, healingRolls: undefined }
+  if (mutation.type === 'use') return {
+    type: 'use',
+    characterId: mutation.characterId,
+    instanceId: mutation.instanceId,
+    spellSlotLevel: mutation.spellSlotLevel,
+    healingRolls: undefined,
+  }
   if (mutation.type === 'prepare-attunement') return { ...mutation, dmPrerequisiteConfirmed: undefined }
   return mutation
 }

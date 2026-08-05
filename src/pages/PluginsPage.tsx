@@ -44,6 +44,7 @@ import {
   subscribeAccountSession,
 } from '../lib/accountSession'
 import { activateRoomPluginPackage } from '../lib/roomPluginActivation'
+import { showAppConfirm, showAppPrompt } from '../lib/appDialog'
 import { getRoomSession } from '../lib/roomSession'
 import {
   getRoomRulesSnapshot,
@@ -207,7 +208,7 @@ function PluginCatalogBrowser({
 
   const report = async (plugin: PluginCatalogEntry, version: PluginCatalogVersion) => {
     if (!accountId) return onError('请登录后举报插件。')
-    const details = window.prompt('请说明举报原因（安全、版权、误导或其他问题）：')?.trim()
+    const details = (await showAppPrompt('请说明举报原因（安全、版权、误导或其他问题）：'))?.trim()
     if (!details) return
     onBusy(`report:${plugin.id}`)
     try {
@@ -399,7 +400,7 @@ function PluginModerationPanel({
     version: string,
     action: 'approve' | 'reject' | 'suspend',
   ) => {
-    const note = action === 'approve' ? '' : window.prompt('填写审核说明：')?.trim()
+    const note = action === 'approve' ? '' : (await showAppPrompt('填写审核说明：'))?.trim()
     if (action !== 'approve' && !note) return
     setBusy(`${pluginId}@${version}`)
     try {
@@ -438,7 +439,7 @@ function PluginModerationPanel({
                   }
                 })()} className="rounded-xl bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100">通过</button>
                 <button type="button" disabled={busy != null} onClick={() => void (async () => {
-                  const note = window.prompt('填写拒绝原因：')?.trim()
+                  const note = (await showAppPrompt('填写拒绝原因：'))?.trim()
                   if (!note) return
                   setBusy(`creator:${creator.accountId}`)
                   try {
@@ -496,7 +497,7 @@ function PluginModerationPanel({
                 )}
                 {payout.status === 'approved' && (
                   <button type="button" disabled={busy != null} onClick={() => void (async () => {
-                    const reference = window.prompt('请输入支付平台或银行转账流水号：')?.trim()
+                    const reference = (await showAppPrompt('请输入支付平台或银行转账流水号：'))?.trim()
                     if (!reference) return
                     setBusy(`payout:${payout.payoutId}`)
                     try {
@@ -515,7 +516,7 @@ function PluginModerationPanel({
                   })()} className="rounded-xl bg-cyan-500/12 px-3 py-2 text-xs font-semibold text-cyan-100">确认已打款</button>
                 )}
                 <button type="button" disabled={busy != null} onClick={() => void (async () => {
-                  const note = window.prompt('请输入拒绝原因，预占金额会退回创作者余额：')?.trim()
+                  const note = (await showAppPrompt('请输入拒绝原因，预占金额会退回创作者余额：'))?.trim()
                   if (!note) return
                   setBusy(`payout:${payout.payoutId}`)
                   try {
@@ -866,7 +867,11 @@ export default function PluginsPage() {
     const warning = activeInRoom
       ? '这个版本当前已在房间启用。删除账号库引用不会停止房间运行，但之后需要重新上传才能再次安装。仍要删除吗？'
       : `从账号插件库删除 ${plugin.name} v${plugin.version}？`
-    if (!window.confirm(warning)) return
+    if (!(await showAppConfirm({
+      message: warning,
+      tone: 'danger',
+      confirmLabel: '删除',
+    }))) return
     const key = `${plugin.id}@${plugin.version}:delete`
     setBusyKey(key)
     setNotice(null)
@@ -1188,6 +1193,7 @@ export default function PluginsPage() {
                               <div><dt className="inline text-slate-600">最低协议：</dt><dd className="inline">v{plugin.minimumGameProtocolVersion}</dd></div>
                               <div><dt className="inline text-slate-600">内容分类：</dt><dd className="inline">{plugin.contentCategory}</dd></div>
                               <div><dt className="inline text-slate-600">分发策略：</dt><dd className="inline">{plugin.distributionPolicy}</dd></div>
+                              {plugin.workshopOrigin && <div><dt className="inline text-slate-600">上传来源：</dt><dd className="inline">已验证 DM 工坊{plugin.workshopOrigin.campaignId ? ` · 战役 ${plugin.workshopOrigin.campaignId}` : ''}</dd></div>}
                               <div><dt className="inline text-slate-600">大小：</dt><dd className="inline">{formatBytes(plugin.sizeBytes)}</dd></div>
                               <div><dt className="inline text-slate-600">保存时间：</dt><dd className="inline">{formatDate(plugin.createdAt)}</dd></div>
                               <div><dt className="inline text-slate-600">规则集：</dt><dd className="inline">D&D 5e 2014 / SRD 5.1</dd></div>

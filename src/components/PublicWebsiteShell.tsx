@@ -1,7 +1,9 @@
-import { ArrowRight, Menu, Sparkles, UserRound, X } from 'lucide-react'
+import { ArrowRight, Menu, UserRound, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import starMarkLogo from '../assets/starmark-logo.png'
 import { getAccountSession, subscribeAccountSession } from '../lib/accountSession'
+import ThemeToggle from './ThemeToggle'
 
 const publicNavigation = [
   { to: '/', label: '产品' },
@@ -29,7 +31,7 @@ function PublicNavLink({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={active
-        ? 'text-sm font-semibold text-white'
+        ? 'text-sm font-semibold text-slate-100'
         : 'text-sm font-semibold text-slate-400 transition hover:text-white'}
     >
       {label}
@@ -53,11 +55,11 @@ export default function PublicWebsiteShell({ children }: { children: ReactNode }
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#06070f]/88 backdrop-blur-xl">
         <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-5 lg:px-8">
           <Link to="/" className="flex items-center gap-3" aria-label="星痕首页">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-950">
-              <Sparkles className="h-5 w-5 text-white" />
+            <span className="flex h-10 w-10 items-center justify-center drop-shadow-[0_0_10px_rgba(139,92,246,0.42)]">
+              <img src={starMarkLogo} alt="" aria-hidden="true" className="h-10 w-10 object-contain" />
             </span>
             <span>
-              <span className="block font-display text-base font-bold tracking-wide text-white">星痕</span>
+              <span className="block font-display text-base font-bold tracking-wide text-slate-100">星痕</span>
               <span className="block text-[10px] uppercase tracking-[0.24em] text-violet-300">Astral Trace</span>
             </span>
           </Link>
@@ -69,6 +71,7 @@ export default function PublicWebsiteShell({ children }: { children: ReactNode }
           </nav>
 
           <div className="hidden items-center gap-3 md:flex">
+            <ThemeToggle compact />
             {account ? (
               <Link to="/app/profile" className="flex max-w-48 items-center gap-2 truncate rounded-xl px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/5">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-violet-500/10">
@@ -111,6 +114,10 @@ export default function PublicWebsiteShell({ children }: { children: ReactNode }
         {mobileOpen && (
           <div className="border-t border-white/8 bg-[#080914] px-5 py-5 md:hidden">
             <nav className="grid gap-4">
+              <div className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300">
+                <span>界面主题</span>
+                <ThemeToggle compact />
+              </div>
               {publicNavigation.map((item) => (
                 <PublicNavLink
                   key={item.to}

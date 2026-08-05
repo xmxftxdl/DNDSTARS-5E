@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
+import { createCoreFighter } from './support/characterCreation'
 
-test('character level auto-saves while editing and survives an immediate refresh', async ({ page, request }) => {
+test('single-level advancement persists and survives an immediate refresh', async ({ page, request }) => {
   const name = `等级回归-${Date.now()}`
   const created = await (await request.post('http://127.0.0.1:6173/api/rooms', {
     data: {
@@ -35,29 +36,16 @@ test('character level auto-saves while editing and survives an immediate refresh
   ] as const)
   await page.reload({ waitUntil: 'domcontentloaded' })
 
-  await page.getByRole('button', { name: '新建角色' }).click()
-  await page.getByRole('button', { name: /经验丰富的冒险者/ }).click()
-  await page.getByRole('button', { name: '选择属性方式' }).click()
-  await page.getByRole('button', { name: /标准数组/ }).click()
-  await page.getByRole('button', { name: '开始分配' }).click()
-  await page.getByRole('button', { name: '加入种族调整并选择装备' }).click()
-  await page.getByRole('button', { name: '确认起始装备' }).click()
-  await page.getByRole('textbox', { name: '角色名称' }).fill(name)
-  await page.getByRole('button', { name: '创建角色' }).click()
+  await createCoreFighter(page, { name })
+  await expect(page.getByText('1', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '提升至 2 级' }).click()
+  await page.getByRole('dialog', { name: /战士 1 → 2 级/ }).getByRole('button', { name: '确认升级' }).click()
+  await expect(page.getByRole('button', { name: '提升至 3 级' })).toBeVisible()
 
-  const level = page.getByRole('spinbutton', { name: '等级', exact: true })
-  await expect(level).toHaveValue('1')
-  await level.fill('')
-  await page.waitForTimeout(750)
-  await expect(level).toHaveValue('')
-
-  await level.fill('12')
-  await expect(level).toHaveValue('12')
-
-  // Refresh without Enter or blur. A valid numeric edit must already be in the
-  // local durable queue, even if the async shared-state PUT has not completed.
+  // The advancement is an atomic durable transaction. An immediate refresh
+  // must not restore the pre-upgrade snapshot.
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('spinbutton', { name: '等级', exact: true })).toHaveValue('12')
+  await expect(page.getByRole('button', { name: '提升至 3 级' })).toBeVisible()
 
   await expect.poll(async () => {
     const response = await request.get(`http://127.0.0.1:6173/api/state/characters?room=${created.roomId}`, {
@@ -66,8 +54,8 @@ test('character level auto-saves while editing and survives an immediate refresh
     if (!response.ok()) return null
     const state = await response.json() as { characters?: Array<{ name?: string; level?: number }> }
     return state.characters?.find((character) => character.name === name)?.level ?? null
-  }).toBe(12)
+  }).toBe(2)
 
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('spinbutton', { name: '等级', exact: true })).toHaveValue('12')
+  await expect(page.getByRole('button', { name: '提升至 3 级' })).toBeVisible()
 })

@@ -123,18 +123,26 @@ async function getRoomState<T>(
 }
 
 async function enterRoom(page: Page, origin: string, membership: RoomMembershipResponse) {
-  await page.goto(`${origin}/settings`, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(
+  await page.addInitScript(
     ([key, session]) => localStorage.setItem(key, JSON.stringify(session)),
     [SESSION_KEY, sessionFrom(membership)] as const,
   )
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  const destination = membership.member.role === 'dm'
+    ? `/campaign/${membership.roomId}/dm-tools/workshop`
+    : `/campaign/${membership.roomId}/extensions`
+  // Reproduce the production login path: main.tsx starts on the public page,
+  // then BrowserRouter enters the campaign without reloading the document.
+  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' })
+  await page.evaluate((path) => {
+    window.history.pushState({}, '', path)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, destination)
+  await page.waitForURL(`${origin}${destination}`)
 }
 
 async function uploadTemplateFromDm(page: Page) {
-  await page.locator('input[type="file"][accept*=".dndstars5e"]').setInputFiles(TEMPLATE_PATH)
-  await expect(page.getByText(`已原子激活 ${PLUGIN_ID}；房间玩家将自动下载并激活。`)).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByTestId('room-rules-status').getByText('本机已就绪')).toBeVisible({ timeout: 20_000 })
+  await page.locator('input[type="file"][accept=".dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"]').setInputFiles(TEMPLATE_PATH)
+  await expect(page.getByText('已保存并启用 Rules API V2 E2E；当前房间成员会按精确版本同步。')).toBeVisible({ timeout: 20_000 })
 }
 
 test('插件状态迁移只在受限 Worker 内按连续 schema 执行', async ({ page }) => {
@@ -218,7 +226,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
     enterRoom(player2, PLAYER2, joined2),
   ])
 
-  await expect(player.getByTestId('room-rules-status').getByText('本机已就绪')).toBeVisible()
+  await expect(player.getByTestId('active-rules-extensions-page')).toBeVisible()
   await expect(player.locator('input[type="file"]')).toHaveCount(0)
   await uploadTemplateFromDm(dm)
   await expect.poll(async () => {
@@ -233,8 +241,8 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
     expect(player2.getByRole('heading', { name: 'Rules API V2 E2E' })).toBeVisible({ timeout: 25_000 }),
   ])
   await Promise.all([
-    expect(player.getByTestId('room-rules-status').getByText('本机已就绪')).toBeVisible({ timeout: 20_000 }),
-    expect(player2.getByTestId('room-rules-status').getByText('本机已就绪')).toBeVisible({ timeout: 20_000 }),
+    expect(player.getByText('已激活 · v0.1.0')).toBeVisible({ timeout: 20_000 }),
+    expect(player2.getByText('已激活 · v0.1.0')).toBeVisible({ timeout: 20_000 }),
   ])
 
   const now = Date.now()

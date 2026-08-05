@@ -100,6 +100,8 @@ export function placeDnd5eItemArea(input: {
   turnEconomy: Dnd5eTurnEconomyCounts
   areaId: string
   createdAt: number
+  receiptId?: string
+  expectedInventoryRevision?: number
   transaction?: CombatTransaction
 }):
   | { ok: true; map: BattleMap; characters: Character[]; area: Dnd5eItemArea; spentEconomy?: 'action' | 'bonusAction'; transaction?: CombatTransaction }
@@ -122,7 +124,13 @@ export function placeDnd5eItemArea(input: {
   if (!preview.valid) return rejected(preview.reason ?? 'invalid-target-cell')
   const mutation = applyDnd5eInventoryMutation(
     input.characters,
-    { type: 'use', characterId: input.actor.id, instanceId: input.entry.instanceId },
+    {
+      type: 'use',
+      characterId: input.actor.id,
+      instanceId: input.entry.instanceId,
+      receiptId: input.receiptId,
+      expectedInventoryRevision: input.expectedInventoryRevision,
+    },
     { turnEconomy: input.turnEconomy, transaction: input.transaction },
   )
   if (!mutation.ok) return { ok: false, reason: 'item-use-rejected', transaction: mutation.transaction }

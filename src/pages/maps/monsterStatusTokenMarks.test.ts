@@ -56,4 +56,18 @@ describe('Flesh Golem Damage Aversion Token mark', () => {
       token({ id: 'flesh-golem', poolId: 'srd-5.1:flesh-golem' }),
     ], [])).toEqual([])
   })
+
+  it('uses the uniform monster red when no character owns the effect', () => {
+    expect(buildDnd5eMonsterStatusTokenMarks([
+      token({
+        id: 'flesh-golem',
+        poolId: 'srd-5.1:flesh-golem',
+        dnd5eCombatState: { monsterDamageAversionActive: true },
+      }),
+    ], [])).toEqual([expect.objectContaining({
+      tokenId: 'flesh-golem',
+      borderColor: '#FECACA',
+      glowColor: '#EF4444',
+    })])
+  })
 })

@@ -26,7 +26,7 @@ export default function PublicLandingPage() {
               <ShieldCheck className="h-3.5 w-3.5" />
               D&amp;D 5e 2014 · SRD 5.1 · DM 权威结算
             </div>
-            <h1 className="mt-7 font-display text-5xl font-bold leading-[1.08] text-white sm:text-6xl lg:text-7xl">
+            <h1 className="mt-7 font-display text-5xl font-bold leading-[1.08] text-slate-100 sm:text-6xl lg:text-7xl">
               记录每一场冒险，
               <span className="mt-2 block bg-gradient-to-r from-violet-300 via-fuchsia-200 to-amber-200 bg-clip-text text-transparent">
                 让传奇永不褪色

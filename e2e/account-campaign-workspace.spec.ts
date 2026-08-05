@@ -204,8 +204,8 @@ test('登录同一账号后可在新设备接管未关闭的 DM 房间', async (
 
   await page.goto(`${APP}/app`, { waitUntil: 'domcontentloaded' })
   await expect(page.getByText(campaign.name, { exact: true })).toBeVisible()
-  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: '接管当前 DM 房间' }).click()
+  await page.getByTestId('app-dialog-confirm').click()
   await expect(page).toHaveURL(`${APP}/campaign/${campaign.campaignId}/overview`)
 
   const restoredSession = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? 'null'), ROOM_SESSION_KEY) as {
