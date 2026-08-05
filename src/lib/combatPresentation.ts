@@ -58,6 +58,7 @@ export const CONE_OF_COLD_ANIMATION_DURATION_MS = 1_250
 export const CIRCLE_OF_DEATH_ANIMATION_DURATION_MS = 1_300
 export const ICE_STORM_ANIMATION_DURATION_MS = 1_350
 export const FREEZING_SPHERE_ANIMATION_DURATION_MS = 1_350
+export const METEOR_SWARM_ANIMATION_DURATION_MS = 1_800
 export const FINGER_OF_DEATH_ANIMATION_DURATION_MS = 1_300
 export const POWER_WORD_STUN_ANIMATION_DURATION_MS = 1_250
 export const POWER_WORD_KILL_ANIMATION_DURATION_MS = 1_300
@@ -508,6 +509,7 @@ export interface CombatPresentationMapProjectile {
     | 'circle-of-death'
     | 'ice-storm'
     | 'freezing-sphere'
+    | 'meteor-swarm'
     | 'color-spray'
     | 'faerie-fire'
     | 'sleep'
@@ -936,6 +938,8 @@ export function combatPresentationProjectilesForMap(
             ? ICE_STORM_ANIMATION_DURATION_MS
           : event.spellId === 'freezing-sphere'
             ? FREEZING_SPHERE_ANIMATION_DURATION_MS
+          : event.spellId === 'meteor-swarm'
+            ? METEOR_SWARM_ANIMATION_DURATION_MS
           : event.spellId === 'color-spray'
             ? COLOR_SPRAY_ANIMATION_DURATION_MS
           : event.spellId === 'faerie-fire'
@@ -2369,6 +2373,7 @@ export async function publishAreaSpellPresentation(input: {
     'circle-of-death': CIRCLE_OF_DEATH_ANIMATION_DURATION_MS,
     'ice-storm': ICE_STORM_ANIMATION_DURATION_MS,
     'freezing-sphere': FREEZING_SPHERE_ANIMATION_DURATION_MS,
+    'meteor-swarm': METEOR_SWARM_ANIMATION_DURATION_MS,
     'color-spray': COLOR_SPRAY_ANIMATION_DURATION_MS,
     'faerie-fire': FAERIE_FIRE_ANIMATION_DURATION_MS,
     sleep: SLEEP_ANIMATION_DURATION_MS,
