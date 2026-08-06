@@ -62,6 +62,45 @@ async function stopServer(r: Running, removeRoot = true): Promise<void> {
   if (removeRoot) await rm(r.sharedRoot, { recursive: true, force: true }).catch(() => {})
 }
 
+describe('房间语音 P0', () => {
+  it('仅向持有有效房间凭证的成员返回语音状态或短期令牌', async () => {
+    const createResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '语音鉴权测试',
+        displayName: '语音 DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'voice-auth-test-client',
+        activePlugins: [],
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const created = await createResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+
+    const forbidden = await fetch(`${offServer.base}/api/rooms/${created.roomId}/voice`)
+    expect(forbidden.status).toBe(403)
+
+    const headers = {
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    }
+    const status = await fetch(`${offServer.base}/api/rooms/${created.roomId}/voice`, { headers })
+    expect(status.status).toBe(200)
+    await expect(status.json()).resolves.toEqual({ schemaVersion: 1, enabled: false, provider: 'livekit' })
+
+    const access = await fetch(`${offServer.base}/api/rooms/${created.roomId}/voice/token`, {
+      method: 'POST',
+      headers,
+    })
+    expect(access.status).toBe(200)
+    await expect(access.json()).resolves.toEqual({ schemaVersion: 1, enabled: false, provider: 'livekit' })
+  })
+})
+
 function putState(base: string, name: string, body: unknown, headers: Record<string, string> = {}) {
   return fetch(`${base}/api/state/${name}`, {
     method: 'PUT',
@@ -79,6 +118,9 @@ beforeAll(async () => {
   delete offEnv.STARS_SHARED_SECRET
   offServer = await startServer(5392, {
     STARS_SHARED_SECRET: '',
+    STARS_LIVEKIT_URL: '',
+    STARS_LIVEKIT_API_KEY: '',
+    STARS_LIVEKIT_API_SECRET: '',
     STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET: 'test-marketplace-payment-secret',
     STARS_PLUGIN_ADMIN_ACCOUNT_IDS: '*',
   })

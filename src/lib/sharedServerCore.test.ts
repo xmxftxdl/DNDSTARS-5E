@@ -106,10 +106,14 @@ describe('production transport security', () => {
       res,
       env,
     )).toBe(true)
-    sharedServerCore.applySecurityHeaders(res, { production: true })
+    sharedServerCore.applySecurityHeaders(res, {
+      production: true,
+      env: { ...env, STARS_LIVEKIT_URL: 'wss://voice.example.test' },
+    })
     expect(headers.get('Access-Control-Allow-Origin')).toBe('https://table.dndstars.example')
     expect(headers.get('Vary')).toBe('Origin')
-    expect(headers.get('Content-Security-Policy')).toContain("connect-src 'self'")
+    expect(headers.get('Permissions-Policy')).toContain('microphone=(self)')
+    expect(headers.get('Content-Security-Policy')).toContain("connect-src 'self' wss://voice.example.test")
     expect(headers.get('Strict-Transport-Security')).toContain('max-age=31536000')
     expect(sharedServerCore.applyCors(
       { headers: { origin: 'https://evil.example' } },

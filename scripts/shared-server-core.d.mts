@@ -96,7 +96,7 @@ export function createMarketplaceCheckout(
 }>
 export function applySecurityHeaders(
   res: { setHeader(name: string, value: string): void },
-  options?: { production?: boolean },
+  options?: { production?: boolean; env?: Record<string, string | undefined> },
 ): void
 export function applyCors(
   req: { headers?: Record<string, string | string[] | undefined> } | null | undefined,

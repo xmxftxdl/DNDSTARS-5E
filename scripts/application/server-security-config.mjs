@@ -67,16 +67,25 @@ export function validateProductionSecurityConfig(env = process.env) {
 }
 
 export function applySecurityHeaders(res, options = {}) {
-  const production = options.production ?? productionSecurityEnabled()
+  const env = options.env ?? process.env
+  const production = options.production ?? productionSecurityEnabled(env)
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'no-referrer')
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()')
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
   // The 3D dice renderer is an application-owned iframe, so same-origin
   // framing must remain available while third-party framing stays blocked.
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   if (!production) return
+  const liveKitConnectSource = (() => {
+    try {
+      const parsed = new URL(String(env.STARS_LIVEKIT_URL ?? '').trim())
+      return parsed.protocol === 'wss:' || parsed.protocol === 'ws:' ? parsed.origin : null
+    } catch {
+      return null
+    }
+  })()
   res.setHeader(
     'Content-Security-Policy',
     [
@@ -92,7 +101,7 @@ export function applySecurityHeaders(res, options = {}) {
       "media-src 'self' blob:",
       "worker-src 'self' blob:",
       "frame-src 'self'",
-      "connect-src 'self'",
+      `connect-src 'self'${liveKitConnectSource ? ` ${liveKitConnectSource}` : ''}`,
     ].join('; '),
   )
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')

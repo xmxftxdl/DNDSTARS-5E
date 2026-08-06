@@ -9,5 +9,5 @@ export function validateProductionSecurityConfig(env?: NodeJS.ProcessEnv): {
 }
 export function applySecurityHeaders(
   response: { setHeader(name: string, value: string): void },
-  options?: { production?: boolean },
+  options?: { production?: boolean; env?: Record<string, string | undefined> },
 ): void

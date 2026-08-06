@@ -1,6 +1,11 @@
 import { sharedLobbyApiCandidates } from './sharedApi'
 import { getAccountSession } from './accountSession'
 import type { JsonValue } from '../rulesets/dnd5e/pluginApi'
+import type {
+  DisabledVoiceAccessStatus,
+  VoiceAccessCredential,
+  VoiceAccessStatus,
+} from '../voice/voiceTypes'
 import {
   DND5E_2014_RULESET_ID,
   getRoomClientId,
@@ -219,6 +224,29 @@ async function roomRequest<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   throw new RoomApiError(reachedServer ? 'request-failed' : 'server-unavailable', 0)
+}
+
+export async function getRoomVoiceStatus(session: RoomSession): Promise<VoiceAccessStatus> {
+  return roomRequest<VoiceAccessStatus>(`/rooms/${encodeURIComponent(session.roomId)}/voice`, {
+    method: 'GET',
+    headers: {
+      'X-Stars-Member': session.memberId,
+      'X-Stars-Room-Token': session.roomToken,
+    },
+  })
+}
+
+export async function requestRoomVoiceAccess(session: RoomSession): Promise<DisabledVoiceAccessStatus | VoiceAccessCredential> {
+  return roomRequest<DisabledVoiceAccessStatus | VoiceAccessCredential>(
+    `/rooms/${encodeURIComponent(session.roomId)}/voice/token`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Stars-Member': session.memberId,
+        'X-Stars-Room-Token': session.roomToken,
+      },
+    },
+  )
 }
 
 async function roomBinaryRequest(path: string, init?: RequestInit): Promise<Response> {

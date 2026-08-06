@@ -1,5 +1,50 @@
-import { describe, expect, it } from 'vitest'
-import { normalizeRoomRosterPayload, onlineRoomRoster, RoomApiError, roomHeartbeatErrorIsTerminal } from './roomApi'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  getRoomVoiceStatus,
+  normalizeRoomRosterPayload,
+  onlineRoomRoster,
+  requestRoomVoiceAccess,
+  RoomApiError,
+  roomHeartbeatErrorIsTerminal,
+} from './roomApi'
+import type { RoomSession } from './roomSession'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+const voiceTestSession: RoomSession = {
+  roomId: '4Y3ZTK',
+  roomName: 'Voice test',
+  rulesetId: 'dnd5e-2014-srd-5.1',
+  memberId: 'member-voice-test',
+  roomToken: 'x'.repeat(48),
+  clientId: 'client-voice-test',
+  role: 'dm',
+  displayName: 'DM',
+  createdAt: 1,
+}
+
+describe('room voice API routing', () => {
+  it('does not duplicate the /api prefix for status and token requests', async () => {
+    const requestedUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      requestedUrls.push(String(input))
+      return new Response(JSON.stringify({ schemaVersion: 1, enabled: false, provider: 'livekit' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await getRoomVoiceStatus(voiceTestSession)
+    await requestRoomVoiceAccess(voiceTestSession)
+
+    expect(requestedUrls).toEqual([
+      'http://127.0.0.1:5273/api/rooms/4Y3ZTK/voice',
+      'http://127.0.0.1:5273/api/rooms/4Y3ZTK/voice/token',
+    ])
+  })
+})
 
 describe('room heartbeat recovery policy', () => {
   it('keeps the session during a temporary host-offline window', () => {

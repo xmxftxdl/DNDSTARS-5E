@@ -40,6 +40,7 @@ const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
 const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
+const VoiceRoomSystem = lazy(() => import('./components/VoiceRoomSystem'))
 
 function PageLoadingFallback() {
   return (
@@ -369,6 +370,13 @@ export default function App() {
         {!isSpectator && <RoomHandoutNotification />}
         <CampaignTimeSystem isDm={endpointMode !== 'player'} />
         <SceneAudioPlaybackSystem />
+        {roomSession && (
+          <VoiceRoomSystem
+            key={`${roomSession.roomId}:${roomSession.memberId}`}
+            session={roomSession}
+            sidebarCollapsed={collapsed}
+          />
+        )}
       </Suspense>
       <iframe
         title="D20 dice preloader"
