@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
+  AudioLines,
   BookOpenText,
   Check,
   ClipboardList,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
+import VoiceRoomPanel from '../components/VoiceRoomPanel'
 import { combatantDamagePerTurn } from '../lib/combatStatistics'
 import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../lib/roomApi'
 import {
@@ -31,9 +33,10 @@ import { useCombatStatisticsStore } from '../store/combatStatistics'
 import { useMapStore } from '../store/maps'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 
-type CommunicationsTab = 'chat' | 'handouts' | 'journal' | 'notes'
+type CommunicationsTab = 'voice' | 'chat' | 'handouts' | 'journal' | 'notes'
 
 const tabs: Array<{ id: CommunicationsTab; label: string; icon: typeof MessageSquareText }> = [
+  { id: 'voice', label: '房间语音', icon: AudioLines },
   { id: 'chat', label: '文字聊天', icon: MessageSquareText },
   { id: 'handouts', label: '讲义', icon: ScrollText },
   { id: 'journal', label: '战役日志', icon: BookOpenText },
@@ -101,12 +104,16 @@ function SharedHandoutImage({ handout }: { handout: RoomHandout }) {
 }
 
 export default function CommunicationsPage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const session = useMemo(() => getRoomSession(), [])
   const isDm = session?.role === 'dm'
   const requestedTab = searchParams.get('tab')
-  const [tab, setTab] = useState<CommunicationsTab>(
-    requestedTab === 'handouts' || requestedTab === 'journal' || requestedTab === 'notes' ? requestedTab : 'chat',
+  const tab: CommunicationsTab = (
+    session?.role === 'spectator'
+      ? 'voice'
+      : requestedTab === 'voice' || requestedTab === 'handouts' || requestedTab === 'journal' || requestedTab === 'notes'
+        ? requestedTab
+        : 'chat'
   )
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -119,6 +126,13 @@ export default function CommunicationsPage() {
   const markHandoutsRead = useRoomCommunicationsStore((state) => state.markHandoutsRead)
   const maps = useMapStore((state) => state.maps)
   const sessions = useCombatStatisticsStore((state) => state.sessions)
+
+  const selectTab = (nextTab: CommunicationsTab) => {
+    const nextSearchParams = new URLSearchParams(searchParams)
+    if (nextTab === 'chat') nextSearchParams.delete('tab')
+    else nextSearchParams.set('tab', nextTab)
+    setSearchParams(nextSearchParams, { replace: true })
+  }
 
   useEffect(() => {
     if (!session || !isDm) return
@@ -150,15 +164,15 @@ export default function CommunicationsPage() {
     <div className="mx-auto max-w-7xl">
       <PageHeader
         title="通讯与日志"
-        description="房间聊天、秘密纸条、讲义、战役记录与队伍共享手记。"
+        description="房间语音、文字聊天、秘密纸条、讲义、战役记录与队伍共享手记。"
       />
 
       <div className="mb-5 flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-slate-950/45 p-2">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {tabs.filter(({ id }) => session.role !== 'spectator' || id === 'voice').map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => selectTab(id)}
             className={`relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
               tab === id ? 'bg-arcane-500/20 text-arcane-100' : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
             }`}
@@ -180,6 +194,7 @@ export default function CommunicationsPage() {
         </div>
       )}
 
+      {tab === 'voice' && <VoiceRoomPanel />}
       {tab === 'chat' && (
         <ChatPanel
           isDm={isDm}

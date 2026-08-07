@@ -1,4 +1,5 @@
 import type {
+  LocalAudioTrack,
   LocalParticipant,
   Participant,
   RemoteAudioTrack,
@@ -13,6 +14,12 @@ import {
   type VoiceProviderSnapshot,
 } from './voiceTypes'
 import type { RoomRole } from '../lib/roomSession'
+import {
+  DEFAULT_VOICE_CHANGER_SELECTION,
+  isVoiceChangerBypassed,
+  type VoiceChangerSelection,
+} from './voiceChanger'
+import { AstralTraceVoiceChangerProcessor } from './voiceChangerProcessor'
 
 function participantRole(participant: Participant): RoomRole {
   try {
@@ -46,6 +53,10 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
   private listeners = new Set<(snapshot: VoiceProviderSnapshot) => void>()
   private snapshot: VoiceProviderSnapshot = { ...INITIAL_VOICE_PROVIDER_SNAPSHOT }
   private attachedAudio = new Map<RemoteAudioTrack, HTMLMediaElement>()
+  private voiceChangerSelection: VoiceChangerSelection = DEFAULT_VOICE_CHANGER_SELECTION
+  private voiceChangerProcessor: AstralTraceVoiceChangerProcessor | null = null
+  private voiceChangerTrack: LocalAudioTrack | null = null
+  private voiceChangerQueue: Promise<void> = Promise.resolve()
 
   subscribe(listener: (snapshot: VoiceProviderSnapshot) => void): () => void {
     this.listeners.add(listener)
@@ -99,6 +110,47 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
     })
   }
 
+  private microphoneTrack(): LocalAudioTrack | null {
+    if (!this.room) return null
+    const publication = Array.from(this.room.localParticipant.audioTrackPublications.values())
+      .find((candidate) => String(candidate.source) === 'microphone')
+    return publication?.track as LocalAudioTrack | null ?? null
+  }
+
+  private async stopVoiceChangerProcessor() {
+    const track = this.voiceChangerTrack
+    this.voiceChangerTrack = null
+    this.voiceChangerProcessor = null
+    if (track?.getProcessor()?.name === 'astraltrace-npc-voice-changer-v1') {
+      await track.stopProcessor().catch(() => undefined)
+    }
+  }
+
+  private async applyVoiceChangerSelection() {
+    const track = this.microphoneTrack()
+    if (!track) return
+    if (isVoiceChangerBypassed(this.voiceChangerSelection)) {
+      await this.stopVoiceChangerProcessor()
+      return
+    }
+    if (track === this.voiceChangerTrack && this.voiceChangerProcessor) {
+      this.voiceChangerProcessor.setSelection(this.voiceChangerSelection)
+      return
+    }
+    await this.stopVoiceChangerProcessor()
+    const processor = new AstralTraceVoiceChangerProcessor(this.voiceChangerSelection)
+    await track.setProcessor(processor)
+    this.voiceChangerTrack = track
+    this.voiceChangerProcessor = processor
+  }
+
+  private queueVoiceChangerApply(): Promise<void> {
+    this.voiceChangerQueue = this.voiceChangerQueue
+      .catch(() => undefined)
+      .then(() => this.applyVoiceChangerSelection())
+    return this.voiceChangerQueue
+  }
+
   async connect(credential: VoiceAccessCredential): Promise<void> {
     await this.disconnect()
     this.update({ connectionState: 'connecting', canPublish: credential.canPublish, error: undefined })
@@ -120,7 +172,10 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
       room.on(RoomEvent.ActiveSpeakersChanged, sync)
       room.on(RoomEvent.TrackMuted, sync)
       room.on(RoomEvent.TrackUnmuted, sync)
-      room.on(RoomEvent.LocalTrackPublished, sync)
+      room.on(RoomEvent.LocalTrackPublished, () => {
+        sync()
+        void this.queueVoiceChangerApply().catch((error) => this.update({ error: `变声处理器启动失败：${errorMessage(error)}` }))
+      })
       room.on(RoomEvent.LocalTrackUnpublished, sync)
       room.on(RoomEvent.ParticipantMetadataChanged, sync)
       room.on(RoomEvent.MediaDevicesChanged, () => void this.enumerateDevices())
@@ -150,18 +205,20 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
 
   async disconnect(): Promise<void> {
     const room = this.room
-    this.room = null
     if (room) {
+      await this.stopVoiceChangerProcessor()
       const localParticipant = room.localParticipant as LocalParticipant
       if (localParticipant.isMicrophoneEnabled) await localParticipant.setMicrophoneEnabled(false).catch(() => undefined)
       room.disconnect()
     }
+    this.room = null
     for (const element of this.attachedAudio.values()) element.remove()
     this.attachedAudio.clear()
     this.update({
       ...INITIAL_VOICE_PROVIDER_SNAPSHOT,
       inputDevices: this.snapshot.inputDevices,
       outputDevices: this.snapshot.outputDevices,
+      voiceChangerSelection: this.voiceChangerSelection,
     })
   }
 
@@ -169,6 +226,7 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
     if (!this.room || !this.snapshot.canPublish) return
     try {
       await this.room.localParticipant.setMicrophoneEnabled(enabled)
+      if (enabled) await this.queueVoiceChangerApply()
       await this.enumerateDevices()
       this.syncParticipants()
       this.update({ error: undefined })
@@ -189,6 +247,7 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
   async setInputDevice(deviceId: string): Promise<void> {
     if (!this.room || !deviceId) return
     await this.room.switchActiveDevice('audioinput', deviceId, true)
+    await this.queueVoiceChangerApply()
     await this.enumerateDevices()
   }
 
@@ -196,6 +255,18 @@ export class LiveKitVoiceProvider implements VoiceProviderAdapter {
     if (!this.room || !deviceId) return
     await this.room.switchActiveDevice('audiooutput', deviceId, true)
     await this.enumerateDevices()
+  }
+
+  async setVoiceChangerSelection(selection: VoiceChangerSelection): Promise<void> {
+    this.voiceChangerSelection = selection
+    this.update({ voiceChangerSelection: selection, error: undefined })
+    if (!this.room || !this.snapshot.canPublish) return
+    try {
+      await this.queueVoiceChangerApply()
+    } catch (error) {
+      this.update({ error: `变声处理器启动失败：${errorMessage(error)}` })
+      throw error
+    }
   }
 
   refreshDevices(): Promise<void> {

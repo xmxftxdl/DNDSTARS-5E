@@ -1,4 +1,5 @@
 import type { RoomRole } from '../lib/roomSession'
+import type { VoiceChangerSelection } from './voiceChanger'
 
 export type VoiceConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
@@ -21,6 +22,8 @@ export interface VoiceProviderSnapshot {
   outputDevices: MediaDeviceInfo[]
   activeInputDeviceId?: string
   activeOutputDeviceId?: string
+  voiceChangerSupported: boolean
+  voiceChangerSelection: VoiceChangerSelection
   error?: string
 }
 
@@ -51,6 +54,7 @@ export interface VoiceProviderAdapter {
   setDeafened(deafened: boolean): Promise<void>
   setInputDevice(deviceId: string): Promise<void>
   setOutputDevice(deviceId: string): Promise<void>
+  setVoiceChangerSelection(selection: VoiceChangerSelection): Promise<void>
   refreshDevices(): Promise<void>
 }
 
@@ -62,4 +66,9 @@ export const INITIAL_VOICE_PROVIDER_SNAPSHOT: VoiceProviderSnapshot = {
   participants: [],
   inputDevices: [],
   outputDevices: [],
+  voiceChangerSupported: typeof AudioContext !== 'undefined',
+  voiceChangerSelection: {
+    baseProfileId: 'original',
+    effectPresetId: 'natural',
+  },
 }

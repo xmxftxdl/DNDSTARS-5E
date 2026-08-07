@@ -14,6 +14,7 @@ import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerVi
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 import { nextCampaignRoomPath } from './lib/campaignNavigation'
 import { showAppConfirm } from './lib/appDialog'
+import { VoiceRoomProvider } from './voice/VoiceRoomContext'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
 const Sidebar = lazy(() => import('./components/Sidebar'))
@@ -362,7 +363,8 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <VoiceRoomProvider session={roomSession}>
+      <div className="flex h-screen w-screen overflow-hidden">
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
@@ -373,8 +375,6 @@ export default function App() {
         {roomSession && (
           <VoiceRoomSystem
             key={`${roomSession.roomId}:${roomSession.memberId}`}
-            session={roomSession}
-            sidebarCollapsed={collapsed}
           />
         )}
       </Suspense>
@@ -444,7 +444,7 @@ export default function App() {
           <Route path="/campaign/:campaignId/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
           {!isSpectator && <Route path="/campaign/:campaignId/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
-          {!isSpectator && <Route path="/campaign/:campaignId/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
+          <Route path="/campaign/:campaignId/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />
           {!isSpectator && <Route path="/campaign/:campaignId/extensions" element={lazyPage('规则与扩展', <ActiveRulesExtensionsPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/settings" element={lazyPage('设置页面', <CampaignSettingsPage />)} />}
           <Route path="/campaign/:campaignId" element={<Navigate to={defaultCampaignPath} replace />} />
@@ -458,6 +458,7 @@ export default function App() {
           <Route path="*" element={<Navigate to={defaultCampaignPath} replace />} />
         </Routes>
       </main>
-    </div>
+      </div>
+    </VoiceRoomProvider>
   )
 }
