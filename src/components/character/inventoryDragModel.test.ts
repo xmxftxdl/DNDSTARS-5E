@@ -52,4 +52,12 @@ describe('inventory drag destinations', () => {
     expect(dnd5eInventoryDropDecision(belt, { kind: 'equipment', slot: 'belt' })).toMatchObject({ accepted: true })
     expect(dnd5eInventoryDropDecision(belt, { kind: 'equipment', slot: 'ring' })).toMatchObject({ accepted: false })
   })
+
+  it('accepts a handheld focus in either hand slot', () => {
+    const focus = equipmentEntry('mainWeapon')
+    focus.item.equipment!.allowedSlots = ['mainWeapon', 'offHand']
+    expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'mainWeapon' })).toMatchObject({ accepted: true })
+    expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'offHand' })).toMatchObject({ accepted: true })
+    expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'armor' })).toMatchObject({ accepted: false })
+  })
 })

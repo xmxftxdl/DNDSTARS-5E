@@ -18,14 +18,16 @@ export function dnd5ePluginSpellArea(
   const size = Math.max(1, spell.range.sizeFeet ?? 5)
   const placement = placementRangeFeet(spell)
   if (shape === 'cone') {
-    return { shape: 'cone', origin: 'self', lengthFeet: size, aimRangeFeet: placement }
+    return { shape: 'cone', origin: 'self', lengthFeet: size, minimumLengthFeet: spell.range.adjustable ? 5 : undefined, aimRangeFeet: placement }
   }
   if (shape === 'line') {
-    return { shape: 'line', origin: 'self', widthFeet: 5, lengthFeet: size, aimRangeFeet: placement }
+    return { shape: 'line', origin: 'self', widthFeet: 5, lengthFeet: size, minimumLengthFeet: spell.range.adjustable ? 5 : undefined, aimRangeFeet: placement }
   }
   if (shape === 'cube') {
     return {
       shape: 'rect', origin: 'point', widthFeet: size, heightFeet: size,
+      minimumWidthFeet: spell.range.adjustable ? 5 : undefined,
+      minimumHeightFeet: spell.range.adjustable ? 5 : undefined,
       placeRangeFeet: placement, rotatable: false,
     }
   }
@@ -34,6 +36,8 @@ export function dnd5ePluginSpellArea(
       shape: 'rect', origin: 'point',
       widthFeet: Math.max(1, spell.range.widthFeet ?? 5),
       heightFeet: Math.max(1, spell.range.heightFeet ?? 5),
+      minimumWidthFeet: spell.range.adjustable ? 5 : undefined,
+      minimumHeightFeet: spell.range.adjustable ? 5 : undefined,
       placeRangeFeet: placement,
       rotatable: spell.range.type !== 'self' && spell.range.rotatable === true,
     }
@@ -42,6 +46,7 @@ export function dnd5ePluginSpellArea(
     shape: 'circle',
     origin: spell.range.type === 'self' ? 'self' : 'point',
     radiusFeet: size,
+    minimumRadiusFeet: spell.range.adjustable ? 5 : undefined,
     ...(spell.range.type === 'self' ? {} : { placeRangeFeet: placement }),
   }
 }

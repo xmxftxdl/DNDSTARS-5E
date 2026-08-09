@@ -62,6 +62,37 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('职业特性')
   })
 
+  it('在战士职业特性栏直接显示回气和动作如潮', () => {
+    const fighter: Character = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      charClass: '战士',
+      level: 4,
+      dnd5eClassLevels: { fighter: 4 },
+      classResources: {
+        fighterSecondWind: { current: 1, max: 1 },
+        fighterActionSurge: { current: 1, max: 1 },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: fighter,
+      canAct: true,
+      pending: false,
+      turnEconomy: {
+        action: { current: 1, max: 1 },
+        bonusAction: { current: 1, max: 1 },
+        movement: { current: 30, max: 30 },
+      },
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('3 项 · 1/1')
+    expect(html).toContain('aria-label="回气"')
+    expect(html).toContain('aria-label="动作如潮"')
+    expect(html).toContain('/assets/icons/fighter-second-wind-feature-action.png')
+    expect(html).toContain('/assets/icons/fighter-action-surge-feature-action.png')
+  })
+
   it('keeps an active grapple escape command visible in the default hotbar', () => {
     const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
       character: character(),

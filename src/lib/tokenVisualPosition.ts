@@ -6,7 +6,20 @@ export interface TokenVisualNodeLike {
   cancelPositionAnimation?: () => void
   setPositionLocked?: (locked: boolean) => void
   position: (point: { x: number; y: number }) => void
+  getPosition?: () => { x: number; y: number }
   getLayer: () => TokenVisualLayerLike | null
+}
+
+/** Reads the live rendered position of one of a Token's synchronized layers. */
+export function tokenVisualNodesDisplayPosition(
+  nodes: Iterable<TokenVisualNodeLike> | undefined,
+): { x: number; y: number } | undefined {
+  if (!nodes) return undefined
+  for (const node of nodes) {
+    const point = node.getPosition?.()
+    if (point) return { x: point.x, y: point.y }
+  }
+  return undefined
 }
 
 export function setTokenVisualNodesPositionLocked(
@@ -40,4 +53,19 @@ export function syncTokenVisualNodes(
   }
   for (const layer of layers) layer.batchDraw()
   return count
+}
+
+/**
+ * Commits the final position while detached Token layers are still locked,
+ * then releases the lock. This prevents a layer whose React position effect
+ * was skipped during dragging from remaining at the drag origin.
+ */
+export function releaseTokenVisualNodesAtPosition(
+  nodes: Iterable<TokenVisualNodeLike>,
+  point: { x: number; y: number },
+): number {
+  const snapshot = Array.from(nodes)
+  syncTokenVisualNodes(snapshot, point)
+  setTokenVisualNodesPositionLocked(snapshot, false)
+  return snapshot.length
 }

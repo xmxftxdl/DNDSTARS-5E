@@ -1,9 +1,9 @@
 import type {
-  PdfCampaignAnalysisV1,
   PdfImportCandidateV1,
   PdfNamedRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
+import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
 
 export type PdfKnowledgeTabV1 =
   | 'overview'
@@ -58,7 +58,7 @@ function mergeCitations(...collections: readonly PdfSourceCitationV1[][]): PdfSo
   })
 }
 
-export function buildPdfMonsterCodex(analysis: PdfCampaignAnalysisV1): PdfMonsterCodexEntryV1[] {
+export function buildPdfMonsterCodex(analysis: PdfCampaignAnalysisView): PdfMonsterCodexEntryV1[] {
   const byName = new Map<string, PdfMonsterCodexEntryV1>()
   for (const candidate of analysis.importCandidates.filter((entry) => entry.kind === 'monster')) {
     const key = normalized(candidate.name)
@@ -94,7 +94,7 @@ export function buildPdfMonsterCodex(analysis: PdfCampaignAnalysisV1): PdfMonste
   return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
 
-export function buildPdfMapIndex(analysis: PdfCampaignAnalysisV1): PdfMapIndexEntryV1[] {
+export function buildPdfMapIndex(analysis: PdfCampaignAnalysisView): PdfMapIndexEntryV1[] {
   const byName = new Map<string, PdfMapIndexEntryV1>()
   for (const candidate of analysis.importCandidates.filter((entry) => entry.kind === 'map')) {
     const key = normalized(candidate.name)
@@ -146,7 +146,7 @@ export function buildPdfPersonPortraitPrompt(person: {
   ].filter(Boolean).join('\n')
 }
 
-export function pdfKnowledgeTabCounts(analysis: PdfCampaignAnalysisV1): Record<PdfKnowledgeTabV1, number> {
+export function pdfKnowledgeTabCounts(analysis: PdfCampaignAnalysisView): Record<PdfKnowledgeTabV1, number> {
   return {
     overview: analysis.people.length + analysis.factions.length + analysis.locations.length + analysis.clues.length,
     people: analysis.people.length,

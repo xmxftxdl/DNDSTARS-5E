@@ -11,6 +11,7 @@ import {
   dnd5eRageFeatureForCharacter,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
+import type { MapFreeDiceResolution } from './mapFreeDiceRoll'
 
 const DIE_SIDES = [4, 6, 8, 10, 12, 20, 100] as const
 
@@ -20,12 +21,14 @@ export interface MapFreeDiceRollRequest {
   bonus: number
   label: string
   visibility: 'public' | 'dm'
+  resolution?: MapFreeDiceResolution
 }
 
 interface MapDiceRollerProps {
   isDm: boolean
   character?: Character
   canCheck: boolean
+  headlessCheck: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
   combatRollsVisible?: boolean
@@ -38,6 +41,7 @@ export default function MapDiceRoller({
   isDm,
   character,
   canCheck,
+  headlessCheck,
   pending,
   turnEconomy,
   combatRollsVisible = true,
@@ -100,7 +104,43 @@ export default function MapDiceRoller({
       ? 2 + Math.floor((dnd5eTotalCharacterLevel(character!) - 1) / 4)
       : 0
   const selectedCheckModifier = (selectedCheck?.modifier ?? 0) + draconicInteractionBonus
-  const checkDisabled = !selectedCheck || !canCheck || pending || (spendAction && turnEconomy.action.current < 1)
+  const checkDisabled = !selectedCheck || !canCheck || pending ||
+    (headlessCheck && spendAction && turnEconomy.action.current < 1)
+
+  const submitCheck = () => {
+    if (!selectedCheck) return
+    const effectiveMode = bearAspectAvailable && bearAspectTask ? 'advantage' : mode
+    if (!headlessCheck) {
+      void onRoll({
+        count: effectiveMode === 'normal' ? 1 : 2,
+        sides: 20,
+        bonus: selectedCheckModifier,
+        label: `${selectedCheck.label} · DC ${dc}`,
+        visibility: 'public',
+        resolution: {
+          keep: effectiveMode === 'advantage'
+            ? 'highest'
+            : effectiveMode === 'disadvantage'
+              ? 'lowest'
+              : undefined,
+          dc,
+        },
+      })
+      return
+    }
+    onCheck({
+      ability: selectedCheck.ability,
+      skill: selectedCheck.skill,
+      context: bearAspectAvailable && bearAspectTask
+        ? 'push-pull-lift-break'
+        : draconicInteractionAvailable && draconicInteraction
+          ? 'interact-with-dragons'
+          : undefined,
+      dc,
+      mode,
+      spendAction: spendAction || undefined,
+    })
+  }
 
   const roll = async () => {
     setRolling(true)
@@ -209,7 +249,11 @@ export default function MapDiceRoller({
                       <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100"><option value="normal">正常</option><option value="advantage">优势</option><option value="disadvantage">劣势</option></select>
                     </label>
                   </div>
-                  <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-400"><input type="checkbox" checked={spendAction} onChange={(event) => setSpendAction(event.target.checked)} />DM 将本次检定判定为一个主动动作</label>
+                  {headlessCheck ? (
+                    <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-400"><input type="checkbox" checked={spendAction} onChange={(event) => setSpendAction(event.target.checked)} />DM 将本次检定判定为一个主动动作</label>
+                  ) : (
+                    <p className="mt-2 text-[11px] leading-5 text-emerald-300/80">战斗外鉴定不会消耗行动；骰值、调整值与是否通过会公开同步。</p>
+                  )}
                   {bearAspectAvailable ? (
                     <label className="mt-2 flex items-center gap-2 text-[11px] text-amber-200">
                       <input
@@ -230,22 +274,11 @@ export default function MapDiceRoller({
                       龙族先祖：本次魅力检定用于与龙类互动
                     </label>
                   ) : null}
-                  {!canCheck && <p className="mt-2 text-[11px] text-amber-300/80">只有当前获得行动权的玩家角色可以提交 Headless 鉴定。</p>}
+                  {!canCheck && <p className="mt-2 text-[11px] text-amber-300/80">{headlessCheck ? '只有当前获得行动权的玩家角色可以提交 Headless 鉴定。' : '请选择自己控制的玩家角色后再进行鉴定。'}</p>}
                   <button
                     type="button"
                     disabled={checkDisabled}
-                    onClick={() => onCheck({
-                      ability: selectedCheck.ability,
-                      skill: selectedCheck.skill,
-                      context: bearAspectAvailable && bearAspectTask
-                        ? 'push-pull-lift-break'
-                        : draconicInteractionAvailable && draconicInteraction
-                          ? 'interact-with-dragons'
-                          : undefined,
-                      dc,
-                      mode,
-                      spendAction: spendAction || undefined,
-                    })}
+                    onClick={submitCheck}
                     className="mt-3 w-full rounded-xl bg-cyan-500/20 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35 disabled:cursor-not-allowed disabled:opacity-40"
                   >{pending ? '等待 DM 结算…' : `进行${selectedCheck.label}（${selectedCheckModifier >= 0 ? '+' : ''}${selectedCheckModifier}）· DC ${dc}`}</button>
                 </>

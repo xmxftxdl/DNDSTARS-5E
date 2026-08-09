@@ -42,6 +42,7 @@ const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotif
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
 const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
 const VoiceRoomSystem = lazy(() => import('./components/VoiceRoomSystem'))
+const CampaignCombatBackgroundSystem = lazy(() => import('./components/CampaignCombatBackgroundSystem'))
 
 function PageLoadingFallback() {
   return (
@@ -370,8 +371,18 @@ export default function App() {
       <SharedSyncRecoveryBanner />
       <Suspense fallback={null}>
         {!isSpectator && <RoomHandoutNotification />}
-        <CampaignTimeSystem isDm={endpointMode !== 'player'} />
+        <CampaignTimeSystem
+          key={`${roomSession?.roomId ?? 'local'}:${roomSession?.memberId ?? endpointMode}`}
+          isDm={endpointMode !== 'player'}
+        />
         <SceneAudioPlaybackSystem />
+        {roomSession && (
+          <CampaignCombatBackgroundSystem
+            key={`${roomSession.roomId}:${roomSession.memberId}:combat-background`}
+            session={roomSession}
+            active={!/^\/campaign\/[^/]+\/maps(?:\/|$)/.test(location.pathname) && location.pathname !== '/maps'}
+          />
+        )}
         {roomSession && (
           <VoiceRoomSystem
             key={`${roomSession.roomId}:${roomSession.memberId}`}

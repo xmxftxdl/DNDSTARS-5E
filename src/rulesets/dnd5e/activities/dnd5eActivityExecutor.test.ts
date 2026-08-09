@@ -135,4 +135,20 @@ describe('generic D&D 5e Activity executor', () => {
       ]),
     })
   })
+
+  it('commits host-validated adjustable area dimensions', () => {
+    const activity: Dnd5eActivityDefinitionV1 = {
+      schemaVersion: 1, id: 'adjustable-wall', name: 'Adjustable Wall', activation: { kind: 'action' },
+      target: { kind: 'area', relation: 'enemy', origin: 'point', shape: 'rect', lengthFeet: 100, minimumLengthFeet: 5, widthFeet: 5, heightFeet: 5, placeRangeFeet: 90, maximumTargets: 1, rotatable: true },
+      outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [{ id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'constant', value: 1 }, damageType: 'force' }] }],
+      automation: automationCapabilityFromLegacyStatus('full'),
+    }
+    const validResult = resolveDnd5eActivity({
+      activity, actor, targets: [target], areaPlacement: { x: 2, y: 3, lengthFeet: 35, widthFeet: 5, heightFeet: 5 }, areaPlacementDistanceFeet: 30, dmApproved: true, rolls: {},
+    })
+    expect(validResult, JSON.stringify(validResult)).toMatchObject({ ok: true, areaInstance: { lengthFeet: 35, widthFeet: 5, heightFeet: 5 } })
+    expect(resolveDnd5eActivity({
+      activity, actor, targets: [target], areaPlacement: { x: 2, y: 3, lengthFeet: 105 }, areaPlacementDistanceFeet: 30, dmApproved: true, rolls: {},
+    })).toEqual({ ok: false, reason: 'invalid-target', details: ['area dimensions are invalid'] })
+  })
 })

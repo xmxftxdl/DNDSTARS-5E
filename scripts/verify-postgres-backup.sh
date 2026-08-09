@@ -8,6 +8,16 @@ esac
 POSTGRES_IMAGE="${STARS_POSTGRES_IMAGE:-postgres:17-alpine}"
 HELPER_IMAGE="${STARS_BACKUP_HELPER_IMAGE:-alpine:3.21}"
 APP_IMAGE="${STARS_APP_IMAGE:-}"
+verification_phase='initialization'
+
+report_verification_failure() {
+  local status="$?"
+  printf '{"level":"error","event":"backup_verification_failed","phase":"%s","line":%s,"status":%s}\n' \
+    "$verification_phase" "${BASH_LINENO[0]:-0}" "$status" >&2
+  exit "$status"
+}
+
+trap report_verification_failure ERR
 
 usage() {
   printf '用法：STARS_APP_IMAGE=<image> %s <astraltrace-*.tar.gz>\n' "$0" >&2
@@ -23,6 +33,7 @@ if [[ -z "$APP_IMAGE" ]]; then
 fi
 
 archive_path="$(readlink -f -- "$1")"
+verification_phase='archive-validation'
 if [[ ! -f "$archive_path" || ! -f "${archive_path}.sha256" ]]; then
   printf '找不到备份或校验文件：%s\n' "$archive_path" >&2
   exit 2
@@ -70,6 +81,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+verification_phase='archive-extraction'
 tar -xzf "$archive_path" -C "$work_dir"
 inner_entries="$(tar -tzf "$work_dir/shared-data.tar.gz")"
 if printf '%s\n' "$inner_entries" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
@@ -98,6 +110,7 @@ expected_plugins="$(manifest_number plugins)"
 expected_entitlements="$(manifest_number entitlements)"
 expected_files="$(manifest_number sharedFiles)"
 
+verification_phase='restore-environment-startup'
 docker network create "$network" >/dev/null
 docker volume create "$postgres_volume" >/dev/null
 docker volume create "$data_volume" >/dev/null
@@ -119,6 +132,7 @@ for _ in $(seq 1 60); do
 done
 docker exec "$postgres_container" pg_isready -U astraltrace -d astraltrace >/dev/null
 
+verification_phase='postgres-restore'
 docker run --rm \
   --network "$network" \
   -e PGPASSWORD="$password" \
@@ -133,6 +147,7 @@ docker run --rm \
     --exit-on-error \
     /restore/postgres.dump
 
+verification_phase='shared-data-restore'
 docker run --rm \
   --mount "type=volume,src=${data_volume},dst=/data" \
   --mount "type=bind,src=$(docker_host_path "$work_dir"),dst=/restore,readonly" \
@@ -142,6 +157,7 @@ docker run --rm \
     chown -R 1000:1000 /data
   '
 
+verification_phase='application-startup'
 docker run -d \
   --name "$app_container" \
   --network "$network" \
@@ -159,6 +175,7 @@ docker run -d \
   --mount "type=volume,src=${data_volume},dst=/data" \
   "$APP_IMAGE" >/dev/null
 
+verification_phase='application-readiness'
 for _ in $(seq 1 60); do
   if docker exec "$app_container" node -e \
     "fetch('http://127.0.0.1:8080/api/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
@@ -170,6 +187,7 @@ done
 docker exec "$app_container" node -e \
   "fetch('http://127.0.0.1:8080/api/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+verification_phase='restored-count-validation'
 actual_counts="$(
   docker exec -e PGPASSWORD="$password" "$postgres_container" \
     psql -U astraltrace -d astraltrace -tA -F '|' -c '
@@ -206,6 +224,7 @@ if [[ "$actual_files" != "$expected_files" ]]; then
   exit 5
 fi
 
+verification_phase='shared-json-validation'
 docker exec "$app_container" node --input-type=module -e '
   import { readFile, readdir } from "node:fs/promises";
   import path from "node:path";

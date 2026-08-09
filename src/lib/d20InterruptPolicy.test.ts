@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   canBonusDieChangeFailure,
+  DND5E_CORE_INSPIRATION_RESOURCE_KEY,
+  dnd5eCoreInspirationChoiceRerollOption,
   shouldOpenD20RollConfirmation,
 } from './d20InterruptPolicy'
 
@@ -36,6 +38,42 @@ describe('d20 interrupt policy', () => {
       visibility: 'dm-only',
       outcome: 'unknown',
     })).toBe(true)
+  })
+
+  it('opens immediately for an eligible choice reroll even before success is known', () => {
+    expect(shouldOpenD20RollConfirmation({
+      visibility: 'public',
+      outcome: 'unknown',
+      eligibleEnemyModifiers: [{
+        characterId: 'hero',
+        featureId: 'test.lucky:feat-lucky',
+        featureLabel: '幸运',
+        modifierKind: 'choice-reroll',
+        rerollScope: 'self-roll',
+        resourceCosts: [{ resourceKey: 'test.lucky:luck-points', amount: 1 }],
+        decisionRequired: true,
+      }],
+    })).toBe(true)
+  })
+
+  it('projects character-sheet Inspiration into the shared Lucky-style reroll window', () => {
+    expect(dnd5eCoreInspirationChoiceRerollOption({
+      id: 'hero',
+      inspiration: 2,
+    }, 'hero-token')).toEqual({
+      characterId: 'hero',
+      featureId: 'dnd5e-core-inspiration',
+      featureLabel: '激励',
+      modifierKind: 'choice-reroll',
+      sourceTokenId: 'hero-token',
+      rerollScope: 'self-roll',
+      resourceCosts: [{ resourceKey: DND5E_CORE_INSPIRATION_RESOURCE_KEY, amount: 1 }],
+      decisionRequired: true,
+    })
+    expect(dnd5eCoreInspirationChoiceRerollOption({
+      id: 'hero',
+      inspiration: 0,
+    })).toBeUndefined()
   })
 
   it('offers a bonus die only when the failed result can still reach the target', () => {

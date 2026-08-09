@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import { cellToPixel, tokenCenterForAnchorCell } from './gridCombat'
-import { aoeOrientFromCell, cellsForAoe, tokensInCells } from './skillTargeting'
+import { aoeOrientFromCell, cellsForAoe, resolveAoeDimensions, tokensInCells } from './skillTargeting'
 
 function map(tokens: Token[]): BattleMap {
   return {
@@ -79,5 +79,30 @@ describe('AOE token coverage targeting', () => {
     expect(keys.has('7,4')).toBe(true)
     expect(keys.has('7,6')).toBe(true)
     expect(keys.has('5,8')).toBe(false)
+  })
+
+  it('keeps the square corners outside a circular fireball template', () => {
+    const cells = cellsForAoe(
+      { shape: 'circle', origin: 'point', radiusFeet: 20 },
+      { col: 0, row: 0 },
+      { col: 5, row: 5 },
+    )
+    const keys = new Set(cells.map((cell) => `${cell.col},${cell.row}`))
+
+    expect(keys.has('1,1')).toBe(false)
+    expect(keys.has('9,1')).toBe(false)
+    expect(keys.has('1,9')).toBe(false)
+    expect(keys.has('9,9')).toBe(false)
+    expect(keys.has('5,1')).toBe(true)
+    expect(keys.has('9,5')).toBe(true)
+    expect(keys.has('5,9')).toBe(true)
+    expect(keys.has('1,5')).toBe(true)
+  })
+
+  it('resolves adjustable dimensions only inside the declared five-foot bounds', () => {
+    const template = { shape: 'rect', origin: 'point', widthFeet: 100, heightFeet: 5, minimumWidthFeet: 5 } as const
+    expect(resolveAoeDimensions(template, { widthFeet: 35 })).toMatchObject({ widthFeet: 35, heightFeet: 5 })
+    expect(resolveAoeDimensions(template, { widthFeet: 105 })).toBeNull()
+    expect(resolveAoeDimensions(template, { widthFeet: 33 })).toBeNull()
   })
 })

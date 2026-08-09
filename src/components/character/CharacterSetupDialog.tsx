@@ -28,7 +28,7 @@ import {
   dnd5eRacialAbilityBonuses,
   recommendedDnd5eBaseAbilitiesFromArray,
   recommendedDnd5eRacialBonusChoices,
-  rollDnd5eAbilityScore,
+  rollDnd5eAbilityScoreSet,
   type Dnd5eAbilityRoll,
   type Dnd5eAbilityGenerationMethod,
 } from '../../rulesets/dnd5e/characterSetup'
@@ -151,7 +151,7 @@ const METHOD_OPTIONS: Array<{
   {
     id: 'roll-4d6',
     name: '4d6 去最低值',
-    summary: '每次投四枚 d6，去掉一枚最低值，再选择填入一项尚未分配的属性。',
+    summary: '一次生成完整的六组结果；全部骰完后，再把六组结果分配给六项属性。',
     kind: 'roll',
   },
 ]
@@ -418,8 +418,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const [baseAbilities, setBaseAbilities] = useState<Abilities>(() =>
     recommendedDnd5eBaseAbilitiesFromArray('战士', DND5E_STANDARD_ARRAY),
   )
-  const [currentRoll, setCurrentRoll] = useState<Dnd5eAbilityRoll | null>(null)
-  const [rolls, setRolls] = useState<Array<Dnd5eAbilityRoll & { ability: AbilityKey }>>([])
+  const [rolledScores, setRolledScores] = useState<Dnd5eAbilityRoll[]>([])
+  const [rollAssignments, setRollAssignments] = useState<Partial<Record<AbilityKey, number>>>({})
   const [racialBonusChoices, setRacialBonusChoices] = useState<AbilityKey[]>([])
   const [racialSkillProficiencies, setRacialSkillProficiencies] = useState<string[]>([])
   const [racialFeatIds, setRacialFeatIds] = useState<string[]>([])
@@ -561,9 +561,13 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const pointBuyRemaining = methodKind === 'point-buy'
     ? dnd5ePointBuyRemainingForRule(baseAbilities, pointBuyRule)
     : 0
-  const assignedRollAbilities = new Set(rolls.map((roll) => roll.ability))
+  const rolls: Array<Dnd5eAbilityRoll & { ability: AbilityKey }> = ABILITY_KEYS.flatMap((ability) => {
+    const rollIndex = rollAssignments[ability]
+    const roll = rollIndex == null ? undefined : rolledScores[rollIndex]
+    return roll ? [{ ...roll, ability }] : []
+  })
   const abilityAllocationComplete = methodKind === 'roll'
-    ? rolls.length === 6
+    ? rolledScores.length === 6 && rolls.length === 6
     : methodKind === 'point-buy'
       ? pointBuyRemaining === 0
       : sameScoreMultiset(baseAbilities, standardArray)
@@ -617,8 +621,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       setBaseAbilities(emptyAbilities(pointBuyRule.minimum))
     } else {
       setBaseAbilities(emptyAbilities())
-      setCurrentRoll(null)
-      setRolls([])
+      setRolledScores([])
+      setRollAssignments({})
     }
     setStage('abilities')
   }
@@ -644,11 +648,18 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     })
   }
 
-  const assignCurrentRoll = (ability: AbilityKey) => {
-    if (!currentRoll || assignedRollAbilities.has(ability)) return
-    setBaseAbilities((current) => ({ ...current, [ability]: currentRoll.total }))
-    setRolls((current) => [...current, { ...currentRoll, ability }])
-    setCurrentRoll(null)
+  const assignRolledScore = (ability: AbilityKey, rollIndex: number | null) => {
+    if (rolledScores.length !== 6) return
+    if (rollIndex != null && ABILITY_KEYS.some((key) => key !== ability && rollAssignments[key] === rollIndex)) return
+
+    const nextAssignments = { ...rollAssignments }
+    if (rollIndex == null) delete nextAssignments[ability]
+    else nextAssignments[ability] = rollIndex
+    setRollAssignments(nextAssignments)
+    setBaseAbilities((current) => ({
+      ...current,
+      [ability]: rollIndex == null ? 0 : rolledScores[rollIndex]?.total ?? 0,
+    }))
   }
 
   const toggleLimited = (
@@ -808,31 +819,66 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                 </div>
               )}
               {methodKind === 'roll' && (
-                <div className="rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-5 text-center">
-                  {currentRoll ? (
-                    <>
-                      <p className="text-xs text-slate-500">本次投掷，划掉一枚最低值</p>
-                      <div className="mt-3 flex justify-center gap-2">
-                        {currentRoll.dice.map((die, index) => (
-                          <span key={index} className={`flex h-11 w-11 items-center justify-center rounded-xl border font-mono text-lg font-bold ${
-                            currentRoll.discardedIndices.includes(index)
-                              ? 'border-rose-400/30 bg-rose-500/10 text-rose-300 line-through'
-                              : 'border-white/10 bg-white/5 text-slate-100'
-                          }`}>{die}</span>
-                        ))}
-                      </div>
-                      <p className="mt-3 text-lg font-bold text-arcane-200">合计 {currentRoll.total}</p>
-                    </>
-                  ) : rolls.length < 6 ? (
-                    <button
-                      type="button"
-                      onClick={() => setCurrentRoll(rollDnd5eAbilityScore(rollRule))}
-                      className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-3 text-sm font-semibold text-white"
-                    >
-                      <Dices className="h-4 w-4" /> 投掷 {rollRule.diceCount}d{rollRule.dieSides}（第 {rolls.length + 1}/6 次）
-                    </button>
+                <div className="rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-5">
+                  {rolledScores.length !== 6 ? (
+                    <div className="text-center">
+                      <p className="mb-4 text-xs leading-5 text-slate-400">
+                        先一次投出全部六组属性结果。六组全部生成后，才会开放下方的属性分配。
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBaseAbilities(emptyAbilities())
+                          setRollAssignments({})
+                          setRolledScores(rollDnd5eAbilityScoreSet(rollRule))
+                        }}
+                        className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-3 text-sm font-semibold text-white"
+                      >
+                        <Dices className="h-4 w-4" /> 一次投出六组 {rollRule.diceCount}d{rollRule.dieSides}
+                      </button>
+                    </div>
                   ) : (
-                    <div className="flex items-center justify-center gap-2 text-emerald-200"><Check className="h-5 w-5" /> 六项属性已完成</div>
+                    <>
+                      <div className="mb-4 flex items-center justify-center gap-2 text-sm text-emerald-200">
+                        <Check className="h-5 w-5" /> 六组骰点已全部生成，现在可以统一分配属性
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {rolledScores.map((roll, rollIndex) => {
+                          const assignedAbility = ABILITIES.find(
+                            (ability) => rollAssignments[ability.key] === rollIndex,
+                          )
+                          return (
+                            <div
+                              key={rollIndex}
+                              data-testid={`ability-roll-result-${rollIndex}`}
+                              className="rounded-xl border border-white/8 bg-black/15 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-xs text-slate-500">第 {rollIndex + 1} 组</span>
+                                <strong className="font-mono text-lg text-arcane-200">{roll.total}</strong>
+                              </div>
+                              <div className="mt-2 flex gap-1.5">
+                                {roll.dice.map((die, dieIndex) => (
+                                  <span
+                                    key={dieIndex}
+                                    className={`flex h-7 w-7 items-center justify-center rounded-md border font-mono text-xs ${
+                                      roll.discardedIndices.includes(dieIndex)
+                                        ? 'border-rose-400/25 bg-rose-500/10 text-rose-300 line-through'
+                                        : 'border-white/10 bg-white/5 text-slate-200'
+                                    }`}
+                                  >
+                                    {die}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="mt-2 text-[11px] text-slate-500">
+                                {assignedAbility ? `已分配：${assignedAbility.label}` : '等待分配'}
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -860,28 +906,40 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                           <button type="button" aria-label={`提高${ability.label}`} onClick={() => adjustPointBuy(ability.key, 1)} className="h-8 w-8 rounded-lg border border-white/10 text-slate-300">+</button>
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          disabled={!currentRoll || assignedRollAbilities.has(ability.key)}
-                          onClick={() => assignCurrentRoll(ability.key)}
-                          className="min-w-20 rounded-xl border border-white/10 px-3 py-2 font-mono text-lg font-bold text-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                        <select
+                          aria-label={`${ability.label}骰点结果`}
+                          value={rollAssignments[ability.key] ?? ''}
+                          disabled={rolledScores.length !== 6}
+                          onChange={(event) => assignRolledScore(
+                            ability.key,
+                            event.target.value === '' ? null : Number(event.target.value),
+                          )}
+                          className="min-w-32 rounded-xl border border-white/10 bg-void-900 px-3 py-2 text-sm font-semibold text-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
                         >
-                          {assignedRollAbilities.has(ability.key)
-                            ? baseAbilities[ability.key]
-                            : currentRoll ? `填入 ${currentRoll.total}` : '未分配'}
-                        </button>
+                          <option value="">{rolledScores.length === 6 ? '未分配' : '先投出六组'}</option>
+                          {rolledScores.map((roll, rollIndex) => {
+                            const assignedElsewhere = ABILITY_KEYS.some(
+                              (key) => key !== ability.key && rollAssignments[key] === rollIndex,
+                            )
+                            return (
+                              <option key={rollIndex} value={rollIndex} disabled={assignedElsewhere}>
+                                第 {rollIndex + 1} 组 · {roll.total}
+                              </option>
+                            )
+                          })}
+                        </select>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
-              {methodKind === 'roll' && rolls.length > 0 && (
+              {methodKind === 'roll' && rolledScores.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {
                     setBaseAbilities(emptyAbilities())
-                    setRolls([])
-                    setCurrentRoll(null)
+                    setRolledScores([])
+                    setRollAssignments({})
                   }}
                   className="inline-flex items-center gap-2 text-xs text-slate-500 hover:text-slate-200"
                 >

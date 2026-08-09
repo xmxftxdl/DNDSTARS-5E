@@ -34,6 +34,7 @@ import {
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import {
   dnd5eMonsterAreaSavingThrowEffect,
+  dnd5eMonsterRequiredAreaSavingThrowVariantId,
   getDnd5eSrdMonster,
   type Dnd5eMonsterAction,
   type Dnd5eMonsterAreaSavingThrowVariant,
@@ -301,7 +302,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
     })
   ) return { ok: false, reason: 'line-of-effect-blocked' }
 
-  const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cellsForAoe(variant.area, orientFrom, targetCell))
+  const eligibleTargets = tokensInCells(input.map, input.map.tokens, cellsForAoe(variant.area, orientFrom, targetCell))
     .filter((candidate) =>
       candidate.type !== 'obstacle' && candidate.id !== actorToken.id &&
       isPresentMonsterAreaCreature(candidate, input.characters) &&
@@ -327,10 +328,24 @@ export function prepareDnd5eMonsterAreaAction(input: {
         toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
       }))
   const supplied = [...input.targetTokenIds].sort()
-  const authoritative = authoritativeTargets.map((target) => target.id).sort()
-  if (supplied.length !== authoritative.length || supplied.some((id, index) => id !== authoritative[index])) {
-    return { ok: false, reason: 'invalid-target' }
-  }
+  const eligible = eligibleTargets.map((target) => target.id).sort()
+  const usesBoundedSelection = variant.minimumTargets != null || variant.maximumTargets != null
+  if (
+    usesBoundedSelection
+      ? (
+          supplied.length < (variant.minimumTargets ?? 0) ||
+          supplied.length > (variant.maximumTargets ?? Number.POSITIVE_INFINITY) ||
+          supplied.some((id) => !eligible.includes(id))
+        )
+      : (
+          supplied.length !== eligible.length ||
+          supplied.some((id, index) => id !== eligible[index])
+        )
+  ) return { ok: false, reason: 'invalid-target' }
+  const suppliedSet = new Set(supplied)
+  const authoritativeTargets = usesBoundedSelection
+    ? eligibleTargets.filter((target) => suppliedSet.has(target.id))
+    : eligibleTargets
 
   const authoritativeTargetIds = new Set(authoritativeTargets.map((target) => target.id))
   const snapshotMap: BattleMap = {
@@ -375,6 +390,14 @@ export function prepareDnd5eMonsterAreaAction(input: {
   applyTurnEconomy(snapshot.state, actorToken.id, input.turnEconomy)
   if (!monsterActionResourceAvailable(snapshot.state, actorToken.id, action)) {
     return { ok: false, reason: 'resource-unavailable' }
+  }
+  const requiredVariantId = dnd5eMonsterRequiredAreaSavingThrowVariantId(
+    action,
+    snapshot.state.combatants[actorToken.id]?.classState
+      .monsterActionUsesByActionId?.[action.id]?.current,
+  )
+  if (requiredVariantId != null && variant.id !== requiredVariantId) {
+    return { ok: false, reason: 'invalid-action' }
   }
   return {
     ok: true,

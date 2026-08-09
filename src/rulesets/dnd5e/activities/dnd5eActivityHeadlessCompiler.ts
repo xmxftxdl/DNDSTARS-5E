@@ -73,7 +73,10 @@ function actorSnapshot(combatant: Dnd5eCombatant): Dnd5eActivityActorSnapshot {
     level: combatant.level,
     proficiencyBonus: combatant.proficiencyBonus,
     abilities: { ...combatant.abilities },
-    classLevels: combatant.classLevels ? { ...combatant.classLevels } : undefined,
+    classLevels: combatant.classLevels ? Object.fromEntries(
+      Object.entries(combatant.classLevels)
+        .filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+    ) : undefined,
     currentHp: combatant.currentHp,
     maxHp: combatant.maxHp,
     armorClass: combatant.armorClass,

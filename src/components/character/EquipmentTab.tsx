@@ -5,6 +5,7 @@ import {
   Beef,
   Cable,
   CircleDot,
+  ChevronDown,
   Crown,
   Droplets,
   Flame,
@@ -27,7 +28,7 @@ import {
 } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
-import { EQUIPMENT_SLOTS, EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
+import { EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
 import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
 import { showAppConfirm } from '../../lib/appDialog'
@@ -39,6 +40,7 @@ import {
 import { mutateRoomCharacterInventory } from '../../store/roomCommands'
 import {
   dnd5eAttunementRequirementDecision,
+  dnd5eInventoryEntryIsActive,
   dnd5eInventoryLoad,
   normalizeDnd5eInventory,
 } from '../../rulesets/dnd5e/items'
@@ -49,6 +51,7 @@ import {
 } from '../../rulesets/dnd5e/magicItems'
 import { dnd5eArmorProficient, dnd5eWeaponProficient } from '../../rulesets/dnd5e/equipment'
 import { dnd5eMartialSpellSynergyForCharacter } from '../../rulesets/dnd5e/martialSpellSynergy'
+import { getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e/spells'
 import {
   DND5E_EDITABLE_CURRENCIES,
   DND5E_EDITABLE_CURRENCY_LABELS,
@@ -88,6 +91,7 @@ const ICONS: Record<Dnd5eInventoryIconId, ComponentType<{ className?: string }>>
   antitoxin: FlaskConical,
   poison: Skull,
   'healing-potion': FlaskConical,
+  'spellcasting-focus': Sparkles,
   'magic-ring': Gem,
   'magic-wand': Sparkles,
   'magic-staff': Sword,
@@ -106,6 +110,30 @@ const SLOT_ICONS: Partial<Record<EquipmentSlot, ComponentType<{ className?: stri
   ring2: Gem,
   belt: Cable,
   necklace: Gem,
+}
+
+const LEFT_EQUIPMENT_SLOTS: readonly EquipmentSlot[] = [
+  'helmet',
+  'armor',
+  'belt',
+  'shoes',
+  'mainWeapon',
+]
+
+const RIGHT_EQUIPMENT_SLOTS: readonly EquipmentSlot[] = [
+  'necklace',
+  'ring',
+  'ring2',
+  'offHand',
+]
+
+function isHandEquipmentSlot(slot: EquipmentSlot | undefined): boolean {
+  return slot === 'mainWeapon' || slot === 'offHand'
+}
+
+function equipmentCanBeHeldInHand(item: EquipmentItem | undefined): boolean {
+  if (!item) return false
+  return isHandEquipmentSlot(item.slot) || item.allowedSlots?.some(isHandEquipmentSlot) === true
 }
 
 const CATEGORY_LABELS = {
@@ -140,7 +168,7 @@ export interface EquipmentTabProps {
   compact?: boolean
   pending?: boolean
   /** 战斗界面将“使用”接入当前战斗的 DM/Headless 行动事务。 */
-  onUseItem?: (instanceId: string) => boolean | void
+  onUseItem?: (instanceId: string, useActionId?: string) => boolean | void
   /** 战斗快捷栏只保存实例 ID；物品本体与数量始终以权威库存为准。 */
   quickbarSlots?: readonly (string | null)[]
   onAssignQuickbarSlot?: (instanceId: string, slotIndex: number) => void
@@ -174,6 +202,14 @@ function equipmentProficiency(
       spellcastingPrerequisitesEnabled ? '，并且不能施法' : ''
     }；AC 仍按该装备计算。`,
   }
+}
+
+function spellcastingFocusClassLabel(classId: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    bard: '吟游诗人', cleric: '牧师', druid: '德鲁伊', paladin: '圣武士', ranger: '游侠',
+    sorcerer: '术士', warlock: '邪术师', wizard: '法师',
+  }
+  return labels[classId] ?? classId
 }
 
 function EquipmentProficiencyNotice({
@@ -292,8 +328,16 @@ export default function EquipmentTab({
 
   const activateEntry = (entry: Dnd5eInventoryEntry) => {
     if (onUseItem) {
+      if (entry.item.useActions?.length) {
+        setNotice('请在物品详情中选择要使用的法术或能力。')
+        return
+      }
       const submitted = onUseItem(entry.instanceId)
       setNotice(submitted === false ? '当前战斗中不能使用该物品。' : '已提交给 DM/Headless 进行战斗结算。')
+      return
+    }
+    if (entry.item.use?.effect.kind === 'spell-cast') {
+      setNotice('物品施法需要从地图操作栏发起，以便选择目标并由 Headless 完成权威结算。')
       return
     }
     const usePlan = planDnd5eInventoryUse(character, entry)
@@ -328,8 +372,9 @@ export default function EquipmentTab({
     event.preventDefault()
     const instanceId = droppedInstanceId(event)
     const entry = inventory.entries.find((candidate) => candidate.instanceId === instanceId)
-    if (!editable || pending || combatManagementLocked) {
-      setNotice(combatManagementLocked ? '战斗中不能通过背包更换穿戴装备。' : '当前不能更换装备。')
+    const combatSlotLocked = combatManagementLocked && !isHandEquipmentSlot(slot)
+    if (!editable || pending || combatSlotLocked) {
+      setNotice(combatSlotLocked ? '战斗中只能切换主手或副手物品；护甲与其他穿戴槽保持锁定。' : '当前不能更换装备。')
       setDraggedInstanceId(null)
       return
     }
@@ -358,6 +403,69 @@ export default function EquipmentTab({
     setSelectedId(instanceId)
     setNotice(`已将 ${entry ? displayItemName(entry) : '物品'} 放入快捷栏 ${slotIndex + 1}。`)
     setDraggedInstanceId(null)
+  }
+
+  const renderEquipmentSlot = (slot: EquipmentSlot) => {
+    const item = character.equipment?.[slot]
+    const entry = inventory.entries.find((candidate) => candidate.equippedSlot === slot)
+    const Icon = SLOT_ICONS[slot] ?? Shield
+    const decision = draggedInstanceId
+      ? dnd5eInventoryDropDecision(
+          inventory.entries.find((candidate) => candidate.instanceId === draggedInstanceId),
+          { kind: 'equipment', slot },
+        )
+      : undefined
+    const combatSlotLocked = combatManagementLocked && !isHandEquipmentSlot(slot)
+    const canDrop = decision?.accepted === true && editable && !pending && !combatSlotLocked
+    return (
+      <div
+        key={slot}
+        data-testid={`inventory-equipment-slot-${slot}`}
+        onDragOver={(event) => {
+          if (draggedInstanceId && editable) {
+            event.preventDefault()
+            event.dataTransfer.dropEffect = canDrop ? 'move' : 'none'
+          }
+        }}
+        onDrop={(event) => dropOnEquipmentSlot(event, slot)}
+        className={`group/slot relative flex min-h-[72px] flex-1 items-center justify-center rounded-xl border p-1.5 transition sm:min-h-0 ${canDrop
+          ? 'border-emerald-300/65 bg-emerald-400/12 ring-2 ring-emerald-300/15'
+          : draggedInstanceId && decision && !decision.accepted
+            ? 'border-rose-400/20 bg-rose-500/[0.035]'
+            : 'border-white/8 bg-void-950/55 shadow-[inset_0_0_18px_rgba(0,0,0,0.3)]'}`}
+      >
+        <button
+          type="button"
+          onClick={() => entry && setSelectedId(entry.instanceId)}
+          className="flex w-full min-w-0 flex-col items-center text-center"
+          aria-label={`${EQUIPMENT_SLOT_LABELS[slot]}：${item?.name ?? '空'}`}
+        >
+          {entry ? (
+            <Dnd5eActionIcon
+              spec={dnd5eItemActionIcon(entry.item)}
+              disabled={entry.identified === false}
+              className="h-10 w-10 sm:h-11 sm:w-11"
+            />
+          ) : (
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-dashed border-white/10 text-slate-700 sm:h-11 sm:w-11">
+              <Icon className="h-5 w-5" />
+            </span>
+          )}
+          <span className="mt-1 block max-w-full truncate text-[8px] font-semibold uppercase tracking-wide text-amber-100/65 sm:text-[9px]">{EQUIPMENT_SLOT_LABELS[slot]}</span>
+          <span className="mt-0.5 block max-w-full truncate text-[9px] text-slate-300 sm:text-[10px]">{item?.name ?? '拖入装备'}</span>
+        </button>
+        {editable && entry && (
+          <button
+            type="button"
+            aria-label={`卸下${item?.name ?? '装备'}`}
+            onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: entry.instanceId })}
+            disabled={pending || combatSlotLocked}
+            className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-void-950 text-slate-500 hover:text-rose-200 disabled:opacity-40 group-hover/slot:flex"
+          ><X className="h-3 w-3" /></button>
+        )}
+        {canDrop && <span className="pointer-events-none absolute inset-x-1 bottom-1 rounded bg-emerald-500/20 py-0.5 text-center text-[8px] font-bold text-emerald-100">松开放入</span>}
+      </div>
+    )
   }
 
   return (
@@ -538,94 +646,45 @@ export default function EquipmentTab({
           </div>}
         </div>}
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
-          <aside className="rounded-2xl border border-amber-300/12 bg-gradient-to-b from-amber-500/[0.045] to-black/20 p-3" data-testid="inventory-equipment-rail">
-            <div className="relative mx-auto aspect-[3/4] max-h-64 w-full overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-violet-700/35 to-void-950 shadow-inner">
-              {character.portrait ? (
-                <img src={character.portrait} alt={`${character.name}的人物立绘`} className="h-full w-full object-cover object-top" />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-3">
-                  <span className="text-6xl drop-shadow-lg">{character.avatar}</span>
-                  <span className="text-xs font-semibold text-slate-300">{character.name}</span>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(500px,0.95fr)_minmax(0,1.3fr)]">
+          <aside className="overflow-hidden rounded-2xl border border-amber-300/12 bg-[radial-gradient(circle_at_50%_42%,rgba(124,58,237,0.12),transparent_48%),linear-gradient(to_bottom,rgba(245,158,11,0.045),rgba(0,0,0,0.22))] p-3" data-testid="inventory-equipment-rail">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-[88px_minmax(250px,1fr)_88px] sm:items-stretch">
+              <div className="order-2 flex flex-col gap-2 sm:order-none sm:col-start-1 sm:row-start-1">
+                {LEFT_EQUIPMENT_SLOTS.map(renderEquipmentSlot)}
+              </div>
+
+              <div className="relative order-1 col-span-2 min-h-[330px] overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-violet-700/20 via-void-900/45 to-void-950 shadow-[inset_0_0_50px_rgba(0,0,0,0.48),0_14px_34px_rgba(0,0,0,0.28)] sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:min-h-[420px]">
+                {character.portrait ? (
+                  <>
+                    <img src={character.portrait} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-15 blur-xl" />
+                    <img src={character.portrait} alt={`${character.name}的人物立绘`} className="relative z-[1] h-full w-full object-cover object-top drop-shadow-[0_18px_22px_rgba(0,0,0,0.62)]" />
+                  </>
+                ) : (
+                  <div className="relative z-[1] flex h-full flex-col items-center justify-center gap-3">
+                    <span className="text-8xl drop-shadow-lg">{character.avatar}</span>
+                    <span className="text-sm font-semibold text-slate-300">{character.name}</span>
+                  </div>
+                )}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] bg-gradient-to-t from-black via-black/68 to-transparent px-4 pb-3 pt-16">
+                  <p className="truncate text-base font-bold text-white drop-shadow">{character.name}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-200">{character.charClass} · Lv.{character.level} · HP {character.currentHp}/{character.maxHp}</p>
                 </div>
-              )}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-2 pt-8">
-                <p className="truncate text-sm font-bold text-white">{character.name}</p>
-                <p className="mt-0.5 text-[10px] text-slate-300">{character.charClass} · Lv.{character.level} · HP {character.currentHp}/{character.maxHp}</p>
+              </div>
+
+              <div className="order-3 flex flex-col gap-2 sm:col-start-3 sm:row-start-1">
+                {RIGHT_EQUIPMENT_SLOTS.map(renderEquipmentSlot)}
               </div>
             </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {EQUIPMENT_SLOTS.map((slot) => {
-                const item = character.equipment?.[slot]
-                const entry = inventory.entries.find((candidate) => candidate.equippedSlot === slot)
-                const Icon = SLOT_ICONS[slot] ?? Shield
-                const decision = draggedInstanceId
-                  ? dnd5eInventoryDropDecision(
-                      inventory.entries.find((candidate) => candidate.instanceId === draggedInstanceId),
-                      { kind: 'equipment', slot },
-                    )
-                  : undefined
-                const canDrop = decision?.accepted === true && editable && !pending && !combatManagementLocked
-                return (
-                  <div
-                    key={slot}
-                    data-testid={`inventory-equipment-slot-${slot}`}
-                    onDragOver={(event) => {
-                      if (draggedInstanceId && editable) {
-                        event.preventDefault()
-                        event.dataTransfer.dropEffect = canDrop ? 'move' : 'none'
-                      }
-                    }}
-                    onDrop={(event) => dropOnEquipmentSlot(event, slot)}
-                    className={`group/slot relative min-h-24 rounded-xl border p-2 transition ${canDrop
-                      ? 'border-emerald-300/65 bg-emerald-400/12 ring-2 ring-emerald-300/15'
-                      : draggedInstanceId && decision && !decision.accepted
-                        ? 'border-rose-400/20 bg-rose-500/[0.035]'
-                        : 'border-white/8 bg-void-950/45'}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => entry && setSelectedId(entry.instanceId)}
-                      className="flex w-full flex-col items-center text-center"
-                      aria-label={`${EQUIPMENT_SLOT_LABELS[slot]}：${item?.name ?? '空'}`}
-                    >
-                      {entry ? (
-                        <Dnd5eActionIcon
-                          spec={dnd5eItemActionIcon(entry.item)}
-                          disabled={entry.identified === false}
-                          className="h-11 w-11"
-                        />
-                      ) : (
-                        <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-dashed border-white/10 text-slate-700">
-                          <Icon className="h-5 w-5" />
-                        </span>
-                      )}
-                      <span className="mt-1 block text-[9px] font-semibold uppercase tracking-wider text-amber-100/65">{EQUIPMENT_SLOT_LABELS[slot]}</span>
-                      <span className="mt-0.5 block max-w-full truncate text-[10px] text-slate-300">{item?.name ?? '拖入装备'}</span>
-                    </button>
-                    {editable && entry && (
-                      <button
-                        type="button"
-                        aria-label={`卸下${item?.name ?? '装备'}`}
-                        onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: entry.instanceId })}
-                        disabled={pending || combatManagementLocked}
-                        className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-void-950 text-slate-500 hover:text-rose-200 disabled:opacity-40 group-hover/slot:flex"
-                      ><X className="h-3 w-3" /></button>
-                    )}
-                    {canDrop && <span className="pointer-events-none absolute inset-x-1 bottom-1 rounded bg-emerald-500/20 py-0.5 text-center text-[8px] font-bold text-emerald-100">松开放入</span>}
-                  </div>
-                )
-              })}
-            </div>
-            {combatManagementLocked && <p className="mt-2 text-center text-[10px] leading-4 text-amber-300/65">战斗中可查看穿戴，但不能换装。</p>}
+            {combatManagementLocked && <p className="mt-2 text-center text-[10px] leading-4 text-amber-300/65">战斗中可切换主手／副手物品；护甲与其他穿戴槽保持锁定。</p>}
             {!combatManagementLocked && linkedEquipmentFeature && (
               <p className="mt-2 text-center text-[10px] leading-4 text-cyan-200/65">武器联结仍可在右侧物品详情中管理。</p>
             )}
           </aside>
 
           <div className="min-w-0">
-            <div className={`grid gap-2 ${compact ? 'grid-cols-4 sm:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8' : 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'}`}>
+            <div className={`grid gap-2 ${compact
+              ? 'grid-cols-[repeat(auto-fill,minmax(76px,1fr))]'
+              : 'grid-cols-[repeat(auto-fill,minmax(88px,1fr))]'}`}>
               {entries.map((entry) => (
                 <InventoryTile
                   key={entry.instanceId}
@@ -657,7 +716,7 @@ export default function EquipmentTab({
       </section>
 
       {selected && (
-        <section className="glass max-h-[76vh] overflow-y-auto rounded-2xl p-4 xl:sticky xl:top-3" data-testid="inventory-item-actions">
+        <section className="glass min-w-0 max-h-[76vh] overflow-x-hidden overflow-y-auto rounded-2xl p-4 xl:sticky xl:top-3" data-testid="inventory-item-actions">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="font-semibold text-slate-100">{displayItemName(selected)}</p>
@@ -667,10 +726,18 @@ export default function EquipmentTab({
             </div>
             {editable && <div className="flex flex-wrap gap-2">
               {selected.item.equipment && !selected.equippedSlot && selected.identified !== false && (
-                <ActionButton icon={Shield} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId })}>装备</ActionButton>
+                <ActionButton
+                  icon={Shield}
+                  disabled={pending || (combatManagementLocked && !equipmentCanBeHeldInHand(selected.item.equipment))}
+                  onClick={() => run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId })}
+                >装备</ActionButton>
               )}
               {selected.equippedSlot && (
-                <ActionButton icon={Shield} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: selected.instanceId })}>卸下</ActionButton>
+                <ActionButton
+                  icon={Shield}
+                  disabled={pending || (combatManagementLocked && !isHandEquipmentSlot(selected.equippedSlot))}
+                  onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: selected.instanceId })}
+                >卸下</ActionButton>
               )}
               {linkedEquipmentFeature && selected.item.equipment?.dnd5e?.kind === 'weapon' && (
                 <ActionButton
@@ -714,7 +781,7 @@ export default function EquipmentTab({
               {selected.attuned && (
                 <ActionButton icon={Sparkles} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'end-attunement', characterId: character.id, instanceId: selected.instanceId })}>结束同调</ActionButton>
               )}
-              {selected.item.use && selected.identified !== false && (
+              {selected.item.use && dnd5eInventoryEntryIsActive(selected) && (
                 <ActionButton icon={HandHelping} disabled={pending} onClick={useSelected}>使用</ActionButton>
               )}
               {selected.item.magicItem && selected.identified === false && canIdentify && (
@@ -740,6 +807,11 @@ export default function EquipmentTab({
               spellcastingPrerequisitesEnabled={spellcastingPrerequisitesEnabled}
             />
           )}
+          {selected.identified !== false && (selected.item.equipment?.spellcastingFocusClassIds?.length ?? 0) > 0 && (
+            <p className="mt-3 rounded-xl border border-violet-400/20 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-100">
+              施法法器：装备在主手或副手时，可供{selected.item.equipment?.spellcastingFocusClassIds?.map(spellcastingFocusClassLabel).join('、') ?? ''}替代未标价且不会被消耗的材料（M）成分；标价或会被消耗的材料仍须实际提供。
+            </p>
+          )}
 
           {selected.identified === false ? (
             <div className="mt-4 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] p-4 text-sm text-fuchsia-100/85">
@@ -760,6 +832,45 @@ export default function EquipmentTab({
                 <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-amber-50/80">{selected.item.use.effect.adjudication}</p>
               </div>
             )}
+            {selected.item.use?.effect.kind === 'spell-cast' && (() => {
+              const effect = selected.item.use.effect
+              const spell = getDnd5eSrdCombatSpell(effect.spellId)
+              return <div className="rounded-xl border border-cyan-300/12 bg-cyan-500/[0.045] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200/70">Headless 物品施法</p>
+                <p className="mt-1.5 text-xs leading-5 text-cyan-50/85">
+                  {spell?.name ?? effect.spellId} · {effect.castAtLevel} 环
+                  {effect.spellAttackBonus != null ? ` · 固定命中 ${effect.spellAttackBonus >= 0 ? '+' : ''}${effect.spellAttackBonus}` : ''}
+                  {effect.spellSaveDc != null ? ` · 固定 DC ${effect.spellSaveDc}` : ''}
+                  {effect.targeting === 'self-only' ? ' · 仅限自身' : ''}
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-slate-400">从地图操作栏使用；目标、距离、视线、豁免、伤害、专注与物品资源由 Host 一次结算。</p>
+              </div>
+            })()}
+            {selected.item.useActions?.length ? (
+              <div className="rounded-xl border border-cyan-300/12 bg-cyan-500/[0.045] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200/70">Headless 物品能力</p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {selected.item.useActions.map((use) => {
+                    const spell = use.effect.kind === 'spell-cast' ? getDnd5eSrdCombatSpell(use.effect.spellId) : undefined
+                    const resource = use.resourceCost ? selected.resources?.[use.resourceCost.resourceId] : undefined
+                    const disabled = pending || !onUseItem || (use.resourceCost != null && (resource?.current ?? 0) < use.resourceCost.amount)
+                    return <button
+                      key={use.id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onUseItem?.(selected.instanceId, use.id)}
+                      className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 px-3 py-2 text-left text-xs text-cyan-50 hover:bg-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <span className="block font-semibold">{use.label}</span>
+                      <span className="mt-1 block text-[10px] text-slate-400">
+                        {spell ? `${spell.name} · ${use.effect.kind === 'spell-cast' ? use.effect.castAtLevel : ''} 环` : '物品能力'}
+                        {use.resourceCost ? ` · 消耗 ${use.resourceCost.amount} ${resource?.label ?? '充能'}` : ''}
+                      </span>
+                    </button>
+                  })}
+                </div>
+              </div>
+            ) : null}
             {selected.item.magicItem?.attunement === 'required' && (
               <div className="rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] p-3 text-xs text-fuchsia-100/85">
                 <span className="font-semibold">同调状态：</span>
@@ -769,42 +880,52 @@ export default function EquipmentTab({
             )}
           </div>}
 
-          {editable && <div className="mt-4 grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)_minmax(180px,0.8fr)_auto]">
-            <label className="space-y-1 text-xs text-slate-500">
-              <span>数量</span>
-              <input
-                type="number"
-                min={1}
-                max={selected.quantity}
-                value={quantity}
-                onChange={(event) => setQuantity(Math.min(selected.quantity, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
-                className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500"
-              />
+          {editable && <div className="mt-4 min-w-0 space-y-3 rounded-xl border border-white/8 bg-black/10 p-3">
+            <div className="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] gap-3">
+              <label className="min-w-0 space-y-1 text-xs text-slate-500">
+                <span>数量</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={selected.quantity}
+                  value={quantity}
+                  onChange={(event) => setQuantity(Math.min(selected.quantity, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                  className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500"
+                />
+              </label>
+              <label className="min-w-0 space-y-1 text-xs text-slate-500">
+                <span>存放于</span>
+                <span className="relative block min-w-0">
+                  <select
+                    aria-label="物品存放容器"
+                    value={selected.containerInstanceId ?? ''}
+                    onChange={(event) => run({ type: 'set-container', characterId: character.id, instanceId: selected.instanceId, containerInstanceId: event.target.value || undefined })}
+                    disabled={pending || combatManagementLocked}
+                    className="w-full min-w-0 appearance-none truncate rounded-lg border border-white/10 bg-void-900/90 py-2 pl-3 pr-9 text-sm text-slate-100 outline-none focus:border-arcane-500 disabled:opacity-50"
+                  >
+                    <option value="">随身携带</option>
+                    {containers.map((container) => <option key={container.instanceId} value={container.instanceId}>{displayItemName(container)}（{container.item.containerCapacityWeightLb} 磅）</option>)}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                </span>
+              </label>
+            </div>
+            <label className="block min-w-0 space-y-1 text-xs text-slate-500">
+              <span>转交给其他角色</span>
+              <span className="relative block min-w-0">
+                <select
+                  aria-label="转交目标角色"
+                  value={transferTargetId}
+                  onChange={(event) => setTransferTargetId(event.target.value)}
+                  className="w-full min-w-0 appearance-none truncate rounded-lg border border-white/10 bg-void-900/90 py-2 pl-3 pr-9 text-sm text-slate-100 outline-none focus:border-arcane-500"
+                >
+                  <option value="">选择同房间角色…</option>
+                  {transferTargets.map((target) => <option key={target.id} value={target.id}>{target.name}（{target.player || '未填写玩家'}）</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              </span>
             </label>
-            <label className="space-y-1 text-xs text-slate-500">
-              <span>转交给</span>
-              <select
-                value={transferTargetId}
-                onChange={(event) => setTransferTargetId(event.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500"
-              >
-                <option value="">选择同房间角色…</option>
-                {transferTargets.map((target) => <option key={target.id} value={target.id}>{target.name}（{target.player || '未填写玩家'}）</option>)}
-              </select>
-            </label>
-            <label className="space-y-1 text-xs text-slate-500">
-              <span>存放于</span>
-              <select
-                value={selected.containerInstanceId ?? ''}
-                onChange={(event) => run({ type: 'set-container', characterId: character.id, instanceId: selected.instanceId, containerInstanceId: event.target.value || undefined })}
-                disabled={pending || combatManagementLocked}
-                className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500 disabled:opacity-50"
-              >
-                <option value="">随身携带</option>
-                {containers.map((container) => <option key={container.instanceId} value={container.instanceId}>{displayItemName(container)}（{container.item.containerCapacityWeightLb} 磅）</option>)}
-              </select>
-            </label>
-            <div className="flex items-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <ActionButton
                 icon={HandHelping}
                 disabled={pending || combatManagementLocked || !transferTargetId}
@@ -832,7 +953,7 @@ export default function EquipmentTab({
             </div>
           </div>}
           {combatManagementLocked && (
-            <p className="mt-3 text-[11px] text-amber-300/80">战斗中仅开放已接入行动经济的“使用物品”；换装、丢弃和转交需在角色页处理，直至物品交互事务接入 Headless。</p>
+            <p className="mt-3 text-[11px] text-amber-300/80">战斗中可切换主手／副手物品并使用已接入行动经济的物品；护甲、其他穿戴槽、丢弃和转交仍保持锁定。</p>
           )}
         </section>
       )}
@@ -882,7 +1003,7 @@ function InventoryTile({
   onActivate?: () => void
 }) {
   const Icon = ICONS[entry.item.icon] ?? PackageOpen
-  const usable = !!entry.item.use && entry.identified !== false
+  const usable = !!entry.item.use && dnd5eInventoryEntryIsActive(entry)
   const primaryResource = Object.values(entry.resources ?? {})[0]
   const actionIcon = dnd5eItemActionIcon(entry.item)
   return (
@@ -902,7 +1023,7 @@ function InventoryTile({
         <Dnd5eActionIcon
           spec={actionIcon}
           active={selected}
-          disabled={entry.identified === false || (primaryResource != null && primaryResource.current <= 0)}
+          disabled={!dnd5eInventoryEntryIsActive(entry) || (primaryResource != null && primaryResource.current <= 0)}
           badge={primaryResource ? primaryResource.current : entry.quantity > 1 ? entry.quantity : undefined}
           className={`mx-auto ${compact ? 'h-14 w-14' : 'h-16 w-16'}`}
         />

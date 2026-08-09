@@ -122,6 +122,11 @@ if (artAssetPack) {
 
 const server = await createServer({
   clearScreen: false,
+  // DM and player development servers run at the same time. Vite's default
+  // cache directory is shared per workspace, so two dependency optimizers can
+  // invalidate each other's module graph and make otherwise valid dynamic
+  // imports fail intermittently in the browser.
+  cacheDir: path.resolve(process.cwd(), 'node_modules', `.vite-${port}`),
   server: {
     host,
     port,
@@ -158,6 +163,28 @@ if (Array.isArray(server.middlewares.stack)) {
 } else {
   server.middlewares.use(artAssetMiddleware)
   server.middlewares.use(sharedApiMiddleware)
+}
+
+// Do not advertise the dev server until the modules needed by the application
+// shell have been transformed. This closes the short startup window where the
+// browser can request a lazy module while dependency optimization is pending.
+const warmupUrls = [
+  '/src/main.tsx',
+  '/src/components/Sidebar.tsx',
+  '/src/rulesets/dnd5e/pluginLoader.ts',
+]
+if (process.env.STARS_E2E_RELEASE_GATE === '1') {
+  warmupUrls.push(
+    '/src/pages/PublicLandingPage.tsx',
+    '/src/pages/AccountCampaignsPage.tsx',
+    '/src/pages/RoomLobbyPage.tsx',
+    '/src/pages/PluginsPage.tsx',
+  )
+}
+for (const url of warmupUrls) {
+  // Vite's dependency optimizer is stateful; parallel warmups can race while
+  // committing a freshly optimized dependency set.
+  await server.environments.client.warmupRequest(url)
 }
 
 await server.listen()

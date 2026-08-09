@@ -32,7 +32,7 @@ export default function AiProviderSelector({
 }: {
   value: AiProviderSelectionV1
   onChange: (value: AiProviderSelectionV1) => void
-  taskProfile?: 'pdf-campaign' | 'resource-structuring'
+  taskProfile?: 'pdf-campaign' | 'resource-structuring' | 'map-analysis'
 }) {
   const selectedProvider = SELECTABLE_AI_PROVIDER_CATALOG.find((provider) => provider.id === value.providerId)
   const bridge = useSyncExternalStore(subscribeLocalAiBridge, localAiBridgeSnapshot, localAiBridgeSnapshot)
@@ -40,11 +40,16 @@ export default function AiProviderSelector({
   const [bridgeBusy, setBridgeBusy] = useState(false)
   const [bridgeError, setBridgeError] = useState<string | null>(null)
   const bridgeProviderSelected = value.providerId === 'external-account'
-  const modelSupportsProfile = (model: (typeof bridge.models)[number]) =>
-    taskProfile !== 'resource-structuring' || (
-      model.supportedTasks.includes('resource-structuring') &&
-      model.capabilities.includes('structured-output')
-    )
+  const modelSupportsProfile = (model: (typeof bridge.models)[number]) => {
+    if (taskProfile === 'resource-structuring') {
+      return model.supportedTasks.includes('resource-structuring') && model.capabilities.includes('structured-output')
+    }
+    if (taskProfile === 'map-analysis') {
+      return model.supportedTasks.includes('map-analysis') &&
+        model.capabilities.includes('vision') && model.capabilities.includes('structured-output')
+    }
+    return true
+  }
   const bridgeModels = bridge.models.filter((model) =>
     model.providerId === value.providerId && modelSupportsProfile(model))
   const pdfModelRouting = taskProfile === 'pdf-campaign'
@@ -181,6 +186,14 @@ export default function AiProviderSelector({
             <div className="mt-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200">已安全配对</span>
+                {taskProfile === 'pdf-campaign' && (
+                  <span className={`rounded-full px-2 py-1 text-[10px] ${bridge.engines.rapidocr === 'ready'
+                    ? 'bg-emerald-500/10 text-emerald-200'
+                    : 'bg-amber-500/10 text-amber-200'}`}
+                  >
+                    扫描页 OCR：{bridge.engines.rapidocr === 'ready' ? 'RapidOCR 已就绪' : '未配置'}
+                  </span>
+                )}
                 <select
                   value={value.modelId ?? ''}
                   onChange={(event) => onChange({ ...value, modelId: event.currentTarget.value || undefined })}

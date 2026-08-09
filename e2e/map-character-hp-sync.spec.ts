@@ -273,6 +273,43 @@ test('DM 可随时调整双方生命值、状态与位置，并通过 SSE 同步
     return saved ? { hp: saved.hp, maxHp: saved.maxHp } : null
   }, { timeout: 20_000 }).toEqual({ hp: 79, maxHp: 94 })
 
+  await dm.evaluate((id) => {
+    const target = document.querySelector(`[data-testid="initiative-health-${id}"]`)
+    if (!target) throw new Error('held-hp-target-missing')
+    const values: number[] = []
+    const capture = () => {
+      const match = target.getAttribute('title')?.match(/^HP (\d+)\//)
+      if (match) values.push(Number(match[1]))
+    }
+    capture()
+    const observer = new MutationObserver(capture)
+    observer.observe(target, { attributes: true, attributeFilter: ['title'] })
+    ;(window as typeof window & {
+      __heldHpDiagnostic?: { values: number[]; observer: MutationObserver }
+    }).__heldHpDiagnostic = { values, observer }
+  }, tokenId)
+  await hpInput.focus()
+  await dm.keyboard.down('ArrowDown')
+  for (let index = 0; index < 29; index += 1) {
+    await dm.keyboard.down('ArrowDown')
+    await dm.waitForTimeout(12)
+  }
+  await dm.keyboard.up('ArrowDown')
+  await expect(dm.getByTestId(`initiative-health-${tokenId}`)).toHaveAttribute('title', 'HP 49/94')
+  await expect(playerHealth).toHaveAttribute('title', 'HP 49/94', { timeout: 20_000 })
+  // Let every queued write and SSE invalidation settle. A stale re-publish used
+  // to produce sequences such as 54 -> 57 -> 53 during this window.
+  await dm.waitForTimeout(3_000)
+  const heldHpValues = await dm.evaluate(() => {
+    const diagnostic = (window as typeof window & {
+      __heldHpDiagnostic?: { values: number[]; observer: MutationObserver }
+    }).__heldHpDiagnostic
+    diagnostic?.observer.disconnect()
+    return diagnostic?.values ?? []
+  })
+  expect(heldHpValues.length).toBeGreaterThan(2)
+  expect(heldHpValues.every((value, index) => index === 0 || value <= heldHpValues[index - 1])).toBe(true)
+
   const playerConditionToggle = panel.getByTestId('dnd5e-condition-toggle-prone')
   await playerConditionToggle.click()
   await expect(playerConditionToggle).toHaveAttribute('aria-pressed', 'true')

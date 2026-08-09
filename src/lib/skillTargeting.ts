@@ -14,6 +14,8 @@ export interface CircleAoeTargeting {
   shape: 'circle'
   origin: AoeOrigin
   radiusFeet: number
+  /** When present, the caster may choose a radius between this value and radiusFeet. */
+  minimumRadiusFeet?: number
   placeRangeFeet?: number
 }
 
@@ -22,6 +24,9 @@ export interface RectAoeTargeting {
   origin: 'point'
   widthFeet: number
   heightFeet: number
+  /** Optional casting-time lower bounds; the declared dimensions remain the maxima. */
+  minimumWidthFeet?: number
+  minimumHeightFeet?: number
   placeRangeFeet?: number
   rotatable?: boolean
 }
@@ -31,6 +36,8 @@ export interface LineAoeTargeting {
   origin: 'self'
   widthFeet: number
   lengthFeet: number
+  minimumWidthFeet?: number
+  minimumLengthFeet?: number
   /** 瞄准点相对施法者的最远距离（尺）；不设则不限制 */
   aimRangeFeet?: number
 }
@@ -39,11 +46,50 @@ export interface ConeAoeTargeting {
   shape: 'cone'
   origin: 'self'
   lengthFeet: number
+  minimumLengthFeet?: number
   /** 瞄准点相对施法者的最远距离（尺）；不设则不限制 */
   aimRangeFeet?: number
 }
 
 export type SkillAoeTargeting = CircleAoeTargeting | RectAoeTargeting | LineAoeTargeting | ConeAoeTargeting
+
+export interface SkillAoeDimensionSelection {
+  radiusFeet?: number
+  widthFeet?: number
+  heightFeet?: number
+  lengthFeet?: number
+}
+
+function selectedDimension(value: number | undefined, minimum: number | undefined, maximum: number): number | null {
+  if (value == null) return maximum
+  const lower = minimum ?? maximum
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value % DND_FEET_PER_CELL !== 0) return null
+  if (value < lower || value > maximum) return null
+  return value
+}
+
+/** Resolves adjustable template dimensions and rejects forged client values. */
+export function resolveAoeDimensions(
+  aoe: SkillAoeTargeting,
+  selection: SkillAoeDimensionSelection = {},
+): SkillAoeTargeting | null {
+  if (aoe.shape === 'circle') {
+    const radiusFeet = selectedDimension(selection.radiusFeet, aoe.minimumRadiusFeet, aoe.radiusFeet)
+    return radiusFeet == null ? null : { ...aoe, radiusFeet }
+  }
+  if (aoe.shape === 'rect') {
+    const widthFeet = selectedDimension(selection.widthFeet, aoe.minimumWidthFeet, aoe.widthFeet)
+    const heightFeet = selectedDimension(selection.heightFeet, aoe.minimumHeightFeet, aoe.heightFeet)
+    return widthFeet == null || heightFeet == null ? null : { ...aoe, widthFeet, heightFeet }
+  }
+  if (aoe.shape === 'line') {
+    const widthFeet = selectedDimension(selection.widthFeet, aoe.minimumWidthFeet, aoe.widthFeet)
+    const lengthFeet = selectedDimension(selection.lengthFeet, aoe.minimumLengthFeet, aoe.lengthFeet)
+    return widthFeet == null || lengthFeet == null ? null : { ...aoe, widthFeet, lengthFeet }
+  }
+  const lengthFeet = selectedDimension(selection.lengthFeet, aoe.minimumLengthFeet, aoe.lengthFeet)
+  return lengthFeet == null ? null : { ...aoe, lengthFeet }
+}
 
 export function feetToRadiusCells(feet: number): number {
   return feetToMovementCells(feet)

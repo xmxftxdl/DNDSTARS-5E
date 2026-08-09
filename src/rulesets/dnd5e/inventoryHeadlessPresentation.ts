@@ -11,6 +11,7 @@ export async function planDnd5eOnHitInventoryEffectDice(input: {
   state: Dnd5eHeadlessCombatState
   combatant: Dnd5eCombatant
   weaponId?: string
+  targetCreatureType?: string
   critical: boolean
   targetLabel: string
   rollDice(count: number, sides: number, label: string, targetLabel: string): Promise<number[]>
@@ -18,6 +19,7 @@ export async function planDnd5eOnHitInventoryEffectDice(input: {
   const requirements = dnd5eOnHitBonusDamageRequirements({
     combatant: input.combatant,
     weaponId: input.weaponId,
+    targetCreatureType: input.targetCreatureType,
     critical: input.critical,
     turnKey: dnd5eHeadlessTurnKey(input.state, input.combatant.id),
   })

@@ -2,6 +2,7 @@ import type { Token } from '../store/maps'
 
 export function dnd5eCombatTokenSide(token: Token): 'player' | 'enemy' | undefined {
   if (token.dnd5eSummon) return token.dnd5eSummon.side
+  if (token.dnd5eSide) return token.dnd5eSide
   if (token.type === 'player' || token.type === 'enemy') return token.type
   return undefined
 }

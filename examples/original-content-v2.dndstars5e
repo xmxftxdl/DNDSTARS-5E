@@ -50,7 +50,22 @@
       }
     ],
     "backgrounds": [],
-    "features": [],
+    "features": [
+      {
+        "id": "rune-strike",
+        "name": "Rune Strike",
+        "summary": "An original class feature used by the custom-class example.",
+        "description": "Spend one rune charge to empower a strike; this example leaves the exact effect to the DM.",
+        "automation": "manual"
+      },
+      {
+        "id": "rune-guard",
+        "name": "Rune Guard",
+        "summary": "An original defensive class feature.",
+        "description": "Spend one rune charge to invoke a brief ward; this example leaves the exact effect to the DM.",
+        "automation": "manual"
+      }
+    ],
     "feats": [
       {
         "id": "steady-step",
@@ -87,6 +102,46 @@
     "abilityGenerationMethods": [],
     "headlessActions": [],
     "subclasses": [],
+    "classes": [
+      {
+        "schemaVersion": 1,
+        "id": "rune-adept",
+        "name": "Rune Adept",
+        "summary": "An original 1–5 level vertical-slice class used to verify imported class progression.",
+        "hitDie": 10,
+        "primaryAbilities": ["str"],
+        "savingThrows": ["str", "con"],
+        "armorProficiencies": ["Light armor", "Medium armor"],
+        "weaponProficiencies": ["Simple weapons", "Martial weapons"],
+        "skills": { "choiceCount": 2, "options": "any" },
+        "subclass": {
+          "level": 3,
+          "id": "runic-path",
+          "name": "Runic Path",
+          "summary": "A placeholder subclass entry for the original class example."
+        },
+        "features": [
+          { "id": "rune-strike-progression", "level": 1, "name": "Rune Strike", "description": "Gain access to Rune Strike.", "automation": "manual" },
+          { "id": "rune-guard-progression", "level": 2, "name": "Rune Guard", "description": "Gain access to Rune Guard.", "automation": "manual" }
+        ],
+        "advancements": [
+          { "level": 1, "grants": ["rune-strike"] },
+          { "level": 2, "grants": ["rune-guard"] },
+          { "level": 3, "subclassChoice": true },
+          { "level": 4, "abilityScoreImprovement": true },
+          { "level": 5, "attacksPerAction": 2 }
+        ],
+        "resources": [
+          {
+            "id": "rune-charges",
+            "label": "Rune Charges",
+            "shortLabel": "Runes",
+            "resetOn": "short-rest",
+            "maximumByLevel": [2, 2, 3, 3, 4]
+          }
+        ]
+      }
+    ],
     "monsters": []
   }
 }

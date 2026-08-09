@@ -28,6 +28,7 @@ import {
 import { Link, useParams } from 'react-router-dom'
 import type { AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
 import AiProviderSelector from '../components/dm/AiProviderSelector'
+import DmMapAnalysisPanel from '../components/dm/DmMapAnalysisPanel'
 import PdfCampaignAnalysisEditor from '../components/dm/PdfCampaignAnalysisEditor'
 import PdfCampaignKnowledgeBase from '../components/dm/PdfCampaignKnowledgeBase'
 import PageHeader from '../components/PageHeader'
@@ -52,8 +53,13 @@ import {
   type PdfAnalysisDepthV1,
   type PdfAnalysisProgressV1,
   type PdfAnalysisWorkloadEstimateV1,
-  type PdfCampaignAnalysisV1,
 } from '../lib/pdfCampaignAnalysis'
+import type { PdfCampaignAnalysisV2 } from '../lib/pdfCampaignAnalysisV2'
+import {
+  materializePdfCampaignAnalysis,
+  normalizeDmEditedPdfCampaignAnalysisV2,
+  type PdfCampaignAnalysisArtifact,
+} from '../lib/pdfCampaignAnalysisMigration'
 
 type StageStatus = 'available' | 'partial' | 'planned'
 type Notice = { kind: 'success' | 'error'; text: string }
@@ -133,7 +139,7 @@ export default function DmPrepAssistantPage() {
   const [pdfAnalysisBusy, setPdfAnalysisBusy] = useState(false)
   const pdfAnalysisRunRef = useRef(false)
   const [pdfAnalysisProgress, setPdfAnalysisProgress] = useState<PdfAnalysisProgressV1 | null>(null)
-  const [pdfAnalysisResult, setPdfAnalysisResult] = useState<PdfCampaignAnalysisV1 | null>(null)
+  const [pdfAnalysisResult, setPdfAnalysisResult] = useState<PdfCampaignAnalysisV2 | null>(null)
   const [pdfAnalysisEditorOpen, setPdfAnalysisEditorOpen] = useState(false)
   const [pdfAnalysisDirty, setPdfAnalysisDirty] = useState(false)
   const [pdfAnalysisDepth, setPdfAnalysisDepth] = useState<PdfAnalysisDepthV1>('quick')
@@ -171,7 +177,7 @@ export default function DmPrepAssistantPage() {
       ))
       if (!latest?.artifact) return
       setActiveAiJob(latest)
-      setPdfAnalysisResult(latest.artifact.payload as unknown as PdfCampaignAnalysisV1)
+      setPdfAnalysisResult(materializePdfCampaignAnalysis(latest.artifact as PdfCampaignAnalysisArtifact))
       setPdfAnalysisDirty(false)
       setPdfNotice('已从战役档案恢复上一次保存的 PDF 分析草稿。')
     }).catch(() => {})
@@ -259,8 +265,10 @@ export default function DmPrepAssistantPage() {
         },
       })
       setActiveAiJob(completed.job)
-      const persistedPayload = completed.job.artifact?.payload
-      setPdfAnalysisResult(persistedPayload ? persistedPayload as unknown as PdfCampaignAnalysisV1 : completed.result)
+      const persistedArtifact = completed.job.artifact
+      setPdfAnalysisResult(persistedArtifact
+        ? materializePdfCampaignAnalysis(persistedArtifact as PdfCampaignAnalysisArtifact)
+        : completed.result)
       setPdfAnalysisDirty(false)
       setPdfNotice(`分析完成并已保存到战役：${completed.result.documents.length} 个文档，共 ${completed.result.analyzedChunks} 个页段、${completed.result.analysisPasses ?? completed.result.analyzedChunks} 个分析阶段。结果只作为 DM 审阅草稿，不会自动写入 Headless。`)
     } catch (error) {
@@ -284,7 +292,7 @@ export default function DmPrepAssistantPage() {
   const restoreAiJob = (job: PublicAiJobV2) => {
     if (job.artifact?.kind !== 'pdf-campaign-analysis') return
     setActiveAiJob(job)
-    setPdfAnalysisResult(job.artifact.payload as unknown as PdfCampaignAnalysisV1)
+    setPdfAnalysisResult(materializePdfCampaignAnalysis(job.artifact as PdfCampaignAnalysisArtifact))
     setPdfAnalysisDirty(false)
     setPdfNotice(`已恢复 ${formatJobTime(job.updatedAt)} 保存的分析草稿。`)
   }
@@ -346,7 +354,7 @@ export default function DmPrepAssistantPage() {
     setAiCacheClearBusy(true)
     try {
       await clearPdfAnalysisCaches()
-      setPdfNotice('已清除本机保存的 PDF 文字层和分析断点；服务器中的任务历史与草稿未删除。')
+      setPdfNotice('已清除本机分析断点；已完成分析所使用的原文证据缓存仍保留在此设备，服务器中的任务历史与草稿未删除。')
     } catch {
       setPdfNotice('无法清除本机 AI 缓存，请检查浏览器是否允许使用 IndexedDB。')
     } finally {
@@ -374,9 +382,9 @@ export default function DmPrepAssistantPage() {
         activeAiJob.jobId,
         activeAiJob.revision,
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           kind: 'pdf-campaign-analysis',
-          payload: pdfAnalysisResult as unknown as Record<string, unknown>,
+          payload: pdfAnalysisResult,
         },
       )
       setActiveAiJob(updated)
@@ -771,7 +779,7 @@ export default function DmPrepAssistantPage() {
               <PdfCampaignAnalysisEditor
                 analysis={pdfAnalysisResult}
                 onChange={(next) => {
-                  setPdfAnalysisResult(next)
+                  setPdfAnalysisResult(normalizeDmEditedPdfCampaignAnalysisV2(next as unknown as PdfCampaignAnalysisV2))
                   setPdfAnalysisDirty(true)
                 }}
                 onClose={() => setPdfAnalysisEditorOpen(false)}
@@ -781,6 +789,8 @@ export default function DmPrepAssistantPage() {
           </div>
         )}
       </section>
+
+      <DmMapAnalysisPanel aiProviderSelection={aiProviderSelection} />
 
       <section className="mb-5 grid gap-4 lg:grid-cols-2">
         <article className="rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.035] p-5">

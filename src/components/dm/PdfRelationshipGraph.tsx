@@ -7,12 +7,13 @@ import {
 } from 'react'
 import { ImagePlus, MapPin, Maximize2, Minus, Plus, Search, Shield, UserRound, UsersRound } from 'lucide-react'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { generatedImageDataUrlToFile } from '../../lib/generatedImage'
+import AiImageGenerationButton from '../AiImageGenerationButton'
 import type {
   PdfNamedRecordV1,
   PdfPersonRecordV1,
   PdfRelationshipRecordV1,
   PdfSceneRecordV1,
-  PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
 import {
   buildPdfRelationshipForceLayout,
@@ -20,6 +21,8 @@ import {
   type PdfRelationshipGraphPoint,
   type PdfRelationshipNodeKind,
 } from './pdfRelationshipGraphModel'
+import { PdfCitationButtons } from './PdfSourceEvidenceDrawer'
+import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
 
 const VIEW_WIDTH = 1_100
 const VIEW_HEIGHT = 700
@@ -40,10 +43,6 @@ const NODE_LABELS: Record<PdfRelationshipNodeKind, string> = {
 
 function normalizedName(value: string): string {
   return value.trim().toLocaleLowerCase()
-}
-
-function citationText(citations: readonly PdfSourceCitationV1[]): string {
-  return citations.slice(0, 4).map((citation) => `${citation.documentName} · 第 ${citation.page} 页`).join('；')
 }
 
 function relationshipTone(type: string): 'friendly' | 'hostile' | 'secret' | 'neutral' {
@@ -97,6 +96,7 @@ interface PdfRelationshipGraphProps {
   relationships: readonly PdfRelationshipRecordV1[]
   scenes?: readonly PdfSceneRecordV1[]
   onPortraitChange?: (personName: string, portraitDataUrl: string) => void
+  onCitationOpen?: (citation: PdfViewCitation) => void
 }
 
 export default function PdfRelationshipGraph({
@@ -106,6 +106,7 @@ export default function PdfRelationshipGraph({
   relationships,
   scenes = [],
   onPortraitChange,
+  onCitationOpen = () => undefined,
 }: PdfRelationshipGraphProps) {
   const model = useMemo(
     () => buildPdfRelationshipGraphModel({ people, factions, locations, relationships, scenes }),
@@ -422,7 +423,7 @@ export default function PdfRelationshipGraph({
               <span className="mt-2 inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-[10px] text-violet-200">{selectedEdge.relationship.type}</span>
               <p className="mt-4 text-xs leading-6 text-slate-400">{selectedEdge.relationship.description || '原文未提供额外关系说明。'}</p>
               {selectedEdge.inferred && <p className="mt-3 rounded-xl border border-amber-400/15 bg-amber-500/[0.06] p-3 text-[10px] leading-5 text-amber-100/70">这条线用于帮助 DM 发现潜在联系，不会自动写回 PDF 分析结果或 Headless 数据。</p>}
-              {selectedEdge.relationship.citations.length > 0 && <p className="mt-4 border-t border-white/8 pt-3 text-[10px] font-medium leading-5 text-slate-400">证据：{citationText(selectedEdge.relationship.citations)}</p>}
+              {selectedEdge.relationship.citations.length > 0 && <div className="mt-4 border-t border-white/8 pt-1"><PdfCitationButtons citations={selectedEdge.relationship.citations} onOpen={onCitationOpen} /></div>}
             </div>
           ) : selectedNode ? (
             <div data-testid="pdf-relationship-node-detail">
@@ -440,13 +441,25 @@ export default function PdfRelationshipGraph({
               {selectedNode.appearance && <DetailLine label="形象" value={selectedNode.appearance} />}
               {selectedNode.personality && <DetailLine label="性格" value={selectedNode.personality} />}
               {selectedNode.motivation && <DetailLine label="动机" value={selectedNode.motivation} />}
-              {selectedNode.citations.length > 0 && <p className="mt-4 border-t border-white/8 pt-3 text-[10px] font-medium leading-5 text-slate-400">证据：{citationText(selectedNode.citations)}</p>}
+              {selectedNode.citations.length > 0 && <div className="mt-4 border-t border-white/8 pt-1"><PdfCitationButtons citations={selectedNode.citations} onOpen={onCitationOpen} /></div>}
               {selectedNode.kind === 'person' && onPortraitChange && (
-                <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
-                  <ImagePlus className="h-4 w-4" />
-                  {selectedNode.portraitDataUrl ? '替换人物立绘' : '上传人物立绘'}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadPortrait(file); event.currentTarget.value = '' }} />
-                </label>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
+                    <ImagePlus className="h-4 w-4" />
+                    {selectedNode.portraitDataUrl ? '替换人物立绘' : '上传人物立绘'}
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadPortrait(file); event.currentTarget.value = '' }} />
+                  </label>
+                  <AiImageGenerationButton
+                    label="AI 生成人物立绘"
+                    title="AI 生成人物关系图立绘"
+                    className="py-2.5"
+                    defaultPrompt={`为战役人物“${selectedNode.name}”绘制高质量奇幻人物立绘。${selectedNode.role ? `身份：${selectedNode.role}。` : ''}${selectedNode.appearance ? `外貌：${selectedNode.appearance}。` : ''}${selectedNode.personality ? `性格：${selectedNode.personality}。` : ''}${selectedNode.description ? `背景：${selectedNode.description}。` : ''}单人，竖版 3:4，面部清晰，适合人物关系图和圆形头像裁切，不要出现文字、标志、水印或边框。`}
+                    onGenerated={async ({ dataUrl, mimeType }) => {
+                      const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]
+                      await uploadPortrait(await generatedImageDataUrlToFile(dataUrl, `campaign-person-ai-portrait.${extension}`))
+                    }}
+                  />
+                </div>
               )}
               {portraitError && <p role="alert" className="mt-2 text-[11px] text-rose-300">{portraitError}</p>}
             </div>

@@ -126,6 +126,8 @@ export interface Dnd5eSrdSpellDefinition {
   area?: SkillAoeTargeting
   /** Number of distinct area origins that must be selected for one cast. */
   areaTargetCount?: number
+  /** Minimum distinct origins for spells whose declared count is a maximum. */
+  minimumAreaTargetCount?: number
   /** 少数“选择区域内生物”的法术允许施法者选择自己。 */
   areaIncludesSelf?: boolean
   /** 每道射线单独攻击时的基础射线数。 */
@@ -196,10 +198,13 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'dancing-lights', name: '舞光术', englishName: 'Dancing Lights', level: 0, school: '塑能',
-    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0,
-    target: 'ally', effect: 'narrative-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10,
-    description: '种族先天施法的 Headless 授权入口。光源的具体位置与叙事表现由地图层处理。',
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 120 },
+    areaTargetCount: 4, minimumAreaTargetCount: 1,
+    description: '在射程内创建至多四团光；每团提供 10 尺微光并持续专注至多 1 分钟。施法时可分别选择 1 至 4 个互不相同的落点。',
   },
   {
     id: 'minor-illusion', name: '次级幻影', englishName: 'Minor Illusion', level: 0, school: '幻术',
@@ -428,7 +433,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     dice: { count: 0, sides: 8, bonus: 0 }, concentration: true, concentrationDurationRounds: 100,
     maximumTargets: 100, areaIncludesSelf: true,
     area: { shape: 'circle', origin: 'self', radiusFeet: 15 },
-    description: '呼唤灵体环绕你15尺，持续至多10分钟并需要专注。施法时指定任意数量可见生物不受影响；本实现默认排除友方。受影响生物在区域内的移动速度减半，并在一个回合内第一次进入区域或在其中开始回合时进行感知豁免；失败受到3d8光耀伤害（邪恶施法者改为黯蚀伤害），成功减半。每使用高于3环一环的法术位，伤害增加1d8。',
+    description: '呼唤灵体环绕你15尺，持续至多10分钟并需要专注。施法时可以指定任意数量的可见生物不受影响。受影响生物在区域内的移动速度减半，并在一个回合内第一次进入区域或在其中开始回合时进行感知豁免；失败受到3d8光耀伤害（邪恶施法者改为黯蚀伤害），成功减半。每使用高于3环一环的法术位，伤害增加1d8。',
   },
   {
     id: 'moonbeam', name: '月华之光', englishName: 'Moonbeam', level: 2, school: '塑能',
@@ -547,9 +552,10 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     maximumTargets: 100, areaIncludesSelf: true,
     area: {
       shape: 'rect', origin: 'point', widthFeet: 100, heightFeet: 5,
+      minimumWidthFeet: 5,
       placeRangeFeet: 90, rotatable: true,
     },
-    description: '在射程内创造一道最长100尺、高20尺、厚5尺的垂直剑刃直墙，持续至多10分钟并需要专注。墙内空间属于困难地形。生物每回合首次进入墙内或在其中开始回合时进行敏捷豁免，失败受到6d10挥砍伤害，成功减半。环形墙与墙后四分之三掩护仍由地图层或DM处理。',
+    description: '在射程内创造一道最长100尺、高20尺、厚5尺的垂直剑刃直墙，或一道直径至多60尺、高20尺、厚5尺的环形墙，持续至多10分钟并需要专注。墙内空间属于困难地形。生物每回合首次进入墙内或在其中开始回合时进行敏捷豁免，失败受到6d10挥砍伤害，成功减半。墙后的四分之三掩护仍由地图层或DM处理。',
   },
   {
     id: 'charm-person', name: '魅惑人类', englishName: 'Charm Person', level: 1, school: '附魔',

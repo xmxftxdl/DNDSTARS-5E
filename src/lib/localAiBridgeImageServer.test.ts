@@ -51,6 +51,7 @@ describe('Local AI Bridge 图片生成边界', () => {
       expect(body.quality).toBe('low')
       expect(body.dataUrl).toMatch(/^data:image\/png;base64,/)
       expect(upstreamBody).toMatchObject({ model: 'gpt-image-test', size: '1024x1536', quality: 'low' })
+      expect(upstreamBody).not.toHaveProperty('background')
     } finally {
       await bridge.close()
     }
@@ -83,11 +84,12 @@ describe('Local AI Bridge 图片生成边界', () => {
           prompt: 'A sufficiently detailed fantasy portrait prompt for testing explicit quality.',
           aspect: 'portrait-3:4',
           quality: 'medium',
+          background: 'transparent',
         }),
       })
 
       expect(response.status).toBe(200)
-      expect(upstreamBody).toMatchObject({ quality: 'medium' })
+      expect(upstreamBody).toMatchObject({ quality: 'medium', background: 'transparent' })
     } finally {
       await bridge.close()
     }

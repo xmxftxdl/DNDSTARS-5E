@@ -8,6 +8,13 @@ import type { Dnd5eInventory } from './inventory'
 
 export type Abilities = Record<AbilityKey, number>
 
+export interface Dnd5eClassContentBindingV1 {
+  classId: string
+  packageId: string
+  packageVersion: string
+  contentVersion: 1
+}
+
 export type Dnd5eAdvancementHitPointMethod = 'fixed' | 'rolled'
 
 export interface Dnd5eAdvancementAbilityScoreChoice {
@@ -35,9 +42,7 @@ export interface Dnd5eAdvancementSpellSelectionsV1 {
 
 export interface Dnd5eLevelAdvancementDecisionV1 {
   schemaVersion: 1
-  classId:
-    | 'barbarian' | 'bard' | 'cleric' | 'druid' | 'fighter' | 'monk'
-    | 'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard'
+  classId: Dnd5eClassId
   levelsGained: number
   hitPointMethod: Dnd5eAdvancementHitPointMethod
   hitPointRolls: number[]
@@ -57,6 +62,7 @@ export interface Dnd5eLevelAdvancementDecisionV1 {
 export interface Dnd5eLevelAdvancementSnapshotV1 {
   level: number
   dnd5eClassLevels?: Character['dnd5eClassLevels']
+  dnd5eClassContentBindings?: Character['dnd5eClassContentBindings']
   abilities: Abilities
   skills: string[]
   dnd5eClassChoices?: Character['dnd5eClassChoices']
@@ -133,6 +139,8 @@ export interface Character {
     'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard',
     number
   >> & Partial<Record<string, number>>
+  /** Stable package/version receipts for installed custom base classes. */
+  dnd5eClassContentBindings?: Record<string, Dnd5eClassContentBindingV1>
   level: number
   background: string
   /** 可选的完整插件命名空间背景 ID；background 保留可读名称。 */
@@ -263,6 +271,13 @@ export interface Character {
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
     /** Recoverable maximum-HP reductions applied by authoritative combat. */
     hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
+    /** Temporary ability damage; the persisted base ability scores are never overwritten. */
+    abilityScoreReductionLedger?: readonly {
+      id: string
+      ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+      amount: number
+      recovery: 'short-or-long-rest'
+    }[]
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
@@ -394,6 +409,8 @@ export interface Character {
     /** 怪物动作免疫，键由来源动作或图鉴动作族稳定派生。 */
     monsterActionImmunityRoundsByKey?: Record<string, number>
     /** Flesh Golem Damage Aversion presentation state and the combatant that triggered it. */
+    /** 怪物专属狂暴状态；由 Headless 或 DM 权威状态命令写入。 */
+    monsterBerserk?: boolean
     monsterDamageAversionActive?: boolean
     monsterDamageAversionSourceActorId?: string
     hurlThroughHellReady?: boolean

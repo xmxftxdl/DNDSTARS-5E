@@ -17,6 +17,7 @@ export interface Dnd5eInventoryEffectApplication {
   kind: 'on-hit-bonus-damage' | 'damage-reduction' | 'death-prevention'
   amount: number
   damageType?: Dnd5eDamageType
+  dice?: { sides: number; rolls: readonly number[]; bonus: number }
 }
 
 export interface Dnd5eOnHitBonusDamageRequirement {
@@ -142,9 +143,21 @@ function weaponEffectApplies(
   return appliesTo === 'weapon-attacks' || (!!weaponId && snapshot.equipmentId === weaponId)
 }
 
+function targetCreatureTypeMatches(
+  actual: string | undefined,
+  allowed: readonly string[] | undefined,
+): boolean {
+  if (!allowed?.length) return true
+  const normalizedActual = actual?.trim().toLocaleLowerCase()
+  return !!normalizedActual && allowed.some((candidate) =>
+    candidate.trim().toLocaleLowerCase() === normalizedActual,
+  )
+}
+
 export function dnd5eOnHitBonusDamageRequirements(input: {
   combatant: Dnd5eCombatant
   weaponId?: string
+  targetCreatureType?: string
   critical: boolean
   turnKey: string
 }): Dnd5eOnHitBonusDamageRequirement[] {
@@ -160,6 +173,7 @@ export function dnd5eOnHitBonusDamageRequirements(input: {
     const effect = snapshot.effect
     if (
       !weaponEffectApplies(snapshot, effect.appliesTo, input.weaponId) ||
+      !targetCreatureTypeMatches(input.targetCreatureType, effect.targetCreatureTypes) ||
       !effectResourceAvailable(input.combatant, snapshot) ||
       !effectAvailableThisTurn(input.combatant, snapshot, input.turnKey, effect.oncePerTurn)
     ) continue
@@ -190,6 +204,7 @@ export function dnd5eOnHitBonusDamageRequirements(input: {
 export function resolveDnd5eOnHitBonusDamage(input: {
   combatant: Dnd5eCombatant
   weaponId?: string
+  targetCreatureType?: string
   inheritedDamageType: Dnd5eDamageType
   critical: boolean
   turnKey: string
@@ -241,6 +256,8 @@ export function resolveDnd5eInventoryDamageReduction(input: {
   amount: number
   damageTypes: readonly Dnd5eDamageType[]
   turnKey: string
+  /** Host-supplied deterministic rolls; omitted entries are rolled by the authoritative runtime. */
+  rolls?: Readonly<Record<string, readonly number[]>>
 }): { amount: number; applications: Dnd5eInventoryEffectApplication[] } {
   let amount = Math.max(0, input.amount)
   const applications: Dnd5eInventoryEffectApplication[] = []
@@ -257,7 +274,22 @@ export function resolveDnd5eInventoryDamageReduction(input: {
       !effectAvailableThisTurn(input.combatant, snapshot, input.turnKey, effect.oncePerTurn) ||
       (effect.damageTypes?.length && !effect.damageTypes.some((type) => input.damageTypes.includes(type)))
     ) continue
-    const reduction = Math.min(amount, effect.amount)
+    const key = dnd5eInventoryEffectRollKey(snapshot.instanceId, snapshot.effectId)
+    const suppliedRolls = input.rolls?.[key]
+    if (effect.dice && suppliedRolls && (
+      suppliedRolls.length !== effect.dice.count || suppliedRolls.some((roll) =>
+        !Number.isInteger(roll) || roll < 1 || roll > effect.dice!.sides,
+      )
+    )) throw new RangeError('invalid inventory damage reduction rolls')
+    const diceRolls = effect.dice
+      ? suppliedRolls
+        ? [...suppliedRolls]
+        : Array.from({ length: effect.dice.count }, () => authoritativeDie(effect.dice!.sides))
+      : undefined
+    const rolledReduction = effect.dice
+      ? Math.max(0, (diceRolls ?? []).reduce((sum, roll) => sum + roll, 0) + effect.dice.bonus)
+      : effect.amount
+    const reduction = Math.min(amount, rolledReduction)
     if (reduction <= 0 || !spendEffectResource(input.combatant, snapshot)) continue
     amount -= reduction
     markEffectUsedThisTurn(input.combatant, snapshot, input.turnKey, effect.oncePerTurn)
@@ -267,9 +299,21 @@ export function resolveDnd5eInventoryDamageReduction(input: {
       itemName: snapshot.itemName,
       kind: 'damage-reduction',
       amount: reduction,
+      ...(effect.dice ? {
+        dice: { sides: effect.dice.sides, rolls: diceRolls ?? [], bonus: effect.dice.bonus },
+      } : {}),
     })
   }
   return { amount, applications }
+}
+
+function authoritativeDie(sides: number): number {
+  if (globalThis.crypto?.getRandomValues) {
+    const value = new Uint32Array(1)
+    globalThis.crypto.getRandomValues(value)
+    return value[0] % sides + 1
+  }
+  return Math.floor(Math.random() * sides) + 1
 }
 
 export function resolveDnd5eInventoryDeathPrevention(input: {

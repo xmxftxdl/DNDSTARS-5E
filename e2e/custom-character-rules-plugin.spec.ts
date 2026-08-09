@@ -67,6 +67,7 @@ test('DM 可编辑、保存并分发种族和加点规则插件', async ({ brows
 
   const builder = dm.getByTestId('custom-rules-plugin-builder')
   await expect(builder).toBeVisible()
+  await expect(builder.getByRole('tab', { name: /Activity 模板/ })).toHaveCount(0)
   await builder.getByText('高级扩展信息', { exact: false }).click()
   await builder.getByLabel('插件 ID', { exact: true }).fill(PLUGIN_ID)
   await builder.getByLabel('插件名称').fill('房间角色创建规则')
@@ -84,6 +85,10 @@ test('DM 可编辑、保存并分发种族和加点规则插件', async ({ brows
   expect((await downloadPromise).suggestedFilename()).toBe(`${PLUGIN_ID}.dndstars5e`)
 
   await builder.getByRole('button', { name: '保存并启用到当前房间' }).click()
+  const confirmation = dm.getByRole('dialog', { name: /保存工坊扩展：房间角色创建规则/ })
+  await confirmation.getByRole('button', { name: '保存并启用', exact: true }).click()
+  await expect(dm.getByText('已保存并启用 房间角色创建规则；当前房间成员会按精确版本同步。'))
+    .toBeVisible({ timeout: 20_000 })
   await player.goto(`${PLAYER}/campaign/${created.roomId}/extensions`, { waitUntil: 'domcontentloaded' })
   await expect(player.getByRole('heading', { name: '房间角色创建规则' })).toBeVisible({ timeout: 25_000 })
 

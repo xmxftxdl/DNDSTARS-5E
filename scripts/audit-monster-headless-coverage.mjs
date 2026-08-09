@@ -6,6 +6,7 @@ import { createServer } from 'vite'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const jsonOutput = process.argv.includes('--json')
+const detailsOutput = process.argv.includes('--details')
 const vite = await createServer({
   root,
   configFile: false,
@@ -57,6 +58,17 @@ try {
     )
     console.log(verification.passed ? 'Ratchet: PASS' : 'Ratchet: FAIL')
     for (const violation of verification.violations) console.error(`- ${violation}`)
+    if (detailsOutput) {
+      const unresolved = report.actions.rows.filter((row) =>
+        row.effectiveAutomation === 'unstructured' ||
+        row.effectiveAutomation === 'non-combat')
+      for (const row of unresolved) {
+        console.log(
+          `${row.effectiveAutomation}\t${row.slug}\t${row.section}\t` +
+          `${row.actionId}\t${row.actionName}`,
+        )
+      }
+    }
   }
 
   if (!verification.passed) process.exitCode = 1

@@ -231,4 +231,14 @@ export const MAP_SPELL_STATUS_ICONS: Readonly<Record<MapSpellStatusId, Dnd5eActi
     asset: '/assets/icons/flesh-golem-fire-aversion-status.png',
     assetMode: 'foreground',
   },
+  'monster-berserk': {
+    key: 'monster-berserk',
+    motif: 'monster-attack',
+    background: '#7f1d1d',
+    backgroundDeep: '#1f0505',
+    accent: '#fecaca',
+    glow: '#ef4444',
+    runeIndex: 2,
+    textureRotation: 18,
+  },
 }

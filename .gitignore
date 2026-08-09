@@ -17,6 +17,8 @@ dist
 dist-ssr
 playwright-report
 test-results
+artifacts/
+output/
 backups/
 tmp/
 local-content/

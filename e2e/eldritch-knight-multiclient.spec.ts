@@ -476,11 +476,6 @@ function playerAction(input: {
   }
 }
 
-async function continueAfterCoverPreview(dm: Page) {
-  await expect(dm.getByText('掩护预览', { exact: true })).toBeVisible({ timeout: 20_000 })
-  await dm.getByRole('button', { name: '应用并继续结算' }).click()
-}
-
 async function clientToken(page: Page, mapId: string, tokenId: string): Promise<SavedToken | null> {
   return page.evaluate(async ({ mapId: requestedMapId, tokenId: requestedTokenId }) => {
     const { useMapStore } = await import('/src/store/maps.ts')
@@ -694,7 +689,6 @@ test('本地奥法骑士合集在真实 Host/玩家房间完成施法、战争�
       },
     })
     await submitPlayerAction(player, warMagicAttack)
-    await continueAfterCoverPreview(dm)
     await waitForAcceptedAck(request, created, warMagicAttack.id)
     await expect.poll(async () => {
       const maps = await getRoomState<{

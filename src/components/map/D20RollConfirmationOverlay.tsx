@@ -12,6 +12,7 @@ interface D20RollConfirmationOverlayProps {
     featureLabel: string
     replacementValue?: number
     direction?: 'add' | 'subtract'
+    choiceDecision?: 'use' | 'decline'
   }) => void | Promise<void>
   onContinue: (acceptedContributionId?: string, dmOverrideValue?: number) => void | Promise<void>
 }
@@ -34,11 +35,20 @@ export default function D20RollConfirmationOverlay({
   const ownEligibleFeatures = playerCharacter
     ? eligibleModifiers.filter((entry) => entry.characterId === playerCharacter.id)
     : []
+  const requiredChoiceCharacterIds = new Set(eligibleModifiers
+    .filter((entry) => entry.modifierKind === 'choice-reroll' && entry.decisionRequired === true)
+    .map((entry) => entry.characterId))
+  const pendingRequiredDecision = [...requiredChoiceCharacterIds].some((characterId) =>
+    !contributions.some((entry) => entry.kind === 'choice-reroll' && entry.characterId === characterId))
+  const requiredUseContribution = contributions.find((entry) =>
+    entry.kind === 'choice-reroll' && entry.decision === 'use' &&
+    requiredChoiceCharacterIds.has(entry.characterId))
   const [selectedContributionId, setSelectedContributionId] = useState('')
   const [selectedFeatureId, setSelectedFeatureId] = useState(ownEligibleFeatures[0]?.featureId ?? '')
   const [replacementValue, setReplacementValue] = useState('')
   const [dmOverrideValue, setDmOverrideValue] = useState(String(interrupt.payload.originalValue))
   const [submitting, setSubmitting] = useState(false)
+  const [pendingChoiceDecision, setPendingChoiceDecision] = useState<'use' | 'decline' | null>(null)
   const isSecretDmRoll = interrupt.payload.visibility === 'dm-only' &&
     interrupt.payload.allowDmOverride === true
 
@@ -51,6 +61,7 @@ export default function D20RollConfirmationOverlay({
   const selectedContribution = contributions.find((entry) => entry.id === effectiveSelectedContributionId)
   const selectedFeature = ownEligibleFeatures.find((entry) => entry.featureId === selectedFeatureId)
   const selectedFeatureAdjusts = selectedFeature?.modifierKind === 'adjust-d20'
+  const selectedFeatureChoiceReroll = selectedFeature?.modifierKind === 'choice-reroll'
   const parsedDmOverride = Number(dmOverrideValue)
   const dmOverrideValid = Number.isInteger(parsedDmOverride) && parsedDmOverride >= 1 && parsedDmOverride <= 20
   const finalValue = isSecretDmRoll && dmOverrideValid
@@ -62,7 +73,8 @@ export default function D20RollConfirmationOverlay({
   const submitContribution = async () => {
     const parsedValue = Number(replacementValue)
     if (!selectedFeature) return
-    if (!selectedFeatureAdjusts && (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 20)) return
+    if (!selectedFeatureAdjusts && !selectedFeatureChoiceReroll &&
+      (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 20)) return
     setSubmitting(true)
     try {
       await onContribute({
@@ -70,8 +82,30 @@ export default function D20RollConfirmationOverlay({
         featureLabel: selectedFeature.featureLabel,
         ...(selectedFeatureAdjusts
           ? { direction: selectedFeature.direction }
+          : selectedFeatureChoiceReroll
+            ? { choiceDecision: 'use' as const }
           : { replacementValue: parsedValue }),
       })
+      if (selectedFeatureChoiceReroll) setPendingChoiceDecision('use')
+    } catch {
+      if (selectedFeatureChoiceReroll) setPendingChoiceDecision(null)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const submitChoiceDecision = async (decision: 'use' | 'decline') => {
+    if (!selectedFeature || !selectedFeatureChoiceReroll) return
+    setSubmitting(true)
+    try {
+      await onContribute({
+        featureId: selectedFeature.featureId,
+        featureLabel: selectedFeature.featureLabel,
+        choiceDecision: decision,
+      })
+      setPendingChoiceDecision(decision)
+    } catch {
+      setPendingChoiceDecision(null)
     } finally {
       setSubmitting(false)
     }
@@ -115,9 +149,13 @@ export default function D20RollConfirmationOverlay({
             {isSecretDmRoll
               ? '暗骰不会向玩家公开。DM 可修正骰面后继续，最终值会写入权威 RollLedger。'
               : isDM
-                ? '只有拥有已声明改骰特性的玩家可以提交结果；DM 可采用一项声明，或保留原始骰值继续。'
+                ? requiredChoiceCharacterIds.size > 0
+                  ? '相关玩家必须明确选择使用或不使用。玩家作出决定前，DM 不能继续本次结算。'
+                  : '只有拥有已声明改骰特性的玩家可以提交结果；DM 可采用一项声明，或保留原始骰值继续。'
                 : ownEligibleFeatures.length > 0
-                  ? '你拥有可改变本次 d20 的特性。若不使用，无需操作，DM 可以直接继续。'
+                  ? ownEligibleFeatures.some((entry) => entry.modifierKind === 'choice-reroll' && entry.decisionRequired)
+                    ? '你拥有可用于本次 d20 的选择式重掷能力。请明确选择“使用能力”或“不使用”；在你决定前结算保持暂停。'
+                    : '你拥有可改变本次 d20 的特性。若不使用，无需操作，DM 可以直接继续。'
                   : '你没有可用于本次 d20 的特性，请等待 DM 继续结算。'}
           </div>
 
@@ -171,12 +209,18 @@ export default function D20RollConfirmationOverlay({
                         <p className="text-xs text-slate-500">
                           {entry.kind === 'adjust-d20'
                             ? `声明${entry.direction === 'add' ? '增加' : '降低'}本次总值；调整骰由 Host 掷`
+                            : entry.kind === 'choice-reroll'
+                              ? entry.decision === 'use'
+                                ? '玩家选择使用；额外 d20 由 Host 投掷并采用有利结果'
+                                : '玩家选择不使用，本次保留原始 d20'
                             : `声明将 d20 替换为 ${entry.replacementValue}`}
                         </p>
                       </div>
                       <span className="text-2xl font-black tabular-nums text-emerald-200">
                         {entry.kind === 'adjust-d20'
                           ? entry.direction === 'add' ? '+' : '−'
+                          : entry.kind === 'choice-reroll'
+                            ? entry.decision === 'use' ? '使用' : '放弃'
                           : entry.replacementValue}
                       </span>
                     </label>
@@ -190,16 +234,22 @@ export default function D20RollConfirmationOverlay({
               )}
               <button
                 type="button"
-                disabled={busy || (isSecretDmRoll && !dmOverrideValid)}
+                disabled={busy || pendingRequiredDecision || (isSecretDmRoll && !dmOverrideValid)}
                 onClick={() => void onContinue(
-                  isSecretDmRoll ? undefined : effectiveSelectedContributionId || undefined,
+                  isSecretDmRoll
+                    ? undefined
+                    : requiredUseContribution?.id || effectiveSelectedContributionId || undefined,
                   isSecretDmRoll ? parsedDmOverride : undefined,
                 )}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-3 font-bold text-white transition hover:bg-violet-400 disabled:cursor-wait disabled:opacity-50"
                 data-testid="d20-roll-continue"
               >
                 <CheckCircle2 className="h-5 w-5" />
-                {busy ? '正在提交…' : `采用 ${finalValue} 并继续结算`}
+                {busy
+                  ? '正在提交…'
+                  : pendingRequiredDecision
+                    ? '等待相关玩家决定是否使用重掷能力'
+                    : `采用 ${finalValue} 并继续结算`}
               </button>
             </div>
           ) : playerCharacter && ownEligibleFeatures.length > 0 ? (
@@ -212,6 +262,10 @@ export default function D20RollConfirmationOverlay({
                   已提交：{ownContribution.featureLabel}，
                   {ownContribution.kind === 'adjust-d20'
                     ? `等待 Host 掷骰并${ownContribution.direction === 'add' ? '增加' : '降低'}本次总值。`
+                    : ownContribution.kind === 'choice-reroll'
+                      ? ownContribution.decision === 'use'
+                        ? '已选择使用，等待 Host 投出额外 d20。'
+                        : '已选择不使用，本次保留原始结果。'
                     : `替换为 ${ownContribution.replacementValue}。`}
                   再次提交会更新本次声明。
                 </div>
@@ -236,6 +290,10 @@ export default function D20RollConfirmationOverlay({
                     Host 掷 d{selectedFeature?.dieSides}，并
                     {selectedFeature?.direction === 'add' ? '增加' : '降低'}总值
                   </div>
+                ) : selectedFeatureChoiceReroll ? (
+                  <div className="rounded-xl border border-violet-400/20 bg-violet-500/8 px-3 py-2.5 text-sm text-violet-100">
+                    使用后由 Host 投出额外 d20；自己的投掷取较高值，针对你的攻击取较低值。
+                  </div>
                 ) : (
                   <label className="space-y-1">
                     <span className="text-xs text-slate-400">替换点数</span>
@@ -250,16 +308,36 @@ export default function D20RollConfirmationOverlay({
                   </label>
                 )}
               </div>
-              <button
-                type="button"
-                disabled={submitting || !selectedFeatureId || (!selectedFeatureAdjusts &&
-                  (Number(replacementValue) < 1 || Number(replacementValue) > 20))}
-                onClick={() => void submitContribution()}
-                className="w-full rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-3 font-semibold text-violet-100 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-                data-testid="d20-roll-contribute"
-              >
-                {submitting ? '正在提交…' : '提交给 DM 审核'}
-              </button>
+              <div className={selectedFeatureChoiceReroll ? 'grid grid-cols-2 gap-3' : ''}>
+                <button
+                  type="button"
+                  disabled={submitting || !selectedFeatureId || (!selectedFeatureAdjusts &&
+                    !selectedFeatureChoiceReroll &&
+                    (Number(replacementValue) < 1 || Number(replacementValue) > 20))}
+                  onClick={() => void submitContribution()}
+                  className="w-full rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-3 font-semibold text-violet-100 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                  data-testid="d20-roll-contribute"
+                >
+                  {submitting
+                    ? '正在提交…'
+                    : selectedFeatureChoiceReroll && pendingChoiceDecision === 'use'
+                      ? '已选择使用，等待 Host'
+                      : selectedFeatureChoiceReroll
+                        ? '使用能力'
+                        : '提交给 DM 审核'}
+                </button>
+                {selectedFeatureChoiceReroll && selectedFeature && (
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => void submitChoiceDecision('decline')}
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 font-semibold text-slate-300 hover:bg-white/[0.08] disabled:opacity-40"
+                    data-testid="d20-roll-decline"
+                  >
+                    {pendingChoiceDecision === 'decline' ? '已选择不使用，等待 Host' : '不使用'}
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-5 text-center text-sm text-slate-400">

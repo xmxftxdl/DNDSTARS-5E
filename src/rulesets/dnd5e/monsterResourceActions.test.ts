@@ -274,7 +274,10 @@ describe('D&D 5e monster resource actions', () => {
           ability: 'wis',
           dc: 14,
           timing: 'on-damage',
-          onDamage: { mode: 'normal' },
+          onDamage: expect.objectContaining({
+            mode: 'normal',
+            sourceFilter: 'source-or-allies',
+          }),
         }),
       }),
       expect.objectContaining({

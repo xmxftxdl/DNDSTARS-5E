@@ -12,6 +12,7 @@ const e2eRootSuffix = process.env.STARS_E2E_PORT_BASE ? `-${e2ePortBase}` : ''
 const sharedRoot = path.join(os.tmpdir(), `stars-app-e2e-shared${e2eRootSuffix}`)
 const reviewRoot = path.join(os.tmpdir(), `stars-app-e2e-plugin-review${e2eRootSuffix}`)
 const dmOnly = process.env.STARS_E2E_DM_ONLY === '1'
+const releaseGate = process.env.STARS_E2E_RELEASE_GATE === '1'
 
 export default defineConfig({
   testDir: './e2e',
@@ -38,7 +39,7 @@ export default defineConfig({
         VITE_SHARED_API_BASES: dmOnly ? `${dmUrl}/api` : sharedApiBases,
       },
     },
-    ...(dmOnly
+    ...(dmOnly || releaseGate
       ? []
       : [
           {
@@ -66,20 +67,22 @@ export default defineConfig({
               VITE_SHARED_API_BASES: sharedApiBases,
             },
           },
-          {
-            command: `node scripts/vite-server.mjs --host 127.0.0.1 --port ${e2ePortBase + 3} --strictPort`,
-            url: reviewUrl,
-            reuseExistingServer: false,
-            timeout: 120_000,
-            env: {
-              STARS_SHARED_ROOT: reviewRoot,
-              STARS_PLUGIN_REVIEW_REQUIRED: 'true',
-              STARS_PLUGIN_ADMIN_ACCOUNT_IDS: '*',
-              VITE_APP_MODE: 'dm',
-              VITE_SHARED_API_BASES: `${reviewUrl}/api`,
-            },
-          },
         ]),
+    ...(dmOnly
+      ? []
+      : [{
+          command: `node scripts/vite-server.mjs --host 127.0.0.1 --port ${e2ePortBase + 3} --strictPort`,
+          url: reviewUrl,
+          reuseExistingServer: false,
+          timeout: 120_000,
+          env: {
+            STARS_SHARED_ROOT: reviewRoot,
+            STARS_PLUGIN_REVIEW_REQUIRED: 'true',
+            STARS_PLUGIN_ADMIN_ACCOUNT_IDS: '*',
+            VITE_APP_MODE: 'dm',
+            VITE_SHARED_API_BASES: `${reviewUrl}/api`,
+          },
+        }]),
   ],
   projects: [
     {

@@ -336,6 +336,7 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
   turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
   monsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
   monsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
+  optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
   ok: true
@@ -370,6 +371,7 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     turnStartGazeResolutions: input.turnStartGazeResolutions,
     nextMonsterRechargeRolls: input.monsterRechargeRolls,
     nextMonsterMechanicRolls: input.monsterMechanicRolls,
+    optionalBonusDice: input.optionalBonusDice,
   }, input.airborneFallDamageRollsByCombatantId)
   if (!result.ok) return { ok: false, reason: 'invalid-action', airborneFalls }
   return {

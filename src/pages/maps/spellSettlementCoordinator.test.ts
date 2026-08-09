@@ -412,8 +412,30 @@ describe('SpellSettlementCoordinator', () => {
     })).toMatchObject({ spellId: 'wall-of-fire', shape: 'rect', widthFeet: 60, heightFeet: 5 })
     expect(areaSpellPresentationForSettlement({
       ...common,
+      spellId: 'wall-of-fire',
+      wallOfFireGeometry: { shape: 'line', angleDegrees: 35, lengthFeet: 30, diameterFeet: 20 },
+    })).toMatchObject({
+      spellId: 'wall-of-fire',
+      shape: 'rect',
+      widthFeet: 30,
+      heightFeet: 5,
+      wallOfFireShape: 'line',
+      wallOfFireAngleDegrees: 35,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'wall-of-fire',
+      wallOfFireGeometry: { shape: 'ring', angleDegrees: 0, lengthFeet: 60, diameterFeet: 10 },
+    })).toMatchObject({ spellId: 'wall-of-fire', shape: 'rect', widthFeet: 10, heightFeet: 5, wallOfFireShape: 'ring' })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
       spellId: 'blade-barrier',
     })).toMatchObject({ spellId: 'blade-barrier', shape: 'rect', widthFeet: 100, heightFeet: 5 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'blade-barrier',
+      wallOfFireGeometry: { shape: 'ring', angleDegrees: 0, lengthFeet: 100, diameterFeet: 45 },
+    })).toMatchObject({ spellId: 'blade-barrier', shape: 'rect', widthFeet: 45, heightFeet: 5, wallOfFireShape: 'ring' })
     expect(areaSpellPresentationForSettlement({
       ...common,
       spellId: 'fireball',

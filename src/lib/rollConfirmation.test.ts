@@ -1,14 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import {
   createD20AdjustmentContribution,
+  createD20ChoiceRerollContribution,
   createD20ReplacementContribution,
   createD20RollConfirmationInterrupt,
+  currentD20RollConfirmations,
+  findCurrentD20RollConfirmation,
   resolvedD20Adjustment,
   resolvedD20Value,
   settleD20RollConfirmation,
 } from './rollConfirmation'
 
 describe('d20 roll confirmation', () => {
+  it('shows only the latest reconnect generation and never revives an older ghost prompt', () => {
+    const first = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', combatId: 'combat-1', rollId: 'retry-1', label: '法术攻击',
+      targetName: '红龙', originalValue: 15, rollerCharacterId: 'wizard', now: 10,
+    })
+    const latest = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', combatId: 'combat-1', rollId: 'retry-2', label: '法术攻击',
+      targetName: '红龙', originalValue: 9, rollerCharacterId: 'wizard', now: 20,
+    })
+
+    expect(currentD20RollConfirmations({ interrupts: [first, latest] }))
+      .toEqual([latest])
+    expect(currentD20RollConfirmations({
+      interrupts: [first, { ...latest, status: 'done' }],
+    })).toEqual([])
+    const reconnectPrototype = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', combatId: 'combat-1', rollId: 'retry-3', label: '法术攻击',
+      targetName: '红龙', originalValue: 4, rollerCharacterId: 'wizard', now: 30,
+    })
+    expect(findCurrentD20RollConfirmation({ interrupts: [first, latest] }, reconnectPrototype))
+      .toEqual(latest)
+  })
+
   it('opens a DM-owned after-roll transaction and keeps the original result by default', () => {
     const interrupt = createD20RollConfirmationInterrupt({
       mapId: 'map-1', combatId: 'combat-1', rollId: 'roll-1', label: '长剑攻击',
@@ -128,5 +154,90 @@ describe('d20 roll confirmation', () => {
       sourceId: 'support-token',
     })
     expect(resolvedD20Adjustment(response)).toEqual(response.adjustment)
+  })
+
+  it('waits for the owning player to explicitly use or decline a choice reroll', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1',
+      rollId: 'lucky-roll',
+      label: '游侠攻击检定',
+      originalValue: 6,
+      rollerCharacterId: 'ranger',
+      kind: 'attack',
+      eligibleModifiers: [{
+        characterId: 'ranger',
+        featureId: 'test.lucky:feat-lucky',
+        featureLabel: '幸运',
+        modifierKind: 'choice-reroll',
+        rerollScope: 'self-roll',
+        resourceCosts: [{ resourceKey: 'test.lucky:luck-points', amount: 1 }],
+        decisionRequired: true,
+      }],
+      now: 10,
+    })
+
+    expect(() => settleD20RollConfirmation(interrupt, undefined, 20))
+      .toThrow('roll-confirmation-player-decision-pending')
+
+    const decline = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id,
+      characterId: 'ranger',
+      characterName: '游侠',
+      featureId: 'test.lucky:feat-lucky',
+      featureLabel: '幸运',
+      decision: 'decline',
+      now: 12,
+    })
+    const declined = settleD20RollConfirmation({ ...interrupt, contributions: [decline] }, undefined, 20)
+    expect(declined.finalValue).toBe(6)
+    expect(declined.choiceReroll).toBeUndefined()
+  })
+
+  it('records the Host extra d20 and selects the favorable value for the owner', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', rollId: 'enemy-attack', label: '食人魔攻击', originalValue: 17,
+      eligibleModifiers: [{
+        characterId: 'wizard', featureId: 'test.lucky:feat-lucky', featureLabel: '幸运',
+        modifierKind: 'choice-reroll', rerollScope: 'attack-against-self',
+        resourceCosts: [{ resourceKey: 'test.lucky:luck-points', amount: 1 }], decisionRequired: true,
+      }],
+      now: 10,
+    })
+    const use = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id, characterId: 'wizard', characterName: '法师',
+      featureId: 'test.lucky:feat-lucky', featureLabel: '幸运', decision: 'use', now: 12,
+    })
+    const response = settleD20RollConfirmation(
+      { ...interrupt, contributions: [use] }, use.id, 20, undefined, undefined, 5,
+    )
+
+    expect(response).toMatchObject({
+      finalValue: 5,
+      acceptedContributionId: use.id,
+      choiceReroll: {
+        originalValue: 17, rerollValue: 5, selectedValue: 5,
+        scope: 'attack-against-self',
+        resourceCosts: [{ resourceKey: 'test.lucky:luck-points', amount: 1 }],
+      },
+    })
+    expect(response.transaction?.rollLedger.entries).toHaveLength(2)
+    expect(response.transaction?.rollLedger.entries[1].dice).toEqual({ sides: 20, values: [5] })
+  })
+
+  it('rejects a forged choice decision that is not in the Host eligibility list', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', rollId: 'forged-choice', label: '攻击', originalValue: 12,
+      eligibleModifiers: [{
+        characterId: 'hero', featureId: 'test.lucky:feat-lucky', featureLabel: '幸运',
+        modifierKind: 'choice-reroll', rerollScope: 'self-roll',
+        resourceCosts: [{ resourceKey: 'test.lucky:luck-points', amount: 1 }], decisionRequired: true,
+      }],
+    })
+    const forged = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id, characterId: 'hero', characterName: '角色',
+      featureId: 'forged:feat', featureLabel: '伪造能力', decision: 'decline',
+    })
+    expect(() => settleD20RollConfirmation({ ...interrupt, contributions: [forged] }))
+      .toThrow('invalid-roll-confirmation-choice-decision')
   })
 })

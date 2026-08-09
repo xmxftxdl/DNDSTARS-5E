@@ -26,6 +26,7 @@ import {
   registeredDnd5ePluginRaces,
 } from './pluginApi'
 import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
+import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
 import { listRegisteredContentDefinitionPackages } from '../../domain/content/contentDefinitionRegistry'
 
@@ -87,6 +88,16 @@ function packageValue(): Dnd5eContentPackageV2 {
           savingThrowBonus: 1,
           damageImmunities: ['poison'],
         },
+        passiveEffects: [{
+          schemaVersion: 1,
+          id: 'damage-reduction',
+          kind: 'damage-reduction',
+          trigger: 'before-damage',
+          amount: 3,
+          damageTypes: ['slashing'],
+          maximumCurrentHitPointPercent: 50,
+          oncePerTurn: true,
+        }],
       }],
       spells: [],
       items: [{
@@ -144,6 +155,81 @@ function character(): Character {
 }
 
 describe('D&D 5e content package V2', () => {
+  it('persists first-class Activity templates and binds them to every owning content definition', () => {
+    const source = packageValue()
+    source.content.activities = [{
+      schemaVersion: 1,
+      id: 'steady-follow-up',
+      name: 'Steady follow-up',
+      activation: { kind: 'bonus-action', cost: 1 },
+      invocation: {
+        kind: 'triggered', event: 'attack-resolved', confirmation: 'actor-choice', retention: 'until-turn-end',
+      },
+      target: { kind: 'creature', relation: 'enemy', count: 1, rangeFeet: 5 },
+      requirements: [
+        { kind: 'event-source', source: 'attack' },
+        { kind: 'weapon-property', property: 'light', present: true },
+        { kind: 'action-economy-available', economy: 'bonus-action' },
+      ],
+      consumption: [{ kind: 'action-economy', economy: 'bonus-action', amount: 1, consumeOn: 'resolve' }],
+      outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [{
+        id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'constant', value: 2 }, damageType: 'slashing',
+      }] }],
+      automation: {
+        schemaVersion: 1, level: 'full', supportedPhases: [
+          'eligibility', 'targeting', 'cost', 'damage', 'interrupt', 'persistence',
+        ], manualPhases: [], limitations: [],
+      },
+      legacySource: { kind: 'feat', id: 'steady' },
+    }]
+
+    const parsed = parseDnd5eContentPackageV2(new TextEncoder().encode(JSON.stringify(source)).buffer)
+    expect(parsed?.content.activities).toHaveLength(1)
+    const projection = dnd5eContentPackageActivityProjectionV1(parsed!)
+    expect(projection.entries).toContainEqual(expect.objectContaining({
+      sourceKind: 'feat', sourceId: 'steady', activityId: 'steady-follow-up', mode: 'adapted',
+    }))
+    const feat = dnd5eContentDefinitionsFromPackageV2(parsed!).find((definition) =>
+      definition.kind === 'feat' && definition.payload && (definition.payload as { id?: string }).id === 'steady')
+    expect(feat?.activities).toMatchObject([{ id: 'steady-follow-up', invocation: { event: 'attack-resolved' } }])
+    expect(feat?.effects).toContainEqual(expect.objectContaining({
+      modifiers: [expect.objectContaining({ kind: 'damage-reduction', damageTypes: ['slashing'], oncePerTurn: true })],
+      triggers: [expect.objectContaining({ event: 'before-damage', decision: 'automatic' })],
+    }))
+  })
+
+  it('projects passive item hooks into the same Effect/Trigger vocabulary', () => {
+    const base = packageValue()
+    const source = { ...base, content: { ...base.content, items: [...base.content.items] } }
+    source.content.items[0] = {
+      ...source.content.items[0]!,
+      resources: [{ id: 'charges', label: 'Charges', maximum: 3, resetOn: 'long-rest' }],
+      headlessEffects: [{
+        schemaVersion: 1, id: 'reroll', kind: 'attack-roll-reroll', resourceId: 'charges', resourceCost: 1,
+        maximumDice: 1, trigger: 'after-attack-roll', appliesTo: 'weapon-attacks',
+      }, {
+        schemaVersion: 1, id: 'bonus', kind: 'on-hit-bonus-damage', trigger: 'after-attack-hit',
+        appliesTo: 'weapon-attacks', damage: { count: 1, sides: 6, bonus: 0 }, damageType: 'fire', oncePerTurn: true,
+      }, {
+        schemaVersion: 1, id: 'guard', kind: 'damage-reduction', trigger: 'before-damage', amount: 2,
+      }, {
+        schemaVersion: 1, id: 'survive', kind: 'death-prevention', trigger: 'before-drop-to-zero', hitPointsAfter: 1,
+      }],
+    }
+    const item = dnd5eContentDefinitionsFromPackageV2(source).find((definition) => definition.kind === 'item') as {
+      effects?: readonly {
+        modifiers?: readonly { kind: string }[]
+        triggers?: readonly { event: string }[]
+      }[]
+    } | undefined
+    expect(item?.effects?.flatMap((effect) => effect.modifiers ?? []).map((modifier) => modifier.kind)).toEqual([
+      'attack-roll-reroll', 'on-hit-bonus-damage', 'damage-reduction', 'death-prevention',
+    ])
+    expect(item?.effects?.flatMap((effect) => effect.triggers ?? []).map((trigger) => trigger.event)).toEqual([
+      'after-attack-roll', 'attack-hit', 'before-damage', 'before-drop-to-zero',
+    ])
+  })
+
   it('projects executable V2 content into the internal Activity catalog without changing the wire schema', () => {
     const source = packageValue()
     source.content.headlessActions = [{
@@ -367,6 +453,10 @@ describe('D&D 5e content package V2', () => {
       summary: DND5E_ROOM_RUNTIME_PROSE_PLACEHOLDER,
       description: DND5E_ROOM_RUNTIME_PROSE_PLACEHOLDER,
       staticModifiers: { initiativeBonus: 2 },
+      passiveEffects: [expect.objectContaining({
+        kind: 'damage-reduction',
+        amount: 3,
+      })],
     })
     expect(projected.assets[0].dataBase64).toBe(ONE_PIXEL_PNG)
   })
@@ -381,6 +471,10 @@ describe('D&D 5e content package V2', () => {
         expect.objectContaining({
           id: 'com.example.content-v2:steady',
           featureId: 'com.example.content-v2:feat-steady',
+          passiveEffects: [expect.objectContaining({
+            kind: 'damage-reduction',
+            amount: 3,
+          })],
         }),
       ])
       const item = registeredDnd5ePluginItems()[0]
@@ -408,6 +502,16 @@ describe('D&D 5e content package V2', () => {
       expect(combatant.damageImmunities).toContain('poison')
       expect(combatant.conditionImmunities).toContain('frightened')
       expect(combatant.savingThrowBonuses.dex).toBe(2)
+      expect(combatant.pluginFeaturePassiveEffects).toEqual([
+        expect.objectContaining({
+          featureId: 'com.example.content-v2:feat-steady',
+          featureName: 'Steady',
+          effect: expect.objectContaining({
+            kind: 'damage-reduction',
+            amount: 3,
+          }),
+        }),
+      ])
     } finally {
       dispose()
     }

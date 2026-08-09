@@ -89,6 +89,49 @@ function initiative(tokens: readonly Token[]) {
 describe('monster area action map authority', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
+  it('accepts a bounded Kraken Lightning Storm subset without requiring every creature in range', () => {
+    const kraken = token({
+      id: 'kraken',
+      label: 'Kraken',
+      poolId: 'srd-5.1:kraken',
+      hp: 472,
+      maxHp: 472,
+    })
+    const heroes = Array.from({ length: 4 }, (_, index) => token({
+      id: `hero-${index + 1}`,
+      label: `Hero ${index + 1}`,
+      type: 'player',
+      characterId: `hero-character-${index + 1}`,
+      x: 75 + index * 50,
+      y: 25,
+    }))
+    const map = battleMap('kraken-lightning-selection', [kraken, ...heroes])
+    const selected = heroes.slice(0, 3)
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: 'kraken-lightning-selection',
+      map,
+      characters: heroes.map((hero) => character(hero.characterId!)),
+      initiativeOrder: initiative([kraken, ...heroes]),
+      actorTokenId: kraken.id,
+      actionId: 'lightning-storm',
+      targetTokenIds: selected.map((hero) => hero.id),
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetTokens.map((target) => target.id))
+      .toEqual(selected.map((hero) => hero.id))
+
+    expect(prepareDnd5eMonsterAreaAction({
+      combatId: 'kraken-lightning-too-many',
+      map,
+      characters: heroes.map((hero) => character(hero.characterId!)),
+      initiativeOrder: initiative([kraken, ...heroes]),
+      actorTokenId: kraken.id,
+      actionId: 'lightning-storm',
+      targetTokenIds: heroes.map((hero) => hero.id),
+    })).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
   it('authoritatively includes hostiles, monster allies, neutral NPCs, and living downed players', () => {
     const dragon = token({
       id: 'dragon',

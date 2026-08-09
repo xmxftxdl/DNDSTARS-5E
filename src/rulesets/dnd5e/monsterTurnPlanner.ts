@@ -33,6 +33,7 @@ import {
 } from '../../lib/mapPathfinding'
 import {
   dnd5eMonsterAreaSavingThrowVariants,
+  dnd5eMonsterRequiredAreaSavingThrowVariantId,
   dnd5eMonsterMapSpeed,
   dnd5eMonsterProficiencyBonus,
   dnd5eMonsterWeaponAttackAbility,
@@ -991,6 +992,25 @@ function plannerTargetMonster(target: Token): Dnd5eMonsterStatBlock | undefined 
   return target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
 }
 
+function plannerTargetMatchesMonsterSpecialCreatureType(
+  target: Token,
+  requiredTypes: readonly ('humanoid' | 'beast')[] | undefined,
+): boolean {
+  if (!requiredTypes || requiredTypes.length === 0) return true
+  const monster = plannerTargetMonster(target)
+  const normalized = monster?.creatureType.trim().toLowerCase()
+  const creatureType = monster
+    ? normalized === 'beast' || normalized?.includes('野兽')
+      ? 'beast'
+      : normalized === 'humanoid' || normalized?.includes('类人')
+        ? 'humanoid'
+        : undefined
+    : target.type === 'player'
+      ? 'humanoid'
+      : undefined
+  return creatureType != null && requiredTypes.includes(creatureType)
+}
+
 const monsterSupportCandidateServices: MonsterSupportCandidateServices = {
   hitPoints: targetHitPoints,
   armorClass: targetArmorClass,
@@ -1622,7 +1642,13 @@ function allocateMonsterActionTargets(input: {
       if (!rule) return false
       if (
         rule.kind === 'saving-throw-condition' &&
-        distanceFeet > rule.rangeFeet
+        (
+          distanceFeet > rule.rangeFeet ||
+          !plannerTargetMatchesMonsterSpecialCreatureType(
+            target,
+            rule.requiredTargetCreatureTypes,
+          )
+        )
       ) return false
       if (
         (
@@ -2186,15 +2212,56 @@ function actionExpectedValue(input: {
                     ? 6
                     : 5
             controlValue += hitProbability * applyProbability *
-              (conditionValue + (effect.modifiers?.preventHealing ? 4 : 0))
+              (conditionValue + (
+                effect.modifiers?.preventHealing ||
+                effect.modifiers?.preventNonmagicalHealing
+                  ? 4
+                  : 0
+              ))
           }
-        } else if (effect.modifiers?.preventHealing) {
+        } else if (
+          effect.modifiers?.preventHealing ||
+          effect.modifiers?.preventNonmagicalHealing
+        ) {
           controlValue += hitProbability * applyProbability * 4
         }
         // Persistent effects generally survive long enough to tick at least
         // once. The modest 1.5-turn horizon rewards them without letting a
         // theoretical indefinite duration dominate immediate tactics.
         return effectSum + periodicDamage * applyProbability * 1.5
+      }
+      if (effect.kind === 'ability-score-reduction') {
+        const averageReduction = effect.reduction.count *
+          (effect.reduction.sides + 1) / 2 + effect.reduction.bonus
+        const targetCombatant = plannerTokenCombatant(target, characters)
+        const remainingScore = targetCombatant.abilities[effect.ability]
+        const lethalWeight = remainingScore <= averageReduction ? 20 : 0
+        return effectSum + averageReduction * 1.5 + lethalWeight
+      }
+      if (effect.kind === 'equipment-corrosion') {
+        // One point of permanent AC loss affects several future attacks. Keep
+        // the horizon bounded so corrosion does not dominate direct damage.
+        return effectSum + effect.armorClassPenalty * 4
+      }
+      if (effect.kind === 'zero-hit-point-outcome') {
+        const hp = targetHitPoints(target, characters)
+        if (weaponDamage < hp.current) return effectSum
+        const conditionValue = effect.conditions.some((entry) =>
+          entry.condition === 'paralyzed' || entry.condition === 'unconscious')
+          ? 12
+          : 6
+        controlValue += hitProbability * conditionValue
+        return effectSum
+      }
+      if (effect.kind === 'saving-throw-instant-death') {
+        const hp = targetHitPoints(target, characters)
+        if (hp.current > effect.maximumCurrentHitPoints) return effectSum
+        const modifier = targetSavingThrowModifier(target, characters, effect.ability)
+        const successProbability = Math.max(
+          0.05,
+          Math.min(0.95, (21 + modifier - effect.dc) / 20),
+        )
+        return effectSum + (1 - successProbability) * Math.max(20, hp.current)
       }
       const modifier = targetSavingThrowModifier(target, characters, effect.ability)
       const successProbability = Math.max(
@@ -2491,7 +2558,7 @@ function monsterAreaFailedSaveOutcomeValue(input: {
         effect.definitionId === `monster-area:${activeEffect.id}`)
     : false
   if (activeEffect && !alreadyHasActiveEffect) {
-    const modifiers = activeEffect.modifiers
+    const modifiers = activeEffect.modifiers ?? {}
     let mechanicalValue = 0
     if ((modifiers.speedMultiplier ?? 1) < 1) {
       mechanicalValue += (1 - (modifiers.speedMultiplier ?? 1)) * 12 *
@@ -2534,6 +2601,8 @@ function bestMonsterAreaPlacement(input: {
   savingThrow: boolean
   targetMode?: Dnd5eMonsterAreaSavingThrowVariant['target']
   minimumHostiles?: number
+  /** Bounded multi-target actions select only the highest-value legal creatures in the volume. */
+  maximumTargets?: number
   characters: readonly Character[]
   canAffectTarget?: (target: Token) => boolean
   /** Monster action eligibility is authoritative; excluded creatures must not be submitted. */
@@ -2674,9 +2743,24 @@ function bestMonsterAreaPlacement(input: {
     const targetModeAffected = input.targetMode === 'all-creatures-except-self'
       ? geometricallyAffected
       : geometricallyAffected.filter((token) => areOpposedCombatTokens(attacker, token))
-    const affected = input.excludeUnaffectableFromTargetIds
+    const eligibleAffected = input.excludeUnaffectableFromTargetIds
       ? targetModeAffected.filter((token) => input.canAffectTarget?.(token) ?? true)
       : targetModeAffected
+    const saveMultiplier = input.savingThrow ? 0.75 : 1
+    const affected = input.maximumTargets == null
+      ? eligibleAffected
+      : [...eligibleAffected]
+          .sort((left, right) => {
+            const targetValue = (token: Token) => {
+              const opposed = areOpposedCombatTokens(attacker, token)
+              const damage = input.expectedDamageForTarget?.(token) ?? averageDamage
+              const control = input.controlValueForTarget?.(token) ?? 0
+              const focusBonus = token.id === focusTarget.id ? 24 : 0
+              return (opposed ? 1 : -1) * (damage * saveMultiplier + control) + focusBonus
+            }
+            return targetValue(right) - targetValue(left) || left.id.localeCompare(right.id)
+          })
+          .slice(0, input.maximumTargets)
     const hostiles = affected.filter((token) =>
       areOpposedCombatTokens(attacker, token) &&
       (input.canAffectTarget?.(token) ?? true))
@@ -2697,7 +2781,6 @@ function bestMonsterAreaPlacement(input: {
       effectiveHostiles.length < (input.minimumHostiles ?? 2) ||
       !effectiveHostiles.some((token) => token.id === focusTarget.id)
     ) continue
-    const saveMultiplier = input.savingThrow ? 0.75 : 1
     const expectedHostileDamage = hostiles.reduce((sum, hostile) =>
       sum + (input.expectedDamageForTarget?.(hostile) ?? averageDamage), 0) * saveMultiplier
     const expectedFriendlyDamage = friendlies.reduce((sum, friendly) =>
@@ -3128,11 +3211,20 @@ function createTacticalCandidates(input: {
       }).length === 0)
   const legalAreaActions = input.canUseAction
     ? legalActions.flatMap(({ action, index }) => action.rule?.kind === 'area-saving-throw'
-      ? dnd5eMonsterAreaSavingThrowVariants(action).map((variant) => ({
-          action,
-          index,
-          rule: variant,
-        }))
+      ? (() => {
+          const requiredVariantId = dnd5eMonsterRequiredAreaSavingThrowVariantId(
+            action,
+            enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current,
+          )
+          return dnd5eMonsterAreaSavingThrowVariants(action)
+            .filter((variant) =>
+              requiredVariantId == null || variant.id === requiredVariantId)
+            .map((variant) => ({
+              action,
+              index,
+              rule: variant,
+            }))
+        })()
       : [])
     : []
   const legalSpells = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
@@ -3292,6 +3384,7 @@ function createTacticalCandidates(input: {
         savingThrow: true,
         targetMode: rule.target,
         minimumHostiles: 1,
+        maximumTargets: rule.maximumTargets,
         characters,
         canAffectTarget: (candidate) => plannerMonsterAreaRuleAllowsTarget({
           map,

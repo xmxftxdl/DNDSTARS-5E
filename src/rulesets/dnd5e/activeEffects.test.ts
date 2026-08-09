@@ -538,6 +538,31 @@ describe('D&D 5e ActiveEffectInstance', () => {
     })
   })
 
+  it('round-trips source-aware on-damage repeat saves', () => {
+    const effect = createDnd5eConditionEffect({
+      id: 'vampire-charm',
+      condition: 'charmed',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'vampire', rulesId: 'vampire:charm' },
+      repeatSave: {
+        ability: 'wis',
+        dc: 17,
+        timing: 'on-damage',
+        onDamage: { mode: 'normal', sourceFilter: 'source-or-allies' },
+        onSuccess: 'remove',
+      },
+    })
+    expect(normalizeDnd5eActiveEffects([effect])).toEqual([effect])
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(normalizeDnd5eActiveEffects([{
+      ...effect,
+      repeatSave: {
+        ...effect.repeatSave!,
+        onDamage: { mode: 'normal', sourceFilter: 'not-a-source-filter' },
+      },
+    }])[0]?.repeatSave).toBeUndefined()
+  })
+
   it('round-trips source-linked grapple relations and skill-based escape checks', () => {
     const relation = {
       schemaVersion: 1,

@@ -298,22 +298,25 @@ describe('structured monster Teleport and Invisibility', () => {
     expect(attacked.state.combatants.imp.concentrating).toBe(false)
   })
 
-  it('ends invisibility on a stable DM-adjudicated ability id and preserves bonus-action economy', () => {
+  it('ends invisibility on a stable structured ability id and preserves bonus-action economy', () => {
     const wisp = combatant('wisp', 20, { statBlockId: 'srd-5.1:will-o-wisp' })
-    const hero = combatant('hero', 10, { position: { x: 10, y: 5 } })
+    const hero = combatant('hero', 10, { currentHp: 0, position: { x: 5, y: 0 } })
     const state = startDnd5eHeadlessCombat('wisp-invisibility', [wisp, hero])
+    state.distanceFeetByCombatantPair = { ['hero\u0000wisp']: 5 }
     const hidden = resolveDnd5eHeadlessAction(state, {
       type: 'monster-special-action', actorId: 'wisp', actionId: 'invisibility',
     })
     expect(hidden.ok).toBe(true)
     if (!hidden.ok) return
     const consumed = resolveDnd5eHeadlessAction(hidden.state, {
-      type: 'monster-adjudicated-action',
+      type: 'monster-special-action',
       actorId: 'wisp',
       actionId: 'consume-life',
-      effects: [],
+      targetId: 'hero',
+      d20: 20,
+      damageRolls: [1, 1, 1],
     })
-    expect(consumed.ok).toBe(true)
+    expect(consumed.ok, consumed.ok ? undefined : consumed.reason).toBe(true)
     if (!consumed.ok) return
     expect(consumed.state.combatants.wisp.conditions).not.toContain('invisible')
     expect(consumed.state.combatants.wisp.concentrating).toBe(false)

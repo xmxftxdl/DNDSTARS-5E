@@ -22,6 +22,7 @@ export type Dnd5eInventoryIconId =
   | 'antitoxin'
   | 'poison'
   | 'healing-potion'
+  | 'spellcasting-focus'
   | 'magic-ring'
   | 'magic-wand'
   | 'magic-staff'
@@ -85,6 +86,18 @@ export type Dnd5eAmmunitionKind = 'arrow' | 'crossbow-bolt' | 'sling-bullet' | '
 
 export type Dnd5eInventoryResourceReset = 'none' | 'short-rest' | 'long-rest' | 'dawn'
 
+export interface Dnd5eInventoryResourceDiceRecovery {
+  kind: 'dice'
+  trigger: 'dawn'
+  dice: { count: number; sides: number; bonus: number }
+}
+
+export interface Dnd5eInventoryLastChargeDestructionRule {
+  trigger: 'spend-last-charge'
+  dieSides: 20
+  destroyOn: number
+}
+
 export const DND5E_INVENTORY_HEADLESS_EFFECT_SCHEMA_VERSION = 1 as const
 
 /** 模板声明每一件物品提供的实例资源；实际当前值只保存在库存实例中。 */
@@ -94,6 +107,8 @@ export interface Dnd5eInventoryResourceDefinition {
   maximum: number
   initial?: number
   resetOn: Dnd5eInventoryResourceReset
+  recovery?: Dnd5eInventoryResourceDiceRecovery
+  lastChargeDestruction?: Dnd5eInventoryLastChargeDestructionRule
 }
 
 export interface Dnd5eInventoryResourceState {
@@ -102,6 +117,8 @@ export interface Dnd5eInventoryResourceState {
   current: number
   maximum: number
   resetOn: Dnd5eInventoryResourceReset
+  recovery?: Dnd5eInventoryResourceDiceRecovery
+  lastChargeDestruction?: Dnd5eInventoryLastChargeDestructionRule
 }
 
 export interface Dnd5eAttackRollRerollEffect {
@@ -136,15 +153,21 @@ export interface Dnd5eOnHitBonusDamageEffect extends Dnd5eInventoryHeadlessEffec
   /** Damage dice are doubled on a critical hit unless explicitly disabled. */
   doubleDiceOnCritical?: boolean
   oncePerTurn?: boolean
+  /** Optional Host-validated creature-type allowlist, for example Dragon Slayer. */
+  targetCreatureTypes?: readonly string[]
 }
 
-export interface Dnd5eDamageReductionEffect extends Dnd5eInventoryHeadlessEffectBase {
+interface Dnd5eDamageReductionEffectBase extends Dnd5eInventoryHeadlessEffectBase {
   kind: 'damage-reduction'
   trigger: 'before-damage'
-  amount: number
   damageTypes?: readonly Dnd5eDamageType[]
   oncePerTurn?: boolean
 }
+
+export type Dnd5eDamageReductionEffect = Dnd5eDamageReductionEffectBase & (
+  | { amount: number; dice?: never }
+  | { amount?: never; dice: { count: number; sides: number; bonus: number } }
+)
 
 export interface Dnd5eDeathPreventionEffect extends Dnd5eInventoryHeadlessEffectBase {
   kind: 'death-prevention'
@@ -196,6 +219,26 @@ export type Dnd5eInventoryUseEffect =
       amount: number
       selection: 'selected-expended-slot'
     }
+  | {
+      /**
+       * Versioned, declarative item spell source. The client may only submit
+       * the owning instance id; the Host resolves and revalidates every field
+       * below from the authoritative inventory snapshot.
+       */
+      kind: 'spell-cast'
+      schemaVersion: 1
+      spellId: string
+      castAtLevel: number
+      /** Item text may define a fixed save DC or spell attack bonus. */
+      spellSaveDc?: number
+      spellAttackBonus?: number
+      /** Use the wielder's best available spellcasting ability when the item text says so. */
+      useCharacterSpellcasting?: boolean
+      /** Magic items normally waive components unless their text says otherwise. */
+      requiresComponents?: boolean
+      /** Optional restriction imposed by the item in addition to the spell's normal targeting. */
+      targeting?: 'spell-default' | 'self-only'
+    }
 
 export type Dnd5eInventoryTargeting =
   | {
@@ -210,6 +253,17 @@ export type Dnd5eInventoryTargeting =
       rangeFeet: number
       includeSelf?: boolean
     }
+
+export interface Dnd5eInventoryUseAction {
+  id: string
+  label: string
+  economy: 'action' | 'bonusAction' | 'none'
+  consumeQuantity: number
+  resourceCost?: { resourceId: string; amount: number }
+  targeting?: Dnd5eInventoryTargeting
+  chargesPerItem?: number
+  effect: Dnd5eInventoryUseEffect
+}
 
 export interface Dnd5eInventoryItemTemplate {
   /** 稳定、可由规则包命名空间扩展的模板 ID。 */
@@ -247,6 +301,8 @@ export interface Dnd5eInventoryItemTemplate {
     chargesPerItem?: number
     effect: Dnd5eInventoryUseEffect
   }
+  /** Multiple Host-validated actions may spend one shared instance resource. */
+  useActions?: readonly Dnd5eInventoryUseAction[]
   source: {
     book: 'SRD 5.1' | string
     license: 'CC BY 4.0' | string
@@ -266,6 +322,11 @@ export interface Dnd5eInventoryEntry {
   /** schema V1 迁移字段；V2 运行时不会再写入。 */
   remainingCharges?: number
   equippedSlot?: EquipmentSlot
+  /** Instance-bound wear retained independently from the immutable item template. */
+  condition?: {
+    armorClassPenalty?: number
+    destroyed?: boolean
+  }
   /** 同调只属于具体实例；转交、丢弃或失去该实例时不会跟随模板。 */
   attuned?: boolean
   /** 角色在下一次短休中准备与此物品同调；每次短休至多完成一件。 */
@@ -365,6 +426,7 @@ export type Dnd5eInventoryMutationFailure =
   | 'container-cycle'
   | 'container-capacity'
   | 'item-unidentified'
+  | 'item-inactive'
   | 'not-magic-item'
   | 'ammunition-unavailable'
   | 'invalid-receipt'

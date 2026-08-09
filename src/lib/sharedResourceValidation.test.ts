@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { validateAndMigrateSharedResource } from './sharedResourceValidation'
 import { createDnd5eConditionEffect } from '../rulesets/dnd5e/activeEffects'
+import {
+  createD20ChoiceRerollContribution,
+  createD20RollConfirmationInterrupt,
+} from './rollConfirmation'
 
 describe('shared resource runtime validation', () => {
   it('covers every current shared envelope and allows future plugin objects', () => {
@@ -373,5 +377,50 @@ describe('shared resource runtime validation', () => {
       ],
     }
     expect(validateAndMigrateSharedResource('combat-interrupts', duplicate).status).toBe('invalid')
+  })
+
+  it('accepts choice-reroll decisions and rejects malformed decisions', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map',
+      combatId: 'combat',
+      rollId: 'attack-roll',
+      label: 'Spell attack',
+      targetName: 'Target',
+      originalValue: 15,
+      rollerCharacterId: 'wizard',
+      eligibleModifiers: [{
+        characterId: 'wizard',
+        featureId: 'dnd5e-core-inspiration',
+        featureLabel: 'Inspiration',
+        modifierKind: 'choice-reroll',
+        rerollScope: 'self-roll',
+        resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }],
+        decisionRequired: true,
+      }],
+      now: 1,
+    })
+    const contribution = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id,
+      characterId: 'wizard',
+      characterName: 'Wizard',
+      featureId: 'dnd5e-core-inspiration',
+      featureLabel: 'Inspiration',
+      decision: 'decline',
+      now: 2,
+    })
+    const envelope = {
+      mapId: 'map',
+      interrupts: [{ ...interrupt, contributions: [contribution], updatedAt: 2 }],
+      updatedAt: 2,
+    }
+
+    expect(validateAndMigrateSharedResource('combat-interrupts', envelope).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('combat-interrupts', {
+      ...envelope,
+      interrupts: [{
+        ...envelope.interrupts[0],
+        contributions: [{ ...contribution, decision: 'later' }],
+      }],
+    }).status).toBe('invalid')
   })
 })

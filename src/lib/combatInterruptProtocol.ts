@@ -266,10 +266,13 @@ export type RollConfirmationInterruptPayload = Record<string, unknown> & {
     characterId: string
     featureId: string
     featureLabel: string
-    modifierKind?: 'replace-d20' | 'adjust-d20'
+    modifierKind?: 'replace-d20' | 'adjust-d20' | 'choice-reroll'
     sourceTokenId?: string
     dieSides?: number
     direction?: 'add' | 'subtract'
+    rerollScope?: 'self-roll' | 'attack-against-self'
+    resourceCosts?: Array<{ resourceKey: string; amount: number }>
+    decisionRequired?: boolean
   }>
   allowDmOverride?: boolean
   transaction: CombatTransaction
@@ -284,6 +287,15 @@ export type RollConfirmationInterruptResponse = Record<string, unknown> & {
     featureId: string
     direction: 'add' | 'subtract'
     roll: number
+  }
+  choiceReroll?: {
+    characterId: string
+    featureId: string
+    resourceCosts: Array<{ resourceKey: string; amount: number }>
+    scope: 'self-roll' | 'attack-against-self'
+    originalValue: number
+    rerollValue: number
+    selectedValue: number
   }
   dmOverrideApplied?: boolean
   transaction?: CombatTransaction

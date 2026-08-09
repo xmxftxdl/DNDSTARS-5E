@@ -1,7 +1,5 @@
-import { useState } from 'react'
 import { Check, CircleGauge, Dices, GraduationCap, Shield, Sparkles } from 'lucide-react'
 import { ABILITIES, SKILLS } from '../../lib/dnd'
-import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
 import {
   dnd5eAllClassChoiceGroups,
   dnd5eAvailableCombatSpells,
@@ -31,9 +29,6 @@ import {
   dnd5eMonsterSpeedText,
   dnd5eWarlockMysticArcanumOptions,
   getDnd5eSrdCombatSpell,
-  dnd5eSpellSlotRecoveryFeature,
-  dnd5eSpellSlotRecoveryLimit,
-  applyDnd5eSpellSlotRecovery,
   applyDnd5eEldritchMaster,
   dnd5eWildShapeDurationHours,
   DND5E_WILD_SHAPE_KNOWN_FORMS_KEY,
@@ -46,6 +41,10 @@ import {
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
+import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
+import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
+import ClassResourceSummary from './ClassResourceSummary'
+import Dnd5eSpellSlotRecoverySummary from './Dnd5eSpellSlotRecoverySummary'
 
 interface Dnd5eClassProgressionPanelProps {
   character: Character
@@ -81,12 +80,6 @@ const MULTICLASS_PROFICIENCIES: Partial<Record<Dnd5eClassId, { armor: string; we
   sorcerer: { armor: '无额外护甲熟练', weapons: '无额外武器熟练' },
   warlock: { armor: '轻甲', weapons: '简易武器' },
   wizard: { armor: '无额外护甲熟练', weapons: '无额外武器熟练' },
-}
-
-function resetLabel(reset: 'combat' | 'short-rest' | 'long-rest'): string {
-  if (reset === 'short-rest') return '短休或长休恢复'
-  if (reset === 'long-rest') return '长休恢复'
-  return '战斗开始时恢复'
 }
 
 export default function Dnd5eClassProgressionPanel({
@@ -141,12 +134,6 @@ export default function Dnd5eClassProgressionPanel({
     )
   const subclassLocked = lockedChoiceKeys.has(`${definition.id}:subclass`)
   const choiceLocked = (key: string) => lockedChoiceKeys.has(`${definition.id}:class:${key}`)
-  const resources = classResourceDefinitions(character)
-    .map((resourceDefinition) => ({
-      definition: resourceDefinition,
-      state: getClassResource(character, resourceDefinition.key),
-    }))
-    .filter((entry) => entry.state)
   const subclassSpellLists = selectedSubclass === definition.subclass.id
     ? (definition.subclass.spellLists ?? []).filter((list) => !list.choiceOptionId || (stored.selections?.['land-terrain'] ?? []).includes(list.choiceOptionId))
     : []
@@ -540,26 +527,19 @@ export default function Dnd5eClassProgressionPanel({
         </div>
       })()}
 
-      <Dnd5eRestFeatureControls character={character} onChange={onChange} />
+      <Dnd5eSpellSlotRecoverySummary character={character} />
+      <Dnd5eEldritchMasterControl character={character} onChange={onChange} />
 
-      {(resources.length > 0 || extraMetrics.length > 0) && (
+      {extraMetrics.length > 0 && (
         <div className="mt-4 rounded-xl border border-white/10 bg-void-900/40 p-4">
-          <h4 className="text-sm font-semibold text-slate-200">当前职业资源</h4>
+          <h4 className="text-sm font-semibold text-slate-200">当前职业数值</h4>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {extraMetrics.map((metric) => <InfoBlock key={metric.label} title={metric.label} text={metric.value} />)}
-            {resources.map(({ definition: resourceDefinition, state }) => {
-              const unlimited = resourceDefinition.unlimited?.(character) ?? false
-              return (
-                <InfoBlock
-                  key={resourceDefinition.key}
-                  title={resourceDefinition.label}
-                  text={`${unlimited ? '∞' : `${state!.current}/${state!.max}`} · ${resetLabel(resourceDefinition.resetOn)}`}
-                />
-              )
-            })}
           </div>
         </div>
       )}
+
+      <ClassResourceSummary character={character} />
 
       {groups.map((group) => {
         const selected = [...new Set(stored.selections?.[group.id] ?? [])]
@@ -615,12 +595,23 @@ export default function Dnd5eClassProgressionPanel({
                 </div>
                 <div className="mt-2 space-y-2">
                   {features.map((feature) => (
-                    <div key={feature.id}>
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                        {feature.name}
-                        {feature.source === 'subclass' && <span className="rounded bg-arcane-500/10 px-1.5 py-0.5 text-[9px] text-arcane-300">子职</span>}
+                    <div key={feature.id} className="flex items-start gap-3">
+                      <Dnd5eActionIcon
+                        spec={dnd5eClassFeatureActionIcon({
+                          id: feature.id,
+                          name: feature.name,
+                          classId: definition.id,
+                        })}
+                        className="h-12 w-12 shrink-0"
+                        level={entry.level}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                          {feature.name}
+                          {feature.source === 'subclass' && <span className="rounded bg-arcane-500/10 px-1.5 py-0.5 text-[9px] text-arcane-300">子职</span>}
+                        </div>
+                        <p className="mt-0.5 text-xs leading-5 text-slate-500">{feature.description}</p>
                       </div>
-                      <p className="mt-0.5 text-xs leading-5 text-slate-500">{feature.description}</p>
                     </div>
                   ))}
                 </div>
@@ -633,55 +624,18 @@ export default function Dnd5eClassProgressionPanel({
   )
 }
 
-function Dnd5eRestFeatureControls({
+function Dnd5eEldritchMasterControl({
   character,
   onChange,
 }: {
   character: Character
   onChange: (patch: Partial<Character>) => void
 }) {
-  const [draft, setDraft] = useState<{ characterId: string; amounts: Record<number, number> }>({
-    characterId: character.id,
-    amounts: {},
-  })
-  const recoveryFeature = dnd5eSpellSlotRecoveryFeature(character)
-  const recoveryResourceKey = recoveryFeature === 'arcane-recovery'
-    ? 'dnd5e-arcane-recovery'
-    : recoveryFeature === 'natural-recovery'
-      ? 'dnd5e-natural-recovery'
-      : undefined
-  const recoveryResource = recoveryResourceKey ? character.classResources?.[recoveryResourceKey] : undefined
-  const budget = dnd5eSpellSlotRecoveryLimit(character)
-  const amounts = draft.characterId === character.id ? draft.amounts : {}
-  const slotOptions = Array.from({ length: 5 }, (_, index) => {
-    const level = index + 1
-    const slot = character.classResources?.[`dnd5e-spell-slot-${level}`]
-    return slot ? { level, current: slot.current, max: slot.max, missing: Math.max(0, slot.max - slot.current) } : undefined
-  }).filter((entry): entry is NonNullable<typeof entry> => !!entry && entry.missing > 0)
-  const plannedLevels = Object.entries(amounts).reduce(
-    (total, [level, amount]) => total + Number(level) * Math.max(0, amount),
-    0,
-  )
   const eldritchMaster = character.rulesetId === 'dnd5e-2014-srd-5.1' && character.charClass === '邪术师' && character.level >= 20
   const eldritchResource = character.classResources?.['dnd5e-eldritch-master']
   const pactSlots = character.classResources?.['dnd5e-pact-slot']
 
-  if (!recoveryFeature && !eldritchMaster) return null
-
-  const setAmount = (level: number, amount: number) => {
-    const current = draft.characterId === character.id ? draft.amounts : {}
-    setDraft({ characterId: character.id, amounts: { ...current, [level]: amount } })
-  }
-
-  const recoverSlots = () => {
-    const allocations = Object.entries(amounts)
-      .map(([level, amount]) => ({ level: Number(level), amount }))
-      .filter((allocation) => allocation.amount > 0)
-    const result = applyDnd5eSpellSlotRecovery(character, allocations)
-    if (!result.ok) return
-    onChange({ classResources: result.character.classResources })
-    setDraft({ characterId: character.id, amounts: {} })
-  }
+  if (!eldritchMaster) return null
 
   const recoverPactSlots = () => {
     const result = applyDnd5eEldritchMaster(character)
@@ -691,58 +645,23 @@ function Dnd5eRestFeatureControls({
 
   return (
     <div className="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-4">
-      <h4 className="text-sm font-semibold text-cyan-100">短休与每日恢复特性</h4>
-      {recoveryFeature && (
-        <div className="mt-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold text-slate-200">{recoveryFeature === 'arcane-recovery' ? '奥术回想' : '自然恢复'}</p>
-              <p className="mt-1 text-[11px] text-slate-500">完成一次短休后，恢复总环级不超过 {budget} 的法术位；不能恢复 6 环或更高法术位。每天一次。</p>
-            </div>
-            <span className="text-xs text-cyan-100">已分配 {plannedLevels}/{budget} 环</span>
-          </div>
-          {slotOptions.length > 0 ? (
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-              {slotOptions.map((slot) => {
-                const maximum = Math.min(slot.missing, Math.floor(budget / slot.level))
-                return <label key={slot.level} className="rounded-lg border border-white/8 bg-black/10 px-3 py-2">
-                  <span className="block text-[11px] font-semibold text-slate-300">{slot.level}环 · {slot.current}/{slot.max}</span>
-                  <select
-                    value={amounts[slot.level] ?? 0}
-                    disabled={(recoveryResource?.current ?? 0) < 1}
-                    onChange={(event) => setAmount(slot.level, Number(event.target.value))}
-                    className="mt-1 w-full rounded border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-200"
-                  >
-                    {Array.from({ length: maximum + 1 }, (_, amount) => <option key={amount} value={amount}>恢复 {amount} 个</option>)}
-                  </select>
-                </label>
-              })}
-            </div>
-          ) : <p className="mt-2 text-xs text-slate-500">1至5环法术位均已充满。</p>}
-          <button
-            type="button"
-            disabled={(recoveryResource?.current ?? 0) < 1 || plannedLevels < 1 || plannedLevels > budget}
-            onClick={recoverSlots}
-            className="mt-3 rounded-lg bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            确认恢复法术位
-          </button>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-cyan-100">魔能宗师</h4>
+          <p className="mt-1 text-[11px] leading-5 text-slate-500">花费 1 分钟恳求宗主，恢复所有已消耗的契约法术位；每日可使用 1 次，完成长休后恢复。</p>
         </div>
-      )}
-      {eldritchMaster && (
-        <div className={recoveryFeature ? 'mt-4 border-t border-cyan-300/10 pt-4' : 'mt-3'}>
-          <p className="text-xs font-semibold text-slate-200">魔能宗师</p>
-          <p className="mt-1 text-[11px] text-slate-500">花费 1 分钟恳求宗主，恢复所有已消耗的契约法术位；每次长休一次。</p>
-          <button
-            type="button"
-            disabled={(eldritchResource?.current ?? 0) < 1 || !pactSlots || pactSlots.current >= pactSlots.max}
-            onClick={recoverPactSlots}
-            className="mt-3 rounded-lg bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            恢复全部契约位（{pactSlots?.current ?? 0}/{pactSlots?.max ?? 0}）
-          </button>
-        </div>
-      )}
+        <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
+          当前 {eldritchResource?.current ?? 0}/{eldritchResource?.max ?? 1}
+        </span>
+      </div>
+      <button
+        type="button"
+        disabled={(eldritchResource?.current ?? 0) < 1 || !pactSlots || pactSlots.current >= pactSlots.max}
+        onClick={recoverPactSlots}
+        className="mt-3 rounded-lg bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        恢复全部契约位（{pactSlots?.current ?? 0}/{pactSlots?.max ?? 0}）
+      </button>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BadgeDollarSign, ChevronDown, Download, FolderOpen, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { BadgeDollarSign, ChevronDown, Download, FolderOpen, Plus, Save, Trash2, Upload, X } from 'lucide-react'
 import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   buildDnd5eCustomRulesContentPackageV2,
@@ -12,6 +13,7 @@ import {
   dnd5eCustomRulesPluginFileName,
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomHeadlessActionDraft,
+  type Dnd5eActivityDefinitionV1,
   type Dnd5eCustomRulesPluginDraft,
   type Dnd5eContentPackageV2,
   type Dnd5eCantripScalingStep,
@@ -58,11 +60,17 @@ import {
   type Dnd5eCustomSpellRangeShape,
 } from './dnd5eCustomSpellRangeModel'
 import {
+  buildDnd5eSpellIconPrompt,
   dnd5eSpellIconAssetDataUrl,
   dnd5eSpellIconAssetFromFile,
+  dnd5eSpellIconAssetFromGeneratedDataUrl,
+  dnd5eSpellPreviewClassId,
   dnd5eSpellWorkshopHeadlessReady,
   dnd5eSpellWorkshopHeadlessStatus,
 } from './dnd5eSpellWorkshopModel'
+import AiImageGenerationButton from '../AiImageGenerationButton'
+import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
+import { dnd5eSpellActionIcon, type Dnd5eActionIconSpec } from '../../lib/dnd5eActionIcons'
 
 interface RaceDraft {
   id: string
@@ -118,6 +126,11 @@ interface FeatureDraft {
 interface FeatDraft extends FeatureDraft {
   prerequisiteAbilities: Record<AbilityKey, number>
   prerequisiteRaceIds: string
+  d20ChoiceRerollEnabled: boolean
+  d20ChoiceRerollRollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
+  d20ChoiceRerollScopes: Array<'self-roll' | 'attack-against-self'>
+  d20ChoiceRerollUses: number
+  d20ChoiceRerollResetOn: 'short-rest' | 'long-rest'
   sourceFeatDefinition?: Dnd5ePluginFeatDefinition
 }
 
@@ -150,6 +163,12 @@ interface PersistentAreaTriggerEditorDraft {
 
 interface HeadlessEffectEditorDraft {
   enabled: boolean
+  executionMode: 'active' | 'passive-damage-reduction'
+  damageReductionAmount: number
+  damageReductionDamageTypes: Dnd5eDamageType[]
+  damageReductionMinimumIncomingDamage: number
+  damageReductionMaximumCurrentHitPointPercent: number
+  damageReductionOncePerTurn: boolean
   actionLabel: string
   economy: 'action' | 'bonusAction' | 'reaction' | 'none'
   targetingKind: 'self' | 'single-creature' | 'area'
@@ -219,6 +238,7 @@ interface SpellDraft {
   rangeWidthFeet: number
   rangeHeightFeet: number
   rangeRotatable: boolean
+  rangeAdjustable: boolean
   verbal: boolean
   somatic: boolean
   material: boolean
@@ -260,6 +280,8 @@ interface ItemDraft {
   reachFeet: number
   rangeNormal: number
   rangeLong: number
+  spellcastingFocusEnabled: boolean
+  spellcastingFocusClassId: string
   armorCategory: 'light' | 'medium' | 'heavy'
   baseArmorClass: number
   dexterityBonus: 'full' | 'max-2' | 'none'
@@ -282,8 +304,13 @@ interface ItemDraft {
   onHitBonusDamageBonus: number
   onHitBonusDamageType: 'inherit' | Dnd5eDamageType
   onHitBonusDamageOncePerTurn: boolean
+  onHitBonusDamageTargetCreatureTypes: string
   damageReductionEnabled: boolean
+  damageReductionMode: 'fixed' | 'dice'
   damageReductionAmount: number
+  damageReductionDiceCount: number
+  damageReductionDiceSides: number
+  damageReductionDiceBonus: number
   damageReductionOncePerTurn: boolean
   deathPreventionEnabled: boolean
   deathPreventionHitPoints: number
@@ -292,6 +319,16 @@ interface ItemDraft {
   spellSlotRecoveryMaximumLevel: number
   spellSlotRecoveryAmount: number
   spellSlotRecoveryEconomy: 'action' | 'bonusAction' | 'none'
+  spellCastEnabled: boolean
+  spellCastSpellId: string
+  spellCastLevel: number
+  spellCastEconomy: 'action' | 'bonusAction' | 'none'
+  spellCastUsesSaveDc: boolean
+  spellCastSaveDc: number
+  spellCastUsesAttackBonus: boolean
+  spellCastAttackBonus: number
+  spellCastRequiresComponents: boolean
+  spellCastTargetSelfOnly: boolean
   sourceDefinition?: Dnd5ePluginItemDefinition
 }
 
@@ -366,6 +403,7 @@ interface SavedBuilderDraft {
   monsters: Dnd5eMonsterStatBlock[]
   assets?: Dnd5ePluginImageAssetDefinition[]
   importedHeadlessActions?: Dnd5eCustomHeadlessActionDraft[]
+  importedActivities?: Dnd5eActivityDefinitionV1[]
 }
 
 const DRAFT_STORAGE_KEY = 'dndstars5e:custom-rules-workshop:v1'
@@ -408,7 +446,7 @@ function builderDraftHasContent(saved: SavedBuilderDraft, defaults: SavedBuilder
     saved.feats.length > 0 || saved.spells.length > 0 || saved.items.length > 0 ||
     saved.methods.length > 0 || saved.subclasses.length > 0 || saved.classes.length > 0 ||
     saved.monsters.length > 0 || (saved.assets?.length ?? 0) > 0 ||
-    (saved.importedHeadlessActions?.length ?? 0) > 0 ||
+    (saved.importedHeadlessActions?.length ?? 0) > 0 || (saved.importedActivities?.length ?? 0) > 0 ||
     JSON.stringify(saved.metadata) !== JSON.stringify(defaults)
 }
 const PLUGIN_DISTRIBUTION_POLICIES = [
@@ -557,12 +595,23 @@ function newFeat(index: number): FeatDraft {
     summary: '由 DM 提供的自定义专长。',
     prerequisiteAbilities: emptyBonuses(),
     prerequisiteRaceIds: '',
+    d20ChoiceRerollEnabled: false,
+    d20ChoiceRerollRollKinds: ['attack', 'ability-check', 'saving-throw'],
+    d20ChoiceRerollScopes: ['self-roll', 'attack-against-self'],
+    d20ChoiceRerollUses: 3,
+    d20ChoiceRerollResetOn: 'long-rest',
   }
 }
 
 function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
   return {
       enabled: false,
+      executionMode: 'active',
+      damageReductionAmount: 3,
+      damageReductionDamageTypes: [],
+      damageReductionMinimumIncomingDamage: 0,
+      damageReductionMaximumCurrentHitPointPercent: 100,
+      damageReductionOncePerTurn: false,
       actionLabel: '使用特性', economy: 'action', targetingKind: 'single-creature',
       relation: 'enemy', includeSelf: false, rangeFeet: 60,
       areaShape: 'circle', areaRadiusFeet: 10, areaWidthFeet: 10, areaHeightFeet: 10,
@@ -616,6 +665,9 @@ function restoreHeadlessEffectDraft(value: Partial<HeadlessEffectEditorDraft> | 
   return {
     ...fallback,
     ...value,
+    damageReductionDamageTypes: Array.isArray(value?.damageReductionDamageTypes)
+      ? [...new Set(value.damageReductionDamageTypes)]
+      : [],
     // Drafts saved before vertical authoring must retain their old infinite-column behavior.
     persistentAreaVerticalMode: value?.persistentAreaVerticalMode ?? 'legacy',
     persistentAreaTriggers: Array.isArray(value?.persistentAreaTriggers)
@@ -663,7 +715,7 @@ function newSpell(index: number): SpellDraft {
     id: `custom-spell-${index}`, name: `自定义法术 ${index}`, englishName: '', level: 1,
     school: 'evocation', classes: ['wizard'], ritual: false,
     castingTimeUnit: 'action', castingTimeValue: 1, reactionTrigger: '', rangeType: 'distance', rangeFeet: 60,
-    rangeShape: 'none', rangeSizeFeet: 5, rangeWidthFeet: 60, rangeHeightFeet: 5, rangeRotatable: true,
+    rangeShape: 'none', rangeSizeFeet: 5, rangeWidthFeet: 60, rangeHeightFeet: 5, rangeRotatable: true, rangeAdjustable: false,
     verbal: true, somatic: true, material: false, materialText: '',
     durationType: 'instantaneous', durationValue: 1, durationUnit: 'round', concentration: false,
     description: '', higherLevels: '', resolution: 'spell-attack', saveAbility: 'dex', saveOnSuccess: 'half',
@@ -683,6 +735,7 @@ function newItem(index: number): ItemDraft {
     kind: 'weapon', slot: 'mainWeapon', weaponMode: 'melee', weaponCategory: 'martial',
     attackAbility: 'str', damageCount: 1, damageSides: 8, damageType: 'slashing',
     reachFeet: 5, rangeNormal: 20, rangeLong: 60,
+    spellcastingFocusEnabled: false, spellcastingFocusClassId: 'wizard',
     armorCategory: 'light', baseArmorClass: 11, dexterityBonus: 'full', shieldBonus: 2,
     weaponAttackBonus: 0, weaponDamageBonus: 0, armorClassBonus: 0,
     savingThrowBonus: 0, speedBonusFeet: 0,
@@ -691,10 +744,17 @@ function newItem(index: number): ItemDraft {
     headlessEffectsUseCharges: true,
     onHitBonusDamageEnabled: false, onHitBonusDamageCount: 1, onHitBonusDamageSides: 6,
     onHitBonusDamageBonus: 0, onHitBonusDamageType: 'inherit', onHitBonusDamageOncePerTurn: false,
-    damageReductionEnabled: false, damageReductionAmount: 1, damageReductionOncePerTurn: false,
+    onHitBonusDamageTargetCreatureTypes: '',
+    damageReductionEnabled: false, damageReductionMode: 'dice', damageReductionAmount: 1,
+    damageReductionDiceCount: 1, damageReductionDiceSides: 4, damageReductionDiceBonus: 0,
+    damageReductionOncePerTurn: false,
     deathPreventionEnabled: false, deathPreventionHitPoints: 1, deathPreventionMassiveDamage: false,
     spellSlotRecoveryEnabled: false, spellSlotRecoveryMaximumLevel: 3, spellSlotRecoveryAmount: 1,
     spellSlotRecoveryEconomy: 'action',
+    spellCastEnabled: false, spellCastSpellId: '', spellCastLevel: 1,
+    spellCastEconomy: 'action', spellCastUsesSaveDc: false, spellCastSaveDc: 13,
+    spellCastUsesAttackBonus: false, spellCastAttackBonus: 5,
+    spellCastRequiresComponents: false, spellCastTargetSelfOnly: false,
   }
 }
 
@@ -732,6 +792,7 @@ function importedHeadlessEffectDraft(
 ): HeadlessEffectEditorDraft {
   const fallback = newHeadlessEffectDraft()
   const action = definition.action
+  const passiveDamageReduction = definition.passiveEffects?.find((effect) => effect.kind === 'damage-reduction')
   const damage = linkedAction?.effects.find((effect) => effect.kind === 'damage')
   const healing = linkedAction?.effects.find((effect) => effect.kind === 'healing')
   const condition = linkedAction?.effects.find((effect) => effect.kind === 'condition')
@@ -745,7 +806,13 @@ function importedHeadlessEffectDraft(
   const editableConditionExpiration = condition?.duration.expiresAt
   return {
     ...fallback,
-    enabled: !!action,
+    enabled: !!action || !!passiveDamageReduction,
+    executionMode: !action && passiveDamageReduction ? 'passive-damage-reduction' : 'active',
+    damageReductionAmount: passiveDamageReduction?.amount ?? fallback.damageReductionAmount,
+    damageReductionDamageTypes: [...(passiveDamageReduction?.damageTypes ?? [])],
+    damageReductionMinimumIncomingDamage: passiveDamageReduction?.minimumIncomingDamage ?? 0,
+    damageReductionMaximumCurrentHitPointPercent: passiveDamageReduction?.maximumCurrentHitPointPercent ?? 100,
+    damageReductionOncePerTurn: passiveDamageReduction?.oncePerTurn ?? false,
     actionLabel: action?.label ?? definition.name,
     economy: action?.economy ?? fallback.economy,
     targetingKind: targeting?.kind ?? fallback.targetingKind,
@@ -883,11 +950,27 @@ function importedFeatDraft(
   headlessActions: readonly Dnd5eCustomHeadlessActionDraft[],
 ): FeatDraft {
   const feature = importedFeatureDraft(definition, headlessActions)
+  const choiceRerollMechanic = definition.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll'
+    ? definition.declarativeAbility.mechanic
+    : undefined
+  const choiceRerollResourceId = definition.declarativeAbility?.cost?.resources?.[0]?.resourceId
+  const choiceRerollResource = choiceRerollResourceId
+    ? definition.resources?.find((resource) => resource.id === choiceRerollResourceId)
+    : undefined
   return {
     ...feature,
     prerequisiteAbilities: { ...emptyBonuses(), ...(definition.prerequisite?.abilityScores ?? {}) },
     prerequisiteRaceIds: (definition.prerequisite?.raceIds ?? []).join(', '),
     minimumLevel: definition.prerequisite?.minimumLevel ?? feature.minimumLevel,
+    d20ChoiceRerollEnabled: Boolean(choiceRerollMechanic),
+    d20ChoiceRerollRollKinds: choiceRerollMechanic
+      ? [...choiceRerollMechanic.rollKinds]
+      : ['attack', 'ability-check', 'saving-throw'],
+    d20ChoiceRerollScopes: choiceRerollMechanic
+      ? [...choiceRerollMechanic.scopes]
+      : ['self-roll', 'attack-against-self'],
+    d20ChoiceRerollUses: choiceRerollResource?.maximum ?? 3,
+    d20ChoiceRerollResetOn: choiceRerollResource?.resetOn === 'short-rest' ? 'short-rest' : 'long-rest',
     sourceFeatDefinition: structuredClone(definition),
   }
 }
@@ -992,6 +1075,7 @@ function importedSpellDraft(
     rangeWidthFeet: definition.range.widthFeet ?? fallback.rangeWidthFeet,
     rangeHeightFeet: definition.range.heightFeet ?? fallback.rangeHeightFeet,
     rangeRotatable: definition.range.rotatable ?? fallback.rangeRotatable,
+    rangeAdjustable: definition.range.adjustable ?? fallback.rangeAdjustable,
     verbal: definition.components.verbal,
     somatic: definition.components.somatic,
     material: definition.components.material,
@@ -1030,6 +1114,7 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
   const damageReduction = definition.headlessEffects?.find((effect) => effect.kind === 'damage-reduction')
   const deathPrevention = definition.headlessEffects?.find((effect) => effect.kind === 'death-prevention')
   const slotRecovery = definition.use?.effect.kind === 'spell-slot-recovery' ? definition.use.effect : undefined
+  const spellCast = definition.use?.effect.kind === 'spell-cast' ? definition.use.effect : undefined
   const effectResourceId = reroll?.resourceId ?? bonusDamage?.resourceId ?? damageReduction?.resourceId ??
     deathPrevention?.resourceId ?? definition.use?.resourceCost?.resourceId
   const charges = effectResourceId
@@ -1057,6 +1142,8 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
     reachFeet: dnd5e?.kind === 'weapon' ? dnd5e.reachFeet ?? draft.reachFeet : draft.reachFeet,
     rangeNormal: dnd5e?.kind === 'weapon' ? dnd5e.rangeFeet?.normal ?? draft.rangeNormal : draft.rangeNormal,
     rangeLong: dnd5e?.kind === 'weapon' ? dnd5e.rangeFeet?.long ?? draft.rangeLong : draft.rangeLong,
+    spellcastingFocusEnabled: dnd5e?.kind === 'weapon' && (equipment?.spellcastingFocusClassIds?.length ?? 0) > 0,
+    spellcastingFocusClassId: equipment?.spellcastingFocusClassIds?.[0] ?? draft.spellcastingFocusClassId,
     armorCategory: dnd5e?.kind === 'armor' ? dnd5e.category : draft.armorCategory,
     baseArmorClass: dnd5e?.kind === 'armor' ? dnd5e.baseArmorClass : draft.baseArmorClass,
     dexterityBonus: dnd5e?.kind === 'armor' ? dnd5e.dexterityBonus : draft.dexterityBonus,
@@ -1079,8 +1166,13 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
     onHitBonusDamageBonus: bonusDamage?.damage.bonus ?? draft.onHitBonusDamageBonus,
     onHitBonusDamageType: bonusDamage?.damageType ?? draft.onHitBonusDamageType,
     onHitBonusDamageOncePerTurn: bonusDamage?.oncePerTurn === true,
+    onHitBonusDamageTargetCreatureTypes: bonusDamage?.targetCreatureTypes?.join('，') ?? '',
     damageReductionEnabled: !!damageReduction,
+    damageReductionMode: damageReduction?.dice ? 'dice' : 'fixed',
     damageReductionAmount: damageReduction?.amount ?? draft.damageReductionAmount,
+    damageReductionDiceCount: damageReduction?.dice?.count ?? draft.damageReductionDiceCount,
+    damageReductionDiceSides: damageReduction?.dice?.sides ?? draft.damageReductionDiceSides,
+    damageReductionDiceBonus: damageReduction?.dice?.bonus ?? draft.damageReductionDiceBonus,
     damageReductionOncePerTurn: damageReduction?.oncePerTurn === true,
     deathPreventionEnabled: !!deathPrevention,
     deathPreventionHitPoints: deathPrevention?.hitPointsAfter ?? draft.deathPreventionHitPoints,
@@ -1089,6 +1181,16 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
     spellSlotRecoveryMaximumLevel: slotRecovery?.maximumSlotLevel ?? draft.spellSlotRecoveryMaximumLevel,
     spellSlotRecoveryAmount: slotRecovery?.amount ?? draft.spellSlotRecoveryAmount,
     spellSlotRecoveryEconomy: definition.use?.economy ?? draft.spellSlotRecoveryEconomy,
+    spellCastEnabled: !!spellCast,
+    spellCastSpellId: spellCast?.spellId ?? draft.spellCastSpellId,
+    spellCastLevel: spellCast?.castAtLevel ?? draft.spellCastLevel,
+    spellCastEconomy: definition.use?.economy ?? draft.spellCastEconomy,
+    spellCastUsesSaveDc: spellCast?.spellSaveDc != null,
+    spellCastSaveDc: spellCast?.spellSaveDc ?? draft.spellCastSaveDc,
+    spellCastUsesAttackBonus: spellCast?.spellAttackBonus != null,
+    spellCastAttackBonus: spellCast?.spellAttackBonus ?? draft.spellCastAttackBonus,
+    spellCastRequiresComponents: spellCast?.requiresComponents === true,
+    spellCastTargetSelfOnly: spellCast?.targeting === 'self-only',
     sourceDefinition: structuredClone(definition),
   }
 }
@@ -1172,6 +1274,34 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
       canModifyEnemyD20: feature.canModifyEnemyD20,
       automation: 'manual',
       action: undefined,
+      passiveEffects: undefined,
+    }
+  }
+  if (feature.headless.executionMode === 'passive-damage-reduction') {
+    return {
+      ...feature.sourceDefinition,
+      id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
+      description: feature.description.trim(), minimumLevel: feature.minimumLevel,
+      canModifyEnemyD20: feature.canModifyEnemyD20,
+      automation: 'full',
+      action: undefined,
+      passiveEffects: [{
+        schemaVersion: 1,
+        id: 'damage-reduction',
+        kind: 'damage-reduction',
+        trigger: 'before-damage',
+        amount: feature.headless.damageReductionAmount,
+        ...(feature.headless.damageReductionDamageTypes.length > 0
+          ? { damageTypes: [...feature.headless.damageReductionDamageTypes] }
+          : {}),
+        ...(feature.headless.damageReductionMinimumIncomingDamage > 0
+          ? { minimumIncomingDamage: feature.headless.damageReductionMinimumIncomingDamage }
+          : {}),
+        ...(feature.headless.damageReductionMaximumCurrentHitPointPercent < 100
+          ? { maximumCurrentHitPointPercent: feature.headless.damageReductionMaximumCurrentHitPointPercent }
+          : {}),
+        ...(feature.headless.damageReductionOncePerTurn ? { oncePerTurn: true } : {}),
+      }],
     }
   }
   const targeting = feature.headless.targetingKind === 'self'
@@ -1216,6 +1346,7 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
     description: feature.description.trim(), minimumLevel: feature.minimumLevel,
     canModifyEnemyD20: feature.canModifyEnemyD20,
     automation: 'full',
+    passiveEffects: undefined,
     action: {
       ...feature.sourceDefinition?.action,
       id: feature.id.trim(),
@@ -1319,9 +1450,51 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
       : []),
   ) as Partial<Record<AbilityKey, number>>
   const raceIds = feat.prerequisiteRaceIds.split(/[，,]+/).map((entry) => entry.trim()).filter(Boolean)
+  const choiceRerollResourceId = 'd20-choice-reroll-uses'
+  const sourceIsChoiceReroll = feat.sourceFeatDefinition?.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll'
+  const choiceRerollAbility = feat.d20ChoiceRerollEnabled
+    ? {
+        schemaVersion: 1 as const,
+        id: `${feat.id.trim()}-d20-choice-reroll`,
+        name: feat.name.trim(),
+        description: feat.description.trim() || feat.summary.trim(),
+        level: feat.minimumLevel,
+        trigger: { kind: 'after-d20-roll' as const },
+        cost: {
+          economy: 'none' as const,
+          resources: [{ resourceId: choiceRerollResourceId, amount: 1 }],
+        },
+        targeting: { kind: 'self' as const },
+        effects: [],
+        mechanic: {
+          kind: 'd20-choice-reroll' as const,
+          rollKinds: [...feat.d20ChoiceRerollRollKinds],
+          scopes: [...feat.d20ChoiceRerollScopes],
+          additionalDice: 1 as const,
+          selection: 'owner-chooses' as const,
+        },
+        automation: 'full' as const,
+      }
+    : undefined
   return {
     ...feat.sourceFeatDefinition,
     ...feature,
+    ...(choiceRerollAbility ? {
+      automation: 'full' as const,
+      action: undefined,
+      passiveEffects: undefined,
+      declarativeAbility: choiceRerollAbility,
+      resources: [{
+        id: choiceRerollResourceId,
+        label: `${feat.name.trim()}次数`,
+        shortLabel: '重掷',
+        maximum: feat.d20ChoiceRerollUses,
+        resetOn: feat.d20ChoiceRerollResetOn,
+      }],
+    } : sourceIsChoiceReroll ? {
+      declarativeAbility: undefined,
+      resources: undefined,
+    } : { resources: feat.sourceFeatDefinition?.resources }),
     prerequisite: {
       ...(feat.minimumLevel > 1 ? { minimumLevel: feat.minimumLevel } : {}),
       ...(Object.keys(abilityScores).length ? { abilityScores } : {}),
@@ -1331,7 +1504,7 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
 }
 
 function toHeadlessActionDraftFromEditor(id: string, name: string, headless: HeadlessEffectEditorDraft): Dnd5eCustomHeadlessActionDraft | undefined {
-  if (!headless.enabled) return undefined
+  if (!headless.enabled || headless.executionMode !== 'active') return undefined
   const effects: Dnd5eCustomHeadlessActionDraft['effects'] = []
   if (headless.damageEnabled) effects.push({
     kind: 'damage',
@@ -1413,7 +1586,8 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
         widthFeet: spell.rangeWidthFeet,
         heightFeet: spell.rangeHeightFeet,
         rotatable: spell.rangeType !== 'self' && spell.rangeRotatable,
-      } : spell.rangeShape !== 'none' ? { shape: spell.rangeShape, sizeFeet: spell.rangeSizeFeet } : {}),
+        adjustable: spell.rangeAdjustable,
+      } : spell.rangeShape !== 'none' ? { shape: spell.rangeShape, sizeFeet: spell.rangeSizeFeet, adjustable: spell.rangeAdjustable } : {}),
     },
     ...(headlessReady ? {
       targeting: {
@@ -1536,6 +1710,9 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
       damageType: item.onHitBonusDamageType,
       doubleDiceOnCritical: true,
       oncePerTurn: item.onHitBonusDamageOncePerTurn,
+      ...(item.onHitBonusDamageTargetCreatureTypes.trim()
+        ? { targetCreatureTypes: item.onHitBonusDamageTargetCreatureTypes.split(/[，,]/).map((value) => value.trim()).filter(Boolean) }
+        : {}),
       ...chargeReference,
     }] : []),
     ...(item.damageReductionEnabled ? [{
@@ -1543,7 +1720,13 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
       id: 'damage-reduction',
       kind: 'damage-reduction' as const,
       trigger: 'before-damage' as const,
-      amount: item.damageReductionAmount,
+      ...(item.damageReductionMode === 'dice'
+        ? { dice: {
+            count: item.damageReductionDiceCount,
+            sides: item.damageReductionDiceSides,
+            bonus: item.damageReductionDiceBonus,
+          } }
+        : { amount: item.damageReductionAmount }),
       oncePerTurn: item.damageReductionOncePerTurn,
       ...chargeReference,
     }] : []),
@@ -1558,9 +1741,27 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
     }] : []),
   ]
   const needsChargeResource = item.attackRerollEnabled || (
-    item.headlessEffectsUseCharges && (headlessEffects.length > 0 || item.spellSlotRecoveryEnabled)
+    item.headlessEffectsUseCharges && (
+      headlessEffects.length > 0 || item.spellSlotRecoveryEnabled || item.spellCastEnabled
+    )
   )
-  const use: Dnd5ePluginItemDefinition['use'] = item.spellSlotRecoveryEnabled
+  const use: Dnd5ePluginItemDefinition['use'] = item.spellCastEnabled
+    ? {
+        economy: item.spellCastEconomy,
+        consumeQuantity: item.kind === 'consumable' ? 1 : 0,
+        ...(item.headlessEffectsUseCharges ? { resourceCost: { resourceId: 'charges', amount: 1 } } : {}),
+        effect: {
+          kind: 'spell-cast',
+          schemaVersion: 1,
+          spellId: item.spellCastSpellId.trim(),
+          castAtLevel: item.spellCastLevel,
+          ...(item.spellCastUsesSaveDc ? { spellSaveDc: item.spellCastSaveDc } : {}),
+          ...(item.spellCastUsesAttackBonus ? { spellAttackBonus: item.spellCastAttackBonus } : {}),
+          ...(item.spellCastRequiresComponents ? { requiresComponents: true } : {}),
+          ...(item.spellCastTargetSelfOnly ? { targeting: 'self-only' as const } : {}),
+        },
+      }
+    : item.spellSlotRecoveryEnabled
     ? {
         economy: item.spellSlotRecoveryEconomy,
         consumeQuantity: item.kind === 'consumable' ? 1 : 0,
@@ -1577,7 +1778,8 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
           economy: 'action', consumeQuantity: 1,
           effect: { kind: 'healing', dice: { count: item.healingCount, sides: item.healingSides, bonus: item.healingBonus } },
         }
-      : item.sourceDefinition?.use?.effect.kind === 'spell-slot-recovery'
+      : item.sourceDefinition?.use?.effect.kind === 'spell-slot-recovery' ||
+          item.sourceDefinition?.use?.effect.kind === 'spell-cast'
         ? undefined
         : item.sourceDefinition?.use
   const common = {
@@ -1601,6 +1803,9 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
     ...common, category: 'equipment', icon: 'weapon',
     equipment: {
       slot: item.slot, ...(effects ? { effects } : {}),
+      ...(item.spellcastingFocusEnabled
+        ? { spellcastingFocusClassIds: [item.spellcastingFocusClassId] }
+        : {}),
       dnd5e: {
         kind: 'weapon', category: item.weaponCategory, mode: item.weaponMode,
         damage: { count: item.damageCount, sides: item.damageSides, type: item.damageType },
@@ -1632,6 +1837,64 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
     ...common, category: 'equipment', icon: 'generic',
     equipment: { slot: item.slot, ...(effects ? { effects } : {}) },
   }
+}
+
+interface SpellIconPreviewState {
+  name: string
+  level: number
+  classLabel: string
+  spec: Dnd5eActionIconSpec
+}
+
+function internalActivityAutomationLabel(activity: Dnd5eActivityDefinitionV1): string {
+  if (activity.automation.level === 'full') return '完整 Headless'
+  if (activity.automation.level === 'assisted') return '部分 Headless'
+  if (activity.automation.level === 'dm-adjudication') return 'DM 裁定'
+  if (activity.automation.level === 'display-only') return '仅资料'
+  return '不支持'
+}
+
+function Dnd5eInternalActivityDiagnostics({
+  activities,
+}: {
+  activities: readonly Dnd5eActivityDefinitionV1[]
+}) {
+  if (activities.length === 0) return null
+  return (
+    <details
+      className="group rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.025]"
+      data-testid="internal-activity-diagnostics"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/[0.035] [&::-webkit-details-marker]:hidden">
+        <span>
+          内部 Activity 诊断 · {activities.length} 项
+          <span className="ml-2 text-[11px] font-normal text-slate-500">高级只读信息，不是独立内容分类</span>
+        </span>
+        <ChevronDown className="h-4 w-4 text-cyan-300/60 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-2 border-t border-cyan-400/10 p-4">
+        <p className="text-xs leading-5 text-slate-500">
+          这些配方来自已导入内容或 AI 转换结果，并会继续随扩展包保存。普通规则请在法术、怪物、物品、特性等对应编辑器中修改并重新验证 Headless。
+        </p>
+        {activities.map((activity) => (
+          <details key={activity.id} className="group/activity rounded-xl border border-white/8 bg-black/15">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-semibold text-slate-200">{activity.name}</span>
+                <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-600">{activity.id}</span>
+              </span>
+              <span className="shrink-0 rounded-md border border-white/8 px-2 py-1 text-[10px] text-cyan-200/75">
+                {internalActivityAutomationLabel(activity)}
+              </span>
+            </summary>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-white/8 p-3 font-mono text-[10px] leading-5 text-slate-500">
+              {JSON.stringify(activity, null, 2)}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </details>
+  )
 }
 
 export default function Dnd5eCustomPluginBuilder({
@@ -1667,6 +1930,7 @@ export default function Dnd5eCustomPluginBuilder({
     ? restoredDraft.spells.map((spell, index) => restoreSpellDraft(spell, index))
     : [])
   const [expandedSpellIndex, setExpandedSpellIndex] = useState<number | null>(null)
+  const [spellIconPreview, setSpellIconPreview] = useState<SpellIconPreviewState | null>(null)
   const [items, setItems] = useState<ItemDraft[]>(() => Array.isArray(restoredDraft?.items)
     ? restoredDraft.items.map((item, index) => restoreItemDraft(item, index))
     : [])
@@ -1678,6 +1942,8 @@ export default function Dnd5eCustomPluginBuilder({
     Array.isArray(restoredDraft?.assets) ? restoredDraft.assets : [])
   const [importedHeadlessActions, setImportedHeadlessActions] = useState<Dnd5eCustomHeadlessActionDraft[]>(() =>
     Array.isArray(restoredDraft?.importedHeadlessActions) ? restoredDraft.importedHeadlessActions : [])
+  const [importedActivities, setImportedActivities] = useState<Dnd5eActivityDefinitionV1[]>(() =>
+    Array.isArray(restoredDraft?.importedActivities) ? restoredDraft.importedActivities : [])
   const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [selectedMonsterWorkshopEdit, setSelectedMonsterWorkshopEdit] = useState<Dnd5eMonsterWorkshopEditRequest | null>(null)
   const monsterWorkshopEditRequestId = useRef(0)
@@ -1706,6 +1972,7 @@ export default function Dnd5eCustomPluginBuilder({
       setOpen(true)
       setAssets((current) => upsertById(current, contentWorkshopImport.package.assets))
       setImportedHeadlessActions((current) => upsertById(current, content.headlessActions))
+      setImportedActivities((current) => upsertById(current, content.activities ?? []))
       switch (contentWorkshopImport.targetKind) {
       case 'monster':
         setActiveSection('monsters')
@@ -1808,10 +2075,11 @@ export default function Dnd5eCustomPluginBuilder({
         return action ? [action] : []
       }),
     ]),
+    activities: importedActivities,
     subclasses,
     classes,
     monsters,
-  }), [backgrounds, classes, feats, features, importedHeadlessActions, items, metadata, methods, monsters, races, spells, subclasses])
+  }), [backgrounds, classes, feats, features, importedActivities, importedHeadlessActions, items, metadata, methods, monsters, races, spells, subclasses])
 
   const sectionCounts = useMemo<Record<BuilderSection, number>>(() => ({
     monsters: monsters.length,
@@ -1963,7 +2231,8 @@ export default function Dnd5eCustomPluginBuilder({
     monsters,
     assets,
     importedHeadlessActions,
-  }), [assets, backgrounds, classes, feats, features, importedHeadlessActions, items, metadata, methods, monsters, races, spells, subclasses])
+    importedActivities,
+  }), [assets, backgrounds, classes, feats, features, importedActivities, importedHeadlessActions, items, metadata, methods, monsters, races, spells, subclasses])
 
   useEffect(() => {
     try {
@@ -2011,6 +2280,7 @@ export default function Dnd5eCustomPluginBuilder({
       setMonsters(Array.isArray(saved.monsters) ? saved.monsters : [])
       setAssets(Array.isArray(saved.assets) ? saved.assets : [])
       setImportedHeadlessActions(Array.isArray(saved.importedHeadlessActions) ? saved.importedHeadlessActions : [])
+      setImportedActivities(Array.isArray(saved.importedActivities) ? saved.importedActivities : [])
       setLocalError(null)
       setLocalNotice('已载入当前浏览器保存的草稿。')
     } catch {
@@ -2040,6 +2310,7 @@ export default function Dnd5eCustomPluginBuilder({
     setMonsters([])
     setAssets([])
     setImportedHeadlessActions([])
+    setImportedActivities([])
     setLocalError(null)
     setLocalNotice('已删除当前房间的本地工坊草稿；已启用内容不受影响。')
   }
@@ -2131,6 +2402,15 @@ export default function Dnd5eCustomPluginBuilder({
       setLocalNotice(null)
       setLocalError(cause instanceof Error ? cause.message : String(cause))
     }
+  }
+  const generateSpellIcon = async (index: number, dataUrl: string) => {
+    const spell = spells[index]
+    if (!spell) return
+    const asset = await dnd5eSpellIconAssetFromGeneratedDataUrl(spell.id, dataUrl)
+    setAssets((current) => upsertById(current, [asset]))
+    patchSpell(index, { iconAssetId: asset.id })
+    setLocalError(null)
+    setLocalNotice(`已为“${spell.name || spell.id}”生成法术前景图；职业底色与边框将在实际施法时按职业套用。`)
   }
   const removeSpellIcon = (index: number) => {
     const assetId = spells[index]?.iconAssetId
@@ -2266,6 +2546,8 @@ export default function Dnd5eCustomPluginBuilder({
               </fieldset>
             </div>
           </details>
+
+          <Dnd5eInternalActivityDiagnostics activities={importedActivities} />
 
           {categoryControl === 'select' ? (
             <label className="block max-w-sm">
@@ -2460,7 +2742,88 @@ export default function Dnd5eCustomPluginBuilder({
                 <div className="mt-3">
                   <Toggle label="可改变敌方 d20 结果" value={feat.canModifyEnemyD20} onChange={(canModifyEnemyD20) => patchFeat(index, { canModifyEnemyD20 })} />
                 </div>
-                <HeadlessEffectEditor title="专长 Headless 效果" value={feat.headless} onChange={(headless) => patchFeat(index, { headless })} />
+                <fieldset className="mt-3 rounded-xl border border-sky-400/15 bg-sky-500/[0.035] p-3">
+                  <legend className="px-1 text-xs font-semibold text-sky-200">选择式 d20 重掷</legend>
+                  <Toggle
+                    label="骰值出现后暂停，由拥有者决定是否额外投掷一枚 d20"
+                    value={feat.d20ChoiceRerollEnabled}
+                    onChange={(d20ChoiceRerollEnabled) => patchFeat(index, { d20ChoiceRerollEnabled })}
+                  />
+                  {feat.d20ChoiceRerollEnabled && <div className="mt-3 space-y-3">
+                    <div>
+                      <p className="mb-2 text-xs text-slate-400">适用自己的投掷</p>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          ['attack', '攻击检定'],
+                          ['ability-check', '属性／技能检定'],
+                          ['saving-throw', '豁免检定'],
+                        ] as const).map(([kind, label]) => {
+                          const selected = feat.d20ChoiceRerollRollKinds.includes(kind)
+                          return <button
+                            key={kind}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => patchFeat(index, {
+                              d20ChoiceRerollRollKinds: selected
+                                ? feat.d20ChoiceRerollRollKinds.filter((entry) => entry !== kind)
+                                : [...feat.d20ChoiceRerollRollKinds, kind],
+                            })}
+                            className={`rounded-lg border px-2.5 py-1.5 text-xs ${selected ? 'border-sky-300/40 bg-sky-400/10 text-sky-100' : 'border-white/8 text-slate-500'}`}
+                          >{label}</button>
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs text-slate-400">适用范围</p>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          ['self-roll', '自己的投掷'],
+                          ['attack-against-self', '针对自己的攻击'],
+                        ] as const).map(([scope, label]) => {
+                          const selected = feat.d20ChoiceRerollScopes.includes(scope)
+                          return <button
+                            key={scope}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => patchFeat(index, {
+                              d20ChoiceRerollScopes: selected
+                                ? feat.d20ChoiceRerollScopes.filter((entry) => entry !== scope)
+                                : [...feat.d20ChoiceRerollScopes, scope],
+                            })}
+                            className={`rounded-lg border px-2.5 py-1.5 text-xs ${selected ? 'border-sky-300/40 bg-sky-400/10 text-sky-100' : 'border-white/8 text-slate-500'}`}
+                          >{label}</button>
+                        })}
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <BuilderNumber
+                        label="可用次数"
+                        value={feat.d20ChoiceRerollUses}
+                        min={1}
+                        max={20}
+                        onChange={(d20ChoiceRerollUses) => patchFeat(index, { d20ChoiceRerollUses })}
+                      />
+                      <label className="block text-xs text-slate-400">
+                        <span className="mb-1 block">恢复时机</span>
+                        <select
+                          value={feat.d20ChoiceRerollResetOn}
+                          onChange={(event) => patchFeat(index, {
+                            d20ChoiceRerollResetOn: event.target.value === 'short-rest' ? 'short-rest' : 'long-rest',
+                          })}
+                          className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
+                        >
+                          <option value="long-rest">完成长休</option>
+                          <option value="short-rest">完成短休</option>
+                        </select>
+                      </label>
+                    </div>
+                    <p className="text-xs leading-5 text-sky-100/70">
+                      Host 会先公开原始结果，再等待该玩家明确选择“使用”或“不使用”。选择使用后由 Host 投掷额外 d20、选择对能力拥有者有利的结果，并在同一权威事务中消耗次数。
+                    </p>
+                    {feat.headless.enabled && <p className="text-xs text-amber-200/80">启用此机制时，它会取代本专长下方配置的另一项 Headless 效果；一个专长当前只能声明一项自动化机制。</p>}
+                  </div>}
+                </fieldset>
+                <HeadlessEffectEditor title="专长 Headless 效果" mode="feat" value={feat.headless} onChange={(headless) => patchFeat(index, { headless })} />
                 <div className="mt-3 flex justify-end"><DeleteButton label={`删除专长 ${feat.name}`} onClick={() => setFeats((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
               </article>)}
             </div>
@@ -2526,6 +2889,27 @@ export default function Dnd5eCustomPluginBuilder({
                     : '仅资料'
                 const iconAsset = assets.find((asset) => asset.id === spell.iconAssetId)
                 const iconUrl = dnd5eSpellIconAssetDataUrl(iconAsset)
+                // Class order is otherwise semantically irrelevant; the most recently selected
+                // class is the one the author expects to see in the live template preview.
+                const iconPreviewClassId = dnd5eSpellPreviewClassId(spell.classes)
+                const iconPreviewClassLabel = SPELL_CLASSES.find(([id]) => id === iconPreviewClassId)?.[1] ?? iconPreviewClassId
+                const iconPreviewSpec = {
+                  ...dnd5eSpellActionIcon({
+                    id: spell.id,
+                    name: spell.name,
+                    englishName: spell.englishName,
+                    level: spell.level,
+                    school: spell.school,
+                    effect: spell.description,
+                    damageType: spell.headless.damageType,
+                    castingClassId: iconPreviewClassId,
+                  }),
+                  ...(iconUrl ? {
+                    asset: iconUrl,
+                    assetMode: 'foreground' as const,
+                    assetTreatment: 'transparent-foreground' as const,
+                  } : {}),
+                }
                 return <article key={index} className={`overflow-hidden rounded-2xl border bg-black/15 ${expanded ? 'border-violet-400/20' : 'border-white/8'}`}>
                 <button
                   type="button"
@@ -2551,12 +2935,24 @@ export default function Dnd5eCustomPluginBuilder({
                   <BuilderNumber label="环级" value={spell.level} min={0} max={9} onChange={(value) => patchSpell(index, { level: value, upcastFromSlotLevel: Math.max(1, value) })} />
                 </div>
                 <section className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-white/8 bg-black/10 p-3">
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-void-950 text-[10px] text-slate-600">
-                    {iconUrl ? <img src={iconUrl} alt={`${spell.name || '法术'}图标预览`} className="h-full w-full object-cover" /> : '无图标'}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSpellIconPreview({
+                      name: spell.name || '未命名法术',
+                      level: spell.level,
+                      classLabel: iconPreviewClassLabel,
+                      spec: iconPreviewSpec,
+                    })}
+                    className="w-16 shrink-0 cursor-zoom-in rounded-xl text-center outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
+                    aria-label={`放大查看${spell.name || '未命名法术'}图标`}
+                    title="点击放大图标"
+                  >
+                    <Dnd5eActionIcon spec={iconPreviewSpec} className="h-16 w-16" />
+                    <span className="mt-1 block truncate text-[9px] text-slate-500">{iconPreviewClassLabel}模板</span>
+                  </button>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-slate-200">法术图标</p>
-                    <p className="mt-1 text-[11px] leading-5 text-slate-500">PNG、JPG 或 WebP，最大 384 KiB；保存后会随 V2 内容包进入法术书和战斗快捷栏。</p>
+                    <p className="mt-1 text-[11px] leading-5 text-slate-500">PNG、JPG 或 WebP，最大 384 KiB；中心画面随 V2 内容包保存，底色、纹样和边框会在法术书与战斗栏中按施法职业自动套用。</p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
                     <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/25">
@@ -2573,6 +2969,21 @@ export default function Dnd5eCustomPluginBuilder({
                         }}
                       />
                     </label>
+                    <AiImageGenerationButton
+                      label="AI 生成图标"
+                      title="AI 生成法术图标"
+                      aspect="square"
+                      background="transparent"
+                      description="AI 只生成透明背景的中心法术画面；职业底色、纹样、边框和流光由法术模板在下层自动叠加。"
+                      defaultPrompt={buildDnd5eSpellIconPrompt({
+                        name: spell.name,
+                        englishName: spell.englishName,
+                        school: spell.school,
+                        description: spell.description,
+                        damageType: spell.headless.damageType,
+                      })}
+                      onGenerated={({ dataUrl }) => generateSpellIcon(index, dataUrl)}
+                    />
                     {iconUrl && <button type="button" onClick={() => removeSpellIcon(index)} className="rounded-xl border border-rose-400/20 px-3 py-2 text-xs font-semibold text-rose-200">移除图标</button>}
                   </div>
                 </section>
@@ -2597,6 +3008,10 @@ export default function Dnd5eCustomPluginBuilder({
                   {spell.rangeShape === 'rect' && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-300/10 bg-black/10 px-3 py-2">
                     <Toggle label="远程放置后可自由旋转" value={spell.rangeType !== 'self' && spell.rangeRotatable} onChange={(rangeRotatable) => patchSpell(index, { rangeRotatable })} />
                     <span className="text-[11px] leading-5 text-slate-500">类似火墙术：先在射程内选择中心，再用角度控制条或 Q/E 调整朝向。自身起源的长方形固定朝向。</span>
+                  </div>}
+                  {spell.rangeShape !== 'none' && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-300/10 bg-black/10 px-3 py-2">
+                    <Toggle label="施法时可调整范围尺寸" value={spell.rangeAdjustable} onChange={(rangeAdjustable) => patchSpell(index, { rangeAdjustable })} />
+                    <span className="text-[11px] leading-5 text-slate-500">玩家可按 5 尺步进，从 5 尺调整到上方声明的最大尺寸；Headless 会重新校验。</span>
                   </div>}
                   <div className="mt-3 flex flex-wrap items-end gap-3">
                     <div className="min-w-44"><BuilderSelect label="影响目标" value={spell.headless.relation} options={TARGET_RELATIONS} onChange={(relation) => patchSpell(index, { headless: { ...spell.headless, relation: relation as HeadlessEffectEditorDraft['relation'] } })} /></div>
@@ -2681,7 +3096,7 @@ export default function Dnd5eCustomPluginBuilder({
                 </details>
                 <div className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${headlessStatus === 'full' ? 'border-emerald-400/20 bg-emerald-500/[0.055] text-emerald-100' : headlessStatus === 'partial' ? 'border-amber-400/20 bg-amber-500/[0.055] text-amber-100' : 'border-white/8 bg-black/10 text-slate-400'}`}>
                   {headlessStatus === 'full'
-                    ? <>Headless 已接入：Host 将执行{spell.resolution === 'saving-throw' ? `${spell.saveAbility.toUpperCase()} 豁免、` : spell.resolution === 'spell-attack' ? '法术攻击、' : ''}{spell.headless.damageEnabled ? `${spell.headless.damageCount}d${spell.headless.damageSides} ${spell.headless.damageType}伤害` : '标准状态'}{spell.level === 0 && spell.headless.damageEnabled ? (spell.cantripScaling ? `，并应用 ${spell.cantripScalingSteps.length} 个角色等级缩放阈值` : '；当前没有角色等级缩放') : ''}。</>
+                    ? <>Headless 已接入：Host 将执行{spell.resolution === 'saving-throw' ? `${ABILITIES.find((ability) => ability.key === spell.saveAbility)?.label ?? spell.saveAbility}豁免、` : spell.resolution === 'spell-attack' ? '法术攻击、' : ''}{spell.headless.damageEnabled ? `${spell.headless.damageCount}d${spell.headless.damageSides} ${spell.headless.damageType}伤害` : '标准状态'}{spell.level === 0 && spell.headless.damageEnabled ? (spell.cantripScaling ? `，并应用 ${spell.cantripScalingSteps.length} 个角色等级缩放阈值` : '；当前没有角色等级缩放') : ''}。</>
                     : headlessStatus === 'partial'
                       ? 'Headless 尚未完成：自动结算开关已开启，但没有伤害或标准状态配方。保存时会安全回落为“仅资料”，不会错误执行。'
                       : '当前仅接入法术资料；启用法术效果编辑器并配置至少一种效果后，才会生成 Host 可执行事务。'}
@@ -2720,9 +3135,14 @@ export default function Dnd5eCustomPluginBuilder({
                   <BuilderNumber label="伤害骰面数" value={item.damageSides} min={2} max={1000} onChange={(value) => patchItem(index, { damageSides: value })} />
                   {item.weaponMode === 'melee' ? <BuilderNumber label="触及（尺）" value={item.reachFeet} min={0} max={500} onChange={(value) => patchItem(index, { reachFeet: value })} /> : <><BuilderNumber label="普通射程" value={item.rangeNormal} min={0} max={10000} onChange={(value) => patchItem(index, { rangeNormal: value })} /><BuilderNumber label="最大射程" value={item.rangeLong} min={0} max={10000} onChange={(value) => patchItem(index, { rangeLong: value })} /></>}
                 </div>}
+                {item.kind === 'weapon' && <div className="mt-3 grid gap-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 sm:grid-cols-2">
+                  <Toggle label="可视为施法法器" value={item.spellcastingFocusEnabled} onChange={(spellcastingFocusEnabled) => patchItem(index, { spellcastingFocusEnabled })} />
+                  {item.spellcastingFocusEnabled && <BuilderSelect label="适用施法职业" value={item.spellcastingFocusClassId} options={SPELL_CLASSES} onChange={(spellcastingFocusClassId) => patchItem(index, { spellcastingFocusClassId })} />}
+                  <p className="text-xs text-slate-500 sm:col-span-2">未勾选时，该武器绝不会被 Headless 视为法器；勾选后，只有所选职业持用它时才能替代无标价且不消耗的材料成分。</p>
+                </div>}
                 {item.kind === 'armor' && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderSelect label="护甲类别" value={item.armorCategory} options={ARMOR_CATEGORIES} onChange={(value) => patchItem(index, { armorCategory: value as ItemDraft['armorCategory'] })} /><BuilderNumber label="基础 AC" value={item.baseArmorClass} min={0} max={50} onChange={(value) => patchItem(index, { baseArmorClass: value })} /><BuilderSelect label="敏捷调整" value={item.dexterityBonus} options={DEXTERITY_BONUSES} onChange={(value) => patchItem(index, { dexterityBonus: value as ItemDraft['dexterityBonus'] })} /></div>}
                 {item.kind === 'shield' && <div className="mt-3 max-w-48"><BuilderNumber label="盾牌 AC 加值" value={item.shieldBonus} min={-20} max={20} onChange={(value) => patchItem(index, { shieldBonus: value })} /></div>}
-                {item.kind === 'consumable' && !item.spellSlotRecoveryEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderNumber label="治疗骰数量" value={item.healingCount} min={1} max={40} onChange={(value) => patchItem(index, { healingCount: value })} /><BuilderNumber label="治疗骰面数" value={item.healingSides} min={2} max={100} onChange={(value) => patchItem(index, { healingSides: value })} /><BuilderNumber label="固定治疗" value={item.healingBonus} min={-1000} max={1000} onChange={(value) => patchItem(index, { healingBonus: value })} /></div>}
+                {item.kind === 'consumable' && !item.spellSlotRecoveryEnabled && !item.spellCastEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderNumber label="治疗骰数量" value={item.healingCount} min={1} max={40} onChange={(value) => patchItem(index, { healingCount: value })} /><BuilderNumber label="治疗骰面数" value={item.healingSides} min={2} max={100} onChange={(value) => patchItem(index, { healingSides: value })} /><BuilderNumber label="固定治疗" value={item.healingBonus} min={-1000} max={1000} onChange={(value) => patchItem(index, { healingBonus: value })} /></div>}
                 {item.kind !== 'consumable' && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5"><BuilderNumber label="武器命中" value={item.weaponAttackBonus} min={-20} max={20} onChange={(value) => patchItem(index, { weaponAttackBonus: value })} /><BuilderNumber label="武器伤害" value={item.weaponDamageBonus} min={-20} max={20} onChange={(value) => patchItem(index, { weaponDamageBonus: value })} /><BuilderNumber label="AC" value={item.armorClassBonus} min={-20} max={20} onChange={(value) => patchItem(index, { armorClassBonus: value })} /><BuilderNumber label="全部豁免" value={item.savingThrowBonus} min={-20} max={20} onChange={(value) => patchItem(index, { savingThrowBonus: value })} /><BuilderNumber label="速度（尺）" value={item.speedBonusFeet} min={-500} max={500} onChange={(value) => patchItem(index, { speedBonusFeet: value })} /></div>}
                 <section className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.04] p-4">
                   <div>
@@ -2734,15 +3154,32 @@ export default function Dnd5eCustomPluginBuilder({
                     {item.kind !== 'consumable' && <Toggle label="命中后造成额外伤害" value={item.onHitBonusDamageEnabled} onChange={(onHitBonusDamageEnabled) => patchItem(index, { onHitBonusDamageEnabled })} />}
                     {item.kind !== 'consumable' && <Toggle label="受到伤害时减伤" value={item.damageReductionEnabled} onChange={(damageReductionEnabled) => patchItem(index, { damageReductionEnabled })} />}
                     {item.kind !== 'consumable' && <Toggle label="降至 0 HP 时保命" value={item.deathPreventionEnabled} onChange={(deathPreventionEnabled) => patchItem(index, { deathPreventionEnabled })} />}
-                    <Toggle label="恢复已消耗法术位" value={item.spellSlotRecoveryEnabled} onChange={(spellSlotRecoveryEnabled) => patchItem(index, { spellSlotRecoveryEnabled })} />
+                    <Toggle label="恢复已消耗法术位" value={item.spellSlotRecoveryEnabled} onChange={(spellSlotRecoveryEnabled) => patchItem(index, { spellSlotRecoveryEnabled, ...(spellSlotRecoveryEnabled ? { spellCastEnabled: false } : {}) })} />
+                    <Toggle label="通过物品施放 Headless 法术" value={item.spellCastEnabled} onChange={(spellCastEnabled) => patchItem(index, { spellCastEnabled, ...(spellCastEnabled ? { spellSlotRecoveryEnabled: false } : {}) })} />
                     <Toggle label="上述效果消耗共享充能" value={item.headlessEffectsUseCharges || item.attackRerollEnabled} onChange={(headlessEffectsUseCharges) => patchItem(index, { headlessEffectsUseCharges })} />
                   </div>
                   {(item.attackRerollEnabled || item.headlessEffectsUseCharges) && <div className="mt-3 grid gap-3 sm:grid-cols-2"><BuilderNumber label="最大充能" value={item.attackRerollCharges} min={1} max={1000000} onChange={(attackRerollCharges) => patchItem(index, { attackRerollCharges })} /><BuilderSelect label="充能恢复时点" value={item.attackRerollResetOn} options={[["none", "不自动恢复"], ["short-rest", "短休"], ["long-rest", "长休"], ["dawn", "黎明（由战役日历推进）"]]} onChange={(attackRerollResetOn) => patchItem(index, { attackRerollResetOn: attackRerollResetOn as ItemDraft['attackRerollResetOn'] })} /></div>}
-                  {item.onHitBonusDamageEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3 xl:grid-cols-6"><BuilderNumber label="额外伤害骰数量" value={item.onHitBonusDamageCount} min={1} max={40} onChange={(onHitBonusDamageCount) => patchItem(index, { onHitBonusDamageCount })} /><BuilderNumber label="骰子面数" value={item.onHitBonusDamageSides} min={2} max={100} onChange={(onHitBonusDamageSides) => patchItem(index, { onHitBonusDamageSides })} /><BuilderNumber label="固定加值" value={item.onHitBonusDamageBonus} min={-1000} max={1000} onChange={(onHitBonusDamageBonus) => patchItem(index, { onHitBonusDamageBonus })} /><BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} /><Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} /></div>}
-                  {item.damageReductionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2"><BuilderNumber label="每次减伤" value={item.damageReductionAmount} min={1} max={1000000} onChange={(damageReductionAmount) => patchItem(index, { damageReductionAmount })} /><Toggle label="每回合一次" value={item.damageReductionOncePerTurn} onChange={(damageReductionOncePerTurn) => patchItem(index, { damageReductionOncePerTurn })} /></div>}
+                  {item.onHitBonusDamageEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3 xl:grid-cols-6"><BuilderNumber label="额外伤害骰数量" value={item.onHitBonusDamageCount} min={1} max={40} onChange={(onHitBonusDamageCount) => patchItem(index, { onHitBonusDamageCount })} /><BuilderNumber label="骰子面数" value={item.onHitBonusDamageSides} min={2} max={100} onChange={(onHitBonusDamageSides) => patchItem(index, { onHitBonusDamageSides })} /><BuilderNumber label="固定加值" value={item.onHitBonusDamageBonus} min={-1000} max={1000} onChange={(onHitBonusDamageBonus) => patchItem(index, { onHitBonusDamageBonus })} /><BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} /><BuilderInput label="限定目标生物类型（逗号分隔）" value={item.onHitBonusDamageTargetCreatureTypes} onChange={(onHitBonusDamageTargetCreatureTypes) => patchItem(index, { onHitBonusDamageTargetCreatureTypes })} /><Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} /></div>}
+                  {item.damageReductionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <BuilderSelect label="减伤方式" value={item.damageReductionMode} options={[["dice", "骰式减伤"], ["fixed", "固定减伤"]]} onChange={(damageReductionMode) => patchItem(index, { damageReductionMode: damageReductionMode as ItemDraft['damageReductionMode'] })} />
+                    {item.damageReductionMode === 'fixed'
+                      ? <BuilderNumber label="每次固定减伤" value={item.damageReductionAmount} min={1} max={1000000} onChange={(damageReductionAmount) => patchItem(index, { damageReductionAmount })} />
+                      : <>
+                          <BuilderNumber label="减伤骰数量" value={item.damageReductionDiceCount} min={1} max={40} onChange={(damageReductionDiceCount) => patchItem(index, { damageReductionDiceCount })} />
+                          <BuilderSelect label="减伤骰面数" value={String(item.damageReductionDiceSides)} options={[["4", "d4"], ["6", "d6"], ["8", "d8"], ["10", "d10"], ["12", "d12"], ["20", "d20"]]} onChange={(damageReductionDiceSides) => patchItem(index, { damageReductionDiceSides: Number(damageReductionDiceSides) })} />
+                          <BuilderNumber label="固定加值" value={item.damageReductionDiceBonus} min={-1000} max={1000} onChange={(damageReductionDiceBonus) => patchItem(index, { damageReductionDiceBonus })} />
+                        </>}
+                    <Toggle label="每回合一次" value={item.damageReductionOncePerTurn} onChange={(damageReductionOncePerTurn) => patchItem(index, { damageReductionOncePerTurn })} />
+                    {item.damageReductionMode === 'dice' && <p className="text-xs text-cyan-200 xl:col-span-5">当前减伤：{item.damageReductionDiceCount}d{item.damageReductionDiceSides}{item.damageReductionDiceBonus === 0 ? '' : item.damageReductionDiceBonus > 0 ? `+${item.damageReductionDiceBonus}` : item.damageReductionDiceBonus}</p>}
+                  </div>}
                   {item.deathPreventionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2"><BuilderNumber label="保命后 HP" value={item.deathPreventionHitPoints} min={1} max={1000000} onChange={(deathPreventionHitPoints) => patchItem(index, { deathPreventionHitPoints })} /><Toggle label="允许阻止巨量伤害即死" value={item.deathPreventionMassiveDamage} onChange={(deathPreventionMassiveDamage) => patchItem(index, { deathPreventionMassiveDamage })} /></div>}
                   {item.spellSlotRecoveryEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3"><BuilderNumber label="最高可恢复环级" value={item.spellSlotRecoveryMaximumLevel} min={1} max={9} onChange={(spellSlotRecoveryMaximumLevel) => patchItem(index, { spellSlotRecoveryMaximumLevel })} /><BuilderNumber label="恢复法术位数量" value={item.spellSlotRecoveryAmount} min={1} max={9} onChange={(spellSlotRecoveryAmount) => patchItem(index, { spellSlotRecoveryAmount })} /><BuilderSelect label="使用行动经济" value={item.spellSlotRecoveryEconomy} options={[["action", "动作"], ["bonusAction", "附赠动作"], ["none", "不消耗行动"]]} onChange={(spellSlotRecoveryEconomy) => patchItem(index, { spellSlotRecoveryEconomy: spellSlotRecoveryEconomy as ItemDraft['spellSlotRecoveryEconomy'] })} /></div>}
-                  {(item.attackRerollEnabled || item.onHitBonusDamageEnabled || item.damageReductionEnabled || item.deathPreventionEnabled || item.spellSlotRecoveryEnabled) && <p className="mt-3 text-xs text-emerald-300">兼容报告：所选效果可由 Host 完整 Headless 结算；插件不能执行 JavaScript，也不能直接修改角色或战斗 Store。</p>}
+                  {item.spellCastEnabled && <div className="mt-3 space-y-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3">
+                    <div className="grid gap-3 sm:grid-cols-3"><BuilderInput label="核心 Headless 法术 ID" value={item.spellCastSpellId} onChange={(spellCastSpellId) => patchItem(index, { spellCastSpellId })} /><BuilderNumber label="施放环级" value={item.spellCastLevel} min={0} max={9} onChange={(spellCastLevel) => patchItem(index, { spellCastLevel })} /><BuilderSelect label="使用行动经济" value={item.spellCastEconomy} options={[["action", "动作"], ["bonusAction", "附赠动作"], ["none", "不消耗行动"]]} onChange={(spellCastEconomy) => patchItem(index, { spellCastEconomy: spellCastEconomy as ItemDraft['spellCastEconomy'] })} /></div>
+                    <div className="grid gap-3 sm:grid-cols-3"><Toggle label="使用固定法术豁免 DC" value={item.spellCastUsesSaveDc} onChange={(spellCastUsesSaveDc) => patchItem(index, { spellCastUsesSaveDc })} />{item.spellCastUsesSaveDc && <BuilderNumber label="固定法术豁免 DC" value={item.spellCastSaveDc} min={1} max={30} onChange={(spellCastSaveDc) => patchItem(index, { spellCastSaveDc })} />}<Toggle label="使用固定法术攻击加值" value={item.spellCastUsesAttackBonus} onChange={(spellCastUsesAttackBonus) => patchItem(index, { spellCastUsesAttackBonus })} />{item.spellCastUsesAttackBonus && <BuilderNumber label="固定法术攻击加值" value={item.spellCastAttackBonus} min={-20} max={30} onChange={(spellCastAttackBonus) => patchItem(index, { spellCastAttackBonus })} />}<Toggle label="仍需施法成分" value={item.spellCastRequiresComponents} onChange={(spellCastRequiresComponents) => patchItem(index, { spellCastRequiresComponents })} /><Toggle label="仅能以自己为目标" value={item.spellCastTargetSelfOnly} onChange={(spellCastTargetSelfOnly) => patchItem(index, { spellCastTargetSelfOnly })} /></div>
+                    <p className="text-xs text-slate-500">仅接受已接入核心 Headless 的 SRD 法术。Host 会重新核对物品归属、同调、充能、行动、目标、距离、视线、豁免与法术效果；不支持的法术会在保存时拒绝。</p>
+                  </div>}
+                  {(item.attackRerollEnabled || item.onHitBonusDamageEnabled || item.damageReductionEnabled || item.deathPreventionEnabled || item.spellSlotRecoveryEnabled || item.spellCastEnabled) && <p className="mt-3 text-xs text-emerald-300">兼容报告：所选效果可由 Host 完整 Headless 结算；插件不能执行 JavaScript，也不能直接修改角色或战斗 Store。</p>}
                 </section>
                 <div className="mt-3 flex justify-end"><DeleteButton label={`删除物品 ${item.name}`} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
               </article>)}
@@ -2804,7 +3241,75 @@ export default function Dnd5eCustomPluginBuilder({
           </div>
         </div>
       )}
+      {spellIconPreview && (
+        <SpellWorkshopIconPreviewDialog
+          preview={spellIconPreview}
+          onClose={() => setSpellIconPreview(null)}
+        />
+      )}
     </section>
+  )
+}
+
+function SpellWorkshopIconPreviewDialog({
+  preview,
+  onClose,
+}: {
+  preview: SpellIconPreviewState
+  onClose(): void
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [onClose])
+
+  return createPortal(
+    <div
+      role="presentation"
+      className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="spell-workshop-icon-preview-title"
+        className="glass w-full max-w-xl rounded-3xl border border-white/15 p-4 shadow-2xl shadow-black/70 sm:p-6"
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h3 id="spell-workshop-icon-preview-title" className="text-lg font-bold text-slate-50">{preview.name}</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {preview.level === 0 ? '戏法' : `${preview.level} 环`} · {preview.classLabel}模板
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭法术图标预览"
+            className="rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-slate-100"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <Dnd5eActionIcon
+          spec={preview.spec}
+          level={preview.level}
+          className="mx-auto w-full max-w-lg rounded-3xl shadow-2xl shadow-black/60"
+        />
+        <p className="mt-4 text-center text-xs text-slate-500">放大图会保留职业底色、边框与流光；点击空白处或按 Esc 关闭。</p>
+      </section>
+    </div>,
+    document.body,
   )
 }
 
@@ -2817,9 +3322,10 @@ function HeadlessEffectEditor({
   value: HeadlessEffectEditorDraft
   onChange(value: HeadlessEffectEditorDraft): void
   title?: string
-  mode?: 'feature' | 'spell'
+  mode?: 'feature' | 'feat' | 'spell'
 }) {
   const patch = (next: Partial<HeadlessEffectEditorDraft>) => onChange({ ...value, ...next })
+  const featureLike = mode !== 'spell'
   const patchPersistentAreaTrigger = (index: number, next: Partial<PersistentAreaTriggerEditorDraft>) => {
     patch({
       persistentAreaTriggers: value.persistentAreaTriggers.map((trigger, triggerIndex) =>
@@ -2834,6 +3340,86 @@ function HeadlessEffectEditor({
   const removePersistentAreaTrigger = (index: number) => {
     patch({ persistentAreaTriggers: value.persistentAreaTriggers.filter((_, triggerIndex) => triggerIndex !== index) })
   }
+  if (mode === 'feat' && value.enabled && value.executionMode === 'passive-damage-reduction') {
+    return (
+      <section className="mt-4 rounded-2xl border border-violet-400/15 bg-violet-500/[0.045] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-violet-100">{title}</h4>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+              被动效果由 Host 在伤害写入前自动检查。触发条件、伤害类型、生命阈值与每回合次数都会进入不可变战斗快照。
+            </p>
+          </div>
+          <Toggle label="已启用自动结算" value={value.enabled} onChange={(enabled) => patch({ enabled })} />
+        </div>
+        <div className="mt-4 space-y-4 border-t border-violet-400/10 pt-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <BuilderSelect
+              label="效果机制"
+              value={value.executionMode}
+              options={[["active", "主动能力"], ["passive-damage-reduction", "被动减伤"]]}
+              onChange={(executionMode) => patch({ executionMode: executionMode as HeadlessEffectEditorDraft['executionMode'] })}
+            />
+            <div className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] px-3 py-2.5">
+              <span className="block text-xs font-semibold text-slate-500">触发时点</span>
+              <strong className="mt-1.5 block text-sm text-cyan-100">受到伤害前（自动）</strong>
+            </div>
+            <BuilderNumber label="每次减伤" value={value.damageReductionAmount} min={1} max={1000000} onChange={(damageReductionAmount) => patch({ damageReductionAmount })} />
+            <div className="self-end pb-0.5">
+              <Toggle label="每回合最多触发一次" value={value.damageReductionOncePerTurn} onChange={(damageReductionOncePerTurn) => patch({ damageReductionOncePerTurn })} />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/8 bg-black/10 p-3">
+            <div>
+              <h5 className="text-xs font-semibold text-slate-300">触发条件</h5>
+              <p className="mt-1 text-[11px] leading-5 text-slate-600">所有已填写条件必须同时满足；0 或 100 表示不限制。</p>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <BuilderNumber
+                label="来袭伤害至少为（0＝不限）"
+                value={value.damageReductionMinimumIncomingDamage}
+                min={0}
+                max={1000000}
+                onChange={(damageReductionMinimumIncomingDamage) => patch({ damageReductionMinimumIncomingDamage })}
+              />
+              <BuilderNumber
+                label="当前 HP 不高于（%，100＝不限）"
+                value={value.damageReductionMaximumCurrentHitPointPercent}
+                min={1}
+                max={100}
+                onChange={(damageReductionMaximumCurrentHitPointPercent) => patch({ damageReductionMaximumCurrentHitPointPercent })}
+              />
+            </div>
+            <div className="mt-3">
+              <span className="mb-2 block text-xs font-semibold text-slate-500">限定伤害类型（不选＝全部）</span>
+              <div className="flex flex-wrap gap-2">
+                {HEADLESS_DAMAGE_TYPES.map(([damageType, label]) => {
+                  const selected = value.damageReductionDamageTypes.includes(damageType)
+                  return (
+                    <Toggle
+                      key={damageType}
+                      label={label}
+                      value={selected}
+                      onChange={() => patch({
+                        damageReductionDamageTypes: selected
+                          ? value.damageReductionDamageTypes.filter((entry) => entry !== damageType)
+                          : [...value.damageReductionDamageTypes, damageType],
+                      })}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">
+            Headless 可结算：Host 会在临时生命与生命值扣除前应用减伤，并记录具体专长、效果与减伤数值。
+          </p>
+        </div>
+      </section>
+    )
+  }
   return (
     <section className="mt-4 rounded-2xl border border-violet-400/15 bg-violet-500/[0.045] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2847,19 +3433,25 @@ function HeadlessEffectEditor({
       </div>
 
       {value.enabled && <div className="mt-4 space-y-4 border-t border-violet-400/10 pt-4">
-        {mode === 'feature' ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {mode === 'feat' && <BuilderSelect
+          label="效果机制"
+          value={value.executionMode}
+          options={[["active", "主动能力"], ["passive-damage-reduction", "被动减伤"]]}
+          onChange={(executionMode) => patch({ executionMode: executionMode as HeadlessEffectEditorDraft['executionMode'] })}
+        />}
+        {featureLike ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <BuilderInput label="战斗按钮文字" value={value.actionLabel} onChange={(actionLabel) => patch({ actionLabel })} />
           <BuilderSelect label="行动类型" value={value.economy} options={ACTION_ECONOMIES} onChange={(economy) => patch({ economy: economy as HeadlessEffectEditorDraft['economy'] })} />
           <BuilderSelect label="目标模式" value={value.targetingKind} options={TARGETING_KINDS} onChange={(targetingKind) => patch({ targetingKind: targetingKind as HeadlessEffectEditorDraft['targetingKind'] })} />
           {value.targetingKind !== 'self' && <BuilderSelect label="目标关系" value={value.relation} options={TARGET_RELATIONS} onChange={(relation) => patch({ relation: relation as HeadlessEffectEditorDraft['relation'] })} />}
         </div> : <p className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] px-3 py-2 text-xs leading-5 text-cyan-100/70">行动类型、射程与目标取自上方的法术资料；法术位、V／S／M、命中／豁免、升环和专注由 Host 统一校验。</p>}
 
-        {mode === 'feature' && value.targetingKind === 'single-creature' && <div className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end">
+        {featureLike && value.targetingKind === 'single-creature' && <div className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end">
           <BuilderNumber label="射程（尺）" value={value.rangeFeet} min={0} max={10000} onChange={(rangeFeet) => patch({ rangeFeet })} />
           <div className="pb-0.5"><Toggle label="允许选择自己" value={value.includeSelf} onChange={(includeSelf) => patch({ includeSelf })} /></div>
         </div>}
 
-        {mode === 'feature' && value.targetingKind === 'area' && <div className="rounded-xl border border-white/8 bg-black/10 p-3">
+        {featureLike && value.targetingKind === 'area' && <div className="rounded-xl border border-white/8 bg-black/10 p-3">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <BuilderSelect label="范围形状" value={value.areaShape} options={AREA_SHAPES} onChange={(areaShape) => patch({ areaShape: areaShape as HeadlessEffectEditorDraft['areaShape'] })} />
             <BuilderNumber label={value.areaShape === 'circle' || value.areaShape === 'rect' ? '放置射程（尺）' : '瞄准距离（尺）'} value={value.rangeFeet} min={0} max={10000} onChange={(rangeFeet) => patch({ rangeFeet })} />
@@ -3039,7 +3631,7 @@ function HeadlessEffectEditor({
             </div>}
           </fieldset>
 
-          {mode === 'feature' && <fieldset className={`rounded-xl border p-3 ${value.healingEnabled ? 'border-emerald-400/25 bg-emerald-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
+          {featureLike && <fieldset className={`rounded-xl border p-3 ${value.healingEnabled ? 'border-emerald-400/25 bg-emerald-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
             <legend className="px-1"><Toggle label="治疗" value={value.healingEnabled} onChange={(healingEnabled) => patch({ healingEnabled })} /></legend>
             {value.healingEnabled && <div className="mt-2 grid grid-cols-2 gap-3">
               <BuilderNumber label="治疗骰数量" value={value.healingCount} min={1} max={12} onChange={(healingCount) => patch({ healingCount })} />
@@ -3062,11 +3654,11 @@ function HeadlessEffectEditor({
           </fieldset>
         </div>
 
-        {!value.damageEnabled && !(mode === 'feature' && value.healingEnabled) && !value.conditionEnabled && !(mode === 'feature' && value.summonEnabled && value.targetingKind === 'area') && !(mode === 'feature' && value.persistentAreaEnabled && value.targetingKind === 'area') && (
+        {!value.damageEnabled && !(featureLike && value.healingEnabled) && !value.conditionEnabled && !(featureLike && value.summonEnabled && value.targetingKind === 'area') && !(featureLike && value.persistentAreaEnabled && value.targetingKind === 'area') && (
           <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-3 py-2 text-xs text-rose-100">至少启用一种伤害、治疗、标准状态、持续区域或召唤效果。</p>
         )}
 
-        {mode === 'feature' && <div className="rounded-xl border border-white/8 bg-black/10 p-3">
+        {featureLike && <div className="rounded-xl border border-white/8 bg-black/10 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div><h5 className="text-xs font-semibold text-slate-300">Interrupt 确认</h5><p className="mt-1 text-[11px] text-slate-600">在掷骰和写入前暂停事务；取消或超时不会消耗行动经济。</p></div>
             <Toggle label="启用 Interrupt" value={value.interruptEnabled} onChange={(interruptEnabled) => patch({ interruptEnabled })} />

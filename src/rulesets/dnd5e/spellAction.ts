@@ -12,7 +12,7 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { Dnd5eSpellMetamagicPayload, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, resolveAoeDimensions, tokensInCells } from '../../lib/skillTargeting'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
@@ -82,7 +82,7 @@ import {
 import { createDnd5eCoreSpellArea, dnd5eWallOfFireDamagingSideCells, getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
 import { dnd5eWallOfFireCells, dnd5eWallOfFireDamageCells, normalizeWallOfFireAngle, type Dnd5eWallOfFireGeometry } from './wallOfFireGeometry'
 import { dnd5eCharacterClassLevel } from './multiclass'
-import { dnd5eEffectiveSpellcastingSource } from './subclassSpellcasting'
+import { dnd5eEffectiveSpellcastingSource, dnd5eEffectiveSpellcastingSources } from './subclassSpellcasting'
 import { dnd5eSpellSavePressureApplies } from './martialSpellSynergy'
 import {
   dnd5eCoreSpellComponentRequirements,
@@ -101,6 +101,13 @@ import {
 } from './openingAttack'
 import { dnd5eHiddenSpellSaveDisadvantageApplies } from './spellSavePressure'
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
+import {
+  applyDnd5eInventoryActivityCosts,
+  dnd5eInventoryEntryIsActive,
+  dnd5eInventoryEntryUseAction,
+  normalizeDnd5eInventory,
+  type Dnd5eInventoryActivityCost,
+} from './items'
 
 export type Dnd5eSpellCastRejectReason =
   | 'invalid-action'
@@ -114,10 +121,13 @@ export type Dnd5eSpellCastRejectReason =
   | 'spellcasting-class-unavailable'
   | 'innate-spell-unavailable'
   | 'sustained-spell-unavailable'
+  | 'item-spell-unavailable'
+  | 'item-resource-unavailable'
   | 'wild-shape-spellcasting-unavailable'
   | 'armor-proficiency-required'
   | 'component-unavailable'
   | 'verbal-component-unavailable'
+  | 'somatic-component-unavailable'
   | 'material-component-unavailable'
   | 'costly-material-unavailable'
   | 'spell-reaction-only'
@@ -138,10 +148,20 @@ export interface PreparedDnd5eSpellCast {
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actor: Character
+  itemSpellSource?: {
+    instanceId: string
+    useActionId?: string
+    itemName: string
+    expectedInventoryRevision: number
+    costs: readonly Dnd5eInventoryActivityCost[]
+    economy: 'action' | 'bonusAction' | 'none'
+  }
   castingClassId?: Dnd5eClassId
   racialInnate: boolean
   racialGrant?: Dnd5eRacialInnateSpellGrant
   spellcastingAbility: keyof Character['abilities']
+  spellAttackModifier: number
+  spellSaveDc: number
   castingClassLevel: number
   actorToken: Token
   targetToken: Token
@@ -200,6 +220,7 @@ export interface PreparedDnd5eSpellCast {
   areaAnchorCells?: readonly { col: number; row: number }[]
   areaTargetOrientation?: 0 | 1 | 2 | 3
   wallOfFireGeometry?: Dnd5eWallOfFireGeometry
+  excludedAreaTargetIds: readonly string[]
   areaDurationRounds?: number
   teleportDestination?: Dnd5eSpellTeleportDestination
   /** 当前事务是在使用既有持续法术效果，而不是再次施法。 */
@@ -467,7 +488,53 @@ export function prepareDnd5eSpellCast(input: {
         : 'invalid-target',
     }
   }
-  const racialGrant = payload.racialInnate
+  const inventory = normalizeDnd5eInventory(actor)
+  const itemEntry = payload.itemInstanceId
+    ? inventory.entries.find((entry) => entry.instanceId === payload.itemInstanceId)
+    : undefined
+  const itemUse = itemEntry ? dnd5eInventoryEntryUseAction(itemEntry, payload.itemUseActionId) : undefined
+  const itemSpellEffect = itemUse?.effect.kind === 'spell-cast'
+    ? itemUse.effect
+    : undefined
+  if (payload.itemInstanceId && (
+    !itemEntry || !itemSpellEffect || itemEntry.quantity < 1 ||
+    itemEntry.identified === false || !dnd5eInventoryEntryIsActive(itemEntry) ||
+    (itemEntry.item.equipment != null && itemEntry.equippedSlot == null) ||
+    itemSpellEffect.spellId !== spell.id || itemSpellEffect.castAtLevel !== payload.slotLevel ||
+    (spell.effect === 'spell-attack' && itemSpellEffect.spellAttackBonus == null && itemSpellEffect.useCharacterSpellcasting !== true) ||
+    ((spell.saveAbility != null || spell.unwillingSaveAbility != null) && itemSpellEffect.spellSaveDc == null && itemSpellEffect.useCharacterSpellcasting !== true) ||
+    payload.castingClassId != null || payload.racialInnate === true || sustainedAttack != null
+  )) return { ok: false, reason: 'item-spell-unavailable' }
+  const itemSpellCosts: Dnd5eInventoryActivityCost[] = itemUse
+    ? [
+        ...(itemUse.consumeQuantity > 0
+          ? [{ kind: 'quantity' as const, amount: itemUse.consumeQuantity }]
+          : []),
+        ...(itemUse.resourceCost
+          ? [{ kind: 'resource' as const, ...itemUse.resourceCost }]
+          : []),
+      ]
+    : []
+  if (itemEntry && itemSpellEffect) {
+    const quantityCost = itemSpellCosts
+      .filter((cost) => cost.kind === 'quantity')
+      .reduce((sum, cost) => sum + cost.amount, 0)
+    const insufficientResource = itemSpellCosts.some((cost) =>
+      cost.kind === 'resource' && (itemEntry.resources?.[cost.resourceId]?.current ?? 0) < cost.amount,
+    )
+    if (quantityCost > itemEntry.quantity || insufficientResource) {
+      return { ok: false, reason: 'item-resource-unavailable' }
+    }
+  }
+  const itemSpellSource = itemEntry && itemSpellEffect ? {
+    instanceId: itemEntry.instanceId,
+    ...(payload.itemUseActionId ? { useActionId: payload.itemUseActionId } : {}),
+    itemName: itemEntry.item.name,
+    expectedInventoryRevision: inventory.revision ?? 0,
+    costs: itemSpellCosts,
+    economy: itemUse!.economy,
+  } : undefined
+  const racialGrant = !itemSpellSource && payload.racialInnate
     ? dnd5eRacialInnateSpellGrant(dnd5eRacialRulesForCharacter(actor), spell.id)
     : undefined
   if (payload.racialInnate === true && (
@@ -477,23 +544,33 @@ export function prepareDnd5eSpellCast(input: {
   )) {
     return { ok: false, reason: 'innate-spell-unavailable' }
   }
-  const castingClassId = !racialGrant
+  const castingClassId = !itemSpellSource && !racialGrant
     ? dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
     : undefined
-  if (!racialGrant && !castingClassId) {
+  if (!itemSpellSource && !racialGrant && !castingClassId) {
     return { ok: false, reason: 'spell-not-known-or-prepared' }
   }
   const castingSource = castingClassId
     ? dnd5eEffectiveSpellcastingSource(actor, castingClassId)
     : undefined
   const definition = castingSource?.definition
-  const castingClassLevel = racialGrant
+  const castingClassLevel = itemSpellSource
+    ? actor.level
+    : racialGrant
     ? actor.level
     : castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  const spellcastingAbility = racialGrant?.ability ?? definition?.spellcasting?.ability
+  const itemSpellcastingAbility = itemSpellSource && itemSpellEffect?.useCharacterSpellcasting === true
+    ? dnd5eEffectiveSpellcastingSources(actor)
+        .flatMap((source) => source.definition.spellcasting?.ability ? [source.definition.spellcasting.ability] : [])
+        .sort((left, right) =>
+          rules.abilityModifier(actor.abilities[right]) - rules.abilityModifier(actor.abilities[left]))[0]
+    : undefined
+  const spellcastingAbility = itemSpellSource
+    ? itemSpellEffect?.useCharacterSpellcasting === true ? itemSpellcastingAbility : 'int' as const
+    : racialGrant?.ability ?? definition?.spellcasting?.ability
   if (
     !spellcastingAbility ||
-    (!racialGrant && (!definition?.spellcasting || castingClassLevel < 1))
+    (!itemSpellSource && !racialGrant && (!definition?.spellcasting || castingClassLevel < 1))
   ) {
     return { ok: false, reason: 'spellcasting-class-unavailable' }
   }
@@ -502,7 +579,10 @@ export function prepareDnd5eSpellCast(input: {
     return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   }
   if (spell.castingTime === 'reaction') return { ok: false, reason: 'spell-reaction-only' }
-  if (enforceSpellcastingPrerequisites && !racialGrant && !sustainedAttack) {
+  if (
+    enforceSpellcastingPrerequisites && !racialGrant && !sustainedAttack &&
+    (!itemSpellSource || itemSpellEffect?.requiresComponents === true)
+  ) {
     const componentCheck = dnd5eSpellComponentCheck(
       actor,
       dnd5eCoreSpellComponentRequirements(spell.id),
@@ -511,6 +591,9 @@ export function prepareDnd5eSpellCast(input: {
     if (!dnd5eSpellComponentsAvailable(componentCheck)) {
       if (componentCheck.verbal === 'unavailable-silenced') {
         return { ok: false, reason: 'verbal-component-unavailable' }
+      }
+      if (componentCheck.somatic === 'unavailable-hands-occupied') {
+        return { ok: false, reason: 'somatic-component-unavailable' }
       }
       if (componentCheck.material === 'missing-focus-or-pouch') {
         return { ok: false, reason: 'material-component-unavailable' }
@@ -524,6 +607,8 @@ export function prepareDnd5eSpellCast(input: {
 
   const slotLevel = sustainedAttack
     ? sustainedEffect!.potency!
+    : itemSpellSource
+      ? itemSpellEffect!.castAtLevel
     : racialGrant
       ? racialGrant.castAtLevel
     : spell.level === 0
@@ -536,7 +621,7 @@ export function prepareDnd5eSpellCast(input: {
     (higherSlotDamageChoices.length > 0 && !payload.higherSlotDamageType) ||
     (payload.higherSlotDamageType != null && !higherSlotDamageChoices.includes(payload.higherSlotDamageType))
   ) return { ok: false, reason: 'spell-option-required' }
-  if (spell.level > 0 && !sustainedAttack) {
+  if (spell.level > 0 && !sustainedAttack && !itemSpellSource) {
     const resourceKey = racialGrant
       ? DND5E_RACIAL_RESOURCE_KEYS.innateSpell(spell.id)
       : definition!.spellcasting!.kind === 'pact' && spell.level <= 5
@@ -556,7 +641,7 @@ export function prepareDnd5eSpellCast(input: {
     ) return { ok: false, reason: 'slot-unavailable' }
   }
   if (
-    racialGrant && (
+    (racialGrant || itemSpellSource) && (
       payload.overchannel === true ||
       payload.empowered === true ||
       payload.draconicResistance === true ||
@@ -573,7 +658,12 @@ export function prepareDnd5eSpellCast(input: {
     payload.healingAllocations?.length ||
     (sustainedAttack.origin === 'caster' && payload.areaTargetCell) ||
     payload.areaTargetOrientation != null || payload.wallOfFireShape != null ||
+    payload.areaTargetRadiusFeet != null || payload.areaTargetWidthFeet != null ||
+    payload.areaTargetHeightFeet != null || payload.areaTargetLengthFeet != null ||
     payload.wallOfFireAngleDegrees != null || payload.wallOfFireDamagingSide != null ||
+    payload.wallOfFireLengthFeet != null || payload.wallOfFireDiameterFeet != null ||
+    payload.bladeBarrierShape != null || payload.bladeBarrierAngleDegrees != null ||
+    payload.bladeBarrierLengthFeet != null || payload.bladeBarrierDiameterFeet != null ||
     payload.projectileTargetIds?.length || payload.sculptedTargetIds?.length ||
     (sustainedAttack.resolution !== 'saving-throw' && (payload.targetTokenIds?.length ?? 0) > 1)
   )) return { ok: false, reason: 'invalid-action' }
@@ -639,6 +729,23 @@ export function prepareDnd5eSpellCast(input: {
   ) return { ok: false, reason: 'invalid-target' }
   const persistentArea = spell.effect === 'persistent-area'
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const suppliedExcludedAreaTargetIds = payload.excludedAreaTargetIds ?? []
+  const excludedAreaTargetIds = [...new Set(suppliedExcludedAreaTargetIds)]
+  if (
+    excludedAreaTargetIds.length !== suppliedExcludedAreaTargetIds.length ||
+    (spell.id !== 'spirit-guardians' && excludedAreaTargetIds.length > 0) ||
+    excludedAreaTargetIds.some((id) => {
+      const target = input.map.tokens.find((token) => token.id === id)
+      return !target || target.type === 'obstacle' || target.id === actorToken.id || !mapGeometryCanSeeToken({
+        geometry,
+        map: input.map,
+        viewer: actorToken,
+        target,
+        forceEnabled: true,
+        fallbackRangeFeet: 10_000,
+      })
+    })
+  ) return { ok: false, reason: 'invalid-target' }
   let blindTargetMiss = false
   let guessedTargetId: string | undefined
   if (guessedTargetCell != null) {
@@ -785,7 +892,7 @@ export function prepareDnd5eSpellCast(input: {
   let areaAnchorCells: readonly { col: number; row: number }[] | undefined
   let wallOfFireGeometry: Dnd5eWallOfFireGeometry | undefined
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
-  const areaTargeting = spell.area && sustainedUsesArea
+  const areaTemplate = spell.area && sustainedUsesArea
     ? {
         ...spell.area,
         placeRangeFeet: sustainedAttack?.origin === 'effect-token'
@@ -793,31 +900,80 @@ export function prepareDnd5eSpellCast(input: {
           : sustainedAttack?.rangeFeet,
       }
     : spell.area
+  const areaTargeting = areaTemplate
+    ? resolveAoeDimensions(areaTemplate, {
+        radiusFeet: payload.areaTargetRadiusFeet,
+        widthFeet: payload.areaTargetWidthFeet,
+        heightFeet: payload.areaTargetHeightFeet,
+        lengthFeet: payload.areaTargetLengthFeet,
+      })
+    : undefined
+  if (areaTemplate && !areaTargeting) return { ok: false, reason: 'spell-area-orientation-invalid' }
+  if (!areaTemplate && (
+    payload.areaTargetRadiusFeet != null || payload.areaTargetWidthFeet != null ||
+    payload.areaTargetHeightFeet != null || payload.areaTargetLengthFeet != null
+  )) return { ok: false, reason: 'invalid-action' }
   const hasWallOfFireOptions = payload.wallOfFireShape != null || payload.wallOfFireAngleDegrees != null ||
-    payload.wallOfFireDamagingSide != null
+    payload.wallOfFireDamagingSide != null || payload.wallOfFireLengthFeet != null ||
+    payload.wallOfFireDiameterFeet != null
   if (hasWallOfFireOptions && spell.id !== 'wall-of-fire') return { ok: false, reason: 'invalid-action' }
+  const hasBladeBarrierOptions = payload.bladeBarrierShape != null || payload.bladeBarrierAngleDegrees != null ||
+    payload.bladeBarrierLengthFeet != null || payload.bladeBarrierDiameterFeet != null
+  if (hasBladeBarrierOptions && spell.id !== 'blade-barrier') return { ok: false, reason: 'invalid-action' }
   if (spell.id === 'wall-of-fire') {
     const shape = payload.wallOfFireShape ?? 'line'
     const angle = payload.wallOfFireAngleDegrees ?? ((payload.areaTargetOrientation ?? 0) * 90)
     const side = payload.wallOfFireDamagingSide ?? (shape === 'ring' ? 'outside' : 'right')
-    if (!Number.isFinite(angle) || angle < -3_600 || angle > 3_600 ||
+    const lengthFeet = payload.wallOfFireLengthFeet ?? 60
+    const diameterFeet = payload.wallOfFireDiameterFeet ?? 20
+    if ((shape !== 'line' && shape !== 'ring') ||
+      !Number.isFinite(angle) || angle < -3_600 || angle > 3_600 ||
+      !Number.isInteger(lengthFeet) || lengthFeet < 5 || lengthFeet > 60 || lengthFeet % 5 !== 0 ||
+      !Number.isInteger(diameterFeet) || diameterFeet < 5 || diameterFeet > 20 || diameterFeet % 5 !== 0 ||
       (shape === 'line' && side !== 'left' && side !== 'right') ||
       (shape === 'ring' && side !== 'inside' && side !== 'outside')) {
       return { ok: false, reason: 'spell-area-orientation-invalid' }
     }
-    wallOfFireGeometry = { shape, angleDegrees: normalizeWallOfFireAngle(angle), damagingSide: side }
+    wallOfFireGeometry = {
+      shape,
+      angleDegrees: normalizeWallOfFireAngle(angle),
+      damagingSide: side,
+      lengthFeet,
+      diameterFeet,
+    }
+  }
+  if (spell.id === 'blade-barrier') {
+    const shape = payload.bladeBarrierShape ?? 'line'
+    const angle = payload.bladeBarrierAngleDegrees ?? payload.areaTargetAngleDegrees ?? 0
+    const lengthFeet = payload.bladeBarrierLengthFeet ?? payload.areaTargetWidthFeet ?? 100
+    const diameterFeet = payload.bladeBarrierDiameterFeet ?? 60
+    if ((shape !== 'line' && shape !== 'ring') ||
+      !Number.isFinite(angle) || angle < -3_600 || angle > 3_600 ||
+      !Number.isInteger(lengthFeet) || lengthFeet < 5 || lengthFeet > 100 || lengthFeet % 5 !== 0 ||
+      !Number.isInteger(diameterFeet) || diameterFeet < 5 || diameterFeet > 60 || diameterFeet % 5 !== 0) {
+      return { ok: false, reason: 'spell-area-orientation-invalid' }
+    }
+    wallOfFireGeometry = {
+      shape,
+      angleDegrees: normalizeWallOfFireAngle(angle),
+      damagingSide: shape === 'ring' ? 'outside' : 'right',
+      lengthFeet,
+      diameterFeet,
+    }
   }
   if (areaTargeting && (spell.areaTargetCount ?? 1) > 1) {
     const requiredAreaTargetCount = spell.areaTargetCount ?? 1
+    const minimumAreaTargetCount = Math.max(1, Math.min(requiredAreaTargetCount, spell.minimumAreaTargetCount ?? requiredAreaTargetCount))
     const submittedAreaCells = payload.areaTargetCells
     if (
       areaTargeting.shape !== 'circle' ||
       areaTargeting.origin !== 'point' ||
       !Array.isArray(submittedAreaCells) ||
-      submittedAreaCells.length !== requiredAreaTargetCount
+      submittedAreaCells.length < minimumAreaTargetCount ||
+      submittedAreaCells.length > requiredAreaTargetCount
     ) return { ok: false, reason: 'spell-area-target-required' }
     const uniqueAreaKeys = new Set(submittedAreaCells.map(cellKey))
-    if (uniqueAreaKeys.size !== requiredAreaTargetCount) {
+    if (uniqueAreaKeys.size !== submittedAreaCells.length) {
       return { ok: false, reason: 'spell-area-target-required' }
     }
     if (payload.areaTargetOrientation != null) {
@@ -1108,7 +1264,10 @@ export function prepareDnd5eSpellCast(input: {
     }
   } else if (payload.areaTargetCell != null || payload.areaTargetCells != null || payload.areaTargetOrientation != null ||
     payload.wallOfFireShape != null || payload.wallOfFireAngleDegrees != null ||
-    payload.wallOfFireDamagingSide != null) {
+    payload.wallOfFireDamagingSide != null || payload.wallOfFireLengthFeet != null ||
+    payload.wallOfFireDiameterFeet != null || payload.bladeBarrierShape != null ||
+    payload.bladeBarrierAngleDegrees != null || payload.bladeBarrierLengthFeet != null ||
+    payload.bladeBarrierDiameterFeet != null) {
     return { ok: false, reason: 'invalid-target' }
   }
   for (let targetIndex = 0; targetIndex < validTargetTokens.length; targetIndex += 1) {
@@ -1245,6 +1404,10 @@ export function prepareDnd5eSpellCast(input: {
     validTargetTokens.some((target) => !snapshot.state.combatants[target.id])
   ) return { ok: false, reason: 'combatant-missing' }
   const targetCombatants = validTargetTokens.map((token) => snapshot.state.combatants[token.id])
+  if (
+    itemSpellEffect?.targeting === 'self-only' &&
+    validTargetTokens.some((token) => token.id !== actorToken.id)
+  ) return { ok: false, reason: 'invalid-target' }
   const isUndeadOrConstruct = (creatureType: string | undefined) =>
     ['构装体', 'construct', '亡灵', 'undead'].includes((creatureType ?? '').toLowerCase())
   if (
@@ -1360,6 +1523,10 @@ export function prepareDnd5eSpellCast(input: {
     }
   }
   const abilityModifier = rules.abilityModifier(actor.abilities[spellcastingAbility])
+  const spellAttackModifier = itemSpellEffect?.spellAttackBonus ??
+    rules.proficiencyBonus(actor.level) + abilityModifier
+  const spellSaveDc = itemSpellEffect?.spellSaveDc ??
+    8 + rules.proficiencyBonus(actor.level) + abilityModifier
   const baseDamageDiceCounts = sustainedAttack || spell.sustainedAttack?.immediateAttack
     ? [dnd5eSustainedSpellAttackDiceCount(spell, slotLevel)]
     : dnd5eSpellDamageDiceCounts(
@@ -1551,7 +1718,7 @@ export function prepareDnd5eSpellCast(input: {
     ? {
         modifier: targetCombatant.savingThrowBonuses[savingThrowAbility!] ??
           rules.abilityModifier(targetCombatant.abilities[savingThrowAbility!]),
-        dc: 8 + actorCombatant.proficiencyBonus + abilityModifier,
+        dc: spellSaveDc,
         mode: spellSavingThrowMode(targetCombatant, targetToken.id),
       }
     : undefined
@@ -1567,7 +1734,7 @@ export function prepareDnd5eSpellCast(input: {
           targetToken: currentTargetToken,
           modifier: currentTarget.savingThrowBonuses[savingThrowAbility!] ??
             rules.abilityModifier(currentTarget.abilities[savingThrowAbility!]),
-          dc: 8 + actorCombatant.proficiencyBonus + abilityModifier,
+          dc: spellSaveDc,
           mode: spellSavingThrowMode(currentTarget, currentTargetToken.id),
           blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, currentTargetToken.id, 'bless'),
           baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, currentTargetToken.id, 'bane'),
@@ -1597,11 +1764,14 @@ export function prepareDnd5eSpellCast(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
+      itemSpellSource,
       castingClassId,
       castingClassLevel,
       racialInnate: racialGrant != null,
       racialGrant,
       spellcastingAbility,
+      spellAttackModifier,
+      spellSaveDc,
       actorToken,
       targetToken,
       targetTokens: validTargetTokens,
@@ -1650,6 +1820,7 @@ export function prepareDnd5eSpellCast(input: {
       areaAnchorCells,
       areaTargetOrientation: payload.areaTargetOrientation,
       wallOfFireGeometry,
+      excludedAreaTargetIds,
       sustainedEffectAttack,
       sustainedEffectAreaId: authorizedSustainedEffectAreaId,
       teleportDestination,
@@ -1687,9 +1858,7 @@ export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: n
     resolution: rules.resolveAttack({
       rolls,
       mode,
-      modifier: rules.proficiencyBonus(prepared.actor.level) +
-        rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
-        (blessRoll ?? 0) - (baneRoll ?? 0),
+      modifier: prepared.spellAttackModifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       targetAc,
     }),
     use: postD20Adjustment,
@@ -1717,9 +1886,7 @@ export function previewDnd5eSpellTargetAttack(
     resolution: rules.resolveAttack({
       rolls,
       mode,
-      modifier: rules.proficiencyBonus(prepared.actor.level) +
-        rules.abilityModifier(prepared.actor.abilities[prepared.spellcastingAbility]) +
-        (blessRoll ?? 0) - (baneRoll ?? 0),
+      modifier: prepared.spellAttackModifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       targetAc: target.armorClass,
     }),
     use: postD20Adjustment,
@@ -1826,6 +1993,14 @@ export function resolvePreparedDnd5eSpellCast(input: {
   const action: Dnd5eAction = {
     type: 'cast-spell',
     actorId: prepared.actorToken.id,
+    itemSpellSource: prepared.itemSpellSource ? {
+      instanceId: prepared.itemSpellSource.instanceId,
+      useActionId: prepared.itemSpellSource.useActionId,
+      itemName: prepared.itemSpellSource.itemName,
+      economy: prepared.itemSpellSource.economy,
+    } : undefined,
+    spellAttackModifier: prepared.spellAttackModifier,
+    spellSaveDc: prepared.spellSaveDc,
     castingClassId: prepared.castingClassId,
     racialInnate: prepared.racialInnate || undefined,
     targetId: prepared.targetToken.id,
@@ -1898,10 +2073,50 @@ export function resolvePreparedDnd5eSpellCast(input: {
   const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
   let result = resolveDnd5eHeadlessAction(prepared.state, action)
   if (!result.ok) return { result, airborneFalls }
+  let settlementCharacters = prepared.characters
+  if (prepared.itemSpellSource) {
+    const sourceIndex = settlementCharacters.findIndex((character) => character.id === prepared.actor.id)
+    if (sourceIndex < 0) {
+      return {
+        result: { ok: false, state: prepared.state, events: [], reason: 'invalid-actor' },
+        airborneFalls,
+      }
+    }
+    const spent = applyDnd5eInventoryActivityCosts(settlementCharacters[sourceIndex], {
+      instanceId: prepared.itemSpellSource.instanceId,
+      costs: prepared.itemSpellSource.costs,
+      receiptId: prepared.action.id,
+      expectedInventoryRevision: prepared.itemSpellSource.expectedInventoryRevision,
+    })
+    if (!spent.ok) {
+      return {
+        result: { ok: false, state: prepared.state, events: [], reason: 'item-resource-unavailable' },
+        airborneFalls,
+      }
+    }
+    settlementCharacters = settlementCharacters.map((character, index) =>
+      index === sourceIndex ? spent.character : character,
+    )
+    if (spent.lastChargeChecks?.length) {
+      result = {
+        ...result,
+        events: [
+          ...result.events,
+          ...spent.lastChargeChecks.map((check) => ({
+            type: 'item-last-charge-check' as const,
+            actorId: prepared.actorToken.id,
+            itemInstanceId: prepared.itemSpellSource!.instanceId,
+            itemName: prepared.itemSpellSource!.itemName,
+            ...check,
+          })),
+        ],
+      }
+    }
+  }
   let application = planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,
-      characters: prepared.characters,
+      characters: settlementCharacters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
     })
   const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)
@@ -1920,8 +2135,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   ) {
     const actorCombatant = result.state.combatants[prepared.actorToken.id]
     if (actorCombatant) {
-      const sourceSaveDc = 8 + actorCombatant.proficiencyBonus +
-        rules.abilityModifier(actorCombatant.abilities[prepared.spellcastingAbility])
+      const sourceSaveDc = prepared.spellSaveDc
       const effectTokenId = declaration.anchorMode === 'effect-token'
         ? `core-spell-effect:${prepared.action.id}`
         : undefined
@@ -1979,6 +2193,8 @@ export function resolvePreparedDnd5eSpellCast(input: {
           ? { 'wall-of-fire-turn-end': wallDamageCells }
           : undefined,
         wallOfFireGeometry: prepared.wallOfFireGeometry,
+        lightingAnchorCells: declaration.spellId === 'dancing-lights' ? prepared.areaAnchorCells : undefined,
+        excludedTargetIds: declaration.spellId === 'spirit-guardians' ? prepared.excludedAreaTargetIds : undefined,
       })
       const effectToken = effectTokenId
         ? {
@@ -2028,7 +2244,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
         application = planDnd5eMapResultApplication({
           state: result.state,
           map: prepared.map,
-          characters: prepared.characters,
+          characters: settlementCharacters,
           characterIdByCombatantId: prepared.characterIdByCombatantId,
         })
       }

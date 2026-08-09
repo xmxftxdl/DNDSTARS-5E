@@ -105,6 +105,29 @@ describe('CharacterDetailPanel', () => {
     expect(markup).toContain('value="94"')
   })
 
+  it('只向 DM 提供移除地图标记入口，并明确保留人物卡数据', () => {
+    const dmMarkup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
+      token,
+      character,
+      onSetHitPoints: () => undefined,
+      onRemoveFromMap: () => undefined,
+      onClose: () => undefined,
+      isDM: true,
+    }))
+    const playerMarkup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
+      token,
+      character,
+      onSetHitPoints: () => undefined,
+      onRemoveFromMap: () => undefined,
+      onClose: () => undefined,
+      isDM: false,
+    }))
+
+    expect(dmMarkup).toContain('data-testid="remove-character-token"')
+    expect(dmMarkup).toContain('不会删除人物卡、装备或战役记录')
+    expect(playerMarkup).not.toContain('data-testid="remove-character-token"')
+  })
+
   it('角色降至 0 HP 后仍保留独立的可访问关闭入口', () => {
     const defeatedCharacter = {
       ...character,

@@ -16,6 +16,8 @@ import { VoiceRoomContext, type VoiceRoomContextValue } from './useVoiceRoom'
 import {
   loadVoiceChangerConfig,
   saveVoiceChangerConfig,
+  DEFAULT_VOICE_CHANGER_SELECTION,
+  toggleVoiceChangerShortcut,
   voiceChangerStorageKey,
   voiceShortcutFromKeyboardEvent,
   type VoiceChangerSelection,
@@ -91,11 +93,11 @@ function VoiceRoomProviderSession({ session, children }: { session: RoomSession 
       const slots = current.slots.filter((slot) => slot.shortcut !== input.shortcut)
       if (!('clear' in input)) slots.push(input)
       slots.sort((left, right) => left.shortcut - right.shortcut)
-      const activeSlot = 'clear' in input && current.activeShortcut === input.shortcut
-        ? undefined
-        : current.activeShortcut
+      const clearingActiveSlot = 'clear' in input && current.activeShortcut === input.shortcut
+      const activeSlot = clearingActiveSlot ? undefined : current.activeShortcut
       return {
         ...current,
+        ...(clearingActiveSlot ? { selection: DEFAULT_VOICE_CHANGER_SELECTION } : {}),
         ...(activeSlot ? { activeShortcut: activeSlot } : { activeShortcut: undefined }),
         slots,
         ...(!('clear' in input) && current.activeShortcut === input.shortcut
@@ -106,15 +108,7 @@ function VoiceRoomProviderSession({ session, children }: { session: RoomSession 
   }, [])
 
   const activateVoiceNpcQuickSlot = useCallback((shortcut: number) => {
-    setVoiceChangerConfig((current) => {
-      const slot = current.slots.find((candidate) => candidate.shortcut === shortcut)
-      if (!slot) return current
-      return {
-        ...current,
-        selection: slot.selection,
-        activeShortcut: shortcut,
-      }
-    })
+    setVoiceChangerConfig((current) => toggleVoiceChangerShortcut(current, shortcut))
   }, [])
 
   useEffect(() => {

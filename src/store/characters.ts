@@ -1414,9 +1414,13 @@ export const useCharacterStore = create<CharacterState>()(
       const saveCharacters = () => {
         const seq = ++characterSaveSeq
         const save = async () => {
-          let characters = get().characters
           const shared = await loadSharedResource<SharedCharactersState>('characters')
           if (seq !== characterSaveSeq) return
+          // Read the local winner only after the rebase fetch settles. Holding a
+          // number-input spinner can apply several newer optimistic HP edits
+          // during this await; capturing before it would publish an older HP at
+          // a newer server revision and make the map visibly jump backwards.
+          let characters = get().characters
           if (shared?.characters) {
             if (isPlayerPort()) {
               const protectedSharedCharacters = mergePendingLocalCharacterClassResourceEdits(

@@ -63,6 +63,7 @@
     <script type="module">
       import { createDiceBox, DICE_BASE_SCALE, DICE_D4_BASE_SCALE, DICE_D4_LABEL_SCALE, DICE_D4_THEME } from './src/lib/diceEngine'
       import { diceFrameLayout } from './src/lib/diceFrameLayout'
+      import { sameOrderedDiceValues } from './src/lib/diceFrameValues'
       import { buildNotation } from './src/lib/diceNotation'
 
       const params = new URLSearchParams(window.location.search)
@@ -155,13 +156,6 @@
           .slice(0, q)
       }
 
-      function sameMultiset(left, right) {
-        if (left.length !== right.length) return false
-        const a = [...left].sort((x, y) => x - y)
-        const b = [...right].sort((x, y) => x - y)
-        return a.every((value, index) => value === b[index])
-      }
-
       function postResult(kind, requestId, values, fallback) {
         inFlightRequestIds.delete(requestId)
         rememberCompleted(requestId)
@@ -213,7 +207,7 @@
             Array.isArray(outcome.values) && outcome.values.length > 0
               ? outcome.values
               : fallbackValues(qty, sides)
-          if (forced.length > 0 && !sameMultiset(vals, forced)) {
+          if (forced.length > 0 && !sameOrderedDiceValues(vals, forced)) {
             // The engine simulates once, swaps face materials, then replays the
             // same launch. Multi-die collisions can diverge slightly on replay,
             // leaving a different material face uppermost. Correct only the
@@ -229,11 +223,28 @@
             })
             vals = forced
           }
+          const presentedValues = forced.length > 0 ? forced : vals
+          // D4 forced notation in dice-box-threejs can return a different value
+          // for an individual die even when the aggregate multiset looks right.
+          // Pin each physical die before and after gathering so the visible D4
+          // face cannot drift away from the authoritative result.
+          box.correctVisibleFaces(presentedValues)
           // Keep the physical roll, then present multi-die results as a readable
           // non-overlapping grid. D6 dice retain their rolled top face while
           // being straightened, so stacked dice cannot remain leaning.
-          await box.arrangeSettledDice()
-          deliver(vals, false)
+          await box.arrangeSettledDice(presentedValues)
+          const correctedAfterArrange = box.correctVisibleFaces(presentedValues)
+          const visibleValues = box.visibleValues()
+          if (!sameOrderedDiceValues(visibleValues, presentedValues)) {
+            console.warn('[dice-box-frame] visible faces differ after arrangement', {
+              requestId,
+              notation,
+              expected: presentedValues,
+              visible: visibleValues,
+              correctedAfterArrange,
+            })
+          }
+          deliver(presentedValues, false)
         } catch (error) {
           console.error('[dice-box-frame] roll failed', error)
           deliver(fallbackValues(qty, sides), true)

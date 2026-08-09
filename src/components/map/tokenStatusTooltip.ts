@@ -38,6 +38,7 @@ export const MAP_SPELL_STATUS_IDS = [
   'hold-person',
   'blindness-deafness',
   'monster-damage-aversion',
+  'monster-berserk',
 ] as const
 
 export type MapSpellStatusId = typeof MAP_SPELL_STATUS_IDS[number]
@@ -73,6 +74,10 @@ const CUSTOM_SPELL_STATUS_TOOLTIPS: Partial<Record<MapSpellStatusId, TokenStatus
   'monster-damage-aversion': {
     title: '伤害畏避',
     description: '受到火焰伤害后，攻击检定和属性检定具有劣势，直到该生物的下个回合结束。',
+  },
+  'monster-berserk': {
+    title: '狂暴',
+    description: '该怪物已进入狂暴状态。其回合中会按狂暴规则选择并攻击最近的可见生物；DM 可以在怪物状态面板中手动解除。',
   },
 }
 
@@ -135,4 +140,3 @@ export const SHILLELAGH_TOKEN_TOOLTIP: TokenStatusTooltipContent = {
   title: '橡棍术 · Shillelagh',
   description: '所持短棒或长棍已被强化：伤害骰变为 d8，并可使用施法关键属性进行攻击和伤害掷骰。',
 }
-

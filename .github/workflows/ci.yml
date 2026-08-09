@@ -71,6 +71,11 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Account and plugin release E2E
+        env:
+          # These release tests only use the DM and plugin-review origins. Skip
+          # the two idle player Vite instances and prewarm their route modules
+          # before Playwright starts its first assertion.
+          STARS_E2E_RELEASE_GATE: '1'
         run: >-
           npx playwright test
           e2e/account-auth-lifecycle.spec.ts

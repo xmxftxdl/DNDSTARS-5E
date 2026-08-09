@@ -23,6 +23,7 @@ function combatant(input: {
   maxHp?: number
   classState?: Partial<Dnd5eCombatant['classState']>
   classId?: Dnd5eCombatant['classId']
+  damageDefenseRules?: Dnd5eCombatant['damageDefenseRules']
 }): Dnd5eCombatant {
   return createDnd5eCombatant({
     id: input.id,
@@ -39,6 +40,7 @@ function combatant(input: {
     position: { x: 0, y: 0 },
     concentrating: false,
     statBlockId: input.statBlockId,
+    damageDefenseRules: input.damageDefenseRules,
     classState: input.classState,
     classId: input.classId,
   })
@@ -47,7 +49,7 @@ function combatant(input: {
 function damageFleshGolem(input: {
   currentHp: number
   damage: number
-  damageType: 'fire' | 'lightning'
+  damageType: 'fire' | 'lightning' | 'slashing'
   classState?: Partial<Dnd5eCombatant['classState']>
 }) {
   const state = startDnd5eHeadlessCombat('flesh-golem-damage', [
@@ -59,6 +61,9 @@ function damageFleshGolem(input: {
       statBlockId: 'srd-5.1:flesh-golem',
       currentHp: input.currentHp,
       maxHp: 93,
+      damageDefenseRules: input.damageType === 'slashing'
+        ? getDnd5eSrdMonsterBySlug('flesh-golem')?.damageDefenseRules
+        : undefined,
       classState: input.classState,
     }),
   ])
@@ -141,6 +146,38 @@ describe('Flesh Golem Headless automation', () => {
       actorId: 'golem',
       reason: 'fully-healed',
     })
+  })
+
+  it('reports why an ordinary weapon cannot damage the golem', () => {
+    const result = damageFleshGolem({
+      currentHp: 93,
+      damage: 11,
+      damageType: 'slashing',
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+
+    expect(result.state.combatants.golem.currentHp).toBe(93)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'damage-defense-resolved',
+      sourceId: 'hero',
+      targetId: 'golem',
+      damageType: 'slashing',
+      damageBefore: 11,
+      damageAfter: 0,
+      damageSource: {
+        delivery: 'weapon-attack',
+        magical: false,
+      },
+      defenses: [expect.objectContaining({ kind: 'immune' })],
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied',
+      targetId: 'golem',
+      amount: 0,
+      hpBefore: 93,
+      hpAfter: 93,
+    }))
   })
 
   it('applies fire aversion to attacks and checks until the golem turn ends', () => {

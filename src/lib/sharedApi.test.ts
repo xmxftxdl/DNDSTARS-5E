@@ -9,6 +9,7 @@ import {
   sharedWriteApiCandidates,
 } from './sharedApi'
 import { ROOM_SESSION_STORAGE_KEY, type RoomSession } from './roomSession'
+import { SHARED_RESOURCE_QUARANTINE_KEY } from './sharedResourceValidation'
 
 function localStorageDouble() {
   const values = new Map<string, string>()
@@ -219,6 +220,40 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
 
     const putInit = fetchMock.mock.calls[2]?.[1] as RequestInit | undefined
     expect(new Headers(putInit?.headers).get('X-Stars-Expected-Revision')).toBe('5')
+  })
+
+  it('clears a stale integrity warning after that resource validates successfully', async () => {
+    const localStorage = localStorageDouble()
+    localStorage.setItem(SHARED_RESOURCE_QUARANTINE_KEY, JSON.stringify([
+      {
+        id: 'combat-warning', roomId: 'room', resource: 'combat-interrupts',
+        reason: 'stale validator warning', detectedAt: 1, source: 'client',
+      },
+      {
+        id: 'map-warning', roomId: 'room', resource: 'maps',
+        reason: 'unrelated warning', detectedAt: 2, source: 'client',
+      },
+    ]))
+    vi.stubGlobal('window', {
+      localStorage,
+      dispatchEvent: vi.fn(),
+      location: {
+        origin: 'http://127.0.0.1:5274',
+        protocol: 'http:',
+        hostname: '127.0.0.1',
+        port: '5274',
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      interrupts: [], updatedAt: 3,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '3' },
+    })))
+
+    await expect(loadSharedResource('combat-interrupts')).resolves.toMatchObject({ interrupts: [] })
+    expect(JSON.parse(localStorage.getItem(SHARED_RESOURCE_QUARANTINE_KEY) ?? '[]'))
+      .toEqual([expect.objectContaining({ resource: 'maps' })])
   })
 
   it('persists a player wizard preparation during active combat instead of keeping it only in memory', async () => {

@@ -82,6 +82,95 @@ describe('CombatActionBanner', () => {
     expect(barbarian).toContain('--combat-banner-glow:#FF6B6B')
   })
 
+  it('战士横幅在主背景左右显示银灰色双剑纹章', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'fighter',
+      attackName: '疾走',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-fighter-sword="left"')
+    expect(html).toContain('data-combat-fighter-sword="right"')
+    expect(html).not.toContain('data-banner-sword=')
+  })
+
+  it('狂战士横幅使用半露兽颅图腾和两侧双刃战斧', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'barbarian',
+      attackName: '狂暴',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-barbarian-center="horned-skull"')
+    expect(html).toContain('data-combat-barbarian-axe="left"')
+    expect(html).toContain('data-combat-barbarian-axe="right"')
+  })
+
+  it('德鲁伊横幅在主背景左右显示树苗纹章', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'druid',
+      attackName: '荒野形态',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-druid-sapling="left"')
+    expect(html).toContain('data-combat-druid-sapling="right"')
+  })
+
+  it('术士横幅在主背景左右显示涌动的魔法浪', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'sorcerer',
+      attackName: '超魔法',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-sorcerer-wave="left"')
+    expect(html).toContain('data-combat-sorcerer-wave="right"')
+  })
+
+  it('邪术师横幅在主背景左右显示翻动的契约魔法书', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'warlock',
+      attackName: '魔能爆',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-warlock-book="left"')
+    expect(html).toContain('data-combat-warlock-book="right"')
+  })
+
+  it('游侠横幅显示猎人长弓与中央罗盘纹章', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'ranger',
+      attackName: '猎人印记',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-ranger-bow="left"')
+    expect(html).toContain('data-combat-ranger-bow="right"')
+    expect(html).toContain('data-combat-ranger-center="hunter-compass"')
+  })
+
+  it('游荡者横幅使用中央警戒之眼和两侧开锁工具', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'attack',
+      classId: 'rogue',
+      attackName: '偷袭',
+      attackKind: 'action',
+    }))
+
+    expect(html).toContain('data-combat-rogue-center="watchful-eye"')
+    expect(html).toContain('data-combat-rogue-tool="left"')
+    expect(html).toContain('data-combat-rogue-tool="right"')
+    expect(html).not.toContain('data-combat-rogue-dagger=')
+  })
+
   it('renders the Thunderwave spell banner with its dedicated artwork', () => {
     const html = renderToStaticMarkup(createElement(CombatActionBanner, {
       mode: 'spell',
@@ -94,21 +183,37 @@ describe('CombatActionBanner', () => {
     expect(html).toContain('href="/assets/icons/thunderwave-spell-action.png"')
   })
 
-  it('keeps action and kill-streak banners above the combat toolbar stacking layer', () => {
+  it('keeps banners, transient controls, initiative, and player actions in a stable stacking order', () => {
     const mapsPageSource = readFileSync(new URL('../../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+    const wallOfFireSource = readFileSync(new URL('../../pages/maps/WallOfFireTargetingControls.tsx', import.meta.url), 'utf8')
     const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
 
     expect(mapsPageSource).toContain(
       'pointer-events-none absolute inset-x-0 top-[3%] z-[130] flex justify-center px-4',
     )
     expect(mapsPageSource).toContain(
-      'pointer-events-none absolute inset-x-0 top-5 z-[130] flex justify-center',
+      'pointer-events-none absolute inset-x-0 top-5 z-[110] flex justify-center',
+    )
+    expect(mapsPageSource).toContain(
+      'absolute left-1/2 top-14 z-[110] flex -translate-x-1/2 items-center gap-3',
+    )
+    expect(mapsPageSource).toMatch(
+      /data-testid="dnd5e-spell-targeting-overlay"[\s\S]*?className="absolute left-1\/2 top-14 z-\[110\]/,
+    )
+    expect(wallOfFireSource).toContain(
+      'data-testid="wall-of-fire-targeting-controls" className="absolute left-1/2 top-14 z-[110]',
     )
     expect(mapsPageSource).toContain(
       'pointer-events-none absolute inset-x-2 top-2 z-[80] flex flex-col items-center gap-2',
     )
     expect(mapsPageSource).toContain(
       'pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center px-2',
+    )
+    expect(mapsPageSource).toContain(
+      'pointer-events-none absolute bottom-6 left-1/2 z-[110] -translate-x-1/2',
+    )
+    expect(mapsPageSource).toContain(
+      'pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex justify-center',
     )
     expect(css).toMatch(/\.kill-streak-presentation\s*{[^}]*z-index:\s*130;/s)
   })

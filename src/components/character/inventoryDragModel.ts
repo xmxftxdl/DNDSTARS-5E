@@ -28,7 +28,11 @@ export function dnd5eInventoryDropDecision(
   }
   if (entry.identified === false) return { accepted: false, reason: '未鉴定物品不能装备。' }
   if (!entry.item.equipment) return { accepted: false, reason: '该物品不是可穿戴装备。' }
-  if (!equipmentSlotAcceptsItemSlot(destination.slot, entry.item.equipment.slot)) {
+  if (!equipmentSlotAcceptsItemSlot(
+    destination.slot,
+    entry.item.equipment.slot,
+    entry.item.equipment.allowedSlots,
+  )) {
     return { accepted: false, reason: `该物品不能放入这个穿戴槽。` }
   }
   return { accepted: true, action: 'equip' }

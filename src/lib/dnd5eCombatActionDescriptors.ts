@@ -43,11 +43,12 @@ export type Dnd5eCombatActionCommand =
       options?: Dnd5eCombatSpellOptions
     }
   | { kind: 'toggle-spell-modifier'; modifier: Dnd5eCombatSpellModifier }
+  | { kind: 'use-fighter-feature'; feature: 'second-wind' | 'action-surge' }
   | { kind: 'use-class-feature'; payload: Dnd5eClassFeaturePayload }
   | { kind: 'select-extra-action-teleport-destination' }
   | { kind: 'move-persistent-area'; areaId: string }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
-  | { kind: 'use-item'; instanceId: string }
+  | { kind: 'use-item'; instanceId: string; useActionId?: string }
   | { kind: 'end-turn' }
 
 export interface Dnd5eCombatActionResourceBadge {
@@ -158,6 +159,7 @@ export type Dnd5eCombatActionFeatureSource = Dnd5eCombatActionFeatureSourceBase 
 
 export interface Dnd5eCombatActionItemSource {
   instanceId: string
+  useActionId?: string
   label: string
   description: string
   icon: Dnd5eActionIconSpec
@@ -299,7 +301,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
 
   for (const item of input.items ?? []) {
     actions.push(descriptor({
-      id: `item:${item.instanceId}`,
+      id: `item:${item.instanceId}${item.useActionId ? `:${item.useActionId}` : ''}`,
       sourceKind: 'item',
       label: item.label,
       description: item.description,
@@ -307,7 +309,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       economy: item.economy,
       targeting: item.targeting,
       resource: item.resource ?? { label: '数量', current: item.quantity },
-      command: { kind: 'use-item', instanceId: item.instanceId },
+      command: { kind: 'use-item', instanceId: item.instanceId, useActionId: item.useActionId },
     }, availability(input, item.economy, item.usable, item.unavailableReason)))
   }
 

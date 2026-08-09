@@ -24,7 +24,20 @@ export function buildDnd5eMonsterStatusTokenMarks(
       ? characters.find((character) => character.id === token.characterId)
       : undefined
     const combatState = linked?.dnd5eCombatState ?? token.dnd5eCombatState
-    if (combatState?.monsterDamageAversionActive !== true) return []
+    const marks: SpellStatusTokenMark[] = []
+
+    if (combatState?.monsterBerserk === true) {
+      marks.push({
+        tokenId: token.id,
+        statusId: 'monster-berserk',
+        backgroundHighlightColor: '#fecaca',
+        backgroundColor: '#7f1d1d',
+        borderColor: '#fca5a5',
+        glowColor: '#ef4444',
+      })
+    }
+
+    if (combatState?.monsterDamageAversionActive !== true) return marks
 
     const sourceActorId = combatState.monsterDamageAversionSourceActorId
     const sourceToken = sourceActorId
@@ -37,13 +50,14 @@ export function buildDnd5eMonsterStatusTokenMarks(
       ? dnd5eCharacterPresentationColors(sourceCharacter)
       : fallbackMonsterColors()
 
-    return [{
+    marks.push({
       tokenId: token.id,
       statusId: 'monster-damage-aversion',
       backgroundHighlightColor: colors.statusBackgroundHighlightColor,
       backgroundColor: colors.statusBackgroundColor,
       borderColor: colors.statusBorderColor,
       glowColor: colors.glowColor,
-    }]
+    })
+    return marks
   })
 }

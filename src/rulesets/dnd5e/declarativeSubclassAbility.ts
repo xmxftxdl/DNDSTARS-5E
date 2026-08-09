@@ -321,6 +321,23 @@ export interface DeclarativePostD20AdjustmentMechanicV1 {
   directions: readonly ('add' | 'subtract')[]
 }
 
+export type DeclarativeD20ChoiceRerollScopeV1 =
+  | 'self-roll'
+  | 'attack-against-self'
+
+/**
+ * Generic Lucky-style decision window. The imported package only declares
+ * eligibility. The Host rolls the additional d20, validates ownership and
+ * resources, and waits for the owning player to use or decline the feature.
+ */
+export interface DeclarativeD20ChoiceRerollMechanicV1 {
+  kind: 'd20-choice-reroll'
+  rollKinds: readonly DeclarativeNextD20RollKindV1[]
+  scopes: readonly DeclarativeD20ChoiceRerollScopeV1[]
+  additionalDice: 1
+  selection: 'owner-chooses'
+}
+
 export interface DeclarativePostSpellRandomTableOutcomeV1 {
   id: string
   minimum: number
@@ -401,6 +418,7 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeUtilityProjectionAttackAdvantageMechanicV1
     | DeclarativeNextD20AdvantageMechanicV1
     | DeclarativePostD20AdjustmentMechanicV1
+    | DeclarativeD20ChoiceRerollMechanicV1
     | DeclarativePostSpellRandomTableMechanicV1
     | DeclarativePostSpellRandomTableChoiceMechanicV1
     | DeclarativeSpellDamageMaxDieBonusMechanicV1
@@ -909,6 +927,35 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       ) throw new Error(`${path} post d20 adjustment declaration is invalid`)
       if (!record(value.cost) || value.cost.economy !== 'reaction') {
         throw new Error(`${path} post d20 adjustment must consume a reaction`)
+      }
+    } else if (value.mechanic.kind === 'd20-choice-reroll') {
+      assertKeys(
+        value.mechanic,
+        ['kind', 'rollKinds', 'scopes', 'additionalDice', 'selection'],
+        `${path} d20 choice reroll mechanic`,
+      )
+      if (
+        !Array.isArray(value.mechanic.rollKinds) ||
+        value.mechanic.rollKinds.length < 1 ||
+        value.mechanic.rollKinds.length > 3 ||
+        new Set(value.mechanic.rollKinds).size !== value.mechanic.rollKinds.length ||
+        value.mechanic.rollKinds.some((kind) =>
+          !['attack', 'ability-check', 'saving-throw'].includes(String(kind))) ||
+        !Array.isArray(value.mechanic.scopes) ||
+        value.mechanic.scopes.length < 1 ||
+        value.mechanic.scopes.length > 2 ||
+        new Set(value.mechanic.scopes).size !== value.mechanic.scopes.length ||
+        value.mechanic.scopes.some((scope) =>
+          !['self-roll', 'attack-against-self'].includes(String(scope))) ||
+        value.mechanic.additionalDice !== 1 ||
+        value.mechanic.selection !== 'owner-chooses'
+      ) throw new Error(`${path} d20 choice reroll declaration is invalid`)
+      if (value.trigger.kind !== 'after-d20-roll') {
+        throw new Error(`${path} d20 choice reroll must trigger after a d20 roll`)
+      }
+      if (!record(value.cost) || value.cost.economy !== 'none' ||
+        !Array.isArray(value.cost.resources) || value.cost.resources.length < 1) {
+        throw new Error(`${path} d20 choice reroll must consume a declared resource without action economy`)
       }
     } else if (value.mechanic.kind === 'post-spell-random-table') {
       const mechanic = value.mechanic
@@ -1508,6 +1555,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
     ability.mechanic?.kind === 'utility-projection-attack-advantage'
   const auditedNextD20 = ability.mechanic?.kind === 'next-d20-advantage'
   const auditedPostD20Adjustment = ability.mechanic?.kind === 'post-d20-adjustment'
+  const auditedD20ChoiceReroll = ability.mechanic?.kind === 'd20-choice-reroll'
   const auditedPostSpellRandomTable =
     ability.mechanic?.kind === 'post-spell-random-table'
   const auditedPostSpellRandomTableChoice =
@@ -1517,6 +1565,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   const auditedMechanic = auditedCombatManeuver || auditedMartialSpellSynergy ||
     auditedRageFeature || auditedOpeningAttack || auditedHiddenSpellSave ||
     auditedUtilityProjection || auditedNextD20 || auditedPostD20Adjustment ||
+    auditedD20ChoiceReroll ||
     auditedPostSpellRandomTable || auditedPostSpellRandomTableChoice ||
     auditedSpellDamageMaxDieBonus
   if (ability.canModifyEnemyD20) {

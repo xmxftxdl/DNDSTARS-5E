@@ -68,6 +68,7 @@ import {
   dnd5eForcedPushDestination,
 } from './spellAction'
 import { dnd5eFallingDamageDice } from './traversal'
+import { dnd5eWallOfFireDamageCells, type Dnd5eWallOfFireGeometry } from './wallOfFireGeometry'
 
 type ListedMonsterSpell = NonNullable<Dnd5eMonsterSpellcasting['spells']>[number]
 
@@ -604,6 +605,26 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
       prepared.spell.id,
       `${prepared.areaTargetCell.col},${prepared.areaTargetCell.row}`,
     ].join(':')
+    const areaGeometry = mapGeometryRuntimeForMap(prepared.map.id)
+    const stripGeometry: Dnd5eWallOfFireGeometry | undefined =
+      prepared.spell.id === 'wall-of-fire' || prepared.spell.id === 'blade-barrier'
+        ? {
+            shape: 'line',
+            angleDegrees: (prepared.areaTargetOrientation ?? 0) * 90,
+            damagingSide: 'right',
+            lengthFeet: prepared.spell.area?.shape === 'rect'
+              ? prepared.spell.area.widthFeet
+              : prepared.spell.id === 'blade-barrier' ? 100 : 60,
+          }
+        : undefined
+    const wallDamageCells = prepared.spell.id === 'wall-of-fire' && stripGeometry
+      ? dnd5eWallOfFireDamageCells({
+          anchor: prepared.areaTargetCell,
+          wallCells: prepared.areaCells,
+          ...stripGeometry,
+          map: prepared.map,
+        })
+      : undefined
     const area = createDnd5eCoreSpellArea({
       declaration,
       actionId,
@@ -617,6 +638,25 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
       baseElevationFeet: prepared.areaBaseElevationFeet,
       durationRounds: prepared.spell.concentrationDurationRounds,
       sourceAlignment: prepared.monster.alignment,
+      triggerCellsById: wallDamageCells
+        ? { 'wall-of-fire-turn-end': wallDamageCells }
+        : undefined,
+      wallOfFireGeometry: stripGeometry,
+      excludedTargetIds: prepared.spell.id === 'spirit-guardians'
+        ? prepared.map.tokens.filter((candidate) =>
+            candidate.id !== prepared.actorToken.id &&
+            candidate.type !== 'obstacle' &&
+            !areOpposedCombatTokens(prepared.actorToken, candidate) &&
+            mapGeometryCanSeeToken({
+              geometry: areaGeometry,
+              map: prepared.map,
+              viewer: prepared.actorToken,
+              target: candidate,
+              forceEnabled: true,
+              fallbackRangeFeet: 120,
+            }))
+          .map((candidate) => candidate.id)
+        : undefined,
     })
     application.map = {
       ...application.map,

@@ -17,7 +17,12 @@ export type Dnd5eActivityProjectionSourceKind =
   | 'feat'
   | 'item'
   | 'spell'
+  | 'class'
+  | 'subclass'
   | 'subclass-ability'
+  | 'race'
+  | 'background'
+  | 'monster'
   | 'monster-action'
 
 export interface Dnd5eActivityProjectionEntryV1 {
@@ -53,6 +58,7 @@ function safeManualFallback(
     name: candidate.name,
     description: candidate.description,
     activation: candidate.activation,
+    invocation: candidate.invocation,
     target: candidate.target.kind === 'self' ? { kind: 'self' } : {
       kind: 'creature', relation: 'any', count: 1, includeSelf: true,
     },
@@ -83,6 +89,9 @@ export function dnd5eContentPackageActivityProjectionV1(
   const activities: Dnd5eActivityDefinitionV1[] = []
   const entries: Dnd5eActivityProjectionEntryV1[] = []
   const legacyActions = new Map(value.content.headlessActions.map((action) => [action.id, dnd5eActivityFromCustomHeadlessAction(action)]))
+  const explicitSources = new Set((value.content.activities ?? []).flatMap((activity) => activity.legacySource
+    ? [`${activity.legacySource.kind}:${activity.legacySource.id}`]
+    : []))
 
   const add = (
     sourceKind: Dnd5eActivityProjectionSourceKind,
@@ -111,28 +120,46 @@ export function dnd5eContentPackageActivityProjectionV1(
     })
   }
 
-  for (const [id, activity] of legacyActions) add('headless-action', id, activity)
+  const projectedSourceKind = (activity: Dnd5eActivityDefinitionV1): Dnd5eActivityProjectionSourceKind => {
+    const kind = activity.legacySource?.kind
+    if (kind === 'custom-headless-action') return 'headless-action'
+    return kind ?? 'feature'
+  }
+  for (const activity of value.content.activities ?? []) {
+    add(projectedSourceKind(activity), activity.legacySource?.id ?? activity.id, activity)
+  }
+  for (const [id, activity] of legacyActions) {
+    if (!explicitSources.has(`custom-headless-action:${id}`)) add('headless-action', id, activity)
+  }
   for (const feature of value.content.features) {
+    if (explicitSources.has(`feature:${feature.id}`)) continue
     const activity = dnd5eActivityFromPluginFeature(feature, feature.action ? legacyActions.get(feature.action.id) : undefined)
     if (activity) add('feature', feature.id, activity)
   }
   for (const feat of value.content.feats) {
+    if (explicitSources.has(`feat:${feat.id}`)) continue
     const activity = dnd5eActivityFromPluginFeature(feat, feat.action ? legacyActions.get(feat.action.id) : undefined, 'feat')
     if (activity) add('feat', feat.id, activity)
   }
   for (const spell of value.content.spells) {
+    if (explicitSources.has(`spell:${spell.id}`)) continue
     const linked = spell.automation?.mode === 'headless-action' ? legacyActions.get(spell.automation.actionId) : undefined
     add('spell', spell.id, dnd5eActivityFromSpellDefinition(spell, spell.automation?.mode ?? 'reference-only', linked))
   }
   for (const item of value.content.items) {
+    if (explicitSources.has(`item:${item.id}`)) continue
     const activity = dnd5eActivityFromPluginItem(item)
     if (activity) add('item', item.id, activity)
   }
   for (const subclass of value.content.subclasses) {
-    for (const ability of subclass.abilities) add('subclass-ability', `${subclass.id}:${ability.id}`, dnd5eActivityFromDeclarativeSubclassAbility(ability))
+    for (const ability of subclass.abilities) {
+      if (explicitSources.has(`subclass-ability:${subclass.id}:${ability.id}`) || explicitSources.has(`subclass-ability:${ability.id}`)) continue
+      add('subclass-ability', `${subclass.id}:${ability.id}`, dnd5eActivityFromDeclarativeSubclassAbility(ability))
+    }
   }
   for (const monster of value.content.monsters) {
     for (const activity of dnd5eActivitiesFromMonster(monster)) {
+      if (activity.legacySource && explicitSources.has(`${activity.legacySource.kind}:${activity.legacySource.id}`)) continue
       add('monster-action', activity.legacySource?.id ?? activity.id, activity)
     }
   }

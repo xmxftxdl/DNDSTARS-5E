@@ -3,7 +3,13 @@ import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eStandardConditionId } from '../conditions'
 import type { Dnd5eDamageType } from '../damageTypes'
 import type { Dnd5ePersistentAreaVisual } from '../persistentAreaTypes'
-import type { Dnd5eEffectDefinitionV1, Dnd5eEffectDurationV1, Dnd5ePredicateV1, Dnd5eTriggerDefinitionV1 } from './dnd5eEffectContracts'
+import type {
+  Dnd5eEffectDefinitionV1,
+  Dnd5eEffectDurationV1,
+  Dnd5ePredicateV1,
+  Dnd5eTriggerDefinitionV1,
+  Dnd5eTriggerEventV1,
+} from './dnd5eEffectContracts'
 import type { Dnd5eFormulaV1 } from './dnd5eFormula'
 
 export const DND5E_ACTIVITY_SCHEMA_VERSION = 1 as const
@@ -12,6 +18,65 @@ export type Dnd5eActivityActivationV1 =
   | { kind: 'action' | 'bonus-action' | 'reaction' | 'free' | 'movement'; cost?: number; reactionEvent?: string }
   | { kind: 'minute' | 'hour'; value: number }
   | { kind: 'passive' | 'special'; timing?: string }
+
+export type Dnd5eActivityConfirmationV1 = 'automatic' | 'actor-choice' | 'target-choice' | 'dm-approval'
+
+export type Dnd5eActivityTriggerRetentionV1 =
+  | 'single-event'
+  | 'until-triggered'
+  | 'until-turn-end'
+  | 'until-round-end'
+
+export interface Dnd5eActivityEventIdentityV1 {
+  /** Canonical, stable rules definition id used by statistics and exact trigger matching. */
+  definitionId?: string
+  /** Unique Host-owned id for this concrete execution/event batch. */
+  executionId?: string
+  /** Links a child attack/effect to the action that created it. */
+  parentExecutionId?: string
+}
+
+/**
+ * Defines whether an Activity is explicitly selected or becomes available in
+ * an authority-owned event window. Optional for V1 compatibility; omitted
+ * definitions are treated as active Activities unless a legacy self-trigger
+ * can be projected safely.
+ */
+export type Dnd5eActivityInvocationV1 =
+  | { kind: 'active'; confirmation?: 'actor-choice' | 'dm-approval' }
+  | {
+      kind: 'triggered'
+      event: Dnd5eTriggerEventV1
+      confirmation: Dnd5eActivityConfirmationV1
+      retention?: Dnd5eActivityTriggerRetentionV1
+    }
+
+export type Dnd5eActivityEventSourceV1 = (
+  | {
+      kind: 'attack'
+      id?: string
+      activityId?: string
+      mode: 'melee' | 'ranged' | 'spell' | 'unarmed'
+      result?: 'hit' | 'miss' | 'critical-hit' | 'critical-miss'
+      weaponId?: string
+      weaponProperties?: readonly string[]
+    }
+  | { kind: 'spell'; id: string; activityId?: string; level: number }
+  | { kind: 'skill'; id: string; activityId?: string }
+  | { kind: 'item' | 'feature' | 'action'; id: string; activityId?: string }
+  | { kind: 'movement'; id?: string; distanceFeet: number; completed: boolean }
+  | { kind: 'combat'; id?: string; activityId?: string }
+) & Dnd5eActivityEventIdentityV1
+
+/** Host-created event envelope. Clients may reference eventId but cannot author this data. */
+export interface Dnd5eActivityTriggerContextV1 {
+  eventId: string
+  event: Dnd5eTriggerEventV1
+  source: Dnd5eActivityEventSourceV1
+  eligibleActorIds: readonly string[]
+  eligibleTargetIds: readonly string[]
+  actionEconomyAvailable?: Partial<Record<'action' | 'bonus-action' | 'reaction', boolean>>
+}
 
 export type Dnd5eActivityTargetV1 =
   | { kind: 'self' }
@@ -37,6 +102,10 @@ export type Dnd5eActivityTargetV1 =
       lengthFeet?: number
       widthFeet?: number
       heightFeet?: number
+      minimumRadiusFeet?: number
+      minimumLengthFeet?: number
+      minimumWidthFeet?: number
+      minimumHeightFeet?: number
       maximumTargets: number
       includeSelf?: boolean
       rotatable?: boolean
@@ -49,6 +118,10 @@ export interface Dnd5eActivityAreaPlacementV1 {
   y: number
   elevationFeet?: number
   angleDegrees?: number
+  radiusFeet?: number
+  lengthFeet?: number
+  widthFeet?: number
+  heightFeet?: number
 }
 
 export interface Dnd5eActivityAreaInstanceV1 extends Dnd5eActivityAreaPlacementV1 {
@@ -186,6 +259,7 @@ export interface Dnd5eActivityDefinitionV1 {
   name: string
   description?: string
   activation: Dnd5eActivityActivationV1
+  invocation?: Dnd5eActivityInvocationV1
   target: Dnd5eActivityTargetV1
   requirements?: readonly Dnd5ePredicateV1[]
   consumption?: readonly Dnd5eActivityConsumptionV1[]
@@ -196,5 +270,9 @@ export interface Dnd5eActivityDefinitionV1 {
   scaling?: readonly Dnd5eActivityScalingV1[]
   automation: AutomationCapability
   /** Traceability only. Runtime execution never dispatches on this locator. */
-  legacySource?: { kind: 'spell' | 'feature' | 'feat' | 'item' | 'subclass-ability' | 'monster-action' | 'custom-headless-action'; id: string }
+  legacySource?: {
+    kind: 'spell' | 'feature' | 'feat' | 'item' | 'class' | 'subclass' | 'subclass-ability' |
+      'race' | 'background' | 'monster' | 'monster-action' | 'custom-headless-action'
+    id: string
+  }
 }

@@ -7,13 +7,17 @@ import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCo
 import { dnd5eClassDefinitionForCharacter } from './classes'
 import {
   dnd5eCombatantHasConcentrationEffect,
+  dnd5ePendingTurnEndPeriodicDamage,
   dnd5ePendingTurnStartPeriodicDamage,
+  dnd5ePendingSwallowRegurgitationRequirements,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterMechanicRoll,
   type Dnd5eMonsterRechargeRoll,
+  type Dnd5eSwallowRegurgitationRequirement,
+  type Dnd5eSwallowRegurgitationSavingThrowRoll,
   type Dnd5eTurnStartGazeRequirement,
   type Dnd5eTurnStartGazeResolution,
 } from './headlessCombatEngine'
@@ -76,6 +80,27 @@ export interface PreparedDnd5ePlayerEndTurn {
     blessed: boolean
     baned: boolean
   }[]
+  activeEffectPeriodicDamage: readonly {
+    effect: Dnd5eActiveEffectInstance
+    targetId: string
+    targetName: string
+    count: number
+    sides: number
+    modifier: number
+    damageType?: Dnd5eDamageType
+    savingThrow?: {
+      ability: AbilityKey
+      dc: number
+      modifier: number
+      mode: 'normal' | 'advantage' | 'disadvantage'
+      blessed: boolean
+      baned: boolean
+      halflingLucky: boolean
+      legendaryResistanceUses: number
+    }
+  }[]
+  swallowRegurgitationSavingThrows:
+    readonly Dnd5eSwallowRegurgitationRequirement[]
   turnStartActiveEffectSavingThrows: readonly {
     effect: Dnd5eActiveEffectInstance
     targetId: string
@@ -199,6 +224,60 @@ export function prepareDnd5ePlayerEndTurn(input: {
       baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
     }]
   })
+  const activeEffectPeriodicDamage = dnd5ePendingTurnEndPeriodicDamage(
+    snapshot.state,
+    actorCombatant.id,
+  ).map(({ target, effect }) => {
+    const periodicDamage = effect.periodicDamage!
+    const savingThrow = periodicDamage.savingThrow
+    const source = effect.source.actorId
+      ? snapshot.state.combatants[effect.source.actorId]
+      : undefined
+    return {
+      effect,
+      targetId: target.id,
+      targetName: target.name,
+      count: periodicDamage.count,
+      sides: periodicDamage.sides,
+      modifier: periodicDamage.modifier ?? 0,
+      damageType: periodicDamage.type,
+      savingThrow: savingThrow
+        ? {
+            ability: savingThrow.ability,
+            dc: savingThrow.dc,
+            modifier: target.savingThrowBonuses[savingThrow.ability] ??
+              Math.floor((target.abilities[savingThrow.ability] - 10) / 2),
+            mode: dnd5eSavingThrowMode(target, savingThrow.ability, {
+              effectVisible: effect.visibility !== 'dm-only',
+              condition: effect.standardCondition,
+              sourceCreatureType: source?.creatureType,
+              sourceIsSpell: effect.source.kind === 'spell',
+              sourceIsMagical: savingThrow.magical ?? effect.source.magical === true,
+            }),
+            blessed: dnd5eCombatantHasConcentrationEffect(
+              snapshot.state,
+              target.id,
+              'bless',
+            ),
+            baned: dnd5eCombatantHasConcentrationEffect(
+              snapshot.state,
+              target.id,
+              'bane',
+            ),
+            halflingLucky: target.racialRules?.halflingLucky === true,
+            legendaryResistanceUses: Math.max(
+              0,
+              Math.floor(target.classState.legendaryResistanceUses ?? 0),
+            ),
+          }
+        : undefined,
+    }
+  })
+  const swallowRegurgitationSavingThrows =
+    dnd5ePendingSwallowRegurgitationRequirements(
+      snapshot.state,
+      actorCombatant.id,
+    )
   const nextCombatantId = snapshot.state.initiativeOrder[(actorIndex + 1) % snapshot.state.initiativeOrder.length]
   const nextCombatant = snapshot.state.combatants[nextCombatantId]
   const nextInitiativeIndex = (actorIndex + 1) % input.initiativeOrder.length
@@ -400,6 +479,8 @@ export function prepareDnd5ePlayerEndTurn(input: {
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       activeEffectSavingThrows,
+      activeEffectPeriodicDamage,
+      swallowRegurgitationSavingThrows,
       turnStartActiveEffectSavingThrows,
       turnStartActiveEffectPeriodicDamage,
       turnStartGazeRequirements,
@@ -418,6 +499,9 @@ export function resolveDnd5ePlayerEndTurn(input: {
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
   activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
+  activeEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]
+  swallowRegurgitationSavingThrows?:
+    readonly Dnd5eSwallowRegurgitationSavingThrowRoll[]
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]
   turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
@@ -425,6 +509,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
   currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   rageFlightFallingDamageRolls?: readonly number[]
+  optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
   ok: true
@@ -447,6 +532,9 @@ export function resolveDnd5ePlayerEndTurn(input: {
     {
       type: 'end-turn', actorId: actorToken.id,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
+      activeEffectPeriodicDamageRolls: input.activeEffectPeriodicDamageRolls,
+      swallowRegurgitationSavingThrows:
+        input.swallowRegurgitationSavingThrows,
       turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
       turnStartActiveEffectPeriodicDamageRolls:
         input.turnStartActiveEffectPeriodicDamageRolls,
@@ -458,6 +546,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
       rageFlightLandingElevationFeet:
         prepared.prepared.rageFlightFall?.landingElevationFeet,
       rageFlightFallingDamageRolls: input.rageFlightFallingDamageRolls,
+      optionalBonusDice: input.optionalBonusDice,
     },
     input.airborneFallDamageRollsByCombatantId,
   )

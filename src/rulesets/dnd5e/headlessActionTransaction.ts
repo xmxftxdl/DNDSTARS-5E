@@ -11,6 +11,7 @@ import { getDnd5eSrdCombatSpell } from './spells'
 import { dnd5eMonsterAreaSavingThrowEffect, getDnd5eSrdMonster } from './monsters'
 import { dnd5eMonsterMultiattackRuntimeActionIds } from './monsterDynamicMultiattack'
 import type { Dnd5eAction, Dnd5eActionResult, Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { dnd5eTrackableDefinitionIdForActionV1 } from './activities/dnd5eActivityIdentity'
 
 export interface Dnd5eHeadlessTransactionOptions {
   transaction?: CombatTransaction
@@ -28,13 +29,21 @@ export function beginDnd5eHeadlessActionTransaction(
 ): CombatTransaction {
   const now = options.now ?? Date.now()
   const actionId = options.transactionId ?? (action.type === 'plugin' ? action.transactionId : undefined) ?? nextActionId(state, action)
-  let transaction = options.transaction ?? createCombatTransaction({
+  const activityDefinitionId = dnd5eTrackableDefinitionIdForActionV1(state, action)
+  let transaction = options.transaction
+    ? options.transaction.activity ? options.transaction : {
+        ...options.transaction,
+        activity: { schemaVersion: 1 as const, definitionId: activityDefinitionId, executionId: options.transaction.id },
+      }
+    : createCombatTransaction({
     id: actionId,
     mapId: options.mapId ?? state.mapId ?? state.combatId,
     combatId: state.combatId,
     actorId: action.actorId,
     actionId,
     actionKind: action.type,
+    activityDefinitionId,
+    activityExecutionId: actionId,
     now,
   })
   for (const entry of actionRollLedgerEntries(state, action, now)) {

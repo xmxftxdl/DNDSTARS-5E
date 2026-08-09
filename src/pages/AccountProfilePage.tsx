@@ -8,6 +8,8 @@ import {
   type AccountProfile,
 } from '../lib/accountApi'
 import { getAccountSession, saveAccountSession } from '../lib/accountSession'
+import { generatedImageDataUrlToFile } from '../lib/generatedImage'
+import AiImageGenerationButton from '../components/AiImageGenerationButton'
 
 async function resizeAvatar(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('请选择图片文件。')
@@ -128,6 +130,18 @@ export default function AccountProfilePage() {
               const file = event.currentTarget.files?.[0]
               if (file) void resizeAvatar(file).then(setAvatar).catch((cause) => setError(String(cause)))
               event.currentTarget.value = ''
+            }}
+          />
+          <AiImageGenerationButton
+            label="AI 生成头像"
+            title="AI 生成账号头像"
+            aspect="square"
+            disabled={busy != null}
+            className="mt-3 w-40"
+            defaultPrompt={`为“${displayName.trim() || profile?.username || '冒险者'}”绘制一张 D&D 奇幻风格账号头像。单人胸像，面部清晰，主体居中，适合圆形和方形裁切，简洁背景，不要出现文字、标志、水印或装饰边框。`}
+            onGenerated={async ({ dataUrl, mimeType }) => {
+              const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]
+              setAvatar(await resizeAvatar(await generatedImageDataUrlToFile(dataUrl, `account-ai-avatar.${extension}`)))
             }}
           />
           {avatar && (

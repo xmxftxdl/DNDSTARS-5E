@@ -461,11 +461,6 @@ function playerAction(input: {
   }
 }
 
-async function continueAfterCoverPreview(dm: Page) {
-  await expect(dm.getByText('掩护预览', { exact: true })).toBeVisible({ timeout: 20_000 })
-  await dm.getByRole('button', { name: '应用并继续结算' }).click()
-}
-
 async function clientToken(page: Page, mapId: string, tokenId: string): Promise<SavedToken | null> {
   return page.evaluate(async ({ mapId: requestedMapId, tokenId: requestedTokenId }) => {
     const { useMapStore } = await import('/src/store/maps.ts')
@@ -629,7 +624,6 @@ test('本地图腾武者合集在真实 Host/玩家房间完成鹰疾走与狼�
       payload: {},
     })
     await submitPlayerAction(player, attack)
-    await continueAfterCoverPreview(dm)
     await waitForAcceptedAck(request, created, attack.id)
     await expect.poll(async () => {
       const characters = await getRoomState<{ characters: SavedCharacter[] }>(

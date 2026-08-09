@@ -1,5 +1,5 @@
 export const AI_JOB_SCHEMA_VERSION = 2
-export const AI_JOB_ARTIFACT_SCHEMA_VERSION = 1
+export const AI_JOB_ARTIFACT_SCHEMA_VERSION = 2
 export const AI_JOB_MAX_PER_CAMPAIGN = 40
 export const AI_JOB_LOCAL_LEASE_MS = 30 * 60 * 1_000
 export const AI_JOB_ARTIFACT_MAX_BYTES = 3 * 1024 * 1024
@@ -129,7 +129,7 @@ export function normalizeAiJobRecordV2(value) {
         expiresAt: Number(value.lease.expiresAt) || 0,
       }
     : null
-  const artifact = value.artifact == null ? null : normalizePdfCampaignAnalysisArtifactV1(value.artifact)
+  const artifact = value.artifact == null ? null : normalizePdfCampaignAnalysisArtifact(value.artifact)
   if (value.artifact != null && !artifact) return null
   return {
     ...create,
@@ -181,7 +181,7 @@ function namedEntryValid(entry, documentPages) {
 }
 
 export function normalizePdfCampaignAnalysisArtifactV1(value) {
-  if (!plainObject(value) || value.schemaVersion !== AI_JOB_ARTIFACT_SCHEMA_VERSION || value.kind !== 'pdf-campaign-analysis') return null
+  if (!plainObject(value) || value.schemaVersion !== 1 || value.kind !== 'pdf-campaign-analysis') return null
   if (!plainObject(value.payload) || value.payload.schemaVersion !== 1 || safeJsonSize(value) > AI_JOB_ARTIFACT_MAX_BYTES) return null
   const payload = value.payload
   if (!Array.isArray(payload.documents) || payload.documents.length < 1 || payload.documents.length > 20) return null
@@ -229,13 +229,149 @@ export function normalizePdfCampaignAnalysisArtifactV1(value) {
   if (!Array.isArray(payload.warnings) || payload.warnings.length > 100 || payload.warnings.some((entry) => typeof entry !== 'string' || entry.length > 2_000)) return null
   if (typeof payload.overview !== 'string' || payload.overview.length > 12_000) return null
   return {
-    schemaVersion: AI_JOB_ARTIFACT_SCHEMA_VERSION,
+    schemaVersion: 1,
     kind: 'pdf-campaign-analysis',
     payload,
     ...(typeof value.sourceHash === 'string' && /^[a-f0-9]{64}$/i.test(value.sourceHash)
       ? { sourceHash: value.sourceHash.toLowerCase() }
       : {}),
   }
+}
+
+const PDF_V2_VERIFICATIONS = new Set(['exact', 'normalized', 'legacy', 'unverified'])
+const PDF_V2_REVIEW_STATUSES = new Set(['auto-verified', 'needs-review', 'approved', 'rejected'])
+
+function validV2Citation(citation, documents, evidence) {
+  if (!plainObject(citation)) return false
+  const documentId = boundedString(citation.documentId, 120)
+  const documentName = boundedString(citation.documentName, 500)
+  const evidenceId = boundedString(citation.evidenceId, 120)
+  const page = Number(citation.page)
+  const quote = typeof citation.quote === 'string' ? citation.quote : null
+  const verification = String(citation.verification ?? '')
+  const document = documentId ? documents.get(documentId) : null
+  const source = evidenceId ? evidence.get(evidenceId) : null
+  return !!document && !!source && !!documentName && document.name === documentName &&
+    Number.isSafeInteger(page) && page >= 1 && page <= document.pageCount &&
+    quote != null && quote.length <= 320 && PDF_V2_VERIFICATIONS.has(verification) &&
+    source.documentId === documentId && source.page === page && source.quote === quote && source.verification === verification
+}
+
+function validV2Identity(entry, evidence, entityIds) {
+  const id = boundedString(entry.id, 120)
+  const confidence = Number(entry.confidence)
+  const reviewStatus = String(entry.reviewStatus ?? '')
+  if (!id || entityIds.has(id) || !Array.isArray(entry.aliases) || entry.aliases.length > 32 ||
+    entry.aliases.some((alias) => !boundedString(alias, 300)) || !Array.isArray(entry.evidenceIds) || entry.evidenceIds.length > 32 ||
+    entry.evidenceIds.some((evidenceId) => !evidence.has(evidenceId)) || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 ||
+    !PDF_V2_REVIEW_STATUSES.has(reviewStatus)) return false
+  if (reviewStatus === 'auto-verified' && !entry.evidenceIds.some((evidenceId) => ['exact', 'normalized'].includes(evidence.get(evidenceId)?.verification))) return false
+  entityIds.add(id)
+  return true
+}
+
+function validV2NamedEntry(entry, documents, evidence, entityIds) {
+  return plainObject(entry) && !!boundedString(entry.name, 300) &&
+    typeof entry.description === 'string' && entry.description.length <= 8_000 &&
+    validV2Identity(entry, evidence, entityIds) && Array.isArray(entry.citations) && entry.citations.length <= 32 &&
+    entry.citations.every((citation) => validV2Citation(citation, documents, evidence))
+}
+
+export function normalizePdfCampaignAnalysisArtifactV2(value) {
+  if (!plainObject(value) || value.schemaVersion !== 2 || value.kind !== 'pdf-campaign-analysis') return null
+  if (!plainObject(value.payload) || value.payload.schemaVersion !== 2 || safeJsonSize(value) > AI_JOB_ARTIFACT_MAX_BYTES) return null
+  const payload = value.payload
+  if ('pages' in payload || 'sourcePages' in payload || 'normalizedText' in payload) return null
+  if (!Array.isArray(payload.documents) || payload.documents.length < 1 || payload.documents.length > 20) return null
+  const documents = new Map()
+  for (const document of payload.documents) {
+    if (!plainObject(document) || 'pages' in document || 'text' in document || 'normalizedText' in document) return null
+    const id = boundedString(document.id, 120)
+    const name = boundedString(document.name, 500)
+    const sha256 = typeof document.sha256 === 'string' ? document.sha256.toLowerCase() : ''
+    const pageCount = Number(document.pageCount)
+    const sizeBytes = Number(document.sizeBytes)
+    const extractedCharacters = Number(document.extractedCharacters)
+    if (!id || !/^pdf_(?:[a-f0-9]{24}|legacy_[a-f0-9]{24})$/.test(id) || documents.has(id) || !name ||
+      !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > 200 * 1024 * 1024 ||
+      !Number.isSafeInteger(pageCount) || pageCount < 1 || pageCount > 20_000 ||
+      !Number.isSafeInteger(extractedCharacters) || extractedCharacters < 0 || extractedCharacters > 200 * 1024 * 1024 ||
+      !Array.isArray(document.scannedPages) || document.scannedPages.length > pageCount ||
+      document.scannedPages.some((page) => !Number.isSafeInteger(page) || page < 1 || page > pageCount)) return null
+    documents.set(id, { id, name, pageCount })
+  }
+  if (!Array.isArray(payload.evidence) || payload.evidence.length > 2_000) return null
+  const evidence = new Map()
+  for (const source of payload.evidence) {
+    if (!plainObject(source)) return null
+    const id = boundedString(source.id, 120)
+    const documentId = boundedString(source.documentId, 120)
+    const documentName = boundedString(source.documentName, 500)
+    const chunkId = boundedString(source.chunkId, 300)
+    const quote = typeof source.quote === 'string' ? source.quote : null
+    const verification = String(source.verification ?? '')
+    const hash = typeof source.normalizedQuoteSha256 === 'string' ? source.normalizedQuoteSha256.toLowerCase() : ''
+    const page = Number(source.page)
+    const document = documentId ? documents.get(documentId) : null
+    if (!id || evidence.has(id) || !document || !documentName || document.name !== documentName || !chunkId ||
+      !Number.isSafeInteger(page) || page < 1 || page > document.pageCount || quote == null || quote.length > 320 ||
+      (!['legacy', 'unverified'].includes(verification) && quote.trim().length < 8) ||
+      !PDF_V2_VERIFICATIONS.has(verification) || !/^[a-f0-9]{64}$/.test(hash)) return null
+    evidence.set(id, { id, documentId, documentName, page, quote, verification })
+  }
+  const entityIds = new Set()
+  if (!Array.isArray(payload.people) || payload.people.length > 240 || !payload.people.every((entry) => (
+    validV2NamedEntry(entry, documents, evidence, entityIds) &&
+    ['role', 'personality', 'motivation', 'secret', 'voice'].every((key) => typeof entry[key] === 'string' && entry[key].length <= 4_000) &&
+    (entry.appearance == null || (typeof entry.appearance === 'string' && entry.appearance.length <= 4_000)) &&
+    (entry.portraitDataUrl == null || (typeof entry.portraitDataUrl === 'string' && entry.portraitDataUrl.length <= 400_000 && /^data:image\/(?:png|jpeg|webp);base64,/i.test(entry.portraitDataUrl)))
+  ))) return null
+  if (!['locations', 'factions'].every((key) => Array.isArray(payload[key]) && payload[key].length <= 240 && payload[key].every((entry) => validV2NamedEntry(entry, documents, evidence, entityIds)))) return null
+  if (!Array.isArray(payload.clues) || payload.clues.length > 240 || !payload.clues.every((entry) => (
+    validV2NamedEntry(entry, documents, evidence, entityIds) && ['source', 'discovery', 'failForward'].every((key) => typeof entry[key] === 'string' && entry[key].length <= 4_000)
+  ))) return null
+  if (!Array.isArray(payload.scenes) || payload.scenes.length > 240 || !payload.scenes.every((entry) => (
+    validV2NamedEntry(entry, documents, evidence, entityIds) && typeof entry.location === 'string' && entry.location.length <= 2_000 && stringsWithin(entry.npcs) && stringsWithin(entry.monsters)
+  ))) return null
+  if (!Array.isArray(payload.encounters) || payload.encounters.length > 240 || !payload.encounters.every((entry) => (
+    validV2NamedEntry(entry, documents, evidence, entityIds) && stringsWithin(entry.creatures) && typeof entry.notes === 'string' && entry.notes.length <= 4_000
+  ))) return null
+  if (!Array.isArray(payload.importCandidates) || payload.importCandidates.length > 240 || !payload.importCandidates.every((entry) => (
+    validV2NamedEntry(entry, documents, evidence, entityIds) && ['monster', 'npc', 'item', 'spell', 'map', 'handout', 'rule'].includes(entry.kind) && ['full', 'partial', 'manual'].includes(entry.automation)
+  ))) return null
+  if (!Array.isArray(payload.prepTips) || payload.prepTips.length > 240 || !payload.prepTips.every((entry) => (
+    plainObject(entry) && !!boundedString(entry.title, 300) && typeof entry.description === 'string' && entry.description.length <= 8_000 &&
+    ['high', 'medium', 'low'].includes(entry.priority) && validV2Identity(entry, evidence, entityIds) &&
+    Array.isArray(entry.citations) && entry.citations.length <= 32 && entry.citations.every((citation) => validV2Citation(citation, documents, evidence))
+  ))) return null
+  if (!Array.isArray(payload.relationships) || payload.relationships.length > 240) return null
+  const relationshipIds = new Set()
+  for (const relationship of payload.relationships) {
+    if (!plainObject(relationship)) return null
+    const id = boundedString(relationship.id, 120)
+    if (!id || relationshipIds.has(id) || !boundedString(relationship.from, 300) || !boundedString(relationship.to, 300) ||
+      !boundedString(relationship.type, 300) || typeof relationship.description !== 'string' || relationship.description.length > 8_000 ||
+      !Array.isArray(relationship.evidenceIds) || relationship.evidenceIds.length > 32 || relationship.evidenceIds.some((entry) => !evidence.has(entry)) ||
+      !Array.isArray(relationship.citations) || relationship.citations.length > 32 || relationship.citations.some((entry) => !validV2Citation(entry, documents, evidence)) ||
+      !Number.isFinite(Number(relationship.confidence)) || Number(relationship.confidence) < 0 || Number(relationship.confidence) > 1 ||
+      !PDF_V2_REVIEW_STATUSES.has(String(relationship.reviewStatus ?? '')) ||
+      (relationship.fromEntityId != null && !entityIds.has(relationship.fromEntityId)) ||
+      (relationship.toEntityId != null && !entityIds.has(relationship.toEntityId))) return null
+    if (relationship.reviewStatus === 'auto-verified' && !relationship.evidenceIds.some((entry) => ['exact', 'normalized'].includes(evidence.get(entry)?.verification))) return null
+    relationshipIds.add(id)
+  }
+  if (!Array.isArray(payload.warnings) || payload.warnings.length > 100 || payload.warnings.some((entry) => typeof entry !== 'string' || entry.length > 2_000)) return null
+  if (typeof payload.overview !== 'string' || payload.overview.length > 24_000 || !Number.isSafeInteger(payload.analyzedChunks) || payload.analyzedChunks < 0) return null
+  return {
+    schemaVersion: 2,
+    kind: 'pdf-campaign-analysis',
+    payload,
+    ...(typeof value.sourceHash === 'string' && /^[a-f0-9]{64}$/i.test(value.sourceHash) ? { sourceHash: value.sourceHash.toLowerCase() } : {}),
+  }
+}
+
+export function normalizePdfCampaignAnalysisArtifact(value) {
+  return normalizePdfCampaignAnalysisArtifactV2(value) ?? normalizePdfCampaignAnalysisArtifactV1(value)
 }
 
 export function aiJobTransitionAllowed(from, to) {

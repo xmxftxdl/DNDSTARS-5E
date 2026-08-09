@@ -31,12 +31,14 @@ export type Dnd5eMonsterActionEffectiveAutomation =
   | 'headless'
   | 'dm-adjudication'
   | 'unstructured'
+  | 'non-combat'
   | 'blocked-by-child'
   | 'invalid'
 
 export type Dnd5eMonsterActionCoverageReason =
   | 'invalid-action'
   | 'explicit-dm-adjudication'
+  | 'explicit-non-combat'
   | 'no-structured-rule'
   | 'multiattack-child-missing'
   | 'multiattack-child-not-headless'
@@ -107,6 +109,7 @@ export interface Dnd5eMonsterHeadlessCoverageReport {
         headless: number
         dmAdjudication: number
         unstructured: number
+        nonCombat: number
         blockedByChild: number
         invalid: number
       }
@@ -168,10 +171,11 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
   schemaVersion: 1,
   monsterCount: 334,
   actions: {
-    total: 1056,
-    headlessMinimum: 931,
-    dmAdjudicationMaximum: 31,
-    unstructuredMaximum: 94,
+    total: 1067,
+    headlessMinimum: 1015,
+    dmAdjudicationMaximum: 0,
+    unstructuredMaximum: 37,
+    nonCombatExact: 15,
     blockedByChildMaximum: 0,
     invalidMaximum: 0,
     multiattack: {
@@ -183,17 +187,42 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
   },
   spells: {
     occurrenceTotal: 313,
-    fullMinimum: 94,
+    fullMinimum: 103,
     definedMinimum: 159,
     missingMaximum: 154,
   },
   traits: {
     total: 551,
-    headlessWithRuleMinimum: 139,
+    headlessWithRuleMinimum: 146,
     headlessWithoutRuleMaximum: 0,
-    dmAdjudicationMaximum: 412,
+    dmAdjudicationMaximum: 405,
   },
 } as const
+
+/**
+ * Reviewed SRD actions intentionally excluded from combat automation.
+ *
+ * These entries remain present in the catalog and UI.  The audit exclusion is
+ * deliberately keyed by monster, section and stable action id so translated
+ * names or prose cannot accidentally hide a combat action from the ratchet.
+ */
+export const DND5E_MONSTER_NON_COMBAT_ACTION_KEYS = new Set<string>([
+  'ancient-brass-dragon:actions:change-shape',
+  'ancient-bronze-dragon:actions:change-shape',
+  'ancient-copper-dragon:actions:change-shape',
+  'ancient-gold-dragon:actions:change-shape',
+  'ancient-silver-dragon:actions:change-shape',
+  'couatl:actions:change-shape',
+  'deva:actions:change-shape',
+  'doppelganger:actions:read-thoughts',
+  'green-hag:actions:illusory-appearance',
+  'night-hag:actions:change-shape',
+  'night-hag:actions:nightmare-haunting',
+  'oni:actions:change-shape',
+  'sea-hag:actions:illusory-appearance',
+  'shrieker:reactions:shriek',
+  'sprite:actions:heart-sight',
+])
 
 export interface Dnd5eMonsterHeadlessCoverageRatchetResult {
   passed: boolean
@@ -248,7 +277,8 @@ export function verifyDnd5eMonsterHeadlessCoverageRatchet(
     violations,
     'actions.effective.partition',
     action.effective.headless + action.effective.dmAdjudication +
-      action.effective.unstructured + action.effective.blockedByChild + action.effective.invalid,
+      action.effective.unstructured + action.effective.nonCombat +
+      action.effective.blockedByChild + action.effective.invalid,
     action.total,
   )
   requireMinimum(
@@ -268,6 +298,12 @@ export function verifyDnd5eMonsterHeadlessCoverageRatchet(
     'actions.unstructured',
     action.effective.unstructured,
     ratchet.actions.unstructuredMaximum,
+  )
+  requireExact(
+    violations,
+    'actions.nonCombat',
+    action.effective.nonCombat,
+    ratchet.actions.nonCombatExact,
   )
   requireMaximum(
     violations,
@@ -432,10 +468,16 @@ function auditAction(
   const baseAutomation = dnd5eMonsterActionAutomation(action)
   const structure = actionStructure(action)
   const blockers = multiattackBlockers(monster, action)
+  const nonCombat = DND5E_MONSTER_NON_COMBAT_ACTION_KEYS.has(
+    `${monster.slug}:${section}:${action.id}`,
+  )
   let effectiveAutomation: Dnd5eMonsterActionEffectiveAutomation
   const reasonCodes: Dnd5eMonsterActionCoverageReason[] = [...blockers.reasons]
 
-  if (baseAutomation === 'invalid') {
+  if (nonCombat) {
+    effectiveAutomation = 'non-combat'
+    reasonCodes.push('explicit-non-combat')
+  } else if (baseAutomation === 'invalid') {
     effectiveAutomation = 'invalid'
     reasonCodes.push('invalid-action')
   } else if (blockers.childIds.length > 0) {
@@ -551,6 +593,7 @@ export function auditDnd5eMonsterHeadlessCoverage(
           headless: countWhere(actionRows, (row) => row.effectiveAutomation === 'headless'),
           dmAdjudication: countWhere(actionRows, (row) => row.effectiveAutomation === 'dm-adjudication'),
           unstructured: countWhere(actionRows, (row) => row.effectiveAutomation === 'unstructured'),
+          nonCombat: countWhere(actionRows, (row) => row.effectiveAutomation === 'non-combat'),
           blockedByChild: countWhere(actionRows, (row) => row.effectiveAutomation === 'blocked-by-child'),
           invalid: countWhere(actionRows, (row) => row.effectiveAutomation === 'invalid'),
         },

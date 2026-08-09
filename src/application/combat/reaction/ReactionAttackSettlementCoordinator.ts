@@ -15,6 +15,7 @@ export async function coordinateDnd5eReactionAttackInventorySettlement(input: {
   state: Dnd5eHeadlessCombatState
   actor: Dnd5eCombatant
   weaponId?: string
+  targetCreatureType?: string
   hit: boolean
   critical: boolean
   targetLabel: string
@@ -25,6 +26,7 @@ export async function coordinateDnd5eReactionAttackInventorySettlement(input: {
     state: input.state,
     combatant: input.actor,
     weaponId: input.weaponId,
+    targetCreatureType: input.targetCreatureType,
     critical: input.critical,
     targetLabel: input.targetLabel,
     rollDice: input.rollDice,

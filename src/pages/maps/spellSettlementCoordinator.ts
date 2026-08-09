@@ -256,7 +256,12 @@ export function areaSpellPresentationForSettlement(input: {
   mapId: string
   actorTokenId: string
   areaAnchorCell?: { col: number; row: number }
-  wallOfFireGeometry?: { shape: 'line' | 'ring'; angleDegrees: number }
+  wallOfFireGeometry?: {
+    shape: 'line' | 'ring'
+    angleDegrees: number
+    lengthFeet?: number
+    diameterFeet?: number
+  }
 }): AreaSpellPresentationSettlement | null {
   if (
     !input.areaAnchorCell ||
@@ -275,9 +280,13 @@ export function areaSpellPresentationForSettlement(input: {
     spellId: input.spellId,
     targetCell: { ...input.areaAnchorCell },
     ...area,
-    ...(input.spellId === 'wall-of-fire' && input.wallOfFireGeometry ? {
+    ...((input.spellId === 'wall-of-fire' || input.spellId === 'blade-barrier') && input.wallOfFireGeometry ? {
       wallOfFireShape: input.wallOfFireGeometry.shape,
       wallOfFireAngleDegrees: input.wallOfFireGeometry.angleDegrees,
+      widthFeet: input.wallOfFireGeometry.shape === 'ring'
+        ? input.wallOfFireGeometry.diameterFeet ?? (input.spellId === 'blade-barrier' ? 60 : 20)
+        : input.wallOfFireGeometry.lengthFeet ?? (input.spellId === 'blade-barrier' ? 100 : 60),
+      heightFeet: 5,
     } : {}),
   }
 }

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { DND5E_SRD_ITEM_TEMPLATES } from '../rulesets/dnd5e/items'
 import { DND5E_SRD_SPELL_CATALOG } from '../rulesets/dnd5e/spellCatalog'
+import { DND5E_SRD_CLASS_DEFINITIONS } from '../rulesets/dnd5e/classes'
+import { fighterProgression } from '../rulesets/dnd5e/fighter'
+import { registerDnd5ePluginImageAsset } from '../rulesets/dnd5e/pluginAssets'
 import {
   DND5E_CLASS_ICON_PALETTES,
+  dnd5eClassFeatureActionIcon,
   dnd5eItemActionIcon,
   dnd5eSpellActionIcon,
 } from './dnd5eActionIcons'
@@ -89,6 +93,65 @@ describe('D&D 5e combat action icon registry', () => {
     })
     expect(bard.background).toBe('#D946EF')
     expect(bard.background).not.toBe(wizard.background)
+  })
+
+  it('为所有内置职业与子职特性绑定职业模板和绘制前景', () => {
+    const nonFighter = DND5E_SRD_CLASS_DEFINITIONS
+      .filter((definition) => definition.id !== 'fighter')
+      .flatMap((definition) => [...definition.features, ...definition.subclass.features]
+        .map((feature) => ({ definition, feature })))
+    const fighter = fighterProgression('champion').flatMap((entry) => entry.features.map((feature) => ({
+      definition: { id: 'fighter' },
+      feature,
+    })))
+
+    for (const { definition, feature } of [...nonFighter, ...fighter]) {
+      expect(dnd5eClassFeatureActionIcon({
+        id: feature.id,
+        name: feature.name,
+        classId: definition.id,
+      })).toMatchObject({
+        assetMode: 'foreground',
+        classBackdropId: definition.id,
+        background: DND5E_CLASS_ICON_PALETTES[definition.id][0],
+      })
+    }
+  })
+
+  it('让同一特性的等级升级复用绘图，同时保留职业色', () => {
+    expect(dnd5eClassFeatureActionIcon({
+      id: 'brutal-critical-3', name: '凶蛮重击', classId: 'barbarian',
+    }).asset).toBe('/assets/icons/barbarian-brutal-critical-feature-action.png')
+    expect(dnd5eClassFeatureActionIcon({
+      id: 'asi-19', name: '属性值提升', classId: 'wizard',
+    })).toMatchObject({
+      asset: '/assets/icons/asi-feature-action.png',
+      background: '#3B82F6',
+      classBackdropId: 'wizard',
+    })
+  })
+
+  it('tints registered custom spell artwork with the casting-class template', () => {
+    const registered = registerDnd5ePluginImageAsset('test-ai-spell-icon', {
+      id: 'starfire',
+      mediaType: 'image/png',
+      dataBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    })
+    try {
+      expect(dnd5eSpellActionIcon({
+        id: 'custom-starfire',
+        name: '星火矛',
+        castingClassId: 'wizard',
+        iconAssetId: registered.id,
+      })).toMatchObject({
+        assetMode: 'foreground',
+        assetTreatment: 'transparent-foreground',
+        classBackdropId: 'wizard',
+        background: '#3B82F6',
+      })
+    } finally {
+      registered.dispose()
+    }
   })
 
   it('为首批五个戏法绑定透明绘制前景', () => {
@@ -591,12 +654,181 @@ describe('D&D 5e combat action icon registry', () => {
     }
   })
 
-  it('binds painted icons for the elemental gem, elven chain, smoke bottle, and charming eyes', () => {
+  it('binds painted icons for the elemental gem, elven chain, smoke bottle, and magical eyes', () => {
     const cases = [
       ['elemental-gem', 'elemental-gem-item-action.png', 'uncommon', '#237A4A'],
       ['elven-chain', 'elven-chain-item-action.png', 'rare', '#2563A8'],
       ['eversmoking-bottle', 'eversmoking-bottle-item-action.png', 'uncommon', '#237A4A'],
       ['eyes-of-charming', 'eyes-of-charming-item-action.png', 'uncommon', '#237A4A'],
+      ['eyes-of-minute-seeing', 'eyes-of-minute-seeing-item-action.png', 'uncommon', '#237A4A'],
+      ['eyes-of-the-eagle', 'eyes-of-the-eagle-item-action.png', 'uncommon', '#237A4A'],
+      ['feather-token', 'feather-token-item-action.png', 'rare', '#2563A8'],
+      ['figurine-of-wondrous-power', 'figurine-of-wondrous-power-item-action.png', 'varies', '#326C8C'],
+      ['flame-tongue', 'flame-tongue-item-action.png', 'rare', '#2563A8'],
+      ['folding-boat', 'folding-boat-item-action.png', 'rare', '#2563A8'],
+      ['frost-brand', 'frost-brand-item-action.png', 'very-rare', '#7138A8'],
+      ['gauntlets-of-ogre-power', 'gauntlets-of-ogre-power-item-action.png', 'uncommon', '#237A4A'],
+      ['gem-of-brightness', 'gem-of-brightness-item-action.png', 'uncommon', '#237A4A'],
+      ['gem-of-seeing', 'gem-of-seeing-item-action.png', 'rare', '#2563A8'],
+      ['giant-slayer', 'giant-slayer-item-action.png', 'rare', '#2563A8'],
+      ['glamoured-studded-leather-armor', 'glamoured-studded-leather-armor-item-action.png', 'rare', '#2563A8'],
+      ['gloves-of-missile-snaring', 'gloves-of-missile-snaring-item-action.png', 'uncommon', '#237A4A'],
+      ['gloves-of-swimming-and-climbing', 'gloves-of-swimming-and-climbing-item-action.png', 'uncommon', '#237A4A'],
+      ['goggles-of-night', 'goggles-of-night-item-action.png', 'uncommon', '#237A4A'],
+      ['hammer-of-thunderbolts', 'hammer-of-thunderbolts-item-action.png', 'legendary', '#B86A12'],
+      ['handy-haversack', 'handy-haversack-item-action.png', 'rare', '#2563A8'],
+      ['hat-of-disguise', 'hat-of-disguise-item-action.png', 'uncommon', '#237A4A'],
+      ['headband-of-intellect', 'headband-of-intellect-item-action.png', 'uncommon', '#237A4A'],
+      ['helm-of-brilliance', 'helm-of-brilliance-item-action.png', 'very-rare', '#7138A8'],
+      ['helm-of-comprehending-languages', 'helm-of-comprehending-languages-item-action.png', 'uncommon', '#237A4A'],
+      ['helm-of-telepathy', 'helm-of-telepathy-item-action.png', 'uncommon', '#237A4A'],
+      ['helm-of-teleportation', 'helm-of-teleportation-item-action.png', 'rare', '#2563A8'],
+      ['holy-avenger', 'holy-avenger-item-action.png', 'legendary', '#B86A12'],
+      ['horn-of-blasting', 'horn-of-blasting-item-action.png', 'rare', '#2563A8'],
+      ['horn-of-valhalla', 'horn-of-valhalla-item-action.png', 'varies', '#326C8C'],
+      ['horseshoes-of-a-zephyr', 'horseshoes-of-a-zephyr-item-action.png', 'very-rare', '#7138A8'],
+      ['horseshoes-of-speed', 'horseshoes-of-speed-item-action.png', 'rare', '#2563A8'],
+      ['immovable-rod', 'immovable-rod-item-action.png', 'uncommon', '#237A4A'],
+      ['instant-fortress', 'instant-fortress-item-action.png', 'rare', '#2563A8'],
+      ['ioun-stone', 'ioun-stone-item-action.png', 'varies', '#326C8C'],
+      ['iron-flask', 'iron-flask-item-action.png', 'legendary', '#B86A12'],
+      ['javelin-of-lightning', 'javelin-of-lightning-item-action.png', 'uncommon', '#237A4A'],
+      ['lantern-of-revealing', 'lantern-of-revealing-item-action.png', 'uncommon', '#237A4A'],
+      ['luck-blade', 'luck-blade-item-action.png', 'legendary', '#B86A12'],
+      ['mace-of-disruption', 'mace-of-disruption-item-action.png', 'rare', '#2563A8'],
+      ['mace-of-smiting', 'mace-of-smiting-item-action.png', 'rare', '#2563A8'],
+      ['mace-of-terror', 'mace-of-terror-item-action.png', 'rare', '#2563A8'],
+      ['mantle-of-spell-resistance', 'mantle-of-spell-resistance-item-action.png', 'rare', '#2563A8'],
+      ['manual-of-bodily-health', 'manual-of-bodily-health-item-action.png', 'very-rare', '#7138A8'],
+      ['manual-of-gainful-exercise', 'manual-of-gainful-exercise-item-action.png', 'very-rare', '#7138A8'],
+      ['manual-of-golems', 'manual-of-golems-item-action.png', 'very-rare', '#7138A8'],
+      ['manual-of-quickness-of-action', 'manual-of-quickness-of-action-item-action.png', 'very-rare', '#7138A8'],
+      ['medallion-of-thoughts', 'medallion-of-thoughts-item-action.png', 'uncommon', '#237A4A'],
+      ['mirror-of-life-trapping', 'mirror-of-life-trapping-item-action.png', 'very-rare', '#7138A8'],
+      ['mithral-armor', 'mithral-armor-item-action.png', 'uncommon', '#237A4A'],
+      ['necklace-of-adaptation', 'necklace-of-adaptation-item-action.png', 'uncommon', '#237A4A'],
+      ['necklace-of-fireballs', 'necklace-of-fireballs-item-action.png', 'rare', '#2563A8'],
+      ['necklace-of-prayer-beads', 'necklace-of-prayer-beads-item-action.png', 'rare', '#2563A8'],
+      ['nine-lives-stealer', 'nine-lives-stealer-item-action.png', 'very-rare', '#7138A8'],
+      ['oathbow', 'oathbow-item-action.png', 'very-rare', '#7138A8'],
+      ['oil-of-etherealness', 'oil-of-etherealness-item-action.png', 'rare', '#2563A8'],
+      ['oil-of-sharpness', 'oil-of-sharpness-item-action.png', 'very-rare', '#7138A8'],
+      ['oil-of-slipperiness', 'oil-of-slipperiness-item-action.png', 'uncommon', '#237A4A'],
+      ['pearl-of-power', 'pearl-of-power-item-action.png', 'uncommon', '#237A4A'],
+      ['periapt-of-health', 'periapt-of-health-item-action.png', 'uncommon', '#237A4A'],
+      ['periapt-of-proof-against-poison', 'periapt-of-proof-against-poison-item-action.png', 'rare', '#2563A8'],
+      ['periapt-of-wound-closure', 'periapt-of-wound-closure-item-action.png', 'uncommon', '#237A4A'],
+      ['philter-of-love', 'philter-of-love-item-action.png', 'uncommon', '#237A4A'],
+      ['pipes-of-haunting', 'pipes-of-haunting-item-action.png', 'uncommon', '#237A4A'],
+      ['iron-bands-of-binding', 'iron-bands-of-binding-item-action.png', 'rare', '#2563A8'],
+      ['marvelous-pigments', 'marvelous-pigments-item-action.png', 'very-rare', '#7138A8'],
+      ['pipes-of-the-sewers', 'pipes-of-the-sewers-item-action.png', 'uncommon', '#237A4A'],
+      ['plate-armor-of-etherealness', 'plate-armor-of-etherealness-item-action.png', 'legendary', '#B86A12'],
+      ['portable-hole', 'portable-hole-item-action.png', 'rare', '#2563A8'],
+      ['potion-of-animal-friendship', 'potion-of-animal-friendship-item-action.png', 'uncommon', '#237A4A'],
+      ['potion-of-clairvoyance', 'potion-of-clairvoyance-item-action.png', 'rare', '#2563A8'],
+      ['potion-of-climbing', 'potion-of-climbing-item-action.png', 'common', '#52606D'],
+      ['potion-of-diminution', 'potion-of-diminution-item-action.png', 'rare', '#2563A8'],
+      ['potion-of-flying', 'potion-of-flying-item-action.png', 'very-rare', '#7138A8'],
+      ['potion-of-gaseous-form', 'potion-of-gaseous-form-item-action.png', 'rare', '#2563A8'],
+      ['potion-of-giant-strength', 'potion-of-giant-strength-item-action.png', 'varies', '#326C8C'],
+      ['potion-of-growth', 'potion-of-growth-item-action.png', 'uncommon', '#237A4A'],
+      ['potion-of-heroism', 'potion-of-heroism-item-action.png', 'rare', '#2563A8'],
+      ['potion-of-invisibility', 'potion-of-invisibility-item-action.png', 'very-rare', '#7138A8'],
+      ['potion-of-mind-reading', 'potion-of-mind-reading-item-action.png', 'rare', '#2563A8'],
+      ['potion-of-poison', 'potion-of-poison-item-action.png', 'uncommon', '#237A4A'],
+      ['potion-of-resistance', 'potion-of-resistance-item-action.png', 'uncommon', '#237A4A'],
+      ['potion-of-speed', 'potion-of-speed-item-action.png', 'very-rare', '#7138A8'],
+      ['potion-of-water-breathing', 'potion-of-water-breathing-item-action.png', 'uncommon', '#237A4A'],
+      ['restorative-ointment', 'restorative-ointment-item-action.png', 'uncommon', '#237A4A'],
+      ['ring-of-animal-influence', 'ring-of-animal-influence-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-djinni-summoning', 'ring-of-djinni-summoning-item-action.png', 'legendary', '#B86A12'],
+      ['ring-of-elemental-command', 'ring-of-elemental-command-item-action.png', 'legendary', '#B86A12'],
+      ['ring-of-evasion', 'ring-of-evasion-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-feather-falling', 'ring-of-feather-falling-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-free-action', 'ring-of-free-action-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-invisibility', 'ring-of-invisibility-item-action.png', 'legendary', '#B86A12'],
+      ['ring-of-jumping', 'ring-of-jumping-item-action.png', 'uncommon', '#237A4A'],
+      ['ring-of-mind-shielding', 'ring-of-mind-shielding-item-action.png', 'uncommon', '#237A4A'],
+      ['ring-of-protection', 'ring-of-protection-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-regeneration', 'ring-of-regeneration-item-action.png', 'very-rare', '#7138A8'],
+      ['ring-of-resistance', 'ring-of-resistance-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-shooting-stars', 'ring-of-shooting-stars-item-action.png', 'very-rare', '#7138A8'],
+      ['ring-of-spell-storing', 'ring-of-spell-storing-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-spell-turning', 'ring-of-spell-turning-item-action.png', 'legendary', '#B86A12'],
+      ['ring-of-swimming', 'ring-of-swimming-item-action.png', 'uncommon', '#237A4A'],
+      ['ring-of-telekinesis', 'ring-of-telekinesis-item-action.png', 'very-rare', '#7138A8'],
+      ['ring-of-the-ram', 'ring-of-the-ram-item-action.png', 'rare', '#2563A8'],
+      ['ring-of-three-wishes', 'ring-of-three-wishes-item-action.png', 'legendary', '#B86A12'],
+      ['ring-of-warmth', 'ring-of-warmth-item-action.png', 'uncommon', '#237A4A'],
+      ['ring-of-water-walking', 'ring-of-water-walking-item-action.png', 'uncommon', '#237A4A'],
+      ['ring-of-x-ray-vision', 'ring-of-x-ray-vision-item-action.png', 'rare', '#2563A8'],
+      ['robe-of-eyes', 'robe-of-eyes-item-action.png', 'rare', '#2563A8'],
+      ['robe-of-scintillating-colors', 'robe-of-scintillating-colors-item-action.png', 'very-rare', '#7138A8'],
+      ['robe-of-stars', 'robe-of-stars-item-action.png', 'very-rare', '#7138A8'],
+      ['robe-of-the-archmagi', 'robe-of-the-archmagi-item-action.png', 'legendary', '#B86A12'],
+      ['robe-of-useful-items', 'robe-of-useful-items-item-action.png', 'uncommon', '#237A4A'],
+      ['rod-of-absorption', 'rod-of-absorption-item-action.png', 'very-rare', '#7138A8'],
+      ['rod-of-alertness', 'rod-of-alertness-item-action.png', 'very-rare', '#7138A8'],
+      ['rod-of-lordly-might', 'rod-of-lordly-might-item-action.png', 'legendary', '#B86A12'],
+      ['rod-of-rulership', 'rod-of-rulership-item-action.png', 'rare', '#2563A8'],
+      ['rod-of-security', 'rod-of-security-item-action.png', 'very-rare', '#7138A8'],
+      ['rope-of-climbing', 'rope-of-climbing-item-action.png', 'uncommon', '#237A4A'],
+      ['rope-of-entanglement', 'rope-of-entanglement-item-action.png', 'rare', '#2563A8'],
+      ['scarab-of-protection', 'scarab-of-protection-item-action.png', 'legendary', '#B86A12'],
+      ['scimitar-of-speed', 'scimitar-of-speed-item-action.png', 'very-rare', '#7138A8'],
+      ['shield-of-missile-attraction', 'shield-of-missile-attraction-item-action.png', 'rare', '#2563A8'],
+      ['slippers-of-spider-climbing', 'slippers-of-spider-climbing-item-action.png', 'uncommon', '#237A4A'],
+      ['sovereign-glue', 'sovereign-glue-item-action.png', 'legendary', '#B86A12'],
+      ['spell-scroll', 'spell-scroll-item-action.png', 'varies', '#326C8C'],
+      ['spellguard-shield', 'spellguard-shield-item-action.png', 'very-rare', '#7138A8'],
+      ['sphere-of-annihilation', 'sphere-of-annihilation-item-action.png', 'legendary', '#B86A12'],
+      ['staff-of-charming', 'staff-of-charming-item-action.png', 'rare', '#2563A8'],
+      ['staff-of-fire', 'staff-of-fire-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-frost', 'staff-of-frost-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-healing', 'staff-of-healing-item-action.png', 'rare', '#2563A8'],
+      ['staff-of-power', 'staff-of-power-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-striking', 'staff-of-striking-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-swarming-insects', 'staff-of-swarming-insects-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-the-magi', 'staff-of-the-magi-item-action.png', 'legendary', '#B86A12'],
+      ['staff-of-the-python', 'staff-of-the-python-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-the-woodlands', 'staff-of-the-woodlands-item-action.png', 'rare', '#2563A8'],
+      ['staff-of-thunder-and-lightning', 'staff-of-thunder-and-lightning-item-action.png', 'very-rare', '#7138A8'],
+      ['staff-of-withering', 'staff-of-withering-item-action.png', 'rare', '#2563A8'],
+      ['stone-of-controlling-earth-elementals', 'stone-of-controlling-earth-elementals-item-action.png', 'rare', '#2563A8'],
+      ['stone-of-good-luck-luckstone', 'stone-of-good-luck-luckstone-item-action.png', 'uncommon', '#237A4A'],
+      ['sun-blade', 'sun-blade-item-action.png', 'rare', '#2563A8'],
+      ['sword-of-life-stealing', 'sword-of-life-stealing-item-action.png', 'rare', '#2563A8'],
+      ['sword-of-sharpness', 'sword-of-sharpness-item-action.png', 'very-rare', '#7138A8'],
+      ['sword-of-wounding', 'sword-of-wounding-item-action.png', 'rare', '#2563A8'],
+      ['talisman-of-pure-good', 'talisman-of-pure-good-item-action.png', 'legendary', '#B86A12'],
+      ['talisman-of-the-sphere', 'talisman-of-the-sphere-item-action.png', 'legendary', '#B86A12'],
+      ['talisman-of-ultimate-evil', 'talisman-of-ultimate-evil-item-action.png', 'legendary', '#B86A12'],
+      ['tome-of-clear-thought', 'tome-of-clear-thought-item-action.png', 'very-rare', '#7138A8'],
+      ['tome-of-leadership-and-influence', 'tome-of-leadership-and-influence-item-action.png', 'very-rare', '#7138A8'],
+      ['tome-of-understanding', 'tome-of-understanding-item-action.png', 'very-rare', '#7138A8'],
+      ['trident-of-fish-command', 'trident-of-fish-command-item-action.png', 'uncommon', '#237A4A'],
+      ['universal-solvent', 'universal-solvent-item-action.png', 'legendary', '#B86A12'],
+      ['vicious-weapon', 'vicious-weapon-item-action.png', 'rare', '#2563A8'],
+      ['vorpal-sword', 'vorpal-sword-item-action.png', 'legendary', '#B86A12'],
+      ['wand-of-binding', 'wand-of-binding-item-action.png', 'rare', '#2563A8'],
+      ['wand-of-enemy-detection', 'wand-of-enemy-detection-item-action.png', 'rare', '#2563A8'],
+      ['wand-of-fear', 'wand-of-fear-item-action.png', 'rare', '#2563A8'],
+      ['wand-of-fireballs', 'wand-of-fireballs-item-action.png', 'rare', '#2563A8'],
+      ['wand-of-lightning-bolts', 'wand-of-lightning-bolts-item-action.png', 'rare', '#2563A8'],
+      ['wand-of-magic-detection', 'wand-of-magic-detection-item-action.png', 'uncommon', '#237A4A'],
+      ['wand-of-magic-missiles', 'wand-of-magic-missiles-item-action.png', 'uncommon', '#237A4A'],
+      ['wand-of-paralysis', 'wand-of-paralysis-item-action.png', 'rare', '#2563A8'],
+      ['wand-of-polymorph', 'wand-of-polymorph-item-action.png', 'very-rare', '#7138A8'],
+      ['wand-of-secrets', 'wand-of-secrets-item-action.png', 'uncommon', '#237A4A'],
+      ['wand-of-the-war-mage', 'wand-of-the-war-mage-item-action.png', 'varies', '#326C8C'],
+      ['wand-of-web', 'wand-of-web-item-action.png', 'uncommon', '#237A4A'],
+      ['wand-of-wonder', 'wand-of-wonder-item-action.png', 'rare', '#2563A8'],
+      ['well-of-many-worlds', 'well-of-many-worlds-item-action.png', 'legendary', '#B86A12'],
+      ['wind-fan', 'wind-fan-item-action.png', 'uncommon', '#237A4A'],
+      ['winged-boots', 'winged-boots-item-action.png', 'uncommon', '#237A4A'],
+      ['wings-of-flying', 'wings-of-flying-item-action.png', 'rare', '#2563A8'],
+      ['orb-of-dragonkind', 'orb-of-dragonkind-item-action.png', 'artifact', '#A51D2D'],
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {

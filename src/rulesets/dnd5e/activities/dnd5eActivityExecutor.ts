@@ -10,6 +10,7 @@ import type {
   Dnd5eActivityOperationTargetV1,
   Dnd5eActivityOperationV1,
   Dnd5eActivityScalingV1,
+  Dnd5eActivityTriggerContextV1,
 } from './dnd5eActivityContracts'
 import type { Dnd5eEffectDurationV1, Dnd5ePredicateV1 } from './dnd5eEffectContracts'
 import {
@@ -21,6 +22,11 @@ import {
   type Dnd5eFormulaV1,
 } from './dnd5eFormula'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
+import {
+  dnd5eContextPredicateSatisfiedV1,
+  matchDnd5eActivityInvocationV1,
+  type Dnd5eActivityConfirmedByV1,
+} from './dnd5eActivityInvocation'
 
 export interface Dnd5eActivityActorSnapshot extends Dnd5eFormulaActorSnapshot {
   id: string
@@ -48,6 +54,9 @@ export interface Dnd5eActivityExecutionInput {
   choices?: Readonly<Record<string, string>>
   usedTurnKeys?: ReadonlySet<string>
   dmApproved?: boolean
+  /** Host-owned event envelope. Never accept this object from a client payload. */
+  triggerContext?: Dnd5eActivityTriggerContextV1
+  confirmedBy?: Dnd5eActivityConfirmedByV1
 }
 
 export interface Dnd5eActivityCheckResult {
@@ -113,7 +122,8 @@ export type Dnd5eActivityExecutionResult =
     }
   | {
       ok: false
-      reason: 'invalid-definition' | 'invalid-actor' | 'invalid-target' | 'requirement-failed' | 'invalid-rolls' | 'dm-approval-required'
+      reason: 'invalid-definition' | 'invalid-actor' | 'invalid-target' | 'requirement-failed' | 'invalid-rolls' | 'dm-approval-required' |
+        'trigger-context-required' | 'trigger-mismatch' | 'confirmation-required'
       details: readonly string[]
     }
 
@@ -247,6 +257,8 @@ function predicateSatisfied(
   input: Dnd5eActivityExecutionInput,
   target?: Dnd5eActivityActorSnapshot,
 ): boolean {
+  const contextual = dnd5eContextPredicateSatisfiedV1(predicate, input.triggerContext)
+  if (contextual != null) return contextual
   const subject = 'subject' in predicate && predicate.subject === 'target' ? target : input.actor
   if (predicate.kind === 'minimum-level') return input.actor.level >= predicate.level
   if (predicate.kind === 'class-level') return (input.actor.classLevels?.[predicate.classId] ?? 0) >= predicate.minimum
@@ -282,7 +294,8 @@ function predicateSatisfied(
     return resource.current >= evaluateDnd5eFormulaV1(predicate.minimum, formulaContext(input, target))
   }
   if (predicate.kind === 'once-per-turn') return !input.usedTurnKeys?.has(predicate.key)
-  return input.choices?.[predicate.choiceId] === predicate.optionId
+  if (predicate.kind === 'choice') return input.choices?.[predicate.choiceId] === predicate.optionId
+  return false
 }
 
 function selectedD20(values: readonly number[], mode: Dnd5eActivityRollMode): number {
@@ -500,6 +513,15 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
   if (!input.actor.id || input.actor.level < 1 || input.actor.armorClass < 0) {
     return { ok: false, reason: 'invalid-actor', details: ['invalid actor snapshot'] }
   }
+  const invocation = matchDnd5eActivityInvocationV1({
+    activity: input.activity,
+    actorId: input.actor.id,
+    targetIds: input.targets.map((target) => target.id),
+    triggerContext: input.triggerContext,
+    confirmedBy: input.confirmedBy,
+    dmApproved: input.dmApproved,
+  })
+  if (!invocation.ok) return invocation
   if (activity.target.kind === 'self' && (input.targets.length !== 1 || input.targets[0]?.id !== input.actor.id)) {
     return { ok: false, reason: 'invalid-target', details: ['self Activity requires the actor as its only target'] }
   }
@@ -545,6 +567,21 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
     if (!activity.target.rotatable && input.areaPlacement.angleDegrees != null && input.areaPlacement.angleDegrees !== 0) {
       return { ok: false, reason: 'invalid-target', details: ['area rotation is unavailable'] }
     }
+    const resolveDimension = (selected: number | undefined, minimum: number | undefined, maximum: number | undefined) => {
+      if (maximum == null) return selected == null ? undefined : null
+      const value = selected ?? maximum
+      const lower = minimum ?? maximum
+      return Number.isFinite(value) && Number.isInteger(value) && value % 5 === 0 && value >= lower && value <= maximum
+        ? value
+        : null
+    }
+    const radiusFeet = resolveDimension(input.areaPlacement.radiusFeet, activity.target.minimumRadiusFeet, activity.target.radiusFeet)
+    const lengthFeet = resolveDimension(input.areaPlacement.lengthFeet, activity.target.minimumLengthFeet, activity.target.lengthFeet)
+    const widthFeet = resolveDimension(input.areaPlacement.widthFeet, activity.target.minimumWidthFeet, activity.target.widthFeet)
+    const heightFeet = resolveDimension(input.areaPlacement.heightFeet, activity.target.minimumHeightFeet, activity.target.heightFeet)
+    if ([radiusFeet, lengthFeet, widthFeet, heightFeet].some((value) => value === null)) {
+      return { ok: false, reason: 'invalid-target', details: ['area dimensions are invalid'] }
+    }
     areaInstance = {
       ...input.areaPlacement,
       angleDegrees: input.areaPlacement.angleDegrees == null
@@ -552,16 +589,20 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
         : ((input.areaPlacement.angleDegrees % 360) + 360) % 360,
       origin: activity.target.origin,
       shape: activity.target.shape,
-      radiusFeet: activity.target.radiusFeet,
-      lengthFeet: activity.target.lengthFeet,
-      widthFeet: activity.target.widthFeet,
-      heightFeet: activity.target.heightFeet,
+      radiusFeet: radiusFeet ?? undefined,
+      lengthFeet: lengthFeet ?? undefined,
+      widthFeet: widthFeet ?? undefined,
+      heightFeet: heightFeet ?? undefined,
     }
     executionInput.areaPlacement = {
       x: areaInstance.x,
       y: areaInstance.y,
       elevationFeet: areaInstance.elevationFeet,
       angleDegrees: areaInstance.angleDegrees,
+      radiusFeet: areaInstance.radiusFeet,
+      lengthFeet: areaInstance.lengthFeet,
+      widthFeet: areaInstance.widthFeet,
+      heightFeet: areaInstance.heightFeet,
     }
   }
   const projectileTargets = input.projectileTargetIds?.map((id) => input.targets.find((target) => target.id === id))

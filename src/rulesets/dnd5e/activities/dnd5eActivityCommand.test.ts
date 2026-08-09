@@ -33,6 +33,15 @@ beforeEach(() => {
         id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'dice', rollId: 'damage', count: 1, sides: 6 }, damageType: 'force',
       }] }],
       automation: automationCapabilityFromLegacyStatus('full'),
+    }, {
+      schemaVersion: 1, id: 'light-follow-up', name: 'Light follow-up', activation: { kind: 'bonus-action' },
+      invocation: { kind: 'triggered', event: 'attack-resolved', confirmation: 'actor-choice' },
+      target: { kind: 'creature', relation: 'enemy', count: 1 },
+      requirements: [{ kind: 'weapon-property', property: 'light', present: true }],
+      outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [{
+        id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'constant', value: 2 }, damageType: 'slashing',
+      }] }],
+      automation: automationCapabilityFromLegacyStatus('full'),
     }],
   })
 })
@@ -68,5 +77,34 @@ describe('Activity authority command boundary', () => {
     expect(resolveDnd5eActivityCommand({
       command, currentRevision: 7, actor, targets: [], authoritativeRolls: {},
     })).toMatchObject({ ok: false, reason: 'target-snapshot-mismatch' })
+  })
+
+  it('accepts triggered Activities only with a matching Host event envelope', () => {
+    const triggeredCommand: Dnd5eExecuteActivityCommandV1 = {
+      ...command,
+      commandId: 'command-triggered',
+      activityId: 'light-follow-up',
+      triggerEventId: 'event-attack-1',
+    }
+    expect(resolveDnd5eActivityCommand({
+      command: triggeredCommand, currentRevision: 7, actor, targets: [target], authoritativeRolls: {},
+    })).toMatchObject({ ok: false, reason: 'invalid-command' })
+
+    expect(resolveDnd5eActivityCommand({
+      command: triggeredCommand,
+      currentRevision: 7,
+      actor,
+      targets: [target],
+      authoritativeRolls: {},
+      triggerContext: {
+        eventId: 'event-attack-1', event: 'attack-resolved',
+        source: { kind: 'attack', id: 'shortsword', mode: 'melee', result: 'hit', weaponProperties: ['light'] },
+        eligibleActorIds: ['actor'], eligibleTargetIds: ['target'], actionEconomyAvailable: { 'bonus-action': true },
+      },
+      confirmedBy: 'actor',
+    })).toMatchObject({
+      ok: true,
+      proposals: [{ kind: 'deal-damage', amount: 2, targetId: 'target' }],
+    })
   })
 })

@@ -515,11 +515,6 @@ async function openScenario(
   ])
 }
 
-async function continueAfterCoverPreview(dm: Page) {
-  await expect(dm.getByText('掩护预览', { exact: true })).toBeVisible({ timeout: 20_000 })
-  await dm.getByRole('button', { name: '应用并继续结算' }).click()
-}
-
 test('本地战斗大师合集在真实双玩家房间完成四类玩家确认与 Headless 结算', async ({
   browser,
   request,
@@ -702,7 +697,6 @@ test('本地战斗大师合集在真实双玩家房间完成四类玩家确认�
         seq: 2,
       })
       await submitPlayerAction(player, requestAction)
-      await continueAfterCoverPreview(dm)
       const destination = player2.locator('[data-testid^="shared-plugin-choice-cell:"]').first()
       await waitForChoiceOrReportAuthority({
         choice: destination,
@@ -769,7 +763,6 @@ test('本地战斗大师合集在真实双玩家房间完成四类玩家确认�
         seq: 3,
       })
       await submitPlayerAction(player, requestAction)
-      await continueAfterCoverPreview(dm)
       await expect(player2.getByTestId('shared-plugin-choice-use')).toBeVisible({ timeout: 30_000 })
       await expect(player.getByTestId('shared-plugin-choice-use')).toHaveCount(0, { timeout: 2_000 })
       await player2.getByTestId('shared-plugin-choice-use').click({ timeout: 5_000 })
@@ -829,7 +822,6 @@ test('本地战斗大师合集在真实双玩家房间完成四类玩家确认�
         seq: 4,
       })
       await submitPlayerAction(player, requestAction)
-      await continueAfterCoverPreview(dm)
       await expect(player2.getByTestId('shared-plugin-choice-use')).toBeVisible({ timeout: 30_000 })
       await expect(player.getByTestId('shared-plugin-choice-use')).toHaveCount(0, { timeout: 2_000 })
       await player2.getByTestId('shared-plugin-choice-use').click({ timeout: 5_000 })

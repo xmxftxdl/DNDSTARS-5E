@@ -184,6 +184,14 @@ export interface Dnd5eSpellMetamagicPayload {
 
 export interface Dnd5eSpellCastPayload {
   spellId: string
+  /**
+   * Inventory spell source selected by the player. All spell facts, costs and
+   * ownership are resolved again by the DM Host; no client-supplied item
+   * statistics are accepted.
+   */
+  itemInstanceId?: string
+  /** Selects one Host-declared action on a multi-action item. */
+  itemUseActionId?: string
   /** The class whose spellcasting feature authorizes this cast. */
   castingClassId?: Dnd5eClassId
   /** The character's racial spell grant authorizes this cast instead of a class spellcasting feature. */
@@ -204,16 +212,32 @@ export interface Dnd5eSpellCastPayload {
   areaTargetOrientation?: 0 | 1 | 2 | 3
   /** 通用可旋转长方形模板的自由角度；Host 会归一化为 0–359 度后重建覆盖格。 */
   areaTargetAngleDegrees?: number
+  /** Casting-time dimensions for adjustable area templates; Host validates their declared min/max bounds. */
+  areaTargetRadiusFeet?: number
+  areaTargetWidthFeet?: number
+  areaTargetHeightFeet?: number
+  areaTargetLengthFeet?: number
   /** Wall of Fire uses host-validated geometry independent from the legacy four-way rectangle. */
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
   wallOfFireDamagingSide?: 'left' | 'right' | 'inside' | 'outside'
+  /** Host validates 5-foot increments up to the spell's 60-foot maximum. */
+  wallOfFireLengthFeet?: number
+  /** Ring diameter, in 5-foot increments up to the spell's 20-foot maximum. */
+  wallOfFireDiameterFeet?: number
+  /** Blade Barrier may be a freely rotated line up to 100 feet or a ring up to 60 feet in diameter. */
+  bladeBarrierShape?: 'line' | 'ring'
+  bladeBarrierAngleDegrees?: number
+  bladeBarrierLengthFeet?: number
+  bladeBarrierDiameterFeet?: number
   /** Ordered per-projectile targets; duplicates allocate multiple projectiles to one creature. */
   projectileTargetIds?: string[]
   /** 塑能学派14级“超限导能”：由DM端重新验证资格并掷后续反噬伤害。 */
   overchannel?: boolean
   /** 塑能学派2级“法术塑形”：必须是本次区域法术所影响、且不含施法者的生物。 */
   sculptedTargetIds?: string[]
+  /** Creatures explicitly designated as unaffected by a persistent area such as Spirit Guardians. */
+  excludedAreaTargetIds?: string[]
   /** 术士超魔法；种类、已知选项、术法点与附加参数都由DM端重新验证。 */
   metamagic?: Dnd5eSpellMetamagicPayload
   /** 强化法术在伤害骰掷出后另行选择重掷；可与另一种超魔法同时使用。 */

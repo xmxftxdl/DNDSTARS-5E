@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
+import { dnd5eClassFeatureActionIcon, dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
 import {
   DND5E_CLASS_BORDER_BLUR_STD_DEVIATION,
   DND5E_CLASS_BORDER_DEEP_STROKE_OPACITY,
@@ -102,6 +102,49 @@ describe('Dnd5eActionIcon', () => {
     expect(html).toContain('data-border-detail="arcane-gems" fill="#DBEAFE"')
     expect(html.match(/<rect class="dnd5e-class-border-line"[^>]+>/)?.[0])
       .not.toContain('stroke-dasharray')
+  })
+
+  it('renders a painted class feature above the matching animated class frame', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eClassFeatureActionIcon({ id: 'rage', name: '狂暴', classId: 'barbarian' }),
+    }))
+    expect(html).toContain('href="/assets/icons/barbarian-rage-feature-action.png"')
+    expect(html).toContain('data-icon-detail="painted-barbarian-rage"')
+    expect(html).toContain('data-class-backdrop="barbarian"')
+    expect(html).toContain('data-class-border="barbarian"')
+    expect(html).toContain('data-class-border-flow="barbarian"')
+    expect(html).toContain('dnd5e-class-border-flow__paint')
+    expect(html).toContain('stop-color="#E5484D"')
+  })
+
+  it('keeps one generated spell foreground while changing the class template', () => {
+    const generatedForeground = 'data:image/webp;base64,UklGRg=='
+    const wizard = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: {
+        ...dnd5eSpellActionIcon({ id: 'custom-starfire', name: '星火矛', castingClassId: 'wizard' }),
+        asset: generatedForeground,
+        assetMode: 'foreground' as const,
+        assetTreatment: 'transparent-foreground' as const,
+      },
+    }))
+    const bard = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: {
+        ...dnd5eSpellActionIcon({ id: 'custom-starfire', name: '星火矛', castingClassId: 'bard' }),
+        asset: generatedForeground,
+        assetMode: 'foreground' as const,
+        assetTreatment: 'transparent-foreground' as const,
+      },
+    }))
+    expect(wizard).toContain(`href="${generatedForeground}"`)
+    expect(bard).toContain(`href="${generatedForeground}"`)
+    expect(wizard).toContain('stop-color="#3B82F6"')
+    expect(wizard).toContain('data-class-border="wizard"')
+    expect(wizard).toContain('data-foreground-composite="normal-over-class-template"')
+    expect(wizard).not.toContain('data-class-foreground-tint')
+    expect(wizard).not.toContain('mix-blend-mode:screen')
+    expect(bard).toContain('stop-color="#D946EF"')
+    expect(bard).toContain('data-class-border="bard"')
+    expect(bard).toContain('data-foreground-composite="normal-over-class-template"')
   })
 
   it('uses the shared single-line class border visual parameters', () => {

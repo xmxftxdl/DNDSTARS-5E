@@ -58,4 +58,20 @@ describe('D&D 5e Activity validation', () => {
       'full automation cannot contain manual adjudication operations',
     ]))
   })
+
+  it('rejects runtime-only unknown activation, trigger, target and operation values', () => {
+    const invalid = {
+      ...damageActivity(),
+      activation: { kind: 'script' },
+      invocation: { kind: 'triggered', event: 'after-anything', confirmation: 'automatic' },
+      target: { kind: 'zone', relation: 'enemy' },
+      outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [{ id: 'execute', kind: 'javascript' }] }],
+    } as unknown as Dnd5eActivityDefinitionV1
+    expect(validateDnd5eActivityDefinitionV1(invalid)).toEqual(expect.arrayContaining([
+      'activity.invocation.event is invalid',
+      'activity.activation.kind is invalid',
+      'activity.target.kind is invalid',
+      'activity.outcomes[0].operations[0].kind is invalid',
+    ]))
+  })
 })

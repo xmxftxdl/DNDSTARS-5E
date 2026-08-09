@@ -12,6 +12,8 @@ import type {
 /** Browser targeting draft. It contains no authoritative combat result. */
 export interface Dnd5eSpellTargetingSession {
   characterId: string
+  itemInstanceId?: string
+  itemUseActionId?: string
   castingClassId?: Dnd5eClassId
   racialInnate?: boolean
   spellId: string
@@ -33,16 +35,29 @@ export interface Dnd5eSpellTargetingSession {
   carefulSelecting: boolean
   heightenedTargetId?: string
   heightenedSelecting: boolean
+  excludedAreaTargetIds?: string[]
+  excludingAreaTargets?: boolean
   guessedTargeting?: boolean
   area?: SkillAoeTargeting
   areaTargetCell?: GridCell
   areaTargetCells?: GridCell[]
   areaTargetCount?: number
+  minimumAreaTargetCount?: number
   /** Free-angle orientation for a generic rotatable rectangular template. */
   areaTargetAngleDegrees?: number
+  areaTargetRadiusFeet?: number
+  areaTargetWidthFeet?: number
+  areaTargetHeightFeet?: number
+  areaTargetLengthFeet?: number
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
   wallOfFireDamagingSide?: 'left' | 'right' | 'inside' | 'outside'
+  wallOfFireLengthFeet?: number
+  wallOfFireDiameterFeet?: number
+  bladeBarrierShape?: 'line' | 'ring'
+  bladeBarrierAngleDegrees?: number
+  bladeBarrierLengthFeet?: number
+  bladeBarrierDiameterFeet?: number
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   effectDamageType?: NonNullable<Dnd5eSpellCastPayload['effectDamageType']>
   enlargeReduceChoice?: NonNullable<Dnd5eSpellCastPayload['enlargeReduceChoice']>

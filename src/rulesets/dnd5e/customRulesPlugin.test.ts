@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   buildDnd5eCustomRulesPluginPackageV1,
@@ -10,6 +11,7 @@ import { dnd5eRulesPluginFromDeclarativePackageV1 } from './declarativePluginPac
 import {
   dnd5ePluginSpellDefinition,
   dnd5ePluginSubclassDefinition,
+  dnd5ePluginFeatDefinition,
   registerDnd5eRulesPlugin,
   registeredDnd5ePluginMonsters,
 } from './pluginApi'
@@ -49,6 +51,28 @@ function draft(): Dnd5eCustomRulesPluginDraft {
 }
 
 describe('DM custom rules plugin builder', () => {
+  it('keeps the importable choice-reroll example valid', () => {
+    const source = readFileSync(new URL('../../../examples/fortune-choice-reroll-test.dndstars5e', import.meta.url))
+    const bytes = Uint8Array.from(source).buffer
+    const parsed = parseDnd5eDeclarativeRulesPackageV1(bytes)
+    expect(parsed?.manifest.id).toBe('example.fortune-choice-reroll')
+    expect(parsed?.manifest.distributionPolicy).toBe('room-distributable')
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromDeclarativePackageV1(parsed!))
+    try {
+      expect(dnd5ePluginFeatDefinition('example.fortune-choice-reroll:fortune-choice')).toMatchObject({
+        name: '幸运抉择（测试）',
+        automation: 'full',
+        resources: [{
+          id: 'example.fortune-choice-reroll:fortune-points',
+          maximum: 3,
+          resetOn: 'long-rest',
+        }],
+      })
+    } finally {
+      dispose()
+    }
+  })
+
   it('exports new packages as validated pure JSON without executable source', () => {
     const value = draft()
     value.subclasses = [{
@@ -139,6 +163,82 @@ describe('DM custom rules plugin builder', () => {
       budget: 27, minimum: 8, maximum: 10, costs: { 8: 0, 9: 1 },
     }]
     expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('购点规则 错误购点 的 10 分成本无效。')
+  })
+
+  it('accepts Host-owned feat damage reduction and rejects invalid trigger values', () => {
+    const value = draft()
+    value.feats = [{
+      id: 'stone-guard',
+      name: '岩石守卫',
+      summary: '在受伤前降低伤害。',
+      description: '生命值不高于一半时，每回合一次降低挥砍伤害。',
+      automation: 'full',
+      passiveEffects: [{
+        schemaVersion: 1,
+        id: 'damage-reduction',
+        kind: 'damage-reduction',
+        trigger: 'before-damage',
+        amount: 3,
+        damageTypes: ['slashing'],
+        minimumIncomingDamage: 5,
+        maximumCurrentHitPointPercent: 50,
+        oncePerTurn: true,
+      }],
+    }]
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
+
+    value.feats[0] = {
+      ...value.feats[0],
+      passiveEffects: [{
+        ...value.feats[0].passiveEffects![0],
+        amount: 0,
+      }],
+    }
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toContain(
+      '专长 岩石守卫 的 Headless 被动效果无效。',
+    )
+  })
+
+  it('accepts a pure-data choice reroll feat with a Host-owned long-rest resource', () => {
+    const value = draft()
+    value.feats = [{
+      id: 'lucky-choice',
+      name: '幸运抉择',
+      summary: '结果确定前选择额外 d20。',
+      description: '玩家明确决定是否使用，所有骰子与资源由 Host 结算。',
+      automation: 'full',
+      resources: [{ id: 'luck-points', label: '幸运点', maximum: 3, resetOn: 'long-rest' }],
+      declarativeAbility: {
+        schemaVersion: 1,
+        id: 'lucky-choice-reroll',
+        name: '幸运抉择',
+        description: '结果确定前选择额外 d20。',
+        level: 1,
+        trigger: { kind: 'after-d20-roll' },
+        cost: { economy: 'none', resources: [{ resourceId: 'luck-points', amount: 1 }] },
+        targeting: { kind: 'self' },
+        effects: [],
+        mechanic: {
+          kind: 'd20-choice-reroll',
+          rollKinds: ['attack', 'ability-check', 'saving-throw'],
+          scopes: ['self-roll', 'attack-against-self'],
+          additionalDice: 1,
+          selection: 'owner-chooses',
+        },
+        automation: 'full',
+      },
+    }]
+
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
+    value.feats[0] = {
+      ...value.feats[0],
+      resources: [{ id: 'luck-points', label: '幸运点', maximum: 0, resetOn: 'long-rest' }],
+    }
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('专长 幸运抉择 的资源声明无效。')
+    value.feats[0] = { ...value.feats[0], resources: undefined }
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toContain(
+      '专长 幸运抉择 的选择重掷必须消耗该专长声明的资源。',
+    )
   })
 
   it('serializes background, feature, spell and item forms into one installable package', () => {

@@ -2,6 +2,7 @@ import { canWriteSharedState } from './appMode'
 import { getRoomClientId, getRoomSession } from './roomSession'
 import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 import {
+  clearSharedIntegrityIssues,
   reportSharedIntegrityIssue,
   validateAndMigrateSharedResource,
 } from './sharedResourceValidation'
@@ -272,6 +273,7 @@ export async function loadSharedResource<T>(name: string): Promise<T | null> {
   if (validation.status === 'migrated') {
     console.warn(`[共享状态迁移:${name}] ${validation.reasons.join('；')}`)
   }
+  clearSharedIntegrityIssues(name)
   return validation.value as T
 }
 

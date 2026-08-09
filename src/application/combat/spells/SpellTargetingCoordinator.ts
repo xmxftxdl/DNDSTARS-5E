@@ -14,6 +14,38 @@ export interface SpellTargetingSubmissionInput {
   spellSpecificPayload?: Partial<Dnd5eSpellCastPayload>
 }
 
+export interface DefaultSculptedSpellTargetsInput {
+  enabled: boolean
+  affectedTargetIds: readonly string[]
+  alliedTargetIds: readonly string[]
+  currentTargetIds: readonly string[]
+  maximumTargets: number
+}
+
+/**
+ * Keeps still-valid manual choices and, when Sculpt Spells was armed, fills the
+ * remaining allowance with affected allies. The player can still remove an
+ * automatic choice or replace it with any other affected creature before the
+ * cast is submitted.
+ */
+export function defaultSculptedSpellTargetIds(
+  input: DefaultSculptedSpellTargetsInput,
+): string[] {
+  const maximumTargets = Math.max(0, Math.floor(input.maximumTargets))
+  if (maximumTargets === 0) return []
+  const affected = new Set(input.affectedTargetIds)
+  const selected = [...new Set(input.currentTargetIds)]
+    .filter((targetId) => affected.has(targetId))
+    .slice(0, maximumTargets)
+  if (!input.enabled || selected.length >= maximumTargets) return selected
+  for (const targetId of input.alliedTargetIds) {
+    if (!affected.has(targetId) || selected.includes(targetId)) continue
+    selected.push(targetId)
+    if (selected.length >= maximumTargets) break
+  }
+  return selected
+}
+
 /**
  * Converts an ephemeral targeting draft into a room command payload. This does
  * not declare the targets legal: the authority Host revalidates visibility,
@@ -26,6 +58,8 @@ export function buildSpellTargetingSubmission(
   const targetTokenIds = [...new Set(input.selectedTargetIds)]
   return {
     spellId: targeting.spellId,
+    itemInstanceId: targeting.itemInstanceId,
+    itemUseActionId: targeting.itemUseActionId,
     castingClassId: targeting.castingClassId,
     racialInnate: targeting.racialInnate,
     slotLevel: targeting.slotLevel,
@@ -35,6 +69,10 @@ export function buildSpellTargetingSubmission(
     areaTargetCells: input.areaTargetCells?.map((cell) => ({ ...cell })),
     areaTargetOrientation: input.areaTargetOrientation,
     areaTargetAngleDegrees: input.areaTargetAngleDegrees,
+    areaTargetRadiusFeet: targeting.areaTargetRadiusFeet,
+    areaTargetWidthFeet: targeting.areaTargetWidthFeet,
+    areaTargetHeightFeet: targeting.areaTargetHeightFeet,
+    areaTargetLengthFeet: targeting.areaTargetLengthFeet,
     ...input.spellSpecificPayload,
     higherSlotDamageType: targeting.higherSlotDamageType,
     conditionChoice: targeting.conditionChoice,
@@ -53,6 +91,9 @@ export function buildSpellTargetingSubmission(
     repellingBlast: targeting.repellingBlast || undefined,
     sculptedTargetIds: targeting.sculptedTargetIds.length > 0
       ? [...targeting.sculptedTargetIds]
+      : undefined,
+    excludedAreaTargetIds: (targeting.excludedAreaTargetIds?.length ?? 0) > 0
+      ? [...targeting.excludedAreaTargetIds!]
       : undefined,
     metamagic: targeting.metamagic
       ? {

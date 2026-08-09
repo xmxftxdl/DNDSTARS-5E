@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Dnd5eSpellTargetingSession } from './SpellTargetingContracts'
-import { buildSpellTargetingSubmission, selectSpellModifierMode } from './SpellTargetingCoordinator'
+import {
+  buildSpellTargetingSubmission,
+  defaultSculptedSpellTargetIds,
+  selectSpellModifierMode,
+} from './SpellTargetingCoordinator'
 
 const targeting: Dnd5eSpellTargetingSession = {
   characterId: 'character-1',
@@ -81,5 +85,35 @@ describe('SpellTargetingCoordinator', () => {
   it('keeps modifier modes mutually exclusive', () => {
     const result = selectSpellModifierMode({ ...targeting, carefulSelecting: true }, 'sculpt')
     expect(result).toMatchObject({ sculpting: true, carefulSelecting: false, heightenedSelecting: false })
+  })
+
+  it('automatically protects affected allies when Sculpt Spells was armed', () => {
+    expect(defaultSculptedSpellTargetIds({
+      enabled: true,
+      affectedTargetIds: ['enemy-1', 'ally-1', 'ally-2', 'ally-3'],
+      alliedTargetIds: ['ally-1', 'ally-2', 'ally-3'],
+      currentTargetIds: [],
+      maximumTargets: 2,
+    })).toEqual(['ally-1', 'ally-2'])
+  })
+
+  it('preserves valid manual protection choices and never exceeds the allowance', () => {
+    expect(defaultSculptedSpellTargetIds({
+      enabled: true,
+      affectedTargetIds: ['enemy-1', 'ally-1', 'ally-2'],
+      alliedTargetIds: ['ally-1', 'ally-2'],
+      currentTargetIds: ['enemy-1', 'outside-area'],
+      maximumTargets: 2,
+    })).toEqual(['enemy-1', 'ally-1'])
+  })
+
+  it('does not add automatic choices when Sculpt Spells was not armed', () => {
+    expect(defaultSculptedSpellTargetIds({
+      enabled: false,
+      affectedTargetIds: ['ally-1'],
+      alliedTargetIds: ['ally-1'],
+      currentTargetIds: [],
+      maximumTargets: 4,
+    })).toEqual([])
   })
 })

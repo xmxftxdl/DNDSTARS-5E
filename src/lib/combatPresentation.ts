@@ -117,6 +117,7 @@ export const DISINTEGRATE_ANIMATION_DURATION_MS = 1_150
 
 /** Core spells whose entrance must remain painted until the authoritative area is visible. */
 export const PERSISTENT_AREA_PRESENTATION_SPELL_IDS: ReadonlySet<CombatPresentationAreaSpellId> = new Set([
+  'dancing-lights',
   'mage-hand',
   'darkness',
   'daylight',
@@ -737,10 +738,16 @@ export function parseCombatPresentationEvent(
       !expected ||
       area.shape !== expected.shape ||
       area.lengthFeet !== expected.lengthFeet ||
-      area.widthFeet !== expected.widthFeet ||
+      (area.spellId === 'wall-of-fire' || area.spellId === 'blade-barrier'
+        ? (!Number.isInteger(area.widthFeet) || Number(area.widthFeet) < 5 ||
+          (Number(area.widthFeet) > (area.spellId === 'blade-barrier'
+            ? (area.wallOfFireShape === 'ring' ? 60 : 100)
+            : (area.wallOfFireShape === 'ring' ? 20 : 60)) &&
+            !(area.spellId === 'wall-of-fire' && area.wallOfFireShape === 'ring' && area.widthFeet === 60)) || Number(area.widthFeet) % 5 !== 0)
+        : area.widthFeet !== expected.widthFeet) ||
       area.heightFeet !== expected.heightFeet ||
       area.radiusFeet !== expected.radiusFeet ||
-      (area.spellId === 'wall-of-fire' && (
+      ((area.spellId === 'wall-of-fire' || area.spellId === 'blade-barrier') && (
         (area.wallOfFireShape != null && area.wallOfFireShape !== 'line' && area.wallOfFireShape !== 'ring') ||
         (area.wallOfFireAngleDegrees != null && (!Number.isFinite(area.wallOfFireAngleDegrees) || area.wallOfFireAngleDegrees < 0 || area.wallOfFireAngleDegrees >= 360))
       )) ||
@@ -1217,7 +1224,7 @@ export function combatPresentationProjectilesForMap(
         const heightPx = (event.heightFeet ?? 20) / feetPerCell * gridSize
         const orientedStrip = event.spellId === 'wall-of-fire' || event.spellId === 'blade-barrier'
         const wallRadians = (event.wallOfFireAngleDegrees ?? 0) * Math.PI / 180
-        const wallFrom = event.spellId === 'wall-of-fire'
+        const wallFrom = orientedStrip
           ? { x: targetPoint.x - Math.cos(wallRadians), y: targetPoint.y - Math.sin(wallRadians) }
           : source
         return [{
@@ -1228,8 +1235,8 @@ export function combatPresentationProjectilesForMap(
           hit: true,
           issuedAt: combatPresentationLocalTime(event.createdAt),
           durationMs: animationDuration,
-          radiusPx: event.spellId === 'wall-of-fire' && event.wallOfFireShape === 'ring'
-            ? 10 / feetPerCell * gridSize
+          radiusPx: orientedStrip && event.wallOfFireShape === 'ring'
+            ? ((event.spellId === 'wall-of-fire' && event.widthFeet === 60 ? 20 : event.widthFeet) ?? (event.spellId === 'blade-barrier' ? 60 : 20)) / 2 / feetPerCell * gridSize
             : Math.max(widthPx, heightPx) / 2,
           areaWidthPx: widthPx,
           areaHeightPx: heightPx,
@@ -2363,6 +2370,7 @@ export async function publishAreaSpellPresentation(input: {
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
   const duration = {
+    'dancing-lights': DANCING_LIGHTS_ANIMATION_DURATION_MS,
     'burning-hands': BURNING_HANDS_ANIMATION_DURATION_MS,
     thunderwave: THUNDERWAVE_ANIMATION_DURATION_MS,
     shatter: SHATTER_ANIMATION_DURATION_MS,

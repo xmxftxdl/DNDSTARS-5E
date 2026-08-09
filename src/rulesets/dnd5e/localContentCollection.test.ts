@@ -66,6 +66,53 @@ describe('本地房间内容合集', () => {
     ])
   })
 
+  it('accepts one feat object when the importer explicitly selected feats', async () => {
+    const feat = {
+      id: 'watchful-step',
+      name: '警觉步伐',
+      summary: '你会持续留意周围威胁。',
+      description: '这是一项用于验证单条专长导入的测试专长。',
+      automation: 'manual',
+    }
+    const prepared = await prepareDnd5eLocalContentJson(
+      JSON.stringify(feat),
+      'single-feat.json',
+      { targetCollection: 'feats' },
+    )
+
+    expect(prepared.sourceKind).toBe('content-shorthand')
+    expect(prepared.package.content.feats).toEqual([
+      expect.objectContaining({ id: feat.id, name: feat.name, automation: 'manual' }),
+    ])
+  })
+
+  it('accepts a singular feat wrapper when the importer explicitly selected feats', async () => {
+    const prepared = await prepareDnd5eLocalContentJson(JSON.stringify({
+      name: '单条专长资料',
+      feat: {
+        id: 'steady-hands',
+        name: '稳定双手',
+        summary: '保持稳定。',
+        description: '这是一项用于验证单数包装格式的测试专长。',
+        automation: 'manual',
+      },
+    }), 'wrapped-feat.json', { targetCollection: 'feats' })
+
+    expect(prepared.package.content.feats).toEqual([
+      expect.objectContaining({ id: 'steady-hands', name: '稳定双手' }),
+    ])
+  })
+
+  it('does not guess the category of a bare resource object without an explicit target', async () => {
+    await expect(prepareDnd5eLocalContentJson(JSON.stringify({
+      id: 'ambiguous-resource',
+      name: 'Ambiguous Resource',
+      summary: 'Could be a feature or feat.',
+      description: 'The generic importer must keep requiring an explicit collection.',
+      automation: 'manual',
+    }))).rejects.toThrow(/races.*feats.*spells/i)
+  })
+
   it('accepts a self-contained collection with an embedded AI-generated image', async () => {
     const prepared = await prepareDnd5eLocalContentJson(JSON.stringify({
       format: DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,

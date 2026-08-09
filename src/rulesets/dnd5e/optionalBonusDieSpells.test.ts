@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createDnd5eCombatant,
+  resolveDnd5ePersistentAreaTrigger,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
   type Dnd5eCombatant,
@@ -215,5 +216,119 @@ describe('SRD 5.1 可选奖励骰 ActiveEffect', () => {
     }))
     expect(resolved.state.combatants[ally.id].currentHp).toBe(20)
     expect(resolved.state.combatants[cleric.id].concentrating).toBe(false)
+  })
+
+  it('抗力术通过统一 Headless 消费器覆盖专注豁免', () => {
+    const cleric = combatant('cleric', 20, {
+      classId: 'cleric',
+      level: 1,
+      classSelections: { 'spell-cantrips': ['resistance'] },
+    })
+    const ally = combatant('ally', 10)
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('resistance-concentration', [cleric, ally]),
+      {
+        type: 'cast-spell',
+        actorId: cleric.id,
+        targetId: ally.id,
+        spellId: 'resistance',
+        slotLevel: 0,
+        effectRolls: [],
+      },
+    )
+    expect(cast.ok, cast.ok ? undefined : cast.reason).toBe(true)
+    if (!cast.ok) return
+    const target = cast.state.combatants[ally.id]
+    const effect = dnd5eActiveOptionalBonusDice(
+      target.classState.activeEffects,
+      'saving-throw',
+    )[0]
+    target.concentrating = true
+    target.classState.concentrationSpellId = 'test-concentration'
+
+    const resolved = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'concentration-save',
+      actorId: ally.id,
+      d20: 7,
+      dc: 10,
+      optionalBonusDice: [{
+        effectId: effect.id,
+        targetId: ally.id,
+        rollKind: 'saving-throw',
+        roll: 1,
+      }],
+    })
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'optional-bonus-die-used',
+      targetId: ally.id,
+      effectId: effect.id,
+      roll: 1,
+    }))
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'concentration-resolved',
+      actorId: ally.id,
+      total: 10,
+      success: true,
+    }))
+    expect(resolved.state.combatants[ally.id].concentrating).toBe(true)
+  })
+
+  it('抗力术覆盖持续区域豁免，并拒绝重复或伪造的奖励骰声明', () => {
+    const cleric = combatant('cleric', 20, {
+      classId: 'cleric', level: 1,
+      classSelections: { 'spell-cantrips': ['resistance'] },
+    })
+    const ally = combatant('ally', 10)
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('resistance-area', [cleric, ally]),
+      {
+        type: 'cast-spell', actorId: cleric.id, targetId: ally.id,
+        spellId: 'resistance', slotLevel: 0, effectRolls: [],
+      },
+    )
+    expect(cast.ok, cast.ok ? undefined : cast.reason).toBe(true)
+    if (!cast.ok) return
+    const effect = dnd5eActiveOptionalBonusDice(
+      cast.state.combatants[ally.id].classState.activeEffects,
+      'saving-throw',
+    )[0]
+    const trigger = {
+      id: 'test-area-save',
+      label: '测试区域',
+      timing: 'turn-end' as const,
+      savingThrow: { ability: 'dex' as const, dc: 13, onSuccess: 'half' as const },
+      damage: { count: 1, sides: 6, type: 'fire' as const },
+    }
+
+    const resolved = resolveDnd5ePersistentAreaTrigger(cast.state, {
+      areaId: 'test-area', sourceId: cleric.id, targetId: ally.id, trigger,
+      d20: 8, damageRolls: [6],
+      optionalBonusDice: [{
+        effectId: effect.id, targetId: ally.id,
+        rollKind: 'saving-throw', roll: 3,
+      }],
+    })
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'optional-bonus-die-used', effectId: effect.id, roll: 3,
+    }))
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'persistent-area-triggered', saveSuccess: true, damage: 3,
+    }))
+
+    const forged = resolveDnd5ePersistentAreaTrigger(cast.state, {
+      areaId: 'test-area', sourceId: cleric.id, targetId: ally.id, trigger,
+      d20: 8, damageRolls: [6],
+      optionalBonusDice: [{
+        effectId: effect.id, targetId: ally.id,
+        rollKind: 'saving-throw', roll: 5,
+      }],
+    })
+    expect(forged.ok).toBe(false)
+    if (!forged.ok) expect(forged.reason).toBe('invalid-dice')
   })
 })

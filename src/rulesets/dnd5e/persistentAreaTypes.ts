@@ -8,6 +8,7 @@ export const DND5E_DECLARATIVE_DURATION_MAX_ROUNDS = 14_400
 
 export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'arcane',
+  'dancing-lights',
   'toxic-cloud',
   'daylight',
   'darkness',

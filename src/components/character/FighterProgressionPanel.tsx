@@ -1,12 +1,10 @@
 import { useSyncExternalStore } from 'react'
-import { Check, Shield, Sparkles, Swords, Wind } from 'lucide-react'
+import { Check, Sparkles, Swords } from 'lucide-react'
 import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
-  fighterActionSurgeUses,
   fighterAttacksPerAttackAction,
   fighterFightingStyleName,
   fighterFightingStyleSelectionLimit,
-  fighterIndomitableUses,
   fighterProgression,
   fighterSelectedFightingStyles,
   fighterSelectedSubclassChoices,
@@ -26,6 +24,9 @@ import {
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
+import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
+import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
+import ClassResourceSummary from './ClassResourceSummary'
 
 interface FighterProgressionPanelProps {
   character: Character
@@ -144,12 +145,12 @@ export default function FighterProgressionPanel({
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-3">
         <Summary icon={Swords} label="每次攻击动作" value={`${fighterAttacksPerAttackAction(character.level)} 次攻击`} />
-        <Summary icon={Wind} label="动作如潮" value={`${fighterActionSurgeUses(character.level)} 次／短休或长休`} />
-        <Summary icon={Shield} label="不屈" value={`${fighterIndomitableUses(character.level)} 次／长休`} />
         <Summary icon={Sparkles} label="战斗风格" value={fightingStyles.map(fighterFightingStyleName).join('、') || '尚未选择'} />
       </div>
+
+      <ClassResourceSummary character={character} />
 
       {(pluginSubclass?.declarativeSpellcasting || pluginResourceDice.length > 0) && (
         <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-500/5 p-4">
@@ -262,9 +263,16 @@ export default function FighterProgressionPanel({
                 </div>
                 <div className="mt-2 space-y-2">
                   {entry.features.map((feature) => (
-                    <div key={feature.id}>
-                      <div className="text-sm font-semibold text-slate-200">{feature.name}</div>
-                      <p className="mt-0.5 text-xs leading-5 text-slate-500">{feature.description}</p>
+                    <div key={feature.id} className="flex items-start gap-3">
+                      <Dnd5eActionIcon
+                        spec={dnd5eClassFeatureActionIcon({ id: feature.id, name: feature.name, classId: 'fighter' })}
+                        className="h-12 w-12 shrink-0"
+                        level={entry.level}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-slate-200">{feature.name}</div>
+                        <p className="mt-0.5 text-xs leading-5 text-slate-500">{feature.description}</p>
+                      </div>
                     </div>
                   ))}
                 </div>

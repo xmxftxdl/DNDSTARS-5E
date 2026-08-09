@@ -178,6 +178,25 @@ describe('AiProviderV1', () => {
     expect(result).toEqual({ ok: false, error: 'provider-output-invalid' })
   })
 
+  it('可为未通过 Host 校验的输出返回不含原始载荷的安全诊断', async () => {
+    const registry = new AiProviderRegistryV1()
+    registry.register(runtime(provider(), { arbitrary: 'javascript' }))
+    const result = await executeStructuredAiTask({
+      registry,
+      selection: selection({ modelId: 'local-model' }),
+      request: request(),
+      validateOutput: (value): value is { name: string } => (
+        !!value && typeof value === 'object' && typeof (value as { name?: unknown }).name === 'string'
+      ),
+      describeInvalidOutput: () => '$.name 缺少必填字段',
+    })
+    expect(result).toEqual({
+      ok: false,
+      error: 'provider-output-invalid',
+      detail: '$.name 缺少必填字段',
+    })
+  })
+
   it('限制文档、图片与提示词输入，避免把任意载荷交给 Provider', () => {
     expect(validateAiStructuredGenerationRequest(request())).toBe(true)
     expect(validateAiStructuredGenerationRequest({ ...request(), maxOutputTokens: 1_600 })).toBe(true)

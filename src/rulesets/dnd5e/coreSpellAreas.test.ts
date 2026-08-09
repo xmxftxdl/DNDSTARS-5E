@@ -195,6 +195,11 @@ describe('core spell persistent area declarations', () => {
       cells: east,
       damage: { count: 6, sides: 8, modifier: 0, type: 'fire' },
     }))
+    expect(area.triggers?.map((trigger) => trigger.dmAdjustable)).toEqual([
+      false,
+      false,
+      false,
+    ])
   })
 
   it('resolves Darkness and Daylight overlap by spell level instead of render order', () => {

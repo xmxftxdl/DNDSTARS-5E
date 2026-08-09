@@ -43,6 +43,7 @@ import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eConte
 import { registerDnd5eActivityPackage } from './activities/dnd5eActivityRegistry'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { registerContentDefinitionPackage } from '../../domain/content/contentDefinitionRegistry'
+import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 
 export const DND5E_CONTENT_PACKAGE_FORMAT = 'dndstars5e-content' as const
 export const DND5E_CONTENT_PACKAGE_SCHEMA_VERSION = 2 as const
@@ -69,6 +70,8 @@ export interface Dnd5eContentPackageContributionsV2 {
   items: readonly Dnd5ePluginItemDefinition[]
   abilityGenerationMethods: readonly Dnd5ePluginAbilityGenerationDefinition[]
   headlessActions: readonly Dnd5eCustomHeadlessActionDraft[]
+  /** First-class recipes for timing/cost/target/check/effect composition. */
+  activities?: readonly Dnd5eActivityDefinitionV1[]
   subclasses: readonly DeclarativeSubclassDefinitionV1[]
   /** Optional for backward compatibility with V2 packages created before class authoring was exposed. */
   classes?: readonly DeclarativeClassDefinitionV1[]
@@ -119,6 +122,7 @@ export function buildDnd5eCustomRulesContentPackageV2(
       items: structuredClone(draft.items),
       abilityGenerationMethods: structuredClone(draft.abilityGenerationMethods),
       headlessActions: structuredClone(draft.headlessActions ?? []),
+      activities: structuredClone(draft.activities ?? []),
       subclasses: structuredClone(draft.subclasses ?? []),
       classes: structuredClone(draft.classes ?? []),
       monsters: structuredClone(draft.monsters ?? []),
@@ -220,7 +224,7 @@ export interface Dnd5eContentAutomationCoverageReportV2 {
 const ROOT_KEYS = new Set(['format', 'schemaVersion', 'manifest', 'provenance', 'assets', 'content'])
 const CONTENT_KEYS = new Set([
   'races', 'backgrounds', 'features', 'feats', 'spells', 'items',
-  'abilityGenerationMethods', 'headlessActions', 'subclasses', 'classes', 'monsters',
+  'abilityGenerationMethods', 'headlessActions', 'activities', 'subclasses', 'classes', 'monsters',
 ])
 const CONTENT_LIMITS: Record<keyof Dnd5eContentPackageContributionsV2, number> = {
   races: 128,
@@ -231,6 +235,7 @@ const CONTENT_LIMITS: Record<keyof Dnd5eContentPackageContributionsV2, number> =
   items: 500,
   abilityGenerationMethods: 32,
   headlessActions: 512,
+  activities: 1024,
   subclasses: 64,
   classes: 32,
   monsters: 128,
@@ -376,7 +381,7 @@ export function dnd5eContentPackageAutomationCoverageV2(
       declarativeClassCompatibilityReportV1([definition]).features.map((entry) => [entry.featureId, entry]),
     )
     for (const feature of definition.features) {
-      const compatibility = compatibilityByFeatureId.get(feature.id)
+      const compatibility = compatibilityByFeatureId.get(`${definition.id}:${feature.id}`)
       if (!compatibility) continue
       add(
         'class-feature',
@@ -583,6 +588,7 @@ export function parseDnd5eContentPackageV2(bytes: ArrayBuffer): Dnd5eContentPack
     items: contentArray(parsed.content, 'items') as unknown as Dnd5ePluginItemDefinition[],
     abilityGenerationMethods: contentArray(parsed.content, 'abilityGenerationMethods') as unknown as Dnd5ePluginAbilityGenerationDefinition[],
     headlessActions: contentArray(parsed.content, 'headlessActions') as unknown as Dnd5eCustomHeadlessActionDraft[],
+    activities: contentArray(parsed.content, 'activities') as unknown as Dnd5eActivityDefinitionV1[],
     subclasses: contentArray(parsed.content, 'subclasses') as unknown as DeclarativeSubclassDefinitionV1[],
     classes: contentArray(parsed.content, 'classes') as unknown as DeclarativeClassDefinitionV1[],
     monsters: contentArray(parsed.content, 'monsters') as unknown as Dnd5eMonsterStatBlock[],
@@ -598,6 +604,7 @@ export function parseDnd5eContentPackageV2(bytes: ArrayBuffer): Dnd5eContentPack
     items: [...content.items],
     abilityGenerationMethods: [...content.abilityGenerationMethods],
     headlessActions: [...content.headlessActions],
+    activities: [...(content.activities ?? [])],
     subclasses: [...content.subclasses],
     classes: [...content.classes],
     monsters: [...content.monsters],
@@ -645,6 +652,8 @@ const ROOM_RUNTIME_PROSE_KEYS = new Set([
   'prompt',
   'adjudication',
   'note',
+  'notes',
+  'reason',
   'automationReasons',
   'reasons',
 ])

@@ -18,6 +18,7 @@ import {
 } from '../lib/playerView'
 import { characterExportFileName, makeCharacterExport, parseCharacterExport } from '../lib/characterTransfer'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
+import { declarativeClassContentBindingV1 } from '../rulesets/dnd5e/declarativeClass'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
 import { dnd5eStartingEquipmentPlan, resolveDnd5eStartingEquipment } from '../rulesets/dnd5e/startingEquipment'
 import { showAppAlert } from '../lib/appDialog'
@@ -62,6 +63,7 @@ export default function CharactersPage() {
 
   const confirmCreate = (setup: CharacterSetupResult) => {
     const definition = dnd5eClassDefinition(setup.charClass)
+    const classContentBinding = definition ? declarativeClassContentBindingV1(definition.id) : undefined
     const id = add(setup.name)
     const startingEquipment = resolveDnd5eStartingEquipment(
       id,
@@ -81,6 +83,7 @@ export default function CharactersPage() {
       dnd5eBackgroundSkillProficiencies: setup.backgroundSkillProficiencies,
       level: 1,
       ...(definition ? { dnd5eClassLevels: { [definition.id]: 1 } } : {}),
+      ...(classContentBinding ? { dnd5eClassContentBindings: { [classContentBinding.classId]: classContentBinding } } : {}),
       abilities: setup.abilities,
       skills: [...new Set([
         ...setup.classSkillProficiencies,

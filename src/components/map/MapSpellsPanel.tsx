@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useCharacterStore } from '../../store/characters'
 import { useSpellbookStore } from '../../store/spellbook'
+import SpellSlotResourceEditor from '../character/SpellSlotResourceEditor'
 import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import { dnd5eCombatSpellActionId } from '../../lib/dnd5eCombatActionDescriptors'
 import { dnd5eCombatSpellDamagePreview } from './combatSpellDamagePresentation'
 
-import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
+import { getClassResource } from '../../lib/classResources'
 import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_RACIAL_RESOURCE_KEYS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eEffectiveSpellcastingSources, dnd5eEffectiveSpellSelections, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eRacialRulesForCharacter, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
 
 const DAMAGE_TYPE_LABELS: Record<string, string> = {
@@ -218,10 +219,6 @@ export default function MapSpellsPanel({
     const effectiveSubclassId = source?.subclass?.id ??
       c.dnd5eClassChoices?.classes?.[definition.id]?.subclass
     const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, classLevel - 1))]
-    const slots = classResourceDefinitions(c)
-      .filter((resource) => resource.key.startsWith('dnd5e-spell-slot-') || resource.key === 'dnd5e-pact-slot' || resource.key.startsWith('dnd5e-mystic-arcanum-'))
-      .map((resource) => ({ resource, state: getClassResource(c, resource.key) }))
-      .filter((entry) => entry.state && entry.state.max > 0)
     const selectedClassSpellIds = dnd5eSelectedSpellIdsForClass(c, source!.classId)
     const selectedSpells = selectedClassSpellIds
       .map((id) => getDnd5eSrdCombatSpell(id))
@@ -312,14 +309,7 @@ export default function MapSpellsPanel({
         {wildShapeBlocksSpellcasting ? <p className="rounded-xl border border-amber-400/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">
           荒野变形期间不能施法；18级“野兽施法”解锁后才可在野兽形态施放当前已接入且材料成分允许的法术。
         </p> : null}
-        <div className="grid gap-2 sm:grid-cols-2">
-          {slots.map(({ resource, state }) => (
-            <div key={resource.key} className="rounded-xl border border-violet-400/20 bg-violet-500/5 px-3 py-2">
-              <div className="text-xs text-slate-500">{resource.label}</div>
-              <div className="mt-1 text-lg font-bold tabular-nums text-violet-100">{state!.current}/{state!.max}</div>
-            </div>
-          ))}
-        </div>
+        <SpellSlotResourceEditor character={c} compact />
         {combatSpellChoices.length > 0 ? <section className="rounded-2xl border border-violet-300/15 bg-black/20 p-3 shadow-inner">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>

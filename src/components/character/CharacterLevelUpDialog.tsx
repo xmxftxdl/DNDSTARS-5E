@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronRight, Dices, LockKeyhole, Sparkles, X } from 'lucide-react'
 import { ABILITIES, type AbilityKey } from '../../lib/dnd'
@@ -8,11 +8,9 @@ import {
   buildDnd5eLevelAdvancementPlan,
   dnd5eAdvancementRevisionBaseCharacter,
   dnd5eClassDefinition,
-  dnd5ePluginFeatAvailableForCharacter,
-  dnd5eSrdFeatAvailableForCharacter,
-  DND5E_SRD_FEATS,
+  dnd5eRulesPluginRegistrySnapshot,
   fighterFightingStyleSelectionLimit,
-  registeredDnd5ePluginFeats,
+  subscribeDnd5eRulesPluginRegistry,
   reviseDnd5eLevelAdvancement,
   type Dnd5eClassId,
   type FighterFightingStyleId,
@@ -25,7 +23,10 @@ import type {
   Dnd5eLevelAdvancementDecisionV1,
   Dnd5eLevelAdvancementRecordV1,
 } from '../../types/character'
+import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
+import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import Dnd5eSpellAdvancementPicker from './Dnd5eSpellAdvancementPicker'
+import { dnd5eAdvancementFeatOptions } from './featAdvancementOptions'
 
 interface CharacterLevelUpDialogProps {
   character: Character
@@ -45,6 +46,7 @@ const FAILURE_MESSAGES: Record<Dnd5eLevelAdvancementFailure, string> = {
   'invalid-level-gain': '升级等级无效。',
   'maximum-level': '角色总等级不能超过 20 级。',
   'invalid-class': '职业不存在或当前规则包未提供该职业。',
+  'class-content-version-mismatch': '角色绑定的职业包版本与当前安装版本不一致；请由 DM 迁移或恢复原版本后再升级。',
   'multiclass-prerequisite': '角色不满足该兼职职业的属性前提。',
   'rolled-hit-points-not-supported-for-multiclass': '兼职生命值当前必须使用职业固定值。',
   'invalid-hit-point-rolls': '生命骰数量或结果无效，请重新投掷。',
@@ -103,6 +105,11 @@ export default function CharacterLevelUpDialog({
   onCancel,
   onConfirm,
 }: CharacterLevelUpDialogProps) {
+  useSyncExternalStore(
+    subscribeDnd5eRulesPluginRegistry,
+    dnd5eRulesPluginRegistrySnapshot,
+    dnd5eRulesPluginRegistrySnapshot,
+  )
   const baseCharacter = useMemo(
     () => revisionRecord
       ? dnd5eAdvancementRevisionBaseCharacter(character, revisionRecord)
@@ -167,14 +174,8 @@ export default function CharacterLevelUpDialog({
   const featCandidateCharacter = plan
     ? { ...baseCharacter, level: plan.toLevel }
     : baseCharacter
-  const feats = [
-    ...DND5E_SRD_FEATS.filter((feat) =>
-      !baseCharacter.dnd5eFeatIds?.includes(feat.id) &&
-      dnd5eSrdFeatAvailableForCharacter(feat, featCandidateCharacter)),
-    ...registeredDnd5ePluginFeats().filter((feat) =>
-      !baseCharacter.dnd5eFeatIds?.includes(feat.id) &&
-      dnd5ePluginFeatAvailableForCharacter(feat, featCandidateCharacter)),
-  ]
+  const featOptions = dnd5eAdvancementFeatOptions(featCandidateCharacter)
+  const feats = featOptions.filter((feat) => feat.eligible)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -322,21 +323,28 @@ export default function CharacterLevelUpDialog({
           </div>
 
           <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-            <h3 className="font-semibold text-slate-100">本次自动获得</h3>
+            <h3 className="font-semibold text-slate-100">本次固定获得的职业特性</h3>
             {plan.grantedFeatures.length > 0 ? (
               <div className="mt-3 grid gap-2 md:grid-cols-2">
                 {plan.grantedFeatures.map((feature) => (
-                  <div key={`${feature.level}-${feature.id}`} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-md bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold text-violet-200">{feature.level}级</span>
-                      <span className="text-sm font-semibold text-slate-100">{feature.name}</span>
+                  <div key={`${feature.level}-${feature.id}`} className="flex items-start gap-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <Dnd5eActionIcon
+                      spec={dnd5eClassFeatureActionIcon({ id: feature.id, name: feature.name, classId })}
+                      className="h-12 w-12 shrink-0"
+                      level={feature.level}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-md bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold text-violet-200">{feature.level}级</span>
+                        <span className="text-sm font-semibold text-slate-100">{feature.name}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{feature.description}</p>
                     </div>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{feature.description}</p>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-slate-500">本次没有新增自动职业特性。</p>
+              <p className="mt-2 text-sm text-slate-500">本次没有新增固定职业特性。</p>
             )}
           </section>
 
@@ -457,21 +465,50 @@ export default function CharacterLevelUpDialog({
                   >
                     <option value="single">一项属性 +2</option>
                     <option value="split">两项属性各 +1</option>
-                    {feats.length > 0 && <option value="feat">选择专长</option>}
+                    <option value="feat">选择专长</option>
                   </select>
                 </div>
                 {draft.mode === 'feat' ? (
-                  <select
-                    value={draft.featId ?? ''}
-                    onChange={(event) => setAsiDrafts((current) => ({
-                      ...current,
-                      [classLevel]: { mode: 'feat', featId: event.target.value || undefined },
-                    }))}
-                    className="mt-3 w-full rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-200"
-                  >
-                    <option value="">选择满足前提的专长…</option>
-                    {feats.map((feat) => <option key={feat.id} value={feat.id}>{feat.name}</option>)}
-                  </select>
+                  <div className="mt-3 space-y-3">
+                    <select
+                      value={draft.featId ?? ''}
+                      onChange={(event) => setAsiDrafts((current) => ({
+                        ...current,
+                        [classLevel]: { mode: 'feat', featId: event.target.value || undefined },
+                      }))}
+                      className="w-full rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-200"
+                    >
+                      <option value="">选择满足前提的专长…</option>
+                      {featOptions.map((feat) => (
+                        <option key={feat.id} value={feat.id} disabled={!feat.eligible}>
+                          {feat.name}{feat.disabledReason ? `（${feat.disabledReason}）` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500">
+                      已载入 {featOptions.length} 项专长，其中 {feats.length} 项当前可选。
+                    </p>
+                    {feats.length === 0 && (
+                      <p className="rounded-xl border border-amber-300/15 bg-amber-500/[0.05] px-3 py-2 text-xs leading-5 text-amber-100/80">
+                        当前没有满足前提的专长。SRD 5.1 核心只公开“擒抱者”（需要力量 13）；DM 可在自定义工坊导入其他合法规则包，安装后会自动出现在这里。
+                      </p>
+                    )}
+                    {draft.featId && (() => {
+                      const selected = featOptions.find((feat) => feat.id === draft.featId)
+                      return selected ? (
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-400">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="text-sm text-slate-100">{selected.name}</strong>
+                            <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">{selected.sourceLabel}</span>
+                            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">
+                              {selected.automation === 'full' ? '完整 Headless' : selected.automation === 'partial' ? '部分 Headless' : 'DM 裁定'}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-slate-300">{selected.summary}</p>
+                        </div>
+                      ) : null
+                    })()}
+                  </div>
                 ) : (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <AbilitySelect
@@ -616,7 +653,7 @@ export default function CharacterLevelUpDialog({
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-black/20 px-5 py-4 sm:px-7">
           <p className="text-xs text-slate-500">
-            确认时会同时写入等级、生命值、属性、专长、职业选择、法术书和升级审计记录。
+            确认时会同时写入等级、生命值、固定职业特性、属性、专长、职业选择、法术书和升级审计记录。
           </p>
           <div className="flex gap-2">
             <button type="button" onClick={onCancel} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300">

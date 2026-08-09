@@ -18,6 +18,7 @@ describe('MapDiceRoller', () => {
       isDm: false,
       character,
       canCheck: true,
+      headlessCheck: true,
       pending: false,
       turnEconomy: {
         turnKey: 'combat:1:hero', attacksUsed: 0,

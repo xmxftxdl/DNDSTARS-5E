@@ -79,6 +79,7 @@ export const COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS = Object.freeze([
 ])
 
 export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
+  'dancing-lights': Object.freeze({ shape: 'circle', radiusFeet: 0 }),
   'burning-hands': Object.freeze({ shape: 'cone', lengthFeet: 15, widthFeet: 15 }),
   thunderwave: Object.freeze({ shape: 'line', lengthFeet: 15, widthFeet: 15 }),
   shatter: Object.freeze({ shape: 'circle', radiusFeet: 10 }),

@@ -4,10 +4,14 @@ import {
   type ClassResourceDefinition,
   type ClassResourceReset,
 } from './classDefinitionRegistry'
-import { dnd5ePluginClassResourceDefinitions } from '../rulesets/dnd5e/pluginApi'
+import {
+  dnd5ePluginClassResourceDefinitions,
+  dnd5ePluginFeatResourceDefinitions,
+} from '../rulesets/dnd5e/pluginApi'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { dnd5eMulticlassPactSlots, dnd5eMulticlassSpellSlots, normalizeDnd5eClassLevels } from '../rulesets/dnd5e/multiclass'
 import { dnd5eRacialResourceDefinitions } from '../rulesets/dnd5e/racialAutomation'
+import { declarativeClassResourceDefinitionsV1 } from '../rulesets/dnd5e/declarativeClass'
 
 function finiteNonNegative(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
@@ -32,16 +36,19 @@ function dnd5eClassViews(character: Character): Character[] {
 
 function registeredResourceDefinitions(character: Character): ClassResourceDefinition[] {
   const views = dnd5eClassViews(character)
-  const definitions = views.flatMap((view) => {
+  const definitions: ClassResourceDefinition[] = views.flatMap((view) => {
     const registered = classDefinitionForCharacter(view)?.resources
     const native = typeof registered === 'function' ? registered(view) : (registered ?? [])
-    return [...native, ...dnd5ePluginClassResourceDefinitions(view)].map((definition) => ({
+    return [...native, ...dnd5ePluginClassResourceDefinitions(view), ...declarativeClassResourceDefinitionsV1(view)].map((definition) => ({
       ...definition,
       isAvailable: () => definition.isAvailable(view),
       max: () => definition.max(view),
       unlimited: definition.unlimited ? () => definition.unlimited!(view) : undefined,
     }))
   })
+  if (character.rulesetId === 'dnd5e-2014-srd-5.1') {
+    definitions.push(...dnd5ePluginFeatResourceDefinitions(character))
+  }
   if (character.rulesetId !== 'dnd5e-2014-srd-5.1') return definitions
 
   const withoutSharedSlots = definitions.filter((definition) =>
@@ -55,9 +62,9 @@ function registeredResourceDefinitions(character: Character): ClassResourceDefin
     }
     deduplicated.set(definition.key, {
       ...previous,
-      isAvailable: () => previous.isAvailable(character) || definition.isAvailable(),
-      max: () => Math.max(previous.max(character), definition.max()),
-      unlimited: () => previous.unlimited?.(character) === true || definition.unlimited?.() === true,
+      isAvailable: () => previous.isAvailable(character) || definition.isAvailable(character),
+      max: () => Math.max(previous.max(character), definition.max(character)),
+      unlimited: () => previous.unlimited?.(character) === true || definition.unlimited?.(character) === true,
     })
   }
 

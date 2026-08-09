@@ -28,6 +28,19 @@ describe('Wall of Fire geometry', () => {
     expect(new Set(cells.map((cell) => cell.col))).toEqual(new Set([10]))
   })
 
+  it('allows a shorter straight wall in five-foot increments', () => {
+    const cells = dnd5eWallOfFireCells({
+      anchor: { col: 10, row: 10 },
+      shape: 'line',
+      angleDegrees: 0,
+      lengthFeet: 25,
+      map,
+    })
+
+    expect(cells).toHaveLength(5)
+    expect(new Set(cells.map((cell) => cell.row))).toEqual(new Set([10]))
+  })
+
   it('keeps the selected axis-aligned burning side to a 10-by-60-foot band', () => {
     const anchor = { col: 10, row: 10 }
     const wallCells = dnd5eWallOfFireCells({ anchor, shape: 'line', angleDegrees: 0, map })
@@ -64,5 +77,29 @@ describe('Wall of Fire geometry', () => {
     expect(wallCells.length).toBeGreaterThanOrEqual(8)
     expect(inside).toContainEqual(anchor)
     expect(outside).not.toContainEqual(anchor)
+  })
+
+  it('allows a smaller ring diameter and keeps its damage band relative to that ring', () => {
+    const anchor = { col: 10, row: 10 }
+    const wallCells = dnd5eWallOfFireCells({
+      anchor,
+      shape: 'ring',
+      angleDegrees: 0,
+      diameterFeet: 10,
+      map,
+    })
+    const outside = dnd5eWallOfFireDamageCells({
+      anchor,
+      wallCells,
+      shape: 'ring',
+      angleDegrees: 0,
+      damagingSide: 'outside',
+      diameterFeet: 10,
+      map,
+    })
+
+    expect(wallCells).toContainEqual({ col: 11, row: 10 })
+    expect(wallCells).not.toContainEqual({ col: 12, row: 10 })
+    expect(outside).toContainEqual({ col: 13, row: 10 })
   })
 })

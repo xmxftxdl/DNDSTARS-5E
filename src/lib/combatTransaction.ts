@@ -32,6 +32,10 @@ export interface RollLedgerEntry {
   visibility: RollLedgerVisibility
   sourceId?: string
   targetId?: string
+  /** Stable rules definition that caused this roll. */
+  activityDefinitionId?: string
+  /** Concrete authoritative execution that caused this roll. */
+  activityExecutionId?: string
   rerolls: RollLedgerReroll[]
   createdAt: number
 }
@@ -73,6 +77,12 @@ export interface CombatTransaction {
   actorId: string
   actionId: string
   actionKind: string
+  activity?: {
+    schemaVersion: 1
+    definitionId: string
+    executionId: string
+    parentExecutionId?: string
+  }
   status: CombatTransactionStatus
   rollLedger: RollLedger
   interruptWindows: InterruptWindow[]
@@ -88,6 +98,9 @@ export function createCombatTransaction(input: {
   actorId: string
   actionId: string
   actionKind: string
+  activityDefinitionId?: string
+  activityExecutionId?: string
+  parentActivityExecutionId?: string
   now?: number
 }): CombatTransaction {
   const now = input.now ?? Date.now()
@@ -99,6 +112,14 @@ export function createCombatTransaction(input: {
     actorId: input.actorId,
     actionId: input.actionId,
     actionKind: input.actionKind,
+    ...(input.activityDefinitionId ? {
+      activity: {
+        schemaVersion: 1,
+        definitionId: input.activityDefinitionId,
+        executionId: input.activityExecutionId ?? input.id,
+        ...(input.parentActivityExecutionId ? { parentExecutionId: input.parentActivityExecutionId } : {}),
+      },
+    } : {}),
     status: 'preparing',
     rollLedger: { entries: [] },
     interruptWindows: [],
@@ -125,6 +146,8 @@ export function appendRollLedgerEntry(
         ...input,
         dice: { ...input.dice, values: [...input.dice.values] },
         rerolls: [],
+        activityDefinitionId: input.activityDefinitionId ?? transaction.activity?.definitionId,
+        activityExecutionId: input.activityExecutionId ?? transaction.activity?.executionId,
         createdAt,
       }],
     },

@@ -82,6 +82,7 @@ function failedSaveConditionIsValid(raw: unknown): boolean {
     'repeatSaveAtEndOfTargetTurn',
     'expiresAtSourceTurnEnd',
     'repeatSaveDisadvantageWhenSourceVisible',
+    'repeatSaveOnDamage',
     'breakOnDamage',
     'canBeAwakenedByAction',
     'minimumFailureMargin',
@@ -105,6 +106,23 @@ function failedSaveConditionIsValid(raw: unknown): boolean {
       raw.repeatSaveDisadvantageWhenSourceVisible !== true ||
       raw.repeatSaveAtEndOfTargetTurn === true
     ) &&
+    (
+      raw.repeatSaveOnDamage == null ||
+      (
+        isRecord(raw.repeatSaveOnDamage) &&
+        Object.keys(raw.repeatSaveOnDamage).every((key) =>
+          key === 'mode' || key === 'sourceFilter') &&
+        (
+          raw.repeatSaveOnDamage.mode === 'normal' ||
+          raw.repeatSaveOnDamage.mode === 'advantage'
+        ) &&
+        (
+          raw.repeatSaveOnDamage.sourceFilter === 'any' ||
+          raw.repeatSaveOnDamage.sourceFilter === 'source-or-allies'
+        )
+      )
+    ) &&
+    !(raw.repeatSaveAtEndOfTargetTurn === true && raw.repeatSaveOnDamage != null) &&
     (raw.breakOnDamage == null || typeof raw.breakOnDamage === 'boolean') &&
     (
       raw.canBeAwakenedByAction == null ||
@@ -266,14 +284,22 @@ function periodicDamageIsValid(raw: unknown): boolean {
       key === 'sides' ||
       key === 'modifier' ||
       key === 'type' ||
-      key === 'savingThrow') ||
+      key === 'savingThrow' ||
+      key === 'cumulativeDamage' ||
+      key === 'removeEffectAfterCumulativeDamage') ||
     (
       raw.timing !== 'target-turn-start' &&
+      raw.timing !== 'target-turn-end' &&
       raw.timing !== 'source-turn-start'
     ) ||
     !finiteInteger(raw.count, 1, 100) ||
     !finiteInteger(raw.sides, 2, 100) ||
     !finiteInteger(raw.modifier ?? 0, -1_000, 1_000) ||
+    !finiteInteger(raw.cumulativeDamage ?? 0, 0, 1_000_000) ||
+    (
+      raw.removeEffectAfterCumulativeDamage != null &&
+      !finiteInteger(raw.removeEffectAfterCumulativeDamage, 1, 1_000_000)
+    ) ||
     (
       raw.type != null &&
       (typeof raw.type !== 'string' || !DAMAGE_TYPE_VALUES.has(raw.type))
@@ -362,6 +388,21 @@ function activeEffectRemovalIsValid(raw: unknown): boolean {
     finiteInteger(action.abilityCheck.dc, 1, 100)
 }
 
+function activeEffectEscapeCheckIsValid(raw: unknown): boolean {
+  return isRecord(raw) &&
+    Object.keys(raw).every((key) =>
+      key === 'ability' || key === 'skill' || key === 'alternativeAbility' ||
+      key === 'alternativeSkill' || key === 'dc' || key === 'economy') &&
+    ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+    (raw.skill == null || raw.skill === 'athletics' || raw.skill === 'acrobatics') &&
+    (raw.alternativeAbility == null ||
+      ABILITY_KEYS.includes(raw.alternativeAbility as typeof ABILITY_KEYS[number])) &&
+    (raw.alternativeSkill == null ||
+      raw.alternativeSkill === 'athletics' || raw.alternativeSkill === 'acrobatics') &&
+    finiteInteger(raw.dc, 1, 100) &&
+    raw.economy === 'action'
+}
+
 function repeatSaveIsValid(raw: unknown): boolean {
   return isRecord(raw) &&
     Object.keys(raw).every((key) =>
@@ -389,9 +430,12 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     'dependentLegacyConditions',
     'rootLegacyCondition',
     'conditionsWhenAttackHasAdvantage',
+    'dependentLegacyConditionsWhenAttackHasAdvantage',
     'removeSourceRelationSlotGroupOnApply',
     'modifiers',
     'periodicDamage',
+    'regurgitation',
+    'removal',
   ])
   if (
     !Object.keys(raw).every((key) => allowedKeys.has(key)) ||
@@ -449,6 +493,28 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
       !periodicDamageIsValid(raw.periodicDamage)
     ) ||
     (
+      raw.regurgitation != null &&
+      (
+        !isRecord(raw.regurgitation) ||
+        !Object.keys(raw.regurgitation).every((key) => [
+          'damageThreshold', 'ability', 'dc', 'ejects', 'applyProne',
+          'placementWithinFeet',
+        ].includes(key)) ||
+        !finiteInteger(raw.regurgitation.damageThreshold, 1, 1_000) ||
+        raw.regurgitation.ability !== 'con' ||
+        !finiteInteger(raw.regurgitation.dc, 1, 100) ||
+        !['triggering-target', 'all-swallowed'].includes(
+          String(raw.regurgitation.ejects),
+        ) ||
+        raw.regurgitation.applyProne !== true ||
+        !finiteInteger(raw.regurgitation.placementWithinFeet, 1, 100)
+      )
+    ) ||
+    (
+      raw.removal != null &&
+      !activeEffectRemovalIsValid(raw.removal)
+    ) ||
+    (
       raw.modifiers != null &&
       (
         !isRecord(raw.modifiers) ||
@@ -493,6 +559,8 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     'whenCapacityFull',
     'attackAdvantageAgainstLinkedTarget',
     'attackAutomaticallyHitsLinkedTarget',
+    'requiresAttackAdvantage',
+    'preventsSourceActionWhileLinked',
     'movement',
     'endsOnSourceIncapacitated',
   ])
@@ -519,6 +587,14 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
       typeof relation.attackAutomaticallyHitsLinkedTarget !== 'boolean'
     ) ||
     (
+      relation.requiresAttackAdvantage != null &&
+      typeof relation.requiresAttackAdvantage !== 'boolean'
+    ) ||
+    (
+      relation.preventsSourceActionWhileLinked != null &&
+      typeof relation.preventsSourceActionWhileLinked !== 'boolean'
+    ) ||
+    (
       relation.movement != null &&
       !['drag-target', 'carry-target', 'source-rides-target'].includes(
         String(relation.movement),
@@ -535,6 +611,7 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
       ? raw.escapeDc != null
       : !finiteInteger(raw.escapeDc, 1, 100)
   ) return false
+  if (raw.regurgitation != null && relation.kind !== 'swallowed') return false
   if (
     relation.kind === 'attachment'
       ? raw.rootLegacyCondition !== 'attached'
@@ -591,13 +668,34 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
   const conditional = raw.conditionsWhenAttackHasAdvantage
   if (conditional != null && (
     relation.kind !== 'attachment' ||
-    !Array.isArray(conditional) ||
-    conditional.length < 1 ||
-    conditional.length > 8 ||
-    conditional.some((entry) =>
+      !Array.isArray(conditional) ||
+      conditional.length < 1 ||
+      conditional.length > 8 ||
+      conditional.some((entry) =>
       !isRecord(entry) ||
-      !Object.keys(entry).every((key) => key === 'condition') ||
-      !STANDARD_CONDITIONS.has(String(entry.condition)))
+      !Object.keys(entry).every((key) =>
+        key === 'condition' || key === 'targetMaxSizeRank') ||
+      !STANDARD_CONDITIONS.has(String(entry.condition)) ||
+      (
+        entry.targetMaxSizeRank != null &&
+        !finiteInteger(entry.targetMaxSizeRank, 0, 5)
+      ))
+  )) return false
+  const conditionalLegacy = raw.dependentLegacyConditionsWhenAttackHasAdvantage
+  if (conditionalLegacy != null && (
+    relation.kind !== 'attachment' ||
+    !Array.isArray(conditionalLegacy) ||
+    conditionalLegacy.length < 1 ||
+    conditionalLegacy.length > 8 ||
+    conditionalLegacy.some((entry) =>
+      !isRecord(entry) ||
+      !Object.keys(entry).every((key) =>
+        key === 'condition' || key === 'targetMaxSizeRank') ||
+      !requiredText(entry.condition, 120) ||
+      (
+        entry.targetMaxSizeRank != null &&
+        !finiteInteger(entry.targetMaxSizeRank, 0, 5)
+      ))
   )) return false
   return true
 }
@@ -610,6 +708,49 @@ function onHitEffectIsValid(raw: unknown): boolean {
   ) return false
   if (raw.kind === 'source-linked-condition') {
     return sourceLinkedConditionEffectIsValid(raw)
+  }
+  if (raw.kind === 'ability-score-reduction') {
+    return Object.keys(raw).every((key) => [
+      'id', 'kind', 'ability', 'reduction', 'minimumScore', 'diesAtMinimum', 'recovery',
+    ].includes(key)) &&
+      ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+      isRecord(raw.reduction) &&
+      Object.keys(raw.reduction).every((key) =>
+        key === 'count' || key === 'sides' || key === 'bonus') &&
+      finiteInteger(raw.reduction.count, 1, 100) &&
+      finiteInteger(raw.reduction.sides, 2, 100) &&
+      finiteInteger(raw.reduction.bonus, -1_000, 1_000) &&
+      raw.minimumScore === 0 &&
+      raw.diesAtMinimum === true &&
+      raw.recovery === 'short-or-long-rest'
+  }
+  if (raw.kind === 'equipment-corrosion') {
+    return Object.keys(raw).every((key) => [
+      'id', 'kind', 'target', 'armorClassPenalty', 'requiresNonmagical',
+      'requiresMetal', 'destroysAtProvidedArmorClass',
+    ].includes(key)) &&
+      raw.target === 'armor' &&
+      raw.armorClassPenalty === 1 &&
+      raw.requiresNonmagical === true &&
+      (raw.requiresMetal == null || raw.requiresMetal === true) &&
+      raw.destroysAtProvidedArmorClass === 10
+  }
+  if (raw.kind === 'saving-throw-instant-death') {
+    return Object.keys(raw).every((key) => [
+      'id', 'kind', 'ability', 'dc', 'magical', 'maximumCurrentHitPoints',
+    ].includes(key)) &&
+      ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+      finiteInteger(raw.dc, 1, 100) &&
+      (raw.magical == null || typeof raw.magical === 'boolean') &&
+      finiteInteger(raw.maximumCurrentHitPoints, 0, 1_000_000)
+  }
+  if (raw.kind === 'zero-hit-point-outcome') {
+    return Object.keys(raw).every((key) =>
+      key === 'id' || key === 'kind' || key === 'stabilize' || key === 'conditions') &&
+      zeroHitPointOutcomeIsValid({
+        stabilize: raw.stabilize,
+        conditions: raw.conditions,
+      })
   }
   if (raw.kind === 'forced-movement') {
     const allowedKeys = new Set([
@@ -681,6 +822,7 @@ function onHitEffectIsValid(raw: unknown): boolean {
       'periodicDamage',
       'campaignPeriodicHitPointMaximumReduction',
       'repeatSave',
+      'escapeCheck',
       'modifiers',
       'removal',
       'stacking',
@@ -703,10 +845,6 @@ function onHitEffectIsValid(raw: unknown): boolean {
         raw.ailment != null &&
         raw.ailment !== 'disease' &&
         raw.ailment !== 'curse'
-      ) ||
-      (
-        raw.ailment === 'disease' &&
-        raw.standardCondition !== 'poisoned'
       ) ||
       (
         raw.periodicDamage == null &&
@@ -739,6 +877,10 @@ function onHitEffectIsValid(raw: unknown): boolean {
         !repeatSaveIsValid(raw.repeatSave)
       ) ||
       (
+        raw.escapeCheck != null &&
+        !activeEffectEscapeCheckIsValid(raw.escapeCheck)
+      ) ||
+      (
         raw.removal != null &&
         !activeEffectRemovalIsValid(raw.removal)
       ) ||
@@ -748,11 +890,16 @@ function onHitEffectIsValid(raw: unknown): boolean {
           !isRecord(raw.modifiers) ||
           !Object.keys(raw.modifiers).every((key) =>
             key === 'preventHealing' ||
+            key === 'preventNonmagicalHealing' ||
             key === 'abilityCheckDisadvantages' ||
             key === 'savingThrowDisadvantages') ||
           (
             raw.modifiers.preventHealing != null &&
             typeof raw.modifiers.preventHealing !== 'boolean'
+          ) ||
+          (
+            raw.modifiers.preventNonmagicalHealing != null &&
+            typeof raw.modifiers.preventNonmagicalHealing !== 'boolean'
           ) ||
           (
             raw.modifiers.abilityCheckDisadvantages != null &&
@@ -869,6 +1016,8 @@ function onHitEffectIsValid(raw: unknown): boolean {
       'ability',
       'dc',
       'magical',
+      'targetCreatureTypeExclusions',
+      'targetRaceExclusions',
       'conditionOnFailedSave',
       'additionalConditionsOnFailedSave',
     ])
@@ -876,6 +1025,26 @@ function onHitEffectIsValid(raw: unknown): boolean {
       ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
       finiteInteger(raw.dc, 1, 100) &&
       (raw.magical == null || typeof raw.magical === 'boolean') &&
+      (
+        raw.targetCreatureTypeExclusions == null ||
+        (
+          Array.isArray(raw.targetCreatureTypeExclusions) &&
+          raw.targetCreatureTypeExclusions.length >= 1 &&
+          raw.targetCreatureTypeExclusions.length <= 2 &&
+          new Set(raw.targetCreatureTypeExclusions).size ===
+            raw.targetCreatureTypeExclusions.length &&
+          raw.targetCreatureTypeExclusions.every((entry) =>
+            entry === 'construct' || entry === 'undead')
+        )
+      ) &&
+      (
+        raw.targetRaceExclusions == null ||
+        (
+          Array.isArray(raw.targetRaceExclusions) &&
+          raw.targetRaceExclusions.length === 1 &&
+          raw.targetRaceExclusions[0] === 'elf'
+        )
+      ) &&
       failedSaveConditionSetIsValid(
         raw.conditionOnFailedSave,
         raw.additionalConditionsOnFailedSave,
@@ -939,9 +1108,13 @@ function areaTargetingIsValid(raw: unknown): boolean {
 
 function areaSavingThrowEffectIsValid(raw: unknown): boolean {
   if (!isRecord(raw)) return false
+  const additionalDamage = Array.isArray(raw.additionalDamage)
+    ? raw.additionalDamage
+    : undefined
   const targetCreatureTypeExclusions = Array.isArray(raw.targetCreatureTypeExclusions)
     ? raw.targetCreatureTypeExclusions
     : undefined
+  const sourceLinkedTargets = raw.sourceLinkedTargets
   const forcedMovement = raw.forcedMovementOnFailedSave
   const forcedMovementIsValid = forcedMovement == null || (
     isRecord(forcedMovement) &&
@@ -958,15 +1131,33 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       key === 'label' ||
       key === 'durationRounds' ||
       key === 'repeatSaveAtEndOfTargetTurn' ||
+      key === 'standardCondition' ||
+      key === 'periodicDamage' ||
       key === 'modifiers') &&
     requiredText(activeEffect.id, 96) &&
     /^[a-z][a-z0-9-]*$/.test(String(activeEffect.id)) &&
     requiredText(activeEffect.label, 240) &&
     finiteInteger(activeEffect.durationRounds, 1, 14_400) &&
     typeof activeEffect.repeatSaveAtEndOfTargetTurn === 'boolean' &&
-    isRecord(activeEffect.modifiers) &&
-    Object.keys(activeEffect.modifiers).length > 0 &&
-    Object.keys(activeEffect.modifiers).every((key) =>
+    (
+      activeEffect.standardCondition == null ||
+      STANDARD_CONDITIONS.has(String(activeEffect.standardCondition))
+    ) &&
+    (
+      activeEffect.periodicDamage == null ||
+      periodicDamageIsValid(activeEffect.periodicDamage)
+    ) &&
+    (
+      activeEffect.modifiers != null ||
+      activeEffect.standardCondition != null ||
+      activeEffect.periodicDamage != null
+    ) &&
+    (
+      activeEffect.modifiers == null ||
+      (
+        isRecord(activeEffect.modifiers) &&
+        Object.keys(activeEffect.modifiers).length > 0 &&
+        Object.keys(activeEffect.modifiers).every((key) =>
       key === 'speedMultiplier' ||
       key === 'preventReactions' ||
       key === 'maximumAttacksPerTurn' ||
@@ -993,10 +1184,12 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       activeEffect.modifiers.actionOrBonusActionOnly == null ||
       typeof activeEffect.modifiers.actionOrBonusActionOnly === 'boolean'
     ) &&
-    (
-      activeEffect.modifiers.strengthRollMode == null ||
-      activeEffect.modifiers.strengthRollMode === 'advantage' ||
-      activeEffect.modifiers.strengthRollMode === 'disadvantage'
+        (
+          activeEffect.modifiers.strengthRollMode == null ||
+          activeEffect.modifiers.strengthRollMode === 'advantage' ||
+          activeEffect.modifiers.strengthRollMode === 'disadvantage'
+        )
+      )
     )
   )
   return areaTargetingIsValid(raw.area) &&
@@ -1005,10 +1198,30 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       targetCreatureTypeExclusions == null ||
       (
         targetCreatureTypeExclusions.length > 0 &&
-        targetCreatureTypeExclusions.length <= 3 &&
+        targetCreatureTypeExclusions.length <= 4 &&
         new Set(targetCreatureTypeExclusions).size === targetCreatureTypeExclusions.length &&
         targetCreatureTypeExclusions.every((entry) =>
-          entry === 'aberration' || entry === 'demon' || entry === 'undead')
+          entry === 'aberration' ||
+          entry === 'construct' ||
+          entry === 'demon' ||
+          entry === 'undead')
+      )
+    ) &&
+    (raw.minimumTargets == null || finiteInteger(raw.minimumTargets, 1, 64)) &&
+    (raw.maximumTargets == null || finiteInteger(raw.maximumTargets, 1, 64)) &&
+    !(
+      raw.minimumTargets != null &&
+      raw.maximumTargets != null &&
+      Number(raw.minimumTargets) > Number(raw.maximumTargets)
+    ) &&
+    (
+      sourceLinkedTargets == null ||
+      (
+        isRecord(sourceLinkedTargets) &&
+        Object.keys(sourceLinkedTargets).every((key) =>
+          key === 'slotGroup' || key === 'selection') &&
+        requiredText(sourceLinkedTargets.slotGroup, 120) &&
+        sourceLinkedTargets.selection === 'all'
       )
     ) &&
     ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
@@ -1027,6 +1240,16 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       typeof raw.requiresTargetCanHearSource === 'boolean'
     ) &&
     (raw.damage == null || validateDamage(raw.damage)) &&
+    (
+      raw.additionalDamage == null ||
+      (
+        raw.damage != null &&
+        additionalDamage != null &&
+        additionalDamage.length >= 1 &&
+        additionalDamage.length <= 8 &&
+        additionalDamage.every((damage) => validateDamage(damage))
+      )
+    ) &&
     !(raw.damage == null && raw.damageOnSuccessfulSave != null) &&
     !(raw.damage != null && !['none', 'half'].includes(String(raw.damageOnSuccessfulSave ?? 'none'))) &&
     (
@@ -1165,6 +1388,14 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     action.economy !== 'bonus-action'
   ) return false
   if (action.referencedActionId != null && !requiredText(action.referencedActionId, 120)) return false
+  if (
+    action.requiredActiveEffectDefinitionId != null &&
+    !requiredText(action.requiredActiveEffectDefinitionId, 320)
+  ) return false
+  if (
+    action.forbiddenActiveEffectDefinitionId != null &&
+    !requiredText(action.forbiddenActiveEffectDefinitionId, 320)
+  ) return false
   if (action.relationRequirement != null) {
     if (
       !isRecord(action.relationRequirement) ||
@@ -1271,6 +1502,11 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         )
       ) return false
     } else if (action.rule.kind === 'saving-throw-condition') {
+      const requiredTargetCreatureTypes = Array.isArray(action.rule.requiredTargetCreatureTypes)
+        ? action.rule.requiredTargetCreatureTypes
+        : undefined
+      const repeatSaveOnDamage = action.rule.repeatSaveOnDamage
+      const sourceTargetLimit = action.rule.sourceTargetLimit
       if (
         !finiteInteger(action.rule.rangeFeet, 0, 100_000) ||
         !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
@@ -1306,6 +1542,16 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
           action.rule.repeatSaveAtEndOfTargetTurn !== true
         ) ||
         (
+          requiredTargetCreatureTypes != null &&
+          (
+            requiredTargetCreatureTypes.length < 1 ||
+            requiredTargetCreatureTypes.length > 2 ||
+            new Set(requiredTargetCreatureTypes).size !== requiredTargetCreatureTypes.length ||
+            requiredTargetCreatureTypes.some((entry) =>
+              entry !== 'humanoid' && entry !== 'beast')
+          )
+        ) ||
+        (
           action.rule.additionalConditionsOnFailedSave != null &&
           !failedSaveConditionSetIsValid(
             {
@@ -1327,13 +1573,166 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
           )
         ) ||
         (action.rule.preventReactions != null && typeof action.rule.preventReactions !== 'boolean') ||
-        (action.rule.repeatSaveOnDamage != null && typeof action.rule.repeatSaveOnDamage !== 'boolean')
+        (
+          repeatSaveOnDamage != null &&
+          typeof repeatSaveOnDamage !== 'boolean' &&
+          (
+            !isRecord(repeatSaveOnDamage) ||
+            !Object.keys(repeatSaveOnDamage).every((key) =>
+              key === 'mode' || key === 'sourceFilter') ||
+            (
+              repeatSaveOnDamage.mode !== 'normal' &&
+              repeatSaveOnDamage.mode !== 'advantage'
+            ) ||
+            (
+              repeatSaveOnDamage.sourceFilter !== 'any' &&
+              repeatSaveOnDamage.sourceFilter !== 'source-or-allies'
+            )
+          )
+        ) ||
+        (
+          sourceTargetLimit != null &&
+          (
+            !isRecord(sourceTargetLimit) ||
+            !Object.keys(sourceTargetLimit).every((key) =>
+              key === 'maximum' || key === 'replaceOldest' ||
+              key === 'partitionByRequiredCreatureType') ||
+            !finiteInteger(sourceTargetLimit.maximum, 1, 64) ||
+            sourceTargetLimit.replaceOldest !== true ||
+            (
+              sourceTargetLimit.partitionByRequiredCreatureType != null &&
+              sourceTargetLimit.partitionByRequiredCreatureType !== true
+            ) ||
+            (
+              sourceTargetLimit.partitionByRequiredCreatureType === true &&
+              requiredTargetCreatureTypes == null
+            )
+          )
+        )
+      ) return false
+    } else if (action.rule.kind === 'saving-throw-terminal-effect') {
+      const healing = action.rule.healingOnDeath
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'rangeFeet' ||
+          key === 'ability' ||
+          key === 'dc' ||
+          key === 'magical' ||
+          key === 'requiresSourceCanSeeTarget' ||
+          key === 'requiresTargetCanSeeSource' ||
+          key === 'requiredCondition' ||
+          key === 'requiresTargetAtZeroHitPoints' ||
+          key === 'failure' ||
+          key === 'healingOnDeath') ||
+        !finiteInteger(action.rule.rangeFeet, 0, 100_000) ||
+        !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
+        !finiteInteger(action.rule.dc, 1, 100) ||
+        (action.rule.magical != null && typeof action.rule.magical !== 'boolean') ||
+        (
+          action.rule.requiresSourceCanSeeTarget != null &&
+          typeof action.rule.requiresSourceCanSeeTarget !== 'boolean'
+        ) ||
+        (
+          action.rule.requiresTargetCanSeeSource != null &&
+          typeof action.rule.requiresTargetCanSeeSource !== 'boolean'
+        ) ||
+        (
+          action.rule.requiredCondition != null &&
+          !STANDARD_CONDITIONS.has(String(action.rule.requiredCondition))
+        ) ||
+        (
+          action.rule.requiresTargetAtZeroHitPoints != null &&
+          typeof action.rule.requiresTargetAtZeroHitPoints !== 'boolean'
+        ) ||
+        (
+          action.rule.failure !== 'reduce-to-zero' &&
+          action.rule.failure !== 'instant-death'
+        ) ||
+        (
+          healing != null &&
+          (
+            !isRecord(healing) ||
+            !Object.keys(healing).every((key) =>
+              key === 'count' || key === 'sides' || key === 'bonus') ||
+            !finiteInteger(healing.count, 1, 100) ||
+            !finiteInteger(healing.sides, 2, 1_000) ||
+            !finiteInteger(healing.bonus, 0, 1_000) ||
+            action.rule.failure !== 'instant-death'
+          )
+        )
       ) return false
     } else if (action.rule.kind === 'conditioned-damage-and-healing') {
       if (
         !STANDARD_CONDITIONS.has(String(action.rule.requiredCondition)) ||
         typeof action.rule.requireSameSource !== 'boolean' ||
         !validateDamage(action.rule.damage)
+      ) return false
+    } else if (action.rule.kind === 'self-healing') {
+      const healing = action.rule.healing
+      if (
+        !Object.keys(action.rule).every((key) => key === 'kind' || key === 'healing') ||
+        !isRecord(healing) ||
+        !Object.keys(healing).every((key) =>
+          key === 'count' || key === 'sides' || key === 'bonus') ||
+        !finiteInteger(healing.count, 1, 100) ||
+        !finiteInteger(healing.sides, 2, 1_000) ||
+        !finiteInteger(healing.bonus, 0, 1_000)
+      ) return false
+    } else if (action.rule.kind === 'temporary-armor-class-bonus') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'rangeFeet' ||
+          key === 'target' ||
+          key === 'armorClassBonus' ||
+          key === 'duration' ||
+          key === 'magical') ||
+        !finiteInteger(action.rule.rangeFeet, 0, 100_000) ||
+        action.rule.target !== 'self-or-one-visible-creature' ||
+        !finiteInteger(action.rule.armorClassBonus, 1, 100) ||
+        action.rule.duration !== 'until-source-next-turn-end' ||
+        (action.rule.magical != null && typeof action.rule.magical !== 'boolean')
+      ) return false
+    } else if (action.rule.kind === 'grant-movement') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'maximumSpeedFraction' ||
+          key === 'provokesOpportunityAttacks') ||
+        typeof action.rule.maximumSpeedFraction !== 'number' ||
+        !Number.isFinite(action.rule.maximumSpeedFraction) ||
+        action.rule.maximumSpeedFraction <= 0 ||
+        action.rule.maximumSpeedFraction > 1 ||
+        typeof action.rule.provokesOpportunityAttacks !== 'boolean'
+      ) return false
+    } else if (action.rule.kind === 'automatic-area-active-effect') {
+      const modifiers = isRecord(action.rule.modifiers)
+        ? action.rule.modifiers
+        : undefined
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'radiusFeet' ||
+          key === 'target' ||
+          key === 'ignoresLineOfEffect' ||
+          key === 'duration' ||
+          key === 'magical' ||
+          key === 'modifiers') ||
+        !finiteInteger(action.rule.radiusFeet, 0, 100_000) ||
+        (
+          action.rule.target !== 'all-creatures-including-self' &&
+          action.rule.target !== 'all-creatures-except-self'
+        ) ||
+        (
+          action.rule.ignoresLineOfEffect != null &&
+          typeof action.rule.ignoresLineOfEffect !== 'boolean'
+        ) ||
+        action.rule.duration !== 'until-source-next-turn-end' ||
+        (action.rule.magical != null && typeof action.rule.magical !== 'boolean') ||
+        !modifiers ||
+        !Object.keys(modifiers).every((key) => key === 'preventHealing') ||
+        modifiers.preventHealing !== true
       ) return false
     } else if (action.rule.kind === 'healing-touch') {
       const healing = isRecord(action.rule.healing)
@@ -1485,20 +1884,99 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         followUpMovement.maximumSpeedFraction <= 0 ||
         followUpMovement.maximumSpeedFraction > 1
       ) return false
+    } else if (action.rule.kind === 'self-combat-buff') {
+      const modifiers = isRecord(action.rule.modifiers)
+        ? action.rule.modifiers
+        : undefined
+      const savingThrowAdvantages = modifiers && Array.isArray(modifiers.savingThrowAdvantages)
+        ? modifiers.savingThrowAdvantages
+        : undefined
+      const duration = action.rule.duration
+      const durationIsValid = duration === 'until-source-next-turn-end' || (
+        isRecord(duration) &&
+        Object.keys(duration).every((key) => key === 'type' || key === 'rounds') &&
+        duration.type === 'rounds' &&
+        finiteInteger(duration.rounds, 1, 14_400)
+      )
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' ||
+          key === 'duration' ||
+          key === 'magical' ||
+          key === 'modifiers' ||
+          key === 'bonusActionWeaponActionId') ||
+        !durationIsValid ||
+        (action.rule.magical != null && typeof action.rule.magical !== 'boolean') ||
+        !modifiers ||
+        Object.keys(modifiers).length < 1 ||
+        !Object.keys(modifiers).every((key) =>
+          key === 'armorClassBonus' ||
+          key === 'savingThrowAdvantages' ||
+          key === 'sizeRankDelta' ||
+          key === 'strengthRollMode') ||
+        (
+          modifiers.armorClassBonus != null &&
+          !finiteInteger(modifiers.armorClassBonus, -100, 100)
+        ) ||
+        (
+          modifiers.savingThrowAdvantages != null &&
+          (
+            !savingThrowAdvantages ||
+            savingThrowAdvantages.length < 1 ||
+            savingThrowAdvantages.length > ABILITY_KEYS.length ||
+            new Set(savingThrowAdvantages).size !== savingThrowAdvantages.length ||
+            savingThrowAdvantages.some((ability) =>
+              !ABILITY_KEYS.includes(ability as typeof ABILITY_KEYS[number]))
+          )
+        ) ||
+        (
+          modifiers.sizeRankDelta != null &&
+          modifiers.sizeRankDelta !== -1 &&
+          modifiers.sizeRankDelta !== 1
+        ) ||
+        (
+          modifiers.strengthRollMode != null &&
+          modifiers.strengthRollMode !== 'advantage' &&
+          modifiers.strengthRollMode !== 'disadvantage'
+        ) ||
+        (
+          action.rule.bonusActionWeaponActionId != null &&
+          !requiredText(action.rule.bonusActionWeaponActionId, 120)
+        )
+      ) return false
     } else if (action.rule.kind === 'area-saving-throw') {
       if (action.rule.variants != null) {
+        const variants = Array.isArray(action.rule.variants)
+          ? action.rule.variants
+          : undefined
+        const orderedVariantIds = Array.isArray(action.rule.orderedVariantIds)
+          ? action.rule.orderedVariantIds
+          : undefined
         if (
-          !Array.isArray(action.rule.variants) ||
-          action.rule.variants.length < 2 ||
-          action.rule.variants.length > 16 ||
-          new Set(action.rule.variants.map((variant) =>
-            isRecord(variant) ? String(variant.id) : '')).size !== action.rule.variants.length ||
-          action.rule.variants.some((variant) =>
+          !Object.keys(action.rule).every((key) =>
+            key === 'kind' || key === 'variants' || key === 'orderedVariantIds') ||
+          variants == null ||
+          variants.length < 2 ||
+          variants.length > 16 ||
+          new Set(variants.map((variant) =>
+            isRecord(variant) ? String(variant.id) : '')).size !== variants.length ||
+          variants.some((variant) =>
             !isRecord(variant) ||
             !requiredText(variant.id, 96) ||
             !/^[a-z][a-z0-9-]*$/.test(String(variant.id)) ||
             !requiredText(variant.name, 240) ||
-            !areaSavingThrowEffectIsValid(variant))
+            !areaSavingThrowEffectIsValid(variant)) ||
+          (
+            orderedVariantIds != null &&
+            (
+              action.usage?.kind !== 'per-day' ||
+              orderedVariantIds.length !== variants.length ||
+              orderedVariantIds.length !== action.usage.max ||
+              new Set(orderedVariantIds).size !== orderedVariantIds.length ||
+              orderedVariantIds.some((id, index) =>
+                id !== (isRecord(variants[index]) ? variants[index].id : undefined))
+            )
+          )
         ) return false
       } else if (!areaSavingThrowEffectIsValid(action.rule)) return false
     } else return false

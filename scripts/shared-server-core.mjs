@@ -27,7 +27,7 @@ import {
   AI_JOB_MAX_PER_CAMPAIGN,
   normalizeAiJobCreateRequestV2,
   normalizeAiJobRecordV2,
-  normalizePdfCampaignAnalysisArtifactV1,
+  normalizePdfCampaignAnalysisArtifact,
   publicAiJobV2,
 } from '../shared/ai-job.mjs'
 import {
@@ -38,15 +38,19 @@ import {
   validateGeometryStructure,
 } from '../shared/map-geometry-kernel.mjs'
 import {
+  createPlayerExplorationMoveApi,
+  mutatePlayerExplorationMoveState,
+} from './player-exploration-move.mjs'
+export { mutatePlayerExplorationMoveState }
+import {
   applyDnd5eEffectiveVisionProfile,
   compileDnd5eEffectiveVisionProfile,
 } from '../shared/dnd5e-vision-profile.mjs'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
   isCombatPresentationAreaSpellId,
-  isCombatPresentationProjectileSpellId,
-  isCombatPresentationTargetEffectSpellId,
 } from '../shared/combat-presentation-contract.mjs'
+import { normalizeCombatTargetPresentationEvent } from './combat-target-presentation.mjs'
 import {
   analyzeMarketplaceDeclarativePackage,
   MARKETPLACE_CREATOR_NOTICE_VERSION,
@@ -1269,6 +1273,7 @@ const PLAYER_ADVANCEMENT_CONTROLLED_CHARACTER_FIELDS = Object.freeze([
   'level',
   'charClass',
   'dnd5eClassLevels',
+  'dnd5eClassContentBindings',
   'abilities',
   'savingThrows',
   'skills',
@@ -1382,6 +1387,7 @@ function advancementSnapshotMatchesCharacter(snapshot, character) {
   return plainObject(snapshot) &&
     snapshot.level === character?.level &&
     sameJsonValue(snapshot.dnd5eClassLevels, character?.dnd5eClassLevels) &&
+    sameJsonValue(snapshot.dnd5eClassContentBindings, character?.dnd5eClassContentBindings) &&
     sameJsonValue(snapshot.abilities, character?.abilities) &&
     sameJsonValue(snapshot.skills, character?.skills) &&
     sameJsonValue(snapshot.dnd5eClassChoices, character?.dnd5eClassChoices) &&
@@ -2252,6 +2258,19 @@ export function mutateCombatInterruptQueue(
           entry?.featureLabel === acceptedContribution.featureLabel,
         )
       : undefined
+    const eligibleModifiers = Array.isArray(current.payload?.eligibleModifiers)
+      ? current.payload.eligibleModifiers
+      : []
+    const requiredChoiceCharacterIds = new Set(eligibleModifiers
+      .filter((entry) => entry?.modifierKind === 'choice-reroll' && entry?.decisionRequired === true)
+      .map((entry) => entry?.characterId)
+      .filter((characterId) => typeof characterId === 'string' && characterId))
+    const choiceDecisions = (Array.isArray(current.contributions) ? current.contributions : [])
+      .filter((entry) => entry?.kind === 'choice-reroll' && requiredChoiceCharacterIds.has(entry.characterId))
+    if ([...requiredChoiceCharacterIds].some((characterId) =>
+      !choiceDecisions.some((entry) => entry.characterId === characterId))) {
+      return { ok: false, status: 409, error: 'roll-choice-decision-pending' }
+    }
     if (acceptedContribution?.kind === 'adjust-d20') {
       const adjustment = response.adjustment
       if (
@@ -2269,6 +2288,36 @@ export function mutateCombatInterruptQueue(
     } else if (response.adjustment != null) {
       return { ok: false, status: 400, error: 'unexpected-roll-adjustment' }
     }
+    let choiceRerollFinalValue
+    if (acceptedContribution?.kind === 'choice-reroll') {
+      const choiceReroll = response.choiceReroll
+      const rerollScope = acceptedEligibleModifier?.rerollScope
+      const expectedResourceCosts = Array.isArray(acceptedEligibleModifier?.resourceCosts)
+        ? acceptedEligibleModifier.resourceCosts
+        : []
+      if (
+        acceptedContribution.decision !== 'use' ||
+        !acceptedEligibleModifier || acceptedEligibleModifier.modifierKind !== 'choice-reroll' ||
+        !['self-roll', 'attack-against-self'].includes(rerollScope) ||
+        expectedResourceCosts.length < 1 || !choiceReroll ||
+        choiceReroll.characterId !== acceptedContribution.characterId ||
+        choiceReroll.featureId !== acceptedContribution.featureId ||
+        choiceReroll.scope !== rerollScope ||
+        choiceReroll.originalValue !== originalValue ||
+        !Number.isInteger(choiceReroll.rerollValue) || choiceReroll.rerollValue < 1 || choiceReroll.rerollValue > 20 ||
+        !Array.isArray(choiceReroll.resourceCosts) ||
+        JSON.stringify(choiceReroll.resourceCosts) !== JSON.stringify(expectedResourceCosts)
+      ) return { ok: false, status: 409, error: 'roll-choice-reroll-conflict' }
+      const expectedSelectedValue = rerollScope === 'attack-against-self'
+        ? Math.min(originalValue, choiceReroll.rerollValue)
+        : Math.max(originalValue, choiceReroll.rerollValue)
+      if (choiceReroll.selectedValue !== expectedSelectedValue) {
+        return { ok: false, status: 409, error: 'roll-choice-reroll-conflict' }
+      }
+      choiceRerollFinalValue = expectedSelectedValue
+    } else if (response.choiceReroll != null) {
+      return { ok: false, status: 400, error: 'unexpected-choice-reroll' }
+    }
     const dmOverrideAllowed =
       current.payload?.visibility === 'dm-only' &&
       current.payload?.allowDmOverride === true &&
@@ -2277,6 +2326,8 @@ export function mutateCombatInterruptQueue(
       ? response.finalValue
       : acceptedContribution?.kind === 'replace-d20'
         ? acceptedContribution.replacementValue
+        : acceptedContribution?.kind === 'choice-reroll'
+          ? choiceRerollFinalValue
         : originalValue
     if (response.finalValue !== expectedValue) {
       return { ok: false, status: 409, error: 'roll-confirmation-value-conflict' }
@@ -2289,7 +2340,7 @@ export function mutateCombatInterruptQueue(
     ) return { ok: false, status: 409, error: 'invalid-transition' }
     const contribution = mutation?.contribution
     if (
-      !contribution || !['replace-d20', 'adjust-d20'].includes(contribution.kind) ||
+      !contribution || !['replace-d20', 'adjust-d20', 'choice-reroll'].includes(contribution.kind) ||
       typeof contribution.id !== 'string' || !contribution.id ||
       typeof contribution.characterId !== 'string' || !contribution.characterId ||
       typeof contribution.characterName !== 'string' || !contribution.characterName.trim() ||
@@ -2305,6 +2356,10 @@ export function mutateCombatInterruptQueue(
       (contribution.kind === 'adjust-d20' && (
         typeof contribution.featureId !== 'string' || !contribution.featureId.trim() ||
         !['add', 'subtract'].includes(contribution.direction)
+      )) ||
+      (contribution.kind === 'choice-reroll' && (
+        typeof contribution.featureId !== 'string' || !contribution.featureId.trim() ||
+        !['use', 'decline'].includes(contribution.decision)
       ))
     ) return { ok: false, status: 400, error: 'invalid-contribution' }
     const eligibleModifiers = Array.isArray(current.payload?.eligibleModifiers)
@@ -2315,7 +2370,9 @@ export function mutateCombatInterruptQueue(
       entry?.featureId === contribution.featureId &&
       entry?.featureLabel === contribution.featureLabel &&
       (entry?.modifierKind ?? 'replace-d20') === contribution.kind &&
-      (contribution.kind !== 'adjust-d20' || entry?.direction === contribution.direction),
+      (contribution.kind !== 'adjust-d20' || entry?.direction === contribution.direction) &&
+      (contribution.kind !== 'choice-reroll' ||
+        ['self-roll', 'attack-against-self'].includes(entry?.rerollScope)),
     )
     if (!eligibleModifier) {
       return { ok: false, status: 403, error: 'ineligible-roll-modifier' }
@@ -2329,7 +2386,10 @@ export function mutateCombatInterruptQueue(
     ) {
       return { ok: false, status: 403, error: 'character-ownership-required' }
     }
-    if (contribution.id !== `${current.id}:${contribution.characterId}`) {
+    const expectedContributionId = contribution.kind === 'choice-reroll'
+      ? `${current.id}:${contribution.characterId}:choice-reroll`
+      : `${current.id}:${contribution.characterId}`
+    if (contribution.id !== expectedContributionId) {
       return { ok: false, status: 400, error: 'invalid-contribution-id' }
     }
     const normalizedContribution = contribution.kind === 'adjust-d20' ? {
@@ -2340,6 +2400,15 @@ export function mutateCombatInterruptQueue(
       featureId: contribution.featureId.trim().slice(0, 160),
       featureLabel: contribution.featureLabel.trim().slice(0, 120),
       direction: contribution.direction,
+      createdAt: contribution.createdAt,
+    } : contribution.kind === 'choice-reroll' ? {
+      id: contribution.id.slice(0, 240),
+      kind: 'choice-reroll',
+      characterId: contribution.characterId.slice(0, 160),
+      characterName: contribution.characterName.trim().slice(0, 80),
+      featureId: contribution.featureId.trim().slice(0, 160),
+      featureLabel: contribution.featureLabel.trim().slice(0, 120),
+      decision: contribution.decision,
       createdAt: contribution.createdAt,
     } : {
       id: contribution.id.slice(0, 240),
@@ -2354,7 +2423,10 @@ export function mutateCombatInterruptQueue(
     }
     const contributions = [
       ...(Array.isArray(current.contributions) ? current.contributions : [])
-        .filter((entry) => entry?.id !== normalizedContribution.id),
+        .filter((entry) => entry?.id !== normalizedContribution.id && !(
+          entry?.kind === 'choice-reroll' && normalizedContribution.kind === 'choice-reroll' &&
+          entry?.characterId === normalizedContribution.characterId
+        )),
       normalizedContribution,
     ].sort((a, b) => Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0)).slice(-32)
     const interrupts = [...base.interrupts]
@@ -2698,99 +2770,14 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     !common.transactionId || !common.sourceTokenId
   ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
 
-  if (
-    common.type === 'spell-projectile' &&
-    isCombatPresentationProjectileSpellId(common.spellId)
-  ) {
-    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
-    const outcome = payload?.outcome
-    const accentColor = payload?.accentColor
-    const glowColor = payload?.glowColor
-    if (
-      !targetTokenId ||
-      (outcome != null && outcome !== 'hit' && outcome !== 'miss') ||
-      (accentColor != null && (typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor))) ||
-      (glowColor != null && (typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)))
-    ) {
-      return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
-    }
-    return {
-      ok: true,
-      event: {
-        ...common,
-        targetTokenId,
-        ...(outcome ? { outcome } : {}),
-        ...(accentColor ? { accentColor } : {}),
-        ...(glowColor ? { glowColor } : {}),
-        createdAt: now,
-        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
-      },
-    }
-  }
-
-  if (
-    common.type === 'spell-target-effect' &&
-    isCombatPresentationTargetEffectSpellId(common.spellId)
-  ) {
-    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
-    const accentColor = payload?.accentColor
-    const glowColor = payload?.glowColor
-    if (
-      !targetTokenId ||
-      ['resistance', 'spare-the-dying'].includes(common.spellId) && (
-        typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor) ||
-        typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)
-      ) ||
-      (accentColor != null && (typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor))) ||
-      (glowColor != null && (typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)))
-    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
-    return {
-      ok: true,
-      event: {
-        ...common,
-        targetTokenId,
-        ...(accentColor ? { accentColor } : {}),
-        ...(glowColor ? { glowColor } : {}),
-        createdAt: now,
-        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
-      },
-    }
-  }
-
-  if (common.type === 'spell-persistent-target-effect' && common.spellId === 'chill-touch') {
-    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
-    if (!targetTokenId) {
-      return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
-    }
-    return {
-      ok: true,
-      event: {
-        ...common,
-        targetTokenId,
-        createdAt: now,
-        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
-      },
-    }
-  }
-
-  if (common.type === 'spell-save-target-effect' && common.spellId === 'sacred-flame') {
-    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
-    const outcome = payload?.outcome
-    if (
-      !targetTokenId ||
-      (outcome != null && outcome !== 'failed-save' && outcome !== 'successful-save')
-    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
-    return {
-      ok: true,
-      event: {
-        ...common,
-        targetTokenId,
-        ...(outcome ? { outcome } : {}),
-        createdAt: now,
-        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
-      },
-    }
-  }
+  const targetPresentation = normalizeCombatTargetPresentationEvent({
+    common,
+    payload,
+    now,
+    normalizedLabel,
+    lifetimeMs: COMBAT_PRESENTATION_LIFETIME_MS,
+  })
+  if (targetPresentation) return targetPresentation
 
   if (common.type === 'spell-banner') {
     const casterName = normalizedLabel(payload?.casterName, 80)
@@ -2875,16 +2862,23 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     const expected = COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS[common.spellId]
     const col = payload?.targetCell?.col
     const row = payload?.targetCell?.row
-    const wallOfFireShape = common.spellId === 'wall-of-fire' ? (payload?.wallOfFireShape ?? 'line') : undefined; const wallOfFireAngleDegrees = common.spellId === 'wall-of-fire' ? (payload?.wallOfFireAngleDegrees ?? 0) : undefined
+    const wallSpell = common.spellId === 'wall-of-fire' || common.spellId === 'blade-barrier'
+    const wallOfFireShape = wallSpell ? (payload?.wallOfFireShape ?? 'line') : undefined; const wallOfFireAngleDegrees = wallSpell ? (payload?.wallOfFireAngleDegrees ?? 0) : undefined
     if (
       !expected ||
       payload?.shape !== expected.shape ||
       payload?.lengthFeet !== expected.lengthFeet ||
-      payload?.widthFeet !== expected.widthFeet ||
+      (wallSpell
+        ? (!Number.isInteger(payload?.widthFeet) || payload.widthFeet < 5 ||
+          (payload.widthFeet > (common.spellId === 'blade-barrier'
+            ? (wallOfFireShape === 'ring' ? 60 : 100)
+            : (wallOfFireShape === 'ring' ? 20 : 60)) &&
+            !(common.spellId === 'wall-of-fire' && wallOfFireShape === 'ring' && payload.widthFeet === 60)) || payload.widthFeet % 5 !== 0)
+        : payload?.widthFeet !== expected.widthFeet) ||
       payload?.heightFeet !== expected.heightFeet ||
       payload?.radiusFeet !== expected.radiusFeet ||
       !Number.isInteger(col) || col < 0 || col > 10_000 ||
-      !Number.isInteger(row) || row < 0 || row > 10_000 || (common.spellId === 'wall-of-fire' &&
+      !Number.isInteger(row) || row < 0 || row > 10_000 || (wallSpell &&
         (!['line', 'ring'].includes(wallOfFireShape) || !Number.isFinite(wallOfFireAngleDegrees) || wallOfFireAngleDegrees < 0 || wallOfFireAngleDegrees >= 360))
     ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     return {
@@ -2894,10 +2888,14 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         targetCell: { col, row },
         shape: expected.shape,
         ...(expected.lengthFeet != null ? { lengthFeet: expected.lengthFeet } : {}),
-        ...(expected.widthFeet != null ? { widthFeet: expected.widthFeet } : {}),
+        ...(expected.widthFeet != null ? {
+          widthFeet: wallSpell
+            ? (common.spellId === 'wall-of-fire' && wallOfFireShape === 'ring' && payload.widthFeet === 60 ? 20 : payload.widthFeet)
+            : expected.widthFeet,
+        } : {}),
         ...(expected.heightFeet != null ? { heightFeet: expected.heightFeet } : {}),
         ...(expected.radiusFeet != null ? { radiusFeet: expected.radiusFeet } : {}),
-        ...(common.spellId === 'wall-of-fire' ? { wallOfFireShape, wallOfFireAngleDegrees } : {}),
+        ...(wallSpell ? { wallOfFireShape, wallOfFireAngleDegrees } : {}),
         createdAt: now,
         expiresAt: now + (common.spellId === 'wall-of-fire' ? 120_000 : common.spellId === 'flaming-sphere' ? 15_000 : COMBAT_PRESENTATION_LIFETIME_MS),
       },
@@ -4224,6 +4222,9 @@ function validateDnd5eResourceStates(name, value) {
           typeof token.visualVariantId !== 'string' ||
           !/^[a-z0-9_-]{1,80}$/i.test(token.visualVariantId)
         )) return 'invalid-token-visual-variant'
+        if (token.dnd5eSide != null && !['player', 'enemy'].includes(token.dnd5eSide)) {
+          return 'invalid-dnd5e-token-side'
+        }
         if (token.lightSource != null && !validTimedLightState(token.lightSource)) return 'invalid-token-light-source'
         if (token.movementAnimation != null && !validTokenMovementAnimation(token.movementAnimation)) {
           return 'invalid-token-movement-animation'
@@ -9735,7 +9736,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
 
     if (action === 'result' && req.method === 'POST') {
       const payload = await readJsonRequest(req, 4 * 1024 * 1024)
-      const artifact = normalizePdfCampaignAnalysisArtifactV1(payload?.artifact)
+      const artifact = normalizePdfCampaignAnalysisArtifact(payload?.artifact)
       const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
       if (!artifact) throw new RoomProtocolError(400, 'invalid-ai-job-artifact')
       let updated = null
@@ -9764,7 +9765,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
 
     if (action === 'artifact' && req.method === 'PUT') {
       const payload = await readJsonRequest(req, 4 * 1024 * 1024)
-      const artifact = normalizePdfCampaignAnalysisArtifactV1(payload?.artifact)
+      const artifact = normalizePdfCampaignAnalysisArtifact(payload?.artifact)
       const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
       if (!artifact) throw new RoomProtocolError(400, 'invalid-ai-job-artifact')
       let updated = null
@@ -11384,6 +11385,18 @@ async function handleCampaignApi(req, res, parsed, ctx) {
  * 处理 /api/* 请求。返回 true 表示已处理（含错误响应），false 表示非 /api（调用方走静态回退）。
  * 任何写锁超时（LockTimeoutError，statusCode=503）由内层 try/catch 映射为 503 fail-closed。
  */
+const handlePlayerExplorationMoveApi = createPlayerExplorationMoveApi({
+  writeJson,
+  readBody,
+  withWriteLock,
+  transactionLockPath: sharedStateTransactionLockPath,
+  recoverTransaction: recoverSharedStateTransaction,
+  readState: readSharedStateFile,
+  atomicMutate: atomicMutateJsonStateLocked,
+  stateRevision: sharedStateRevision,
+  publishEvent,
+})
+
 export async function handleSharedApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/')) return false
   applySecurityHeaders(res)
@@ -11539,6 +11552,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
 
   try {
     if (await handleCampaignApi(req, res, parsed, ctx)) return true
+    if (await handlePlayerExplorationMoveApi({
+      req,
+      res,
+      parsed,
+      ctx,
+      authenticatedRoomMember,
+      accessRole: ctx.accessRole,
+    })) return true
 
     const authenticatedSystemRoute = sharedAuthenticatedSystemRoute({
       pathname: parsed.pathname,

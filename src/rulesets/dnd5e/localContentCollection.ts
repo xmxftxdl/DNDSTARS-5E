@@ -19,7 +19,8 @@ export const DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION = 1 as const
 export const DND5E_LOCAL_COLLECTION_TEXT_FILE_MAX_BYTES = 8 * 1024 * 1024
 export const DND5E_LOCAL_COLLECTION_MAX_FILES = 2048
 
-type CollectionKey = keyof Dnd5eContentPackageContributionsV2
+export type Dnd5eLocalContentCollectionKey = keyof Dnd5eContentPackageContributionsV2
+type CollectionKey = Dnd5eLocalContentCollectionKey
 type LocalCollectionFileReference = string | readonly string[]
 type ImageTargetCategory = 'race' | 'feature' | 'feat' | 'spell' | 'item' | 'monster'
 type ImageTargetSlot = 'icon' | 'portrait' | 'tokenPortrait' | 'initiativePortrait'
@@ -125,6 +126,14 @@ export interface PreparedDnd5eLocalContentJson {
   audit?: Dnd5eLocalContentCollectionAudit
 }
 
+export interface PrepareDnd5eLocalContentJsonOptions {
+  /**
+   * Lets a category-specific importer accept one resource object without
+   * weakening the default, unambiguous collection parser.
+   */
+  targetCollection?: Dnd5eLocalContentCollectionKey
+}
+
 const COLLECTION_KEYS: readonly CollectionKey[] = [
   'races',
   'backgrounds',
@@ -139,6 +148,20 @@ const COLLECTION_KEYS: readonly CollectionKey[] = [
   'monsters',
 ]
 const COLLECTION_KEY_SET = new Set<string>(COLLECTION_KEYS)
+const SINGULAR_COLLECTION_KEYS: Readonly<Partial<Record<CollectionKey, readonly string[]>>> = {
+  races: ['race'],
+  backgrounds: ['background'],
+  features: ['feature'],
+  feats: ['feat'],
+  spells: ['spell'],
+  items: ['item'],
+  abilityGenerationMethods: ['abilityGenerationMethod', 'abilityGeneration'],
+  headlessActions: ['headlessAction'],
+  activities: ['activity'],
+  subclasses: ['subclass'],
+  classes: ['class'],
+  monsters: ['monster'],
+}
 const IMAGE_ID = /^[a-z0-9][a-z0-9._-]{0,99}$/
 const ENTRY_ID = /^[a-z0-9][a-z0-9._-]{0,99}$/
 const IMAGE_TARGET_COLLECTION: Readonly<Partial<Record<CollectionKey, ImageTargetCategory>>> = {
@@ -624,12 +647,28 @@ async function localJsonFingerprint(value: unknown): Promise<string> {
 
 async function shorthandCollectionFromJson(
   value: Record<string, unknown>,
+  targetCollection?: Dnd5eLocalContentCollectionKey,
 ): Promise<LocalContentCollection | undefined> {
   const nested = plainObject(value.content) ? value.content : undefined
-  const content = Object.fromEntries(COLLECTION_KEYS.flatMap((key) => {
+  let content = Object.fromEntries(COLLECTION_KEYS.flatMap((key) => {
     const entries = nested?.[key] ?? value[key]
     return Array.isArray(entries) ? [[key, entries]] : []
   })) as Partial<Dnd5eContentPackageContributionsV2>
+
+  if (Object.keys(content).length === 0 && targetCollection && COLLECTION_KEY_SET.has(targetCollection)) {
+    const singularKeys = SINGULAR_COLLECTION_KEYS[targetCollection] ?? []
+    const wrappedEntry = singularKeys
+      .map((key) => nested?.[key] ?? value[key])
+      .find(plainObject)
+    const directEntry = [nested, value].find((candidate) =>
+      plainObject(candidate) &&
+      typeof candidate.id === 'string' && candidate.id.trim().length > 0 &&
+      typeof candidate.name === 'string' && candidate.name.trim().length > 0)
+    const entry = wrappedEntry ?? directEntry
+    if (entry) {
+      content = { [targetCollection]: [entry] } as Partial<Dnd5eContentPackageContributionsV2>
+    }
+  }
   if (Object.keys(content).length === 0) return undefined
 
   const fingerprint = await localJsonFingerprint(value)
@@ -675,6 +714,7 @@ async function shorthandCollectionFromJson(
 export async function prepareDnd5eLocalContentJson(
   source: string,
   sourceFileName = 'pasted-room-rules.json',
+  options: PrepareDnd5eLocalContentJsonOptions = {},
 ): Promise<PreparedDnd5eLocalContentJson> {
   const json = jsonWithoutMarkdownFence(source)
   const sourceBytes = new TextEncoder().encode(json)
@@ -708,7 +748,7 @@ export async function prepareDnd5eLocalContentJson(
   const isCollection = parsed.format === DND5E_LOCAL_CONTENT_COLLECTION_FORMAT
   const collection = isCollection
     ? collectionFromJson(parsed)
-    : await shorthandCollectionFromJson(parsed)
+    : await shorthandCollectionFromJson(parsed, options.targetCollection)
   if (!collection) {
     throw new Error('未找到可导入的 races、backgrounds、features、feats、spells、items、classes、subclasses、monsters 或其他受支持分类')
   }

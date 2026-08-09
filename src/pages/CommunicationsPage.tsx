@@ -1,20 +1,30 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
+  ArrowDownUp,
   AudioLines,
+  BookMarked,
   BookOpenText,
+  CalendarDays,
   Check,
+  ChevronDown,
   ClipboardList,
   FileText,
+  Filter,
   Image as ImageIcon,
+  LayoutList,
+  ListTree,
   LockKeyhole,
   MessageSquareText,
+  PenLine,
   Plus,
+  Search,
   ScrollText,
   Send,
   Sparkles,
   Trash2,
   Upload,
   Users,
+  X,
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
@@ -23,6 +33,7 @@ import { combatantDamagePerTurn } from '../lib/combatStatistics'
 import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../lib/roomApi'
 import {
   type RoomChatChannel,
+  type CampaignJournalEntry,
   type RoomHandout,
   type RoomJournalMutation,
   type SharedNoteKind,
@@ -519,9 +530,35 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
   )
 }
 
-function CampaignJournalPanel({ isDm, entries, sessions, maps, busy, onMutate }: {
+type CampaignJournalView = 'timeline' | 'catalog'
+
+function formatJournalDate(value: number): string {
+  const date = new Date(value)
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
+}
+
+function journalChapterLabel(entry: CampaignJournalEntry): string {
+  const explicit = entry.title.match(/^((?:第?[一二三四五六七八九十百零〇0-9]+[幕章卷]|序章|终章))\s*[·:：—-]/)?.[1]
+  if (explicit) return explicit
+  return entry.source === 'combat-summary' ? '战斗纪要' : '冒险篇章'
+}
+
+function journalExcerpt(body: string, maximum = 220): string {
+  const compact = body.replace(/\s+/g, ' ').trim()
+  return compact.length > maximum ? `${compact.slice(0, maximum)}…` : compact
+}
+
+function journalVolume(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+export function CampaignJournalPanel({ isDm, entries, sessions, maps, busy, onMutate }: {
   isDm: boolean
-  entries: ReturnType<typeof useRoomCommunicationsStore.getState>['journal']['campaignEntries']
+  entries: readonly CampaignJournalEntry[]
   sessions: ReturnType<typeof useCombatStatisticsStore.getState>['sessions']
   maps: ReturnType<typeof useMapStore.getState>['maps']
   busy: boolean
@@ -529,9 +566,40 @@ function CampaignJournalPanel({ isDm, entries, sessions, maps, busy, onMutate }:
 }) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [composerOpen, setComposerOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [chapterFilter, setChapterFilter] = useState('all')
+  const [dateFilter, setDateFilter] = useState('')
+  const [newestFirst, setNewestFirst] = useState(true)
+  const [view, setView] = useState<CampaignJournalView>('timeline')
+  const [expandedEntryId, setExpandedEntryId] = useState<string>()
   const orderedSessions = [...sessions].sort((left, right) => right.updatedAt - left.updatedAt)
   const latest = orderedSessions[0]
   const mapName = latest ? maps.find((map) => map.id === latest.mapId)?.name ?? '未命名地图' : ''
+  const volumeById = useMemo(() => new Map(
+    [...entries]
+      .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+      .map((entry, index) => [entry.id, index + 1]),
+  ), [entries])
+  const availableChapters = useMemo(() => [...new Set(entries.map(journalChapterLabel))], [entries])
+  const visibleEntries = useMemo(() => {
+    const search = query.trim().toLocaleLowerCase('zh-CN')
+    return [...entries]
+      .filter((entry) => chapterFilter === 'all' || journalChapterLabel(entry) === chapterFilter)
+      .filter((entry) => !dateFilter || formatJournalDate(entry.createdAt) === dateFilter)
+      .filter((entry) => !search || `${entry.title}\n${entry.body}\n${entry.authorName}`.toLocaleLowerCase('zh-CN').includes(search))
+      .sort((left, right) => newestFirst
+        ? right.createdAt - left.createdAt || right.id.localeCompare(left.id)
+        : left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+  }, [chapterFilter, dateFilter, entries, newestFirst, query])
+  const chapterGroups = useMemo(() => {
+    const groups = new Map<string, CampaignJournalEntry[]>()
+    for (const entry of visibleEntries) {
+      const chapter = journalChapterLabel(entry)
+      groups.set(chapter, [...(groups.get(chapter) ?? []), entry])
+    }
+    return [...groups.entries()]
+  }, [visibleEntries])
 
   const useCombatSummary = () => {
     if (!latest) return
@@ -559,16 +627,186 @@ function CampaignJournalPanel({ isDm, entries, sessions, maps, busy, onMutate }:
     await onMutate({ operation: 'add-campaign-entry', title, body, source: title.endsWith('战斗纪要') ? 'combat-summary' : 'dm', ...(latest && title.endsWith('战斗纪要') ? { combatId: latest.combatId } : {}) })
     setTitle('')
     setBody('')
+    setComposerOpen(false)
   }
 
+  const deleteEntryButton = (entry: CampaignJournalEntry) => isDm ? (
+    <button
+      type="button"
+      onClick={() => void onMutate({ operation: 'remove-campaign-entry', id: entry.id })}
+      className="rounded-lg border border-transparent p-2 text-slate-600 transition hover:border-red-400/20 hover:bg-red-500/10 hover:text-red-300"
+      aria-label={`删除篇章：${entry.title}`}
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  ) : null
+
   return <div className="space-y-5">
-    {isDm && <form onSubmit={(event) => void submit(event).catch(() => {})} className="rounded-2xl border border-white/8 bg-slate-950/45 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-100">记录本次团务</h3><p className="mt-1 text-xs text-slate-500">可手写前情提要，或从最近一场战斗生成可编辑摘要。</p></div>{latest && <button type="button" onClick={useCombatSummary} className="flex items-center gap-2 rounded-xl border border-violet-300/15 bg-violet-500/10 px-3 py-2 text-sm text-violet-200"><Sparkles className="h-4 w-4" />生成战斗摘要</button>}</div>
-      <input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题，例如：第三幕·失落矿坑" className="mt-4 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-100" />
-      <textarea required maxLength={40_000} rows={7} value={body} onChange={(event) => setBody(event.target.value)} placeholder="剧情记录、重要决定、待续事件…" className="mt-3 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-100" />
-      <div className="mt-3 text-right"><button disabled={busy || !title.trim() || !body.trim()} className="rounded-xl bg-arcane-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">保存日志</button></div>
-    </form>}
-    {entries.length === 0 ? <div className="rounded-2xl border border-dashed border-white/8 py-20 text-center text-slate-600"><FileText className="mx-auto h-10 w-10" /><p className="mt-3">还没有战役日志</p></div> : [...entries].reverse().map((entry) => <article key={entry.id} className="rounded-2xl border border-white/8 bg-slate-950/45 p-5"><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-bold text-slate-100">{entry.title}</h3>{entry.source === 'combat-summary' && <span className="rounded bg-violet-400/10 px-2 py-0.5 text-[10px] text-violet-200">战斗摘要</span>}</div><p className="mt-1 text-xs text-slate-600">{formatTime(entry.createdAt, true)} · {entry.authorName}</p></div>{isDm && <button type="button" onClick={() => void onMutate({ operation: 'remove-campaign-entry', id: entry.id })} className="rounded-lg p-2 text-slate-600 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>}</div><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{entry.body}</p></article>)}
+    <section className="overflow-hidden rounded-2xl border border-amber-300/15 bg-gradient-to-br from-amber-500/[0.08] via-slate-950/55 to-slate-950/75">
+      <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-5 sm:px-6">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 rounded-xl border border-amber-300/20 bg-amber-500/10 p-2.5 text-amber-300">
+            <BookMarked className="h-5 w-5" />
+          </span>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-serif text-2xl font-black tracking-wide text-slate-100">战报篇章</h2>
+              <span className="rounded-full border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] font-semibold text-slate-500">共 {entries.length} 篇</span>
+            </div>
+            <p className="mt-1 text-sm italic text-slate-500">在命运的卷册上，记录每一次掷骰、抉择与未竟之事。</p>
+          </div>
+        </div>
+        {isDm ? (
+          <button
+            type="button"
+            aria-expanded={composerOpen}
+            onClick={() => setComposerOpen((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-xl border border-amber-300/25 bg-amber-400/10 px-4 py-2.5 text-sm font-bold text-amber-100 shadow-lg shadow-black/20 transition hover:bg-amber-400/20"
+          >
+            {composerOpen ? <X className="h-4 w-4" /> : <PenLine className="h-4 w-4" />}
+            {composerOpen ? '收起编辑器' : '撰写新篇章'}
+          </button>
+        ) : null}
+      </div>
+
+      {isDm && composerOpen ? (
+        <form onSubmit={(event) => void submit(event).catch(() => {})} className="border-t border-amber-300/10 bg-black/15 px-5 py-5 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-slate-100">记录本次团务</h3>
+              <p className="mt-1 text-xs text-slate-500">标题可使用“第三幕·失落矿坑”格式，章节目录会自动归类。</p>
+            </div>
+            {latest ? (
+              <button type="button" onClick={useCombatSummary} className="flex items-center gap-2 rounded-xl border border-violet-300/15 bg-violet-500/10 px-3 py-2 text-sm text-violet-200 transition hover:bg-violet-500/20">
+                <Sparkles className="h-4 w-4" />生成战斗摘要
+              </button>
+            ) : null}
+          </div>
+          <input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题，例如：第三幕·失落矿坑" className="mt-4 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-amber-300/35" />
+          <textarea required maxLength={40_000} rows={7} value={body} onChange={(event) => setBody(event.target.value)} placeholder="剧情记录、重要决定、人物变化、未解决线索与待续事件…" className="mt-3 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm leading-7 text-slate-100 outline-none transition focus:border-amber-300/35" />
+          <div className="mt-3 flex justify-end"><button disabled={busy || !title.trim() || !body.trim()} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-40">保存篇章</button></div>
+        </form>
+      ) : null}
+    </section>
+
+    <section aria-label="战役日志筛选" className="rounded-2xl border border-white/8 bg-slate-950/50 p-3 shadow-xl shadow-black/10">
+      <div className="flex flex-col gap-2 lg:flex-row">
+        <label className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索战报标题、正文或记录者…"
+            className="w-full rounded-xl border border-white/8 bg-black/20 py-2.5 pl-9 pr-3 text-sm text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-amber-300/25"
+          />
+        </label>
+        <label className="relative flex items-center rounded-xl border border-white/8 bg-black/20 text-sm text-slate-400">
+          <Filter className="pointer-events-none ml-3 h-4 w-4 text-slate-600" />
+          <select aria-label="筛选章节" value={chapterFilter} onChange={(event) => setChapterFilter(event.target.value)} className="appearance-none bg-transparent py-2.5 pl-2 pr-9 outline-none">
+            <option value="all">全部章节</option>
+            {availableChapters.map((chapter) => <option key={chapter} value={chapter}>{chapter}</option>)}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-slate-600" />
+        </label>
+        <label className="relative flex items-center rounded-xl border border-white/8 bg-black/20 text-sm text-slate-400">
+          <CalendarDays className="pointer-events-none ml-3 h-4 w-4 text-slate-600" />
+          <input aria-label="筛选日期" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} className="min-w-[9.5rem] bg-transparent py-2.5 pl-2 pr-3 text-slate-400 outline-none [color-scheme:dark]" />
+          {dateFilter ? <button type="button" aria-label="清除日期筛选" onClick={() => setDateFilter('')} className="mr-2 rounded p-1 text-slate-600 transition hover:bg-white/5 hover:text-slate-300"><X className="h-3.5 w-3.5" /></button> : null}
+        </label>
+        <button type="button" onClick={() => setNewestFirst((current) => !current)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 bg-black/20 px-3 py-2.5 text-sm text-slate-400 transition hover:border-amber-300/20 hover:text-amber-200">
+          <ArrowDownUp className="h-4 w-4" />{newestFirst ? '最新优先' : '最早优先'}
+        </button>
+      </div>
+    </section>
+
+    <div role="tablist" aria-label="战役日志视图" className="mx-auto flex w-fit rounded-xl border border-white/8 bg-slate-950/50 p-1">
+      <button type="button" role="tab" aria-selected={view === 'timeline'} onClick={() => setView('timeline')} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition ${view === 'timeline' ? 'bg-amber-400/12 text-amber-200 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}>
+        <ListTree className="h-4 w-4" />剧情时间轴
+      </button>
+      <button type="button" role="tab" aria-selected={view === 'catalog'} onClick={() => setView('catalog')} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition ${view === 'catalog' ? 'bg-amber-400/12 text-amber-200 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}>
+        <LayoutList className="h-4 w-4" />章节目录
+      </button>
+    </div>
+
+    {visibleEntries.length === 0 ? (
+      <div className="rounded-2xl border border-dashed border-white/8 py-20 text-center text-slate-600">
+        <FileText className="mx-auto h-10 w-10" />
+        <p className="mt-3 font-semibold text-slate-400">{entries.length === 0 ? '还没有战役日志' : '没有符合筛选条件的篇章'}</p>
+        <p className="mt-1 text-xs">{entries.length === 0 ? '下一次冒险结束后，从这里写下第一篇战报。' : '尝试清除搜索内容或切换篇章类型。'}</p>
+      </div>
+    ) : view === 'timeline' ? (
+      <div role="tabpanel" aria-label="剧情时间轴" className="relative space-y-4 pl-5 before:absolute before:bottom-6 before:left-[7px] before:top-6 before:w-px before:bg-gradient-to-b before:from-amber-400/60 before:via-amber-400/20 before:to-transparent sm:pl-8">
+        {visibleEntries.map((entry) => {
+          const expanded = expandedEntryId === entry.id
+          const volume = volumeById.get(entry.id) ?? 1
+          const excerpt = journalExcerpt(entry.body)
+          return (
+            <div key={entry.id} className="relative">
+              <span className="absolute -left-[18px] top-7 h-3 w-3 rounded-full border-2 border-void-950 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.65)] sm:-left-[27px]" />
+              <article className="overflow-hidden rounded-2xl border border-white/9 bg-slate-950/55 shadow-xl shadow-black/10 transition hover:-translate-y-0.5 hover:border-amber-300/20">
+                <div className="flex flex-col sm:flex-row">
+                <div className="flex shrink-0 items-center justify-between border-b border-white/8 bg-gradient-to-br from-black/70 to-amber-950/30 px-4 py-3 sm:w-24 sm:flex-col sm:justify-center sm:border-b-0 sm:border-r sm:px-3 sm:py-5">
+                  <span className="text-[9px] font-black tracking-[0.28em] text-slate-600">VOL</span>
+                  <strong className="font-serif text-2xl text-amber-300 sm:mt-1 sm:text-3xl">{journalVolume(volume)}</strong>
+                </div>
+                <div className="min-w-0 flex-1 p-4 sm:p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-serif text-lg font-bold text-slate-100">{entry.title}</h3>
+                        <span className={`rounded-md px-2 py-0.5 text-[9px] font-bold ${entry.source === 'combat-summary' ? 'bg-violet-400/10 text-violet-200' : 'bg-amber-400/10 text-amber-200'}`}>{entry.source === 'combat-summary' ? '战斗纪要' : 'DM 手记'}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                        <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-amber-400/70" />{formatJournalDate(entry.createdAt)}</span>
+                        <span>{journalChapterLabel(entry)}</span>
+                        <span>{entry.authorName}</span>
+                      </div>
+                    </div>
+                    {deleteEntryButton(entry)}
+                  </div>
+                  <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{expanded ? entry.body : excerpt}</p>
+                  {entry.body.replace(/\s+/g, ' ').trim().length > 220 ? (
+                    <button type="button" onClick={() => setExpandedEntryId(expanded ? undefined : entry.id)} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-amber-300/80 transition hover:text-amber-200">
+                      {expanded ? '收起篇章' : '阅读全文'}<ChevronDown className={`h-3.5 w-3.5 transition ${expanded ? 'rotate-180' : ''}`} />
+                    </button>
+                  ) : null}
+                  </div>
+                </div>
+              </article>
+            </div>
+          )
+        })}
+      </div>
+    ) : (
+      <div role="tabpanel" aria-label="章节目录" className="space-y-4">
+        {chapterGroups.map(([chapter, chapterEntries]) => (
+          <section key={chapter} className="overflow-hidden rounded-2xl border border-white/9 bg-slate-950/55 shadow-xl shadow-black/10">
+            <div className="flex items-center justify-between gap-3 border-b border-white/8 bg-white/[0.025] px-4 py-3 sm:px-5">
+              <h3 className="flex items-center gap-2 font-serif font-bold text-slate-200"><BookMarked className="h-4 w-4 text-amber-300" />{chapter}</h3>
+              <span className="rounded-full border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] text-slate-500">{chapterEntries.length} 篇记录</span>
+            </div>
+            <div className="divide-y divide-white/[0.06] px-3 sm:px-4">
+              {chapterEntries.map((entry) => {
+                const expanded = expandedEntryId === entry.id
+                return <div key={entry.id} className="py-1">
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setExpandedEntryId(expanded ? undefined : entry.id)} className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-3 text-left transition hover:bg-white/[0.025]">
+                      <span className="shrink-0 rounded bg-white/5 px-2 py-1 font-mono text-[10px] font-bold text-amber-300/75">#{journalVolume(volumeById.get(entry.id) ?? 1)}</span>
+                      <span className="truncate text-sm font-semibold text-slate-300">{entry.title}</span>
+                      <span className="min-w-6 flex-1 border-b border-dotted border-white/10" />
+                      <span className="shrink-0 text-[10px] tabular-nums text-slate-600">{formatJournalDate(entry.createdAt)}</span>
+                      <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-600 transition ${expanded ? 'rotate-180' : ''}`} />
+                    </button>
+                    {deleteEntryButton(entry)}
+                  </div>
+                  {expanded ? <div className="mx-2 mb-3 rounded-xl border border-amber-300/10 bg-amber-500/[0.035] px-4 py-3"><p className="whitespace-pre-wrap text-sm leading-7 text-slate-300">{entry.body}</p><p className="mt-3 text-[10px] text-slate-600">{entry.authorName} · {formatTime(entry.createdAt, true)}</p></div> : null}
+                </div>
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+    )}
   </div>
 }
 

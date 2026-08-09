@@ -6,16 +6,26 @@ import { DND5E_STANDARD_CONDITION_IDS } from '../conditions'
 import { DND5E_DAMAGE_TYPES } from '../damageTypes'
 import type {
   Dnd5eActivityDefinitionV1,
+  Dnd5eActivityActivationV1,
+  Dnd5eActivityInvocationV1,
   Dnd5eActivityOperationV1,
   Dnd5eActivityTargetV1,
 } from './dnd5eActivityContracts'
-import type { Dnd5eEffectDefinitionV1, Dnd5eEffectDurationV1, Dnd5eTriggerDefinitionV1 } from './dnd5eEffectContracts'
+import {
+  DND5E_TRIGGER_EVENT_IDS_V1,
+  type Dnd5eEffectDefinitionV1,
+  type Dnd5eEffectDurationV1,
+  type Dnd5ePredicateV1,
+  type Dnd5eTriggerDefinitionV1,
+} from './dnd5eEffectContracts'
 import { validateDnd5eFormulaV1 } from './dnd5eFormula'
+import { isDnd5eTrackableDefinitionIdV1 } from './dnd5eActivityIdentity'
 
-const ID_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,159}$/
+const ID_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,255}$/
 const ABILITIES = new Set(['str', 'dex', 'con', 'int', 'wis', 'cha'])
 const DAMAGE_TYPES = new Set<string>(DND5E_DAMAGE_TYPES)
 const CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
+const TRIGGER_EVENTS = new Set<string>(DND5E_TRIGGER_EVENT_IDS_V1)
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
@@ -31,6 +41,59 @@ function validId(value: unknown): value is string {
 
 function appendFormulaErrors(errors: string[], value: unknown, label: string): void {
   errors.push(...validateDnd5eFormulaV1(value, label))
+}
+
+function validateInvocation(invocation: Dnd5eActivityInvocationV1 | undefined, errors: string[]): void {
+  if (!invocation) return
+  if (invocation.kind === 'active') {
+    if (invocation.confirmation != null && !['actor-choice', 'dm-approval'].includes(invocation.confirmation)) {
+      errors.push('activity.invocation.confirmation is invalid')
+    }
+    return
+  }
+  if (!TRIGGER_EVENTS.has(invocation.event)) errors.push('activity.invocation.event is invalid')
+  if (!['automatic', 'actor-choice', 'target-choice', 'dm-approval'].includes(invocation.confirmation)) {
+    errors.push('activity.invocation.confirmation is invalid')
+  }
+  if (invocation.retention != null && ![
+    'single-event', 'until-triggered', 'until-turn-end', 'until-round-end',
+  ].includes(invocation.retention)) errors.push('activity.invocation.retention is invalid')
+}
+
+function validatePredicate(predicate: Dnd5ePredicateV1, label: string, errors: string[]): void {
+  if (predicate.kind === 'activity-definition') {
+    if (!isDnd5eTrackableDefinitionIdV1(predicate.definitionId)) errors.push(`${label}.definitionId is invalid`)
+    return
+  }
+  if (predicate.kind === 'event-source') {
+    if (predicate.sourceId != null && !validId(predicate.sourceId)) errors.push(`${label}.sourceId is invalid`)
+    if (predicate.activityId != null && !validId(predicate.activityId)) errors.push(`${label}.activityId is invalid`)
+    return
+  }
+  if (predicate.kind === 'weapon-property') {
+    if (!validId(predicate.property)) errors.push(`${label}.property is invalid`)
+    return
+  }
+  if (predicate.kind === 'movement-distance') {
+    if (predicate.minimumFeet != null && !finiteNumber(predicate.minimumFeet, 0, 100_000)) errors.push(`${label}.minimumFeet is invalid`)
+    if (predicate.maximumFeet != null && !finiteNumber(predicate.maximumFeet, 0, 100_000)) errors.push(`${label}.maximumFeet is invalid`)
+    if (predicate.minimumFeet != null && predicate.maximumFeet != null && predicate.minimumFeet > predicate.maximumFeet) {
+      errors.push(`${label} range is inverted`)
+    }
+    return
+  }
+  if (predicate.kind === 'spell-used') {
+    if (predicate.spellId != null && !validId(predicate.spellId)) errors.push(`${label}.spellId is invalid`)
+    if (predicate.minimumLevel != null && !finiteInteger(predicate.minimumLevel, 0, 9)) errors.push(`${label}.minimumLevel is invalid`)
+    if (predicate.maximumLevel != null && !finiteInteger(predicate.maximumLevel, 0, 9)) errors.push(`${label}.maximumLevel is invalid`)
+    if (predicate.minimumLevel != null && predicate.maximumLevel != null && predicate.minimumLevel > predicate.maximumLevel) {
+      errors.push(`${label} level range is inverted`)
+    }
+    return
+  }
+  if (predicate.kind === 'skill-used' && predicate.skillId != null && !validId(predicate.skillId)) {
+    errors.push(`${label}.skillId is invalid`)
+  }
 }
 
 function validateDuration(duration: Dnd5eEffectDurationV1, label: string, errors: string[]): void {
@@ -56,8 +119,35 @@ function validateDuration(duration: Dnd5eEffectDurationV1, label: string, errors
   errors.push(`${label}.kind is invalid`)
 }
 
+function validateActivation(activation: Dnd5eActivityActivationV1, errors: string[]): void {
+  if (!['action', 'bonus-action', 'reaction', 'free', 'movement', 'minute', 'hour', 'passive', 'special'].includes(activation.kind)) {
+    errors.push('activity.activation.kind is invalid')
+    return
+  }
+  if (activation.kind === 'minute' || activation.kind === 'hour') {
+    if (!finiteInteger(activation.value, 1, 10_000)) errors.push('activity.activation.value is invalid')
+    return
+  }
+  if (activation.kind === 'passive' || activation.kind === 'special') {
+    if (activation.timing != null && (!activation.timing.trim() || activation.timing.length > 500)) {
+      errors.push('activity.activation.timing is invalid')
+    }
+    return
+  }
+  if (
+    activation.kind === 'action' || activation.kind === 'bonus-action' ||
+    activation.kind === 'reaction' || activation.kind === 'free' || activation.kind === 'movement'
+  ) {
+    if (activation.cost != null && !finiteInteger(activation.cost, 0, 10)) errors.push('activity.activation.cost is invalid')
+    if (activation.kind === 'reaction' && activation.reactionEvent != null && (
+      !activation.reactionEvent.trim() || activation.reactionEvent.length > 500
+    )) errors.push('activity.activation.reactionEvent is invalid')
+  }
+}
+
 function validateTrigger(trigger: Dnd5eTriggerDefinitionV1, label: string, errors: string[]): void {
   if (!validId(trigger.id)) errors.push(`${label}.id is invalid`)
+  if (!TRIGGER_EVENTS.has(trigger.event)) errors.push(`${label}.event is invalid`)
   if (!trigger.activityId && !trigger.effectId) errors.push(`${label} must reference an activity or effect`)
   if (trigger.activityId && !validId(trigger.activityId)) errors.push(`${label}.activityId is invalid`)
   if (trigger.effectId && !validId(trigger.effectId)) errors.push(`${label}.effectId is invalid`)
@@ -78,8 +168,12 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     const modifierLabel = `${label}.modifiers[${index}]`
     if (
       modifier.kind === 'armor-class' || modifier.kind === 'speed' ||
-      ((modifier.kind === 'attack-roll' || modifier.kind === 'saving-throw') && modifier.value)
+      ((modifier.kind === 'attack-roll' || modifier.kind === 'saving-throw') && modifier.value) ||
+      modifier.kind === 'weapon-damage-roll'
     ) appendFormulaErrors(errors, modifier.value, `${modifierLabel}.value`)
+    if (modifier.kind === 'damage-reduction' || modifier.kind === 'on-hit-bonus-damage') {
+      appendFormulaErrors(errors, modifier.amount, `${modifierLabel}.amount`)
+    }
     if (modifier.kind === 'saving-throw' && modifier.ability && !ABILITIES.has(modifier.ability)) {
       errors.push(`${modifierLabel}.ability is invalid`)
     }
@@ -93,6 +187,20 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     if (modifier.kind === 'maximum-attacks-per-turn' && !finiteInteger(modifier.value, 0, 1_000)) {
       errors.push(`${modifierLabel}.value is invalid`)
     }
+    if (modifier.kind === 'damage-reduction') {
+      if (modifier.damageTypes?.some((damageType) => !DAMAGE_TYPES.has(damageType))) errors.push(`${modifierLabel}.damageTypes is invalid`)
+      if (modifier.minimumIncomingDamage != null && !finiteInteger(modifier.minimumIncomingDamage, 1, 1_000_000)) errors.push(`${modifierLabel}.minimumIncomingDamage is invalid`)
+      if (modifier.maximumCurrentHitPointPercent != null && !finiteInteger(modifier.maximumCurrentHitPointPercent, 1, 100)) errors.push(`${modifierLabel}.maximumCurrentHitPointPercent is invalid`)
+    }
+    if (modifier.kind === 'on-hit-bonus-damage') {
+      if (modifier.damageType !== 'inherit-primary' && !DAMAGE_TYPES.has(modifier.damageType)) errors.push(`${modifierLabel}.damageType is invalid`)
+      if (modifier.targetCreatureTypes?.some((type) => !validId(type))) errors.push(`${modifierLabel}.targetCreatureTypes is invalid`)
+    }
+    if (modifier.kind === 'death-prevention' && !finiteInteger(modifier.hitPointsAfter, 1, 1_000_000)) {
+      errors.push(`${modifierLabel}.hitPointsAfter is invalid`)
+    }
+    if ('resourceId' in modifier && modifier.resourceId != null && !validId(modifier.resourceId)) errors.push(`${modifierLabel}.resourceId is invalid`)
+    if ('resourceCost' in modifier && modifier.resourceCost != null && !finiteInteger(modifier.resourceCost, 1, 1_000_000)) errors.push(`${modifierLabel}.resourceCost is invalid`)
   }
   effect.triggers?.forEach((trigger, index) => validateTrigger(trigger, `${label}.triggers[${index}]`, errors))
 }
@@ -106,6 +214,11 @@ export function validateDnd5eEffectDefinitionV1(effect: Dnd5eEffectDefinitionV1)
 
 function validateTarget(target: Dnd5eActivityTargetV1, errors: string[]): void {
   if (target.kind === 'self') return
+  if (!['creature', 'area'].includes(target.kind)) {
+    errors.push('activity.target.kind is invalid')
+    return
+  }
+  if (!['ally', 'enemy', 'any'].includes(target.relation)) errors.push('activity.target.relation is invalid')
   if (target.kind === 'creature') {
     if (!finiteInteger(target.count, 1, 256)) errors.push('activity.target.count is invalid')
     if (target.rangeFeet != null && !finiteNumber(target.rangeFeet, 0, 100_000)) errors.push('activity.target.rangeFeet is invalid')
@@ -119,14 +232,34 @@ function validateTarget(target: Dnd5eActivityTargetV1, errors: string[]): void {
     return
   }
   if (!finiteInteger(target.maximumTargets, 1, 256)) errors.push('activity.target.maximumTargets is invalid')
+  if (!['self', 'point'].includes(target.origin)) errors.push('activity.target.origin is invalid')
+  if (!['circle', 'sphere', 'cone', 'line', 'cube', 'cylinder', 'rect'].includes(target.shape)) {
+    errors.push('activity.target.shape is invalid')
+  }
   for (const [field, value] of Object.entries({
     placeRangeFeet: target.placeRangeFeet,
     radiusFeet: target.radiusFeet,
     lengthFeet: target.lengthFeet,
     widthFeet: target.widthFeet,
     heightFeet: target.heightFeet,
+    minimumRadiusFeet: target.minimumRadiusFeet,
+    minimumLengthFeet: target.minimumLengthFeet,
+    minimumWidthFeet: target.minimumWidthFeet,
+    minimumHeightFeet: target.minimumHeightFeet,
   })) {
     if (value != null && !finiteNumber(value, 1, 100_000)) errors.push(`activity.target.${field} is invalid`)
+  }
+  for (const [minimumField, maximumField] of [
+    ['minimumRadiusFeet', 'radiusFeet'],
+    ['minimumLengthFeet', 'lengthFeet'],
+    ['minimumWidthFeet', 'widthFeet'],
+    ['minimumHeightFeet', 'heightFeet'],
+  ] as const) {
+    const minimum = target[minimumField]
+    const maximum = target[maximumField]
+    if (minimum != null && (maximum == null || minimum > maximum || minimum % 5 !== 0 || maximum % 5 !== 0)) {
+      errors.push(`activity.target.${minimumField} is invalid`)
+    }
   }
   if ((target.shape === 'circle' || target.shape === 'sphere' || target.shape === 'cylinder') && target.radiusFeet == null) {
     errors.push('activity.target.radiusFeet is required')
@@ -165,7 +298,7 @@ export function dnd5eActivityRequiredPhases(activity: Dnd5eActivityDefinitionV1)
     for (const operation of outcome.operations) operationPhases(operation).forEach((phase) => phases.add(phase))
   }
   if (activity.effects?.some((effect) => effect.duration.kind !== 'instantaneous')) phases.add('duration')
-  if (activity.triggers?.length || activity.effects?.some((effect) => effect.triggers?.length)) phases.add('interrupt')
+  if (activity.invocation?.kind === 'triggered' || activity.triggers?.length || activity.effects?.some((effect) => effect.triggers?.length)) phases.add('interrupt')
   phases.add('persistence')
   return [...phases]
 }
@@ -222,7 +355,9 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     !operation.prompt.trim() || !operation.reason.trim() || operation.requiresDmApproval !== true
   )) {
     errors.push(`${label} is an invalid manual adjudication`)
+    return
   }
+  if (operation.kind !== 'manual-adjudication') errors.push(`${label}.kind is invalid`)
 }
 
 export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinitionV1): readonly string[] {
@@ -230,6 +365,13 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
   if (activity.schemaVersion !== 1) errors.push('activity.schemaVersion is invalid')
   if (!validId(activity.id)) errors.push('activity.id is invalid')
   if (!activity.name.trim() || activity.name.length > 160) errors.push('activity.name is invalid')
+  if (activity.legacySource && (
+    !['spell', 'feature', 'feat', 'item', 'class', 'subclass', 'subclass-ability', 'race', 'background', 'monster', 'monster-action', 'custom-headless-action']
+      .includes(activity.legacySource.kind) ||
+    !validId(activity.legacySource.id)
+  )) errors.push('activity.legacySource is invalid')
+  validateInvocation(activity.invocation, errors)
+  validateActivation(activity.activation, errors)
   validateTarget(activity.target, errors)
   errors.push(...validateAutomationCapability(activity.automation).map((error) => `activity.automation: ${error}`))
 
@@ -272,6 +414,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
     }
     if ('resourceId' in consumption && !validId(consumption.resourceId)) errors.push(`${label}.resourceId is invalid`)
   }
+  activity.requirements?.forEach((predicate, index) => validatePredicate(predicate, `activity.requirements[${index}]`, errors))
   activity.effects?.forEach((effect, index) => validateEffect(effect, `activity.effects[${index}]`, errors))
   activity.triggers?.forEach((trigger, index) => validateTrigger(trigger, `activity.triggers[${index}]`, errors))
 

@@ -42,6 +42,8 @@ export interface Dnd5eActionIconSpec {
   /** Optional painted layer. Transparent foreground assets preserve the generated class-color background. */
   asset?: string
   assetMode?: 'cover' | 'foreground'
+  /** Custom spell artwork is composited normally above the semantic class template. */
+  assetTreatment?: 'transparent-foreground'
   /** Optional semantic backdrop rendered beneath transparent artwork. */
   classBackdropId?: string
   /** Magic-item rarity controls the inventory background and ornamental frame. */
@@ -58,6 +60,13 @@ export interface Dnd5eSpellActionIconInput {
   damageType?: string
   tags?: readonly string[]
   castingClassId?: string
+  iconAssetId?: string
+}
+
+export interface Dnd5eClassFeatureActionIconInput {
+  id: string
+  name: string
+  classId: string
   iconAssetId?: string
 }
 
@@ -108,6 +117,149 @@ export const DND5E_CLASS_ICON_PALETTES: Readonly<Record<string, IconPalette>> = 
   sorcerer: ['#FB7185', '#30070E', '#FFE4E8', '#FDA4AF'],
   warlock: ['#8B5CF6', '#170A31', '#EDE9FE', '#A78BFA'],
   wizard: ['#3B82F6', '#071A38', '#DBEAFE', '#60A5FA'],
+}
+
+const SHARED_PAINTED_CLASS_FEATURE_IDS = new Set([
+  'asi',
+  'evasion',
+  'expertise',
+  'extra-attack',
+  'fighting-style',
+  'spellcasting',
+  'timeless-body',
+  'unarmored-defense',
+])
+
+/**
+ * Canonical painted feature ids. Numeric upgrades (for example Brutal Critical
+ * and Bardic Inspiration die increases) intentionally reuse one illustration;
+ * the level badge and rules text communicate the upgraded value.
+ */
+const DND5E_PAINTED_CLASS_FEATURE_IDS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+  barbarian: new Set([
+    'rage', 'unarmored-defense', 'reckless-attack', 'danger-sense', 'primal-path', 'asi',
+    'extra-attack', 'fast-movement', 'feral-instinct', 'brutal-critical', 'relentless-rage',
+    'indomitable-might', 'primal-champion', 'berserker-frenzy', 'berserker-mindless-rage',
+    'berserker-intimidating-presence', 'berserker-retaliation',
+  ]),
+  bard: new Set([
+    'spellcasting', 'bardic-inspiration', 'jack-of-all-trades', 'song-of-rest', 'bard-college',
+    'expertise', 'asi', 'font-of-inspiration', 'countercharm', 'magical-secrets',
+    'superior-inspiration', 'lore-bonus-proficiencies', 'lore-cutting-words',
+    'lore-additional-magical-secrets', 'lore-peerless-skill',
+  ]),
+  cleric: new Set([
+    'spellcasting', 'divine-domain', 'channel-divinity', 'turn-undead', 'asi', 'destroy-undead',
+    'divine-intervention', 'life-domain-spells', 'life-bonus-proficiency', 'life-disciple-of-life',
+    'life-preserve-life', 'life-blessed-healer', 'life-divine-strike', 'life-supreme-healing',
+  ]),
+  druid: new Set([
+    'druidic', 'spellcasting', 'wild-shape', 'druid-circle', 'asi', 'timeless-body', 'beast-spells',
+    'archdruid', 'land-bonus-cantrip', 'land-natural-recovery', 'land-circle-spells', 'land-stride',
+    'land-natures-ward', 'land-natures-sanctuary',
+  ]),
+  fighter: new Set([
+    'fighting-style', 'second-wind', 'action-surge', 'martial-archetype',
+    'champion-improved-critical', 'asi', 'extra-attack', 'champion-remarkable-athlete',
+    'indomitable', 'champion-additional-style', 'champion-superior-critical', 'champion-survivor',
+  ]),
+  monk: new Set([
+    'unarmored-defense', 'martial-arts', 'ki', 'unarmored-movement', 'monastic-tradition',
+    'deflect-missiles', 'asi', 'slow-fall', 'extra-attack', 'stunning-strike',
+    'ki-empowered-strikes', 'evasion', 'stillness-of-mind', 'purity-of-body',
+    'tongue-of-sun-and-moon', 'diamond-soul', 'timeless-body', 'empty-body', 'perfect-self',
+    'open-hand-technique', 'open-hand-wholeness', 'open-hand-tranquility',
+    'open-hand-quivering-palm',
+  ]),
+  paladin: new Set([
+    'divine-sense', 'lay-on-hands', 'fighting-style', 'spellcasting', 'divine-smite',
+    'divine-health', 'sacred-oath', 'asi', 'extra-attack', 'aura-of-protection', 'aura-of-courage',
+    'improved-divine-smite', 'cleansing-touch', 'aura-improvements', 'devotion-oath-spells',
+    'devotion-sacred-weapon', 'devotion-turn-unholy', 'devotion-aura', 'devotion-purity',
+    'devotion-holy-nimbus',
+  ]),
+  ranger: new Set([
+    'favored-enemy', 'natural-explorer', 'fighting-style', 'spellcasting', 'ranger-archetype',
+    'primeval-awareness', 'asi', 'extra-attack', 'lands-stride', 'hide-in-plain-sight', 'vanish',
+    'feral-senses', 'foe-slayer', 'hunter-prey-feature', 'hunter-defensive-tactics-feature',
+    'hunter-multiattack-feature', 'hunter-superior-defense-feature',
+  ]),
+  rogue: new Set([
+    'expertise', 'sneak-attack', 'thieves-cant', 'cunning-action', 'roguish-archetype', 'asi',
+    'uncanny-dodge', 'evasion', 'reliable-talent', 'blindsense', 'slippery-mind', 'elusive',
+    'stroke-of-luck', 'thief-fast-hands', 'thief-second-story-work', 'thief-supreme-sneak',
+    'thief-use-magic-device', 'thief-reflexes',
+  ]),
+  sorcerer: new Set([
+    'spellcasting', 'sorcerous-origin', 'font-of-magic', 'metamagic', 'asi',
+    'sorcerous-restoration', 'draconic-ancestor', 'draconic-resilience',
+    'draconic-elemental-affinity', 'draconic-wings', 'draconic-presence',
+  ]),
+  warlock: new Set([
+    'otherworldly-patron', 'pact-magic', 'eldritch-invocations', 'pact-boon', 'asi',
+    'mystic-arcanum', 'eldritch-master', 'fiend-expanded-spells', 'fiend-dark-ones-blessing',
+    'fiend-dark-ones-own-luck', 'fiendish-resilience', 'fiend-hurl-through-hell',
+  ]),
+  wizard: new Set([
+    'spellcasting', 'arcane-recovery', 'arcane-tradition', 'asi', 'spell-mastery',
+    'signature-spells', 'evocation-savant', 'evocation-sculpt-spells',
+    'evocation-potent-cantrip', 'evocation-empowered', 'evocation-overchannel',
+  ]),
+})
+
+const CLASS_FEATURE_ID_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  'barbarian-rage': 'rage',
+  'bard-countercharm': 'countercharm',
+  'cleric-divine-intervention': 'divine-intervention',
+  'cleric-preserve-life': 'life-preserve-life',
+  'cleric-turn-undead': 'turn-undead',
+  'draconic-elemental-resistance': 'draconic-elemental-affinity',
+  'monk-quivering-palm-end': 'open-hand-quivering-palm',
+  'monk-quivering-palm-release': 'open-hand-quivering-palm',
+  'monk-wholeness-of-body': 'open-hand-wholeness',
+  'paladin-cleansing-touch': 'cleansing-touch',
+  'paladin-divine-sense': 'divine-sense',
+  'paladin-holy-nimbus': 'devotion-holy-nimbus',
+  'paladin-lay-on-hands': 'lay-on-hands',
+  'paladin-sacred-weapon': 'devotion-sacred-weapon',
+  'paladin-turn-the-unholy': 'devotion-turn-unholy',
+  'rogue-cunning-action': 'cunning-action',
+  'rogue-fast-hands': 'thief-fast-hands',
+  'rage-feature-eagle-dash': 'fast-movement',
+  'rage-feature-wolf-knockdown': 'rage',
+  'repelling-blast': 'eldritch-invocations',
+})
+
+function canonicalClassFeatureId(id: string): string {
+  const aliased = CLASS_FEATURE_ID_ALIASES[id] ?? id
+  return aliased
+    .replace(/^asi-\d+$/, 'asi')
+    .replace(/^brutal-critical-\d+$/, 'brutal-critical')
+    .replace(/^song-of-rest-\d+$/, 'song-of-rest')
+    .replace(/^bardic-inspiration(?:-\d+)?$/, 'bardic-inspiration')
+    .replace(/^expertise-\d+$/, 'expertise')
+    .replace(/^magical-secrets-\d+$/, 'magical-secrets')
+    .replace(/^channel-divinity-\d+$/, 'channel-divinity')
+    .replace(/^destroy-undead-(?:half|\d+)$/, 'destroy-undead')
+    .replace(/^wild-shape(?:-\d+)?$/, 'wild-shape')
+    .replace(/^unarmored-movement(?:-\d+)?$/, 'unarmored-movement')
+    .replace(/^favored-enemy-improvement-\d+$/, 'favored-enemy')
+    .replace(/^natural-explorer-improvement-\d+$/, 'natural-explorer')
+    .replace(/^metamagic(?:-[a-z]+|-\d+)?$/, 'metamagic')
+    .replace(/^mystic-arcanum-\d+$/, 'mystic-arcanum')
+    .replace(/^action-surge-\d+$/, 'action-surge')
+    .replace(/^extra-attack(?:-\d+)?$/, 'extra-attack')
+    .replace(/^indomitable-\d+$/, 'indomitable')
+    .replace(/^divine-intervention-improved$/, 'divine-intervention')
+}
+
+function paintedClassFeatureAsset(classId: string, featureId: string): string | undefined {
+  const canonicalId = canonicalClassFeatureId(featureId)
+  if (!DND5E_PAINTED_CLASS_FEATURE_IDS[classId]?.has(canonicalId)) return undefined
+  const filename = SHARED_PAINTED_CLASS_FEATURE_IDS.has(canonicalId)
+    ? canonicalId
+    : `${classId}-${canonicalId}`
+  return `/assets/icons/${filename}-feature-action.png`
 }
 
 export const DND5E_MAGIC_ITEM_RARITY_PALETTES: Readonly<Record<Dnd5eMagicItemRarity, IconPalette>> = {
@@ -378,6 +530,11 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:dimensional-shackles': '/assets/icons/dimensional-shackles-item-action.png',
   'srd-5.1:magic-item:dragon-scale-mail': '/assets/icons/dragon-scale-mail-item-action.png',
   'srd-5.1:magic-item:dragon-slayer': '/assets/icons/dragon-slayer-item-action.png',
+  'srd-5.1:magic-item:dragon-slayer-longsword': '/assets/icons/dragon-slayer-item-action.png',
+  'srd-5.1:magic-item:dragon-slayer-greatsword': '/assets/icons/dragon-slayer-item-action.png',
+  'srd-5.1:magic-item:dragon-slayer-rapier': '/assets/icons/dragon-slayer-item-action.png',
+  'srd-5.1:magic-item:dragon-slayer-scimitar': '/assets/icons/dragon-slayer-item-action.png',
+  'srd-5.1:magic-item:dragon-slayer-shortsword': '/assets/icons/dragon-slayer-item-action.png',
   'srd-5.1:magic-item:dust-of-disappearance': '/assets/icons/dust-of-disappearance-item-action.png',
   'srd-5.1:magic-item:dust-of-dryness': '/assets/icons/dust-of-dryness-item-action.png',
   'srd-5.1:magic-item:dust-of-sneezing-and-choking': '/assets/icons/dust-of-sneezing-and-choking-item-action.png',
@@ -389,6 +546,176 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:elven-chain': '/assets/icons/elven-chain-item-action.png',
   'srd-5.1:magic-item:eversmoking-bottle': '/assets/icons/eversmoking-bottle-item-action.png',
   'srd-5.1:magic-item:eyes-of-charming': '/assets/icons/eyes-of-charming-item-action.png',
+  'srd-5.1:magic-item:eyes-of-minute-seeing': '/assets/icons/eyes-of-minute-seeing-item-action.png',
+  'srd-5.1:magic-item:eyes-of-the-eagle': '/assets/icons/eyes-of-the-eagle-item-action.png',
+  'srd-5.1:magic-item:feather-token': '/assets/icons/feather-token-item-action.png',
+  'srd-5.1:magic-item:figurine-of-wondrous-power': '/assets/icons/figurine-of-wondrous-power-item-action.png',
+  'srd-5.1:magic-item:flame-tongue': '/assets/icons/flame-tongue-item-action.png',
+  'srd-5.1:magic-item:folding-boat': '/assets/icons/folding-boat-item-action.png',
+  'srd-5.1:magic-item:frost-brand': '/assets/icons/frost-brand-item-action.png',
+  'srd-5.1:magic-item:gauntlets-of-ogre-power': '/assets/icons/gauntlets-of-ogre-power-item-action.png',
+  'srd-5.1:magic-item:gem-of-brightness': '/assets/icons/gem-of-brightness-item-action.png',
+  'srd-5.1:magic-item:gem-of-seeing': '/assets/icons/gem-of-seeing-item-action.png',
+  'srd-5.1:magic-item:giant-slayer': '/assets/icons/giant-slayer-item-action.png',
+  'srd-5.1:magic-item:glamoured-studded-leather-armor': '/assets/icons/glamoured-studded-leather-armor-item-action.png',
+  'srd-5.1:magic-item:gloves-of-missile-snaring': '/assets/icons/gloves-of-missile-snaring-item-action.png',
+  'srd-5.1:magic-item:gloves-of-swimming-and-climbing': '/assets/icons/gloves-of-swimming-and-climbing-item-action.png',
+  'srd-5.1:magic-item:goggles-of-night': '/assets/icons/goggles-of-night-item-action.png',
+  'srd-5.1:magic-item:hammer-of-thunderbolts': '/assets/icons/hammer-of-thunderbolts-item-action.png',
+  'srd-5.1:magic-item:handy-haversack': '/assets/icons/handy-haversack-item-action.png',
+  'srd-5.1:magic-item:hat-of-disguise': '/assets/icons/hat-of-disguise-item-action.png',
+  'srd-5.1:magic-item:headband-of-intellect': '/assets/icons/headband-of-intellect-item-action.png',
+  'srd-5.1:magic-item:helm-of-brilliance': '/assets/icons/helm-of-brilliance-item-action.png',
+  'srd-5.1:magic-item:helm-of-comprehending-languages': '/assets/icons/helm-of-comprehending-languages-item-action.png',
+  'srd-5.1:magic-item:helm-of-telepathy': '/assets/icons/helm-of-telepathy-item-action.png',
+  'srd-5.1:magic-item:helm-of-teleportation': '/assets/icons/helm-of-teleportation-item-action.png',
+  'srd-5.1:magic-item:holy-avenger': '/assets/icons/holy-avenger-item-action.png',
+  'srd-5.1:magic-item:horn-of-blasting': '/assets/icons/horn-of-blasting-item-action.png',
+  'srd-5.1:magic-item:horn-of-valhalla': '/assets/icons/horn-of-valhalla-item-action.png',
+  'srd-5.1:magic-item:horseshoes-of-a-zephyr': '/assets/icons/horseshoes-of-a-zephyr-item-action.png',
+  'srd-5.1:magic-item:horseshoes-of-speed': '/assets/icons/horseshoes-of-speed-item-action.png',
+  'srd-5.1:magic-item:immovable-rod': '/assets/icons/immovable-rod-item-action.png',
+  'srd-5.1:magic-item:instant-fortress': '/assets/icons/instant-fortress-item-action.png',
+  'srd-5.1:magic-item:ioun-stone': '/assets/icons/ioun-stone-item-action.png',
+  'srd-5.1:magic-item:iron-flask': '/assets/icons/iron-flask-item-action.png',
+  'srd-5.1:magic-item:javelin-of-lightning': '/assets/icons/javelin-of-lightning-item-action.png',
+  'srd-5.1:magic-item:lantern-of-revealing': '/assets/icons/lantern-of-revealing-item-action.png',
+  'srd-5.1:magic-item:luck-blade': '/assets/icons/luck-blade-item-action.png',
+  'srd-5.1:magic-item:mace-of-disruption': '/assets/icons/mace-of-disruption-item-action.png',
+  'srd-5.1:magic-item:mace-of-smiting': '/assets/icons/mace-of-smiting-item-action.png',
+  'srd-5.1:magic-item:mace-of-terror': '/assets/icons/mace-of-terror-item-action.png',
+  'srd-5.1:magic-item:mantle-of-spell-resistance': '/assets/icons/mantle-of-spell-resistance-item-action.png',
+  'srd-5.1:magic-item:manual-of-bodily-health': '/assets/icons/manual-of-bodily-health-item-action.png',
+  'srd-5.1:magic-item:manual-of-gainful-exercise': '/assets/icons/manual-of-gainful-exercise-item-action.png',
+  'srd-5.1:magic-item:manual-of-golems': '/assets/icons/manual-of-golems-item-action.png',
+  'srd-5.1:magic-item:manual-of-quickness-of-action': '/assets/icons/manual-of-quickness-of-action-item-action.png',
+  'srd-5.1:magic-item:mariners-armor': '/assets/icons/mariners-armor-item-action.png',
+  'srd-5.1:magic-item:medallion-of-thoughts': '/assets/icons/medallion-of-thoughts-item-action.png',
+  'srd-5.1:magic-item:mirror-of-life-trapping': '/assets/icons/mirror-of-life-trapping-item-action.png',
+  'srd-5.1:magic-item:mithral-armor': '/assets/icons/mithral-armor-item-action.png',
+  'srd-5.1:magic-item:necklace-of-adaptation': '/assets/icons/necklace-of-adaptation-item-action.png',
+  'srd-5.1:magic-item:necklace-of-fireballs': '/assets/icons/necklace-of-fireballs-item-action.png',
+  'srd-5.1:magic-item:necklace-of-prayer-beads': '/assets/icons/necklace-of-prayer-beads-item-action.png',
+  'srd-5.1:magic-item:nine-lives-stealer': '/assets/icons/nine-lives-stealer-item-action.png',
+  'srd-5.1:magic-item:oathbow': '/assets/icons/oathbow-item-action.png',
+  'srd-5.1:magic-item:oil-of-etherealness': '/assets/icons/oil-of-etherealness-item-action.png',
+  'srd-5.1:magic-item:oil-of-sharpness': '/assets/icons/oil-of-sharpness-item-action.png',
+  'srd-5.1:magic-item:oil-of-slipperiness': '/assets/icons/oil-of-slipperiness-item-action.png',
+  'srd-5.1:magic-item:pearl-of-power': '/assets/icons/pearl-of-power-item-action.png',
+  'srd-5.1:magic-item:periapt-of-health': '/assets/icons/periapt-of-health-item-action.png',
+  'srd-5.1:magic-item:periapt-of-proof-against-poison': '/assets/icons/periapt-of-proof-against-poison-item-action.png',
+  'srd-5.1:magic-item:periapt-of-wound-closure': '/assets/icons/periapt-of-wound-closure-item-action.png',
+  'srd-5.1:magic-item:philter-of-love': '/assets/icons/philter-of-love-item-action.png',
+  'srd-5.1:magic-item:pipes-of-haunting': '/assets/icons/pipes-of-haunting-item-action.png',
+  'srd-5.1:magic-item:iron-bands-of-binding': '/assets/icons/iron-bands-of-binding-item-action.png',
+  'srd-5.1:magic-item:marvelous-pigments': '/assets/icons/marvelous-pigments-item-action.png',
+  'srd-5.1:magic-item:pipes-of-the-sewers': '/assets/icons/pipes-of-the-sewers-item-action.png',
+  'srd-5.1:magic-item:plate-armor-of-etherealness': '/assets/icons/plate-armor-of-etherealness-item-action.png',
+  'srd-5.1:magic-item:portable-hole': '/assets/icons/portable-hole-item-action.png',
+  'srd-5.1:magic-item:potion-of-animal-friendship': '/assets/icons/potion-of-animal-friendship-item-action.png',
+  'srd-5.1:magic-item:potion-of-clairvoyance': '/assets/icons/potion-of-clairvoyance-item-action.png',
+  'srd-5.1:magic-item:potion-of-climbing': '/assets/icons/potion-of-climbing-item-action.png',
+  'srd-5.1:magic-item:potion-of-diminution': '/assets/icons/potion-of-diminution-item-action.png',
+  'srd-5.1:magic-item:potion-of-flying': '/assets/icons/potion-of-flying-item-action.png',
+  'srd-5.1:magic-item:potion-of-gaseous-form': '/assets/icons/potion-of-gaseous-form-item-action.png',
+  'srd-5.1:magic-item:potion-of-giant-strength': '/assets/icons/potion-of-giant-strength-item-action.png',
+  'srd-5.1:magic-item:potion-of-growth': '/assets/icons/potion-of-growth-item-action.png',
+  'srd-5.1:magic-item:potion-of-heroism': '/assets/icons/potion-of-heroism-item-action.png',
+  'srd-5.1:magic-item:potion-of-invisibility': '/assets/icons/potion-of-invisibility-item-action.png',
+  'srd-5.1:magic-item:potion-of-mind-reading': '/assets/icons/potion-of-mind-reading-item-action.png',
+  'srd-5.1:magic-item:potion-of-poison': '/assets/icons/potion-of-poison-item-action.png',
+  'srd-5.1:magic-item:potion-of-resistance': '/assets/icons/potion-of-resistance-item-action.png',
+  'srd-5.1:magic-item:potion-of-speed': '/assets/icons/potion-of-speed-item-action.png',
+  'srd-5.1:magic-item:potion-of-water-breathing': '/assets/icons/potion-of-water-breathing-item-action.png',
+  'srd-5.1:magic-item:restorative-ointment': '/assets/icons/restorative-ointment-item-action.png',
+  'srd-5.1:magic-item:ring-of-animal-influence': '/assets/icons/ring-of-animal-influence-item-action.png',
+  'srd-5.1:magic-item:ring-of-djinni-summoning': '/assets/icons/ring-of-djinni-summoning-item-action.png',
+  'srd-5.1:magic-item:ring-of-elemental-command': '/assets/icons/ring-of-elemental-command-item-action.png',
+  'srd-5.1:magic-item:ring-of-evasion': '/assets/icons/ring-of-evasion-item-action.png',
+  'srd-5.1:magic-item:ring-of-feather-falling': '/assets/icons/ring-of-feather-falling-item-action.png',
+  'srd-5.1:magic-item:ring-of-free-action': '/assets/icons/ring-of-free-action-item-action.png',
+  'srd-5.1:magic-item:ring-of-invisibility': '/assets/icons/ring-of-invisibility-item-action.png',
+  'srd-5.1:magic-item:ring-of-jumping': '/assets/icons/ring-of-jumping-item-action.png',
+  'srd-5.1:magic-item:ring-of-mind-shielding': '/assets/icons/ring-of-mind-shielding-item-action.png',
+  'srd-5.1:magic-item:ring-of-protection': '/assets/icons/ring-of-protection-item-action.png',
+  'srd-5.1:magic-item:ring-of-regeneration': '/assets/icons/ring-of-regeneration-item-action.png',
+  'srd-5.1:magic-item:ring-of-resistance': '/assets/icons/ring-of-resistance-item-action.png',
+  'srd-5.1:magic-item:ring-of-shooting-stars': '/assets/icons/ring-of-shooting-stars-item-action.png',
+  'srd-5.1:magic-item:ring-of-spell-storing': '/assets/icons/ring-of-spell-storing-item-action.png',
+  'srd-5.1:magic-item:ring-of-spell-turning': '/assets/icons/ring-of-spell-turning-item-action.png',
+  'srd-5.1:magic-item:ring-of-swimming': '/assets/icons/ring-of-swimming-item-action.png',
+  'srd-5.1:magic-item:ring-of-telekinesis': '/assets/icons/ring-of-telekinesis-item-action.png',
+  'srd-5.1:magic-item:ring-of-the-ram': '/assets/icons/ring-of-the-ram-item-action.png',
+  'srd-5.1:magic-item:ring-of-three-wishes': '/assets/icons/ring-of-three-wishes-item-action.png',
+  'srd-5.1:magic-item:ring-of-warmth': '/assets/icons/ring-of-warmth-item-action.png',
+  'srd-5.1:magic-item:ring-of-water-walking': '/assets/icons/ring-of-water-walking-item-action.png',
+  'srd-5.1:magic-item:ring-of-x-ray-vision': '/assets/icons/ring-of-x-ray-vision-item-action.png',
+  'srd-5.1:magic-item:robe-of-eyes': '/assets/icons/robe-of-eyes-item-action.png',
+  'srd-5.1:magic-item:robe-of-scintillating-colors': '/assets/icons/robe-of-scintillating-colors-item-action.png',
+  'srd-5.1:magic-item:robe-of-stars': '/assets/icons/robe-of-stars-item-action.png',
+  'srd-5.1:magic-item:robe-of-the-archmagi': '/assets/icons/robe-of-the-archmagi-item-action.png',
+  'srd-5.1:magic-item:robe-of-useful-items': '/assets/icons/robe-of-useful-items-item-action.png',
+  'srd-5.1:magic-item:rod-of-absorption': '/assets/icons/rod-of-absorption-item-action.png',
+  'srd-5.1:magic-item:rod-of-alertness': '/assets/icons/rod-of-alertness-item-action.png',
+  'srd-5.1:magic-item:rod-of-lordly-might': '/assets/icons/rod-of-lordly-might-item-action.png',
+  'srd-5.1:magic-item:rod-of-rulership': '/assets/icons/rod-of-rulership-item-action.png',
+  'srd-5.1:magic-item:rod-of-security': '/assets/icons/rod-of-security-item-action.png',
+  'srd-5.1:magic-item:rope-of-climbing': '/assets/icons/rope-of-climbing-item-action.png',
+  'srd-5.1:magic-item:rope-of-entanglement': '/assets/icons/rope-of-entanglement-item-action.png',
+  'srd-5.1:magic-item:scarab-of-protection': '/assets/icons/scarab-of-protection-item-action.png',
+  'srd-5.1:magic-item:scimitar-of-speed': '/assets/icons/scimitar-of-speed-item-action.png',
+  'srd-5.1:magic-item:shield-of-missile-attraction': '/assets/icons/shield-of-missile-attraction-item-action.png',
+  'srd-5.1:magic-item:slippers-of-spider-climbing': '/assets/icons/slippers-of-spider-climbing-item-action.png',
+  'srd-5.1:magic-item:sovereign-glue': '/assets/icons/sovereign-glue-item-action.png',
+  'srd-5.1:magic-item:spell-scroll': '/assets/icons/spell-scroll-item-action.png',
+  'srd-5.1:magic-item:spellguard-shield': '/assets/icons/spellguard-shield-item-action.png',
+  'srd-5.1:magic-item:sphere-of-annihilation': '/assets/icons/sphere-of-annihilation-item-action.png',
+  'srd-5.1:magic-item:staff-of-charming': '/assets/icons/staff-of-charming-item-action.png',
+  'srd-5.1:magic-item:staff-of-fire': '/assets/icons/staff-of-fire-item-action.png',
+  'srd-5.1:magic-item:staff-of-frost': '/assets/icons/staff-of-frost-item-action.png',
+  'srd-5.1:magic-item:staff-of-healing': '/assets/icons/staff-of-healing-item-action.png',
+  'srd-5.1:magic-item:staff-of-power': '/assets/icons/staff-of-power-item-action.png',
+  'srd-5.1:magic-item:staff-of-striking': '/assets/icons/staff-of-striking-item-action.png',
+  'srd-5.1:magic-item:staff-of-swarming-insects': '/assets/icons/staff-of-swarming-insects-item-action.png',
+  'srd-5.1:magic-item:staff-of-the-magi': '/assets/icons/staff-of-the-magi-item-action.png',
+  'srd-5.1:magic-item:staff-of-the-python': '/assets/icons/staff-of-the-python-item-action.png',
+  'srd-5.1:magic-item:staff-of-the-woodlands': '/assets/icons/staff-of-the-woodlands-item-action.png',
+  'srd-5.1:magic-item:staff-of-thunder-and-lightning': '/assets/icons/staff-of-thunder-and-lightning-item-action.png',
+  'srd-5.1:magic-item:staff-of-withering': '/assets/icons/staff-of-withering-item-action.png',
+  'srd-5.1:magic-item:stone-of-controlling-earth-elementals': '/assets/icons/stone-of-controlling-earth-elementals-item-action.png',
+  'srd-5.1:magic-item:stone-of-good-luck-luckstone': '/assets/icons/stone-of-good-luck-luckstone-item-action.png',
+  'srd-5.1:magic-item:sun-blade': '/assets/icons/sun-blade-item-action.png',
+  'srd-5.1:magic-item:sword-of-life-stealing': '/assets/icons/sword-of-life-stealing-item-action.png',
+  'srd-5.1:magic-item:sword-of-sharpness': '/assets/icons/sword-of-sharpness-item-action.png',
+  'srd-5.1:magic-item:sword-of-wounding': '/assets/icons/sword-of-wounding-item-action.png',
+  'srd-5.1:magic-item:talisman-of-pure-good': '/assets/icons/talisman-of-pure-good-item-action.png',
+  'srd-5.1:magic-item:talisman-of-the-sphere': '/assets/icons/talisman-of-the-sphere-item-action.png',
+  'srd-5.1:magic-item:talisman-of-ultimate-evil': '/assets/icons/talisman-of-ultimate-evil-item-action.png',
+  'srd-5.1:magic-item:tome-of-clear-thought': '/assets/icons/tome-of-clear-thought-item-action.png',
+  'srd-5.1:magic-item:tome-of-leadership-and-influence': '/assets/icons/tome-of-leadership-and-influence-item-action.png',
+  'srd-5.1:magic-item:tome-of-understanding': '/assets/icons/tome-of-understanding-item-action.png',
+  'srd-5.1:magic-item:trident-of-fish-command': '/assets/icons/trident-of-fish-command-item-action.png',
+  'srd-5.1:magic-item:universal-solvent': '/assets/icons/universal-solvent-item-action.png',
+  'srd-5.1:magic-item:vicious-weapon': '/assets/icons/vicious-weapon-item-action.png',
+  'srd-5.1:magic-item:vorpal-sword': '/assets/icons/vorpal-sword-item-action.png',
+  'srd-5.1:magic-item:wand-of-binding': '/assets/icons/wand-of-binding-item-action.png',
+  'srd-5.1:magic-item:wand-of-enemy-detection': '/assets/icons/wand-of-enemy-detection-item-action.png',
+  'srd-5.1:magic-item:wand-of-fear': '/assets/icons/wand-of-fear-item-action.png',
+  'srd-5.1:magic-item:wand-of-fireballs': '/assets/icons/wand-of-fireballs-item-action.png',
+  'srd-5.1:magic-item:wand-of-lightning-bolts': '/assets/icons/wand-of-lightning-bolts-item-action.png',
+  'srd-5.1:magic-item:wand-of-magic-detection': '/assets/icons/wand-of-magic-detection-item-action.png',
+  'srd-5.1:magic-item:wand-of-magic-missiles': '/assets/icons/wand-of-magic-missiles-item-action.png',
+  'srd-5.1:magic-item:wand-of-paralysis': '/assets/icons/wand-of-paralysis-item-action.png',
+  'srd-5.1:magic-item:wand-of-polymorph': '/assets/icons/wand-of-polymorph-item-action.png',
+  'srd-5.1:magic-item:wand-of-secrets': '/assets/icons/wand-of-secrets-item-action.png',
+  'srd-5.1:magic-item:wand-of-the-war-mage': '/assets/icons/wand-of-the-war-mage-item-action.png',
+  'srd-5.1:magic-item:wand-of-web': '/assets/icons/wand-of-web-item-action.png',
+  'srd-5.1:magic-item:wand-of-wonder': '/assets/icons/wand-of-wonder-item-action.png',
+  'srd-5.1:magic-item:well-of-many-worlds': '/assets/icons/well-of-many-worlds-item-action.png',
+  'srd-5.1:magic-item:wind-fan': '/assets/icons/wind-fan-item-action.png',
+  'srd-5.1:magic-item:winged-boots': '/assets/icons/winged-boots-item-action.png',
+  'srd-5.1:magic-item:wings-of-flying': '/assets/icons/wings-of-flying-item-action.png',
+  'srd-5.1:magic-item:orb-of-dragonkind': '/assets/icons/orb-of-dragonkind-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [
@@ -470,6 +797,24 @@ export function dnd5eNamedActionIcon(input: {
   }
 }
 
+/**
+ * Class-feature counterpart to dnd5eSpellActionIcon. Built-in SRD features use
+ * painted transparent foregrounds; package-defined features can supply their
+ * own image asset and otherwise retain the deterministic class-coloured motif.
+ */
+export function dnd5eClassFeatureActionIcon(
+  input: Dnd5eClassFeatureActionIconInput,
+): Dnd5eActionIconSpec {
+  const spec = dnd5eNamedActionIcon(input)
+  const customAsset = dnd5ePluginImageAssetUrl(input.iconAssetId)
+  const asset = customAsset ?? paintedClassFeatureAsset(input.classId, input.id)
+  return {
+    ...spec,
+    ...(asset ? { asset, assetMode: 'foreground' as const } : {}),
+    ...(customAsset ? { assetTreatment: 'transparent-foreground' as const } : {}),
+  }
+}
+
 function motifFromSchool(school: string | undefined): Dnd5eActionIconMotif {
   const normalized = school?.toLowerCase() ?? ''
   if (/illusion|幻术/.test(normalized)) return 'illusion'
@@ -490,7 +835,8 @@ export function dnd5eSpellActionIcon(input: Dnd5eSpellActionIconInput): Dnd5eAct
     .join(' ')
   const motif = explicitDamageMotif ?? motifFromText(searchable) ?? motifFromSchool(input.school)
   const spec = paletteFor(key, motif)
-  const asset = dnd5ePluginImageAssetUrl(input.iconAssetId) ?? DND5E_PAINTED_SPELL_ASSETS[input.id]
+  const customAsset = dnd5ePluginImageAssetUrl(input.iconAssetId)
+  const asset = customAsset ?? DND5E_PAINTED_SPELL_ASSETS[input.id]
   const classPalette = input.castingClassId ? DND5E_CLASS_ICON_PALETTES[input.castingClassId] : undefined
   return {
     ...spec,
@@ -501,6 +847,7 @@ export function dnd5eSpellActionIcon(input: Dnd5eSpellActionIconInput): Dnd5eAct
       glow: classPalette[3],
     } : {}),
     ...(asset ? { asset, assetMode: 'foreground' as const } : {}),
+    ...(customAsset ? { assetTreatment: 'transparent-foreground' as const } : {}),
     classBackdropId: input.castingClassId,
   }
 }
@@ -517,7 +864,7 @@ export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' 
             : item.icon === 'alchemists-fire' || item.icon === 'torch' || item.icon === 'tinderbox' ? 'fire'
               : item.icon === 'poison' || item.icon === 'antitoxin' ? 'poison'
                 : item.icon === 'holy-water' ? 'radiant'
-                  : item.icon === 'magic-ring' || item.icon === 'magic-wand' || item.icon === 'magic-staff' || item.icon === 'magic-scroll' || item.icon === 'magic-wondrous' ? 'arcane'
+                  : item.icon === 'spellcasting-focus' || item.icon === 'magic-ring' || item.icon === 'magic-wand' || item.icon === 'magic-staff' || item.icon === 'magic-scroll' || item.icon === 'magic-wondrous' ? 'arcane'
                     : item.category === 'equipment' ? 'weapon' : 'beast')
   const base = paletteFor(key, motif)
   const rarityPalette = item.magicItem ? DND5E_MAGIC_ITEM_RARITY_PALETTES[item.magicItem.rarity] : undefined

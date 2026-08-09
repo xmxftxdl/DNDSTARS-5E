@@ -9,7 +9,10 @@ import {
   type ResourceStructuringModelRouteEntryV1,
 } from '../../lib/resourceStructuringModelRouting'
 import { buildDnd5eCustomMonster } from './customMonsterWorkshop'
-import { prepareDnd5eLocalContentJson } from './localContentCollection'
+import {
+  prepareDnd5eLocalContentJson,
+  type Dnd5eLocalContentCollectionKey,
+} from './localContentCollection'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import { normalizeDnd5eMonsterStatBlockContent } from './monsterContentDeepAnalysis'
 import { parseDnd5ePastedMonster } from './monsterStatBlockPaste'
@@ -31,7 +34,7 @@ export type Dnd5eLocalContentAiTargetKind =
 export const DND5E_LOCAL_CONTENT_AI_TARGETS: readonly {
   id: Dnd5eLocalContentAiTargetKind
   label: string
-  collection?: string
+  collection?: Dnd5eLocalContentCollectionKey
   description: string
 }[] = [
   { id: 'auto', label: '自动识别／混合内容', description: '允许模型识别一种或多种规则资源，适合整包资料。' },
@@ -118,7 +121,9 @@ const DND5E_LOCAL_CONTENT_AI_TARGET_GUIDES: Record<Dnd5eLocalContentAiTargetKind
   'ability-generation': '目标类型是加点规则。主体必须写入 abilityGenerationMethods，kind 只能是 standard-array、point-buy 或 roll。',
 }
 
-function targetCollection(target: Dnd5eLocalContentAiTargetKind): string | undefined {
+export function dnd5eLocalContentAiTargetCollection(
+  target: Dnd5eLocalContentAiTargetKind,
+): Dnd5eLocalContentCollectionKey | undefined {
   return DND5E_LOCAL_CONTENT_AI_TARGETS.find((entry) => entry.id === target)?.collection
 }
 
@@ -359,13 +364,17 @@ async function localContentHostGate(
         return { ok: false, reason: 'empty-content', detail: '模型没有生成任何可导入条目。' }
       }
     }
-    const prepared = await prepareDnd5eLocalContentJson(draft.contentJson, 'ai-model-routing-preview.json')
+    const requiredCollection = dnd5eLocalContentAiTargetCollection(targetKind)
+    const prepared = await prepareDnd5eLocalContentJson(
+      draft.contentJson,
+      'ai-model-routing-preview.json',
+      { targetCollection: requiredCollection },
+    )
     const entryCount = Object.values(prepared.package.content)
       .reduce((total, value) => total + (Array.isArray(value) ? value.length : 0), 0)
     if (entryCount === 0) {
       return { ok: false, reason: 'empty-content', detail: '模型没有生成任何可导入条目。' }
     }
-    const requiredCollection = targetCollection(targetKind)
     if (requiredCollection) {
       const entries = prepared.package.content[requiredCollection as keyof typeof prepared.package.content]
       if (!Array.isArray(entries) || entries.length === 0) {

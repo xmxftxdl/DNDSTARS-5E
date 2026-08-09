@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_COLOR,
   DND5E_MONSTER_TOKEN_BORDER_COLOR,
   buildDnd5eTokenBorderPresentations,
   buildDnd5eTokenPresentationColors,
@@ -44,6 +45,23 @@ describe('map Token class presentation colors', () => {
       token('monster', { type: 'enemy', color: '#00ff00' }),
     )).toBe('#EF4444')
     expect(DND5E_MONSTER_TOKEN_BORDER_COLOR).toBe('#EF4444')
+  })
+
+  it('uses an emerald ring for a monster allied with the players', () => {
+    const friendly = token('friendly-monster', {
+      type: 'enemy',
+      dnd5eSide: 'player',
+      color: '#ff0000',
+    })
+    expect(dnd5eTokenPresentationColor(friendly)).toBe('#34D399')
+    expect(DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_COLOR).toBe('#34D399')
+    expect(dnd5eTokenBorderPresentation(friendly)).toEqual({
+      background: '#065F46',
+      backgroundDeep: '#022C22',
+      accent: '#A7F3D0',
+      glow: '#34D399',
+      classId: 'friendly-monster',
+    })
   })
 
   it('carries the complete spell-portrait palette into the map frame', () => {

@@ -90,7 +90,11 @@ export interface Dnd5eActiveEffectRepeatSave {
   dc: number
   timing: 'target-turn-start' | 'target-turn-end' | 'on-damage'
   /** 受到伤害后额外触发一次豁免；由 Headless 记录待结算项，客户端不能自行伪造。 */
-  onDamage?: { mode: 'normal' | 'advantage' }
+  onDamage?: {
+    mode: 'normal' | 'advantage'
+    /** Restricts monster charm retries to harm caused by that monster or its allies. */
+    sourceFilter?: 'any' | 'source-or-allies'
+  }
   /** 部分持续法术会在重复豁免失败时造成伤害；骰池由 Host 校验并结算。 */
   damageOnFailure?: {
     count: number
@@ -133,7 +137,7 @@ export interface Dnd5eActiveEffectPeriodicDamage {
    * carried inside a monster instead tick when that source monster starts its
    * turn (for example, swallowed acid damage).
    */
-  timing: 'target-turn-start' | 'source-turn-start'
+  timing: 'target-turn-start' | 'target-turn-end' | 'source-turn-start'
   count: number
   sides: number
   modifier?: number
@@ -150,6 +154,10 @@ export interface Dnd5eActiveEffectPeriodicDamage {
     magical?: boolean
     damageOnSuccessfulSave: 'none' | 'half'
   }
+  /** Running damage dealt by this periodic payload, used by bounded attachment rules. */
+  cumulativeDamage?: number
+  /** Remove the owning effect after its periodic payload has dealt this much damage. */
+  removeEffectAfterCumulativeDamage?: number
   /** Prevents a retried begin-turn transaction from applying the damage twice. */
   lastResolvedTurnKey?: string
 }
@@ -248,6 +256,8 @@ export interface Dnd5eActiveEffectModifiers {
   abilityCheckDisadvantages?: readonly AbilityKey[]
   /** Imposes disadvantage on saving throws using the listed abilities. */
   savingThrowDisadvantages?: readonly AbilityKey[]
+  /** Grants advantage on saving throws using the listed abilities. */
+  savingThrowAdvantages?: readonly AbilityKey[]
   /** Multiplies carrying capacity without changing optional encumbrance thresholds. */
   carryingCapacityMultiplier?: number
   /** Prevents damage and prone from falls no longer than this distance while not incapacitated. */
@@ -267,6 +277,8 @@ export interface Dnd5eActiveEffectModifiers {
   preventReactions?: boolean
   /** The creature cannot regain hit points while this effect is active. */
   preventHealing?: boolean
+  /** The creature may regain hit points only from magical healing. */
+  preventNonmagicalHealing?: boolean
   damageResistance?: Dnd5eDamageType
   conditionImmunities?: readonly Dnd5eStandardConditionId[]
   /** 橡棍术只强化施法时所持的短棒或长棍。 */
@@ -481,6 +493,9 @@ export function createDnd5eConditionEffect(input: {
           savingThrowDisadvantages: input.modifiers.savingThrowDisadvantages
             ? [...new Set(input.modifiers.savingThrowDisadvantages)]
             : undefined,
+          savingThrowAdvantages: input.modifiers.savingThrowAdvantages
+            ? [...new Set(input.modifiers.savingThrowAdvantages)]
+            : undefined,
           savingThrowBonusByAbility: input.modifiers.savingThrowBonusByAbility
             ? { ...input.modifiers.savingThrowBonusByAbility }
             : undefined,
@@ -581,6 +596,9 @@ export function createDnd5eMechanicalEffect(input: {
             : undefined,
           savingThrowDisadvantages: input.modifiers.savingThrowDisadvantages
             ? [...new Set(input.modifiers.savingThrowDisadvantages)]
+            : undefined,
+          savingThrowAdvantages: input.modifiers.savingThrowAdvantages
+            ? [...new Set(input.modifiers.savingThrowAdvantages)]
             : undefined,
           savingThrowBonusByAbility: input.modifiers.savingThrowBonusByAbility
             ? { ...input.modifiers.savingThrowBonusByAbility }
@@ -727,7 +745,12 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       onFailureTransition !== null &&
       (rawRepeatSave.onDamage == null || (
         isRecord(rawRepeatSave.onDamage) &&
-        (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
+        (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage') &&
+        (
+          rawRepeatSave.onDamage.sourceFilter == null ||
+          rawRepeatSave.onDamage.sourceFilter === 'any' ||
+          rawRepeatSave.onDamage.sourceFilter === 'source-or-allies'
+        )
       ))
       ? {
           ability: rawRepeatSave.ability as AbilityKey,
@@ -735,7 +758,14 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           timing: rawRepeatSave.timing as 'target-turn-start' | 'target-turn-end' | 'on-damage',
           onDamage: isRecord(rawRepeatSave.onDamage) &&
             (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
-            ? { mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage' }
+            ? {
+                mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage',
+                sourceFilter:
+                  rawRepeatSave.onDamage.sourceFilter === 'any' ||
+                  rawRepeatSave.onDamage.sourceFilter === 'source-or-allies'
+                    ? rawRepeatSave.onDamage.sourceFilter as 'any' | 'source-or-allies'
+                    : undefined,
+              }
             : undefined,
           damageOnFailure,
           onFailureTransition,
@@ -783,10 +813,13 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         'modifier',
         'type',
         'savingThrow',
+        'cumulativeDamage',
+        'removeEffectAfterCumulativeDamage',
         'lastResolvedTurnKey',
       ].includes(key)) &&
       (
         rawPeriodicDamage.timing === 'target-turn-start' ||
+        rawPeriodicDamage.timing === 'target-turn-end' ||
         rawPeriodicDamage.timing === 'source-turn-start'
       ) &&
       Number.isInteger(rawPeriodicDamage.count) &&
@@ -798,6 +831,17 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       Number.isInteger(rawPeriodicDamage.modifier ?? 0) &&
       Number(rawPeriodicDamage.modifier ?? 0) >= -1_000 &&
       Number(rawPeriodicDamage.modifier ?? 0) <= 1_000 &&
+      Number.isInteger(rawPeriodicDamage.cumulativeDamage ?? 0) &&
+      Number(rawPeriodicDamage.cumulativeDamage ?? 0) >= 0 &&
+      Number(rawPeriodicDamage.cumulativeDamage ?? 0) <= 1_000_000 &&
+      (
+        rawPeriodicDamage.removeEffectAfterCumulativeDamage == null ||
+        (
+          Number.isInteger(rawPeriodicDamage.removeEffectAfterCumulativeDamage) &&
+          Number(rawPeriodicDamage.removeEffectAfterCumulativeDamage) >= 1 &&
+          Number(rawPeriodicDamage.removeEffectAfterCumulativeDamage) <= 1_000_000
+        )
+      ) &&
       (
         rawPeriodicDamage.type == null ||
         (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawPeriodicDamage.type)
@@ -841,6 +885,11 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           sides: Number(rawPeriodicDamage.sides),
           modifier: Number(rawPeriodicDamage.modifier ?? 0),
           type: rawPeriodicDamage.type as Dnd5eDamageType | undefined,
+          cumulativeDamage: Number(rawPeriodicDamage.cumulativeDamage ?? 0) || undefined,
+          removeEffectAfterCumulativeDamage:
+            rawPeriodicDamage.removeEffectAfterCumulativeDamage == null
+              ? undefined
+              : Number(rawPeriodicDamage.removeEffectAfterCumulativeDamage),
           savingThrow: isRecord(rawPeriodicDamage.savingThrow)
             ? {
                 ability: rawPeriodicDamage.savingThrow.ability as AbilityKey,
@@ -1108,6 +1157,10 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             rawModifiers.savingThrowDisadvantages.every((entry) => ABILITIES.has(entry as AbilityKey))
             ? [...new Set(rawModifiers.savingThrowDisadvantages)] as AbilityKey[]
             : undefined,
+          savingThrowAdvantages: Array.isArray(rawModifiers.savingThrowAdvantages) &&
+            rawModifiers.savingThrowAdvantages.every((entry) => ABILITIES.has(entry as AbilityKey))
+            ? [...new Set(rawModifiers.savingThrowAdvantages)] as AbilityKey[]
+            : undefined,
           carryingCapacityMultiplier: typeof rawModifiers.carryingCapacityMultiplier === 'number' &&
             Number.isFinite(rawModifiers.carryingCapacityMultiplier) &&
             rawModifiers.carryingCapacityMultiplier >= 1 &&
@@ -1179,6 +1232,10 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           preventHealing: typeof rawModifiers.preventHealing === 'boolean'
             ? rawModifiers.preventHealing
             : undefined,
+          preventNonmagicalHealing:
+            typeof rawModifiers.preventNonmagicalHealing === 'boolean'
+              ? rawModifiers.preventNonmagicalHealing
+              : undefined,
           damageResistance: (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawModifiers.damageResistance)
             ? rawModifiers.damageResistance as Dnd5eDamageType
             : undefined,
@@ -1251,6 +1308,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.abilityCheckAdvantages != null ||
         modifiers.abilityCheckDisadvantages != null ||
         modifiers.savingThrowDisadvantages != null ||
+        modifiers.savingThrowAdvantages != null ||
         modifiers.carryingCapacityMultiplier != null ||
         modifiers.safeFallFeet != null ||
         modifiers.armorClassBonus != null ||
@@ -1263,6 +1321,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.weaponDamageD4 != null ||
         modifiers.preventReactions != null ||
         modifiers.preventHealing != null ||
+        modifiers.preventNonmagicalHealing != null ||
         modifiers.damageResistance != null ||
         modifiers.conditionImmunities != null ||
         modifiers.shillelagh != null ||
@@ -1437,6 +1496,10 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           !Array.isArray(raw.modifiers.savingThrowDisadvantages) ||
           raw.modifiers.savingThrowDisadvantages.some((entry) => !ABILITIES.has(entry as AbilityKey))
         )) issues.push(`activeEffects[${index}].modifiers.savingThrowDisadvantages 无效`)
+        if (raw.modifiers.savingThrowAdvantages != null && (
+          !Array.isArray(raw.modifiers.savingThrowAdvantages) ||
+          raw.modifiers.savingThrowAdvantages.some((entry) => !ABILITIES.has(entry as AbilityKey))
+        )) issues.push(`activeEffects[${index}].modifiers.savingThrowAdvantages 无效`)
         if (raw.modifiers.carryingCapacityMultiplier != null && (
           typeof raw.modifiers.carryingCapacityMultiplier !== 'number' ||
           !Number.isFinite(raw.modifiers.carryingCapacityMultiplier) ||
@@ -1505,6 +1568,10 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
         if (raw.modifiers.preventHealing != null && typeof raw.modifiers.preventHealing !== 'boolean') {
           issues.push(`activeEffects[${index}].modifiers.preventHealing 无效`)
         }
+        if (
+          raw.modifiers.preventNonmagicalHealing != null &&
+          typeof raw.modifiers.preventNonmagicalHealing !== 'boolean'
+        ) issues.push(`activeEffects[${index}].modifiers.preventNonmagicalHealing 无效`)
         if (raw.modifiers.damageResistance != null && !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(raw.modifiers.damageResistance)) {
           issues.push(`activeEffects[${index}].modifiers.damageResistance 无效`)
         }
@@ -1677,6 +1744,14 @@ export function dnd5eActiveSavingThrowDisadvantages(
 ): AbilityKey[] {
   return [...new Set(effectiveDnd5eActiveEffects(effects).flatMap(
     (effect) => effect.modifiers?.savingThrowDisadvantages ?? [],
+  ))]
+}
+
+export function dnd5eActiveSavingThrowAdvantages(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): AbilityKey[] {
+  return [...new Set(effectiveDnd5eActiveEffects(effects).flatMap(
+    (effect) => effect.modifiers?.savingThrowAdvantages ?? [],
   ))]
 }
 

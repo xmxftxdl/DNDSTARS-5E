@@ -7,6 +7,7 @@ import type {
   AiProviderRuntimeV1,
   AiStructuredGenerationResultV1,
 } from './aiProvider'
+import type { PdfOcrProviderV1 } from './pdfCampaignAnalysisV2'
 
 export const LOCAL_AI_BRIDGE_API_VERSION = 1
 export const LOCAL_AI_BRIDGE_DEFAULT_URL = 'http://127.0.0.1:47431'
@@ -37,6 +38,7 @@ export interface LocalAiPortraitGenerationInput {
   prompt: string
   aspect?: 'portrait-3:4' | 'square'
   quality?: 'low' | 'medium' | 'high'
+  background?: 'opaque' | 'transparent'
 }
 
 export interface LocalAiPortraitGenerationResult {
@@ -90,12 +92,16 @@ async function bridgeRequest<T>(
   timeoutMs = 10_000,
 ): Promise<T> {
   const controller = new AbortController()
+  const externalSignal = init?.signal
+  const requestSignal = externalSignal
+    ? AbortSignal.any([controller.signal, externalSignal])
+    : controller.signal
   const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(`${configuredBridgeUrl()}${path}`, {
       ...init,
       cache: 'no-store',
-      signal: controller.signal,
+      signal: requestSignal,
       headers: {
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...(authorization && accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
@@ -109,6 +115,7 @@ async function bridgeRequest<T>(
     return body
   } catch (error) {
     if (error instanceof LocalAiBridgeError) throw error
+    if (externalSignal?.aborted) throw new LocalAiBridgeError('local-ai-bridge-request-aborted')
     const aborted = controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')
     throw new LocalAiBridgeError(aborted
       ? 'local-ai-bridge-timeout'
@@ -239,6 +246,65 @@ export function localAiBridgeSnapshot(): LocalAiBridgeSnapshot {
   return snapshot
 }
 
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) {
+    throw new LocalAiBridgeError('unsupported-ocr-image')
+  }
+  if (blob.size < 1 || blob.size > 24 * 1024 * 1024) throw new LocalAiBridgeError('ocr-image-too-large')
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new LocalAiBridgeError('ocr-image-read-failed'))
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new LocalAiBridgeError('ocr-image-read-failed'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+/**
+ * OCR stays behind the paired loopback Bridge. The browser sends only a rendered
+ * page that has already failed the PDF text-layer threshold, never the whole PDF.
+ */
+export function createLocalBridgePdfOcrProvider(): PdfOcrProviderV1 {
+  return {
+    id: 'local-bridge:rapidocr-v1',
+    async recognizePage(input, signal) {
+      if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+      const imageDataUrl = await blobToDataUrl(input.image)
+      const result = await bridgeRequest<{
+        schemaVersion: number
+        engineId: string
+        text: string
+        confidence?: number
+        blocks?: Array<{ text: string; bbox: [number, number, number, number]; confidence?: number }>
+      }>('/api/ocr/pdf-page', {
+        method: 'POST',
+        body: JSON.stringify({
+          schemaVersion: 1,
+          documentId: input.documentId,
+          page: input.page,
+          imageDataUrl,
+          imageWidth: input.imageWidth,
+          imageHeight: input.imageHeight,
+          languageHints: input.languageHints,
+        }),
+        ...(signal ? { signal } : {}),
+      }, true, 180_000)
+      if (
+        result.schemaVersion !== 1 || typeof result.engineId !== 'string' ||
+        typeof result.text !== 'string' || result.text.length > 250_000 ||
+        (result.confidence !== undefined && (!Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1)) ||
+        (result.blocks !== undefined && (!Array.isArray(result.blocks) || result.blocks.length > 10_000))
+      ) throw new LocalAiBridgeError('invalid-ocr-response')
+      return {
+        text: result.text,
+        ...(result.confidence !== undefined ? { confidence: result.confidence } : {}),
+        ...(result.blocks ? { blocks: result.blocks } : {}),
+      }
+    },
+  }
+}
+
 export async function generateLocalAiPortrait(
   input: LocalAiPortraitGenerationInput,
 ): Promise<LocalAiPortraitGenerationResult> {
@@ -256,6 +322,7 @@ export async function generateLocalAiPortrait(
       prompt,
       aspect: input.aspect ?? 'portrait-3:4',
       ...(input.quality ? { quality: input.quality } : {}),
+      ...(input.background ? { background: input.background } : {}),
     }),
   }, true, 310_000)
   if (
@@ -327,8 +394,8 @@ const READY_EXTERNAL_DESCRIPTOR: AiProviderDescriptorV1 = {
   transport: 'external-server',
   status: 'ready',
   dataBoundary: 'cloud-processing',
-  capabilities: ['text-generation', 'structured-output', 'long-context', 'chinese'],
-  supportedTasks: ['pdf-extraction', 'campaign-analysis', 'resource-structuring', 'session-summary', 'prep-recommendations'],
+  capabilities: ['text-generation', 'structured-output', 'vision', 'long-context', 'chinese'],
+  supportedTasks: ['pdf-extraction', 'campaign-analysis', 'resource-structuring', 'map-analysis', 'session-summary', 'prep-recommendations'],
   pricing: {
     mode: 'external-account',
     creditsPerMillionInput: 0,

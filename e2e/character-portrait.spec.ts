@@ -148,5 +148,11 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
     })).json() as { characters?: Array<{ id?: string; initiativePortrait?: string }> }
     return state.characters?.find((character) => character.id === characterId)?.initiativePortrait ?? ''
   }, { timeout: 15_000 }).toMatch(/^data:image\/(?:webp|jpeg);base64,/)
-  await expect(page.getByRole('button', { name: 'AI 生成（稍后）' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'AI 生成完整立绘' })).toBeEnabled()
+  await page.getByRole('button', { name: 'AI 生成完整立绘' }).click()
+  const aiDialog = page.getByRole('dialog', { name: 'AI 生成角色立绘' })
+  await expect(aiDialog).toBeVisible()
+  await expect(aiDialog.getByText('固定使用低成本标准品质（low），不会请求 medium 或 high 品质。')).toBeVisible()
+  await expect(aiDialog.getByRole('button', { name: /最高/ })).toHaveCount(0)
+  await aiDialog.getByRole('button', { name: '关闭 AI 图片生成' }).click()
 })

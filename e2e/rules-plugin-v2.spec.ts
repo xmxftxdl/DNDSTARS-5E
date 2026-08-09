@@ -244,6 +244,10 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
     expect(player.getByText('已激活 · v0.1.0')).toBeVisible({ timeout: 20_000 }),
     expect(player2.getByText('已激活 · v0.1.0')).toBeVisible({ timeout: 20_000 }),
   ])
+  await Promise.all([
+    expect(player.getByText('演示特性：守护火花', { exact: true })).toBeVisible({ timeout: 20_000 }),
+    expect(player2.getByText('余烬长枪（原创演示）', { exact: true })).toBeVisible({ timeout: 20_000 }),
+  ])
 
   const now = Date.now()
   const hero = {
@@ -253,6 +257,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
     hitDice: '3d6',
     abilities: { str: 10, dex: 12, con: 14, int: 16, wis: 10, cha: 10 },
     savingThrows: ['int', 'wis'],
+    dnd5ePluginFeatureIds: [FEATURE_ID],
   }
   const ally = character('plugin-ally', '插件盟友', created.roomId, joined2.member.memberId)
   await putRoomState(request, created.roomId, 'characters', {
@@ -288,23 +293,9 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
 
   await player.goto(`${PLAYER}/characters`, { waitUntil: 'domcontentloaded' })
   await expect(player.getByRole('textbox', { name: '角色名称' })).toHaveValue('插件主角', { timeout: 20_000 })
-  await player.getByRole('button', { name: '扩展规则', exact: true }).click()
-  const featureCard = player.locator('article').filter({ hasText: '演示特性：守护火花' })
-  await featureCard.getByRole('button', { name: '选择', exact: true }).click()
-  await expect(featureCard.getByRole('button', { name: '已选择', exact: true })).toBeVisible()
-  await expect.poll(async () => {
-    const state = await getRoomState<{ characters: Array<{ id: string; dnd5ePluginFeatureIds?: string[] }> }>(
-      request,
-      created.roomId,
-      'characters',
-      joined.member,
-    )
-    return state.characters.find((candidate) => candidate.id === hero.id)?.dnd5ePluginFeatureIds ?? []
-  }, { timeout: 20_000 }).toContain(FEATURE_ID)
+  await expect(player.getByRole('button', { name: '扩展规则', exact: true })).toHaveCount(0)
   await player.reload({ waitUntil: 'domcontentloaded' })
-  await player.getByRole('button', { name: '扩展规则', exact: true }).click()
-  await expect(player.locator('article').filter({ hasText: '演示特性：守护火花' }).getByRole('button', { name: '已选择' }))
-    .toBeVisible()
+  await expect(player.getByRole('button', { name: '扩展规则', exact: true })).toHaveCount(0)
   await player.getByRole('button', { name: '职业', exact: true }).click()
   await player.getByRole('button', { name: /^法师\s+\d+级/ }).click()
   await player.getByRole('combobox', { name: /奥术传承/ }).selectOption(SUBCLASS_ID)

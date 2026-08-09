@@ -15,6 +15,7 @@ import {
 import { geometryEntityPoints } from './mapCanvasGeometryUtils'
 import { usePrefersReducedMotion, useStatusAnimation, useTokenBadgeImage } from './mapEffectHooks'
 import { mapCanvasEffectTokenAreaRenderOffset } from './mapCanvasInteraction'
+import { persistentAreaAtlasLoopFrames } from './persistentAreaAtlasFrames'
 
 interface Point {
   x: number
@@ -124,6 +125,7 @@ function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; ma
 
 
 const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>> = {
+  'dancing-lights': { icon: '✦', glow: '#a5f3fc' },
   'mage-hand': { icon: '✋', glow: '#67e8f9' },
   grease: { icon: '≋', glow: '#fde68a' },
   daylight: { icon: '☀', glow: '#fef3c7' },
@@ -168,7 +170,6 @@ const PERSISTENT_AREA_SPRITE_ASSETS: Readonly<Record<string, string>> = {
 const PERSISTENT_STRIP_PRESETS = new Set(['wall-of-fire', 'blade-barrier'])
 
 
-
 function PersistentAreaSpriteAtlas({
   image,
   x,
@@ -198,9 +199,7 @@ function PersistentAreaSpriteAtlas({
   const spriteRef = useRef<Konva.Image>(null)
   const frameWidth = (image.naturalWidth || image.width) / 4
   const frameHeight = (image.naturalHeight || image.height) / 4
-  const loopFrames = preset === 'cloudkill' || preset === 'ice-storm-ground'
-    ? [4, 5, 6, 7, 8, 9, 10, 11] as const
-    : [8, 9, 10, 11, 12, 13, 14, 15] as const
+  const loopFrames = persistentAreaAtlasLoopFrames(preset)
   const cropInset = Math.max(0.5, Math.min(frameWidth, frameHeight) * 0.004)
 
   useStatusAnimation(
@@ -214,7 +213,9 @@ function PersistentAreaSpriteAtlas({
         width: frameWidth - cropInset * 2,
         height: frameHeight - cropInset * 2,
       })
-      spriteRef.current?.opacity(opacity + Math.sin(seconds * 2.2) * 0.035)
+      spriteRef.current?.opacity(
+        preset === 'darkness' ? opacity : opacity + Math.sin(seconds * 2.2) * 0.035,
+      )
     },
     { active: !reducedMotion, fps: 14 },
   )
@@ -280,9 +281,15 @@ function persistentAreaSpritePlacement(
   const y = centers.reduce((sum, point) => sum + point.y, 0) / centers.length
 
   if (PERSISTENT_STRIP_PRESETS.has(preset)) {
-    if (preset === 'wall-of-fire' && area.wallOfFireGeometry?.shape === 'line' && area.anchorCell) {
+    if ((preset === 'wall-of-fire' || preset === 'blade-barrier') && area.wallOfFireGeometry?.shape === 'line' && area.anchorCell) {
       const anchor = cellTopLeft(area.anchorCell, map)
-      return { x: anchor.x + grid / 2, y: anchor.y + grid / 2, width: grid * 12.05, height: grid * 1.12, rotation: area.wallOfFireGeometry.angleDegrees }
+      return {
+        x: anchor.x + grid / 2,
+        y: anchor.y + grid / 2,
+        width: grid * ((area.wallOfFireGeometry.lengthFeet ?? (preset === 'blade-barrier' ? 100 : 60)) / 5 + 0.05),
+        height: grid * 1.12,
+        rotation: area.wallOfFireGeometry.angleDegrees,
+      }
     }
     const covariance = centers.reduce((sum, point) => ({
       xx: sum.xx + (point.x - x) ** 2,
@@ -622,7 +629,7 @@ export function Dnd5eCoreSpellAreaOverlay({
     (frame) => {
       const seconds = (frame?.time ?? 0) / 1000
       groupRef.current?.opacity(
-        preset === 'flaming-sphere'
+        preset === 'flaming-sphere' || preset === 'darkness'
           ? 1
           : (0.84 + Math.sin(seconds * 2.1) * 0.12) * intensity,
       )
@@ -638,6 +645,13 @@ export function Dnd5eCoreSpellAreaOverlay({
 
   return (
     <Group ref={groupRef} listening={false}>
+      {preset === 'dancing-lights' ? area.cells.map((cell, index) => {
+        const point = cellTopLeft(cell, map)
+        return <Group key={`dancing-light:${area.id}:${cellKey(cell)}`}>
+          <Circle x={point.x + grid / 2} y={point.y + grid / 2} radius={grid * 0.22} fill={index % 2 ? '#f0abfc' : '#a5f3fc'} opacity={0.92} shadowColor={index % 2 ? '#e879f9' : '#67e8f9'} shadowBlur={grid * 0.45} />
+          <Circle x={point.x + grid / 2} y={point.y + grid / 2} radius={grid * 0.08} fill="#ffffff" opacity={0.96} />
+        </Group>
+      }) : null}
       {triggerOnlyCells.map((cell) => {
         const { x, y } = cellTopLeft(cell, map)
         return (
@@ -718,11 +732,11 @@ export function Dnd5eCoreSpellAreaOverlay({
           size={grid * FLAMING_SPHERE_VISUAL_DIAMETER_GRID_FACTOR}
           reducedMotion={reducedMotion}
         />
-      ) : persistentAreaImage && preset === 'wall-of-fire' && area.wallOfFireGeometry?.shape === 'ring' && area.anchorCell ? (
+      ) : persistentAreaImage && (preset === 'wall-of-fire' || preset === 'blade-barrier') && area.wallOfFireGeometry?.shape === 'ring' && area.anchorCell ? (
         <WallOfFireRingVisual
           image={persistentAreaImage}
           x={cellTopLeft(area.anchorCell, map).x + grid / 2} y={cellTopLeft(area.anchorCell, map).y + grid / 2}
-          radius={grid * 2} reducedMotion={reducedMotion} persistent
+          radius={grid * ((area.wallOfFireGeometry.diameterFeet ?? (preset === 'blade-barrier' ? 60 : 20)) / 10)} reducedMotion={reducedMotion} persistent
         />
       ) : persistentAreaImage && spritePlacement ? (
         <PersistentAreaSpriteAtlas
@@ -817,11 +831,11 @@ export function Dnd5ePluginAreaOverlays({
       )}
       x={renderOffset.x}
       y={renderOffset.y}
-      onClick={isDM && area.coreSpellId === 'wall-of-fire' && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
-      onTap={isDM && area.coreSpellId === 'wall-of-fire' && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
+      onClick={isDM && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
+      onTap={isDM && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
     >
       {overlay}
-      {isDM && area.coreSpellId === 'wall-of-fire' && onAreaClick && area.cells.map((cell) => { const point = cellTopLeft(cell, map); return <Rect key={`wall-of-fire-hit:${area.id}:${cellKey(cell)}`} x={point.x} y={point.y} width={map.gridSize} height={map.gridSize} fill="rgba(255,255,255,0.001)" /> })}
+      {isDM && onAreaClick && area.cells.map((cell) => { const point = cellTopLeft(cell, map); return <Rect key={`persistent-area-hit:${area.id}:${cellKey(cell)}`} x={point.x} y={point.y} width={map.gridSize} height={map.gridSize} fill="rgba(255,255,255,0.001)" /> })}
       {isDM && area.coreSpellId === 'spike-growth' && center && onVisibilityToggle && <Group
         x={center.x}
         y={center.y}

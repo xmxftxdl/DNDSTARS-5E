@@ -1,5 +1,5 @@
 export const AI_JOB_SCHEMA_VERSION: 2
-export const AI_JOB_ARTIFACT_SCHEMA_VERSION: 1
+export const AI_JOB_ARTIFACT_SCHEMA_VERSION: 2
 export const AI_JOB_MAX_PER_CAMPAIGN: 40
 export const AI_JOB_LOCAL_LEASE_MS: number
 export const AI_JOB_ARTIFACT_MAX_BYTES: number
@@ -47,9 +47,18 @@ export interface AiJobCreateRequestV2 {
 export interface PdfCampaignAnalysisArtifactV1 {
   schemaVersion: 1
   kind: 'pdf-campaign-analysis'
-  payload: Record<string, unknown>
+  payload: object
   sourceHash?: string
 }
+
+export interface PdfCampaignAnalysisArtifactV2 {
+  schemaVersion: 2
+  kind: 'pdf-campaign-analysis'
+  payload: object
+  sourceHash?: string
+}
+
+export type PdfCampaignAnalysisArtifact = PdfCampaignAnalysisArtifactV1 | PdfCampaignAnalysisArtifactV2
 
 export interface AiJobRecordV2 extends AiJobCreateRequestV2 {
   jobId: string
@@ -59,7 +68,7 @@ export interface AiJobRecordV2 extends AiJobCreateRequestV2 {
   revision: number
   progress: { stage: string; current: number; total: number; message: string }
   lease: null | { tokenHash: string; runnerId: string; acquiredAt: number; expiresAt: number }
-  artifact: PdfCampaignAnalysisArtifactV1 | null
+  artifact: PdfCampaignAnalysisArtifact | null
   failure: null | { code: string; message: string }
   createdAt: number
   updatedAt: number
@@ -71,6 +80,8 @@ export const AI_JOB_STATUSES: readonly AiJobStatusV2[]
 export function normalizeAiJobCreateRequestV2(value: unknown): AiJobCreateRequestV2 | null
 export function normalizeAiJobRecordV2(value: unknown): AiJobRecordV2 | null
 export function normalizePdfCampaignAnalysisArtifactV1(value: unknown): PdfCampaignAnalysisArtifactV1 | null
+export function normalizePdfCampaignAnalysisArtifactV2(value: unknown): PdfCampaignAnalysisArtifactV2 | null
+export function normalizePdfCampaignAnalysisArtifact(value: unknown): PdfCampaignAnalysisArtifact | null
 export function aiJobTransitionAllowed(from: AiJobStatusV2, to: AiJobStatusV2): boolean
 export function publicAiJobV2(value: unknown, includeArtifact?: boolean): Omit<AiJobRecordV2, 'lease'> & {
   lease: null | { runnerId: string; acquiredAt: number; expiresAt: number }

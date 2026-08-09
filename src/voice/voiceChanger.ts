@@ -48,7 +48,7 @@ export interface VoiceEffectPresetDefinition {
 
 export interface VoiceNpcQuickSlot {
   shortcut: number
-  npcTokenId: string
+  npcTokenId?: string
   npcName: string
   mapId?: string
   selection: VoiceChangerSelection
@@ -140,12 +140,14 @@ export function normalizeVoiceChangerConfig(value: unknown): VoiceChangerConfigV
       if (!entry || typeof entry !== 'object') return []
       const slot = entry as Partial<VoiceNpcQuickSlot>
       const shortcut = Math.trunc(Number(slot.shortcut))
-      if (shortcut < 1 || shortcut > 9 || typeof slot.npcTokenId !== 'string' || !slot.npcTokenId.trim()) return []
+      const npcName = typeof slot.npcName === 'string' ? slot.npcName.trim().slice(0, 80) : ''
+      if (shortcut < 1 || shortcut > 9 || !npcName) return []
+      const npcTokenId = typeof slot.npcTokenId === 'string' ? slot.npcTokenId.trim() : ''
       return [{
         shortcut,
-        npcTokenId: slot.npcTokenId.trim(),
-        npcName: typeof slot.npcName === 'string' && slot.npcName.trim() ? slot.npcName.trim().slice(0, 80) : '未命名 NPC',
-        ...(typeof slot.mapId === 'string' && slot.mapId.trim() ? { mapId: slot.mapId.trim() } : {}),
+        npcName,
+        ...(npcTokenId ? { npcTokenId } : {}),
+        ...(npcTokenId && typeof slot.mapId === 'string' && slot.mapId.trim() ? { mapId: slot.mapId.trim() } : {}),
         selection: normalizeVoiceChangerSelection(slot.selection),
       }]
     })
@@ -160,6 +162,24 @@ export function normalizeVoiceChangerConfig(value: unknown): VoiceChangerConfigV
       ? { activeShortcut }
       : {}),
     slots,
+  }
+}
+
+export function toggleVoiceChangerShortcut(config: VoiceChangerConfigV1, shortcut: number): VoiceChangerConfigV1 {
+  const normalized = normalizeVoiceChangerConfig(config)
+  const slot = normalized.slots.find((candidate) => candidate.shortcut === shortcut)
+  if (!slot) return normalized
+  if (normalized.activeShortcut === shortcut) {
+    return {
+      ...normalized,
+      selection: DEFAULT_VOICE_CHANGER_SELECTION,
+      activeShortcut: undefined,
+    }
+  }
+  return {
+    ...normalized,
+    selection: slot.selection,
+    activeShortcut: shortcut,
   }
 }
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Dices, Play, X } from 'lucide-react'
 import type { Dnd5eCustomMonsterDraft } from '../../rulesets/dnd5e/customMonsterWorkshop'
 import type { Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
+import { ABILITIES } from '../../lib/dnd'
 import {
   listDnd5eMonsterWorkshopSandboxActions,
   runDnd5eMonsterWorkshopSandbox,
@@ -207,7 +208,7 @@ export default function Dnd5eMonsterHeadlessSandbox({ draft, monsterCatalog, onC
                 ? result.attacks.length > 1
                   ? <>共结算 {result.attacks.length} 次攻击，命中 {result.attacks.filter((attack) => attack.hit).length} 次</>
                   : <>攻击总值 {result.attack.total} 对 AC {result.attack.armorClass}</>
-                : <>{result.save.ability.toUpperCase()} 豁免 {result.save.total} 对 DC {result.save.dc}（加值 {result.save.modifier >= 0 ? '+' : ''}{result.save.modifier}）</>}
+                : <>{ABILITIES.find((ability) => ability.key === result.save?.ability)?.label ?? result.save.ability}豁免 {result.save.total} 对 DC {result.save.dc}（加值 {result.save.modifier >= 0 ? '+' : ''}{result.save.modifier}）</>}
             </div>
           </div>
           <div className="mt-3">

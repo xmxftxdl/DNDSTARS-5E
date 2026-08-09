@@ -9,6 +9,16 @@ export interface Dnd5eWallOfFireGeometry {
   shape: Dnd5eWallOfFireShape
   angleDegrees: number
   damagingSide: Dnd5eWallOfFireDamagingSide
+  lengthFeet?: number
+  diameterFeet?: number
+}
+
+export const WALL_OF_FIRE_MAX_LENGTH_FEET = 60
+export const WALL_OF_FIRE_MAX_DIAMETER_FEET = 20
+
+export function normalizeWallOfFireDimension(value: number | undefined, maximum: number): number {
+  if (value == null || !Number.isFinite(value)) return maximum
+  return Math.max(5, Math.min(maximum, Math.round(value / 5) * 5))
 }
 
 type WallMap = Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY'>
@@ -39,10 +49,12 @@ export function dnd5eWallOfFireCells(input: {
   anchor: GridCell
   shape: Dnd5eWallOfFireShape
   angleDegrees: number
+  lengthFeet?: number
+  diameterFeet?: number
   map: WallMap
 }): GridCell[] {
   if (input.shape === 'ring') {
-    const radius = 2
+    const radius = normalizeWallOfFireDimension(input.diameterFeet, WALL_OF_FIRE_MAX_DIAMETER_FEET) / 10
     const halfCellDiagonal = Math.SQRT1_2
     const cells: GridCell[] = []
     for (let row = input.anchor.row - 3; row <= input.anchor.row + 3; row += 1) {
@@ -54,19 +66,21 @@ export function dnd5eWallOfFireCells(input: {
     return clipped(cells, input.map)
   }
   const angle = normalizeWallOfFireAngle(input.angleDegrees)
+  const lengthFeet = normalizeWallOfFireDimension(input.lengthFeet, WALL_OF_FIRE_MAX_LENGTH_FEET)
+  const lengthCells = Math.round(lengthFeet / 5)
   // A 1-foot-thick wall is represented by exactly one 5-foot grid lane. The
   // generic polygon-touching helper includes cells that merely touch both
   // long edges, which turns axis-aligned walls into a 15-by-60-foot strip.
   if (angle === 0 || angle === 180) {
-    return clipped(Array.from({ length: 12 }, (_, index) => ({
-      col: input.anchor.col + index - 5,
+    return clipped(Array.from({ length: lengthCells }, (_, index) => ({
+      col: input.anchor.col + index - Math.floor((lengthCells - 1) / 2),
       row: input.anchor.row,
     })), input.map)
   }
   if (angle === 90 || angle === 270) {
-    return clipped(Array.from({ length: 12 }, (_, index) => ({
+    return clipped(Array.from({ length: lengthCells }, (_, index) => ({
       col: input.anchor.col,
-      row: input.anchor.row + index - 5,
+      row: input.anchor.row + index - Math.floor((lengthCells - 1) / 2),
     })), input.map)
   }
   const radians = angle * Math.PI / 180
@@ -76,7 +90,7 @@ export function dnd5eWallOfFireCells(input: {
     col: input.anchor.col - normal.x * 10,
     row: input.anchor.row - normal.y * 10,
   }
-  return clipped(cellsInRect(input.anchor, orientFrom, 60, 5), input.map)
+  return clipped(cellsInRect(input.anchor, orientFrom, lengthFeet, 5), input.map)
 }
 
 /** Selected 10-foot damage band. Ring walls choose inside/outside; line walls choose left/right. */
@@ -86,17 +100,20 @@ export function dnd5eWallOfFireDamageCells(input: {
   shape: Dnd5eWallOfFireShape
   angleDegrees: number
   damagingSide: Dnd5eWallOfFireDamagingSide
+  lengthFeet?: number
+  diameterFeet?: number
   map: WallMap
 }): GridCell[] {
   const wallKeys = new Set(input.wallCells.map(cellKey))
   const { columns, rows } = mapBounds(input.map)
   const result = new Map<string, GridCell>(input.wallCells.map((cell) => [cellKey(cell), cell]))
   if (input.shape === 'ring') {
+    const radius = normalizeWallOfFireDimension(input.diameterFeet, WALL_OF_FIRE_MAX_DIAMETER_FEET) / 10
     for (let row = 0; row < rows; row += 1) for (let col = 0; col < columns; col += 1) {
       const distance = Math.hypot(col - input.anchor.col, row - input.anchor.row)
       const selected = input.damagingSide === 'inside'
-        ? distance < 2
-        : input.damagingSide === 'outside' && distance > 2 && distance <= 4
+        ? distance < radius
+        : input.damagingSide === 'outside' && distance > radius && distance <= radius + 2
       if (selected) result.set(cellKey({ col, row }), { col, row })
     }
     return [...result.values()]
@@ -127,11 +144,12 @@ export function dnd5eWallOfFireDamageCells(input: {
   const along = { x: Math.cos(radians), y: Math.sin(radians) }
   const left = { x: -along.y, y: along.x }
   const sign = input.damagingSide === 'left' ? 1 : -1
+  const halfLength = normalizeWallOfFireDimension(input.lengthFeet, WALL_OF_FIRE_MAX_LENGTH_FEET) / 10
   for (let row = 0; row < rows; row += 1) for (let col = 0; col < columns; col += 1) {
     const delta = { x: col - input.anchor.col, y: row - input.anchor.row }
     const longitudinal = delta.x * along.x + delta.y * along.y
     const lateral = (delta.x * left.x + delta.y * left.y) * sign
-    if (Math.abs(longitudinal) <= 6.5 && lateral >= 0 && lateral <= 2.5) {
+    if (Math.abs(longitudinal) <= halfLength + 0.5 && lateral >= 0 && lateral <= 2.5) {
       result.set(`${col},${row}`, { col, row })
     }
   }

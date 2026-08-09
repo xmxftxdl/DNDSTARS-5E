@@ -6,6 +6,7 @@ import type { Dnd5ePersistentAreaVisual } from './persistentAreaTypes'
  * visual chunk merely to recover a legacy area's missing visual field.
  */
 export const DND5E_CORE_SPELL_AREA_VISUALS: Readonly<Record<string, Dnd5ePersistentAreaVisual>> = {
+  'dancing-lights': { preset: 'dancing-lights', intensity: 'strong' },
   'mage-hand': { preset: 'mage-hand', intensity: 'subtle' },
   darkness: { preset: 'darkness', intensity: 'strong' },
   daylight: { preset: 'daylight', intensity: 'subtle' },

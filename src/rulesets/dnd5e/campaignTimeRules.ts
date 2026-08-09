@@ -24,10 +24,11 @@ export interface Dnd5eCampaignTimeReconcileResult {
 
 function applyDawn(character: Character, dawns: number): Character {
   if (dawns < 1) return character
-  return restoreDnd5eInventoryResources(
-    advanceDnd5eDivineInterventionCalendarDays(character, dawns),
-    'dawn',
-  )
+  let next = advanceDnd5eDivineInterventionCalendarDays(character, dawns)
+  for (let dawn = 0; dawn < dawns; dawn += 1) {
+    next = restoreDnd5eInventoryResources(next, 'dawn')
+  }
+  return next
 }
 
 export function applyDnd5eShortRestBenefits(character: Character): Character {
@@ -38,6 +39,7 @@ export function applyDnd5eShortRestBenefits(character: Character): Character {
         ...character.dnd5eCombatState,
         relentlessRageDc: undefined,
         relentlessRagePendingDc: undefined,
+        abilityScoreReductionLedger: undefined,
       } : undefined,
     }, 'short-rest')),
     'short-rest',
