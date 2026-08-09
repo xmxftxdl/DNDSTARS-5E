@@ -13,6 +13,8 @@ import { RoomCommandBus, type RoomCommandEnvelope } from '../application/command
 import { browserRoomCommandTelemetry } from '../adapters/browser/performanceCommandTelemetry'
 import { appRoomAuthorityScheduler } from '../lib/roomAuthorityScheduler'
 import { getRoomSession } from '../lib/roomSession'
+import { getClassResource, spendClassResource } from '../lib/classResources'
+import { DND5E_CORE_INSPIRATION_RESOURCE_KEY } from '../lib/d20InterruptPolicy'
 import { browserSharedRoomService } from '../composition/browserSharedRoomService'
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
@@ -107,9 +109,26 @@ export type AppRoomCommand =
       activeEffects: readonly Dnd5eActiveEffectInstance[]
     })
   | (RoomCommandEnvelope & {
+      type: 'combat.monster-berserk.set'
+      mapId: string
+      tokenId: string
+      active: boolean
+    })
+  | (RoomCommandEnvelope & {
       type: 'character.spell-selections.replace'
       characterId: string
       patch: SpellChoicePatch
+    })
+  | (RoomCommandEnvelope & {
+      type: 'character.spell-slot.set'
+      characterId: string
+      resourceKey: string
+      current: number
+    })
+  | (RoomCommandEnvelope & {
+      type: 'character.class-resources.spend'
+      characterId: string
+      costs: readonly { resourceKey: string; amount: number }[]
     })
   | (RoomCommandEnvelope & {
       type: 'character.inventory.mutate'
@@ -144,6 +163,10 @@ function characterMutationAllowed(character: Character): boolean {
   const session = getRoomSession()
   if (!session || session.role === 'dm') return true
   return session.role === 'player' && character.roomMemberId === session.memberId
+}
+
+export function isEditableDnd5eSpellSlotResourceKey(resourceKey: string): boolean {
+  return resourceKey === 'dnd5e-pact-slot' || /^dnd5e-spell-slot-[1-9]$/.test(resourceKey)
 }
 
 async function persistRoomStores(resources: readonly ('characters' | 'maps')[]): Promise<void> {
@@ -184,7 +207,7 @@ export interface RoomSpellEffectRemovalPlan {
  * Builds the complete out-of-combat-safe removal transaction. No initiative
  * snapshot is required: the spell entity metadata and its anchored area are
  * the authority links, and concentration is cleared only when every link still
- * names the caster's current Flaming Sphere concentration.
+ * names the caster's current concentration.
  */
 export function planRoomSpellEffectRemoval(input: {
   map: BattleMap
@@ -196,7 +219,7 @@ export function planRoomSpellEffectRemoval(input: {
     return { status: 'missing', map: input.map, characters: [...input.characters] }
   }
   const effect = token.dnd5eSpellEffect
-  if (!effect || effect.spellId !== 'flaming-sphere') {
+  if (!effect) {
     return { status: 'invalid', map: input.map, characters: [...input.characters] }
   }
   const removal = removeDnd5eSpellEffectFromMap(input.map, token.id)
@@ -205,8 +228,7 @@ export function planRoomSpellEffectRemoval(input: {
   }
 
   const concentrationId = effect.concentrationId
-  const exactFlamingSphereRelation = effect.spellId === 'flaming-sphere' &&
-    concentrationId === 'flaming-sphere' &&
+  const exactPersistentSpellRelation = !!concentrationId &&
     removal.removedAreas.some((area) =>
       area.sourceKind === 'core-spell' &&
       area.coreSpellId === effect.spellId &&
@@ -216,7 +238,7 @@ export function planRoomSpellEffectRemoval(input: {
       area.anchorTokenId === token.id &&
       area.concentrationId === concentrationId,
     )
-  if (!exactFlamingSphereRelation) {
+  if (!exactPersistentSpellRelation) {
     return { status: 'removed', map: removal.map, characters: [...input.characters] }
   }
 
@@ -514,6 +536,50 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
     }
   }
 
+  if (command.type === 'combat.monster-berserk.set') {
+    if (!directDmMutationAllowed()) {
+      return { status: 'rejected', message: '只有 DM 可以直接调整怪物专属状态。' }
+    }
+    const characterState = useCharacterStore.getState()
+    const mapState = useMapStore.getState()
+    const map = mapState.maps.find((candidate) => candidate.id === command.mapId)
+    const token = map?.tokens.find((candidate) => candidate.id === command.tokenId)
+    if (!map || !token || token.type !== 'enemy') {
+      return { status: 'rejected', message: '找不到待调整状态的怪物。' }
+    }
+    const character = token.characterId
+      ? characterState.characters.find((candidate) => candidate.id === token.characterId)
+      : undefined
+    if (token.characterId && !character) {
+      return { status: 'rejected', message: '怪物关联角色数据已经失效。' }
+    }
+
+    const previousCharacter = character ? structuredClone(character) : undefined
+    const previousToken = structuredClone(token)
+    const previousState = character?.dnd5eCombatState ?? token.dnd5eCombatState
+    const nextState = {
+      ...(previousState ?? {}),
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      monsterBerserk: command.active ? true : undefined,
+    }
+    if (character) {
+      characterState.applyAuthorityUpdate(character.id, { dnd5eCombatState: nextState })
+    } else {
+      mapState.applyAuthorityTokenUpdate(map.id, token.id, { dnd5eCombatState: nextState })
+    }
+    try {
+      await persistRoomStores(character ? ['characters'] : ['maps'])
+      return { status: 'applied' }
+    } catch (error) {
+      if (previousCharacter) {
+        characterState.applyAuthorityUpdate(previousCharacter.id, previousCharacter)
+      } else {
+        mapState.applyAuthorityTokenUpdate(map.id, previousToken.id, previousToken)
+      }
+      throw error
+    }
+  }
+
   if (command.type === 'character.spell-selections.replace') {
     const state = useCharacterStore.getState()
     const character = state.characters.find((candidate) => candidate.id === command.characterId)
@@ -522,6 +588,79 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
     }
     const previous = structuredClone(character)
     state.applyAuthorityUpdate(character.id, command.patch)
+    try {
+      await persistRoomStores(['characters'])
+      return { status: 'applied' }
+    } catch (error) {
+      state.applyAuthorityUpdate(previous.id, previous)
+      throw error
+    }
+  }
+
+  if (command.type === 'character.spell-slot.set') {
+    const state = useCharacterStore.getState()
+    const character = state.characters.find((candidate) => candidate.id === command.characterId)
+    if (!character || !characterMutationAllowed(character)) {
+      return { status: 'rejected', message: '当前成员无权修改该角色的法术位。' }
+    }
+    if (!isEditableDnd5eSpellSlotResourceKey(command.resourceKey)) {
+      return { status: 'rejected', message: '该资源不是可手动调整的法术位。' }
+    }
+    const resource = getClassResource(character, command.resourceKey)
+    if (!resource || resource.max < 1) {
+      return { status: 'rejected', message: '该角色没有对应法术位。' }
+    }
+    if (!Number.isSafeInteger(command.current) || command.current < 0 || command.current > resource.max) {
+      return { status: 'rejected', message: `法术位必须是 0 到 ${resource.max} 之间的整数。` }
+    }
+    const previous = structuredClone(character)
+    state.applyAuthorityUpdate(character.id, {
+      classResources: {
+        ...(character.classResources ?? {}),
+        [command.resourceKey]: { current: command.current, max: resource.max },
+      },
+    }, { protectClassResourcesUntilAcknowledged: true })
+    try {
+      await persistRoomStores(['characters'])
+      return { status: 'applied' }
+    } catch (error) {
+      state.applyAuthorityUpdate(previous.id, previous)
+      throw error
+    }
+  }
+
+  if (command.type === 'character.class-resources.spend') {
+    const state = useCharacterStore.getState()
+    const character = state.characters.find((candidate) => candidate.id === command.characterId)
+    if (!character || !characterMutationAllowed(character)) {
+      return { status: 'rejected', message: '当前成员无权消耗该角色的资源。' }
+    }
+    if (
+      !Array.isArray(command.costs) || command.costs.length < 1 || command.costs.length > 16 ||
+      command.costs.some((cost) => !cost.resourceKey.trim() ||
+        !Number.isSafeInteger(cost.amount) || cost.amount < 1 || cost.amount > 1_000_000) ||
+      new Set(command.costs.map((cost) => cost.resourceKey)).size !== command.costs.length
+    ) return { status: 'rejected', message: '资源消耗配置无效。' }
+    let resolved: Character | null = character
+    for (const cost of command.costs) {
+      if (!resolved) break
+      if (cost.resourceKey === DND5E_CORE_INSPIRATION_RESOURCE_KEY) {
+        const currentInspiration: number = Number.isSafeInteger(resolved.inspiration)
+          ? Math.max(0, resolved.inspiration)
+          : 0
+        resolved = currentInspiration >= cost.amount
+          ? { ...resolved, inspiration: currentInspiration - cost.amount }
+          : null
+        continue
+      }
+      resolved = spendClassResource(resolved, cost.resourceKey, cost.amount)
+    }
+    if (!resolved) return { status: 'rejected', message: '角色资源不足或资源不存在。' }
+    const previous = structuredClone(character)
+    state.applyAuthorityUpdate(character.id, {
+      classResources: resolved.classResources,
+      inspiration: resolved.inspiration,
+    }, { protectClassResourcesUntilAcknowledged: true })
     try {
       await persistRoomStores(['characters'])
       return { status: 'applied' }
@@ -704,6 +843,26 @@ export function replaceRoomCombatantActiveEffects(input: {
   })
 }
 
+export function setRoomMonsterBerserk(input: {
+  mapId: string
+  tokenId: string
+  active: boolean
+}): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [linkedCharacterIdForToken(input.mapId, input.tokenId)],
+    mapId: input.mapId,
+    tokenId: input.tokenId,
+    fallback: 'room:invalid:monster-berserk',
+  })
+  return appRoomCommandBus.dispatch({
+    ...input,
+    id: commandId('monster-berserk'),
+    type: 'combat.monster-berserk.set',
+    ...aggregateTarget,
+    issuedAt: Date.now(),
+  })
+}
+
 export function replaceRoomCharacterSpellSelections(
   characterId: string,
   patch: SpellChoicePatch,
@@ -719,6 +878,43 @@ export function replaceRoomCharacterSpellSelections(
     issuedAt: Date.now(),
     characterId,
     patch,
+  })
+}
+
+export function setRoomCharacterSpellSlot(input: {
+  characterId: string
+  resourceKey: string
+  current: number
+}): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [input.characterId],
+    fallback: 'room:invalid:spell-slot',
+  })
+  return appRoomCommandBus.dispatchLatest({
+    ...input,
+    id: commandId('spell-slot'),
+    type: 'character.spell-slot.set',
+    ...aggregateTarget,
+    issuedAt: Date.now(),
+  }, `spell-slot:${input.characterId}:${input.resourceKey}`)
+}
+
+export function spendRoomCharacterClassResources(input: {
+  characterId: string
+  costs: readonly { resourceKey: string; amount: number }[]
+  transactionId: string
+}): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [input.characterId],
+    fallback: 'room:invalid:class-resources-spend',
+  })
+  return appRoomCommandBus.dispatch({
+    id: `class-resource-spend:${input.transactionId}`,
+    type: 'character.class-resources.spend',
+    ...aggregateTarget,
+    issuedAt: Date.now(),
+    characterId: input.characterId,
+    costs: input.costs.map((cost) => ({ ...cost })),
   })
 }
 

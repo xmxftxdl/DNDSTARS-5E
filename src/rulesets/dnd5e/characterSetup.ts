@@ -517,6 +517,17 @@ export function rollDnd5eAbilityScore(
   }
 }
 
+export function rollDnd5eAbilityScoreSet(
+  rule: { diceCount: number; dieSides: number; dropLowest: number },
+  count = 6,
+  random: () => number = Math.random,
+): Dnd5eAbilityRoll[] {
+  return Array.from(
+    { length: Math.max(0, Math.floor(count)) },
+    () => rollDnd5eAbilityScore(rule, random),
+  )
+}
+
 export function rollDnd5eFourD6DropLowest(random: () => number = Math.random): Dnd5eFourD6Roll {
   const rolled = rollDnd5eAbilityScore({ diceCount: 4, dieSides: 6, dropLowest: 1 }, random)
   const dice = rolled.dice as [number, number, number, number]

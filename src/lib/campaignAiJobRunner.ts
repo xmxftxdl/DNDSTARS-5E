@@ -11,6 +11,7 @@ import {
 } from './aiJobApi'
 import {
   createExternalAiBridgeRuntime,
+  createLocalBridgePdfOcrProvider,
   createLocalAiBridgeRuntime,
   localAiBridgeSnapshot,
 } from './localAiBridgeApi'
@@ -21,8 +22,10 @@ import {
   selectPdfAnalysisModelRouting,
   type PdfAnalysisDepthV1,
   type PdfAnalysisProgressV1,
-  type PdfCampaignAnalysisV1,
 } from './pdfCampaignAnalysis'
+import { finalizePdfCampaignAnalysisV2 } from './pdfCampaignAnalysisFinalizer'
+import type { PdfCampaignAnalysisV2 } from './pdfCampaignAnalysisV2'
+import { pdfSourceRepository } from './pdfSourceRepository'
 import {
   createEmptyPdfAnalysisCache,
   createPdfAnalysisCacheKey,
@@ -31,11 +34,11 @@ import {
   savePdfAnalysisCache,
 } from './pdfAnalysisCache'
 
-const PDF_ANALYSIS_PROMPT_VERSION = 'pdf-campaign-analysis-v3'
+const PDF_ANALYSIS_PROMPT_VERSION = 'pdf-campaign-analysis-v5-ocr-evidence'
 
 export interface CampaignPdfAnalysisRunResult {
   job: PublicAiJobV2
-  result: PdfCampaignAnalysisV1
+  result: PdfCampaignAnalysisV2
 }
 
 function sourceAssetsForFiles(files: readonly File[]) {
@@ -70,7 +73,15 @@ function registerBridgeProvider(registry: AiProviderRegistryV1, selection: AiPro
 
 function failureDetails(error: unknown, providerId?: string): { code: string; message: string } {
   const raw = error instanceof Error ? error.message : String(error)
-  const code = (raw.split(':', 1)[0] || 'ai-job-failed').slice(0, 120)
+  const safeRaw = [...(raw || 'ai-job-failed')]
+    .map((character) => {
+      const codePoint = character.codePointAt(0) ?? 0
+      return codePoint < 32 || codePoint === 127 ? ' ' : character
+    })
+    .join('')
+  const code = safeRaw
+    .trim()
+    .slice(0, 120)
   return { code, message: pdfAnalysisErrorMessage(error, providerId).slice(0, 1_000) }
 }
 
@@ -86,6 +97,10 @@ export async function runCampaignPdfAnalysisJob(input: {
   if (input.files.length === 0) throw new Error('pdf-files-required')
   const registry = new AiProviderRegistryV1()
   registerBridgeProvider(registry, input.selection)
+  const bridge = localAiBridgeSnapshot()
+  const ocrProvider = bridge.engines.rapidocr === 'ready'
+    ? createLocalBridgePdfOcrProvider()
+    : undefined
   const modelRouting = selectPdfAnalysisModelRouting(await registry.models(), input.selection)
   if (!modelRouting) throw new Error('pdf-model-routing-unavailable')
 
@@ -164,6 +179,7 @@ export async function runCampaignPdfAnalysisJob(input: {
         extraction: modelRouting.extraction.modelId,
         synthesis: modelRouting.synthesis.modelId,
       },
+      ocrProviderId: ocrProvider?.id,
     })
     const cached = await loadPdfAnalysisCache(cacheKey).catch(() => null)
     const cache = cached ?? createEmptyPdfAnalysisCache({
@@ -193,11 +209,11 @@ export async function runCampaignPdfAnalysisJob(input: {
         message: `已从本机缓存恢复 ${documents.length} 个 PDF 的文字层`,
       })
     } else {
-      documents = await extractPdfDocuments(input.files, reportProgress)
+      documents = await extractPdfDocuments(input.files, reportProgress, { ocrProvider })
       cache.documents = documents
       await persistCache()
     }
-    const result = await analyzeExtractedPdfDocuments({
+    const legacyAnalysis = await analyzeExtractedPdfDocuments({
       documents,
       registry,
       selection: input.selection,
@@ -216,6 +232,21 @@ export async function runCampaignPdfAnalysisJob(input: {
       },
     })
 
+    const result = await finalizePdfCampaignAnalysisV2({ analysis: legacyAnalysis, documents })
+    try {
+      const records = new Map(result.documents.map((document) => [document.id, document]))
+      for (const document of documents) {
+        const record = records.get(document.id)
+        if (!record || !document.pages) continue
+        await pdfSourceRepository.saveDocument(record, document.pages)
+      }
+    } catch {
+      result.warnings = [...new Set([
+        ...result.warnings,
+        '分析结果已保存，但此设备未能保留 PDF 原文页缓存；点击引用时需要重新附加原始 PDF。',
+      ])]
+    }
+
     if (heartbeatTimer) clearInterval(heartbeatTimer)
     heartbeatTimer = null
     heartbeat()
@@ -228,9 +259,9 @@ export async function runCampaignPdfAnalysisJob(input: {
       latestRevision,
       leaseToken,
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         kind: 'pdf-campaign-analysis',
-        payload: result as unknown as Record<string, unknown>,
+        payload: result,
       },
     )
     await deletePdfAnalysisCache(cacheKey).catch(() => undefined)

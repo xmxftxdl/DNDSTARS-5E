@@ -922,6 +922,10 @@ export function planDnd5eMapResultApplication(input: {
             monsterHydraDamageTakenThisTurn: combatant.classState.monsterHydraDamageTakenThisTurn,
             monsterHydraHeadSeveredTurnKey: combatant.classState.monsterHydraHeadSeveredTurnKey,
             monsterHydraFireDamageSinceLastTurn: combatant.classState.monsterHydraFireDamageSinceLastTurn,
+            monsterSwallowedInternalDamageTurnKey:
+              combatant.classState.monsterSwallowedInternalDamageTurnKey,
+            monsterSwallowedInternalDamageBySourceId:
+              combatant.classState.monsterSwallowedInternalDamageBySourceId,
             monsterThreatByTargetId: combatant.classState.monsterThreatByTargetId,
             hurlThroughHellSourceId: combatant.classState.hurlThroughHellSourceId,
             hurlThroughHellDamage: combatant.classState.hurlThroughHellDamage,
@@ -977,11 +981,46 @@ export function planDnd5eMapResultApplication(input: {
     const nextCharacterCurrentHp = combatant.classState.wildShapeFormId
       ? combatant.classState.wildShapeOriginalCurrentHp ?? character.currentHp
       : combatant.currentHp
-    const inventoryCharacter = applyDnd5eInventoryHeadlessSnapshotToCharacter({
+    let inventoryCharacter = applyDnd5eInventoryHeadlessSnapshotToCharacter({
       character,
       snapshots: combatant.inventoryHeadlessEffects,
       revision: combatant.inventoryRevision,
     })
+    const armorState = combatant.equippedArmor
+    const persistedArmorEntry = armorState
+      ? inventoryCharacter.dnd5eInventory?.entries.find((entry) =>
+          entry.instanceId === armorState.instanceId)
+      : undefined
+    const armorStateChanged = !!armorState && !!persistedArmorEntry && (
+      Math.max(0, Math.floor(persistedArmorEntry.condition?.armorClassPenalty ?? 0)) !==
+        armorState.armorClassPenalty ||
+      (persistedArmorEntry.condition?.destroyed === true) !== armorState.destroyed ||
+      (persistedArmorEntry.equippedSlot === 'armor') === armorState.destroyed
+    )
+    if (armorStateChanged && armorState && inventoryCharacter.dnd5eInventory) {
+      inventoryCharacter = {
+        ...inventoryCharacter,
+        dnd5eInventory: {
+          ...inventoryCharacter.dnd5eInventory,
+          revision: (inventoryCharacter.dnd5eInventory.revision ?? 0) + 1,
+          entries: inventoryCharacter.dnd5eInventory.entries.map((entry) =>
+            entry.instanceId === armorState.instanceId
+              ? {
+                  ...entry,
+                  equippedSlot: armorState.destroyed ? undefined : entry.equippedSlot,
+                  condition: {
+                    ...entry.condition,
+                    armorClassPenalty: armorState.armorClassPenalty || undefined,
+                    destroyed: armorState.destroyed || undefined,
+                  },
+                }
+              : entry),
+        },
+        equipment: armorState.destroyed
+          ? { ...inventoryCharacter.equipment, armor: undefined }
+          : inventoryCharacter.equipment,
+      }
+    }
     const resourcesUnchanged = JSON.stringify(character.classResources ?? {}) === JSON.stringify(nextClassResources ?? {})
     const inventoryUnchanged = JSON.stringify(character.dnd5eInventory ?? {}) === JSON.stringify(inventoryCharacter.dnd5eInventory ?? {})
     const classStateUnchanged = JSON.stringify(character.dnd5eCombatState ?? {}) === JSON.stringify(nextClassState ?? {})

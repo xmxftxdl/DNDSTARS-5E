@@ -13,11 +13,19 @@ import {
   type Dnd5eMonsterSize,
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterTargetPriority,
+  type Dnd5eMonsterTrait,
 } from './monsters'
 import { DND5E_STANDARD_CONDITIONS, type Dnd5eStandardConditionId } from './conditions'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
+
+export interface Dnd5eMonsterWorkshopTemplateSource {
+  templateId: string
+  monsterId: string
+  monsterName: string
+  section: 'trait' | 'action' | 'bonus-action' | 'reaction' | 'legendary' | 'lair'
+}
 
 export interface Dnd5eCustomMonsterTraitDraft {
   name: string
@@ -57,6 +65,9 @@ export interface Dnd5eCustomMonsterTraitDraft {
   targetBonusConditions: Dnd5eStandardConditionId[]
   targetAttackBonus: number
   targetDamageBonus: number
+  /** Complete catalog rule retained when the basic form cannot express every field. */
+  preservedTrait?: Dnd5eMonsterTrait
+  templateSource?: Dnd5eMonsterWorkshopTemplateSource
 }
 
 export interface Dnd5eCustomMonsterActionDraft {
@@ -109,6 +120,9 @@ export interface Dnd5eCustomMonsterActionDraft {
   summonConcentration: boolean
   summonConcentrationEndsOnAppearance: boolean
   summonSide: 'ally' | 'enemy'
+  /** Complete catalog action retained when the basic form is only an editable projection. */
+  preservedAction?: Dnd5eMonsterAction
+  templateSource?: Dnd5eMonsterWorkshopTemplateSource
 }
 
 export interface Dnd5eCustomMonsterEquipmentDraft {
@@ -196,6 +210,8 @@ export interface Dnd5eCustomMonsterMechanicDraft {
 export interface Dnd5eCustomMonsterDraft {
   /** 原始结构化数据；表单未覆盖的高级字段会在保存时原样透传。 */
   preservedStatBlock?: Dnd5eMonsterStatBlock
+  /** Multiattacks selected from the ability library are stored outside the flat action editor. */
+  preservedMultiattacks?: readonly Dnd5eMonsterAction[]
   id?: string
   slug?: string
   name: string
@@ -807,7 +823,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
   const preserved = draft.preservedStatBlock
   const normalizedDraftActions = draft.actions.map((draftAction) => {
     const normalized = normalizedAction(draftAction)
-    const previous = [
+    const previous = draftAction.preservedAction ?? [
       ...(preserved?.actions ?? []),
       ...(preserved?.bonusActions ?? []),
       ...(preserved?.reactions ?? []),
@@ -816,7 +832,17 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     ].find((action) => action.id === normalized.id && action.kind === normalized.kind)
     if (!previous) return normalized
     if (normalized.kind !== 'weapon-attack' || !normalized.attack || !previous.attack) {
-      return { ...previous, ...normalized }
+      const mergedRule = previous.rule && normalized.rule && previous.rule.kind === normalized.rule.kind
+        ? { ...previous.rule, ...normalized.rule } as Dnd5eMonsterAction['rule']
+        : normalized.rule ?? previous.rule
+      return {
+        ...previous,
+        ...normalized,
+        ...(mergedRule ? { rule: mergedRule } : {}),
+        ...(draftAction.preservedAction?.automation
+          ? { automation: draftAction.preservedAction.automation }
+          : {}),
+      }
     }
     return {
       ...previous,
@@ -835,9 +861,15 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
   const repeated = draft.actions.filter((action) =>
     action.category === 'action' && action.kind === 'weapon-attack' && action.attacksPerAction > 1)
   const actions: Dnd5eMonsterAction[] = [...baseActions]
-  const preservedMultiattacks = preserved?.actions.filter((action) =>
-    action.kind === 'multiattack' && action.sequence?.every((id) => baseActions.some((candidate) => candidate.id === id)),
-  ) ?? []
+  const preservedMultiattacks = [
+    ...(preserved?.actions ?? []),
+    ...(draft.preservedMultiattacks ?? []),
+  ].filter((action, index, entries) =>
+    action.kind === 'multiattack' &&
+    (action.sequence?.every((id) => baseActions.some((candidate) => candidate.id === id)) ||
+      (!!action.randomRepeat && baseActions.some((candidate) => candidate.id === action.randomRepeat?.actionId))) &&
+    entries.findIndex((candidate) => candidate.id === action.id) === index,
+  )
   if (preservedMultiattacks.length > 0) {
     actions.unshift(...preservedMultiattacks.map((action) => structuredClone(action)))
   } else if (repeated.length > 0) {
@@ -937,11 +969,18 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       rule?.kind === 'limited-magic-immunity' ||
       rule?.kind === 'magic-weapons' ||
       rule?.kind === 'conditional-target-bonus'
-    return {
+    const normalizedTrait: Dnd5eMonsterTrait = {
       name: trait.name.trim(),
       description: trait.description.trim(),
       automation: headlessRule ? ('headless' as const) : ('dm-adjudication' as const),
       ...(rule ? { rule } : {}),
+    }
+    if (!trait.preservedTrait) return normalizedTrait
+    return {
+      ...structuredClone(trait.preservedTrait),
+      ...normalizedTrait,
+      automation: trait.preservedTrait.automation ?? normalizedTrait.automation,
+      ...(rule ? { rule } : trait.preservedTrait.rule ? { rule: structuredClone(trait.preservedTrait.rule) } : {}),
     }
   })
   const traitNameIncludes = (pattern: RegExp) => traits.some((trait) => pattern.test(trait.name))
@@ -1243,7 +1282,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     entries.map((action) => {
       const damage = action.attack?.damage[0]
       const usage = action.usage
-      const areaRule = action.rule?.kind === 'area-saving-throw' && !action.rule.variants
+      const areaRule = action.rule?.kind === 'area-saving-throw' && !action.rule.variants && action.rule.damage
         ? action.rule
         : undefined
       const summonRule = action.rule?.kind === 'summon' ? action.rule : undefined
@@ -1327,12 +1366,16 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         summonConcentration: summonRule?.concentration ?? false,
         summonConcentrationEndsOnAppearance: summonRule?.concentrationEndsOnAppearance ?? false,
         summonSide: summonRule?.side ?? 'ally',
+        preservedAction: structuredClone(action),
       }
     }),
   )
   const draftActions = repairWrappedActionDrafts(mappedDraftActions)
   return {
     preservedStatBlock: structuredClone(monster),
+    preservedMultiattacks: monster.actions
+      .filter((action) => action.kind === 'multiattack')
+      .map((action) => structuredClone(action)),
     id: monster.id,
     slug: monster.slug,
     name: monster.name,
@@ -1467,6 +1510,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       name: trait.name,
       description: trait.description,
       automation: trait.automation ?? 'dm-adjudication',
+      preservedTrait: structuredClone(trait),
       ruleKind: (() => {
         const kind = trait.rule?.kind
         return kind === 'undead-fortitude' ||

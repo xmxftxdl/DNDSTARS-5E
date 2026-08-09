@@ -1,0 +1,105 @@
+{
+  "format": "dndstars5e-declarative",
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "example.fortune-choice-reroll",
+    "name": "幸运抉择测试包",
+    "version": "1.0.1",
+    "publisher": "Astral Trace 示例",
+    "license": "CC0-1.0",
+    "description": "用于验证玩家拥有可选 d20 重掷能力时的暂停、选择、资源消耗与长休恢复。",
+    "apiVersion": 2,
+    "rulesetId": "dnd5e-2014-srd-5.1",
+    "pluginKind": "content-package",
+    "distributionPolicy": "room-distributable",
+    "declaredCapabilities": [
+      "resource",
+      "interrupt"
+    ]
+  },
+  "subclasses": [],
+  "classes": [],
+  "legacy": {
+    "manifest": {
+      "id": "example.fortune-choice-reroll",
+      "name": "幸运抉择测试包",
+      "version": "1.0.1",
+      "publisher": "Astral Trace 示例",
+      "license": "CC0-1.0",
+      "description": "用于验证玩家拥有可选 d20 重掷能力时的暂停、选择、资源消耗与长休恢复。",
+      "apiVersion": 2,
+      "rulesetId": "dnd5e-2014-srd-5.1",
+      "pluginKind": "content-package",
+      "distributionPolicy": "room-distributable",
+      "declaredCapabilities": [
+        "resource",
+        "interrupt"
+      ]
+    },
+    "races": [],
+    "backgrounds": [],
+    "features": [],
+    "feats": [
+      {
+        "id": "fortune-choice",
+        "name": "幸运抉择（测试）",
+        "summary": "投掷 d20 后可以决定是否消耗幸运点并投掷一枚额外 d20。",
+        "description": "这是用于验证 Headless 暂停与资源事务的原创测试特性，不包含非 SRD 规则书正文。",
+        "automation": "full",
+        "prerequisite": {
+          "minimumLevel": 4
+        },
+        "resources": [
+          {
+            "id": "fortune-points",
+            "label": "幸运点",
+            "shortLabel": "幸运",
+            "maximum": 3,
+            "resetOn": "long-rest"
+          }
+        ],
+        "declarativeAbility": {
+          "schemaVersion": 1,
+          "id": "fortune-choice-reroll",
+          "name": "幸运抉择（测试）",
+          "description": "在结果确定前，由玩家决定是否消耗一次幸运点并投掷额外 d20。",
+          "level": 4,
+          "trigger": {
+            "kind": "after-d20-roll"
+          },
+          "cost": {
+            "economy": "none",
+            "resources": [
+              {
+                "resourceId": "fortune-points",
+                "amount": 1
+              }
+            ]
+          },
+          "targeting": {
+            "kind": "self"
+          },
+          "effects": [],
+          "mechanic": {
+            "kind": "d20-choice-reroll",
+            "rollKinds": [
+              "attack",
+              "ability-check",
+              "saving-throw"
+            ],
+            "scopes": [
+              "self-roll",
+              "attack-against-self"
+            ],
+            "additionalDice": 1,
+            "selection": "owner-chooses"
+          },
+          "automation": "full"
+        }
+      }
+    ],
+    "spells": [],
+    "items": [],
+    "abilityGenerationMethods": []
+  }
+}

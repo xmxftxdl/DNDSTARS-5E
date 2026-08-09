@@ -15,6 +15,7 @@
     "dev:player3": "node scripts/vite-server.mjs --host 127.0.0.1 --port 5276 --strictPort --art-asset-root public",
     "dev:table": "node scripts/start-table.mjs",
     "local-ai-bridge": "node scripts/local-ai-bridge.mjs",
+    "local-ocr": "python scripts/rapidocr-server.py",
     "serve:dm": "node scripts/static-server.mjs --host 127.0.0.1 --port 5273 --root dist --art-asset-root public",
     "serve:player": "node scripts/static-server.mjs --host 127.0.0.1 --port 5274 --root dist --art-asset-root public",
     "serve:player1": "node scripts/static-server.mjs --host 127.0.0.1 --port 5274 --root dist --art-asset-root public",

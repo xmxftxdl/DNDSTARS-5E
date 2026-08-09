@@ -116,6 +116,7 @@ export async function executeStructuredAiTask<T>(input: {
   selection: AiProviderSelectionV1
   request: AiStructuredGenerationRequestV1
   validateOutput: (value: unknown) => value is T
+  describeInvalidOutput?: (value: unknown) => string
   estimatedInputTokens?: number
   estimatedOutputTokens?: number
 }): Promise<AiProviderExecutionResult<T>> {
@@ -142,7 +143,14 @@ export async function executeStructuredAiTask<T>(input: {
       result.providerId !== route.provider.id ||
       (route.model && result.modelId !== route.model.id)
     ) return { ok: false, error: 'provider-response-mismatch' }
-    if (!input.validateOutput(result.output)) return { ok: false, error: 'provider-output-invalid' }
+    if (!input.validateOutput(result.output)) {
+      const detail = input.describeInvalidOutput?.(result.output).trim().slice(0, 2_000)
+      return {
+        ok: false,
+        error: 'provider-output-invalid',
+        ...(detail ? { detail } : {}),
+      }
+    }
     return {
       ok: true,
       output: result.output,

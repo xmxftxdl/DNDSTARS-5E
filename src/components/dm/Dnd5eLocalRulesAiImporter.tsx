@@ -10,6 +10,7 @@ import {
 import {
   DND5E_LOCAL_CONTENT_AI_TARGETS,
   dnd5eContentPackageAutomationCoverageV2,
+  dnd5eLocalContentAiTargetCollection,
   dnd5eLocalContentAiTargetLabel,
   dnd5eLocalContentAiErrorMessage,
   generateDnd5eLocalContentAiDraft,
@@ -118,13 +119,20 @@ export default function Dnd5eLocalRulesAiImporter({
   const [error, setError] = useState<string | null>(null)
   const [showJsonEditor, setShowJsonEditor] = useState(false)
 
-  const previewDraft = useCallback(async (draftJson: string) => {
+  const previewDraft = useCallback(async (
+    draftJson: string,
+    requestedTarget: Dnd5eLocalContentAiTargetKind = targetKind,
+  ) => {
     setError(null)
     setInstallNotice(null)
     setPrepared(null)
     setCoverage(null)
     try {
-      const next = await prepareDnd5eLocalContentJson(draftJson, 'dm-ai-rule-draft.json')
+      const next = await prepareDnd5eLocalContentJson(
+        draftJson,
+        'dm-ai-rule-draft.json',
+        { targetCollection: dnd5eLocalContentAiTargetCollection(requestedTarget) },
+      )
       setPrepared(next)
       setCoverage(dnd5eContentPackageAutomationCoverageV2(next.package))
       return next
@@ -132,7 +140,7 @@ export default function Dnd5eLocalRulesAiImporter({
       setError(reason instanceof Error ? reason.message : String(reason))
       return null
     }
-  }, [])
+  }, [targetKind])
 
   useEffect(() => {
     try {
@@ -199,7 +207,11 @@ export default function Dnd5eLocalRulesAiImporter({
     setAiBusy(true)
     setError(null)
     try {
-      const next = await prepareDnd5eLocalContentJson(source, 'dm-pasted-rules.json')
+      const next = await prepareDnd5eLocalContentJson(
+        source,
+        'dm-pasted-rules.json',
+        { targetCollection: dnd5eLocalContentAiTargetCollection(targetKind) },
+      )
       await installPrepared(next)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -233,7 +245,7 @@ export default function Dnd5eLocalRulesAiImporter({
       })
       setResult(generated)
       setDraft(generated.draft.contentJson)
-      const next = await previewDraft(generated.draft.contentJson)
+      const next = await previewDraft(generated.draft.contentJson, generated.targetKind)
       const editorTarget = next ? editableTargetInPreparedPackage(next, generated.targetKind) : null
       if (next && editorTarget && onEditContent) {
         onEditContent({

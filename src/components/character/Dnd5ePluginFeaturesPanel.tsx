@@ -1,11 +1,13 @@
-import { useSyncExternalStore } from 'react'
-import { Check, LockKeyhole, PlugZap } from 'lucide-react'
+import { useEffect, useSyncExternalStore } from 'react'
+import { Check, LockKeyhole, PlugZap, Skull } from 'lucide-react'
 import {
+  classifyDnd5ePluginFeatureAudience,
   dnd5ePluginFeatAvailableForCharacter,
   dnd5ePluginFeatureAvailableForCharacter,
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginFeats,
   registeredDnd5ePluginFeatures,
+  registeredDnd5ePluginMonsters,
   registeredDnd5ePluginRaces,
   subscribeDnd5eRulesPluginRegistry,
   DND5E_SRD_FEATS,
@@ -16,6 +18,7 @@ import {
   roomAllowsPlugin,
   subscribeRoomRules,
 } from '../../lib/roomRulesState'
+import { useCustomMonsterStore } from '../../store/customMonsters'
 
 const ECONOMY_LABEL = {
   action: '动作',
@@ -42,6 +45,10 @@ export default function Dnd5ePluginFeaturesPanel({
     getRoomRulesSnapshot,
   )
   const registeredFeatures = registeredDnd5ePluginFeatures()
+  const roomMonsters = useCustomMonsterStore((state) => state.monsters)
+  const roomMonstersLoaded = useCustomMonsterStore((state) => state.loaded)
+  const loadRoomMonsters = useCustomMonsterStore((state) => state.loadShared)
+  const registeredMonsters = registeredDnd5ePluginMonsters()
   const registeredRaces = registeredDnd5ePluginRaces()
   const allRaceGrantedFeatureIds = new Set(
     registeredRaces.flatMap((race) => race.grantedFeatureIds ?? []),
@@ -49,11 +56,31 @@ export default function Dnd5ePluginFeaturesPanel({
   const selectedRace = registeredRaces.find((race) =>
     race.id === character.dnd5eRaceId || race.name === character.race)
   const selectedRaceGrantedFeatureIds = new Set(selectedRace?.grantedFeatureIds ?? [])
+  useEffect(() => {
+    void loadRoomMonsters()
+  }, [loadRoomMonsters])
   // 子职和专长授予的特性在各自页面展示；当前种族授予的特性在这里只读展示。
   const features = registeredFeatures.filter((feature) =>
     !feature.grantedBySubclass &&
     !feature.grantedByFeat &&
     (!allRaceGrantedFeatureIds.has(feature.id) || selectedRaceGrantedFeatureIds.has(feature.id)))
+  const classifiableFeatures = features.filter((feature) =>
+    roomMonstersLoaded || !feature.ownerPluginId.startsWith('local.room.paste-'))
+  const classifiedFeatures = classifiableFeatures.map((feature) => ({
+    feature,
+    classification: selectedRaceGrantedFeatureIds.has(feature.id)
+      ? { audience: 'character' as const, monsterNames: [] }
+      : classifyDnd5ePluginFeatureAudience(feature, [
+          ...registeredMonsters,
+          ...roomMonsters,
+        ]),
+  }))
+  const characterFeatures = classifiedFeatures.filter(({ classification }) =>
+    classification.audience === 'character')
+  const monsterFeatures = classifiedFeatures.filter(({ classification }) =>
+    classification.audience !== 'character')
+  const waitingForRoomMonsterClassification = !roomMonstersLoaded && features.some((feature) =>
+    feature.ownerPluginId.startsWith('local.room.paste-'))
   const feats = registeredDnd5ePluginFeats()
   const selected = new Set(character.dnd5ePluginFeatureIds ?? [])
   const selectedFeats = new Set(character.dnd5eFeatIds ?? [])
@@ -78,7 +105,7 @@ export default function Dnd5ePluginFeaturesPanel({
         <div>
           <h3 className="text-lg font-bold text-slate-100">扩展规则特性</h3>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            以下文字和自动化由用户安装的独立插件提供，不属于 SRD 5.1 核心包。选择结果会保存到角色并参与 DM Headless 校验。
+            扩展内容按角色规则与怪物规则分开显示。只有角色规则可以加入人物卡并参与 DM Headless 校验。
           </p>
         </div>
       </div>
@@ -88,7 +115,29 @@ export default function Dnd5ePluginFeaturesPanel({
           尚无已安装插件提供通用特性。可在“规则插件”页面安装兼容模板。
         </div>
       ) : (
-        <div className="mt-5 space-y-3">
+        <div className="mt-5 space-y-5">
+          <div className="flex items-center justify-between gap-3 border-b border-violet-400/15 pb-2">
+            <div>
+              <h4 className="text-sm font-bold text-violet-100">角色规则</h4>
+              <p className="mt-0.5 text-xs text-slate-500">角色可获得的专长、种族特性和通用扩展特性</p>
+            </div>
+            <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-xs text-violet-200">
+              {feats.length + characterFeatures.length}
+            </span>
+          </div>
+
+          {feats.length === 0 && characterFeatures.length === 0 && (
+            <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center text-sm text-slate-500">
+              当前扩展包没有提供角色规则。
+            </div>
+          )}
+
+          {waitingForRoomMonsterClassification && (
+            <div className="rounded-xl border border-cyan-400/15 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-100/75">
+              正在载入房间怪物目录并重新分类旧扩展规则…
+            </div>
+          )}
+
           {feats.map((feat) => {
             const available = dnd5ePluginFeatAvailableForCharacter(feat, character)
             const active = selectedFeats.has(feat.id)
@@ -141,7 +190,7 @@ export default function Dnd5ePluginFeaturesPanel({
             )
           })}
 
-          {features.map((feature) => {
+          {characterFeatures.map(({ feature }) => {
             const available = dnd5ePluginFeatureAvailableForCharacter(feature, character)
             const raciallyGranted = selectedRaceGrantedFeatureIds.has(feature.id)
             const active = raciallyGranted ? available : selected.has(feature.id)
@@ -203,6 +252,80 @@ export default function Dnd5ePluginFeaturesPanel({
               </article>
             )
           })}
+
+          {monsterFeatures.length > 0 && (
+            <div className="pt-2">
+              <div className="flex items-center justify-between gap-3 border-b border-rose-400/15 pb-2">
+                <div className="flex items-start gap-2.5">
+                  <Skull className="mt-0.5 h-4 w-4 text-rose-300" />
+                  <div>
+                    <h4 className="text-sm font-bold text-rose-100">怪物规则</h4>
+                    <p className="mt-0.5 text-xs text-slate-500">怪物属性块中的特性与动作，不会加入角色人物卡</p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-rose-500/10 px-2.5 py-1 text-xs text-rose-200">
+                  {monsterFeatures.length}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {monsterFeatures.map(({ feature, classification }) => {
+            const active = selected.has(feature.id)
+            const monsterLabel = classification.audience === 'monster-action' ? '怪物动作' : '怪物特性'
+            return (
+              <article key={feature.id} className="rounded-xl border border-rose-400/15 bg-rose-500/5 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-semibold text-slate-100">{feature.name}</h4>
+                      <span className="rounded-full bg-rose-500/12 px-2 py-0.5 text-[10px] text-rose-200">
+                        {monsterLabel}
+                      </span>
+                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">
+                        {feature.automation === 'full' ? '完整自动结算' : feature.automation === 'partial' ? '部分自动结算' : 'DM 手动裁定'}
+                      </span>
+                      {feature.action && (
+                        <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] text-rose-200">
+                          {ECONOMY_LABEL[feature.action.economy]}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm text-slate-300">{feature.summary}</p>
+                    <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-500">{feature.description}</p>
+                    {classification.monsterNames.length > 0 && (
+                      <p className="mt-2 text-xs text-rose-100/65">
+                        所属怪物：{classification.monsterNames.join(' / ')}
+                      </p>
+                    )}
+                    <p className="mt-2 break-all text-[11px] text-slate-600">
+                      {feature.sourceLabel ?? feature.ownerPluginName} · {feature.ownerPluginLicense} · {feature.id}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!active}
+                    onClick={() => toggle(feature.id)}
+                    className={`flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                      active
+                        ? 'border-amber-400/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15'
+                        : 'cursor-not-allowed border-white/5 text-slate-600'
+                    }`}
+                  >
+                    {active ? <Check className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
+                    {active ? '从角色移除' : '怪物专用'}
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+
+          {(missingIds.length > 0 || missingFeatIds.length > 0) && (
+            <div className="border-b border-amber-400/15 pb-2 pt-2">
+              <h4 className="text-sm font-bold text-amber-100">缺失引用</h4>
+              <p className="mt-0.5 text-xs text-slate-500">原插件未安装，暂时无法判断属于角色还是怪物</p>
+            </div>
+          )}
 
           {missingIds.map((featureId) => (
             <article key={featureId} className="rounded-xl border border-amber-400/15 bg-amber-500/5 p-4">

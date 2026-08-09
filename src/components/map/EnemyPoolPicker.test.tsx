@@ -22,10 +22,13 @@ describe('EnemyPoolPicker room monster integration', () => {
     const markup = renderToStaticMarkup(createElement(EnemyPoolPicker, {
       open: true,
       canManageCustom: true,
+      allowFriendlyPlacement: true,
       onClose: vi.fn(),
       onPick: vi.fn(),
     }))
 
     expect(markup).toContain('房间怪物工坊')
+    expect(markup).toContain('作为玩家友方添加')
+    expect(markup).toContain('敌对怪物会将它视为敌人')
   })
 })

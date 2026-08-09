@@ -7,6 +7,7 @@ import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eStandardConditionId } from './conditions'
 import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
 import type {
+  Dnd5eActiveEffectEscapeCheck,
   Dnd5eActiveEffectModifiers,
   Dnd5eActiveEffectPeriodicDamage,
   Dnd5eActiveEffectRemoval,
@@ -239,6 +240,10 @@ export interface Dnd5eMonsterSavingThrowConditionOnHitEffect {
   dc: number
   /** The saving throw is against a magical effect rather than the weapon damage. */
   magical?: boolean
+  /** Creature categories that do not receive or roll against this condition. */
+  targetCreatureTypeExclusions?: readonly ('construct' | 'undead')[]
+  /** Core ancestry categories that do not receive or roll against this condition. */
+  targetRaceExclusions?: readonly 'elf'[]
   conditionOnFailedSave: Dnd5eMonsterFailedSaveCondition
   /** Additional dependent or margin-gated conditions from the same save. */
   additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
@@ -270,6 +275,10 @@ export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
     attackAdvantageAgainstLinkedTarget?: boolean
     /** The relation's source attack automatically hits this already-linked target. */
     attackAutomaticallyHitsLinkedTarget?: boolean
+    /** The relation rider applies only when the triggering attack had advantage. */
+    requiresAttackAdvantage?: boolean
+    /** The source cannot repeat this action while this relation remains active. */
+    preventsSourceActionWhileLinked?: boolean
   }
   /** Omit only when the relation has no ordinary escape check (for example swallowed). */
   escapeDc?: number
@@ -295,6 +304,13 @@ export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
   /** Conditions that apply only when the triggering attack had effective advantage. */
   conditionsWhenAttackHasAdvantage?: readonly {
     condition: Dnd5eStandardConditionId
+    /** Apply this conditional rider only to targets no larger than this rank. */
+    targetMaxSizeRank?: number
+  }[]
+  /** Legacy dependent states gated by attack advantage and optional target size. */
+  dependentLegacyConditionsWhenAttackHasAdvantage?: readonly {
+    condition: string
+    targetMaxSizeRank?: number
   }[]
   /**
    * Replaces an existing relation from another slot group atomically. Tarrasque
@@ -305,6 +321,22 @@ export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
   modifiers?: Dnd5eActiveEffectModifiers
   /** Optional damage carried by the root relation for exactly its lifetime. */
   periodicDamage?: Omit<Dnd5eActiveEffectPeriodicDamage, 'lastResolvedTurnKey'>
+  /**
+   * A swallowed creature can force the source to regurgitate it after dealing
+   * enough damage from inside during one creature turn. The save belongs to
+   * the swallowing monster and is resolved at the damaging creature's turn
+   * end, after all of that turn's damage has been accumulated.
+   */
+  regurgitation?: {
+    damageThreshold: number
+    ability: 'con'
+    dc: number
+    ejects: 'triggering-target' | 'all-swallowed'
+    applyProne: true
+    placementWithinFeet: number
+  }
+  /** A bounded action that removes the relation root and all dependent effects. */
+  removal?: Dnd5eActiveEffectRemoval
 }
 
 export interface Dnd5eMonsterPersistentOnHitEffect {
@@ -346,6 +378,8 @@ export interface Dnd5eMonsterPersistentOnHitEffect {
     recovery: 'when-effect-removed'
   }
   repeatSave?: Dnd5eActiveEffectRepeatSave
+  /** A fixed-DC action the affected creature can use to end this effect. */
+  escapeCheck?: Dnd5eActiveEffectEscapeCheck
   modifiers?: Dnd5eActiveEffectModifiers
   removal?: Dnd5eActiveEffectRemoval
   stacking: 'refresh' | 'increase-periodic-dice'
@@ -392,6 +426,47 @@ export interface Dnd5eMonsterHitPointMaximumReductionOnHitEffect {
   healSourceByAmount?: boolean
 }
 
+export interface Dnd5eMonsterAbilityScoreReductionOnHitEffect {
+  id: string
+  kind: 'ability-score-reduction'
+  ability: AbilityKey
+  reduction: { count: number; sides: number; bonus: number }
+  minimumScore: 0
+  diesAtMinimum: true
+  recovery: 'short-or-long-rest'
+}
+
+export interface Dnd5eMonsterEquipmentCorrosionOnHitEffect {
+  id: string
+  kind: 'equipment-corrosion'
+  target: 'armor'
+  armorClassPenalty: 1
+  requiresNonmagical: true
+  requiresMetal?: true
+  destroysAtProvidedArmorClass: 10
+}
+
+export interface Dnd5eMonsterSavingThrowInstantDeathOnHitEffect {
+  id: string
+  kind: 'saving-throw-instant-death'
+  ability: AbilityKey
+  dc: number
+  magical?: boolean
+  /** Evaluated after this attack's damage and before relation riders. */
+  maximumCurrentHitPoints: number
+}
+
+export interface Dnd5eMonsterZeroHitPointOutcomeOnHitEffect {
+  id: string
+  kind: 'zero-hit-point-outcome'
+  stabilize: true
+  conditions: readonly {
+    condition: Dnd5eStandardConditionId
+    durationRounds: number
+    dependsOnCondition?: Dnd5eStandardConditionId
+  }[]
+}
+
 export type Dnd5eMonsterOnHitEffect =
   | Dnd5eMonsterSavingThrowDamageOnHitEffect
   | Dnd5eMonsterSavingThrowConditionOnHitEffect
@@ -399,6 +474,10 @@ export type Dnd5eMonsterOnHitEffect =
   | Dnd5eMonsterPersistentOnHitEffect
   | Dnd5eMonsterForcedMovementOnHitEffect
   | Dnd5eMonsterHitPointMaximumReductionOnHitEffect
+  | Dnd5eMonsterAbilityScoreReductionOnHitEffect
+  | Dnd5eMonsterEquipmentCorrosionOnHitEffect
+  | Dnd5eMonsterSavingThrowInstantDeathOnHitEffect
+  | Dnd5eMonsterZeroHitPointOutcomeOnHitEffect
 
 export interface Dnd5eMonsterWeaponAttack {
   mode: 'melee' | 'ranged' | 'melee-or-ranged'
@@ -438,7 +517,16 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   area: SkillAoeTargeting
   target: 'hostile' | 'all-creatures-except-self'
   /** Creature categories excluded by the SRD action before any saving throw is rolled. */
-  targetCreatureTypeExclusions?: readonly ('aberration' | 'demon' | 'undead')[]
+  targetCreatureTypeExclusions?: readonly ('aberration' | 'construct' | 'demon' | 'undead')[]
+  /** Hard lower target-count bound for explicitly selected multi-target effects. */
+  minimumTargets?: number
+  /** Hard target-count ceiling for bounded multi-target effects. */
+  maximumTargets?: number
+  /** Requires the submitted set to be every live target held in this source relation slot. */
+  sourceLinkedTargets?: {
+    slotGroup: string
+    selection: 'all'
+  }
   ability: AbilityKey
   dc: number
   /** The saving throw is against a magical monster effect. */
@@ -451,6 +539,8 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   requiresTargetCanHearSource?: boolean
   /** Omit for pure control effects such as Frightful Presence. */
   damage?: Dnd5eMonsterDamage
+  /** Additional damage types resolved from the same saving throw and dice payload. */
+  additionalDamage?: readonly Dnd5eMonsterDamage[]
   damageOnSuccessfulSave?: 'none' | 'half'
   conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
   /** Additional margin-gated or dependent conditions caused by the same save. */
@@ -464,7 +554,9 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
     label: string
     durationRounds: number
     repeatSaveAtEndOfTargetTurn: boolean
-    modifiers: Pick<
+    standardCondition?: Dnd5eStandardConditionId
+    periodicDamage?: Omit<Dnd5eActiveEffectPeriodicDamage, 'lastResolvedTurnKey'>
+    modifiers?: Pick<
       Dnd5eActiveEffectModifiers,
       | 'speedMultiplier'
       | 'preventReactions'
@@ -483,6 +575,11 @@ export interface Dnd5eMonsterFailedSaveCondition {
   condition: Dnd5eStandardConditionId
   durationRounds: number
   repeatSaveAtEndOfTargetTurn: boolean
+  /** A repeat save offered after qualifying harm instead of at a turn boundary. */
+  repeatSaveOnDamage?: {
+    mode: 'normal' | 'advantage'
+    sourceFilter: 'any' | 'source-or-allies'
+  }
   /** Use the end of the source's next turn instead of target-round ticking. */
   expiresAtSourceTurnEnd?: boolean
   /** Repeat saves have disadvantage while the source remains visible. */
@@ -526,6 +623,8 @@ export type Dnd5eMonsterAreaSavingThrowRule =
   | {
       kind: 'area-saving-throw'
       variants: readonly Dnd5eMonsterAreaSavingThrowVariant[]
+      /** Per-day variants which must be resolved in this exact order. */
+      orderedVariantIds?: readonly string[]
     }
 
 export interface Dnd5eMonsterLegendaryWingAttackRule {
@@ -602,10 +701,21 @@ export type Dnd5eMonsterSpecialActionRule =
       expiresAtSourceTurnEnd?: boolean
       repeatSaveAtEndOfTargetTurn?: boolean
       repeatSaveDisadvantageWhenSourceVisible?: boolean
+      requiredTargetCreatureTypes?: readonly ('humanoid' | 'beast')[]
       additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
       immunityOnSuccessfulSaveOrEffectEnd?: Dnd5eMonsterActionImmunityRule
       preventReactions?: boolean
-      repeatSaveOnDamage?: boolean
+      repeatSaveOnDamage?: boolean | {
+        mode: 'normal' | 'advantage'
+        sourceFilter: 'any' | 'source-or-allies'
+      }
+      /** Replaces the oldest source-owned instance when the source reaches this cap. */
+      sourceTargetLimit?: {
+        maximum: number
+        replaceOldest: true
+        /** Dryad Fey Charm owns separate humanoid and beast capacity pools. */
+        partitionByRequiredCreatureType?: true
+      }
     }
   | {
       kind: 'conditioned-damage-and-healing'
@@ -614,12 +724,73 @@ export type Dnd5eMonsterSpecialActionRule =
       damage: Dnd5eMonsterDamage
     }
   | {
+      /** A single-target save that either drops the target to 0 HP or kills it. */
+      kind: 'saving-throw-terminal-effect'
+      rangeFeet: number
+      ability: AbilityKey
+      dc: number
+      magical?: boolean
+      requiresSourceCanSeeTarget?: boolean
+      requiresTargetCanSeeSource?: boolean
+      requiredCondition?: Dnd5eStandardConditionId
+      requiresTargetAtZeroHitPoints?: boolean
+      failure: 'reduce-to-zero' | 'instant-death'
+      /** Rolled and applied to the source only when instant death succeeds. */
+      healingOnDeath?: { count: number; sides: number; bonus: number }
+    }
+  | {
       /** SRD celestials' finite-use touch: deterministic healing plus bounded cures. */
       kind: 'healing-touch'
       rangeFeet: 5
       target: 'another-living-creature'
       healing: { count: number; sides: number; bonus: number }
       removes: readonly ('curse' | 'disease' | 'poisoned' | 'blinded' | 'deafened')[]
+    }
+  | {
+      /** A deterministic self-heal, including legendary actions such as Unicorn Heal Self. */
+      kind: 'self-healing'
+      healing: { count: number; sides: number; bonus: number }
+    }
+  | {
+      /** A source-bound AC ward which can protect the source or one visible ally. */
+      kind: 'temporary-armor-class-bonus'
+      rangeFeet: number
+      target: 'self-or-one-visible-creature'
+      armorClassBonus: number
+      duration: 'until-source-next-turn-end'
+      magical?: boolean
+    }
+  | {
+      /** A bounded self buff which may temporarily unlock one declared bonus-action attack. */
+      kind: 'self-combat-buff'
+      duration:
+        | 'until-source-next-turn-end'
+        | { type: 'rounds'; rounds: number }
+      magical?: boolean
+      modifiers: Partial<Pick<
+        Dnd5eActiveEffectModifiers,
+        | 'armorClassBonus'
+        | 'savingThrowAdvantages'
+        | 'sizeRankDelta'
+        | 'strengthRollMode'
+      >>
+      bonusActionWeaponActionId?: string
+    }
+  | {
+      /** A deterministic self-origin aura which applies one bounded modifier to every target in range. */
+      kind: 'automatic-area-active-effect'
+      radiusFeet: number
+      target: 'all-creatures-including-self' | 'all-creatures-except-self'
+      ignoresLineOfEffect?: boolean
+      duration: 'until-source-next-turn-end'
+      magical?: boolean
+      modifiers: Pick<Dnd5eActiveEffectModifiers, 'preventHealing'>
+    }
+  | {
+      /** Adds a bounded movement budget; the subsequent map move remains Host-authoritative. */
+      kind: 'grant-movement'
+      maximumSpeedFraction: number
+      provokesOpportunityAttacks: boolean
     }
   | {
       /** Roper Reel: move every target held by one source-linked slot group. */
@@ -698,6 +869,25 @@ export function dnd5eMonsterAreaSavingThrowEffect(
     return variantId ? variants.find((variant) => variant.id === variantId) : undefined
   }
   return variantId == null || variantId === 'default' ? variants[0] : undefined
+}
+
+/** Returns the only legal staged area variant for the current per-day resource. */
+export function dnd5eMonsterRequiredAreaSavingThrowVariantId(
+  action: Pick<Dnd5eMonsterAction, 'rule' | 'usage'>,
+  usesRemaining?: number,
+): string | undefined {
+  const rule = action.rule
+  if (
+    rule?.kind !== 'area-saving-throw' ||
+    !rule.variants ||
+    !rule.orderedVariantIds ||
+    action.usage?.kind !== 'per-day'
+  ) return undefined
+  const boundedRemaining = Math.max(
+    0,
+    Math.min(action.usage.max, usesRemaining ?? action.usage.max),
+  )
+  return rule.orderedVariantIds[action.usage.max - boundedRemaining]
 }
 
 export interface Dnd5eMonsterTrait {
@@ -995,6 +1185,9 @@ export interface Dnd5eMonsterAction {
   targetEligibility?: Dnd5eMonsterTargetEligibility
   /** 传奇动作直接调用普通武器动作时指向其 ID。 */
   referencedActionId?: string
+  /** The action is available only while this exact authoritative effect is active. */
+  requiredActiveEffectDefinitionId?: string
+  forbiddenActiveEffectDefinitionId?: string
   movement?: {
     kind: 'straight-toward-visible-hostile'
     maximumSpeedFraction: number
@@ -2089,7 +2282,10 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
             dc: 14,
             condition: 'charmed' as const,
             preventReactions: true,
-            repeatSaveOnDamage: true,
+            repeatSaveOnDamage: {
+              mode: 'normal' as const,
+              sourceFilter: 'source-or-allies' as const,
+            },
           },
         }
       }
@@ -2578,6 +2774,284 @@ const CATALOG_BASE_WEAPON_ATTACKS = {
  * instead of silently dropping damage dice or guessing at runtime.
  */
 const CATALOG_EXACT_WEAPON_ATTACKS = {
+  azer: [{
+    actionId: 'warhammer',
+    branchNote: 'Headless defaults to the one-handed branch; use Warhammer (Two-Handed) for the versatile branch.',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one target',
+      damage: [
+        { average: 7, count: 1, sides: 8, bonus: 3, type: 'bludgeoning' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'fire' },
+      ],
+    },
+  }],
+  'black-pudding': [{
+    actionId: 'pseudopod',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one target',
+      damage: [
+        { average: 6, count: 1, sides: 6, bonus: 3, type: 'bludgeoning' },
+        { average: 18, count: 4, sides: 8, bonus: 0, type: 'acid' },
+      ],
+      onHitEffects: [{
+        id: 'corrosive-form-armor', kind: 'equipment-corrosion', target: 'armor',
+        armorClassPenalty: 1, requiresNonmagical: true,
+        destroysAtProvidedArmorClass: 10,
+      }],
+    },
+  }],
+  darkmantle: [{
+    actionId: 'crush',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one creature',
+      damage: [{ average: 6, count: 1, sides: 6, bonus: 3, type: 'bludgeoning' }],
+      onHitEffects: [{
+        id: 'crush-attachment', kind: 'source-linked-condition',
+        relation: {
+          kind: 'attachment', slotGroup: 'crush', capacity: 1,
+          maxDistanceFeet: 5, targetMaxSizeRank: 2,
+          whenCapacityFull: 'linked-target-only', movement: 'source-rides-target',
+          endsOnSourceIncapacitated: true, attackAdvantageAgainstLinkedTarget: true,
+          requiresAttackAdvantage: true,
+        },
+        escapeDc: 13,
+        conditions: [],
+        rootLegacyCondition: 'attached',
+        conditionsWhenAttackHasAdvantage: [{ condition: 'blinded', targetMaxSizeRank: 2 }],
+        dependentLegacyConditionsWhenAttackHasAdvantage: [{
+          condition: 'unable-to-breathe', targetMaxSizeRank: 2,
+        }],
+      }],
+    },
+  }],
+  druid: [{
+    actionId: 'quarterstaff',
+    branchNote:
+      'Headless defaults to the one-handed branch; use Quarterstaff (Two-Handed) or Quarterstaff (Shillelagh) for those legal branches.',
+    attack: {
+      mode: 'melee', toHit: 2, reachFeet: 5, target: 'one target',
+      damage: [{ average: 3, count: 1, sides: 6, bonus: 0, type: 'bludgeoning' }],
+    },
+  }],
+  dryad: [{
+    actionId: 'club',
+    branchNote: 'Headless defaults to the ordinary club branch; use Club (Shillelagh) while its magical branch is active.',
+    attack: {
+      mode: 'melee', toHit: 2, reachFeet: 5, target: 'one target',
+      damage: [{ average: 2, count: 1, sides: 4, bonus: 0, type: 'bludgeoning' }],
+    },
+  }],
+  ettercap: [{
+    actionId: 'web',
+    attack: {
+      mode: 'ranged', toHit: 4, rangeFeet: { normal: 30, long: 60 },
+      targetMaxSizeRank: 3, target: 'one Large or smaller creature', damage: [],
+      onHitEffects: [{
+        id: 'web-restraint', kind: 'persistent-effect',
+        definitionId: 'srd-5.1:monster:ettercap:web-restraint',
+        label: 'Web Restraint', standardCondition: 'restrained',
+        escapeCheck: { ability: 'str', dc: 11, economy: 'action' },
+        stacking: 'refresh',
+      }],
+    },
+  }],
+  'giant-spider': [{
+    actionId: 'web',
+    attack: {
+      mode: 'ranged', toHit: 5, rangeFeet: { normal: 30, long: 60 },
+      target: 'one creature', damage: [],
+      onHitEffects: [{
+        id: 'web-restraint', kind: 'persistent-effect',
+        definitionId: 'srd-5.1:monster:giant-spider:web-restraint',
+        label: 'Web Restraint', standardCondition: 'restrained',
+        escapeCheck: { ability: 'str', dc: 12, economy: 'action' },
+        stacking: 'refresh',
+      }],
+    },
+  }],
+  duergar: [
+    {
+      actionId: 'war-pick',
+      branchNote: 'Headless defaults to normal size; use War Pick (Enlarged) after Enlarge.',
+      attack: {
+        mode: 'melee', toHit: 4, reachFeet: 5, target: 'one target',
+        damage: [{ average: 6, count: 1, sides: 8, bonus: 2, type: 'piercing' }],
+      },
+    },
+    {
+      actionId: 'javelin',
+      branchNote: 'Headless defaults to normal size; use Javelin (Enlarged) after Enlarge.',
+      attack: {
+        mode: 'melee-or-ranged', toHit: 4, reachFeet: 5,
+        rangeFeet: { normal: 30, long: 120 }, target: 'one target',
+        damage: [{ average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+        rangedDamage: [{ average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+      },
+    },
+  ],
+  'giant-rat-diseased': [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee', toHit: 4, reachFeet: 5, target: 'one target',
+      damage: [{ average: 4, count: 1, sides: 4, bonus: 2, type: 'piercing' }],
+      onHitEffects: [{
+        id: 'diseased-bite', kind: 'persistent-effect',
+        savingThrow: { ability: 'con', dc: 10 },
+        definitionId: 'srd-5.1:monster:giant-rat-diseased:bite-disease',
+        label: 'Diseased Bite', ailment: 'disease',
+        modifiers: { preventNonmagicalHealing: true },
+        campaignPeriodicHitPointMaximumReduction: {
+          intervalHours: 24,
+          reduction: { average: 3, count: 1, sides: 6, bonus: 0 },
+          execution: 'campaign-time-only', recovery: 'when-effect-removed',
+        },
+        removal: { onMagicalHealing: true }, stacking: 'refresh',
+      }],
+    },
+  }],
+  homunculus: [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee', toHit: 4, reachFeet: 5, target: 'one creature',
+      damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'piercing' }],
+      onHitEffects: [{
+        id: 'bite-poisoned-unconscious',
+        kind: 'saving-throw-condition',
+        ability: 'con',
+        dc: 10,
+        conditionOnFailedSave: {
+          condition: 'poisoned',
+          durationRounds: 10,
+          repeatSaveAtEndOfTargetTurn: false,
+        },
+        additionalConditionsOnFailedSave: [{
+          condition: 'unconscious',
+          durationRounds: 10,
+          repeatSaveAtEndOfTargetTurn: false,
+          minimumFailureMargin: 5,
+          dependsOnCondition: 'poisoned',
+          breakOnDamage: true,
+          canBeAwakenedByAction: true,
+        }],
+      }],
+    },
+  }],
+  'gray-ooze': [{
+    actionId: 'pseudopod',
+    attack: {
+      mode: 'melee', toHit: 3, reachFeet: 5, target: 'one target',
+      damage: [
+        { average: 4, count: 1, sides: 6, bonus: 1, type: 'bludgeoning' },
+        { average: 7, count: 2, sides: 6, bonus: 0, type: 'acid' },
+      ],
+      onHitEffects: [{
+        id: 'corrode-metal-armor', kind: 'equipment-corrosion', target: 'armor',
+        armorClassPenalty: 1, requiresNonmagical: true, requiresMetal: true,
+        destroysAtProvidedArmorClass: 10,
+      }],
+    },
+  }],
+  magmin: [{
+    actionId: 'touch',
+    attack: {
+      mode: 'melee', toHit: 4, reachFeet: 5, target: 'one target',
+      damage: [{ average: 7, count: 2, sides: 6, bonus: 0, type: 'fire' }],
+      onHitEffects: [{
+        id: 'ignited', kind: 'persistent-effect',
+        definitionId: 'srd-5.1:monster:magmin:ignited', label: 'Ignited',
+        periodicDamage: { timing: 'target-turn-end', count: 1, sides: 6, modifier: 0, type: 'fire' },
+        removal: { action: { label: 'Extinguish Flames', economy: 'action', maxDistanceFeet: 5 } },
+        stacking: 'refresh',
+      }],
+    },
+  }],
+  mimic: [{
+    actionId: 'pseudopod',
+    branchNote: 'Headless defaults to the mimic without Adhesive; use Pseudopod (Adhesive Object Form) while transformed.',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one target',
+      damage: [{ average: 7, count: 1, sides: 8, bonus: 3, type: 'bludgeoning' }],
+    },
+  }],
+  shadow: [{
+    actionId: 'strength-drain',
+    attack: {
+      mode: 'melee', toHit: 4, reachFeet: 5, target: 'one creature',
+      damage: [{ average: 9, count: 2, sides: 6, bonus: 2, type: 'necrotic' }],
+      onHitEffects: [{
+        id: 'strength-drain', kind: 'ability-score-reduction', ability: 'str',
+        reduction: { count: 1, sides: 4, bonus: 0 }, minimumScore: 0,
+        diesAtMinimum: true, recovery: 'short-or-long-rest',
+      }],
+    },
+  }],
+  solar: [{
+    actionId: 'slaying-longbow',
+    attack: {
+      mode: 'ranged', toHit: 13, rangeFeet: { normal: 150, long: 600 },
+      target: 'one target',
+      damage: [
+        { average: 15, count: 2, sides: 8, bonus: 6, type: 'piercing' },
+        { average: 27, count: 6, sides: 8, bonus: 0, type: 'radiant' },
+      ],
+      onHitEffects: [{
+        id: 'slaying-save', kind: 'saving-throw-instant-death',
+        ability: 'con', dc: 15, magical: true, maximumCurrentHitPoints: 190,
+      }],
+    },
+  }],
+  stirge: [{
+    actionId: 'blood-drain',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one creature',
+      damage: [{ average: 5, count: 1, sides: 4, bonus: 3, type: 'piercing' }],
+      onHitEffects: [{
+        id: 'blood-drain-attachment', kind: 'source-linked-condition',
+        relation: {
+          kind: 'attachment', slotGroup: 'blood-drain', capacity: 1,
+          maxDistanceFeet: 5, targetMaxSizeRank: 5,
+          whenCapacityFull: 'linked-target-only', movement: 'source-rides-target',
+          endsOnSourceIncapacitated: true, preventsSourceActionWhileLinked: true,
+        },
+        escapeDc: 5, conditions: [], rootLegacyCondition: 'attached',
+        periodicDamage: {
+          timing: 'source-turn-start', count: 1, sides: 4, modifier: 3,
+          cumulativeDamage: 0, removeEffectAfterCumulativeDamage: 10,
+        },
+        removal: { action: { label: 'Detach Stirge', economy: 'action', maxDistanceFeet: 5 } },
+      }],
+    },
+  }],
+  'swarm-of-centipedes': [{
+    actionId: 'bites',
+    attack: {
+      mode: 'melee', toHit: 3, reachFeet: 0, target: 'one target in the swarm space',
+      damage: [{ average: 10, count: 4, sides: 4, bonus: 0, type: 'piercing' }],
+      damageAtHalfHp: [{ average: 5, count: 2, sides: 4, bonus: 0, type: 'piercing' }],
+      onHitEffects: [{
+        id: 'bites-zero-outcome', kind: 'zero-hit-point-outcome', stabilize: true,
+        conditions: [
+          { condition: 'poisoned', durationRounds: 600 },
+          { condition: 'paralyzed', durationRounds: 600, dependsOnCondition: 'poisoned' },
+        ],
+      }],
+    },
+  }],
+  'vampire-bat': [{
+    actionId: 'bite',
+    attack: {
+      mode: 'melee', toHit: 9, reachFeet: 5, target: 'one willing creature, or a creature grappled, incapacitated, or restrained by the vampire',
+      damage: [
+        { average: 7, count: 1, sides: 6, bonus: 4, type: 'piercing' },
+        { average: 10, count: 3, sides: 6, bonus: 0, type: 'necrotic' },
+      ],
+      onHitEffects: [{
+        id: 'bite-necrotic-maximum-reduction', kind: 'hit-point-maximum-reduction',
+        damageBasis: { kind: 'damage-type', damageType: 'necrotic' },
+        recovery: 'long-rest', healSourceByAmount: true,
+      }],
+    },
+  }],
   cloaker: [{
     actionId: 'bite',
     attack: {
@@ -2684,6 +3158,46 @@ const CATALOG_EXACT_WEAPON_ATTACKS = {
         dc: 10,
         damage: [{ average: 5, count: 2, sides: 4, bonus: 0, type: 'poison' }],
         damageOnSuccessfulSave: 'half',
+      }],
+    },
+  }],
+  'rug-of-smothering': [{
+    actionId: 'smother',
+    attack: {
+      mode: 'melee',
+      toHit: 5,
+      reachFeet: 5,
+      targetMaxSizeRank: 2,
+      target: 'one Medium or smaller creature',
+      damage: [],
+      onHitEffects: [{
+        id: 'smother-attachment',
+        kind: 'source-linked-condition',
+        relation: {
+          kind: 'grapple',
+          slotGroup: 'smother',
+          capacity: 1,
+          maxDistanceFeet: 5,
+          targetMaxSizeRank: 2,
+          whenCapacityFull: 'linked-target-only',
+          movement: 'source-rides-target',
+          endsOnSourceIncapacitated: true,
+          preventsSourceActionWhileLinked: true,
+        },
+        escapeDc: 13,
+        conditions: [
+          { condition: 'grappled' },
+          { condition: 'restrained', dependsOnCondition: 'grappled' },
+          { condition: 'blinded', dependsOnCondition: 'grappled' },
+        ],
+        dependentLegacyConditions: ['unable-to-breathe'],
+        periodicDamage: {
+          timing: 'target-turn-start',
+          count: 2,
+          sides: 6,
+          modifier: 3,
+          type: 'bludgeoning',
+        },
       }],
     },
   }],
@@ -2923,6 +3437,14 @@ const CATALOG_EXACT_WEAPON_ATTACKS = {
             modifier: 0,
             type: 'acid',
           },
+          regurgitation: {
+            damageThreshold: 30,
+            ability: 'con',
+            dc: 21,
+            ejects: 'all-swallowed',
+            applyProne: true,
+            placementWithinFeet: 10,
+          },
         }],
       },
     },
@@ -3037,6 +3559,86 @@ const CATALOG_EXACT_WEAPON_ATTACKS = {
 }[]>>
 
 const CATALOG_WEAPON_ATTACK_VARIANTS = {
+  azer: [{
+    sourceActionId: 'warhammer', id: 'warhammer-two-handed',
+    nameSuffix: ' (Two-Handed)',
+    branchNote: 'Headless two-handed versatile branch.',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one target',
+      damage: [
+        { average: 8, count: 1, sides: 10, bonus: 3, type: 'bludgeoning' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'fire' },
+      ],
+    },
+  }],
+  dryad: [{
+    sourceActionId: 'club', id: 'club-shillelagh',
+    nameSuffix: ' (Shillelagh)',
+    branchNote: 'Headless branch while the dryad has Shillelagh active.',
+    attack: {
+      mode: 'melee', toHit: 6, reachFeet: 5, target: 'one target',
+      damage: [{ average: 8, count: 1, sides: 8, bonus: 4, type: 'bludgeoning' }],
+    },
+  }],
+  druid: [
+    {
+      sourceActionId: 'quarterstaff', id: 'quarterstaff-two-handed',
+      nameSuffix: ' (Two-Handed)',
+      branchNote: 'Headless two-handed versatile branch.',
+      attack: {
+        mode: 'melee', toHit: 2, reachFeet: 5, target: 'one target',
+        damage: [{ average: 4, count: 1, sides: 8, bonus: 0, type: 'bludgeoning' }],
+      },
+    },
+    {
+      sourceActionId: 'quarterstaff', id: 'quarterstaff-shillelagh',
+      nameSuffix: ' (Shillelagh)',
+      branchNote: 'Headless branch while Shillelagh is active.',
+      attack: {
+        mode: 'melee', toHit: 4, reachFeet: 5, target: 'one target',
+        damage: [{ average: 6, count: 1, sides: 8, bonus: 2, type: 'bludgeoning' }],
+      },
+    },
+  ],
+  duergar: [
+    {
+      sourceActionId: 'war-pick', id: 'war-pick-enlarged',
+      nameSuffix: ' (Enlarged)', branchNote: 'Headless branch while enlarged.',
+      attack: {
+        mode: 'melee', toHit: 4, reachFeet: 5, target: 'one target',
+        damage: [{ average: 11, count: 2, sides: 8, bonus: 2, type: 'piercing' }],
+      },
+    },
+    {
+      sourceActionId: 'javelin', id: 'javelin-enlarged',
+      nameSuffix: ' (Enlarged)', branchNote: 'Headless branch while enlarged.',
+      attack: {
+        mode: 'melee-or-ranged', toHit: 4, reachFeet: 5,
+        rangeFeet: { normal: 30, long: 120 }, target: 'one target',
+        damage: [{ average: 9, count: 2, sides: 6, bonus: 2, type: 'piercing' }],
+        rangedDamage: [{ average: 9, count: 2, sides: 6, bonus: 2, type: 'piercing' }],
+      },
+    },
+  ],
+  mimic: [{
+    sourceActionId: 'pseudopod', id: 'pseudopod-adhesive-object-form',
+    nameSuffix: ' (Adhesive Object Form)',
+    branchNote: 'Headless branch while the mimic is in object form.',
+    attack: {
+      mode: 'melee', toHit: 5, reachFeet: 5, target: 'one target',
+      damage: [{ average: 7, count: 1, sides: 8, bonus: 3, type: 'bludgeoning' }],
+      onHitEffects: [{
+        id: 'adhesive-grapple', kind: 'source-linked-condition',
+        relation: {
+          kind: 'grapple', slotGroup: 'adhesive', capacity: 1,
+          maxDistanceFeet: 5, targetMaxSizeRank: 5,
+          whenCapacityFull: 'linked-target-only',
+          attackAdvantageAgainstLinkedTarget: true,
+        },
+        escapeDc: 13, conditions: [{ condition: 'grappled' }],
+      }],
+    },
+  }],
   djinni: [{
     sourceActionId: 'scimitar',
     id: 'scimitar-thunder',
@@ -3417,6 +4019,31 @@ const CATALOG_SAVING_THROW_CONDITION_ATTACKS = {
       repeatSaveAtEndOfTargetTurn: true,
     },
   },
+  ghast: {
+    actionId: 'claws',
+    effectId: 'claws-paralyzed',
+    ability: 'con',
+    dc: 10,
+    targetCreatureTypeExclusions: ['undead'],
+    conditionOnFailedSave: {
+      condition: 'paralyzed',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+  ghoul: {
+    actionId: 'claws',
+    effectId: 'claws-paralyzed',
+    ability: 'con',
+    dc: 10,
+    targetCreatureTypeExclusions: ['undead'],
+    targetRaceExclusions: ['elf'],
+    conditionOnFailedSave: {
+      condition: 'paralyzed',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
   lich: {
     actionId: 'paralyzing-touch',
     effectId: 'touch-paralyzed',
@@ -3454,6 +4081,8 @@ const CATALOG_SAVING_THROW_CONDITION_ATTACKS = {
   ability: AbilityKey
   dc: number
   magical?: boolean
+  targetCreatureTypeExclusions?: readonly ('construct' | 'undead')[]
+  targetRaceExclusions?: readonly 'elf'[]
   conditionOnFailedSave: Dnd5eMonsterFailedSaveCondition
   additionalConditionsOnFailedSave?: readonly Dnd5eMonsterFailedSaveCondition[]
 }>>
@@ -3827,6 +4456,53 @@ const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
   periodicDamage?: Omit<Dnd5eActiveEffectPeriodicDamage, 'lastResolvedTurnKey'>
 }>>
 
+const CATALOG_SWALLOW_ATTACKS = {
+  behir: {
+    grappleActionId: 'constrict', grappleSlotGroup: 'constrict',
+    targetMaxSizeRank: 2, capacity: 1,
+    periodicDamage: { count: 6, sides: 6 },
+    regurgitation: {
+      damageThreshold: 30, ability: 'con', dc: 14,
+      ejects: 'triggering-target', applyProne: true,
+      placementWithinFeet: 10,
+    },
+  },
+  'giant-frog': {
+    grappleActionId: 'bite', grappleSlotGroup: 'bite',
+    targetMaxSizeRank: 1, capacity: 1,
+    periodicDamage: { count: 2, sides: 4 },
+  },
+  'giant-toad': {
+    grappleActionId: 'bite', grappleSlotGroup: 'bite',
+    targetMaxSizeRank: 2, capacity: 1,
+    periodicDamage: { count: 3, sides: 6 },
+  },
+  remorhaz: {
+    grappleActionId: 'bite', grappleSlotGroup: 'bite',
+    targetMaxSizeRank: 2, capacity: 20,
+    periodicDamage: { count: 6, sides: 6 },
+    regurgitation: {
+      damageThreshold: 30, ability: 'con', dc: 15,
+      ejects: 'all-swallowed', applyProne: true,
+      placementWithinFeet: 10,
+    },
+  },
+} as const satisfies Readonly<Record<string, {
+  grappleActionId: string
+  grappleSlotGroup: string
+  targetMaxSizeRank: number
+  capacity: number
+  periodicDamage: { count: number; sides: number }
+  regurgitation?: {
+    damageThreshold: number
+    ability: 'con'
+    dc: number
+    ejects: 'triggering-target' | 'all-swallowed'
+    applyProne: true
+    placementWithinFeet: number
+  }
+}>>
+
 const CATALOG_DAMAGE_OR_GRAPPLE_ATTACKS = {
   'vampire-spawn': {
     actionId: 'claws',
@@ -4081,6 +4757,104 @@ const CATALOG_PERSISTENT_EFFECT_ATTACKS = {
       stacking: 'refresh',
     },
   },
+  'werebear-bear': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 14 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:werebear:lycanthropy',
+      label: 'Werebear Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'werebear-hybrid': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 14 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:werebear:lycanthropy',
+      label: 'Werebear Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'wereboar-boar': {
+    actionId: 'tusks',
+    effect: {
+      id: 'tusks-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 12 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:wereboar:lycanthropy',
+      label: 'Wereboar Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'wererat-rat': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 11 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:wererat:lycanthropy',
+      label: 'Wererat Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'weretiger-hybrid': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 13 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:weretiger:lycanthropy',
+      label: 'Weretiger Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'weretiger-tiger': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 13 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:weretiger:lycanthropy',
+      label: 'Weretiger Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
+  'werewolf-wolf': {
+    actionId: 'bite',
+    effect: {
+      id: 'bite-lycanthropy',
+      kind: 'persistent-effect',
+      magical: true,
+      savingThrow: { ability: 'con', dc: 12 },
+      targetCreatureTypeRequirements: ['humanoid'],
+      definitionId: 'srd-5.1:monster:werewolf:lycanthropy',
+      label: 'Werewolf Lycanthropy',
+      ailment: 'curse',
+      stacking: 'refresh',
+    },
+  },
   'wererat-hybrid': {
     actionId: 'bite',
     effect: {
@@ -4155,6 +4929,20 @@ const CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS = {
     savingThrow: { ability: 'con', dc: 13 },
     recovery: 'long-rest',
   },
+  specter: {
+    actionId: 'life-drain',
+    effectId: 'life-drain-hit-point-maximum-reduction',
+    damageBasis: { kind: 'damage-type', damageType: 'necrotic' },
+    savingThrow: { ability: 'con', dc: 10 },
+    recovery: 'long-rest',
+  },
+  wraith: {
+    actionId: 'life-drain',
+    effectId: 'life-drain-hit-point-maximum-reduction',
+    damageBasis: { kind: 'damage-type', damageType: 'necrotic' },
+    savingThrow: { ability: 'con', dc: 14 },
+    recovery: 'long-rest',
+  },
   'vampire-spawn': {
     actionId: 'bite',
     effectId: 'bite-hit-point-maximum-reduction',
@@ -4197,6 +4985,19 @@ const VAMPIRE_BITE_TARGET_ELIGIBILITY = {
   // field. Keep the option visible for DM adjudication without guessing it.
   dmAdjudicationAlternatives: [{ kind: 'willing-target' }],
 } as const satisfies Dnd5eMonsterTargetEligibility
+
+const PRONE_TARGET_ONLY_ELIGIBILITY = {
+  kind: 'any-of',
+  predicates: [{ kind: 'standard-condition', condition: 'prone' }],
+} as const satisfies Dnd5eMonsterTargetEligibility
+
+const CATALOG_PRONE_TARGET_ONLY_ATTACKS = {
+  elephant: 'stomp',
+  elk: 'hooves',
+  'giant-elk': 'hooves',
+  mammoth: 'stomp',
+  triceratops: 'stomp',
+} as const satisfies Readonly<Record<string, string>>
 
 const CATALOG_MAGICAL_WEAPON_TRAIT_MONSTERS = new Set([
   'androsphinx',
@@ -4396,7 +5197,85 @@ const CATALOG_LEGENDARY_ACTION_REFERENCES = {
       automation: 'headless',
     },
   ],
+  'vampire-bat': [
+    {
+      legacyActionId: 'unarmed-strike',
+      actionId: 'legendary-unarmed-strike',
+      referencedActionId: 'unarmed-strike',
+      automation: 'headless',
+    },
+    {
+      legacyActionId: 'bite-costs-2-actions',
+      actionId: 'legendary-bite-costs-2-actions',
+      referencedActionId: 'bite',
+      automation: 'headless',
+    },
+  ],
+  'vampire-mist': [
+    {
+      legacyActionId: 'unarmed-strike',
+      actionId: 'legendary-unarmed-strike',
+      referencedActionId: 'unarmed-strike',
+      automation: 'headless',
+    },
+    {
+      legacyActionId: 'bite-costs-2-actions',
+      actionId: 'legendary-bite-costs-2-actions',
+      referencedActionId: 'bite',
+      automation: 'headless',
+    },
+  ],
 } as const
+
+const CATALOG_LEGENDARY_ACTION_VARIANTS = {
+  'mummy-lord': [
+    {
+      legacyActionId: 'attack',
+      actionId: 'attack-rotting-fist',
+      referencedActionId: 'rotting-fist',
+      kind: 'weapon-reference',
+    },
+    {
+      legacyActionId: 'attack',
+      actionId: 'attack-dreadful-glare',
+      referencedActionId: 'dreadful-glare',
+      kind: 'special-reference',
+    },
+  ],
+  kraken: [
+    {
+      legacyActionId: 'tentacle-attack-or-fling',
+      actionId: 'legendary-tentacle-attack',
+      referencedActionId: 'tentacle',
+      kind: 'weapon-reference',
+    },
+    {
+      legacyActionId: 'tentacle-attack-or-fling',
+      actionId: 'legendary-fling',
+      referencedActionId: 'fling',
+      kind: 'special-reference',
+    },
+  ],
+  tarrasque: [
+    {
+      legacyActionId: 'chomp-costs-2-actions',
+      actionId: 'chomp-bite-costs-2-actions',
+      referencedActionId: 'bite',
+      kind: 'weapon-reference',
+    },
+    {
+      legacyActionId: 'chomp-costs-2-actions',
+      actionId: 'chomp-swallow-costs-2-actions',
+      referencedActionId: 'swallow',
+      kind: 'weapon-reference',
+    },
+  ],
+} as const satisfies Readonly<Record<string, readonly {
+  legacyActionId: string
+  actionId: string
+  referencedActionId: string
+  kind: 'weapon-reference' | 'special-reference'
+}[]>>
 
 const CATALOG_HEALING_TOUCH_RULES = {
   deva: {
@@ -4451,6 +5330,10 @@ const CATALOG_INVISIBILITY_RULES = {
     breakOn: ['makes-attack', 'casts-spell'],
     breakOnMonsterAbilityIds: ['enlarge'],
   },
+  'green-hag': {
+    actionId: 'invisible-passage',
+    breakOn: ['makes-attack', 'casts-spell'],
+  },
   imp: {
     actionId: 'invisibility',
     breakOn: ['makes-attack'],
@@ -4483,6 +5366,216 @@ const CATALOG_INVISIBILITY_RULES = {
  * can be expressed without parsing prose at runtime.
  */
 const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
+  androsphinx: {
+    roar: {
+      kind: 'area-saving-throw',
+      orderedVariantIds: ['first-roar', 'second-roar', 'third-roar'],
+      variants: [
+        {
+          id: 'first-roar',
+          name: '第一次咆哮',
+          area: { shape: 'circle', origin: 'self', radiusFeet: 500 },
+          target: 'all-creatures-except-self',
+          ability: 'wis',
+          dc: 18,
+          magical: true,
+          requiresTargetCanHearSource: true,
+          conditionOnFailedSave: {
+            condition: 'frightened',
+            durationRounds: 10,
+            repeatSaveAtEndOfTargetTurn: true,
+          },
+        },
+        {
+          id: 'second-roar',
+          name: '第二次咆哮',
+          area: { shape: 'circle', origin: 'self', radiusFeet: 500 },
+          target: 'all-creatures-except-self',
+          ability: 'wis',
+          dc: 18,
+          magical: true,
+          requiresTargetCanHearSource: true,
+          conditionOnFailedSave: {
+            condition: 'frightened',
+            durationRounds: 10,
+            repeatSaveAtEndOfTargetTurn: true,
+          },
+          additionalConditionsOnFailedSave: [
+            {
+              condition: 'deafened',
+              durationRounds: 10,
+              repeatSaveAtEndOfTargetTurn: false,
+              dependsOnCondition: 'frightened',
+            },
+            {
+              condition: 'paralyzed',
+              durationRounds: 10,
+              repeatSaveAtEndOfTargetTurn: false,
+              dependsOnCondition: 'frightened',
+            },
+          ],
+        },
+        {
+          id: 'third-roar',
+          name: '第三次咆哮',
+          area: { shape: 'circle', origin: 'self', radiusFeet: 500 },
+          target: 'all-creatures-except-self',
+          ability: 'con',
+          dc: 18,
+          magical: true,
+          requiresTargetCanHearSource: true,
+          damage: {
+            average: 44,
+            count: 8,
+            sides: 10,
+            bonus: 0,
+            type: 'thunder',
+          },
+          damageOnSuccessfulSave: 'half',
+          conditionOnFailedSave: {
+            condition: 'prone',
+            durationRounds: 1,
+            repeatSaveAtEndOfTargetTurn: false,
+          },
+        },
+      ],
+    },
+  },
+  'clay-golem': {
+    haste: {
+      kind: 'self-combat-buff',
+      duration: 'until-source-next-turn-end',
+      magical: true,
+      modifiers: {
+        armorClassBonus: 2,
+        savingThrowAdvantages: ['dex'],
+      },
+      bonusActionWeaponActionId: 'slam',
+    },
+  },
+  duergar: {
+    enlarge: {
+      kind: 'self-combat-buff',
+      duration: { type: 'rounds', rounds: 10 },
+      magical: true,
+      modifiers: {
+        sizeRankDelta: 1,
+        strengthRollMode: 'advantage',
+      },
+    },
+  },
+  dryad: {
+    'fey-charm': {
+      kind: 'saving-throw-condition',
+      rangeFeet: 30,
+      ability: 'wis',
+      dc: 14,
+      condition: 'charmed',
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      requiresTargetCanSeeSource: true,
+      durationRounds: 432_000,
+      requiredTargetCreatureTypes: ['humanoid', 'beast'],
+      repeatSaveOnDamage: {
+        mode: 'normal',
+        sourceFilter: 'source-or-allies',
+      },
+      immunityOnSuccessfulSaveOrEffectEnd: {
+        durationRounds: 14_400,
+        scope: { kind: 'source-action' },
+      },
+      sourceTargetLimit: {
+        maximum: 3,
+        replaceOldest: true,
+        partitionByRequiredCreatureType: true,
+      },
+    },
+  },
+  ghost: {
+    'horrifying-visage': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 60 },
+      target: 'all-creatures-except-self',
+      targetCreatureTypeExclusions: ['undead'],
+      ability: 'wis',
+      dc: 13,
+      magical: true,
+      requiresTargetCanSeeSource: true,
+      conditionOnFailedSave: {
+        condition: 'frightened',
+        durationRounds: 10,
+        repeatSaveAtEndOfTargetTurn: true,
+      },
+      immunityOnSuccessfulSaveOrEffectEnd: {
+        durationRounds: 14_400,
+        scope: { kind: 'source-action' },
+      },
+    },
+  },
+  kraken: {
+    'lightning-storm': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 120 },
+      target: 'all-creatures-except-self',
+      minimumTargets: 1,
+      maximumTargets: 3,
+      ability: 'dex',
+      dc: 23,
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      damage: { average: 22, count: 4, sides: 10, bonus: 0, type: 'lightning' },
+      damageOnSuccessfulSave: 'half',
+    },
+  },
+  'succubus-incubus': {
+    charm: {
+      kind: 'saving-throw-condition',
+      rangeFeet: 30,
+      ability: 'wis',
+      dc: 15,
+      condition: 'charmed',
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      requiredTargetCreatureTypes: ['humanoid'],
+      durationRounds: 14_400,
+      repeatSaveOnDamage: { mode: 'normal', sourceFilter: 'any' },
+      immunityOnSuccessfulSaveOrEffectEnd: {
+        durationRounds: 14_400,
+        scope: { kind: 'source-action' },
+      },
+      sourceTargetLimit: { maximum: 1, replaceOldest: true },
+    },
+  },
+  'vampire-bat': {
+    charm: {
+      kind: 'saving-throw-condition',
+      rangeFeet: 30,
+      ability: 'wis',
+      dc: 17,
+      condition: 'charmed',
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      requiresTargetCanSeeSource: true,
+      requiredTargetCreatureTypes: ['humanoid'],
+      durationRounds: 14_400,
+      repeatSaveOnDamage: { mode: 'normal', sourceFilter: 'source-or-allies' },
+    },
+  },
+  'vampire-vampire': {
+    charm: {
+      kind: 'saving-throw-condition',
+      rangeFeet: 30,
+      ability: 'wis',
+      dc: 17,
+      condition: 'charmed',
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      requiresTargetCanSeeSource: true,
+      requiredTargetCreatureTypes: ['humanoid'],
+      durationRounds: 14_400,
+      repeatSaveOnDamage: { mode: 'normal', sourceFilter: 'source-or-allies' },
+    },
+  },
   cloaker: {
     moan: {
       kind: 'area-saving-throw',
@@ -4501,6 +5594,25 @@ const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
       immunityOnSuccessfulSaveOrEffectEnd: {
         durationRounds: 14_400,
         scope: { kind: 'source-action' },
+      },
+    },
+  },
+  otyugh: {
+    'tentacle-slam': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 10 },
+      target: 'all-creatures-except-self',
+      maximumTargets: 2,
+      sourceLinkedTargets: { slotGroup: 'tentacle', selection: 'all' },
+      ability: 'con',
+      dc: 14,
+      damage: { average: 10, count: 2, sides: 6, bonus: 3, type: 'bludgeoning' },
+      damageOnSuccessfulSave: 'half',
+      conditionOnFailedSave: {
+        condition: 'stunned',
+        durationRounds: 1,
+        repeatSaveAtEndOfTargetTurn: false,
+        expiresAtSourceTurnEnd: true,
       },
     },
   },
@@ -4532,6 +5644,19 @@ const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
       durationRounds: 10,
       repeatSaveAtEndOfTargetTurn: true,
       repeatSaveDisadvantageWhenSourceVisible: true,
+    },
+  },
+  'sea-hag': {
+    'death-glare': {
+      kind: 'saving-throw-terminal-effect',
+      rangeFeet: 30,
+      ability: 'wis',
+      dc: 11,
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      requiresTargetCanSeeSource: true,
+      requiredCondition: 'frightened',
+      failure: 'reduce-to-zero',
     },
   },
   'stone-golem': {
@@ -4570,6 +5695,27 @@ const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
     },
   },
   vrock: {
+    spores: {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 15 },
+      target: 'all-creatures-except-self',
+      ability: 'con',
+      dc: 14,
+      activeEffectOnFailedSave: {
+        id: 'vrock-spores',
+        label: 'Spores',
+        durationRounds: 14_400,
+        repeatSaveAtEndOfTargetTurn: true,
+        standardCondition: 'poisoned',
+        periodicDamage: {
+          timing: 'target-turn-start',
+          count: 1,
+          sides: 10,
+          modifier: 0,
+          type: 'poison',
+        },
+      },
+    },
     'stunning-screech': {
       kind: 'area-saving-throw',
       area: { shape: 'circle', origin: 'self', radiusFeet: 20 },
@@ -4589,7 +5735,33 @@ const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
 } as const satisfies Readonly<Record<string, Readonly<Record<string, Dnd5eMonsterSpecialActionRule>>>>
 
 const CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS = {
+  kraken: {
+    'lightning-storm-costs-2-actions': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 120 },
+      target: 'all-creatures-except-self',
+      minimumTargets: 1,
+      maximumTargets: 3,
+      ability: 'dex',
+      dc: 23,
+      magical: true,
+      requiresSourceCanSeeTarget: true,
+      damage: { average: 22, count: 4, sides: 10, bonus: 0, type: 'lightning' },
+      damageOnSuccessfulSave: 'half',
+    },
+  },
   lich: {
+    'disrupt-life-costs-3-actions': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 20 },
+      target: 'all-creatures-except-self',
+      targetCreatureTypeExclusions: ['construct', 'undead'],
+      ability: 'con',
+      dc: 18,
+      magical: true,
+      damage: { average: 21, count: 6, sides: 6, bonus: 0, type: 'necrotic' },
+      damageOnSuccessfulSave: 'half',
+    },
     'frightening-gaze-costs-2-actions': {
       kind: 'saving-throw-condition',
       rangeFeet: 10,
@@ -4606,7 +5778,60 @@ const CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS = {
       },
     },
   },
+  'mummy-lord': {
+    'blinding-dust': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 5 },
+      target: 'all-creatures-except-self',
+      ability: 'con',
+      dc: 16,
+      magical: true,
+      conditionOnFailedSave: {
+        condition: 'blinded',
+        durationRounds: 1,
+        repeatSaveAtEndOfTargetTurn: false,
+      },
+    },
+    'blasphemous-word-costs-2-actions': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 10 },
+      target: 'all-creatures-except-self',
+      targetCreatureTypeExclusions: ['undead'],
+      ability: 'con',
+      dc: 16,
+      magical: true,
+      requiresTargetCanHearSource: true,
+      conditionOnFailedSave: {
+        condition: 'stunned',
+        durationRounds: 1,
+        repeatSaveAtEndOfTargetTurn: false,
+        expiresAtSourceTurnEnd: true,
+      },
+    },
+    'channel-negative-energy-costs-2-actions': {
+      kind: 'automatic-area-active-effect',
+      radiusFeet: 60,
+      target: 'all-creatures-including-self',
+      ignoresLineOfEffect: true,
+      duration: 'until-source-next-turn-end',
+      magical: true,
+      modifiers: { preventHealing: true },
+    },
+  },
   solar: {
+    'searing-burst-costs-2-actions': {
+      kind: 'area-saving-throw',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 10 },
+      target: 'all-creatures-except-self',
+      ability: 'dex',
+      dc: 23,
+      magical: true,
+      damage: { average: 14, count: 4, sides: 6, bonus: 0, type: 'fire' },
+      additionalDamage: [
+        { average: 14, count: 4, sides: 6, bonus: 0, type: 'radiant' },
+      ],
+      damageOnSuccessfulSave: 'half',
+    },
     'blinding-gaze-costs-3-actions': {
       kind: 'saving-throw-condition',
       rangeFeet: 30,
@@ -4618,13 +5843,62 @@ const CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS = {
       requiresTargetCanSeeSource: true,
     },
   },
+  unicorn: {
+    'shimmering-shield-costs-2-actions': {
+      kind: 'temporary-armor-class-bonus',
+      rangeFeet: 60,
+      target: 'self-or-one-visible-creature',
+      armorClassBonus: 2,
+      duration: 'until-source-next-turn-end',
+      magical: true,
+    },
+    'heal-self-costs-3-actions': {
+      kind: 'self-healing',
+      healing: { count: 2, sides: 8, bonus: 2 },
+    },
+  },
+  tarrasque: {
+    move: {
+      kind: 'grant-movement',
+      maximumSpeedFraction: 0.5,
+      provokesOpportunityAttacks: true,
+    },
+  },
+  'vampire-vampire': {
+    move: {
+      kind: 'grant-movement',
+      maximumSpeedFraction: 1,
+      provokesOpportunityAttacks: false,
+    },
+  },
+  'vampire-bat': {
+    move: {
+      kind: 'grant-movement',
+      maximumSpeedFraction: 1,
+      provokesOpportunityAttacks: false,
+    },
+  },
+  'vampire-mist': {
+    move: {
+      kind: 'grant-movement',
+      maximumSpeedFraction: 1,
+      provokesOpportunityAttacks: false,
+    },
+  },
 } as const satisfies Readonly<Record<string, Readonly<Record<string, Dnd5eMonsterSpecialActionRule>>>>
 
 const CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE = {
+  androsphinx: {
+    roar: { kind: 'per-day', max: 3 },
+  },
   vrock: {
+    spores: { kind: 'recharge', dieSides: 6, minimum: 6 },
     'stunning-screech': { kind: 'recharge', dieSides: 6, minimum: 6 },
   },
-} as const satisfies Readonly<Record<string, Readonly<Record<string, Dnd5eMonsterActionUsage>>>>
+} as const satisfies Readonly<Record<
+  string,
+  Readonly<Record<string, Dnd5eMonsterActionUsage | Dnd5eMonsterActionPerDayUsage>>
+>>
 
 interface Dnd5eCatalogCompositeSpecialAction {
   rule: Dnd5eMonsterSpecialActionRule
@@ -5559,6 +6833,16 @@ const CATALOG_MULTIATTACK_CANDIDATES: Readonly<
 function applyCatalogMonsterActionRules(
   monster: Dnd5eMonsterStatBlock,
 ): Dnd5eMonsterStatBlock {
+  const vampireBaseReferenceMonster =
+    monster.slug === 'vampire-bat' || monster.slug === 'vampire-mist'
+      ? DND5E_SRD_MONSTER_CATALOG_METADATA.monsters.find((candidate) =>
+          candidate.slug === 'vampire-vampire')
+      : undefined
+  const vampireBaseReferenceActions = vampireBaseReferenceMonster
+    ? applyCatalogMonsterActionRules(
+        applyCoreMonsterMechanicalRules(vampireBaseReferenceMonster),
+      ).actions
+    : []
   const selfTeleport = CATALOG_SELF_TELEPORT_RULES[
     monster.slug as keyof typeof CATALOG_SELF_TELEPORT_RULES
   ]
@@ -5598,6 +6882,9 @@ function applyCatalogMonsterActionRules(
   const sourceLinkedConditionAttack = CATALOG_SOURCE_LINKED_CONDITION_ATTACKS[
     monster.slug as keyof typeof CATALOG_SOURCE_LINKED_CONDITION_ATTACKS
   ]
+  const swallowAttack = CATALOG_SWALLOW_ATTACKS[
+    monster.slug as keyof typeof CATALOG_SWALLOW_ATTACKS
+  ]
   const damageOrGrappleAttack = CATALOG_DAMAGE_OR_GRAPPLE_ATTACKS[
     monster.slug as keyof typeof CATALOG_DAMAGE_OR_GRAPPLE_ATTACKS
   ]
@@ -5611,8 +6898,14 @@ function applyCatalogMonsterActionRules(
     CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS[
       monster.slug as keyof typeof CATALOG_HIT_POINT_MAXIMUM_REDUCTION_ATTACKS
     ]
+  const proneTargetOnlyActionId = CATALOG_PRONE_TARGET_ONLY_ATTACKS[
+    monster.slug as keyof typeof CATALOG_PRONE_TARGET_ONLY_ATTACKS
+  ]
   const legendaryActionReferences = CATALOG_LEGENDARY_ACTION_REFERENCES[
     monster.slug as keyof typeof CATALOG_LEGENDARY_ACTION_REFERENCES
+  ] ?? []
+  const legendaryActionVariants = CATALOG_LEGENDARY_ACTION_VARIANTS[
+    monster.slug as keyof typeof CATALOG_LEGENDARY_ACTION_VARIANTS
   ] ?? []
   const structuredSpecialActions = CATALOG_STRUCTURED_SPECIAL_ACTIONS[
     monster.slug as keyof typeof CATALOG_STRUCTURED_SPECIAL_ACTIONS
@@ -5623,6 +6916,9 @@ function applyCatalogMonsterActionRules(
   const structuredSpecialActionUsage = CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE[
     monster.slug as keyof typeof CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE
   ] ?? {}
+  const duergarEnlargeEffectDefinitionId = monster.slug === 'duergar'
+    ? `monster:${monster.id}:enlarge:self-combat-buff`
+    : undefined
   const compositeSpecialActions = CATALOG_COMPOSITE_SPECIAL_ACTIONS[monster.slug] ?? {}
   const multiattackOverride = CATALOG_MULTIATTACK_OVERRIDES[monster.slug]
   const multiattackCandidates = CATALOG_MULTIATTACK_CANDIDATES[monster.slug] ?? []
@@ -5639,6 +6935,28 @@ function applyCatalogMonsterActionRules(
     })
     return weaponSequence.length > 0 ? [{ action, weaponSequence }] : []
   })
+  const selfCombatBuffBonusActions = Object.entries(structuredSpecialActions)
+    .flatMap(([buffActionId, rawRule]) => {
+      const rule = rawRule as Dnd5eMonsterSpecialActionRule
+      if (
+        rule.kind !== 'self-combat-buff' ||
+        !rule.bonusActionWeaponActionId
+      ) return []
+      const weapon = monster.actions.find((action) =>
+        action.id === rule.bonusActionWeaponActionId &&
+        action.kind === 'weapon-attack')
+      if (!weapon) return []
+      return [{
+        id: `${buffActionId}-${weapon.id}-bonus-action`,
+        name: `${weapon.name} (${monster.actions.find((action) => action.id === buffActionId)?.name ?? buffActionId})`,
+        description: `While the combat buff is active, use a bonus action to make ${weapon.name}.`,
+        kind: 'weapon-attack' as const,
+        automation: 'headless' as const,
+        referencedActionId: weapon.id,
+        requiredActiveEffectDefinitionId:
+          `monster:${monster.id}:${buffActionId}:self-combat-buff`,
+      }]
+    })
 
   return {
     ...monster,
@@ -5650,7 +6968,7 @@ function applyCatalogMonsterActionRules(
         if (structuredRule) {
           const structuredUsage = structuredSpecialActionUsage[
             action.id as keyof typeof structuredSpecialActionUsage
-          ] as Dnd5eMonsterActionUsage | undefined
+          ] as Dnd5eMonsterActionUsage | Dnd5eMonsterActionPerDayUsage | undefined
           return {
             ...action,
             kind: 'other' as const,
@@ -5717,6 +7035,58 @@ function applyCatalogMonsterActionRules(
           (action.id === 'shortsword' || action.id === 'light-crossbow')
           ? CATALOG_ASSASSIN_POISON_WEAPON_ATTACKS[action.id]
           : undefined
+        if (swallowAttack && action.id === 'swallow') {
+          const bite = monster.actions.find((candidate) =>
+            candidate.id === 'bite')?.attack
+          if (bite) {
+            return {
+              ...action,
+              kind: 'weapon-attack' as const,
+              automation: 'headless' as const,
+              relationRequirement: {
+                kind: 'target-linked-to-source' as const,
+                slotGroup: swallowAttack.grappleSlotGroup,
+              },
+              attack: {
+                ...bite,
+                targetMaxSizeRank: swallowAttack.targetMaxSizeRank,
+                onHitEffects: [{
+                  id: 'swallow',
+                  kind: 'source-linked-condition' as const,
+                  relation: {
+                    kind: 'swallowed' as const,
+                    slotGroup: 'swallow',
+                    capacity: swallowAttack.capacity,
+                    maxDistanceFeet: 5,
+                    targetMaxSizeRank: swallowAttack.targetMaxSizeRank,
+                    whenCapacityFull: 'skip-application' as const,
+                    movement: 'carry-target' as const,
+                    endsOnSourceIncapacitated: false,
+                  },
+                  conditions: [
+                    { condition: 'restrained' as const },
+                    {
+                      condition: 'blinded' as const,
+                      dependsOnCondition: 'restrained' as const,
+                    },
+                  ],
+                  periodicDamage: {
+                    timing: 'source-turn-start' as const,
+                    count: swallowAttack.periodicDamage.count,
+                    sides: swallowAttack.periodicDamage.sides,
+                    modifier: 0,
+                    type: 'acid' as const,
+                  },
+                  regurgitation: 'regurgitation' in swallowAttack
+                    ? swallowAttack.regurgitation
+                    : undefined,
+                  removeSourceRelationSlotGroupOnApply:
+                    swallowAttack.grappleSlotGroup,
+                }],
+              },
+            }
+          }
+        }
         if (monster.slug === 'tarrasque' && action.id === 'swallow') {
           const bite = monster.actions.find((candidate) =>
             candidate.id === 'bite')?.attack
@@ -5725,7 +7095,6 @@ function applyCatalogMonsterActionRules(
               ...action,
               kind: 'weapon-attack' as const,
               automation: 'headless' as const,
-              referencedActionId: 'bite',
               relationRequirement: {
                 kind: 'target-linked-to-source' as const,
                 slotGroup: 'bite',
@@ -5759,6 +7128,14 @@ function applyCatalogMonsterActionRules(
                     sides: 6,
                     modifier: 0,
                     type: 'acid' as const,
+                  },
+                  regurgitation: {
+                    damageThreshold: 60,
+                    ability: 'con' as const,
+                    dc: 20,
+                    ejects: 'all-swallowed' as const,
+                    applyProne: true as const,
+                    placementWithinFeet: 10,
                   },
                   removeSourceRelationSlotGroupOnApply: 'bite',
                 }],
@@ -5860,6 +7237,14 @@ function applyCatalogMonsterActionRules(
                 : action.description),
             kind: 'weapon-attack' as const,
             automation: 'headless' as const,
+            forbiddenActiveEffectDefinitionId:
+              duergarEnlargeEffectDefinitionId &&
+              (action.id === 'war-pick' || action.id === 'javelin')
+                ? duergarEnlargeEffectDefinitionId
+                : undefined,
+            ...(monster.slug === 'vampire-bat' && action.id === 'bite'
+              ? { targetEligibility: VAMPIRE_BITE_TARGET_ELIGIBILITY }
+              : {}),
             attack: exactWeaponAttack.attack,
           }
         }
@@ -5919,6 +7304,14 @@ function applyCatalogMonsterActionRules(
                   magical: 'magical' in savingThrowConditionAttack
                     ? savingThrowConditionAttack.magical
                     : undefined,
+                  targetCreatureTypeExclusions:
+                    'targetCreatureTypeExclusions' in savingThrowConditionAttack
+                      ? savingThrowConditionAttack.targetCreatureTypeExclusions
+                      : undefined,
+                  targetRaceExclusions:
+                    'targetRaceExclusions' in savingThrowConditionAttack
+                      ? savingThrowConditionAttack.targetRaceExclusions
+                      : undefined,
                   conditionOnFailedSave:
                     savingThrowConditionAttack.conditionOnFailedSave,
                   additionalConditionsOnFailedSave:
@@ -5928,6 +7321,18 @@ function applyCatalogMonsterActionRules(
                 },
               ],
             },
+          }
+        }
+        if (
+          proneTargetOnlyActionId != null &&
+          action.id === proneTargetOnlyActionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            targetEligibility: PRONE_TARGET_ONLY_ELIGIBILITY,
           }
         }
         if (monster.slug === 'ankheg' && action.id === 'acid-spray') {
@@ -6231,10 +7636,21 @@ function applyCatalogMonsterActionRules(
             id: 'consume-life',
             name: 'Consume Life',
             description:
-              'Bonus action; the DM adjudicates the zero-hit-point target save, death, and healing.',
+              'Bonus action; a living creature at 0 hit points makes the declared Constitution save or dies, healing the will-o\'-wisp.',
             kind: 'other' as const,
             economy: 'bonus-action' as const,
-            automation: 'dm-adjudication' as const,
+            automation: 'headless' as const,
+            rule: {
+              kind: 'saving-throw-terminal-effect' as const,
+              rangeFeet: 5,
+              ability: 'con' as const,
+              dc: 10,
+              magical: true,
+              requiresSourceCanSeeTarget: true,
+              requiresTargetAtZeroHitPoints: true,
+              failure: 'instant-death' as const,
+              healingOnDeath: { count: 3, sides: 6, bonus: 0 },
+            },
           }]
         : []),
       ...(damageOrGrappleAttack
@@ -6284,6 +7700,11 @@ function applyCatalogMonsterActionRules(
           description: `${variant.branchNote}\n${source.description}`,
           kind: 'weapon-attack' as const,
           automation: 'headless' as const,
+          requiredActiveEffectDefinitionId:
+            monster.slug === 'duergar' &&
+            (variant.id === 'war-pick-enlarged' || variant.id === 'javelin-enlarged')
+              ? duergarEnlargeEffectDefinitionId
+              : undefined,
           attack: variant.attack,
         }]
       }),
@@ -6325,6 +7746,10 @@ function applyCatalogMonsterActionRules(
         sequenceAttackMode: action.sequenceAttackMode,
       })),
     ],
+    bonusActions: [
+      ...(monster.bonusActions ?? []),
+      ...selfCombatBuffBonusActions,
+    ],
     reactions: monster.reactions?.map((reaction) => {
       if (monster.slug === 'chain-devil' && reaction.id === 'unnerving-mask') {
         return {
@@ -6357,23 +7782,47 @@ function applyCatalogMonsterActionRules(
         },
       }
     }),
-    legendaryActions: monster.legendaryActions?.map((action) => {
+    legendaryActions: monster.legendaryActions?.flatMap((action) => {
+      const variants = legendaryActionVariants.filter((candidate) =>
+        candidate.legacyActionId === action.id)
+      if (variants.length > 0) {
+        return variants.flatMap((variant): Dnd5eMonsterAction[] => {
+          if (variant.kind === 'weapon-reference') {
+            return [{
+              ...action,
+              id: variant.actionId,
+              referencedActionId: variant.referencedActionId,
+              automation: 'headless' as const,
+            }]
+          }
+          const special = compositeSpecialActions[variant.referencedActionId]
+          if (!special) return []
+          return [{
+            ...action,
+            id: variant.actionId,
+            kind: 'other' as const,
+            automation: 'headless' as const,
+            relationRequirement: special.relationRequirement,
+            rule: special.rule,
+          }]
+        })
+      }
       const structuredRule = structuredLegendarySpecialActions[
         action.id as keyof typeof structuredLegendarySpecialActions
       ] as Dnd5eMonsterSpecialActionRule | undefined
       if (structuredRule) {
-        return {
+        return [{
           ...action,
           kind: 'other' as const,
           automation: 'headless' as const,
           rule: structuredRule,
-        }
+        }]
       }
       if (
         selfTeleport?.section === 'legendary' &&
         action.id === selfTeleport.actionId
       ) {
-        return {
+        return [{
           ...action,
           kind: 'other' as const,
           automation: 'headless' as const,
@@ -6384,17 +7833,34 @@ function applyCatalogMonsterActionRules(
             requiresVisibleDestination: true as const,
             requiresUnoccupiedDestination: true as const,
           },
-        }
+        }]
       }
       const reference = legendaryActionReferences.find((candidate) =>
         candidate.legacyActionId === action.id)
-      if (!reference) return action
-      return {
+      if (!reference) return [action]
+      const localReferencedAction = monster.actions.find((candidate) =>
+        candidate.id === reference.referencedActionId)
+      if (!localReferencedAction) {
+        const externalReferencedAction = vampireBaseReferenceActions.find(
+          (candidate) => candidate.id === reference.referencedActionId,
+        )
+        if (externalReferencedAction?.kind === 'weapon-attack' && externalReferencedAction.attack) {
+          return [{
+            ...action,
+            id: reference.actionId,
+            kind: 'weapon-attack' as const,
+            attack: externalReferencedAction.attack,
+            targetEligibility: externalReferencedAction.targetEligibility,
+            automation: reference.automation,
+          }]
+        }
+      }
+      return [{
         ...action,
         id: reference.actionId,
         referencedActionId: reference.referencedActionId,
         automation: reference.automation,
-      }
+      }]
     }),
   }
 }

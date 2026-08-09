@@ -1,7 +1,7 @@
 import type {
   AiJobCreateRequestV2,
   AiJobRecordV2,
-  PdfCampaignAnalysisArtifactV1,
+  PdfCampaignAnalysisArtifact,
 } from '../../shared/ai-job.mjs'
 import { sharedLobbyApiCandidates } from './sharedApi'
 import { getAccountSession } from './accountSession'
@@ -88,7 +88,7 @@ export async function submitCampaignAiJobResult(
   jobId: string,
   expectedRevision: number,
   leaseToken: string,
-  artifact: PdfCampaignAnalysisArtifactV1,
+  artifact: PdfCampaignAnalysisArtifact,
 ): Promise<PublicAiJobV2> {
   const response = await aiJobRequest<{ job: PublicAiJobV2 }>(campaignJobPath(campaignId, jobId, 'result'), {
     method: 'POST',
@@ -129,7 +129,7 @@ export async function updateCampaignAiJobArtifact(
   campaignId: string,
   jobId: string,
   expectedRevision: number,
-  artifact: PdfCampaignAnalysisArtifactV1,
+  artifact: PdfCampaignAnalysisArtifact,
 ): Promise<PublicAiJobV2> {
   const response = await aiJobRequest<{ job: PublicAiJobV2 }>(campaignJobPath(campaignId, jobId, 'artifact'), {
     method: 'PUT',

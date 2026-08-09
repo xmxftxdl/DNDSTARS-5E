@@ -1,5 +1,4 @@
 import type {
-  PdfCampaignAnalysisV1,
   PdfEncounterRecordV1,
   PdfImportCandidateV1,
   PdfNamedRecordV1,
@@ -9,6 +8,7 @@ import type {
   PdfSceneRecordV1,
   PdfClueRecordV1,
 } from '../../lib/pdfCampaignAnalysis'
+import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
 
 export type PdfAnalysisEntityCollection = 'people' | 'factions' | 'locations'
 
@@ -62,11 +62,11 @@ function replaceExact(values: readonly string[], previousName: string, nextName:
  * 重命名实体时同步关系图和场景引用，避免 DM 修正姓名后生成一个新的“待确认”节点。
  */
 export function renamePdfAnalysisEntity(
-  analysis: PdfCampaignAnalysisV1,
+  analysis: PdfCampaignAnalysisView,
   collection: PdfAnalysisEntityCollection,
   index: number,
   nextName: string,
-): PdfCampaignAnalysisV1 {
+): PdfCampaignAnalysisView {
   const entries = analysis[collection]
   const current = entries[index]
   if (!current) return analysis
@@ -75,7 +75,7 @@ export function renamePdfAnalysisEntity(
   const nextEntries = entries.map((entry, entryIndex) => entryIndex === index
     ? { ...entry, name: normalizedName }
     : entry)
-  const next: PdfCampaignAnalysisV1 = {
+  const next: PdfCampaignAnalysisView = {
     ...analysis,
     [collection]: nextEntries,
     relationships: analysis.relationships.map((relationship) => ({
@@ -99,11 +99,11 @@ export function renamePdfAnalysisEntity(
   return next
 }
 
-export function removePdfAnalysisEntry<K extends keyof PdfCampaignAnalysisV1>(
-  analysis: PdfCampaignAnalysisV1,
+export function removePdfAnalysisEntry<K extends keyof PdfCampaignAnalysisView>(
+  analysis: PdfCampaignAnalysisView,
   collection: K,
   index: number,
-): PdfCampaignAnalysisV1 {
+): PdfCampaignAnalysisView {
   const entries = analysis[collection]
   if (!Array.isArray(entries)) return analysis
   return { ...analysis, [collection]: entries.filter((_, entryIndex) => entryIndex !== index) }

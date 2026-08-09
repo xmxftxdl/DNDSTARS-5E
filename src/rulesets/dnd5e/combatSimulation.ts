@@ -144,6 +144,7 @@ import {
   dnd5eDirectedCombatantPairKey,
   dnd5eEffectiveSizeRank,
   dnd5ePendingTurnStartPeriodicDamage,
+  dnd5ePendingSwallowRegurgitationRequirements,
   dnd5ePendingMonsterDeathAreaEffects,
   prepareDnd5eTurnStartGazeRequirements,
   previewDnd5eTurnStartBoundary,
@@ -162,6 +163,7 @@ import {
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterMechanicRoll,
   type Dnd5eMonsterRechargeRoll,
+  type Dnd5eSwallowRegurgitationSavingThrowRoll,
   type Dnd5eMonsterMultiattackStepResolutionV1,
   type Dnd5eTurnStartGazeResolution,
   type Dnd5eSpellForcedMovement,
@@ -449,6 +451,7 @@ interface SimulationAction {
     preventReactions: boolean
     repeatSaveOnDamage: boolean
     changesAllegiance: boolean
+    requiredTargetCreatureTypes?: readonly ('humanoid' | 'beast')[]
   }
   spell?: {
     id: string
@@ -923,11 +926,12 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
         saveDc: rule.dc,
         condition: rule.condition,
         preventReactions: rule.preventReactions === true,
-        repeatSaveOnDamage: rule.repeatSaveOnDamage === true,
+        repeatSaveOnDamage: rule.repeatSaveOnDamage != null,
         changesAllegiance:
           monster.id === 'srd-5.1:aboleth' &&
           action.id === 'enslave' &&
           rule.condition === 'charmed',
+        requiredTargetCreatureTypes: rule.requiredTargetCreatureTypes,
       },
     }]
   })
@@ -1470,6 +1474,24 @@ function simulationLimitedMagicImmunityNegates(
   return rule != null && spellLevel <= rule.maximumSpellLevel
 }
 
+function simulationActorMatchesMonsterSpecialCreatureType(
+  target: SimulationActor,
+  requiredTypes: readonly ('humanoid' | 'beast')[] | undefined,
+): boolean {
+  if (!requiredTypes || requiredTypes.length === 0) return true
+  const normalized = target.monster?.creatureType.trim().toLowerCase()
+  const creatureType = target.monster
+    ? normalized === 'beast' || normalized?.includes('野兽')
+      ? 'beast'
+      : normalized === 'humanoid' || normalized?.includes('类人')
+        ? 'humanoid'
+        : undefined
+    : target.character || target.side === 'players'
+      ? 'humanoid'
+      : undefined
+  return creatureType != null && requiredTypes.includes(creatureType)
+}
+
 function actionExpectedDamage(
   action: SimulationAction,
   actor: SimulationActor,
@@ -1484,6 +1506,10 @@ function actionExpectedDamage(
   if (action.control) {
     if (
       distanceFeet > action.control.rangeFeet ||
+      !simulationActorMatchesMonsterSpecialCreatureType(
+        target,
+        action.control.requiredTargetCreatureTypes,
+      ) ||
       target.conditionImmunities.has(action.control.condition)
     ) return undefined
     const modifier = target.savingThrowModifiers[action.control.ability]
@@ -4594,6 +4620,19 @@ function executeHeadlessWeaponAction(input: {
                 ),
               }
             }
+            if (effect.kind === 'ability-score-reduction') {
+              return {
+                effectId: effect.id,
+                damageRolls: [Array.from(
+                  { length: effect.reduction.count },
+                  () => random.die(effect.reduction.sides),
+                )],
+              }
+            }
+            if (
+              effect.kind === 'equipment-corrosion' ||
+              effect.kind === 'zero-hit-point-outcome'
+            ) return { effectId: effect.id }
             const savingThrow = effect.kind === 'forced-movement'
               ? effect.resistance.kind === 'saving-throw'
                 ? effect.resistance
@@ -4602,11 +4641,15 @@ function executeHeadlessWeaponAction(input: {
                   effect.kind === 'hit-point-maximum-reduction' ||
                   effect.kind === 'persistent-effect'
                 ? effect.savingThrow
-                : {
+                : effect.kind === 'saving-throw-damage' ||
+                    effect.kind === 'saving-throw-condition' ||
+                    effect.kind === 'saving-throw-instant-death'
+                  ? {
                     ability: effect.ability,
                     dc: effect.dc,
                     magical: effect.magical,
                   }
+                  : undefined
             if (!savingThrow) return { effectId: effect.id }
             const failedSaveCondition =
               effect.kind === 'forced-movement'
@@ -4621,7 +4664,10 @@ function executeHeadlessWeaponAction(input: {
                       ? effect.standardCondition
                         ? { condition: effect.standardCondition }
                         : undefined
-                      : effect.conditionOnFailedSave
+                      : effect.kind === 'saving-throw-damage' ||
+                          effect.kind === 'saving-throw-condition'
+                        ? effect.conditionOnFailedSave
+                        : undefined
             const saveMode = dnd5eSavingThrowMode(targetCombatant, savingThrow.ability, {
               effectVisible: true,
               condition: failedSaveCondition?.condition,
@@ -5816,6 +5862,24 @@ function simulationActiveEffectPeriodicDamageRolls(
     })
 }
 
+function simulationSwallowRegurgitationSavingThrows(
+  state: Dnd5eHeadlessCombatState,
+  endingTurnActorId: string,
+  random: SeededRandom,
+): Dnd5eSwallowRegurgitationSavingThrowRoll[] {
+  return dnd5ePendingSwallowRegurgitationRequirements(
+    state,
+    endingTurnActorId,
+  ).map((requirement) => ({
+    sourceId: requirement.sourceId,
+    triggeringTargetId: requirement.triggeringTargetId,
+    d20: random.die(20),
+    d20Second: requirement.mode !== 'normal' ? random.die(20) : undefined,
+    blessRoll: requirement.blessed ? random.die(4) : undefined,
+    baneRoll: requirement.baned ? random.die(4) : undefined,
+  }))
+}
+
 function simulationMonsterMechanicRolls(
   state: Dnd5eHeadlessCombatState,
   actorId: string,
@@ -6070,6 +6134,12 @@ function settleSimulationEndTurn(input: {
       'target-turn-end',
       random,
     ),
+    swallowRegurgitationSavingThrows:
+      simulationSwallowRegurgitationSavingThrows(
+        holder.state,
+        actor.id,
+        random,
+      ),
     turnStartActiveEffectSavingThrows: simulationActiveEffectSavingThrows(
       nextTurnPreview,
       nextActorId,
@@ -6269,7 +6339,7 @@ function simulationHeadlessCombatant(
         : undefined,
     } : undefined,
     statBlockId: actor.monster?.id,
-    creatureType: actor.monster?.creatureType,
+    creatureType: actor.monster?.creatureType ?? (actor.side === 'players' ? 'humanoid' : undefined),
     damageVulnerabilities: [...actor.vulnerabilities],
     damageResistances: [...actor.resistances],
     damageImmunities: [...actor.immunities],

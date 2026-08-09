@@ -206,7 +206,8 @@ describe('legacy content Activity adapters', () => {
     const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability)
     expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
     expect(activity.automation.level).toBe('assisted')
-    expect(activity.triggers?.[0]).toMatchObject({ event: 'on-hit', decision: 'actor-choice' })
+    expect(activity.invocation).toMatchObject({ kind: 'triggered', event: 'attack-hit', confirmation: 'actor-choice' })
+    expect(activity.triggers?.[0]).toMatchObject({ event: 'attack-hit', decision: 'actor-choice' })
     expect(activity.outcomes[0]?.operations).toContainEqual(expect.objectContaining({ kind: 'manual-adjudication' }))
   })
 

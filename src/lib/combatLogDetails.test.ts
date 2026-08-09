@@ -88,6 +88,46 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('燃烧之手伤害 15；豁免成功减半为 7；针刺魔火焰免疫，最终 0')
   })
 
+  it('解释普通武器伤害被血肉魔像免疫而归零', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'damage-defense-resolved',
+        sourceId: 'hero',
+        targetId: 'flesh-golem',
+        damageType: 'slashing',
+        damageBefore: 11,
+        damageAfter: 0,
+        defenses: [{
+          kind: 'immune',
+          multiplier: 0,
+          damageBefore: 11,
+          damageAfter: 0,
+          reasons: ['conditional:0:immune'],
+        }],
+        damageSource: {
+          delivery: 'weapon-attack',
+          magical: false,
+        },
+      },
+      {
+        type: 'damage-applied',
+        sourceId: 'hero',
+        targetId: 'flesh-golem',
+        amount: 0,
+        hpBefore: 93,
+        hpAfter: 93,
+        temporaryHpBefore: 0,
+        temporaryHpAfter: 0,
+        damageTypes: ['slashing'],
+      },
+    ], {
+      resolveName: (id) => id === 'flesh-golem' ? '血肉魔像' : id,
+    })
+
+    expect(details).toContain('血肉魔像｜挥砍伤害免疫生效｜11 → 0｜来源：非魔法武器攻击（普通材质）')
+    expect(details).toContain('血肉魔像｜受到 0 点伤害｜HP 93 → 93')
+  })
+
   it('展开火球术共享的 8d6 每颗骰面和最终伤害', () => {
     const details = formatDnd5eCombatLogDetails([{
       type: 'spell-saving-throw-damage-resolved',
@@ -112,6 +152,21 @@ describe('formatDnd5eCombatLogDetails', () => {
 
     expect(details).toContain('火球术火焰伤害骰 8d6：6 + 5 + 4 + 3 + 2 + 1 + 6 + 5 = 32')
     expect(details).toContain('火球术伤害 32；豁免失败，伤害为 32；最终 32')
+  })
+
+  it('明确记录法术塑形保护目标自动成功且不受范围法术伤害', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-sculpted',
+      actorId: 'wizard',
+      targetId: 'ally',
+      spellId: 'fireball',
+    }], {
+      resolveName: (id) => ({ wizard: 'Test01', ally: 'Test02' })[id] ?? id,
+    })
+
+    expect(details).toEqual([
+      'Test02｜受到Test01的法师特性「法术塑形」保护｜对火球术的豁免自动成功，且不受伤害',
+    ])
   })
 
   it('展开强化塑能来源以及魔法飞弹的公式、逐枚伤害和总伤害', () => {
@@ -438,5 +493,33 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜自动结算 fireball')
     expect(details).toContain('艾莉雅｜随机表结果 50 未接入自动结算｜战斗结算已暂停，等待 DM 裁定')
     expect(details).toContain('艾莉雅｜随机表结果 50 的 DM 裁定已完成｜已跳过该结果｜备注：无需额外效果')
+  })
+
+  it('shows authoritative optional bonus-die consumption', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'optional-bonus-die-used',
+      targetId: 'hero',
+      effectId: 'effect-resistance',
+      definitionId: 'monster.trait.resistance',
+      sourceRulesId: 'monster.trait.resistance',
+      label: '战争抗性',
+      rollKind: 'saving-throw',
+      dieSides: 6,
+      roll: 4,
+    }], { resolveName })).toContain('艾莉雅｜豁免奖励骰：战争抗性 d6=4｜已消耗')
+  })
+
+  it('shows the item damage-reduction dice and final prevented amount', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'inventory-headless-effect-applied',
+      actorId: 'hero',
+      targetId: 'hero',
+      instanceId: 'ward-item',
+      effectId: 'damage-reduction',
+      itemName: '守护腰带',
+      effectKind: 'damage-reduction',
+      amount: 6,
+      dice: { sides: 6, rolls: [4], bonus: 2 },
+    }], { resolveName })).toContain('艾莉雅｜守护腰带 减免 6 点伤害｜减伤骰 d6(4) +2')
   })
 })

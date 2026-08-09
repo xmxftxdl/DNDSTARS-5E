@@ -223,10 +223,15 @@ describe('complex relation Multiattacks', () => {
       })
 
     expect(catalogAction('tarrasque', 'swallow')).toMatchObject({
-      referencedActionId: 'bite',
       relationRequirement: {
         kind: 'target-linked-to-source',
         slotGroup: 'bite',
+      },
+      attack: {
+        onHitEffects: [expect.objectContaining({
+          id: 'swallow',
+          kind: 'source-linked-condition',
+        })],
       },
     })
     expect(catalogAction('kraken', 'fling')).toMatchObject({

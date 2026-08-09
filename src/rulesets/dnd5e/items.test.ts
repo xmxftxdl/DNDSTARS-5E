@@ -67,6 +67,115 @@ describe('SRD 5.1 inventory', () => {
     expect(DND5E_SRD_ITEM_TEMPLATES.every((item) => item.source.license === 'CC BY 4.0')).toBe(true)
   })
 
+  it('equips an arcane focus in either hand and defaults to the free off hand', () => {
+    const focusTemplate = DND5E_SRD_GEAR_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:item:arcane-focus')
+    expect(focusTemplate?.equipment).toMatchObject({
+      id: 'dnd5e-arcane-focus',
+      slot: 'mainWeapon',
+      allowedSlots: ['mainWeapon', 'offHand'],
+      spellcastingFocusClassIds: ['wizard', 'sorcerer', 'warlock'],
+    })
+
+    const hero = { ...character('focus-hero'), equipment: { mainWeapon: DND5E_LONGSWORD } }
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:item:arcane-focus', quantity: 1,
+    })
+    const focus = inventoryEntry(granted.characters[0], 'srd-5.1:item:arcane-focus')
+    const equipped = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'equip', characterId: hero.id, instanceId: focus.instanceId,
+    })
+
+    expect(equipped.ok).toBe(true)
+    expect(equipped.characters[0].equipment?.offHand?.id).toBe('dnd5e-arcane-focus')
+    expect(inventoryEntry(equipped.characters[0], 'srd-5.1:item:arcane-focus').equippedSlot).toBe('offHand')
+
+    const persisted = normalizeCharacter(equipped.characters[0])
+    expect(persisted.equipment?.offHand).toMatchObject({
+      id: 'dnd5e-arcane-focus',
+      allowedSlots: ['mainWeapon', 'offHand'],
+      spellcastingFocusClassIds: ['wizard', 'sorcerer', 'warlock'],
+    })
+  })
+
+  it('migrates a legacy arcane focus that was incorrectly stored as an unidentified magic item', () => {
+    const hero = character('legacy-focus')
+    hero.dnd5eInventory = {
+      schemaVersion: 3,
+      entries: [{
+        instanceId: 'legacy-focus-instance',
+        templateId: 'srd-5.1:magic-item:arcane-focus',
+        item: {
+          id: 'srd-5.1:magic-item:arcane-focus',
+          name: '奥术法器',
+          category: 'magic-item',
+          icon: 'magic-wand',
+          description: '旧存档错误分类。',
+          rulesText: '旧存档错误分类。',
+          stackable: false,
+          magicItem: { kind: 'wand', rarity: 'common', attunement: 'none', automation: 'dm-adjudication' },
+          source: { book: '旧存档', license: '本地内容' },
+        },
+        quantity: 1,
+        identified: false,
+        acquiredAt: 1,
+      }],
+    }
+
+    const normalized = normalizeDnd5eInventory(hero)
+    expect(normalized.entries[0]).toMatchObject({
+      identified: true,
+      item: {
+        id: 'srd-5.1:item:arcane-focus',
+        category: 'adventuring-gear',
+        icon: 'spellcasting-focus',
+        equipment: {
+          allowedSlots: ['mainWeapon', 'offHand'],
+          spellcastingFocusClassIds: ['wizard', 'sorcerer', 'warlock'],
+        },
+      },
+    })
+    expect(normalized.entries[0].item.magicItem).toBeUndefined()
+
+    const equipped = applyDnd5eInventoryMutation([{ ...hero, dnd5eInventory: normalized }], {
+      type: 'equip', characterId: hero.id, instanceId: 'legacy-focus-instance', slot: 'offHand',
+    })
+    expect(equipped.ok).toBe(true)
+    expect(equipped.characters[0].equipment?.offHand?.id).toBe('dnd5e-arcane-focus')
+  })
+
+  it('equips Staff of Striking as a magical quarterstaff in a free hand', () => {
+    const hero = { ...character('striking-staff-hero'), equipment: { mainWeapon: DND5E_LONGSWORD } }
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:magic-item:staff-of-striking', quantity: 1,
+    })
+    const staff = inventoryEntry(granted.characters[0], 'srd-5.1:magic-item:staff-of-striking')
+    const equipped = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'equip', characterId: hero.id, instanceId: staff.instanceId,
+    })
+
+    expect(equipped.ok).toBe(true)
+    expect(equipped.characters[0].equipment?.offHand).toMatchObject({
+      id: 'srd-5.1:magic-item:staff-of-striking',
+      baseEquipmentId: 'dnd5e-quarterstaff',
+      dnd5e: { kind: 'weapon', magical: true },
+    })
+    expect(inventoryEntry(equipped.characters[0], staff.templateId).equippedSlot).toBe('offHand')
+  })
+
+  it('does not infer a focus declaration from an ordinary weapon or shield', () => {
+    const quarterstaff = DND5E_SRD_ITEM_TEMPLATES.find((item) =>
+      item.id === 'srd-5.1:equipment:dnd5e-quarterstaff',
+    )
+    const shield = DND5E_SRD_ITEM_TEMPLATES.find((item) =>
+      item.id === 'srd-5.1:equipment:dnd5e-shield',
+    )
+
+    expect(quarterstaff?.equipment?.spellcastingFocusClassIds).toBeUndefined()
+    expect(shield?.equipment?.spellcastingFocusClassIds).toBeUndefined()
+    expect(quarterstaff?.rulesText).not.toContain('施法法器')
+    expect(shield?.rulesText).not.toContain('施法法器')
+  })
+
   it('grants and equips an active room-plugin equipment template', () => {
     const dispose = registerDnd5eRulesPlugin({
       manifest: {
@@ -274,6 +383,39 @@ describe('SRD 5.1 inventory', () => {
     } finally {
       dispose()
     }
+  })
+
+  it('requires attunement for Pearl of Power and restores its daily use at dawn', () => {
+    const wizard = {
+      ...character('pearl-wizard'),
+      classResources: { 'dnd5e-spell-slot-2': { current: 0, max: 2 } },
+    }
+    const granted = applyDnd5eInventoryMutation([wizard], {
+      type: 'grant', characterId: wizard.id,
+      templateId: 'srd-5.1:magic-item:pearl-of-power', quantity: 1,
+    })
+    const pearl = inventoryEntry(granted.characters[0], 'srd-5.1:magic-item:pearl-of-power')
+    expect(applyDnd5eInventoryMutation(granted.characters, {
+      type: 'use', characterId: wizard.id, instanceId: pearl.instanceId, spellSlotLevel: 2,
+    })).toMatchObject({ ok: false, reason: 'item-inactive' })
+
+    const attuned = {
+      ...granted.characters[0],
+      dnd5eInventory: {
+        ...granted.characters[0].dnd5eInventory!,
+        entries: granted.characters[0].dnd5eInventory!.entries.map((entry) =>
+          entry.instanceId === pearl.instanceId ? { ...entry, attuned: true } : entry,
+        ),
+      },
+    }
+    const used = applyDnd5eInventoryMutation([attuned], {
+      type: 'use', characterId: wizard.id, instanceId: pearl.instanceId,
+      spellSlotLevel: 2, receiptId: 'pearl-of-power:daily-use',
+    })
+    expect(used).toMatchObject({ ok: true, spellSlotLevel: 2, spellSlotsRecovered: 1 })
+    expect(inventoryEntry(used.characters[0], pearl.templateId).resources?.['daily-use'].current).toBe(0)
+    const afterDawn = restoreDnd5eInventoryResources(used.characters[0], 'dawn')
+    expect(inventoryEntry(afterDawn, pearl.templateId).resources?.['daily-use'].current).toBe(1)
   })
 
   it('persists item-use receipts and rejects stale inventory revisions', () => {
@@ -538,6 +680,44 @@ describe('SRD 5.1 inventory', () => {
     })
     const afterDawn = restoreDnd5eInventoryResources(afterLong, 'dawn')
     expect(afterDawn.dnd5eInventory?.entries[0]).toMatchObject({ resources: { dawn: { current: 2 } } })
+  })
+
+  it('rolls dawn charge recovery and resolves last-charge destruction on the authoritative item instance', () => {
+    const hero = character('wand-owner')
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id,
+      templateId: 'srd-5.1:magic-item:wand-of-magic-missiles', quantity: 1,
+    })
+    const wand = inventoryEntry(granted.characters[0], 'srd-5.1:magic-item:wand-of-magic-missiles')
+    const partiallySpent = applyDnd5eInventoryActivityCosts(granted.characters[0], {
+      instanceId: wand.instanceId,
+      costs: [{ kind: 'resource', resourceId: 'charges', amount: 5 }],
+      receiptId: 'wand:spend-five',
+      expectedInventoryRevision: normalizeDnd5eInventory(granted.characters[0]).revision ?? 0,
+    })
+    expect(partiallySpent.ok).toBe(true)
+    if (!partiallySpent.ok) return
+    expect(inventoryEntry(partiallySpent.character, wand.templateId).resources?.charges.current).toBe(2)
+    const recovered = restoreDnd5eInventoryResources(partiallySpent.character, 'dawn', {
+      [`${wand.instanceId}:charges`]: [2],
+    })
+    expect(inventoryEntry(recovered, wand.templateId).resources?.charges.current).toBe(5)
+
+    const lastCharge = applyDnd5eInventoryActivityCosts(recovered, {
+      instanceId: wand.instanceId,
+      costs: [{ kind: 'resource', resourceId: 'charges', amount: 5 }],
+      receiptId: 'wand:last-charge',
+      expectedInventoryRevision: normalizeDnd5eInventory(recovered).revision ?? 0,
+      lastChargeDestructionRolls: { charges: 1 },
+    })
+    expect(lastCharge).toMatchObject({
+      ok: true,
+      lastChargeChecks: [{ resourceId: 'charges', roll: 1, dieSides: 20, destroyed: true }],
+    })
+    if (!lastCharge.ok) return
+    expect(normalizeDnd5eInventory(lastCharge.character).entries.some(
+      (entry) => entry.instanceId === wand.instanceId,
+    )).toBe(false)
   })
 
   it('migrates currency, calculates coin weight, and rejects overspending', () => {

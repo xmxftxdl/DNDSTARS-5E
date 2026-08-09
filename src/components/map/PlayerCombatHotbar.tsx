@@ -6,12 +6,16 @@ import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 import { useSpellbookStore } from '../../store/spellbook'
 import { getClassResource } from '../../lib/classResources'
 import {
+  FIGHTER_RESOURCE_KEYS,
   dnd5eAvailableSpellModifierIntents,
+  dnd5eCharacterClassLevel,
+  dnd5eClassDefinitionForCharacter,
   dnd5eMartialSpellSynergyForCharacter,
   dnd5eMartialSpellBonusAttackAvailable,
   dnd5eRageFeatureForCharacter,
   dnd5eEffectiveSpellcastingSources,
   dnd5eEffectiveSpellSelections,
+  dnd5eInventoryEntryIsActive,
   dnd5eFreeSpellCastSource,
   dnd5ePactSlotLevel,
   dnd5eSelectedSpellIdsForClass,
@@ -25,8 +29,9 @@ import {
   resolveDnd5eSpellModifierIntents,
   toggleDnd5eSpellModifierIntent,
   dnd5eWeaponAttackProfile,
+  fighterResourceState,
 } from '../../rulesets/dnd5e'
-import { dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
+import { dnd5eClassFeatureActionIcon, dnd5eItemActionIcon, dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import {
   buildDnd5eCombatActionDescriptors,
   groupDnd5eCombatHotbarDescriptors,
@@ -85,9 +90,9 @@ interface PlayerCombatHotbarProps {
   pending: boolean
   turnEconomy: {
     turnKey?: string
-    action: { current: number }
-    bonusAction: { current: number }
-    movement: { current: number }
+    action: { current: number; max?: number }
+    bonusAction: { current: number; max?: number }
+    movement: { current: number; max?: number }
   }
   activeActionId?: string
   grappleEscapes?: readonly {
@@ -204,6 +209,7 @@ export default function PlayerCombatHotbar({
     () => dnd5eAvailableSpellModifierIntents(character),
     [character],
   )
+  const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id ?? 'fighter'
   const [armedSpellModifierState, setArmedSpellModifierState] = useState<{
     characterId: string
     ids: Set<Dnd5eCombatSpellModifier>
@@ -302,12 +308,66 @@ export default function PlayerCombatHotbar({
       id: definition.id,
       label: definition.label,
       description: definition.description,
-      icon: dnd5eSystemActionIcon(definition.id, definition.iconMotif),
+      icon: dnd5eClassFeatureActionIcon({
+        id: definition.id,
+        name: definition.label,
+        classId: definition.source.classId,
+      }),
       modifier: definition.id,
       resource,
       available,
       unavailableReason,
     }))
+    const fighterLevel = dnd5eCharacterClassLevel(character, 'fighter')
+    if (fighterLevel >= 1) {
+      const secondWind = fighterResourceState({
+        level: fighterLevel,
+        classResources: character.classResources,
+      }, FIGHTER_RESOURCE_KEYS.secondWind)
+      const secondWindUnavailableReason = secondWind.current < 1
+        ? '回气次数已耗尽；完成短休或长休后恢复。'
+        : character.currentHp <= 0
+          ? '生命值为 0 时不能使用回气。'
+          : character.currentHp >= character.maxHp
+            ? '生命值已满，不需要使用回气。'
+            : undefined
+      featureSources.push({
+        id: 'fighter-second-wind',
+        label: '回气',
+        description: `以附赠动作恢复 1d10＋${fighterLevel} 点生命值；投骰与资源消耗由 Headless 结算。`,
+        icon: dnd5eClassFeatureActionIcon({ id: 'second-wind', name: '回气', classId: 'fighter' }),
+        economy: 'bonus-action',
+        targeting: 'self',
+        resource: { label: '次数', current: secondWind.current, maximum: secondWind.max },
+        available: secondWindUnavailableReason == null,
+        unavailableReason: secondWindUnavailableReason,
+        command: { kind: 'use-fighter-feature', feature: 'second-wind' },
+      })
+    }
+    if (fighterLevel >= 2) {
+      const actionSurge = fighterResourceState({
+        level: fighterLevel,
+        classResources: character.classResources,
+      }, FIGHTER_RESOURCE_KEYS.actionSurge)
+      const alreadyUsedThisTurn = (turnEconomy.action.max ?? 1) > 1
+      const actionSurgeUnavailableReason = actionSurge.current < 1
+        ? '动作如潮次数已耗尽；完成短休或长休后恢复。'
+        : alreadyUsedThisTurn
+          ? '同一回合只能使用一次动作如潮。'
+          : undefined
+      featureSources.push({
+        id: 'fighter-action-surge',
+        label: '动作如潮',
+        description: '不消耗动作或附赠动作，本回合额外获得一个动作；资源与同回合限制由 Headless 复核。',
+        icon: dnd5eClassFeatureActionIcon({ id: 'action-surge', name: '动作如潮', classId: 'fighter' }),
+        economy: 'none',
+        targeting: 'self',
+        resource: { label: '次数', current: actionSurge.current, maximum: actionSurge.max },
+        available: actionSurgeUnavailableReason == null,
+        unavailableReason: actionSurgeUnavailableReason,
+        command: { kind: 'use-fighter-feature', feature: 'action-surge' },
+      })
+    }
     featureSources.unshift(...movablePersistentAreas.map((area) => ({
       id: `persistent-area-move:${area.id}`,
       label: `移动${area.label}`,
@@ -331,7 +391,11 @@ export default function PlayerCombatHotbar({
         id: 'martial-spell-synergy-cantrip-then-bonus-attack-attack',
         label: '特性附赠武器攻击',
         description: '施法已开启本回合的一次附赠动作武器攻击；目标、距离和命中仍由 Host 校验。',
-        icon: dnd5eSystemActionIcon('martial-spell-synergy-cantrip-then-bonus-attack', 'melee-attack'),
+        icon: dnd5eClassFeatureActionIcon({
+          id: 'martial-spell-synergy-cantrip-then-bonus-attack',
+          name: '特性附赠武器攻击',
+          classId: primaryClassId,
+        }),
         economy: 'bonus-action',
         targeting: 'creature',
         command: {
@@ -349,7 +413,11 @@ export default function PlayerCombatHotbar({
         id: 'linked-equipment-recall',
         label: '召回联结武器',
         description: `以附赠动作召回${character.equipment?.mainWeapon?.name ?? '当前主武器'}。`,
-        icon: dnd5eSystemActionIcon('martial-spell-synergy-linked-equipment', 'summon'),
+        icon: dnd5eClassFeatureActionIcon({
+          id: 'martial-spell-synergy-linked-equipment',
+          name: '召回联结武器',
+          classId: primaryClassId,
+        }),
         economy: 'bonus-action',
         targeting: 'self',
         command: {
@@ -370,7 +438,11 @@ export default function PlayerCombatHotbar({
         id: 'feature-extra-action-teleport',
         label: '额外动作传送',
         description: '动作如潮已开启；在地图选择 30 尺内未占据落点。',
-        icon: dnd5eSystemActionIcon('feature-extra-action-teleport', 'arcane'),
+        icon: dnd5eClassFeatureActionIcon({
+          id: 'feature-extra-action-teleport',
+          name: '额外动作传送',
+          classId: primaryClassId,
+        }),
         economy: 'none',
         targeting: 'map-position',
         command: { kind: 'select-extra-action-teleport-destination' },
@@ -384,7 +456,11 @@ export default function PlayerCombatHotbar({
         id: 'rage-feature-eagle-dash',
         label: '狂暴特性疾走',
         description: '狂暴期间以附赠动作获得一份等同步行速度的本回合移动。',
-        icon: dnd5eSystemActionIcon('rage-feature-eagle-dash', 'dash'),
+        icon: dnd5eClassFeatureActionIcon({
+          id: 'rage-feature-eagle-dash',
+          name: '狂暴特性疾走',
+          classId: 'barbarian',
+        }),
         economy: 'bonus-action',
         targeting: 'self',
         available: character.dnd5eCombatState?.raging === true && !wearingHeavyArmor,
@@ -409,7 +485,11 @@ export default function PlayerCombatHotbar({
         description: wolfTargets.length === 1
           ? '以附赠动作击倒本回合已被近战命中的合格目标。'
           : '本回合有多个合格目标；打开职业特性面板选择其中一个。',
-        icon: dnd5eSystemActionIcon('rage-feature-wolf-knockdown', 'control'),
+        icon: dnd5eClassFeatureActionIcon({
+          id: 'rage-feature-wolf-knockdown',
+          name: '狂暴特性击倒',
+          classId: 'barbarian',
+        }),
         economy: 'bonus-action',
         targeting: wolfTargets.length === 1 ? 'creature' : 'configure',
         command: wolfTargets.length === 1
@@ -424,8 +504,40 @@ export default function PlayerCombatHotbar({
       })
     }
     const itemSources = inventory.entries.flatMap((entry) => {
+      if (entry.item.useActions?.length) {
+        const active = dnd5eInventoryEntryIsActive(entry)
+        return entry.item.useActions.map((use) => {
+          const resource = use.resourceCost
+            ? entry.resources?.[use.resourceCost.resourceId]
+            : Object.values(entry.resources ?? {})[0]
+          const targeting: Dnd5eCombatActionTargeting = use.targeting?.kind === 'map-area'
+            ? 'area'
+            : use.targeting?.kind === 'creature'
+              ? 'creature'
+              : 'self'
+          const enoughResource = !use.resourceCost || (resource?.current ?? 0) >= use.resourceCost.amount
+          return {
+            instanceId: entry.instanceId,
+            useActionId: use.id,
+            label: entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name} · ${use.label}`,
+            description: entry.identified === false ? '该物品尚未鉴定，不能在战斗中使用。' : entry.item.rulesText,
+            icon: dnd5eItemActionIcon(entry.item),
+            economy: use.economy === 'bonusAction' ? 'bonus-action' as const : use.economy === 'action' ? 'action' as const : 'none' as const,
+            targeting,
+            quantity: entry.quantity,
+            resource: resource ? { label: resource.label, current: resource.current, maximum: resource.maximum } : undefined,
+            usable: active && entry.quantity > 0 && enoughResource,
+            unavailableReason: entry.identified === false
+              ? '魔法物品尚未鉴定。'
+              : !active
+                ? '需要先完成同调。'
+                : !enoughResource ? `${resource?.label ?? '资源'}不足。` : undefined,
+          }
+        })
+      }
       if (!entry.item.use) return []
       const resource = Object.values(entry.resources ?? {})[0]
+      const active = dnd5eInventoryEntryIsActive(entry)
       const targeting: Dnd5eCombatActionTargeting = entry.item.use.targeting?.kind === 'map-area'
         ? 'area'
         : entry.item.use.targeting?.kind === 'creature'
@@ -440,8 +552,12 @@ export default function PlayerCombatHotbar({
         targeting,
         quantity: entry.quantity,
         resource: resource ? { label: resource.label, current: resource.current, maximum: resource.maximum } : undefined,
-        usable: entry.identified !== false && entry.quantity > 0 && (!resource || resource.current > 0),
-        unavailableReason: entry.identified === false ? '魔法物品尚未鉴定。' : resource?.current === 0 ? `${resource.label}已经耗尽。` : undefined,
+        usable: active && entry.quantity > 0 && (!resource || resource.current > 0),
+        unavailableReason: entry.identified === false
+          ? '魔法物品尚未鉴定。'
+          : !active
+            ? '需要先完成同调。'
+            : resource?.current === 0 ? `${resource.label}已经耗尽。` : undefined,
       }]
     })
     return buildDnd5eCombatActionDescriptors({
@@ -468,7 +584,9 @@ export default function PlayerCombatHotbar({
     movablePersistentAreas,
     movementRemaining,
     pending,
+    primaryClassId,
     spellModifierIntents,
+    turnEconomy.action.max,
     turnEconomy.turnKey,
   ])
 
@@ -549,7 +667,9 @@ export default function PlayerCombatHotbar({
     const byInstanceId = new Map<string, Dnd5eCombatActionDescriptorV1>()
     for (const descriptor of grouped.items) {
       if (descriptor.command.kind === 'use-item') {
-        byInstanceId.set(descriptor.command.instanceId, descriptor)
+        if (!byInstanceId.has(descriptor.command.instanceId)) {
+          byInstanceId.set(descriptor.command.instanceId, descriptor)
+        }
       }
     }
     return byInstanceId
@@ -628,7 +748,7 @@ export default function PlayerCombatHotbar({
       return
     }
     onCommand(entry.command, entry)
-  }, [armedSpellModifiers, character, onCommand, onUnavailable])
+  }, [armedSpellModifiers, character, onCommand, onUnavailable, setArmedSpellModifierState])
 
   const pinSpellSlotLevel = useCallback((actionId: string, slotLevel: number) => {
     if (onSelectedSpellSlotLevelChange) {
@@ -793,8 +913,10 @@ export default function PlayerCombatHotbar({
     })
   }
 
-  const useBackpackItem = (instanceId: string): boolean => {
-    const descriptor = itemDescriptorByInstanceId.get(instanceId)
+  const useBackpackItem = (instanceId: string, useActionId?: string): boolean => {
+    const descriptor = useActionId
+      ? grouped.items.find((candidate) => candidate.command.kind === 'use-item' && candidate.command.instanceId === instanceId && candidate.command.useActionId === useActionId)
+      : itemDescriptorByInstanceId.get(instanceId)
     if (!descriptor) return false
     if (!descriptor.enabled) {
       onUnavailable?.(descriptor)
@@ -838,7 +960,7 @@ export default function PlayerCombatHotbar({
         data-testid={`combat-item-quick-slot-${slotIndex + 1}`}
         aria-label={`${entry.item.name}${directlyUsable ? '' : '（打开背包查看）'}`}
         title={directlyUsable
-          ? `${entry.item.name}\n${descriptor.description}`
+          ? `${entry.item.name}\n${descriptor.description}${(entry.item.useActions?.length ?? 0) > 1 ? '\n右键打开背包，选择其他法术或升环档位。' : ''}`
           : `${entry.item.name}\n该物品没有可直接执行的战斗使用动作，点击查看背包详情。`}
         onDragStart={() => {
           suppressClickAfterDragRef.current = true
@@ -857,6 +979,12 @@ export default function PlayerCombatHotbar({
           if (suppressClickAfterDragRef.current) return
           if (descriptor) activate(descriptor)
           else setBackpackVisible(true)
+        }}
+        onContextMenu={(event) => {
+          if ((entry.item.useActions?.length ?? 0) < 2) return
+          event.preventDefault()
+          event.stopPropagation()
+          setBackpackVisible(true)
         }}
         className={[
           'group relative h-12 w-12 shrink-0 rounded-lg border p-px transition',

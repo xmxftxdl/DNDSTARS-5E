@@ -1,7 +1,6 @@
 import { FileCheck2, Plus, Save, Trash2, X } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
-  PdfCampaignAnalysisV1,
   PdfClueRecordV1,
   PdfEncounterRecordV1,
   PdfImportCandidateV1,
@@ -12,6 +11,7 @@ import type {
   PdfSceneRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
+import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
 import {
   commaSeparatedValues,
   emptyPdfClue,
@@ -26,6 +26,10 @@ import {
   renamePdfAnalysisEntity,
 } from './pdfCampaignAnalysisEditorModel'
 import { showAppConfirm } from '../../lib/appDialog'
+import PdfSourceEvidenceDrawer, {
+  PdfCitationButtons,
+} from './PdfSourceEvidenceDrawer'
+import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
 
 type EditorTab =
   | 'overview'
@@ -55,13 +59,13 @@ const EDITOR_TABS: Array<{ id: EditorTab; label: string }> = [
 ]
 
 interface PdfCampaignAnalysisEditorProps {
-  analysis: PdfCampaignAnalysisV1
-  onChange: (analysis: PdfCampaignAnalysisV1) => void
+  analysis: PdfCampaignAnalysisView
+  onChange: (analysis: PdfCampaignAnalysisView) => void
   onClose: () => void
   onExport?: () => void
 }
 
-function tabCount(analysis: PdfCampaignAnalysisV1, tab: EditorTab): number | null {
+function tabCount(analysis: PdfCampaignAnalysisView, tab: EditorTab): number | null {
   if (tab === 'overview') return null
   if (tab === 'relationships') return analysis.relationships.length
   if (tab === 'imports') return analysis.importCandidates.length
@@ -69,15 +73,16 @@ function tabCount(analysis: PdfCampaignAnalysisV1, tab: EditorTab): number | nul
   return analysis[tab].length
 }
 
-function citationText(citations: readonly PdfSourceCitationV1[]): string {
-  return citations.map((citation) => `${citation.documentName} · 第 ${citation.page} 页`).join('；')
-}
+const PdfCitationOpenContext = createContext<(citation: PdfViewCitation) => void>(() => undefined)
 
 function Evidence({ citations }: { citations: readonly PdfSourceCitationV1[] }) {
+  const onOpen = useContext(PdfCitationOpenContext)
   return (
     <div className="rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-3 py-2 text-[10px] font-medium leading-5 text-sky-100/80">
       <strong className="mr-2 text-sky-100">原文证据（只读）</strong>
-      {citations.length > 0 ? citationText(citations) : '这是由 DM 新增的条目，没有绑定原文页码。'}
+      {citations.length > 0
+        ? <PdfCitationButtons citations={citations} onOpen={onOpen} />
+        : '这是由 DM 新增的条目，没有绑定原文页码。'}
     </div>
   )
 }
@@ -152,6 +157,7 @@ function replaceAt<T>(entries: readonly T[], index: number, value: T): T[] {
 
 export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose, onExport }: PdfCampaignAnalysisEditorProps) {
   const [activeTab, setActiveTab] = useState<EditorTab>('overview')
+  const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
   const entityNames = useMemo(() => [
     ...analysis.people.map((entry) => entry.name),
     ...analysis.factions.map((entry) => entry.name),
@@ -166,7 +172,7 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
-  const remove = async (collection: keyof PdfCampaignAnalysisV1, index: number) => {
+  const remove = async (collection: keyof PdfCampaignAnalysisView, index: number) => {
     if (!await showAppConfirm({
       title: '删除分析条目',
       message: '确定删除这个分析条目吗？原始 PDF 不会受到影响。',
@@ -192,6 +198,7 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
   const canAdd = activeTab !== 'overview'
 
   return (
+    <PdfCitationOpenContext.Provider value={setSelectedCitation}>
     <div className="fixed inset-0 z-[180] flex bg-slate-950/90 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="DM 分析结果编辑器">
       <div className="m-auto flex h-[94vh] w-[min(1500px,96vw)] flex-col overflow-hidden rounded-3xl border border-violet-400/20 bg-[#0b0d17] shadow-2xl shadow-black/60">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-5 py-4">
@@ -296,7 +303,9 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
           </main>
         </div>
       </div>
+      <PdfSourceEvidenceDrawer citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
     </div>
+    </PdfCitationOpenContext.Provider>
   )
 }
 

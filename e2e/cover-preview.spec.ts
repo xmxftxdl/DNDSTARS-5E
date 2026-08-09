@@ -36,7 +36,7 @@ function arrowInventory(quantity = 20) {
   }
 }
 
-test('weapon targeting previews creature cover and lets DM override this attack only', async ({ browser, request }) => {
+test('weapon targeting uses authoritative automatic creature cover without a confirmation dialog', async ({ browser, request }) => {
   const now = Date.now()
   const mapId = `cover-preview-${now}`
   const combatId = `${mapId}:combat`
@@ -104,10 +104,9 @@ test('weapon targeting previews creature cover and lets DM override this attack 
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
-  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible()
+  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible({ timeout: 30_000 })
   await player.getByRole('button', { name: /攻击：长弓/ }).click()
   await player.getByTestId('map-canvas').click({ position: { x: targetToken.x, y: targetToken.y } })
-  await player.getByTestId('dnd5e-cover-preview').getByTestId('dnd5e-cover-confirm').click()
 
   await expect(player.getByText('弹药不足', { exact: true })).toBeVisible({ timeout: 20_000 })
   await expect(player.getByText('当前武器没有可用弹药，本次攻击未结算。')).toBeVisible()
@@ -120,21 +119,13 @@ test('weapon targeting previews creature cover and lets DM override this attack 
   ])
   await player.getByRole('button', { name: /攻击：长弓/ }).click()
   await player.getByTestId('map-canvas').click({ position: { x: targetToken.x, y: targetToken.y } })
-
-  const playerPreview = player.getByTestId('dnd5e-cover-preview')
-  await expect(playerPreview).toBeVisible()
-  await expect(playerPreview).toContainText('半身掩护（+2 AC）')
-  await expect(playerPreview).toContainText('来源：中间盟友')
-  await expect(playerPreview.getByTestId('dnd5e-cover-override')).toHaveCount(0)
-  await playerPreview.getByTestId('dnd5e-cover-confirm').click()
-
-  const dmPreview = dm.getByTestId('dnd5e-cover-preview')
-  await expect(dmPreview).toBeVisible({ timeout: 20_000 })
-  await expect(dmPreview).toContainText('来源：中间盟友')
-  await dmPreview.getByTestId('dnd5e-cover-override').selectOption('three-quarters')
-  await expect(dmPreview).toContainText('本次采用 DM 裁定：四分之三掩护（+5 AC）')
-  await expect(dmPreview.getByText('20', { exact: true })).toBeVisible()
-  await dmPreview.getByRole('button', { name: '应用并继续结算' }).click()
-  await expect(dmPreview).toHaveCount(0)
+  await expect(player.getByTestId('dnd5e-cover-preview')).toHaveCount(0)
+  await expect(dm.getByTestId('dnd5e-cover-preview')).toHaveCount(0)
+  await dm.getByTestId('combat-log-toggle').click()
+  const attackLogEntry = dm.locator('[data-testid^="combat-log-entry-"]')
+    .filter({ hasText: '使用长弓' })
+    .last()
+  await attackLogEntry.getByText(/查看 Headless 结算依据/).click()
+  await expect(attackLogEntry.getByText(/掩护：半身掩护（\+2 AC）.*自动判定/)).toBeVisible({ timeout: 20_000 })
   await context.close()
 })

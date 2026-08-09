@@ -28,6 +28,9 @@ const bridge = await startLocalAiBridge({
   externalImageApiKey: process.env.ASTRALTRACE_IMAGE_MODEL_API_KEY,
   externalImageModelId: process.env.ASTRALTRACE_IMAGE_MODEL_ID,
   externalImageDefaultQuality: process.env.ASTRALTRACE_IMAGE_DEFAULT_QUALITY,
+  ocrApiUrl: process.env.ASTRALTRACE_OCR_API_URL,
+  ocrApiKey: process.env.ASTRALTRACE_OCR_API_KEY,
+  ocrEngineId: process.env.ASTRALTRACE_OCR_ENGINE,
   allowedOrigins,
 })
 

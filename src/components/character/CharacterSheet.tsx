@@ -24,7 +24,6 @@ import {
   dnd5eSkillCheckProficiencyRank,
   resolveDnd5eShortRestHitDice,
   dnd5eRulesPluginRegistrySnapshot,
-  registeredDnd5ePluginFeatures,
   registeredDnd5ePluginBackgrounds,
   registeredDnd5ePluginRaces,
   dnd5eRaceSpeed,
@@ -32,18 +31,19 @@ import {
   normalizeDnd5eClassLevels,
   dnd5eCharacterClassLevel,
   dnd5eAdvancementLockedChoiceKeys,
+  dnd5eLevelAdvancementGrantedFeatures,
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
 import FighterProgressionPanel from './FighterProgressionPanel'
 import Dnd5eClassProgressionPanel from './Dnd5eClassProgressionPanel'
-import Dnd5ePluginFeaturesPanel from './Dnd5ePluginFeaturesPanel'
 import Dnd5eSpellbookPanel from './Dnd5eSpellbookPanel'
 import EquipmentTab from './EquipmentTab'
 import CharacterPortraitEditor from './CharacterPortraitEditor'
 import Dnd5eMulticlassPanel from './Dnd5eMulticlassPanel'
 import CharacterLevelUpDialog from './CharacterLevelUpDialog'
+import SpellSlotResourceEditor from './SpellSlotResourceEditor'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
@@ -63,7 +63,7 @@ export default function CharacterSheet({
   readOnly = false,
   allowAdvancementRevision = false,
 }: CharacterSheetProps) {
-  const [selectedTab, setSelectedTab] = useState<'sheet' | 'class' | 'inventory' | 'spellbook' | 'plugins'>('sheet')
+  const [selectedTab, setSelectedTab] = useState<'sheet' | 'class' | 'inventory' | 'spellbook'>('sheet')
   const [shortRestHitDice, setShortRestHitDice] = useState<Record<number, number>>({})
   const [useSongOfRest, setUseSongOfRest] = useState(false)
   const [shortRestResult, setShortRestResult] = useState('')
@@ -138,12 +138,9 @@ export default function CharacterSheet({
   const advancementRecords = c.dnd5eLevelAdvancements ?? []
   const lockedAdvancementChoices = dnd5eAdvancementLockedChoiceKeys(c)
   const hasSpellbookTab = Object.keys(classLevels).some((classId) => !!dnd5eClassDefinition(classId)?.spellcasting)
-  const hasPluginTab = registeredDnd5ePluginFeatures().length > 0 || (c.dnd5ePluginFeatureIds?.length ?? 0) > 0
   const activeTab = selectedTab === 'class' && !classDefinition
     ? 'sheet'
     : selectedTab === 'spellbook' && !hasSpellbookTab
-      ? 'sheet'
-    : selectedTab === 'plugins' && !hasPluginTab
       ? 'sheet'
       : selectedTab
   const effectiveSavingThrows = dnd5eEffectiveSavingThrowProficiencies(c)
@@ -232,6 +229,7 @@ export default function CharacterSheet({
             portrait={c.portrait}
             initiativePortrait={c.initiativePortrait}
             tokenPortrait={c.tokenPortrait}
+            promptContext={`${c.race || '未知种族'} ${c.charClass || '未知职业'}`}
             editable={!readOnly}
             onChange={(portrait) => updateCharacter({ portrait })}
             onInitiativePortraitChange={(initiativePortrait) => updateCharacter({ initiativePortrait })}
@@ -310,8 +308,9 @@ export default function CharacterSheet({
           {classDefinition && <CharacterTab active={activeTab === 'class'} onClick={() => setSelectedTab('class')}>职业</CharacterTab>}
           <CharacterTab active={activeTab === 'inventory'} onClick={() => setSelectedTab('inventory')}>物品栏</CharacterTab>
           {hasSpellbookTab && <CharacterTab active={activeTab === 'spellbook'} onClick={() => setSelectedTab('spellbook')}>法术书</CharacterTab>}
-          {hasPluginTab && <CharacterTab active={activeTab === 'plugins'} onClick={() => setSelectedTab('plugins')}>扩展规则</CharacterTab>}
       </nav>
+
+      {(activeTab === 'class' || activeTab === 'spellbook') && <SpellSlotResourceEditor character={c} />}
 
       {activeTab === 'class' && (
         <section className="glass rounded-2xl border border-violet-300/15 p-4">
@@ -322,7 +321,7 @@ export default function CharacterSheet({
                 <h3 className="text-sm font-semibold text-slate-100">升级记录</h3>
               </div>
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                每次升级会同时保存生命值、属性／专长、子职和职业选择；玩家确认后不能自行更改。
+                每次升级会同时保存生命值、固定获得的职业特性、属性／专长、子职和职业选择；玩家确认后不能自行更改。
               </p>
             </div>
             {!readOnly && c.level < 20 && activeClassId && (
@@ -341,35 +340,51 @@ export default function CharacterSheet({
             </p>
           ) : (
             <div className="mt-3 space-y-2">
-              {[...advancementRecords].reverse().map((record) => (
-                <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-200">
-                      {dnd5eClassDefinition(record.classId)?.name ?? record.classId}
-                      {' '}{record.fromClassLevel} → {record.toClassLevel}级
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      总等级 {record.fromLevel} → {record.toLevel} ·
-                      {' '}{record.decision.hitPointMethod === 'rolled' ? `生命骰 ${record.decision.hitPointRolls.join('、')}` : '固定生命值'} ·
-                      {' '}{record.completedBy === 'dm' ? 'DM 修订' : '玩家确认'}
-                      {(record.revisions?.length ?? 0) > 0 ? ` · 已修订 ${record.revisions!.length} 次` : ''}
-                    </p>
+              {[...advancementRecords].reverse().map((record) => {
+                const grantedFeatures = dnd5eLevelAdvancementGrantedFeatures(record)
+                return (
+                  <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-200">
+                        {dnd5eClassDefinition(record.classId)?.name ?? record.classId}
+                        {' '}{record.fromClassLevel} → {record.toClassLevel}级
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        总等级 {record.fromLevel} → {record.toLevel} ·
+                        {' '}{record.decision.hitPointMethod === 'rolled' ? `生命骰 ${record.decision.hitPointRolls.join('、')}` : '固定生命值'} ·
+                        {' '}{record.completedBy === 'dm' ? 'DM 修订' : '玩家确认'}
+                        {(record.revisions?.length ?? 0) > 0 ? ` · 已修订 ${record.revisions!.length} 次` : ''}
+                      </p>
+                      {grantedFeatures.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5" aria-label="本次固定获得的职业特性">
+                          {grantedFeatures.map((feature) => (
+                            <span
+                              key={feature.id}
+                              title={feature.description}
+                              className="rounded-md border border-emerald-300/15 bg-emerald-500/[0.07] px-2 py-1 text-[11px] font-medium text-emerald-100"
+                            >
+                              固定获得：{feature.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {allowAdvancementRevision && (
+                      <button
+                        type="button"
+                        onClick={() => setAdvancementRequest({
+                          classId: record.classId,
+                          levelsGained: record.decision.levelsGained,
+                          revisionRecordId: record.id,
+                        })}
+                        className="rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100"
+                      >
+                        修订这次升级
+                      </button>
+                    )}
                   </div>
-                  {allowAdvancementRevision && (
-                    <button
-                      type="button"
-                      onClick={() => setAdvancementRequest({
-                        classId: record.classId,
-                        levelsGained: record.decision.levelsGained,
-                        revisionRecordId: record.id,
-                      })}
-                      className="rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100"
-                    >
-                      修订这次升级
-                    </button>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </section>
@@ -644,7 +659,6 @@ export default function CharacterSheet({
           lockedChoiceKeys={lockedAdvancementChoices}
         />
       )}
-      {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={updateCharacter} />}
       {advancementRequest && (
         <CharacterLevelUpDialog
           character={c}

@@ -339,6 +339,27 @@ describe('D&D 5e equipment attack authority', () => {
     expect(prepareDnd5eEquipmentAttack({ ...adjacent, characters: [adjacent.actor], attacksUsed: 2 })).toEqual({ ok: false, reason: 'attack-action-spent' })
   })
 
+  it('uses occupied vertical space when validating melee reach against flying targets', () => {
+    const outOfReach = fixture()
+    outOfReach.targetToken.elevationFeet = 15
+    expect(prepareDnd5eEquipmentAttack({
+      ...outOfReach,
+      characters: [outOfReach.actor],
+      attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'target-out-of-range' })
+
+    const withinReach = fixture()
+    withinReach.targetToken.elevationFeet = 10
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...withinReach,
+      characters: [withinReach.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.distanceFeet).toBe(5)
+  })
+
   it('allows long-range weapon attacks with disadvantage and rejects targets beyond long range', () => {
     const longRange = fixture(2025)
     longRange.actor.equipment = { mainWeapon: DND5E_LONGBOW }

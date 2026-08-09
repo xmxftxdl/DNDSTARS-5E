@@ -4,11 +4,12 @@ import { dnd5eEquippedEffectTotal } from './equipmentEffects'
 import { dnd5eActiveSpeedBonus, dnd5eActiveSpeedPenalty } from './activeEffects'
 import { fighterProgression, fighterRemarkableAthleteRunningLongJumpBonus } from './fighter'
 import {
+  declarativeClassAttacksPerActionV1,
   registeredDeclarativeClassDefinitionV1,
   registeredDeclarativeClassesV1,
 } from './declarativeClass'
 
-export type Dnd5eClassId =
+export type Dnd5eCoreClassId =
   | 'barbarian'
   | 'bard'
   | 'cleric'
@@ -21,6 +22,9 @@ export type Dnd5eClassId =
   | 'sorcerer'
   | 'warlock'
   | 'wizard'
+
+/** Custom classes are always package-namespaced (for example `local.runes:rune-knight`). */
+export type Dnd5eClassId = Dnd5eCoreClassId | `${string}:${string}`
 
 export type Dnd5eSpellcastingKind =
   | 'full-known'
@@ -862,6 +866,9 @@ export function dnd5eAttacksPerAttackAction(character: Pick<Character, 'charClas
   const invocations = character.dnd5eClassChoices?.classes?.warlock?.selections?.['eldritch-invocations'] ?? []
   const pact = character.dnd5eClassChoices?.classes?.warlock?.selections?.['pact-boon'] ?? []
   if (classLevel(character, 'warlock') >= 5 && invocations.includes('thirsting-blade') && pact.includes('blade')) attacks = Math.max(attacks, 2)
+  for (const [classId, level] of Object.entries(character.dnd5eClassLevels ?? {})) {
+    attacks = Math.max(attacks, declarativeClassAttacksPerActionV1(classId, Number(level) || 0))
+  }
   return attacks
 }
 

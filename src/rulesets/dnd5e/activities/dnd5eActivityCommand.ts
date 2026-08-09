@@ -7,7 +7,8 @@ import {
 } from './dnd5eActivityExecutor'
 import type { Dnd5eDamageType } from '../damageTypes'
 import type { Dnd5eFormulaRollResult } from './dnd5eFormula'
-import type { Dnd5eActivityAreaPlacementV1 } from './dnd5eActivityContracts'
+import type { Dnd5eActivityAreaPlacementV1, Dnd5eActivityTriggerContextV1 } from './dnd5eActivityContracts'
+import type { Dnd5eActivityConfirmedByV1 } from './dnd5eActivityInvocation'
 import type { Character } from '../../../types/character'
 
 export const DND5E_EXECUTE_ACTIVITY_COMMAND_SCHEMA_VERSION = 1 as const
@@ -32,6 +33,8 @@ export interface Dnd5eExecuteActivityCommandV1 {
   inventoryInstanceId?: string
   /** Monotonic inventory revision observed while preparing this action. */
   expectedInventoryRevision?: number
+  /** Opaque reference to a Host-created trigger window; it contains no trusted rule context. */
+  triggerEventId?: string
 }
 
 export interface Dnd5eActivityAuthorityInput {
@@ -49,6 +52,9 @@ export interface Dnd5eActivityAuthorityInput {
   parentDamageType?: Dnd5eDamageType
   usedTurnKeys?: ReadonlySet<string>
   dmApproved?: boolean
+  /** Host-resolved trigger data. This must never be copied from the client command. */
+  triggerContext?: Dnd5eActivityTriggerContextV1
+  confirmedBy?: Dnd5eActivityConfirmedByV1
   /** Host-owned character snapshot used only for inventory-bound Activities. */
   inventoryOwner?: Character
 }
@@ -76,6 +82,7 @@ export function validateDnd5eExecuteActivityCommandV1(command: Dnd5eExecuteActiv
   if (command.inventoryInstanceId != null && !ID_PATTERN.test(command.inventoryInstanceId)) {
     errors.push('invalid inventoryInstanceId')
   }
+  if (command.triggerEventId != null && !ID_PATTERN.test(command.triggerEventId)) errors.push('invalid triggerEventId')
   if (
     command.expectedInventoryRevision != null &&
     (!Number.isInteger(command.expectedInventoryRevision) || command.expectedInventoryRevision < 0)
@@ -98,7 +105,11 @@ export function validateDnd5eExecuteActivityCommandV1(command: Dnd5eExecuteActiv
   if (command.areaPlacement != null && (
     !Number.isFinite(command.areaPlacement.x) || !Number.isFinite(command.areaPlacement.y) ||
     (command.areaPlacement.elevationFeet != null && !Number.isFinite(command.areaPlacement.elevationFeet)) ||
-    (command.areaPlacement.angleDegrees != null && !Number.isFinite(command.areaPlacement.angleDegrees))
+    (command.areaPlacement.angleDegrees != null && !Number.isFinite(command.areaPlacement.angleDegrees)) ||
+    (command.areaPlacement.radiusFeet != null && !Number.isFinite(command.areaPlacement.radiusFeet)) ||
+    (command.areaPlacement.lengthFeet != null && !Number.isFinite(command.areaPlacement.lengthFeet)) ||
+    (command.areaPlacement.widthFeet != null && !Number.isFinite(command.areaPlacement.widthFeet)) ||
+    (command.areaPlacement.heightFeet != null && !Number.isFinite(command.areaPlacement.heightFeet))
   )) errors.push('invalid areaPlacement')
   if (Object.entries(command.choices ?? {}).some(([key, value]) => !ID_PATTERN.test(key) || !ID_PATTERN.test(value))) {
     errors.push('invalid choices')
@@ -127,6 +138,12 @@ export function resolveDnd5eActivityCommand(
   }
   const activity = getRegisteredDnd5eActivity(input.command.packageId, input.command.activityId)
   if (!activity) return { ok: false, reason: 'unknown-activity', details: ['Activity is not registered'] }
+  if (input.command.triggerEventId != null && input.triggerContext?.eventId !== input.command.triggerEventId) {
+    return { ok: false, reason: 'invalid-command', details: ['trigger event reference does not match Host context'] }
+  }
+  if (input.triggerContext != null && input.command.triggerEventId !== input.triggerContext.eventId) {
+    return { ok: false, reason: 'invalid-command', details: ['Host trigger context is not referenced by the command'] }
+  }
   const submittedTargetIds = [...input.command.targetIds].sort()
   const snapshotTargetIds = input.targets.map((target) => target.id).sort()
   if (submittedTargetIds.length !== snapshotTargetIds.length || submittedTargetIds.some((id, index) => id !== snapshotTargetIds[index])) {
@@ -162,5 +179,7 @@ export function resolveDnd5eActivityCommand(
     choices: input.command.choices,
     usedTurnKeys: input.usedTurnKeys,
     dmApproved: input.dmApproved,
+    triggerContext: input.triggerContext,
+    confirmedBy: input.confirmedBy,
   })
 }

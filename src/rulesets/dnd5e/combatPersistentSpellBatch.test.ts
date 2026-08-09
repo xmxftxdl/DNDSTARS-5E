@@ -71,10 +71,7 @@ describe('combat-impacting persistent spell batch', () => {
       .filter((row) => ['insect-plague', 'cloudkill', 'blade-barrier'].includes(row.spellId))
     expect(occurrences).toHaveLength(5)
     expect(occurrences.every((row) => row.definition === 'present')).toBe(true)
-    expect(occurrences.filter((row) => row.spellId === 'cloudkill')
-      .every((row) => row.compatibility === 'manual')).toBe(true)
-    expect(occurrences.filter((row) => row.spellId !== 'cloudkill')
-      .every((row) => row.compatibility === 'full')).toBe(true)
+    expect(occurrences.every((row) => row.compatibility === 'full')).toBe(true)
   })
 
   it('declares upcast damage, shared per-turn frequency, difficult terrain, and vertical volumes', () => {

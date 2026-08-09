@@ -18,18 +18,22 @@ import {
   Upload,
   UserRound,
 } from 'lucide-react'
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { generateLocalAiPortrait, localAiPortraitErrorMessage } from '../../lib/localAiBridgeApi'
 import type {
-  PdfCampaignAnalysisV1,
   PdfImportCandidateV1,
   PdfNamedRecordV1,
   PdfPersonRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
+import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
 import PdfRelationshipGraph from './PdfRelationshipGraph'
+import PdfSourceEvidenceDrawer, {
+  PdfCitationButtons,
+} from './PdfSourceEvidenceDrawer'
+import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
 import {
   buildPdfMapIndex,
   buildPdfMonsterCodex,
@@ -76,6 +80,13 @@ function citationText(citations: readonly PdfSourceCitationV1[]): string {
   return citations.slice(0, 4).map((citation) => `${citation.documentName} · 第 ${citation.page} 页`).join('；')
 }
 
+const PdfCitationOpenContext = createContext<(citation: PdfViewCitation) => void>(() => undefined)
+
+function EvidenceButtons({ citations }: { citations: readonly PdfSourceCitationV1[] }) {
+  const onOpen = useContext(PdfCitationOpenContext)
+  return <PdfCitationButtons citations={citations} onOpen={onOpen} />
+}
+
 function EmptyState({ children }: { children: ReactNode }) {
   return <div className="rounded-2xl border border-dashed border-white/10 px-5 py-12 text-center text-xs text-slate-600">{children}</div>
 }
@@ -91,7 +102,7 @@ function KnowledgeCard({ title, description, citations, children }: {
       <h4 className="text-sm font-semibold text-slate-100">{title}</h4>
       {description && <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-400">{description}</p>}
       {children}
-      {!!citations?.length && <p className="mt-3 text-[10px] font-medium leading-5 text-slate-400">{citationText(citations)}</p>}
+      {!!citations?.length && <EvidenceButtons citations={citations} />}
     </article>
   )
 }
@@ -196,7 +207,7 @@ function PersonPortraitStudio({ person, onPortraitChange }: {
 }
 
 interface PdfCampaignKnowledgeBaseProps {
-  analysis: PdfCampaignAnalysisV1
+  analysis: PdfCampaignAnalysisView
   mapHref: string
   onEdit: () => void
   onPortraitChange: (personName: string, portraitDataUrl: string) => void
@@ -214,6 +225,7 @@ export default function PdfCampaignKnowledgeBase({
   const [query, setQuery] = useState('')
   const [searchScope, setSearchScope] = useState<'current' | 'all'>('current')
   const [selectedImport, setSelectedImport] = useState<PdfImportCandidateV1 | null>(null)
+  const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
   const counts = useMemo(() => pdfKnowledgeTabCounts(analysis), [analysis])
   const monsterCodex = useMemo(() => buildPdfMonsterCodex(analysis), [analysis])
   const mapIndex = useMemo(() => buildPdfMapIndex(analysis), [analysis])
@@ -294,7 +306,7 @@ export default function PdfCampaignKnowledgeBase({
             </div>
           </div>
           <PersonPortraitStudio person={person} onPortraitChange={onPortraitChange} />
-          {!!person.citations.length && <p className="mt-3 text-[10px] font-medium text-slate-400">{citationText(person.citations)}</p>}
+          {!!person.citations.length && <EvidenceButtons citations={person.citations} />}
         </article>
       ))}</div>
     )
@@ -311,7 +323,7 @@ export default function PdfCampaignKnowledgeBase({
     }
     if (activeTab === 'maps') return maps.length === 0 ? <EmptyState>没有识别到地图或可建立场景的地点。</EmptyState> : <div className="space-y-3"><div className="flex justify-end"><Link to={mapHref} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-2 text-[10px] font-semibold text-emerald-100 hover:bg-emerald-500/20"><ExternalLink className="h-3.5 w-3.5" />进入地图与场景编排</Link></div><div className="grid gap-3 lg:grid-cols-2">{maps.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200">{entry.source === 'map-candidate' ? '地图资源' : '地点索引'}</span>{entry.sceneNames.map((scene) => <span key={scene} className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{scene}</span>)}</div></KnowledgeCard>)}</div></div>
     if (activeTab === 'monsters') return monsters.length === 0 ? <EmptyState>没有识别到怪物。遭遇中的生物和怪物导入候选都会显示在这里。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{monsters.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-[9px] ${entry.automation === 'full' ? 'bg-emerald-500/10 text-emerald-200' : entry.automation === 'partial' ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-500/10 text-slate-400'}`}>{KIND_LABELS[entry.automation]}</span>{entry.encounterNames.map((encounter) => <span key={encounter} className="rounded-full bg-rose-500/10 px-2 py-1 text-[9px] text-rose-200">{encounter}</span>)}</div></KnowledgeCard>)}</div>
-    if (activeTab === 'relationships') return <PdfRelationshipGraph people={people} factions={factions} locations={locations} relationships={relationships} scenes={scenes} onPortraitChange={onPortraitChange} />
+    if (activeTab === 'relationships') return <PdfRelationshipGraph people={people} factions={factions} locations={locations} relationships={relationships} scenes={scenes} onPortraitChange={onPortraitChange} onCitationOpen={setSelectedCitation} />
     return imports.length === 0 ? <EmptyState>没有匹配的待导入资源。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{imports.map((entry, index) => (
       <button
         key={`${entry.kind}:${entry.name}:${index}`}
@@ -335,6 +347,7 @@ export default function PdfCampaignKnowledgeBase({
   }
 
   return (
+    <PdfCitationOpenContext.Provider value={setSelectedCitation}>
     <section className="overflow-hidden rounded-2xl border border-white/8 bg-black/15" data-testid="pdf-campaign-knowledge-base">
       <header className="border-b border-white/8 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -390,13 +403,15 @@ export default function PdfCampaignKnowledgeBase({
               {importTypeExplanation(selectedImport)}
               {likelyCombatNpc(selectedImport) && <span className="mt-1 block text-amber-200">该条目包含明显战斗语义，建议 DM 检查 AI 是否误把怪物或敌对战斗单位归类成 NPC。</span>}
             </div>
-            {!!selectedImport.citations.length && <p className="mt-4 text-xs font-medium leading-6 text-slate-400">来源：{citationText(selectedImport.citations)}</p>}
+            {!!selectedImport.citations.length && <EvidenceButtons citations={selectedImport.citations} />}
             <div className="mt-5 flex justify-end">
               <button type="button" onClick={() => { setSelectedImport(null); onEdit() }} className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-semibold text-white hover:bg-violet-400"><PencilLine className="h-3.5 w-3.5" />编辑类型与内容</button>
             </div>
           </section>
         </div>
       )}
+      <PdfSourceEvidenceDrawer citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
     </section>
+    </PdfCitationOpenContext.Provider>
   )
 }

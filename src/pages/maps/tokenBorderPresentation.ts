@@ -2,9 +2,14 @@ import { DND5E_CLASS_ICON_PALETTES } from '../../lib/dnd5eActionIcons'
 import type { Dnd5eClassBorderPalette } from '../../lib/dnd5eClassBorderVisual'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import { dnd5eCharacterPresentationColors } from './combatLogPresentation'
 
 export const DND5E_MONSTER_TOKEN_BORDER_COLOR = DND5E_CLASS_ICON_PALETTES.monster[3]
+export const DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_COLOR = '#34D399'
+const DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_PALETTE = [
+  '#065F46', '#022C22', '#A7F3D0', DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_COLOR,
+] as const
 
 export interface Dnd5eTokenBorderPresentation extends Dnd5eClassBorderPalette {
   classId?: string
@@ -33,7 +38,11 @@ export function dnd5eTokenPresentationColor(
   token: Token,
   character?: Character,
 ): string {
-  if (token.type === 'enemy') return DND5E_MONSTER_TOKEN_BORDER_COLOR
+  if (token.type === 'enemy') {
+    return dnd5eCombatTokenSide(token) === 'player'
+      ? DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_COLOR
+      : DND5E_MONSTER_TOKEN_BORDER_COLOR
+  }
   if (character) return dnd5eCharacterPresentationColors(character).accentColor
   return token.color?.trim() || '#94A3B8'
 }
@@ -47,6 +56,9 @@ export function dnd5eTokenBorderPresentation(
   character?: Character,
 ): Dnd5eTokenBorderPresentation {
   if (token.type === 'enemy') {
+    if (dnd5eCombatTokenSide(token) === 'player') {
+      return presentationFromPalette(DND5E_FRIENDLY_MONSTER_TOKEN_BORDER_PALETTE, 'friendly-monster')
+    }
     return presentationFromPalette(DND5E_CLASS_ICON_PALETTES.monster, 'monster')
   }
   if (character) {

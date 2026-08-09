@@ -25,6 +25,8 @@ describe('DmPrepAssistantPage', () => {
     expect(html).toContain('人物形象与档案')
     expect(html).toContain('关键线索')
     expect(html).toContain('DM 可以编辑或删除结果')
+    expect(html).toContain('地图智能识别与 UVTT 转换')
+    expect(html).toContain('导出含原图的 UVTT')
   })
 
   it('把现有工具入口绑定到当前战役', () => {

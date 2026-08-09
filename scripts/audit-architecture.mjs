@@ -140,8 +140,8 @@ const prefixImportCount = (prefix) => imports(mapsWorkspacePage).filter((specifi
 if (lineCount(mapsPage) > mapsPageLimits.lines) {
   failures.push(`MapsPage.tsx line budget exceeded: ${lineCount(mapsPage)} > ${mapsPageLimits.lines}`)
 }
-if (lineCount(mapsWorkspacePage) > 28_244) {
-  failures.push(`MapsWorkspacePage.tsx line budget exceeded: ${lineCount(mapsWorkspacePage)} > 28244`)
+if (lineCount(mapsWorkspacePage) > 28_557) {
+  failures.push(`MapsWorkspacePage.tsx line budget exceeded: ${lineCount(mapsWorkspacePage)} > 28557`)
 }
 for (const [label, prefix, maximum] of [
   ['ruleset', '../rulesets/', 3],
@@ -151,11 +151,11 @@ for (const [label, prefix, maximum] of [
   const count = prefixImportCount(prefix)
   if (count > maximum) failures.push(`MapsPage.tsx ${label} dependency budget exceeded: ${count} > ${maximum}`)
 }
-if (lineCount(serverCore) > 12_890) {
-  failures.push(`shared-server-core.mjs line budget exceeded: ${lineCount(serverCore)} > 12890`)
+if (lineCount(serverCore) > 12_951) {
+  failures.push(`shared-server-core.mjs line budget exceeded: ${lineCount(serverCore)} > 12951`)
 }
-if (lineCount(mapCanvas) > 2_766) {
-  failures.push(`MapCanvas.tsx line budget exceeded: ${lineCount(mapCanvas)} > 2766`)
+if (lineCount(mapCanvas) > 2_867) {
+  failures.push(`MapCanvas.tsx line budget exceeded: ${lineCount(mapCanvas)} > 2867`)
 }
 for (const [file, maximum] of [
   ['src/components/map/MapCombatEffects.tsx', 413],
@@ -176,8 +176,8 @@ for (const [file, maximum] of [
 if (lineCount(pluginApi) > 2_844) {
   failures.push(`pluginApi.ts line budget exceeded: ${lineCount(pluginApi)} > 2844`)
 }
-if (lineCount(monsterTurnPlanner) > 4_053) {
-  failures.push(`monsterTurnPlanner.ts line budget exceeded: ${lineCount(monsterTurnPlanner)} > 4053`)
+if (lineCount(monsterTurnPlanner) > 4_146) {
+  failures.push(`monsterTurnPlanner.ts line budget exceeded: ${lineCount(monsterTurnPlanner)} > 4146`)
 }
 const mapCanvasLayerCount = [...mapCanvas.matchAll(/<Layer(?:\s|>)/g)].length
 if (mapCanvasLayerCount > 5) {

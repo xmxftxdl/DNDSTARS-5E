@@ -286,7 +286,7 @@ export function defaultEquipmentForDnd5eCharacter(character: Pick<Character, 'ch
   return equipment ? Object.fromEntries(Object.entries(equipment).map(([slot, item]) => [slot, item ? { ...item } : item])) : undefined
 }
 
-/** 丢弃旧项目的攻防数值装备，只保留带有 D&D 5e 规则数据的物品。 */
+/** 丢弃旧项目的纯显示装备，只保留带有 D&D 5e 或声明式法器规则的物品。 */
 export function normalizeDnd5eCharacterEquipment(
   character: Pick<Character, 'charClass' | 'equipment'>,
 ): CharacterEquipment | undefined {
@@ -298,7 +298,9 @@ export function normalizeDnd5eCharacterEquipment(
   ]
   for (const slot of slots) {
     const item = character.equipment?.[slot]
-    const selected = item?.dnd5e || item?.effects ? item : useLegacyDefaults ? defaults?.[slot] : undefined
+    const selected = item?.dnd5e || item?.effects || (item?.spellcastingFocusClassIds?.length ?? 0) > 0
+      ? item
+      : useLegacyDefaults ? defaults?.[slot] : undefined
     if (!selected) continue
     const dnd5e = structuredClone(selected.dnd5e)
     if (dnd5e?.kind === 'weapon') {
@@ -316,6 +318,10 @@ export function normalizeDnd5eCharacterEquipment(
       baseEquipmentId: selected.baseEquipmentId,
       name: selected.name,
       slot: selected.slot,
+      allowedSlots: selected.allowedSlots ? [...selected.allowedSlots] : undefined,
+      spellcastingFocusClassIds: selected.spellcastingFocusClassIds
+        ? [...selected.spellcastingFocusClassIds]
+        : undefined,
       ac: selected.ac,
       effects: selected.effects ? { ...selected.effects } : undefined,
       dnd5e,

@@ -85,6 +85,21 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
   {
+    spellId: 'dancing-lights',
+    label: '舞光术',
+    minimumSlotLevel: 0,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 120 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    lighting: { kind: 'light', brightRadiusFeet: 0, dimRadiusFeet: 10, color: '#a5f3fc', spellLevel: 0 },
+    color: '#67e8f9',
+    visual: { preset: 'dancing-lights', intensity: 'strong' },
+    triggers: [],
+  },
+  {
     spellId: 'mage-hand',
     label: '法师之手',
     minimumSlotLevel: 0,
@@ -321,7 +336,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     concentration: true,
     anchorMode: 'source-token',
     vertical: { mode: 'volume', heightFeet: 30, anchorOffsetFeet: -15 },
-    relation: 'enemy',
+    relation: 'any',
     includeSelf: false,
     movementCostMultiplier: 2,
     damageTypeBySourceAlignment: { evil: 'necrotic', otherwise: 'radiant' },
@@ -419,7 +434,6 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         timing: 'on-create',
         savingThrow: { ability: 'dex', onSuccess: 'half' },
         damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'fire' },
-        dmAdjustable: true,
       },
       {
         id: 'wall-of-fire-enter',
@@ -427,7 +441,6 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         timing: 'on-enter',
         oncePerTurn: true,
         damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'fire' },
-        dmAdjustable: true,
       },
       {
         id: 'wall-of-fire-turn-end',
@@ -435,7 +448,6 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         timing: 'turn-end',
         oncePerTurn: true,
         damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'fire' },
-        dmAdjustable: true,
       },
     ],
   },
@@ -653,6 +665,8 @@ export function createDnd5eCoreSpellArea(input: {
   sourceAlignment?: string
   triggerCellsById?: Readonly<Record<string, readonly GridCell[]>>
   wallOfFireGeometry?: Dnd5eWallOfFireGeometry
+  lightingAnchorCells?: readonly GridCell[]
+  excludedTargetIds?: readonly string[]
 }): Dnd5ePluginArea {
   const declaration = input.declaration
   const sourceIsEvil = /邪恶|evil/i.test(input.sourceAlignment ?? '')
@@ -707,10 +721,12 @@ export function createDnd5eCoreSpellArea(input: {
     movementCostMultiplier: declaration.movementCostMultiplier,
     relation: declaration.relation ?? 'any',
     includeSelf: declaration.includeSelf === true,
+    excludedTargetIds: input.excludedTargetIds ? [...new Set(input.excludedTargetIds)] : undefined,
     hiddenFromPlayers: declaration.hiddenFromPlayers === true,
     lighting: declaration.lighting
       ? { ...declaration.lighting, spellLevel: input.slotLevel }
       : undefined,
+    lightingAnchorCells: input.lightingAnchorCells?.map((cell) => ({ ...cell })),
     visual: { ...declaration.visual },
     wallOfFireGeometry: input.wallOfFireGeometry ? { ...input.wallOfFireGeometry } : undefined,
     triggers: declaration.triggers.map((trigger) => {

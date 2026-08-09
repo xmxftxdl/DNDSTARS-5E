@@ -88,6 +88,31 @@ describe('CombatActionDescriptorV1', () => {
     expect(pending[0].disabledReason).toContain('等待 DM')
   })
 
+  it('keeps multiple item spell actions distinct while sharing the same instance resource', () => {
+    const actions = build({
+      items: [1, 3].map((level) => ({
+        instanceId: 'wand-1',
+        useActionId: `magic-missile-level-${level}`,
+        label: level === 1 ? '魔法飞弹' : `${level}环魔法飞弹`,
+        description: '从魔杖施放。',
+        icon: dnd5eSpellActionIcon({ id: 'magic-missile', name: '魔法飞弹' }),
+        economy: 'action' as const,
+        targeting: 'creature' as const,
+        quantity: 1,
+        resource: { label: '充能', current: 7, maximum: 7 },
+        usable: true,
+      })),
+    }).filter((entry) => entry.sourceKind === 'item')
+    expect(actions.map((entry) => entry.id)).toEqual([
+      'item:wand-1:magic-missile-level-1',
+      'item:wand-1:magic-missile-level-3',
+    ])
+    expect(actions.map((entry) => entry.command)).toEqual([
+      { kind: 'use-item', instanceId: 'wand-1', useActionId: 'magic-missile-level-1' },
+      { kind: 'use-item', instanceId: 'wand-1', useActionId: 'magic-missile-level-3' },
+    ])
+  })
+
   it('将施法特性生成为可预激活的独立快捷栏命令', () => {
     const [feature] = build({
       features: [{

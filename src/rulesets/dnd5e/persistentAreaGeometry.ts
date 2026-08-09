@@ -90,6 +90,7 @@ export function dnd5ePersistentAreaAllowsTarget(
   map: BattleMap,
 ): boolean {
   if (target.type === 'obstacle') return false
+  if (area.excludedTargetIds?.includes(target.id)) return false
   if (target.id === area.sourceTokenId && area.includeSelf !== true) return false
   const source = map.tokens.find((token) => token.id === area.sourceTokenId)
   if (!source || area.relation === 'any' || !area.relation) return true

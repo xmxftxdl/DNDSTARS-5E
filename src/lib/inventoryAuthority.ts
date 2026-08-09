@@ -125,6 +125,7 @@ export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['r
     case 'container-cycle': return '容器不能装入自身或自己的内容物。'
     case 'container-capacity': return '物品总重超过该容器的容量。'
     case 'item-unidentified': return '该魔法物品尚未鉴定，不能启用其规则效果。'
+    case 'item-inactive': return '该魔法物品需要先完成同调，才能启用其规则效果。'
     case 'not-magic-item': return '该物品不需要鉴定。'
     case 'ammunition-unavailable': return '没有可供该武器使用的弹药。'
     case 'invalid-receipt': return '权威奖励收据无效，未写入库存。'

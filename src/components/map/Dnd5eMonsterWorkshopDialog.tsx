@@ -52,10 +52,17 @@ import {
   type Dnd5eMonsterWorkshopAiReview,
 } from './monsterWorkshopReview'
 import Dnd5eMonsterHeadlessSandbox from './Dnd5eMonsterHeadlessSandbox'
+import Dnd5eMonsterAbilityTemplateLibrary from './Dnd5eMonsterAbilityTemplateLibrary'
 import {
   commitDnd5eMonsterWorkshopMonster,
   type Dnd5eMonsterWorkshopCommitDestination,
 } from './monsterWorkshopCommit'
+import {
+  applyDnd5eMonsterAbilityTemplate,
+  DND5E_MONSTER_ABILITY_TEMPLATES,
+  type Dnd5eMonsterAbilityTemplate,
+  type Dnd5eMonsterAbilityTemplateSection,
+} from '../../rulesets/dnd5e/monsterWorkshopAbilityTemplates'
 
 const ABILITY_LABELS: readonly [AbilityKey, string][] = [
   ['str', '力量'], ['dex', '敏捷'], ['con', '体质'], ['int', '智力'], ['wis', '感知'], ['cha', '魅力'],
@@ -326,6 +333,8 @@ export default function Dnd5eMonsterWorkshopDialog({
   ))
   const [pasteOpen, setPasteOpen] = useState(false)
   const [sandboxOpen, setSandboxOpen] = useState(false)
+  const [abilityLibraryOpen, setAbilityLibraryOpen] = useState(false)
+  const [abilityLibrarySection, setAbilityLibrarySection] = useState<Dnd5eMonsterAbilityTemplateSection | 'all'>('all')
   const [pastedText, setPastedText] = useState('')
   const [pasteResult, setPasteResult] = useState<Dnd5ePastedMonsterParseResult>()
   const [pasteError, setPasteError] = useState<string>()
@@ -454,6 +463,30 @@ export default function Dnd5eMonsterWorkshopDialog({
     setCollapsedTraitIndexes((current) => new Set([...current]
       .filter((entryIndex) => entryIndex !== index)
       .map((entryIndex) => entryIndex > index ? entryIndex - 1 : entryIndex)))
+  }
+
+  const openAbilityLibrary = (section: Dnd5eMonsterAbilityTemplateSection | 'all') => {
+    setAbilityLibrarySection(section)
+    setAbilityLibraryOpen(true)
+  }
+
+  const addAbilityTemplate = (template: Dnd5eMonsterAbilityTemplate) => {
+    try {
+      const applied = applyDnd5eMonsterAbilityTemplate(draft, template.id)
+      setDraft(applied.draft)
+      if (applied.addedActionIds.length > 0) {
+        setCollapsedActionIds((current) => new Set([...current, ...applied.addedActionIds]))
+      }
+      if (applied.addedTraitIndexes.length > 0) {
+        setCollapsedTraitIndexes((current) => new Set([...current, ...applied.addedTraitIndexes]))
+      }
+      const dependencyNotice = applied.addedActionIds.length + applied.addedMultiattackIds.length > 1
+        ? `，并带入 ${applied.addedActionIds.length + applied.addedMultiattackIds.length - 1} 个依赖动作`
+        : ''
+      setMessage(`已从“${template.sourceMonsterName}”复制“${template.name}”${dependencyNotice}；所有规则均为当前怪物的独立副本。`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
   }
 
   const revealReviewTarget = (targetId: string) => {
@@ -1293,16 +1326,16 @@ export default function Dnd5eMonsterWorkshopDialog({
             </section>
 
             <section>
-              <div className="mb-3 flex items-center justify-between"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">特性</h3><p className="mt-1 text-[11px] text-slate-500">常见规则可选择 Headless 预设；其余特性保留完整描述并明确交给 DM 裁定。</p></div><button type="button" onClick={() => patchDraft('traits', [...draft.traits, createDnd5eCustomMonsterTraitDraft()])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"><Plus className="h-3 w-3" /> 添加</button></div>
+              <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">特性</h3><p className="mt-1 text-[11px] text-slate-500">可从已验证图鉴复制完整 Headless 特性，也可以手动创建。</p></div><div className="flex shrink-0 gap-2"><button type="button" onClick={() => openAbilityLibrary('trait')} className="flex items-center gap-1 rounded-lg bg-violet-500/15 px-2 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/25"><Search className="h-3 w-3" /> 模板库</button><button type="button" onClick={() => patchDraft('traits', [...draft.traits, createDnd5eCustomMonsterTraitDraft()])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"><Plus className="h-3 w-3" /> 添加</button></div></div>
               <div className="space-y-2">
                 {draft.traits.map((trait, index) => {
                   const update = (patch: Partial<typeof trait>) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
-                  const headlessPreset = ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(trait.ruleKind)
+                  const headlessPreset = trait.preservedTrait?.automation === 'headless' || ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(trait.ruleKind)
                   const coveredByFullMechanic = dnd5eMonsterTraitCoveredByFullMechanic(draft, trait)
                   const collapsed = collapsedTraitIndexes.has(index)
                   return <div id={dnd5eMonsterTraitReviewTarget(index)} key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
                     <button type="button" aria-expanded={!collapsed} onClick={() => toggleTraitCollapsed(index)} className="mb-2 flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left">
-                      <span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{trait.name || `未命名特性 ${index + 1}`}</strong><span className={`mt-0.5 block truncate text-[11px] ${coveredByFullMechanic ? 'text-emerald-300/80' : 'text-slate-500'}`}>{dnd5eMonsterTraitReviewSummary(trait, coveredByFullMechanic)}</span></span>
+                      <span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{trait.name || `未命名特性 ${index + 1}`}</strong><span className={`mt-0.5 block truncate text-[11px] ${trait.templateSource || coveredByFullMechanic ? 'text-violet-300/80' : 'text-slate-500'}`}>{trait.templateSource ? `模板：${trait.templateSource.monsterName} · ${trait.preservedTrait?.rule?.kind ?? trait.ruleKind}` : dnd5eMonsterTraitReviewSummary(trait, coveredByFullMechanic)}</span></span>
                       <span className="flex shrink-0 items-center gap-2 text-[10px] text-slate-500">{collapsed ? '展开' : '收起'}<ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? '' : 'rotate-180'}`} /></span>
                     </button>
                     {!collapsed && <>
@@ -1310,6 +1343,8 @@ export default function Dnd5eMonsterWorkshopDialog({
                       const ruleKind = event.target.value as typeof trait.ruleKind
                       update({
                         ruleKind,
+                        preservedTrait: undefined,
+                        templateSource: undefined,
                         automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(ruleKind)
                           ? 'headless'
                           : 'dm-adjudication',
@@ -1377,13 +1412,15 @@ export default function Dnd5eMonsterWorkshopDialog({
             </section>
 
             <section>
-              <div className="mb-3 flex items-center justify-between"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">动作</h3><p className="mt-1 text-[11px] text-slate-500">只有纯命中＋伤害动作应选择 Headless；带附加规则的动作请选择 DM 裁定。</p></div><button type="button" onClick={() => patchDraft('actions', [...draft.actions, createDnd5eCustomMonsterActionDraft()])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"><Plus className="h-3 w-3" /> 添加</button></div>
+              <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">动作</h3><p className="mt-1 text-[11px] text-slate-500">模板库会保留范围、擒抱、吞咽、共享充能和多重攻击等完整结构。</p></div><div className="flex shrink-0 gap-2"><button type="button" onClick={() => openAbilityLibrary('action')} className="flex items-center gap-1 rounded-lg bg-violet-500/15 px-2 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/25"><Search className="h-3 w-3" /> 模板库</button><button type="button" onClick={() => patchDraft('actions', [...draft.actions, createDnd5eCustomMonsterActionDraft()])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"><Plus className="h-3 w-3" /> 添加</button></div></div>
               <div className="space-y-3">
                 {draft.actions.map((action, index) => {
                   const update = (patch: Partial<typeof action>) => patchDraft('actions', draft.actions.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
                   const areaValidationErrors = validateDnd5eCustomMonsterAreaActionDraft(action)
                   const summonValidationErrors = validateDnd5eCustomMonsterSummonActionDraft(action)
-                  const displayedAutomation = action.kind === 'area-saving-throw'
+                  const displayedAutomation = action.preservedAction?.automation === 'headless'
+                    ? 'headless'
+                    : action.kind === 'area-saving-throw'
                     ? areaValidationErrors.length === 0 ? 'headless' : 'dm-adjudication'
                     : action.kind === 'summon'
                       ? summonValidationErrors.length === 0 ? 'headless' : 'dm-adjudication'
@@ -1395,7 +1432,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                   const collapsed = collapsedActionIds.has(action.id)
                   return <div id={dnd5eMonsterActionReviewTarget(action)} key={action.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
                     <button type="button" aria-expanded={!collapsed} onClick={() => toggleActionCollapsed(action.id)} className="mb-2 flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left">
-                      <span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{action.name || `未命名动作 ${index + 1}`}</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{dnd5eMonsterActionReviewSummary(action)}</span></span>
+                      <span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{action.name || `未命名动作 ${index + 1}`}</strong><span className={`mt-0.5 block truncate text-[11px] ${action.templateSource ? 'text-violet-300/80' : 'text-slate-500'}`}>{action.templateSource ? `模板：${action.templateSource.monsterName} · ${action.preservedAction?.rule?.kind ?? action.preservedAction?.kind ?? action.kind}` : dnd5eMonsterActionReviewSummary(action)}</span></span>
                       <span className="flex shrink-0 items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${displayedAutomation === 'headless' ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200' : 'border-amber-400/20 bg-amber-500/10 text-amber-200'}`}>{displayedAutomation === 'headless' ? 'Headless' : 'DM 裁定'}</span><span className="text-[10px] text-slate-500">{collapsed ? '展开' : '收起'}</span><ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${collapsed ? '' : 'rotate-180'}`} /></span>
                     </button>
                     {!collapsed && <>
@@ -1406,6 +1443,8 @@ export default function Dnd5eMonsterWorkshopDialog({
                         const kind = event.target.value as typeof action.kind
                         update({
                           kind,
+                          preservedAction: undefined,
+                          templateSource: undefined,
                           automation: kind === 'other' || kind === 'movement' ? 'dm-adjudication' : 'headless',
                           ...((kind === 'area-saving-throw' || kind === 'summon') && !['action', 'legendary'].includes(action.category) ? { category: 'action' as const } : {}),
                         })
@@ -1522,6 +1561,14 @@ export default function Dnd5eMonsterWorkshopDialog({
           </footer>
         </main>
       </div>
+      <Dnd5eMonsterAbilityTemplateLibrary
+        key={`${abilityLibrarySection}:${abilityLibraryOpen}`}
+        open={abilityLibraryOpen}
+        templates={DND5E_MONSTER_ABILITY_TEMPLATES}
+        initialSection={abilityLibrarySection}
+        onAdd={addAbilityTemplate}
+        onClose={() => setAbilityLibraryOpen(false)}
+      />
     </div>
   )
 }

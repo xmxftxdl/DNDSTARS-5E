@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Shield, Footprints, HeartPulse, Sparkles } from 'lucide-react'
+import { X, Shield, Footprints, HeartPulse, Sparkles, Trash2 } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
@@ -12,6 +12,7 @@ import {
   closeCharacterDetailOnPrimaryPointerDown,
   shouldCloseCharacterDetailForKey,
 } from './characterDetailClose'
+import { showAppConfirm } from '../../lib/appDialog'
 
 interface CharacterDetailPanelProps {
   token: Token
@@ -26,6 +27,7 @@ interface CharacterDetailPanelProps {
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
   conditionSourceOptions?: readonly { id: string; label: string }[]
+  onRemoveFromMap?: () => void | Promise<void>
   onClose: () => void
 }
 
@@ -37,6 +39,7 @@ export default function CharacterDetailPanel({
   canManageConditions = false,
   onConditionsChange,
   conditionSourceOptions,
+  onRemoveFromMap,
   onClose,
 }: CharacterDetailPanelProps) {
   const portrait = resolveMapTokenPortrait(character, token)
@@ -45,6 +48,8 @@ export default function CharacterDetailPanel({
   const [maxHpDraft, setMaxHpDraft] = useState(String(character.maxHp))
   const [editingCurrentHp, setEditingCurrentHp] = useState(false)
   const [editingMaxHp, setEditingMaxHp] = useState(false)
+  const [removingFromMap, setRemovingFromMap] = useState(false)
+  const [removeFromMapError, setRemoveFromMapError] = useState<string>()
   const [pendingHitPoints, setPendingHitPoints] = useState<{
     currentHp: number
     maxHp: number
@@ -61,14 +66,6 @@ export default function CharacterDetailPanel({
     pending: pendingHitPoints,
   })
   const defeated = displayedHitPoints.currentHp <= 0
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (shouldCloseCharacterDetailForKey(event.key)) onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
-
   const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
     const nextHp = Math.max(0, Math.min(maxHp, hp))
@@ -99,26 +96,49 @@ export default function CharacterDetailPanel({
     void Promise.resolve(result).then(clearPendingRequest, clearPendingRequest)
   }
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldCloseCharacterDetailForKey(event.key)) onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   const commitCurrentHp = () => {
     const nextHp = parseLiveHitPointDraft(currentHpDraft, character.maxHp) ?? character.currentHp
     setEditingCurrentHp(false)
     setCurrentHpDraft(String(nextHp))
-    if (
+    const changed =
       nextHp !== character.currentHp ||
       token.hp !== nextHp ||
       token.maxHp !== character.maxHp
-    ) setHp(nextHp)
+    if (changed) setHp(nextHp)
   }
 
   const updateCurrentHpDraft = (draft: string) => {
     setCurrentHpDraft(draft)
     const nextHp = parseLiveHitPointDraft(draft, character.maxHp)
     if (nextHp == null) return
-    if (
+    const changed =
       nextHp !== character.currentHp ||
       token.hp !== nextHp ||
       token.maxHp !== character.maxHp
-    ) setHp(nextHp)
+    if (changed) setHp(nextHp)
+  }
+
+  const updateMaxHpDraft = (draft: string) => {
+    setMaxHpDraft(draft)
+    if (draft.trim() === '') return
+    const parsed = Number(draft)
+    if (!Number.isFinite(parsed)) return
+    const nextMaxHp = Math.max(1, Math.floor(parsed))
+    const nextCurrentHp = Math.min(displayedHitPoints.currentHp, nextMaxHp)
+    if (
+      nextMaxHp !== character.maxHp ||
+      nextCurrentHp !== character.currentHp ||
+      token.maxHp !== nextMaxHp ||
+      token.hp !== nextCurrentHp
+    ) setHp(nextCurrentHp, nextMaxHp, true)
   }
 
   const commitMaxHp = () => {
@@ -130,6 +150,25 @@ export default function CharacterDetailPanel({
     setCurrentHpDraft(String(nextCurrentHp))
     if (nextMaxHp !== character.maxHp || nextCurrentHp !== character.currentHp) {
       setHp(nextCurrentHp, nextMaxHp, true)
+    }
+  }
+
+  const removeFromMap = async () => {
+    if (!isDM || !onRemoveFromMap || removingFromMap) return
+    if (!await showAppConfirm({
+      title: '移除冒险者标记',
+      message: `从当前地图移除“${character.name}”的 Token？人物卡、装备和角色数据都会保留，之后可以重新放置。`,
+      confirmLabel: '移除标记',
+      tone: 'danger',
+    })) return
+    setRemovingFromMap(true)
+    setRemoveFromMapError(undefined)
+    try {
+      await onRemoveFromMap()
+      onClose()
+    } catch (cause) {
+      setRemoveFromMapError(cause instanceof Error ? cause.message : '冒险者标记未能安全移除，请重试。')
+      setRemovingFromMap(false)
     }
   }
 
@@ -226,7 +265,7 @@ export default function CharacterDetailPanel({
                     setEditingMaxHp(true)
                     event.currentTarget.select()
                   }}
-                  onChange={(event) => setMaxHpDraft(event.target.value)}
+                  onChange={(event) => updateMaxHpDraft(event.target.value)}
                   onBlur={commitMaxHp}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') event.currentTarget.blur()
@@ -244,12 +283,6 @@ export default function CharacterDetailPanel({
                 临时 {tempHp}
               </span>
             )}
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-void-900/80">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all"
-              style={{ width: `${displayedHitPoints.percentage}%` }}
-            />
           </div>
         </section>
 
@@ -304,6 +337,25 @@ export default function CharacterDetailPanel({
           <section className="mt-4">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">D&D 5e 状态</h3>
             <Dnd5eConditionTags conditions={character.conditions} />
+          </section>
+        ) : null}
+
+        {isDM && onRemoveFromMap ? (
+          <section className="mt-4 border-t border-white/10 pt-4">
+            <p className="text-xs leading-relaxed text-slate-500">
+              仅移除当前地图上的 Token；不会删除人物卡、装备或战役记录。
+            </p>
+            {removeFromMapError ? <p className="mt-2 text-xs text-rose-300">{removeFromMapError}</p> : null}
+            <button
+              type="button"
+              data-testid="remove-character-token"
+              disabled={removingFromMap}
+              onClick={() => void removeFromMap()}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:cursor-wait disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              {removingFromMap ? '正在移除…' : '从地图移除标记'}
+            </button>
           </section>
         ) : null}
       </div>

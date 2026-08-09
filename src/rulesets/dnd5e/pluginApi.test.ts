@@ -301,6 +301,7 @@ describe('D&D 5e rules plugin API', () => {
             schemaVersion: 1, id: 'bonus-fire', kind: 'on-hit-bonus-damage',
             trigger: 'after-attack-hit', appliesTo: 'attacks-with-this-weapon',
             damage: { count: 1, sides: 6, bonus: 0 }, damageType: 'fire',
+            targetCreatureTypes: ['龙类', 'dragon'],
             resourceId: 'charges', resourceCost: 1,
           }, {
             schemaVersion: 1, id: 'ward', kind: 'damage-reduction', trigger: 'before-damage',
@@ -320,6 +321,7 @@ describe('D&D 5e rules plugin API', () => {
           },
           equipment: {
             slot: 'mainWeapon', effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+            spellcastingFocusClassIds: ['wizard'],
             dnd5e: {
               kind: 'weapon', category: 'martial', mode: 'melee', attackAbility: 'str',
               damage: { count: 1, sides: 8, type: 'slashing' }, reachFeet: 5,
@@ -336,11 +338,14 @@ describe('D&D 5e rules plugin API', () => {
           equipment: expect.objectContaining({
             id: `${pluginId}:test-blade`, name: '测试剑',
             effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+            spellcastingFocusClassIds: ['wizard'],
           }),
           resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' }],
           headlessEffects: expect.arrayContaining([
             expect.objectContaining({ kind: 'attack-roll-reroll', resourceId: 'charges' }),
-            expect.objectContaining({ kind: 'on-hit-bonus-damage', damageType: 'fire' }),
+            expect.objectContaining({
+              kind: 'on-hit-bonus-damage', damageType: 'fire', targetCreatureTypes: ['龙类', 'dragon'],
+            }),
             expect.objectContaining({ kind: 'damage-reduction', amount: 2 }),
             expect.objectContaining({ kind: 'death-prevention', hitPointsAfter: 1 }),
           ]),
@@ -370,6 +375,30 @@ describe('D&D 5e rules plugin API', () => {
         })
       },
     })).toThrow('Invalid plugin equipment effect armorClassBonus')
+    expect(registeredDnd5ePluginItems()).toEqual([])
+  })
+
+  it('rejects an empty or malformed spellcasting-focus class declaration', () => {
+    expect(() => registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.invalid-focus', name: 'Invalid Focus', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerItem({
+          id: 'empty-focus', name: '空法器声明', category: 'equipment', icon: 'weapon',
+          description: '测试。', rulesText: '测试。', stackable: false,
+          equipment: {
+            slot: 'mainWeapon',
+            spellcastingFocusClassIds: [],
+            dnd5e: {
+              kind: 'weapon', category: 'simple', mode: 'melee', attackAbility: 'str',
+              damage: { count: 1, sides: 6, type: 'bludgeoning' }, reachFeet: 5,
+            },
+          },
+        })
+      },
+    })).toThrow('Invalid plugin equipment spellcasting focus')
     expect(registeredDnd5ePluginItems()).toEqual([])
   })
 

@@ -939,7 +939,7 @@ describe('monster core spell map action', () => {
     const spell = getDnd5eSrdCombatSpell('insect-plague')!
     expect(dnd5eMonsterCoreSpellCompatibility(spell)).toEqual({ automation: 'full' })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('cloudkill')!))
-      .toMatchObject({ automation: 'manual' })
+      .toEqual({ automation: 'full' })
 
     const prepared = prepareDnd5eMonsterCoreSpell({
       combatId: 'monster-persistent-area',
@@ -1058,6 +1058,64 @@ describe('monster core spell map action', () => {
       affectedEnemyCount: 2,
       affectedAllyCount: 0,
     })
+  })
+
+  it('casts Spirit Guardians through the shared area transaction and excludes visible allies', () => {
+    const priest = token({
+      id: 'priest',
+      label: 'Priest',
+      poolId: 'srd-5.1:priest',
+      x: 45,
+      y: 45,
+      dnd5eCombatState: {
+        monsterSpellSlots: { 3: { current: 1, max: 1 } },
+      },
+    })
+    const ally = token({ id: 'ally', label: 'Ally', x: 55, y: 45 })
+    const heroToken = token({
+      id: 'hero-token', label: 'Hero', type: 'player', characterId: 'hero', x: 65, y: 45,
+    })
+    const map = battleMap([priest, ally, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'monster-spirit-guardians',
+      round: 1,
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: priest.id,
+      targetTokenIds: [],
+      spellId: 'spirit-guardians',
+      slotLevel: 3,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const cast = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: { effectRolls: [] },
+    })
+    expect(cast.result.ok, cast.result.ok ? undefined : cast.result.reason).toBe(true)
+    const area = cast.application?.map.dnd5ePluginAreas?.find((entry) =>
+      entry.id === cast.createdAreaId)
+    expect(area).toMatchObject({
+      coreSpellId: 'spirit-guardians',
+      sourceTokenId: priest.id,
+      excludedTargetIds: [ally.id],
+    })
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: cast.application!.map,
+      timing: 'turn-start',
+      round: 1,
+      targetTokenId: ally.id,
+      turnKey: '1:ally',
+    })).toHaveLength(0)
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: cast.application!.map,
+      timing: 'turn-start',
+      round: 1,
+      targetTokenId: heroToken.id,
+      turnKey: '1:hero-token',
+    })).toHaveLength(1)
   })
 
   it('applies monster Hold Person with concentration and a repeat save', () => {

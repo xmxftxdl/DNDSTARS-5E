@@ -29,6 +29,37 @@ function character(id: string, classId: 'wizard' | 'bard'): Character {
 }
 
 describe('Flesh Golem Damage Aversion Token mark', () => {
+  it('projects the authoritative berserk state as a visible Token mark', () => {
+    expect(buildDnd5eMonsterStatusTokenMarks([
+      token({
+        id: 'flesh-golem',
+        poolId: 'srd-5.1:flesh-golem',
+        dnd5eCombatState: { monsterBerserk: true },
+      }),
+    ], [])).toEqual([expect.objectContaining({
+      tokenId: 'flesh-golem',
+      statusId: 'monster-berserk',
+      glowColor: '#ef4444',
+    })])
+  })
+
+  it('keeps berserk and Damage Aversion as two independent marks', () => {
+    const marks = buildDnd5eMonsterStatusTokenMarks([
+      token({
+        id: 'flesh-golem',
+        poolId: 'srd-5.1:flesh-golem',
+        dnd5eCombatState: {
+          monsterBerserk: true,
+          monsterDamageAversionActive: true,
+        },
+      }),
+    ], [])
+    expect(marks.map((mark) => mark.statusId)).toEqual([
+      'monster-berserk',
+      'monster-damage-aversion',
+    ])
+  })
+
   it.each(['wizard', 'bard'] as const)('uses the triggering %s class palette for its edge', (classId) => {
     const source = character('source-character', classId)
     const marks = buildDnd5eMonsterStatusTokenMarks([

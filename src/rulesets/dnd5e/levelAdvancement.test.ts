@@ -7,9 +7,12 @@ import type {
 import {
   applyDnd5eLevelAdvancement,
   buildDnd5eLevelAdvancementPlan,
+  dnd5eLevelAdvancementGrantedFeatures,
   reviseDnd5eLevelAdvancement,
   reviseLatestDnd5eLevelAdvancement,
 } from './levelAdvancement'
+import { DND5E_DECLARATIVE_CLASS_SCHEMA_VERSION, type DeclarativeClassDefinitionV1 } from './declarativeClass'
+import { dnd5eCharacterHasPluginFeature, registerDnd5eRulesPlugin } from './pluginApi'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -89,6 +92,106 @@ function advanceFighter(
 }
 
 describe('D&D 5e level advancement transaction', () => {
+  it('advances a package-namespaced class atomically and rebuilds grants and resources', () => {
+    const definition: DeclarativeClassDefinitionV1 = {
+      schemaVersion: DND5E_DECLARATIVE_CLASS_SCHEMA_VERSION,
+      id: 'rune-adept', name: '符文使', summary: '升级事务测试。', hitDie: 10,
+      primaryAbilities: ['str'], savingThrows: ['str', 'con'],
+      armorProficiencies: ['轻甲'], weaponProficiencies: ['简易武器'],
+      skills: { choiceCount: 0, options: [] },
+      features: [
+        { id: 'rune-focus', level: 1, name: '符文专注', description: '测试。', automation: 'manual' },
+        { id: 'rune-guard', level: 2, name: '符文守护', description: '测试。', automation: 'full' },
+      ],
+      subclass: { level: 3, id: 'runic-path', name: '符文之路', summary: '测试子职。' },
+      advancements: [
+        { level: 1, grants: ['rune-focus'] },
+        { level: 2, grants: ['rune-guard'] },
+        { level: 3, subclassChoice: true },
+        { level: 4, abilityScoreImprovement: true },
+        { level: 5, attacksPerAction: 2 },
+      ],
+      resources: [{ id: 'runes', label: '符文充能', resetOn: 'short-rest', maximumByLevel: [2, 3, 3, 4, 4] }],
+    }
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'test.rune-class', name: '符文职业测试', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeature({ id: 'rune-focus', name: '符文专注', summary: '测试。', description: '测试。', automation: 'manual' })
+        api.registerFeature({ id: 'rune-guard', name: '符文守护', summary: '测试。', description: '测试。', automation: 'manual' })
+        api.registerDeclarativeClass(definition)
+      },
+    })
+    try {
+      const levelOne = fighter({
+        charClass: '符文使', level: 1, dnd5eClassLevels: { 'test.rune-class:rune-adept': 1 },
+        dnd5eClassChoices: { classes: { 'test.rune-class:rune-adept': {} } },
+        classResources: { 'test.rune-class:runes': { current: 2, max: 2 } },
+      })
+      const plan = buildDnd5eLevelAdvancementPlan(levelOne, 'test.rune-class:rune-adept', 1)
+      expect(plan).toMatchObject({ fromClassLevel: 1, toClassLevel: 2, grantedFeatures: [{ name: '符文守护' }] })
+      expect(applyDnd5eLevelAdvancement({
+        ...levelOne,
+        dnd5eClassContentBindings: {
+          'test.rune-class:rune-adept': {
+            classId: 'test.rune-class:rune-adept', packageId: 'test.rune-class',
+            packageVersion: '0.9.0', contentVersion: 1,
+          },
+        },
+      }, {
+        schemaVersion: 1, classId: 'test.rune-class:rune-adept', levelsGained: 1,
+        hitPointMethod: 'fixed', hitPointRolls: [], asiChoices: [],
+      })).toEqual({ ok: false, reason: 'class-content-version-mismatch' })
+      const levelTwo = applyDnd5eLevelAdvancement(levelOne, {
+        schemaVersion: 1, classId: 'test.rune-class:rune-adept', levelsGained: 1,
+        hitPointMethod: 'fixed', hitPointRolls: [], asiChoices: [],
+      })
+      expect(levelTwo.ok).toBe(true)
+      if (!levelTwo.ok) return
+      expect(levelTwo.character).toMatchObject({
+        level: 2,
+        dnd5eClassLevels: { 'test.rune-class:rune-adept': 2 },
+        dnd5eClassContentBindings: {
+          'test.rune-class:rune-adept': { packageId: 'test.rune-class', packageVersion: '1.0.0', contentVersion: 1 },
+        },
+        classResources: { 'test.rune-class:runes': { current: 2, max: 3 } },
+      })
+      expect(levelTwo.record.grantedFeatureIds).toContain('test.rune-class:rune-guard')
+
+      let current = levelTwo.character
+      for (const nextLevel of [3, 4, 5]) {
+        const result = applyDnd5eLevelAdvancement(current, {
+          schemaVersion: 1,
+          classId: 'test.rune-class:rune-adept',
+          levelsGained: 1,
+          hitPointMethod: 'fixed',
+          hitPointRolls: [],
+          ...(nextLevel >= 3 ? { subclassId: 'test.rune-class:rune-adept.runic-path' } : {}),
+          asiChoices: nextLevel === 4
+            ? [{ classLevel: 4, choice: { kind: 'ability-score', increases: { str: 2 } } }]
+            : [],
+        })
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        current = result.character
+      }
+      expect(current).toMatchObject({
+        level: 5,
+        abilities: { str: 18 },
+        dnd5eClassChoices: {
+          classes: { 'test.rune-class:rune-adept': { subclass: 'test.rune-class:rune-adept.runic-path' } },
+        },
+        classResources: { 'test.rune-class:runes': { current: 2, max: 4 } },
+      })
+      expect(dnd5eCharacterHasPluginFeature(current, 'test.rune-class:rune-guard')).toBe(true)
+      expect(current.dnd5eLevelAdvancements).toHaveLength(4)
+    } finally {
+      dispose()
+    }
+  })
+
   it('only builds one-level plans and rejects batch advancement', () => {
     expect(buildDnd5eLevelAdvancementPlan(fighter(), 'fighter', 6)).toBeUndefined()
 
@@ -101,6 +204,43 @@ describe('D&D 5e level advancement transaction', () => {
       gainedClassLevels: [2],
       hitDie: 10,
     })
+  })
+
+  it('includes fixed fighter features in advancement plans, receipts, and usable resources', () => {
+    const firstFighterLevel = buildDnd5eLevelAdvancementPlan(fighter({
+      charClass: '法师',
+      dnd5eClassLevels: { wizard: 1 },
+    }), 'fighter', 1)
+    expect(firstFighterLevel?.grantedFeatures.map((feature) => feature.name)).toContain('回气')
+
+    const actionSurgePlan = buildDnd5eLevelAdvancementPlan(fighter(), 'fighter', 1)
+    expect(actionSurgePlan?.grantedFeatures).toEqual([
+      expect.objectContaining({ id: 'action-surge-1', name: '动作如潮（1次）', level: 2 }),
+    ])
+
+    const result = applyDnd5eLevelAdvancement(fighter(), fighterDecision(2))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.record.grantedFeatureIds).toEqual(['action-surge-1'])
+    expect(dnd5eLevelAdvancementGrantedFeatures(result.record)).toEqual([
+      expect.objectContaining({ id: 'action-surge-1', name: '动作如潮（1次）' }),
+    ])
+    expect(result.character.classResources).toMatchObject({
+      fighterSecondWind: { current: 1, max: 1 },
+      fighterActionSurge: { current: 1, max: 1 },
+    })
+  })
+
+  it('does not record an ability score choice as a fixed granted feature', () => {
+    const levelThree = advanceFighter(fighter(), 3)
+    const result = applyDnd5eLevelAdvancement(
+      levelThree,
+      fighterDecision(4, { kind: 'ability-score', increases: { str: 2 } }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.record.grantedFeatureIds).not.toContain('asi-4')
+    expect(dnd5eLevelAdvancementGrantedFeatures(result.record)).toEqual([])
   })
 
   it('creates a level-seven character through six immutable one-level receipts', () => {

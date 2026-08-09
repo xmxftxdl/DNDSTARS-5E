@@ -20,9 +20,12 @@ import {
 } from '../../lib/mapTokenDragPolicy'
 import { planMapTokenDrop } from '../../lib/mapTokenDropPlanner'
 import { createLatestTokenMovePreviewTracker } from '../../lib/latestTokenMovePreview'
+import { mapWorldPointToViewport } from '../../lib/mapViewportProjection'
 import {
+  releaseTokenVisualNodesAtPosition,
   setTokenVisualNodesPositionLocked,
   syncTokenVisualNodes,
+  tokenVisualNodesDisplayPosition,
   type TokenVisualNodeLike,
 } from '../../lib/tokenVisualPosition'
 import {
@@ -398,6 +401,7 @@ export default function MapCanvas({
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
+  const savingThrowMarkerRef = useRef<HTMLDivElement>(null)
   const gridDragRef = useRef<{
     startX: number
     startY: number
@@ -428,6 +432,10 @@ export default function MapCanvas({
     suppressedMovementAnimationIds: {},
   })
   const dragPreviewPositions = tokenDragVisualState.previews
+  // Pointer movement is intentionally imperative and does not re-render the
+  // whole canvas on every frame. Keep its latest coordinate outside React so
+  // an async commit cannot release detached layers using a stale render.
+  const tokenDragVisualPositionsRef = useRef<Record<string, Point>>({})
   const tokenVisualNodesRef = useRef(new Map<string, Set<TokenVisualNodeLike>>())
   const tokenBorderFlowLayerRef = useRef<Konva.Layer>(null)
   const tokenBorderFlowAnimationEntriesRef = useRef(
@@ -659,6 +667,7 @@ export default function MapCanvas({
       cancelPositionAnimation,
       setPositionLocked,
       position: (point) => node.position(point),
+      getPosition: () => node.position(),
       getLayer: () => node.getLayer(),
     }
     const nodes = tokenVisualNodesRef.current.get(tokenId) ?? new Set<TokenVisualNodeLike>()
@@ -681,6 +690,12 @@ export default function MapCanvas({
     const nodes = tokenVisualNodesRef.current.get(tokenId)
     if (!nodes?.size) return
     setTokenVisualNodesPositionLocked(nodes, locked)
+  }, [])
+
+  const releaseTokenVisualPosition = useCallback((tokenId: string, point: Point) => {
+    const nodes = tokenVisualNodesRef.current.get(tokenId)
+    if (!nodes?.size) return
+    releaseTokenVisualNodesAtPosition(nodes, point)
   }, [])
 
   const syncEffectTokenAreaOverlayPosition = useCallback((tokenId: string, x: number, y: number) => {
@@ -749,6 +764,7 @@ export default function MapCanvas({
     })
 
   const previewTokenDrag = (token: Token, x: number, y: number) => {
+    tokenDragVisualPositionsRef.current[token.id] = { x, y }
     syncTokenVisualPosition(token.id, x, y)
     if (token.dnd5eSpellEffect) {
       effectTokenDragPositionsRef.current[token.id] = { x, y }
@@ -772,6 +788,7 @@ export default function MapCanvas({
   const previewTokenDragFrame = (token: Token, x: number, y: number) => {
     // Keep body, name and vitals in one imperative frame without re-rendering
     // the entire map for every pointer event.
+    tokenDragVisualPositionsRef.current[token.id] = { x, y }
     syncTokenVisualPosition(token.id, x, y)
     if (token.dnd5eSpellEffect) {
       // The animated sphere is a detached persistent-area overlay. Move that
@@ -782,24 +799,39 @@ export default function MapCanvas({
     }
   }
 
-  const releaseTokenDragPreview = (tokenId: string) => {
+  const releaseTokenDragPreview = useCallback((tokenId: string, finalPosition?: Point) => {
+    const position = finalPosition
+      ?? tokenDragVisualPositionsRef.current[tokenId]
+      ?? dragPreviewPositions[tokenId]
+      ?? map.tokens.find((token) => token.id === tokenId)
+    if (position) {
+      // Body, selection/status overlays, name/vitals and the class-flow ring
+      // are separate Konva groups. Commit one shared coordinate before their
+      // position locks are released.
+      releaseTokenVisualPosition(tokenId, position)
+      syncEffectTokenAreaOverlayPosition(tokenId, position.x, position.y)
+    } else {
+      setTokenVisualPositionLocked(tokenId, false)
+    }
+    delete tokenDragVisualPositionsRef.current[tokenId]
     delete effectTokenDragPositionsRef.current[tokenId]
-    setTokenVisualPositionLocked(tokenId, false)
     setTokenDragVisualState((current) => {
       if (!current.previews[tokenId]) return current
       const previews = { ...current.previews }
       delete previews[tokenId]
       return { ...current, previews }
     })
-  }
+  }, [
+    dragPreviewPositions,
+    map.tokens,
+    releaseTokenVisualPosition,
+    setTokenVisualPositionLocked,
+    syncEffectTokenAreaOverlayPosition,
+  ])
 
   const rollbackTokenDragPreview = (tokenId: string) => {
     const authoritative = map.tokens.find((token) => token.id === tokenId)
-    if (authoritative) {
-      syncTokenVisualPosition(tokenId, authoritative.x, authoritative.y)
-      syncEffectTokenAreaOverlayPosition(tokenId, authoritative.x, authoritative.y)
-    }
-    releaseTokenDragPreview(tokenId)
+    releaseTokenDragPreview(tokenId, authoritative)
   }
 
   const cancelTokenDrag = (tokenId: string) => {
@@ -809,10 +841,41 @@ export default function MapCanvas({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const releases: Array<{
+        tokenId: string
+        authoritative: Token
+        suppressMovementAnimationId?: string
+      }> = []
+      for (const [tokenId, preview] of Object.entries(dragPreviewPositions)) {
+        const authoritative = map.tokens.find((token) => token.id === tokenId)
+        const resolution = resolveOptimisticTokenMovePreview({
+          // Parent renders and map invalidations can arrive while the pointer
+          // is still down. They must not release the preview before submit.
+          dragActive: activeDraggingTokenIdsRef.current.has(tokenId),
+          requestPending:
+            optimisticTokenMoveIds.includes(tokenId) ||
+            directMovePreviewTracker.isPending(tokenId),
+          authoritative,
+          preview,
+        })
+        if (resolution.release && authoritative) {
+          releases.push({
+            tokenId,
+            authoritative,
+            suppressMovementAnimationId: resolution.suppressMovementAnimationId,
+          })
+        }
+      }
+
+      // Server-confirmed optimistic moves must use the same atomic visual
+      // release as direct moves; deleting only the React preview leaves any
+      // locked detached layer (most visibly the perimeter ring) at the origin.
+      for (const release of releases) {
+        releaseTokenDragPreview(release.tokenId, release.authoritative)
+      }
+
       setTokenDragVisualState((current) => {
-        let previewsChanged = false
-        let suppressionsChanged = false
-        const previews = { ...current.previews }
+        let changed = false
         const suppressedMovementAnimationIds = {
           ...current.suppressedMovementAnimationIds,
         }
@@ -820,41 +883,31 @@ export default function MapCanvas({
           const animation = map.tokens.find((token) => token.id === tokenId)?.movementAnimation
           if (animation?.id !== animationId) {
             delete suppressedMovementAnimationIds[tokenId]
-            suppressionsChanged = true
+            changed = true
           }
         }
-        for (const [tokenId, preview] of Object.entries(current.previews)) {
-          const authoritative = map.tokens.find((token) => token.id === tokenId)
-          const resolution = resolveOptimisticTokenMovePreview({
-            // Parent renders and map invalidations can arrive while the pointer
-            // is still down. They must not release the preview before submit.
-            dragActive: activeDraggingTokenIdsRef.current.has(tokenId),
-            requestPending:
-              optimisticTokenMoveIds.includes(tokenId) ||
-              directMovePreviewTracker.isPending(tokenId),
-            authoritative,
-            preview,
-          })
-          if (resolution.release) {
-            if (resolution.suppressMovementAnimationId) {
-              if (
-                suppressedMovementAnimationIds[tokenId] !==
-                resolution.suppressMovementAnimationId
-              ) {
-                suppressedMovementAnimationIds[tokenId] = resolution.suppressMovementAnimationId
-                suppressionsChanged = true
-              }
-            }
-            delete previews[tokenId]
-            previewsChanged = true
+        for (const release of releases) {
+          if (
+            release.suppressMovementAnimationId &&
+            suppressedMovementAnimationIds[release.tokenId] !==
+              release.suppressMovementAnimationId
+          ) {
+            suppressedMovementAnimationIds[release.tokenId] =
+              release.suppressMovementAnimationId
+            changed = true
           }
         }
-        if (!previewsChanged && !suppressionsChanged) return current
-        return { previews, suppressedMovementAnimationIds }
+        return changed ? { ...current, suppressedMovementAnimationIds } : current
       })
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [directMovePreviewTracker, map.tokens, optimisticTokenMoveIds])
+  }, [
+    directMovePreviewTracker,
+    dragPreviewPositions,
+    map.tokens,
+    optimisticTokenMoveIds,
+    releaseTokenDragPreview,
+  ])
 
   const monitorDirectTokenMove = (
     tokenId: string,
@@ -1787,6 +1840,45 @@ export default function MapCanvas({
         map.gridSize * Math.max(1, savingThrowToken.size ?? 1) * view.scale * 1.24,
       )
     : 0
+  const savingThrowMarkerPosition = savingThrowToken
+    ? mapWorldPointToViewport(savingThrowToken, view)
+    : undefined
+  const syncSavingThrowMarkerPosition = useCallback(() => {
+    if (!savingThrowToken) return
+    const marker = savingThrowMarkerRef.current
+    if (!marker) return
+    const animationPosition = savingThrowToken.movementAnimation
+      ? tokenMovementAnimationPosition(
+          savingThrowToken.movementAnimation,
+          Date.now() - savingThrowToken.movementAnimation.issuedAt,
+        )
+      : undefined
+    const liveTokenPosition = tokenVisualNodesDisplayPosition(
+      tokenVisualNodesRef.current.get(savingThrowToken.id),
+    ) ?? animationPosition ?? savingThrowToken
+    const stage = stageRef.current
+    const position = mapWorldPointToViewport(liveTokenPosition, stage
+      ? { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
+      : view)
+    marker.style.left = `${position.left}px`
+    marker.style.top = `${position.top}px`
+  }, [savingThrowToken, view])
+
+  useLayoutEffect(() => {
+    if (!savingThrowToken) return
+    let frame = 0
+    let disposed = false
+    const tick = () => {
+      if (disposed) return
+      syncSavingThrowMarkerPosition()
+      frame = window.requestAnimationFrame(tick)
+    }
+    tick()
+    return () => {
+      disposed = true
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [savingThrowToken, syncSavingThrowMarkerPosition])
   const geometryOverlayVisible = isDM || (!isDM && !!onGeometryDoorInteract)
   const difficultTerrainCells = useMemo(
     () => collectMapDifficultTerrainCells({ map, geometry }),
@@ -1935,6 +2027,14 @@ export default function MapCanvas({
         y={view.y}
         draggable={stageCanPan}
         onWheel={handleWheel}
+        onDragMove={(e) => {
+          // Konva moves the Stage imperatively while panning; React's `view`
+          // is committed only on drag end. Keep the DOM saving-throw marker
+          // attached to the same world point without re-rendering the canvas
+          // for every pointer event.
+          if (e.target !== e.target.getStage() || !savingThrowToken) return
+          syncSavingThrowMarkerPosition()
+        }}
         onDragEnd={(e) => {
           // Only update viewport when dragging the stage itself.
           if (e.target === e.target.getStage()) {
@@ -2741,12 +2841,13 @@ export default function MapCanvas({
       ) : null}
       {savingThrowToken ? (
         <div
+          ref={savingThrowMarkerRef}
           data-testid="saving-throw-marker"
           data-saving-throw-ability={savingThrowAbility ?? ''}
           className="pointer-events-none absolute z-[70] -translate-x-1/2 -translate-y-1/2"
           style={{
-            left: view.x + savingThrowToken.x * view.scale,
-            top: view.y + savingThrowToken.y * view.scale,
+            left: savingThrowMarkerPosition?.left,
+            top: savingThrowMarkerPosition?.top,
             width: savingThrowMarkerDiameter,
             height: savingThrowMarkerDiameter,
           }}

@@ -226,7 +226,7 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
           : spec.motif === 'dodge'
             ? '/assets/icons/dodge-action.png'
             : undefined)
-  const paintedAssetDetail = spec.asset?.match(/\/([^/]+)-(?:spell|item)-action\.png$/)?.[1] ?? spec.motif
+  const paintedAssetDetail = spec.asset?.match(/\/([^/]+)-(?:spell|item|feature)-action\.png$/)?.[1] ?? spec.motif
   const paintedAssetIsForeground = spec.assetMode === 'foreground'
   return (
     <span className={`relative block aspect-square overflow-hidden rounded-xl ${active ? 'ring-2 ring-amber-300 ring-offset-2 ring-offset-void-950' : ''} ${disabled ? 'grayscale opacity-45' : ''} ${className}`} aria-hidden="true">
@@ -270,6 +270,7 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
             width={paintedAssetIsForeground ? '80' : '88'}
             height={paintedAssetIsForeground ? '80' : '88'}
             preserveAspectRatio={paintedAssetIsForeground ? 'xMidYMid meet' : 'xMidYMid slice'}
+            data-foreground-composite={spec.assetTreatment === 'transparent-foreground' ? 'normal-over-class-template' : undefined}
             data-icon-detail={`painted-${paintedAssetDetail}`}
           />
         ) : (

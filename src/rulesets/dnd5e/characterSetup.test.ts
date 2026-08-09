@@ -9,6 +9,7 @@ import {
   recommendDnd5eCharacter,
   recommendDnd5eRaces,
   recommendedDnd5eBaseAbilities,
+  rollDnd5eAbilityScoreSet,
   rollDnd5eFourD6DropLowest,
 } from './characterSetup'
 import { registerDnd5eRulesPlugin } from './pluginApi'
@@ -80,5 +81,26 @@ describe('D&D 5e 2014 character setup', () => {
     expect(rollDnd5eFourD6DropLowest(() => values[index++])).toEqual({
       dice: [1, 2, 5, 6], discardedIndex: 0, total: 13,
     })
+  })
+
+  it('rolls the complete six-score pool before ability assignment', () => {
+    const values = [
+      0, 0.2, 0.7, 0.99,
+      0.1, 0.3, 0.5, 0.8,
+      0.2, 0.4, 0.6, 0.9,
+      0.3, 0.5, 0.7, 0.95,
+      0.4, 0.6, 0.8, 0.99,
+      0.5, 0.7, 0.9, 0.99,
+    ]
+    let index = 0
+    const rolls = rollDnd5eAbilityScoreSet(
+      { diceCount: 4, dieSides: 6, dropLowest: 1 },
+      6,
+      () => values[index++],
+    )
+
+    expect(rolls).toHaveLength(6)
+    expect(rolls.map((roll) => roll.total)).toEqual([13, 11, 13, 15, 15, 17])
+    expect(rolls.every((roll) => roll.dice.length === 4 && roll.discardedIndices.length === 1)).toBe(true)
   })
 })

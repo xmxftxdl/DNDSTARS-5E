@@ -71,6 +71,7 @@ export function dnd5eActivityFromCustomHeadlessAction(
     id: definition.id,
     name: definition.label,
     activation: { kind: 'special', timing: 'inherited from the owning content definition' },
+    invocation: { kind: 'active', confirmation: 'actor-choice' },
     target: { kind: 'creature', relation: 'any', count: 256, includeSelf: true },
     requirements: definition.requiredInterruptOptionId
       ? [{ kind: 'choice', choiceId: 'interrupt', optionId: definition.requiredInterruptOptionId }]
@@ -80,4 +81,3 @@ export function dnd5eActivityFromCustomHeadlessAction(
     legacySource: { kind: 'custom-headless-action', id: definition.id },
   }
 }
-

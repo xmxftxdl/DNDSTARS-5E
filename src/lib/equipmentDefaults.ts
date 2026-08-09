@@ -13,8 +13,8 @@ export const EQUIPMENT_SLOTS: EquipmentSlot[] = [
 ]
 
 export const EQUIPMENT_SLOT_LABELS: Record<EquipmentSlot, string> = {
-  mainWeapon: '主手武器',
-  offHand: '副手／盾牌',
+  mainWeapon: '主手／法器',
+  offHand: '副手／盾牌／法器',
   armor: '护甲',
   helmet: '头部',
   shoes: '足部',
@@ -30,8 +30,13 @@ export function isEquipmentSlot(value: unknown): value is EquipmentSlot {
   return typeof value === 'string' && EQUIPMENT_SLOT_SET.has(value)
 }
 
-/** 戒指模板声明 ring，但可以放入任一戒指位。其他装备仍必须严格匹配声明槽位。 */
-export function equipmentSlotAcceptsItemSlot(destination: EquipmentSlot, itemSlot: EquipmentSlot): boolean {
+/** 戒指可放入任一戒指位；显式声明 allowedSlots 的物品可放入其中任一槽位。 */
+export function equipmentSlotAcceptsItemSlot(
+  destination: EquipmentSlot,
+  itemSlot: EquipmentSlot,
+  allowedSlots?: readonly EquipmentSlot[],
+): boolean {
+  if (allowedSlots?.includes(destination)) return true
   return itemSlot === 'ring'
     ? destination === 'ring' || destination === 'ring2'
     : destination === itemSlot

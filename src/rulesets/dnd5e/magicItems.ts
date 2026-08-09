@@ -2,6 +2,8 @@ import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type {
   Dnd5eInventoryIconId,
   Dnd5eInventoryItemTemplate,
+  Dnd5eInventoryResourceDefinition,
+  Dnd5eInventoryUseAction,
   Dnd5eMagicItemKind,
   Dnd5eMagicItemRarity,
 } from '../../types/inventory'
@@ -10,7 +12,84 @@ import { DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED } from './magicItemRulesZh.revie
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
-type CatalogRuleOverride = Pick<Dnd5eInventoryItemTemplate, 'description' | 'rulesText' | 'use'>
+type CatalogRuleOverride = Partial<Pick<
+  Dnd5eInventoryItemTemplate,
+  'description' | 'rulesText' | 'equipment' | 'use' | 'useActions' | 'resources' | 'headlessEffects'
+>> & { automation?: 'headless' | 'dm-adjudication' }
+
+function chargedSpellResource(
+  maximum: number,
+  recoveryBonus: number,
+): Dnd5eInventoryResourceDefinition {
+  return {
+    id: 'charges',
+    label: '充能',
+    maximum,
+    initial: maximum,
+    resetOn: 'dawn',
+    recovery: {
+      kind: 'dice',
+      trigger: 'dawn',
+      dice: { count: 1, sides: 6, bonus: recoveryBonus },
+    },
+    lastChargeDestruction: {
+      trigger: 'spend-last-charge',
+      dieSides: 20,
+      destroyOn: 1,
+    },
+  }
+}
+
+function chargedSpellAction(input: {
+  id: string
+  label: string
+  spellId: string
+  castAtLevel: number
+  chargeCost: number
+  spellSaveDc?: number
+  spellAttackBonus?: number
+  useCharacterSpellcasting?: boolean
+}): Dnd5eInventoryUseAction {
+  return {
+    id: input.id,
+    label: input.label,
+    economy: 'action',
+    consumeQuantity: 0,
+    resourceCost: { resourceId: 'charges', amount: input.chargeCost },
+    effect: {
+      kind: 'spell-cast',
+      schemaVersion: 1,
+      spellId: input.spellId,
+      castAtLevel: input.castAtLevel,
+      ...(input.spellSaveDc != null ? { spellSaveDc: input.spellSaveDc } : {}),
+      ...(input.spellAttackBonus != null ? { spellAttackBonus: input.spellAttackBonus } : {}),
+      ...(input.useCharacterSpellcasting === true ? { useCharacterSpellcasting: true } : {}),
+    },
+  }
+}
+
+const quarterstaff = DND5E_SRD_EQUIPMENT_CATALOG.find((item) => item.id === 'dnd5e-quarterstaff')
+
+function magicStaffEquipment(id: string, name: string): EquipmentItem {
+  if (!quarterstaff) {
+    return {
+      id: `srd-5.1:magic-item:${id}`,
+      name,
+      slot: 'mainWeapon',
+      allowedSlots: ['mainWeapon', 'offHand'],
+    }
+  }
+  return {
+    ...quarterstaff,
+    id: `srd-5.1:magic-item:${id}`,
+    baseEquipmentId: quarterstaff.id,
+    name,
+    allowedSlots: ['mainWeapon', 'offHand'],
+    dnd5e: quarterstaff.dnd5e?.kind === 'weapon'
+      ? { ...quarterstaff.dnd5e, magical: true }
+      : undefined,
+  }
+}
 
 /**
  * 需要声明式 Headless 行为或已完成语境审校的目录条目覆盖。
@@ -38,6 +117,147 @@ const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
         adjudication: '位面护符：先处理 DC 15 智力检定。成功时按“异界传送”裁定；失败时掷 1d100，并处理佩戴者周围 15 尺内所有生物、物件及随机目的地。',
       },
     },
+  },
+  'pearl-of-power': {
+    resources: [{
+      id: 'daily-use',
+      label: '每日使用次数',
+      maximum: 1,
+      initial: 1,
+      resetOn: 'dawn',
+    }],
+    use: {
+      economy: 'action',
+      consumeQuantity: 0,
+      resourceCost: { resourceId: 'daily-use', amount: 1 },
+      effect: {
+        kind: 'spell-slot-recovery',
+        maximumSlotLevel: 3,
+        amount: 1,
+        selection: 'selected-expended-slot',
+      },
+    },
+    automation: 'headless',
+  },
+  'ring-of-protection': {
+    equipment: {
+      id: 'srd-5.1:magic-item:ring-of-protection',
+      name: '防护戒指',
+      slot: 'ring',
+      effects: { armorClassBonus: 1, savingThrowBonus: 1 },
+    },
+    automation: 'headless',
+  },
+  'circlet-of-blasting': {
+    equipment: {
+      id: 'srd-5.1:magic-item:circlet-of-blasting',
+      name: '爆破头环',
+      slot: 'helmet',
+    },
+    resources: [{
+      id: 'daily-use',
+      label: '每日使用次数',
+      maximum: 1,
+      initial: 1,
+      resetOn: 'dawn',
+    }],
+    use: {
+      economy: 'action',
+      consumeQuantity: 0,
+      resourceCost: { resourceId: 'daily-use', amount: 1 },
+      effect: {
+        kind: 'spell-cast',
+        schemaVersion: 1,
+        spellId: 'scorching-ray',
+        castAtLevel: 2,
+        spellAttackBonus: 5,
+      },
+    },
+    automation: 'headless',
+  },
+  'ring-of-jumping': {
+    use: {
+      economy: 'bonusAction',
+      consumeQuantity: 0,
+      effect: {
+        kind: 'spell-cast',
+        schemaVersion: 1,
+        spellId: 'jump',
+        castAtLevel: 1,
+        targeting: 'self-only',
+      },
+    },
+    automation: 'headless',
+  },
+  'wand-of-magic-missiles': {
+    equipment: {
+      id: 'srd-5.1:magic-item:wand-of-magic-missiles',
+      name: '魔法飞弹魔杖',
+      slot: 'mainWeapon',
+    },
+    resources: [chargedSpellResource(7, 1)],
+    useActions: Array.from({ length: 7 }, (_, index) => {
+      const level = index + 1
+      return chargedSpellAction({
+        id: `magic-missile-level-${level}`,
+        label: level === 1 ? '魔法飞弹' : `魔法飞弹（${level}环）`,
+        spellId: 'magic-missile',
+        castAtLevel: level,
+        chargeCost: level,
+      })
+    }),
+    automation: 'headless',
+  },
+  'wand-of-web': {
+    equipment: {
+      id: 'srd-5.1:magic-item:wand-of-web',
+      name: '蛛网魔杖',
+      slot: 'mainWeapon',
+    },
+    resources: [chargedSpellResource(7, 1)],
+    useActions: [chargedSpellAction({
+      id: 'cast-web',
+      label: '施放蛛网术',
+      spellId: 'web',
+      castAtLevel: 2,
+      chargeCost: 1,
+      spellSaveDc: 15,
+    })],
+    automation: 'headless',
+  },
+  'staff-of-healing': {
+    equipment: magicStaffEquipment('staff-of-healing', '医疗法杖'),
+    resources: [chargedSpellResource(10, 4)],
+    useActions: [
+      ...Array.from({ length: 4 }, (_, index) => {
+        const level = index + 1
+        return chargedSpellAction({
+          id: `cure-wounds-level-${level}`,
+          label: level === 1 ? '疗伤术' : `疗伤术（${level}环）`,
+          spellId: 'cure-wounds',
+          castAtLevel: level,
+          chargeCost: level,
+          useCharacterSpellcasting: true,
+        })
+      }),
+      chargedSpellAction({
+        id: 'lesser-restoration',
+        label: '次级复原术',
+        spellId: 'lesser-restoration',
+        castAtLevel: 2,
+        chargeCost: 2,
+        useCharacterSpellcasting: true,
+      }),
+      chargedSpellAction({
+        id: 'mass-cure-wounds',
+        label: '群体疗伤术',
+        spellId: 'mass-cure-wounds',
+        castAtLevel: 5,
+        chargeCost: 5,
+        useCharacterSpellcasting: true,
+      }),
+    ],
+    automation: 'headless',
   },
 }
 
@@ -413,6 +633,17 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     : entry.id.startsWith('belt-')
       ? 'belt'
       : undefined
+  const equipment = rules?.equipment ?? (
+    entry.kind === 'staff'
+      ? magicStaffEquipment(entry.id, entry.name)
+      : wearableSlot
+        ? {
+            id: `srd-5.1:magic-item:${entry.id}`,
+            name: entry.name,
+            slot: wearableSlot,
+          }
+        : undefined
+  )
   if (!rulesText) {
     throw new Error(`SRD 5.1 魔法物品缺少已复核中文正文：${entry.id}`)
   }
@@ -425,20 +656,17 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
     rulesText,
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
-    ...(wearableSlot ? {
-      equipment: {
-        id: `srd-5.1:magic-item:${entry.id}`,
-        name: entry.name,
-        slot: wearableSlot,
-      },
-    } : {}),
+    ...(equipment ? { equipment } : {}),
     ...(rules?.use ? { use: rules.use } : {}),
+    ...(rules?.useActions?.length ? { useActions: rules.useActions } : {}),
+    ...(rules?.resources ? { resources: rules.resources } : {}),
+    ...(rules?.headlessEffects ? { headlessEffects: rules.headlessEffects } : {}),
     magicItem: {
       kind: entry.kind,
       rarity: entry.rarity,
       attunement,
       ...(requirement ? { attunementRequirement: requirement } : {}),
-      automation: 'dm-adjudication',
+      automation: rules?.automation ?? 'dm-adjudication',
     },
     source: SRD_SOURCE,
   }
@@ -476,7 +704,16 @@ function magicEquipmentTemplate(
       ? `使用该魔法武器进行攻击检定和伤害掷骰时获得 +${bonus} 加值；其余武器数据沿用基础武器。`
       : `穿戴该魔法护甲时，护甲等级在基础护甲公式之外再获得 +${bonus} 加值。`,
     stackable: false,
-    equipment: { ...base, id, baseEquipmentId: base.baseEquipmentId ?? base.id, name: magicName, effects },
+    equipment: {
+      ...base,
+      id,
+      baseEquipmentId: base.baseEquipmentId ?? base.id,
+      name: magicName,
+      effects,
+      dnd5e: base.dnd5e?.kind === 'weapon'
+        ? { ...base.dnd5e, magical: true }
+        : base.dnd5e,
+    },
     magicItem: { kind, rarity, attunement: 'none', automation: 'headless' },
     source: SRD_SOURCE,
   }
@@ -486,6 +723,64 @@ const BASE_WEAPONS = DND5E_SRD_EQUIPMENT_CATALOG.filter((item) =>
   item.dnd5e?.kind === 'weapon' && !item.id.endsWith('-offhand'),
 )
 const BASE_ARMOR = DND5E_SRD_EQUIPMENT_CATALOG.filter((item) => item.dnd5e?.kind === 'armor')
+
+const DRAGON_SLAYER_SWORD_IDS = new Set([
+  'dnd5e-longsword',
+  'dnd5e-greatsword',
+  'dnd5e-rapier',
+  'dnd5e-scimitar',
+  'dnd5e-shortsword',
+])
+
+/** The abstract “any sword” SRD entry is expanded into selectable concrete weapons. */
+export const DND5E_SRD_DRAGON_SLAYER_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = BASE_WEAPONS
+  .filter((weapon) => DRAGON_SLAYER_SWORD_IDS.has(weapon.id))
+  .map((weapon) => {
+    const suffix = weapon.id.replace(/^dnd5e-/, '')
+    const id = `srd-5.1:magic-item:dragon-slayer-${suffix}`
+    const name = `屠龙${weapon.name}`
+    const baseEnglishName = suffix
+      .split('-')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+    return {
+      id,
+      name,
+      englishName: `Dragon Slayer ${baseEnglishName}`,
+      category: 'equipment',
+      icon: 'weapon',
+      description: '稀有魔法武器，无需同调。',
+      rulesText: DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED['dragon-slayer']!.rulesText,
+      stackable: false,
+      equipment: {
+        ...weapon,
+        id,
+        baseEquipmentId: weapon.baseEquipmentId ?? weapon.id,
+        name,
+        dnd5e: weapon.dnd5e?.kind === 'weapon'
+          ? { ...weapon.dnd5e, magical: true }
+          : weapon.dnd5e,
+        effects: {
+          ...weapon.effects,
+          weaponAttackBonus: 1,
+          weaponDamageBonus: 1,
+        },
+      },
+      headlessEffects: [{
+        schemaVersion: 1,
+        id: 'dragon-slayer-extra-damage',
+        kind: 'on-hit-bonus-damage',
+        trigger: 'after-attack-hit',
+        appliesTo: 'attacks-with-this-weapon',
+        damage: { count: 3, sides: 6, bonus: 0 },
+        damageType: 'inherit',
+        doubleDiceOnCritical: true,
+        targetCreatureTypes: ['龙类', '龙', 'dragon'],
+      }],
+      magicItem: { kind: 'weapon', rarity: 'rare', attunement: 'none', automation: 'headless' },
+      source: SRD_SOURCE,
+    }
+  })
 
 export const DND5E_SRD_MAGIC_WEAPON_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] =
   BASE_WEAPONS.flatMap((weapon) => ([1, 2, 3] as const).map((bonus) => magicEquipmentTemplate(weapon, bonus, 'weapon')))
@@ -560,4 +855,5 @@ export const DND5E_SRD_MAGIC_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate
   ...DND5E_SRD_MAGIC_ARMOR_TEMPLATES,
   ...DND5E_SRD_MAGIC_SHIELD_TEMPLATES,
   ...DND5E_SRD_MAGIC_CONSUMABLE_TEMPLATES,
+  ...DND5E_SRD_DRAGON_SLAYER_TEMPLATES,
 ]

@@ -1,4 +1,10 @@
-import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
+import type {
+  Dnd5eActivityConfirmationV1,
+  Dnd5eActivityDefinitionV1,
+  Dnd5eActivityTriggerContextV1,
+  Dnd5eActivityTriggerRetentionV1,
+} from './dnd5eActivityContracts'
+import { matchDnd5eActivityInvocationV1, resolveDnd5eActivityInvocationV1 } from './dnd5eActivityInvocation'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
 
 export interface RegisteredDnd5eActivityPackage {
@@ -9,6 +15,14 @@ export interface RegisteredDnd5eActivityPackage {
 
 export interface Dnd5eActivityRegistration {
   dispose(): void
+}
+
+export interface AvailableRegisteredDnd5eActivityV1 {
+  packageId: string
+  packageVersion: string
+  activity: Dnd5eActivityDefinitionV1
+  confirmation: Dnd5eActivityConfirmationV1
+  retention: Dnd5eActivityTriggerRetentionV1
 }
 
 const packages = new Map<string, { token: symbol; value: RegisteredDnd5eActivityPackage }>()
@@ -52,6 +66,45 @@ export function getRegisteredDnd5eActivity(
 
 export function listRegisteredDnd5eActivityPackages(): readonly RegisteredDnd5eActivityPackage[] {
   return [...packages.values()].map(({ value }) => clonePackage(value))
+}
+
+/** Finds every registered Activity that the Host may offer for one event window. */
+export function listAvailableRegisteredDnd5eActivitiesV1(input: {
+  triggerContext: Dnd5eActivityTriggerContextV1
+  actorId: string
+  targetIds: readonly string[]
+}): readonly AvailableRegisteredDnd5eActivityV1[] {
+  const available: AvailableRegisteredDnd5eActivityV1[] = []
+  for (const { value } of packages.values()) {
+    for (const activity of value.activities) {
+      const invocation = resolveDnd5eActivityInvocationV1(activity)
+      if (invocation.kind !== 'triggered') continue
+      const confirmedBy = invocation.confirmation === 'automatic'
+        ? 'system' as const
+        : invocation.confirmation === 'target-choice'
+          ? 'target' as const
+          : invocation.confirmation === 'dm-approval'
+            ? 'dm' as const
+            : 'actor' as const
+      const match = matchDnd5eActivityInvocationV1({
+        activity,
+        actorId: input.actorId,
+        targetIds: input.targetIds,
+        triggerContext: input.triggerContext,
+        confirmedBy,
+        dmApproved: invocation.confirmation === 'dm-approval',
+      })
+      if (!match.ok) continue
+      available.push({
+        packageId: value.packageId,
+        packageVersion: value.packageVersion,
+        activity: structuredClone(activity),
+        confirmation: invocation.confirmation,
+        retention: invocation.retention ?? 'single-event',
+      })
+    }
+  }
+  return available
 }
 
 export function clearDnd5eActivityRegistryForTests(): void {

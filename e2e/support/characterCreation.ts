@@ -36,9 +36,14 @@ export async function createCoreFighter(
   await dialog.getByRole('button', { name: '开始分配' }).click()
 
   if (method === 'roll-4d6') {
-    for (const ability of ['力量', '敏捷', '体质', '智力', '感知', '魅力']) {
-      await dialog.getByRole('button', { name: /投掷 4d6/ }).click()
-      await dialog.getByText(ability, { exact: true }).locator('../..').getByRole('button').click()
+    const abilities = ['力量', '敏捷', '体质', '智力', '感知', '魅力'] as const
+    for (const ability of abilities) {
+      await expect(dialog.getByRole('combobox', { name: `${ability}骰点结果` })).toBeDisabled()
+    }
+    await dialog.getByRole('button', { name: '一次投出六组 4d6' }).click()
+    await expect(dialog.getByTestId(/^ability-roll-result-/)).toHaveCount(6)
+    for (const [rollIndex, ability] of abilities.entries()) {
+      await dialog.getByRole('combobox', { name: `${ability}骰点结果` }).selectOption(String(rollIndex))
     }
   }
 

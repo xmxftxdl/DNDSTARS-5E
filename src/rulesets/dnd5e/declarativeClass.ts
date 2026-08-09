@@ -1,4 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
+import type { ClassResourceDefinition, ClassResourceReset } from '../../lib/classDefinitionTypes'
+import type { Character, Dnd5eClassContentBindingV1 } from '../../types/character'
 import type {
   Dnd5eClassChoiceGroup,
   Dnd5eClassDefinition,
@@ -47,6 +49,44 @@ export interface DeclarativeClassSpellcastingV1 {
   spellsKnown?: readonly number[]
 }
 
+export interface DeclarativeClassResourceV1 {
+  id: string
+  label: string
+  shortLabel?: string
+  resetOn: ClassResourceReset
+  /** Index 0 is class level 1. Shorter tables repeat their final value. */
+  maximumByLevel: readonly number[]
+  availableAtLevel?: number
+}
+
+export interface DeclarativeClassAdvancementV1 {
+  level: number
+  /** Local feature IDs from the same package. They are namespaced by the Host. */
+  grants?: readonly string[]
+  subclassChoice?: boolean
+  abilityScoreImprovement?: boolean
+  /** Total attacks made by one Attack action at and after this class level. */
+  attacksPerAction?: number
+}
+
+export interface DeclarativeClassAdvancementResolutionV1 {
+  previousLevel: number
+  nextLevel: number
+  grantedFeatureIds: readonly string[]
+  removedFeatureIds: readonly string[]
+  resourceUpdates: readonly {
+    id: string
+    key: string
+    previousMaximum: number
+    maximum: number
+  }[]
+  pendingChoiceGroupIds: readonly string[]
+  subclassSelectionRequired: boolean
+  abilityScoreImprovementLevels: readonly number[]
+  attacksPerAction: number
+  spellcastingUpdate?: { cantripsKnown?: number; spellsKnown?: number }
+}
+
 export interface DeclarativeClassStartingEquipmentV1 {
   fixedGrants?: readonly Dnd5eStartingEquipmentGrant[]
   groups?: readonly Dnd5eStartingEquipmentChoiceGroup[]
@@ -80,6 +120,8 @@ export interface DeclarativeClassDefinitionV1 {
   }
   features: readonly DeclarativeClassFeatureV1[]
   choiceGroups?: readonly DeclarativeClassChoiceGroupV1[]
+  advancements?: readonly DeclarativeClassAdvancementV1[]
+  resources?: readonly DeclarativeClassResourceV1[]
   spellcasting?: DeclarativeClassSpellcastingV1
   startingEquipment?: DeclarativeClassStartingEquipmentV1
 }
@@ -102,6 +144,7 @@ export interface RegisteredDeclarativeClassV1 {
   id: string
   ownerPluginId: string
   ownerPluginName: string
+  ownerPluginVersion: string
   ownerPluginLicense: string
   declaration: DeclarativeClassDefinitionV1
   definition: Dnd5eClassDefinition
@@ -114,6 +157,7 @@ const AUTOMATION = new Set<DeclarativeClassAutomationV1>(['full', 'partial', 'ma
 const SPELLCASTING = new Set<Dnd5eSpellcastingKind>([
   'full-known', 'full-prepared', 'half-known', 'half-prepared', 'one-third-known', 'pact',
 ])
+const RESOURCE_RESETS = new Set<ClassResourceReset>(['combat', 'short-rest', 'long-rest'])
 const EQUIPMENT_SLOTS = new Set(['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'ring2', 'belt', 'necklace'])
 const registeredById = new Map<string, RegisteredDeclarativeClassV1>()
 
@@ -158,7 +202,8 @@ export function validateDeclarativeClassDefinitionV1(value: unknown, path = '声
   assertKeys(value, [
     'schemaVersion', 'id', 'name', 'summary', 'hitDie', 'primaryAbilities', 'savingThrows',
     'armorProficiencies', 'weaponProficiencies', 'toolProficiencies', 'skills',
-    'multiclassPrerequisites', 'subclass', 'features', 'choiceGroups', 'spellcasting', 'startingEquipment',
+    'multiclassPrerequisites', 'subclass', 'features', 'choiceGroups', 'advancements', 'resources',
+    'spellcasting', 'startingEquipment',
   ], path)
   if (value.schemaVersion !== DND5E_DECLARATIVE_CLASS_SCHEMA_VERSION) throw new Error(`${path} schemaVersion 不受支持`)
   assertId(value.id, path)
@@ -236,6 +281,51 @@ export function validateDeclarativeClassDefinitionV1(value: unknown, path = '声
       }
     }
   }
+  if (value.advancements != null) {
+    if (!Array.isArray(value.advancements) || value.advancements.length > 20) throw new Error(`${path}职业进度表无效`)
+    let previousLevel = 0
+    for (const advancement of value.advancements) {
+      if (!isRecord(advancement)) throw new Error(`${path}职业进度无效`)
+      assertKeys(advancement, ['level', 'grants', 'subclassChoice', 'abilityScoreImprovement', 'attacksPerAction'], `${path}职业进度`)
+      if (!integer(advancement.level, 1, 20) || Number(advancement.level) <= previousLevel) {
+        throw new Error(`${path}职业进度等级必须在 1～20 且严格递增`)
+      }
+      previousLevel = Number(advancement.level)
+      if (advancement.grants != null) {
+        if (!Array.isArray(advancement.grants) || advancement.grants.length > 64) throw new Error(`${path}职业进度特性授予无效`)
+        const grants = new Set<string>()
+        for (const grant of advancement.grants) {
+          assertId(grant, `${path}职业进度特性`)
+          if (grants.has(grant)) throw new Error(`${path}职业进度特性 ID 重复：${grant}`)
+          grants.add(grant)
+        }
+      }
+      if (advancement.subclassChoice != null && typeof advancement.subclassChoice !== 'boolean') throw new Error(`${path}子职选择标记无效`)
+      if (advancement.abilityScoreImprovement != null && typeof advancement.abilityScoreImprovement !== 'boolean') throw new Error(`${path}属性提升标记无效`)
+      if (advancement.attacksPerAction != null && !integer(advancement.attacksPerAction, 1, 10)) throw new Error(`${path}攻击次数无效`)
+    }
+    const subclassAdvancement = value.advancements.find((entry) => isRecord(entry) && entry.subclassChoice === true)
+    if (subclassAdvancement && (!isRecord(value.subclass) || subclassAdvancement.level !== value.subclass.level)) {
+      throw new Error(`${path}子职选择等级必须与 subclass.level 一致`)
+    }
+  }
+  if (value.resources != null) {
+    if (!Array.isArray(value.resources) || value.resources.length > 32) throw new Error(`${path}职业资源列表无效`)
+    const resourceIds = new Set<string>()
+    for (const resource of value.resources) {
+      if (!isRecord(resource)) throw new Error(`${path}职业资源无效`)
+      assertKeys(resource, ['id', 'label', 'shortLabel', 'resetOn', 'maximumByLevel', 'availableAtLevel'], `${path}职业资源`)
+      assertId(resource.id, `${path}职业资源`)
+      if (resourceIds.has(resource.id)) throw new Error(`${path}职业资源 ID 重复：${resource.id}`)
+      resourceIds.add(resource.id)
+      assertText(resource.label, `${path}职业资源名称`, 160)
+      if (resource.shortLabel != null) assertText(resource.shortLabel, `${path}职业资源短名称`, 80)
+      if (!RESOURCE_RESETS.has(resource.resetOn as ClassResourceReset)) throw new Error(`${path}职业资源恢复周期无效`)
+      if (!Array.isArray(resource.maximumByLevel) || resource.maximumByLevel.length < 1 || resource.maximumByLevel.length > 20 ||
+        resource.maximumByLevel.some((maximum) => !integer(maximum, 0, 1_000))) throw new Error(`${path}职业资源等级表无效`)
+      if (resource.availableAtLevel != null && !integer(resource.availableAtLevel, 1, 20)) throw new Error(`${path}职业资源解锁等级无效`)
+    }
+  }
   if (value.spellcasting != null) {
     if (!isRecord(value.spellcasting)) throw new Error(`${path}施法协议无效`)
     assertKeys(value.spellcasting, ['kind', 'ability', 'ritualCasting', 'focus', 'cantripsKnown', 'spellsKnown'], `${path}施法协议`)
@@ -297,6 +387,72 @@ export function declarativeClassCompatibilityReportV1(
   }
 }
 
+function tableValue(table: readonly number[] | undefined, level: number): number | undefined {
+  if (!table?.length || level < 1) return undefined
+  return table[Math.min(level, table.length) - 1]
+}
+
+function resourceMaximum(resource: DeclarativeClassResourceV1, level: number): number {
+  if (level < (resource.availableAtLevel ?? 1)) return 0
+  return tableValue(resource.maximumByLevel, level) ?? 0
+}
+
+/** Pure domain resolver shared by creation, level-up previews and Host projection. */
+export function resolveDeclarativeClassAdvancementV1(input: {
+  classDefinition: DeclarativeClassDefinitionV1
+  previousLevel: number
+  nextLevel: number
+  ownerPluginId?: string
+}): DeclarativeClassAdvancementResolutionV1 {
+  const previousLevel = Math.floor(input.previousLevel)
+  const nextLevel = Math.floor(input.nextLevel)
+  if (previousLevel < 0 || nextLevel < previousLevel || nextLevel > 20) {
+    throw new Error('声明式职业升级范围无效')
+  }
+  const crossed = (input.classDefinition.advancements ?? []).filter((advancement) =>
+    advancement.level > previousLevel && advancement.level <= nextLevel)
+  const namespace = (id: string) => input.ownerPluginId ? `${input.ownerPluginId}:${id}` : id
+  const grantedFeatureIds = [...new Set(crossed.flatMap((advancement) => advancement.grants ?? []).map(namespace))]
+  const resourceUpdates = (input.classDefinition.resources ?? []).flatMap((resource) => {
+    const previousMaximum = resourceMaximum(resource, previousLevel)
+    const maximum = resourceMaximum(resource, nextLevel)
+    return previousMaximum === maximum ? [] : [{
+      id: resource.id,
+      key: namespace(resource.id),
+      previousMaximum,
+      maximum,
+    }]
+  })
+  const explicitAsiLevels = crossed
+    .filter((advancement) => advancement.abilityScoreImprovement === true)
+    .map((advancement) => advancement.level)
+  const legacyAsiLevels = input.classDefinition.features
+    .filter((feature) => feature.level > previousLevel && feature.level <= nextLevel && feature.id.startsWith('asi-'))
+    .map((feature) => feature.level)
+  const attackSteps = (input.classDefinition.advancements ?? [])
+    .filter((advancement) => advancement.level <= nextLevel && advancement.attacksPerAction != null)
+  return {
+    previousLevel,
+    nextLevel,
+    grantedFeatureIds,
+    removedFeatureIds: [],
+    resourceUpdates,
+    pendingChoiceGroupIds: (input.classDefinition.choiceGroups ?? [])
+      .filter((group) => group.level > previousLevel && group.level <= nextLevel)
+      .map((group) => group.id),
+    subclassSelectionRequired: crossed.some((advancement) => advancement.subclassChoice === true) ||
+      (!!input.classDefinition.subclass && previousLevel < input.classDefinition.subclass.level && nextLevel >= input.classDefinition.subclass.level),
+    abilityScoreImprovementLevels: [...new Set([...explicitAsiLevels, ...legacyAsiLevels])].sort((left, right) => left - right),
+    attacksPerAction: Math.max(1, ...attackSteps.map((advancement) => advancement.attacksPerAction ?? 1)),
+    ...(input.classDefinition.spellcasting ? {
+      spellcastingUpdate: {
+        cantripsKnown: tableValue(input.classDefinition.spellcasting.cantripsKnown, nextLevel),
+        spellsKnown: tableValue(input.classDefinition.spellcasting.spellsKnown, nextLevel),
+      },
+    } : {}),
+  }
+}
+
 function compileClassDefinition(
   declaration: DeclarativeClassDefinitionV1,
   id: string,
@@ -340,6 +496,7 @@ export function registerDeclarativeClassV1(input: {
   definition: DeclarativeClassDefinitionV1
   ownerPluginId: string
   ownerPluginName: string
+  ownerPluginVersion: string
   ownerPluginLicense: string
 }): { registered: RegisteredDeclarativeClassV1; dispose(): void } {
   validateDeclarativeClassDefinitionV1(input.definition)
@@ -352,6 +509,7 @@ export function registerDeclarativeClassV1(input: {
     id,
     ownerPluginId: input.ownerPluginId,
     ownerPluginName: input.ownerPluginName,
+    ownerPluginVersion: input.ownerPluginVersion,
     ownerPluginLicense: input.ownerPluginLicense,
     declaration: structuredClone(input.definition),
     definition: compileClassDefinition(input.definition, id),
@@ -375,12 +533,89 @@ export function registeredDeclarativeClassDefinitionV1(idOrName: string): Dnd5eC
     registeredDeclarativeClassesV1().find((entry) => entry.definition.name === idOrName)?.definition
 }
 
+function registeredDeclarativeClassV1(idOrName: string): RegisteredDeclarativeClassV1 | undefined {
+  return registeredById.get(idOrName) ??
+    registeredDeclarativeClassesV1().find((entry) => entry.definition.name === idOrName)
+}
+
+function registeredClassLevel(character: Character, registered: RegisteredDeclarativeClassV1): number {
+  const stored = character.dnd5eClassLevels?.[registered.id]
+  if (typeof stored === 'number' && Number.isFinite(stored)) return Math.max(0, Math.min(20, Math.floor(stored)))
+  return character.charClass === registered.definition.name
+    ? Math.max(0, Math.min(20, Math.floor(character.level)))
+    : 0
+}
+
+export function declarativeClassAdvancementResolutionV1(
+  idOrName: string,
+  previousLevel: number,
+  nextLevel: number,
+): DeclarativeClassAdvancementResolutionV1 | undefined {
+  const registered = registeredDeclarativeClassV1(idOrName)
+  return registered ? resolveDeclarativeClassAdvancementV1({
+    classDefinition: registered.declaration,
+    previousLevel,
+    nextLevel,
+    ownerPluginId: registered.ownerPluginId,
+  }) : undefined
+}
+
+export function declarativeClassGrantedFeatureIdsV1(character: Character): readonly string[] {
+  return registeredDeclarativeClassesV1().flatMap((registered) => {
+    const level = registeredClassLevel(character, registered)
+    return level > 0
+      ? resolveDeclarativeClassAdvancementV1({
+          classDefinition: registered.declaration,
+          previousLevel: 0,
+          nextLevel: level,
+          ownerPluginId: registered.ownerPluginId,
+        }).grantedFeatureIds
+      : []
+  })
+}
+
+export function declarativeClassResourceDefinitionsV1(character: Character): readonly ClassResourceDefinition[] {
+  return registeredDeclarativeClassesV1().flatMap((registered) => {
+    const classLevel = registeredClassLevel(character, registered)
+    if (classLevel < 1) return []
+    return (registered.declaration.resources ?? []).map((resource): ClassResourceDefinition => ({
+      key: `${registered.ownerPluginId}:${resource.id}`,
+      label: resource.label,
+      shortLabel: resource.shortLabel,
+      resetOn: resource.resetOn,
+      isAvailable: () => classLevel >= (resource.availableAtLevel ?? 1),
+      max: () => resourceMaximum(resource, classLevel),
+    }))
+  })
+}
+
+export function declarativeClassAttacksPerActionV1(idOrName: string, level: number): number {
+  const registered = registeredDeclarativeClassV1(idOrName)
+  return registered
+    ? resolveDeclarativeClassAdvancementV1({
+        classDefinition: registered.declaration,
+        previousLevel: 0,
+        nextLevel: Math.max(0, Math.min(20, Math.floor(level))),
+      }).attacksPerAction
+    : 1
+}
+
+export function declarativeClassContentBindingV1(idOrName: string): Dnd5eClassContentBindingV1 | undefined {
+  const registered = registeredDeclarativeClassV1(idOrName)
+  return registered ? {
+    classId: registered.id,
+    packageId: registered.ownerPluginId,
+    packageVersion: registered.ownerPluginVersion,
+    contentVersion: 1,
+  } : undefined
+}
+
 export function declarativeClassStartingEquipmentV1(idOrName: string): DeclarativeClassStartingEquipmentV1 | undefined {
-  const registered = registeredById.get(idOrName) ?? registeredDeclarativeClassesV1().find((entry) => entry.definition.name === idOrName)
+  const registered = registeredDeclarativeClassV1(idOrName)
   return registered?.declaration.startingEquipment
 }
 
 export function declarativeClassMulticlassPrerequisitesV1(idOrName: string): DeclarativeClassDefinitionV1['multiclassPrerequisites'] {
-  const registered = registeredById.get(idOrName) ?? registeredDeclarativeClassesV1().find((entry) => entry.definition.name === idOrName)
+  const registered = registeredDeclarativeClassV1(idOrName)
   return registered?.declaration.multiclassPrerequisites
 }

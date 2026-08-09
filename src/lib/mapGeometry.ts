@@ -1603,21 +1603,23 @@ export function mapGeometrySpellLightingSources(
 ): MapGeometrySpellLightingSource[] {
   const candidates = (map.dnd5ePluginAreas ?? []).flatMap((area): MapGeometrySpellLightingSource[] => {
     const lighting = area.lighting
-    const anchor = area.anchorCell ?? area.cells[0]
-    if (!lighting || !anchor) return []
-    const point = {
-      x: map.gridOffsetX + (anchor.col + 0.5) * Math.max(1, map.gridSize),
-      y: map.gridOffsetY + (anchor.row + 0.5) * Math.max(1, map.gridSize),
-    }
+    const anchors = area.lightingAnchorCells?.length ? area.lightingAnchorCells : [area.anchorCell ?? area.cells[0]].filter(Boolean)
+    if (!lighting || anchors.length === 0) return []
     const anchorToken = area.anchorTokenId
       ? map.tokens.find((token) => token.id === area.anchorTokenId)
       : undefined
-    const elevationFeet = anchorToken
-      ? mapGeometryTokenElevation(geometry, anchorToken)
-      : mapGeometryTerrainElevationAtPoint(geometry, point)
-    return lighting.kind === 'light'
+    return anchors.flatMap((anchor, anchorIndex): MapGeometrySpellLightingSource[] => {
+      if (!anchor) return []
+      const point = {
+        x: map.gridOffsetX + (anchor.col + 0.5) * Math.max(1, map.gridSize),
+        y: map.gridOffsetY + (anchor.row + 0.5) * Math.max(1, map.gridSize),
+      }
+      const elevationFeet = anchorToken
+        ? mapGeometryTokenElevation(geometry, anchorToken)
+        : mapGeometryTerrainElevationAtPoint(geometry, point)
+      return lighting.kind === 'light'
       ? [{
-          id: `spell-light:${area.id}`,
+          id: `spell-light:${area.id}:${anchorIndex}`,
           areaId: area.id,
           point,
           elevationFeet,
@@ -1629,7 +1631,7 @@ export function mapGeometrySpellLightingSources(
           suppressesMagicalDarknessThroughLevel: lighting.suppressesMagicalDarknessThroughLevel,
         }]
       : [{
-          id: `spell-darkness:${area.id}`,
+          id: `spell-darkness:${area.id}:${anchorIndex}`,
           areaId: area.id,
           point,
           elevationFeet,
@@ -1639,6 +1641,7 @@ export function mapGeometrySpellLightingSources(
           radiusFeet: lighting.radiusFeet,
           suppressesMagicalLightThroughLevel: lighting.suppressesMagicalLightThroughLevel,
         }]
+    })
   })
   return candidates.filter((candidate) => !candidates.some((other) => {
     if (other.id === candidate.id || other.kind === candidate.kind || !spellLightingOverlaps(candidate, other, map)) {

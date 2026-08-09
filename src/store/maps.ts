@@ -656,6 +656,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           creatureTypes: sharedToken.creatureTypes,
           creatureSize: sharedToken.creatureSize,
           size: sharedToken.size,
+          dnd5eSide: sharedToken.dnd5eSide,
           viewerControlled: sharedToken.viewerControlled,
           dnd5eTargetingPreference: sharedToken.dnd5eTargetingPreference,
           dnd5eBehaviorPreference: sharedToken.dnd5eBehaviorPreference,
@@ -726,6 +727,12 @@ function publishMapsState(
   return enqueueLatestMapsPublish(state, options)
 }
 
+export type Dnd5eTokenSide = 'player' | 'enemy'
+
+export interface EnemyPlacementOptions {
+  side?: Dnd5eTokenSide
+}
+
 export interface Token {
   id: string
   label: string
@@ -743,6 +750,8 @@ export interface Token {
   tokenPortraitImageId?: string
   size: number // 直径（格数的倍数，1 = 一格）
   type: 'player' | 'enemy' | 'npc' | 'obstacle'
+  /** 可选的 5e 战斗阵营。未设置时仍由 type 推导；友方怪物使用 player。 */
+  dnd5eSide?: Dnd5eTokenSide
   /** 玩家读取地图时由服务端临时投影；不会作为 DM 地图数据持久化。 */
   viewerControlled?: boolean
   creatureTypes?: CreatureType[]
@@ -928,6 +937,8 @@ export interface Token {
     monsterHydraDamageTakenThisTurn?: number
     monsterHydraHeadSeveredTurnKey?: string
     monsterHydraFireDamageSinceLastTurn?: boolean
+    monsterSwallowedInternalDamageTurnKey?: string
+    monsterSwallowedInternalDamageBySourceId?: Record<string, number>
     /** 由 Headless 按有效承伤累计；DM 可在怪物面板中调整。 */
     monsterThreatByTargetId?: Record<string, number>
     hurlThroughHellSourceId?: string
@@ -1062,23 +1073,28 @@ export interface Dnd5ePluginArea {
   movementCostMultiplier?: number
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
+  excludedTargetIds?: string[]
   /** 隐蔽区域只投影给来源角色与 DM，直到 DM 将其揭示。 */
   hiddenFromPlayers?: boolean
   /** 与权威视线判定共享的声明式光照/魔法黑暗。 */
   lighting?: Dnd5ePersistentAreaLighting
+  /** Optional independent light origins for one multi-point spell area. */
+  lightingAnchorCells?: Array<{ col: number; row: number }>
   visual?: Dnd5ePersistentAreaVisual
   /** Exact host-approved Wall of Fire placement used by presentation and turn-end damage. */
   wallOfFireGeometry?: {
     shape: 'line' | 'ring'
     angleDegrees: number
     damagingSide: 'left' | 'right' | 'inside' | 'outside'
+    lengthFeet?: number
+    diameterFeet?: number
   }
   triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
 /** 地图存档 V17：规范化可选、受限的持久区域垂直快照。 */
-export const MAPS_PERSIST_VERSION = 17
+export const MAPS_PERSIST_VERSION = 18
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -1213,6 +1229,9 @@ function normalizeToken(raw: unknown): Token {
       : undefined,
     size: creatureSize ? creatureSizeToTokenSize(creatureSize) : rawSize,
     type,
+    dnd5eSide: t.dnd5eSide === 'player' || t.dnd5eSide === 'enemy'
+      ? t.dnd5eSide
+      : undefined,
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
     dnd5eTargetingPreference: normalizeDnd5eMonsterTargetingPreference(t.dnd5eTargetingPreference),
@@ -1394,7 +1413,7 @@ function normalizeMap(raw: unknown): BattleMap {
             ? getDnd5eCoreSpellAreaDeclaration(coreSpellId)?.visual
             : undefined
         )
-        const wallOfFireGeometry = coreSpellId === 'wall-of-fire' && area.wallOfFireGeometry &&
+        const wallOfFireGeometry = (coreSpellId === 'wall-of-fire' || coreSpellId === 'blade-barrier') && area.wallOfFireGeometry &&
           (area.wallOfFireGeometry.shape === 'line' || area.wallOfFireGeometry.shape === 'ring') &&
           Number.isFinite(area.wallOfFireGeometry.angleDegrees) &&
           ['left', 'right', 'inside', 'outside'].includes(area.wallOfFireGeometry.damagingSide)
@@ -1402,6 +1421,14 @@ function normalizeMap(raw: unknown): BattleMap {
               shape: area.wallOfFireGeometry.shape,
               angleDegrees: ((Number(area.wallOfFireGeometry.angleDegrees) % 360) + 360) % 360,
               damagingSide: area.wallOfFireGeometry.damagingSide,
+              lengthFeet: Number.isInteger(area.wallOfFireGeometry.lengthFeet) &&
+                Number(area.wallOfFireGeometry.lengthFeet) >= 5 && Number(area.wallOfFireGeometry.lengthFeet) <= (coreSpellId === 'blade-barrier' ? 100 : 60)
+                ? Number(area.wallOfFireGeometry.lengthFeet)
+                : coreSpellId === 'blade-barrier' ? 100 : 60,
+              diameterFeet: Number.isInteger(area.wallOfFireGeometry.diameterFeet) &&
+                Number(area.wallOfFireGeometry.diameterFeet) >= 5 && Number(area.wallOfFireGeometry.diameterFeet) <= (coreSpellId === 'blade-barrier' ? 60 : 20)
+                ? Number(area.wallOfFireGeometry.diameterFeet)
+                : coreSpellId === 'blade-barrier' ? 60 : 20,
             }
           : undefined
         return [{
@@ -1441,8 +1468,16 @@ function normalizeMap(raw: unknown): BattleMap {
             : undefined,
           relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
           includeSelf: area.includeSelf === true,
+          excludedTargetIds: Array.isArray(area.excludedTargetIds)
+            ? [...new Set(area.excludedTargetIds.filter((id): id is string => typeof id === 'string' && !!id))]
+            : undefined,
           hiddenFromPlayers: area.hiddenFromPlayers === true,
           lighting,
+          lightingAnchorCells: Array.isArray(area.lightingAnchorCells)
+            ? area.lightingAnchorCells.flatMap((cell) => Number.isInteger(cell?.col) && Number.isInteger(cell?.row)
+              ? [{ col: Number(cell.col), row: Number(cell.row) }]
+              : [])
+            : undefined,
           visual: visual ? { ...visual } : undefined,
           wallOfFireGeometry,
           triggers: triggers.length > 0 ? triggers : undefined,
@@ -1622,8 +1657,12 @@ interface MapState {
   updateMap: (id: string, patch: Partial<BattleMap>) => void
   removeMap: (id: string) => void
   addToken: (mapId: string, type: Token['type']) => void
-  addEnemyFromPool: (mapId: string, template: EnemyTemplate) => string | null
-  addEncounterFromPool: (mapId: string, entries: readonly Dnd5eEncounterEntry[]) => string[]
+  addEnemyFromPool: (mapId: string, template: EnemyTemplate, options?: EnemyPlacementOptions) => string | null
+  addEncounterFromPool: (
+    mapId: string,
+    entries: readonly Dnd5eEncounterEntry[],
+    options?: EnemyPlacementOptions,
+  ) => string[]
   addCharacterToken: (
     mapId: string,
     payload: {
@@ -1840,7 +1879,7 @@ export const useMapStore = create<MapState>()(
         publishMapsState(get())
       },
 
-      addEnemyFromPool: (mapId, template) => {
+      addEnemyFromPool: (mapId, template, options) => {
         const map = get().maps.find((m) => m.id === mapId)
         if (!map) return null
         const patch = enemyTemplateToTokenPatch(template)
@@ -1859,6 +1898,7 @@ export const useMapStore = create<MapState>()(
           emoji: patch.emoji ?? '👹',
           size: patch.size ?? defaultTokenSizeForMap(map),
           type: 'enemy',
+          dnd5eSide: options?.side === 'player' ? 'player' : undefined,
           hp: patch.hp,
           maxHp: patch.maxHp,
           poolId: patch.poolId,
@@ -1874,7 +1914,7 @@ export const useMapStore = create<MapState>()(
         publishMapsState(get())
         return token.id
       },
-      addEncounterFromPool: (mapId, entries) => {
+      addEncounterFromPool: (mapId, entries, options) => {
         const map = get().maps.find((candidate) => candidate.id === mapId)
         if (!map) return []
         const roster = assignEnemyVisualVariants(
@@ -1896,6 +1936,7 @@ export const useMapStore = create<MapState>()(
             id: uid(), label: patch.label ?? template.name, x: spawn.x, y: spawn.y,
             color: patch.color ?? '#f87171', emoji: patch.emoji ?? '👾',
             size: patch.size ?? defaultTokenSizeForMap(map), type: 'enemy',
+            dnd5eSide: options?.side === 'player' ? 'player' : undefined,
             hp: patch.hp, maxHp: patch.maxHp, poolId: patch.poolId,
             visualVariantId: patch.visualVariantId,
             creatureTypes: patch.creatureTypes, creatureSize: patch.creatureSize,

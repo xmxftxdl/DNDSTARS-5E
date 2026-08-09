@@ -33,7 +33,7 @@ async function enterFreshPlayerRoom(page: Page, request: APIRequestContext) {
   await page.reload({ waitUntil: 'domcontentloaded' })
 }
 
-test('角色创建支持直接标准数组和逐次 4d6 分配', async ({ page, request }) => {
+test('角色创建支持标准数组以及先投完六组再统一分配的 4d6 流程', async ({ page, request }) => {
   test.setTimeout(90_000)
   await enterFreshPlayerRoom(page, request)
 
@@ -48,4 +48,23 @@ test('角色创建支持直接标准数组和逐次 4d6 分配', async ({ page, 
     expect(score).toBeGreaterThanOrEqual(3)
     expect(score).toBeLessThanOrEqual(20)
   }
+})
+
+test('战士升级会预览、授予并记录固定职业特性', async ({ page, request }) => {
+  test.setTimeout(90_000)
+  await enterFreshPlayerRoom(page, request)
+
+  await createCoreFighter(page, { name: '固定特性战士', targetLevel: 2 })
+  const advancementFlow = page.getByRole('dialog', { name: '处理角色总等级 2' })
+  await expect(advancementFlow).toBeVisible()
+  await advancementFlow.getByRole('button', { name: '结算本级' }).click()
+
+  const levelUpDialog = page.getByRole('dialog', { name: '战士 1 → 2 级' })
+  await expect(levelUpDialog.getByRole('heading', { name: '本次固定获得的职业特性' })).toBeVisible()
+  await expect(levelUpDialog.getByText('动作如潮（1次）', { exact: true })).toBeVisible()
+  await levelUpDialog.getByRole('button', { name: '确认升级' }).click()
+
+  await page.getByRole('button', { name: '职业', exact: true }).click()
+  await expect(page.getByText('固定获得：动作如潮（1次）', { exact: true })).toBeVisible()
+  await expect(page.getByText(/动作如潮.*1\/1/)).toBeVisible()
 })

@@ -4,6 +4,7 @@ import {
   isVoiceChangerBypassed,
   normalizeVoiceChangerConfig,
   normalizeVoiceChangerSelection,
+  toggleVoiceChangerShortcut,
   voiceChangerParameters,
   voiceShortcutFromKeyboardEvent,
 } from './voiceChanger'
@@ -20,12 +21,37 @@ describe('voiceChanger', () => {
       slots: [
         { shortcut: 2, npcTokenId: ' npc-2 ', npcName: ' 女爵 ', selection: { baseProfileId: 'feminine', effectPresetId: 'deep-lord' } },
         { shortcut: 2, npcTokenId: 'duplicate', npcName: '重复', selection: DEFAULT_VOICE_CHANGER_SELECTION },
+        { shortcut: 3, npcName: ' 无地图角色 ', selection: { baseProfileId: 'masculine', effectPresetId: 'aged-sage' } },
         { shortcut: 10, npcTokenId: 'invalid', npcName: '无效', selection: DEFAULT_VOICE_CHANGER_SELECTION },
       ],
     })).toMatchObject({
       schemaVersion: 1,
       activeShortcut: 2,
-      slots: [{ shortcut: 2, npcTokenId: 'npc-2', npcName: '女爵' }],
+      slots: [
+        { shortcut: 2, npcTokenId: 'npc-2', npcName: '女爵' },
+        { shortcut: 3, npcName: '无地图角色' },
+      ],
+    })
+  })
+
+  it('toggles a configured shortcut back to the original voice when pressed twice', () => {
+    const configured = normalizeVoiceChangerConfig({
+      selection: DEFAULT_VOICE_CHANGER_SELECTION,
+      slots: [{
+        shortcut: 1,
+        npcName: '酒馆老板',
+        selection: { baseProfileId: 'masculine', effectPresetId: 'deep-lord' },
+      }],
+    })
+    const active = toggleVoiceChangerShortcut(configured, 1)
+    expect(active).toMatchObject({
+      activeShortcut: 1,
+      selection: { baseProfileId: 'masculine', effectPresetId: 'deep-lord' },
+    })
+    expect(toggleVoiceChangerShortcut(active, 1)).toEqual({
+      ...active,
+      selection: DEFAULT_VOICE_CHANGER_SELECTION,
+      activeShortcut: undefined,
     })
   })
 

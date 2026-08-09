@@ -6,6 +6,10 @@ import type {
 } from '../rulesets/dnd5e/headlessCombatEngine'
 import type { CombatExperienceSettlement } from './combatExperience'
 import type { CombatLogEntry } from './sharedCombatTypes'
+import {
+  dnd5eTrackableDefinitionIdForActionV1,
+  isDnd5eTrackableDefinitionIdV1,
+} from '../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 
 export const COMBAT_STATISTICS_RESOURCE = 'combat-statistics'
 export const COMBAT_STATISTICS_SCHEMA_VERSION = 3
@@ -53,6 +57,20 @@ export interface CombatantStatistics {
   spellSlotsSpent: number
 }
 
+export interface Dnd5eActivityUsageStatistics {
+  /** Stable rules/content identity, shared by every execution of this activity. */
+  definitionId: string
+  executions: number
+  attacks: number
+  hits: number
+  criticalHits: number
+  damageDealt: number
+  healingDone: number
+  movementFeet: number
+  /** Last authoritative transaction/receipt that contributed to this aggregate. */
+  lastExecutionId?: string
+}
+
 export interface CombatStatisticsSession {
   combatId: string
   mapId: string
@@ -60,6 +78,7 @@ export interface CombatStatisticsSession {
   updatedAt: number
   lastRound: number
   combatants: Record<string, CombatantStatistics>
+  activityUsage: Record<string, Dnd5eActivityUsageStatistics>
   receipts: string[]
   /** Snapshot of the combat log when this encounter ended, newest entry first. */
   logEntries?: CombatLogEntry[]
@@ -69,6 +88,45 @@ export interface CombatStatisticsSession {
   endedAt?: number
   /** DM 权威确认的本场经验结算；存在时同一 combatId 不得再次发奖。 */
   experienceSettlement?: CombatExperienceSettlement
+}
+
+function emptyActivityUsage(definitionId: string): Dnd5eActivityUsageStatistics {
+  return {
+    definitionId,
+    executions: 0,
+    attacks: 0,
+    hits: 0,
+    criticalHits: 0,
+    damageDealt: 0,
+    healingDone: 0,
+    movementFeet: 0,
+  }
+}
+
+function applyActivityUsage(
+  session: CombatStatisticsSession,
+  observation: Dnd5eCombatStatisticsObservation,
+): void {
+  const definitionId = dnd5eTrackableDefinitionIdForActionV1(observation.source, observation.action)
+  const usage = session.activityUsage[definitionId] ?? emptyActivityUsage(definitionId)
+  usage.executions += 1
+  usage.lastExecutionId = observation.receiptId
+  for (const event of observation.result.events) {
+    if (event.type === 'attack-resolved') {
+      usage.attacks += 1
+      if (event.hit) usage.hits += 1
+      if (event.critical) usage.criticalHits += 1
+    } else if (event.type === 'damage-applied') {
+      usage.damageDealt += Math.max(0,
+        event.hpBefore - event.hpAfter + event.temporaryHpBefore - event.temporaryHpAfter,
+      )
+    } else if (event.type === 'healing-applied') {
+      usage.healingDone += safeAmount(event.amount)
+    } else if (event.type === 'moved') {
+      usage.movementFeet += safeAmount(event.distance)
+    }
+  }
+  session.activityUsage[definitionId] = usage
 }
 
 export interface CombatLogArchiveInput {
@@ -347,6 +405,7 @@ export function createCombatStatisticsSession(input: {
     updatedAt: now,
     lastRound: input.state?.round ?? 1,
     combatants: {},
+    activityUsage: {},
     receipts: [],
   }
   for (const combatant of Object.values(input.state?.combatants ?? {})) {
@@ -384,6 +443,10 @@ export function applyDnd5eCombatStatisticsObservation(
               : emptyD20FaceCounts(),
           },
         ])),
+        activityUsage: Object.fromEntries(Object.entries(current.activityUsage ?? {}).map(([id, value]) => [
+          id,
+          { ...value },
+        ])),
         receipts: [...current.receipts],
       }
     : createCombatStatisticsSession({
@@ -419,6 +482,7 @@ export function applyDnd5eCombatStatisticsObservation(
     if (event.type === 'turn-started') fallbackActorId = event.actorId
     applyEvent(session, resultState, event, fallbackActorId, zeroedByDamage)
   }
+  applyActivityUsage(session, observation)
   session.receipts = [...session.receipts, observation.receiptId].slice(-COMBAT_STATISTICS_MAX_RECEIPTS)
   session.lastRound = resultState.round
   session.updatedAt = observation.observedAt
@@ -697,6 +761,37 @@ const numericCombatantFields: Array<keyof CombatantStatistics> = [
   'bonusActionsSpent', 'reactionsSpent', 'movementSpentFeet', 'classResourcesSpent', 'spellSlotsSpent',
 ]
 
+const numericActivityUsageFields: Array<keyof Dnd5eActivityUsageStatistics> = [
+  'executions', 'attacks', 'hits', 'criticalHits', 'damageDealt', 'healingDone', 'movementFeet',
+]
+
+function normalizedActivityUsage(
+  value: unknown,
+): Record<string, Dnd5eActivityUsageStatistics> | null {
+  if (value == null) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 4_096) return null
+  const result: Record<string, Dnd5eActivityUsageStatistics> = {}
+  for (const [definitionId, rawUsage] of entries) {
+    if (
+      !isDnd5eTrackableDefinitionIdV1(definitionId) ||
+      !rawUsage || typeof rawUsage !== 'object' || Array.isArray(rawUsage)
+    ) return null
+    const usage = rawUsage as unknown as Dnd5eActivityUsageStatistics
+    if (
+      usage.definitionId !== definitionId ||
+      numericActivityUsageFields.some((field) => !finiteNonNegative(usage[field])) ||
+      (usage.lastExecutionId != null && (
+        typeof usage.lastExecutionId !== 'string' ||
+        !usage.lastExecutionId || usage.lastExecutionId.length > 300
+      ))
+    ) return null
+    result[definitionId] = { ...usage }
+  }
+  return result
+}
+
 export function normalizeSharedCombatStatistics(value: unknown): SharedCombatStatisticsState | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
@@ -748,6 +843,8 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
       session.mapId,
     )
     if (experienceSettlement === null) return undefined
+    const activityUsage = normalizedActivityUsage(session.activityUsage)
+    if (activityUsage === null) return undefined
     const logEntries = normalizedCombatLogEntries(session.logEntries)
     if (logEntries === null ||
       (session.mapName != null &&
@@ -766,6 +863,7 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
       updatedAt: session.updatedAt,
       lastRound: session.lastRound,
       combatants,
+      activityUsage,
       receipts: [...session.receipts],
       ...(logEntries ? { logEntries } : {}),
       ...(finiteNonNegative(session.logDeletedAt) ? { logDeletedAt: session.logDeletedAt } : {}),

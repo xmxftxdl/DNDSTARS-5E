@@ -112,21 +112,25 @@ function actionEconomyConsumption(economy: Dnd5ePluginActionEconomy): Dnd5eActiv
 function aoeTarget(template: SkillAoeTargeting, relation: 'ally' | 'enemy' | 'any', includeSelf: boolean, maximumTargets: number): Dnd5eActivityTargetV1 {
   if (template.shape === 'circle') return {
     kind: 'area', relation, origin: template.origin, shape: 'circle', radiusFeet: template.radiusFeet,
+    minimumRadiusFeet: template.minimumRadiusFeet,
     placeRangeFeet: template.placeRangeFeet, maximumTargets, includeSelf,
   }
   if (template.shape === 'rect') return {
     kind: 'area', relation, origin: 'point', shape: 'rect',
     lengthFeet: template.heightFeet, widthFeet: template.widthFeet, heightFeet: 5,
+    minimumLengthFeet: template.minimumHeightFeet, minimumWidthFeet: template.minimumWidthFeet,
     placeRangeFeet: template.placeRangeFeet, maximumTargets, includeSelf,
     rotatable: template.rotatable,
   }
   if (template.shape === 'line') return {
     kind: 'area', relation, origin: 'self', shape: 'line', lengthFeet: template.lengthFeet,
     widthFeet: template.widthFeet, placeRangeFeet: template.aimRangeFeet, maximumTargets, includeSelf,
+    minimumLengthFeet: template.minimumLengthFeet, minimumWidthFeet: template.minimumWidthFeet,
   }
   return {
     kind: 'area', relation, origin: 'self', shape: 'cone', lengthFeet: template.lengthFeet,
     placeRangeFeet: template.aimRangeFeet, maximumTargets, includeSelf,
+    minimumLengthFeet: template.minimumLengthFeet,
   }
 }
 
@@ -398,6 +402,9 @@ export function dnd5eActivityFromSpellDefinition(
     name: spell.name,
     description: spell.description,
     activation: spellActivation(spell),
+    invocation: spell.castingTime.unit === 'reaction'
+      ? { kind: 'triggered', event: 'reaction-window', confirmation: 'actor-choice', retention: 'single-event' }
+      : { kind: 'active', confirmation: 'actor-choice' },
     target: spellTarget(spell),
     consumption: [
       ...(spell.level > 0 ? [{ kind: 'spell-slot' as const, minimumLevel: spell.level, level: 'selected' as const, amount: 1 as const, consumeOn: 'resolve' as const }] : []),
@@ -464,6 +471,9 @@ export function dnd5eActivityFromPluginFeature(
     name: feature.name,
     description: feature.description,
     activation: economyActivation(feature.action.economy),
+    invocation: feature.action.economy === 'reaction'
+      ? { kind: 'triggered', event: 'reaction-window', confirmation: 'actor-choice', retention: 'single-event' }
+      : { kind: 'active', confirmation: 'actor-choice' },
     target: pluginTarget(feature.action.targeting),
     consumption: actionEconomyConsumption(feature.action.economy),
     outcomes,
@@ -515,6 +525,7 @@ export function dnd5eActivityFromPluginItem(
     name: item.name,
     description: item.description,
     activation: economyActivation(economy),
+    invocation: { kind: 'active', confirmation: 'actor-choice' },
     target,
     consumption,
     outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations }],
@@ -582,10 +593,10 @@ function declarativeTarget(targeting: DeclarativeSubclassTargetingV1): Dnd5eActi
 function declarativeTriggerEvent(trigger: DeclarativeSubclassAbilityV1['trigger']): Dnd5eTriggerEventV1 | undefined {
   if (trigger.kind === 'active-use') return undefined
   const events: Record<Exclude<DeclarativeSubclassAbilityV1['trigger']['kind'], 'active-use'>, Dnd5eTriggerEventV1> = {
-    'before-attack-roll': 'before-attack', 'after-attack-roll': 'after-attack',
-    'after-attack-hit': 'on-hit', 'after-attack-miss': 'on-miss', 'after-d20-roll': 'after-save',
+    'before-attack-roll': 'before-attack-roll', 'after-attack-roll': 'after-attack-roll',
+    'after-attack-hit': 'attack-hit', 'after-attack-miss': 'attack-missed', 'after-d20-roll': 'd20-roll-resolved',
     'before-damage-taken': 'before-damage', 'after-damage-taken': 'after-damage',
-    'after-spell-cast': 'after-cast', 'turn-start': 'turn-start', 'turn-end': 'turn-end',
+    'after-spell-cast': 'spell-resolved', 'turn-start': 'turn-start', 'turn-end': 'turn-end',
     'short-rest-complete': 'short-rest-complete', 'long-rest-complete': 'long-rest-complete',
   }
   return events[trigger.kind]
@@ -684,6 +695,13 @@ export function dnd5eActivityFromDeclarativeSubclassAbility(
     activation: ability.trigger.kind === 'active-use'
       ? economyActivation(economy ?? 'none')
       : { kind: 'passive', timing: ability.trigger.kind },
+    invocation: triggerEvent
+      ? {
+          kind: 'triggered', event: triggerEvent,
+          confirmation: ability.automation === 'full' ? 'actor-choice' : 'dm-approval',
+          retention: 'single-event',
+        }
+      : { kind: 'active', confirmation: ability.automation === 'full' ? 'actor-choice' : 'dm-approval' },
     target: declarativeTarget(ability.targeting),
     requirements,
     consumption,
@@ -820,13 +838,25 @@ export function dnd5eActivityFromMonsterAction(
   }
   const requested: Dnd5ePluginAutomationLevel = action.automation === 'dm-adjudication' ? 'manual' : 'full'
   const activation = monsterCollectionActivation(collection, action)
+  const requirements: Dnd5ePredicateV1[] = []
+  if (collection === 'reactions' && action.reactionTrigger?.kind === 'after-action') requirements.push({
+    kind: 'event-source', source: 'action', sourceId: action.reactionTrigger.actionId,
+  })
   return {
     schemaVersion: 1,
     id,
     name: action.name,
     description: action.description,
     activation,
+    invocation: collection === 'reactions'
+      ? { kind: 'triggered', event: action.reactionTrigger ? 'action-resolved' : 'reaction-window', confirmation: 'actor-choice', retention: 'single-event' }
+      : collection === 'legendaryActions'
+        ? { kind: 'triggered', event: 'legendary-action-window', confirmation: 'actor-choice', retention: 'single-event' }
+        : collection === 'lairActions'
+          ? { kind: 'triggered', event: 'lair-action-window', confirmation: 'actor-choice', retention: 'single-event' }
+          : { kind: 'active', confirmation: 'actor-choice' },
     target,
+    requirements: requirements.length ? requirements : undefined,
     consumption: activation.kind === 'action' || activation.kind === 'bonus-action' || activation.kind === 'reaction'
       ? [{ kind: 'action-economy', economy: activation.kind, amount: 1, consumeOn: 'resolve' }]
       : undefined,

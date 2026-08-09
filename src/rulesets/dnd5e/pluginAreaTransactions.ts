@@ -102,8 +102,15 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
   prepared: PreparedDnd5ePersistentAreaTrigger
   d20?: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   blessRoll?: number
   baneRoll?: number
+  rerollD20?: number
+  rerollD20Second?: number
+  bardicInspirationRoll?: number
+  darkOnesOwnLuckRoll?: number
+  optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
   damageRolls?: readonly number[]
   spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse
   dmAdjustment?: Dnd5ePersistentAreaDmAdjustment
@@ -119,8 +126,15 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
     trigger: prepared.candidate.trigger,
     d20: input.d20,
     d20Second: input.d20Second,
+    halflingLuckyD20: input.halflingLuckyD20,
+    halflingLuckyD20Second: input.halflingLuckyD20Second,
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
+    rerollD20: input.rerollD20,
+    rerollD20Second: input.rerollD20Second,
+    bardicInspirationRoll: input.bardicInspirationRoll,
+    darkOnesOwnLuckRoll: input.darkOnesOwnLuckRoll,
+    optionalBonusDice: input.optionalBonusDice,
     damageRolls: input.damageRolls,
     spellDamageMaxDieBonus: input.spellDamageMaxDieBonus,
     dmAdjustment: input.dmAdjustment,

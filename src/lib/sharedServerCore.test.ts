@@ -123,6 +123,139 @@ describe('production transport security', () => {
   })
 })
 
+describe('server-authoritative player exploration movement', () => {
+  const member = { memberId: 'player-member', accountId: 'player-account', role: 'player' }
+  const characterState = {
+    characters: [{
+      id: 'hero',
+      roomMemberId: member.memberId,
+      ownerAccountId: member.accountId,
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      currentHp: 12,
+      conditions: [],
+    }],
+  }
+  const mapsState = {
+    maps: [{
+      id: 'map-1',
+      name: 'Map',
+      width: 500,
+      height: 500,
+      gridSize: 50,
+      tokens: [{
+        id: 'hero-token',
+        characterId: 'hero',
+        type: 'player',
+        label: 'Hero',
+        x: 50,
+        y: 50,
+        size: 1,
+      }],
+    }],
+    selectedId: 'map-1',
+    updatedAt: 1,
+  }
+  const move = (
+    expectedPosition: { x: number; y: number },
+    targetPosition: { x: number; y: number },
+    path = [expectedPosition, targetPosition],
+  ) => ({
+    operation: 'move-owned-token',
+    mapId: 'map-1',
+    tokenId: 'hero-token',
+    characterId: 'hero',
+    expectedPosition,
+    targetPosition,
+    path,
+  })
+
+  it('persists two consecutive moves from the latest authoritative coordinate', () => {
+    const first = sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState,
+      move({ x: 50, y: 50 }, { x: 100, y: 50 }),
+      10,
+      member,
+      { combatActive: false, characterState },
+    )
+    expect(first).toMatchObject({
+      ok: true,
+      changed: true,
+      acceptedPosition: { x: 100, y: 50 },
+    })
+    if (!first.ok) throw new Error(first.error)
+    const second = sharedServerCore.mutatePlayerExplorationMoveState(
+      first.next,
+      move({ x: 100, y: 50 }, { x: 150, y: 100 }),
+      11,
+      member,
+      { combatActive: false, characterState },
+    )
+    expect(second).toMatchObject({
+      ok: true,
+      changed: true,
+      acceptedPosition: { x: 150, y: 100 },
+      next: { updatedAt: 11 },
+    })
+    if (!second.ok) throw new Error(second.error)
+    expect(second.next.maps[0].tokens[0]).toMatchObject({
+      x: 150,
+      y: 100,
+      elevationFeet: 0,
+    })
+  })
+
+  it('rejects stale coordinates, active combat, and a different player owner', () => {
+    expect(sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState,
+      move({ x: 100, y: 50 }, { x: 150, y: 50 }),
+      10,
+      member,
+      { combatActive: false, characterState },
+    )).toMatchObject({ ok: false, error: 'exploration-move-position-conflict' })
+    expect(sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState,
+      move({ x: 50, y: 50 }, { x: 100, y: 50 }),
+      10,
+      member,
+      { combatActive: true, characterState },
+    )).toMatchObject({ ok: false, error: 'exploration-move-combat-active' })
+    expect(sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState,
+      move({ x: 50, y: 50 }, { x: 100, y: 50 }),
+      10,
+      { memberId: 'other-player', role: 'player' },
+      { combatActive: false, characterState },
+    )).toMatchObject({ ok: false, error: 'exploration-move-token-forbidden' })
+  })
+
+  it('rejects a submitted route that crosses movement-blocking geometry', () => {
+    const geometryState = {
+      maps: [{
+        mapId: 'map-1',
+        walls: [{
+          id: 'wall-1',
+          points: [{ x: 100, y: 0 }, { x: 100, y: 200 }],
+          blocksVision: true,
+          blocksMovement: true,
+          blocksLineOfEffect: true,
+          baseHeightFeet: 0,
+          heightFeet: 10,
+        }],
+        doors: [],
+        windows: [],
+        obstacles: [],
+      }],
+    }
+    expect(sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState,
+      move({ x: 50, y: 50 }, { x: 150, y: 50 }),
+      10,
+      member,
+      { combatActive: false, characterState, geometryState },
+    )).toMatchObject({ ok: false, error: 'exploration-move-wall-blocked' })
+  })
+})
+
 describe('retired group ability check protocol', () => {
   const invoke = async (pathname: string, method: string) => {
     let status = 0
@@ -1655,11 +1788,53 @@ describe('map geometry player projection', () => {
     expect(normalized).toMatchObject({
       ok: true,
       event: {
+        widthFeet: 20,
         wallOfFireShape: 'ring',
         wallOfFireAngleDegrees: 0,
         createdAt: timestamp,
         expiresAt: timestamp + 120_000,
       },
+    })
+    if (normalized.ok) expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+
+    const compact = normalizeCombatPresentationEvent({
+      schemaVersion: 1,
+      id: 'wall-ring-compact:area-effect',
+      type: 'spell-area-effect',
+      mapId: 'map-1',
+      transactionId: 'wall-ring-compact',
+      spellId: 'wall-of-fire',
+      sourceTokenId: 'wizard',
+      targetCell: { col: 7, row: 4 },
+      shape: 'rect',
+      widthFeet: 10,
+      heightFeet: 5,
+      wallOfFireShape: 'ring',
+      wallOfFireAngleDegrees: 0,
+    }, { role: 'dm' }, timestamp)
+    expect(compact).toMatchObject({ ok: true, event: { widthFeet: 10, wallOfFireShape: 'ring' } })
+  })
+
+  it('preserves adjustable Blade Barrier ring geometry for synchronized playback', () => {
+    const timestamp = 34_000
+    const normalized = normalizeCombatPresentationEvent({
+      schemaVersion: 1,
+      id: 'blade-ring:area-effect',
+      type: 'spell-area-effect',
+      mapId: 'map-1',
+      transactionId: 'blade-ring',
+      spellId: 'blade-barrier',
+      sourceTokenId: 'cleric',
+      targetCell: { col: 7, row: 4 },
+      shape: 'rect',
+      widthFeet: 45,
+      heightFeet: 5,
+      wallOfFireShape: 'ring',
+      wallOfFireAngleDegrees: 0,
+    }, { role: 'dm' }, timestamp)
+    expect(normalized).toMatchObject({
+      ok: true,
+      event: { widthFeet: 45, wallOfFireShape: 'ring', wallOfFireAngleDegrees: 0 },
     })
     if (normalized.ok) expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
   })
@@ -2671,6 +2846,12 @@ describe('combat interrupt atomic mutation', () => {
       maps: [{ id: 'map', tokens: [{ id: 'monster', visualVariantId: '../private' }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-token-visual-variant' })
     expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'friendly-monster', dnd5eSide: 'player' }] }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'monster', dnd5eSide: 'spectator' }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-token-side' })
+    expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 14_401 } }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-summon' })
     expect(validateSharedStateShape('maps', {
@@ -2752,6 +2933,84 @@ describe('combat interrupt atomic mutation', () => {
         featureLabel: '幸运', dieIndex: 0, replacementValue: 20, createdAt: 220,
       },
     }, 220)).toMatchObject({ ok: false, status: 409 })
+  })
+
+  it('accepts an owned choice-reroll decline and lets the DM continue with the original d20', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: {
+          originalValue: 15,
+          eligibleModifiers: [{
+            characterId: 'hero', featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+            modifierKind: 'choice-reroll', rerollScope: 'self-roll', decisionRequired: true,
+            resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }],
+          }],
+        }, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const contribution = {
+      id: 'confirm:hero:choice-reroll', kind: 'choice-reroll', characterId: 'hero',
+      characterName: '角色', featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      decision: 'decline', createdAt: 150,
+    }
+    const contributed = mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution,
+    }, 200, 'player', ['hero'])
+    expect(contributed).toMatchObject({
+      ok: true,
+      changed: true,
+      next: { interrupts: [{ contributions: [expect.objectContaining({ decision: 'decline' })] }] },
+    })
+    expect(mutateCombatInterruptQueue(contributed.next, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { decision: 'continue', finalValue: 15 },
+    }, 220, 'dm')).toMatchObject({ ok: true, changed: true })
+  })
+
+  it('validates a Host choice-reroll result before accepting the new d20', () => {
+    const resourceCosts = [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }]
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: {
+          originalValue: 7,
+          eligibleModifiers: [{
+            characterId: 'hero', featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+            modifierKind: 'choice-reroll', rerollScope: 'self-roll', decisionRequired: true,
+            resourceCosts,
+          }],
+        }, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const contribution = {
+      id: 'confirm:hero:choice-reroll', kind: 'choice-reroll', characterId: 'hero',
+      characterName: '角色', featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      decision: 'use', createdAt: 150,
+    }
+    const contributed = mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution,
+    }, 200, 'player', ['hero'])
+    const response = {
+      decision: 'continue', finalValue: 18, acceptedContributionId: contribution.id,
+      choiceReroll: {
+        characterId: 'hero', featureId: 'dnd5e-core-inspiration', resourceCosts,
+        scope: 'self-roll', originalValue: 7, rerollValue: 18, selectedValue: 18,
+      },
+    }
+    expect(mutateCombatInterruptQueue(contributed.next, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response,
+    }, 220, 'dm')).toMatchObject({ ok: true, changed: true })
+    expect(mutateCombatInterruptQueue(contributed.next, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { ...response, finalValue: 19 },
+    }, 220, 'dm')).toMatchObject({
+      ok: false,
+      status: 409,
+      error: 'roll-confirmation-value-conflict',
+    })
   })
 
   it('rejects a roll replacement from a character or feature not declared by the Host', () => {

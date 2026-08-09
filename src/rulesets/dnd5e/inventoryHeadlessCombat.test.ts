@@ -174,6 +174,51 @@ describe('inventory effects in the authoritative combat damage pipeline', () => 
     }))
   })
 
+  it('only requests and applies creature-type-limited bonus damage to a matching target', () => {
+    const bonus = effectSnapshot({
+      instanceId: 'dragon-slayer',
+      equipmentId: 'plugin:dragon-slayer',
+      effect: {
+        schemaVersion: 1,
+        id: 'dragon-hit',
+        kind: 'on-hit-bonus-damage',
+        trigger: 'after-attack-hit',
+        appliesTo: 'attacks-with-this-weapon',
+        damage: { count: 3, sides: 6, bonus: 0 },
+        damageType: 'inherit',
+        targetCreatureTypes: ['龙类', 'dragon'],
+      },
+    })
+    const attacker = combatant('attacker', 20, { inventoryHeadlessEffects: [bonus] })
+    const dragon = combatant('dragon', 10, { creatureType: '龙类' })
+    const humanoid = combatant('humanoid', 5, { creatureType: '类人生物' })
+    const state = startDnd5eHeadlessCombat('dragon-slayer-target-type', [attacker, dragon, humanoid])
+    const attack = (targetId: string, rolls?: readonly number[]) => resolveDnd5eHeadlessAction(state, {
+      type: 'attack' as const,
+      actorId: attacker.id,
+      targetId,
+      attackModifier: 5,
+      d20: 15,
+      damage: { count: 1, sides: 8, bonus: 0, rolls: [5], type: 'slashing' as const },
+      classDamageContext: {
+        weaponId: 'plugin:dragon-slayer', mode: 'melee' as const, finesse: false,
+        strengthBased: true, weaponDamageSides: 8, damageType: 'slashing' as const,
+        adjacentEnemyOfTarget: false,
+      },
+      ...(rolls ? { inventoryEffectRolls: {
+        [dnd5eInventoryEffectRollKey('dragon-slayer', 'dragon-hit')]: rolls,
+      } } : {}),
+    })
+
+    const againstDragon = attack(dragon.id, [2, 3, 4])
+    expect(againstDragon.ok, againstDragon.ok ? undefined : againstDragon.reason).toBe(true)
+    if (againstDragon.ok) expect(againstDragon.state.combatants[dragon.id].currentHp).toBe(6)
+
+    const againstHumanoid = attack(humanoid.id)
+    expect(againstHumanoid.ok, againstHumanoid.ok ? undefined : againstHumanoid.reason).toBe(true)
+    if (againstHumanoid.ok) expect(againstHumanoid.state.combatants[humanoid.id].currentHp).toBe(15)
+  })
+
   it('fails closed when a reaction hit omits required item-effect dice', () => {
     const bonus = effectSnapshot({
       instanceId: 'guard-blade',

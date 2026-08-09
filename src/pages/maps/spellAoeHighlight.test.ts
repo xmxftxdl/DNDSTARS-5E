@@ -91,7 +91,7 @@ describe('spellAoeHighlight', () => {
     expect(outOfRange?.valid).toBe(false)
   })
 
-  it('separates a 5-by-60-foot Wall of Fire from its selected 10-foot burning side and cast range', () => {
+  it('separates an adjustable 5-by-30-foot Wall of Fire from its selected 10-foot burning side and cast range', () => {
     const spellTargeting = {
       characterId: 'wizard',
       spellId: 'wall-of-fire',
@@ -115,6 +115,7 @@ describe('spellAoeHighlight', () => {
       wallOfFireShape: 'line',
       wallOfFireAngleDegrees: 0,
       wallOfFireDamagingSide: 'left',
+      wallOfFireLengthFeet: 30,
     } satisfies Dnd5eSpellTargetingSession
     const highlight = buildSpellOrSkillAoeHighlight({
       targeting: spellTargeting.area,
@@ -125,8 +126,8 @@ describe('spellAoeHighlight', () => {
       spellTargeting,
     })
 
-    expect(highlight?.cells).toHaveLength(12)
-    expect(highlight?.hazardCells).toHaveLength(24)
+    expect(highlight?.cells).toHaveLength(6)
+    expect(highlight?.hazardCells).toHaveLength(12)
     expect(highlight?.rangeCells?.length).toBeGreaterThan(highlight?.cells.length ?? 0)
     expect(new Set(highlight?.cells.map((cell) => cell.row))).toEqual(new Set([5]))
     expect(new Set(highlight?.hazardCells?.map((cell) => cell.row))).toEqual(new Set([6, 7]))

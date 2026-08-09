@@ -13,6 +13,7 @@ import {
   DND5E_DECLARATIVE_PACKAGE_FORMAT,
   DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION,
   declarativeSubclassCompatibilityReportV1,
+  validateDeclarativeSubclassAbilityV1,
   validateDeclarativeSubclassDefinitionV1,
   type DeclarativeAbilityCompatibilityReportV1,
   type DeclarativeSubclassDefinitionV1,
@@ -35,6 +36,8 @@ import {
   normalizeDnd5ePersistentAreaVisual,
   type Dnd5ePluginEffectDuration,
 } from './persistentAreaTypes'
+import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
+import { validateDnd5eActivityDefinitionV1 } from './activities/dnd5eActivityValidation'
 
 export interface Dnd5eCustomHeadlessDiceFormula {
   count: number
@@ -79,6 +82,8 @@ export interface Dnd5eCustomRulesPluginDraft {
   items: Dnd5ePluginItemDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   headlessActions?: Dnd5eCustomHeadlessActionDraft[]
+  /** Native Activity recipes. legacySource binds each recipe to its owning content definition. */
+  activities?: Dnd5eActivityDefinitionV1[]
   subclasses?: DeclarativeSubclassDefinitionV1[]
   classes?: DeclarativeClassDefinitionV1[]
   /** 使用怪物工坊生成的完整 stat block；Host 会再次执行 monsterSchema 校验。 */
@@ -87,8 +92,46 @@ export interface Dnd5eCustomRulesPluginDraft {
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
 
+function invalidFeaturePassiveEffects(feature: Dnd5ePluginFeatureDefinition): boolean {
+  const effects = feature.passiveEffects
+  if (effects == null) return false
+  if (!Array.isArray(effects) || effects.length < 1 || effects.length > 16) return true
+  const ids = new Set<string>()
+  return effects.some((effect) => {
+    if (
+      !effect || effect.schemaVersion !== 1 || !ID_PATTERN.test(effect.id) || ids.has(effect.id) ||
+      effect.kind !== 'damage-reduction' || effect.trigger !== 'before-damage' ||
+      !Number.isInteger(effect.amount) || effect.amount < 1 || effect.amount > 1_000_000 ||
+      (effect.minimumIncomingDamage != null && (
+        !Number.isInteger(effect.minimumIncomingDamage) ||
+        effect.minimumIncomingDamage < 1 || effect.minimumIncomingDamage > 1_000_000
+      )) ||
+      (effect.maximumCurrentHitPointPercent != null && (
+        !Number.isInteger(effect.maximumCurrentHitPointPercent) ||
+        effect.maximumCurrentHitPointPercent < 1 || effect.maximumCurrentHitPointPercent > 100
+      )) ||
+      (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean') ||
+      (effect.damageTypes != null && (
+        !Array.isArray(effect.damageTypes) || effect.damageTypes.length < 1 ||
+        effect.damageTypes.length > DND5E_DAMAGE_TYPES.length ||
+        effect.damageTypes.some((damageType: Dnd5eDamageType) => !(DND5E_DAMAGE_TYPES as readonly string[]).includes(damageType))
+      ))
+    ) return true
+    ids.add(effect.id)
+    return false
+  })
+}
+
 export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPluginDraft): string[] {
   const errors: string[] = []
+  const activityIds = new Set<string>()
+  for (const activity of draft.activities ?? []) {
+    errors.push(...validateDnd5eActivityDefinitionV1(activity).map((error) =>
+      `Activity ${activity.id || 'unnamed'}: ${error}`))
+    if (activityIds.has(activity.id)) errors.push(`Activity ID duplicated: ${activity.id}`)
+    activityIds.add(activity.id)
+    if (!activity.legacySource) errors.push(`Activity ${activity.id || 'unnamed'} must declare legacySource for V2 binding`)
+  }
   const manifest = draft.manifest
   if (!ID_PATTERN.test(manifest.id)) errors.push('插件 ID 只能使用小写字母、数字、点、下划线和连字符。')
   if (!manifest.name.trim()) errors.push('请填写插件名称。')
@@ -98,7 +141,7 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
   if (
     draft.races.length + draft.backgrounds.length + draft.features.length + (draft.feats?.length ?? 0) + draft.spells.length +
     draft.items.length + draft.abilityGenerationMethods.length + (draft.subclasses?.length ?? 0) +
-    (draft.classes?.length ?? 0) + (draft.monsters?.length ?? 0) === 0
+    (draft.classes?.length ?? 0) + (draft.monsters?.length ?? 0) + (draft.activities?.length ?? 0) === 0
   ) errors.push('请至少添加一种规则内容。')
 
   if ((draft.monsters?.length ?? 0) > 128) errors.push('单个扩展最多包含 128 个怪物模板。')
@@ -119,12 +162,16 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     }
   }
 
+  const declaredFeatureIds = new Set(draft.features.map((feature) => feature.id))
   const classIds = new Set<string>()
   for (const definition of draft.classes ?? []) {
     try {
       validateDeclarativeClassDefinitionV1(definition, `职业 ${definition.name || definition.id}`)
       if (classIds.has(definition.id)) errors.push(`职业 ID 重复：${definition.id}`)
       classIds.add(definition.id)
+      for (const featureId of definition.advancements?.flatMap((advancement) => advancement.grants ?? []) ?? []) {
+        if (!declaredFeatureIds.has(featureId)) errors.push(`职业 ${definition.name} 授予的特性不存在：${featureId}`)
+      }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error))
     }
@@ -186,8 +233,15 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!feature.name.trim() || !feature.summary.trim() || !feature.description.trim()) {
       errors.push(`特性 ${feature.id || '未命名'} 缺少名称、摘要或正文。`)
     }
-    if (feature.automation !== 'manual' && !feature.action && !feature.staticModifiers) {
+    if (feature.automation !== 'manual' && !feature.action && !feature.staticModifiers && !feature.passiveEffects?.length && !feature.declarativeAbility) {
       errors.push(`自动化特性 ${feature.name || feature.id} 缺少战斗行动。`)
+    }
+    if (feature.declarativeAbility) {
+      try {
+        validateDeclarativeSubclassAbilityV1(feature.declarativeAbility, `特性 ${feature.name || feature.id}`)
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error))
+      }
     }
     if (feature.action && (
       !ID_PATTERN.test(feature.action.id) || !feature.action.label.trim() ||
@@ -198,6 +252,9 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
         (feature.action.interrupt.timeoutMs ?? 30_000) > 300_000
       ))
     )) errors.push(`特性 ${feature.name || feature.id} 的战斗行动或 Interrupt 无效。`)
+    if (invalidFeaturePassiveEffects(feature)) {
+      errors.push(`特性 ${feature.name || feature.id} 的 Headless 被动效果无效。`)
+    }
     const persistentArea = feature.action?.persistentArea
     const persistentAreaTriggers = persistentArea?.triggers
     const persistentAreaTriggerIds = new Set<string>()
@@ -239,8 +296,36 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!feat.name.trim() || !feat.summary.trim() || !feat.description.trim()) {
       errors.push(`专长 ${feat.id || '未命名'} 缺少名称、摘要或正文。`)
     }
-    if (feat.automation !== 'manual' && !feat.action && !feat.staticModifiers) {
+    if (feat.automation !== 'manual' && !feat.action && !feat.staticModifiers && !feat.passiveEffects?.length && !feat.declarativeAbility) {
       errors.push(`自动化专长 ${feat.name || feat.id} 缺少战斗行动或固定效果。`)
+    }
+    if (feat.declarativeAbility) {
+      try {
+        validateDeclarativeSubclassAbilityV1(feat.declarativeAbility, `专长 ${feat.name || feat.id}`)
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error))
+      }
+    }
+    const featResourceIds = new Set<string>()
+    if (feat.resources && (
+      feat.resources.length < 1 || feat.resources.length > 16 || feat.resources.some((resource) => {
+        const invalid = !ID_PATTERN.test(resource.id) || featResourceIds.has(resource.id) ||
+          !resource.label.trim() || (resource.shortLabel != null && !resource.shortLabel.trim()) ||
+          !Number.isInteger(resource.maximum) || resource.maximum < 1 || resource.maximum > 1_000_000 ||
+          !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn)
+        featResourceIds.add(resource.id)
+        return invalid
+      })
+    )) errors.push(`专长 ${feat.name || feat.id} 的资源声明无效。`)
+    if (feat.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll') {
+      const costs = feat.declarativeAbility.cost?.resources ?? []
+      if (costs.length < 1 || costs.some((cost) =>
+        cost.scope === 'core' || !featResourceIds.has(cost.resourceId))) {
+        errors.push(`专长 ${feat.name || feat.id} 的选择重掷必须消耗该专长声明的资源。`)
+      }
+    }
+    if (invalidFeaturePassiveEffects(feat)) {
+      errors.push(`专长 ${feat.name || feat.id} 的 Headless 被动效果无效。`)
     }
     if (feat.prerequisite?.minimumLevel != null && (
       !Number.isInteger(feat.prerequisite.minimumLevel) || feat.prerequisite.minimumLevel < 1 || feat.prerequisite.minimumLevel > 20
@@ -326,13 +411,41 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     }
     if (item.category === 'equipment' && !item.equipment) errors.push(`装备 ${item.name || item.id} 缺少装备规则。`)
   }
+  const sourceExists = (activity: Dnd5eActivityDefinitionV1): boolean => {
+    const source = activity.legacySource
+    if (!source) return false
+    if (source.kind === 'race') return draft.races.some((entry) => entry.id === source.id)
+    if (source.kind === 'background') return draft.backgrounds.some((entry) => entry.id === source.id)
+    if (source.kind === 'feature') return draft.features.some((entry) => entry.id === source.id) ||
+      (draft.classes ?? []).some((entry) => entry.features.some((feature) =>
+        `class-feature.${entry.id}.${feature.id}` === source.id))
+    if (source.kind === 'feat') return (draft.feats ?? []).some((entry) => entry.id === source.id)
+    if (source.kind === 'spell') return draft.spells.some((entry) => entry.id === source.id)
+    if (source.kind === 'item') return draft.items.some((entry) => entry.id === source.id)
+    if (source.kind === 'class') return (draft.classes ?? []).some((entry) => entry.id === source.id)
+    if (source.kind === 'subclass') return (draft.subclasses ?? []).some((entry) => entry.id === source.id)
+    if (source.kind === 'subclass-ability') return (draft.subclasses ?? []).some((entry) =>
+      entry.abilities.some((ability) => ability.id === source.id || `${entry.id}:${ability.id}` === source.id))
+    if (source.kind === 'monster') return (draft.monsters ?? []).some((entry) => entry.id === source.id || entry.slug === source.id)
+    if (source.kind === 'monster-action') return (draft.monsters ?? []).some((entry) => [
+      ...entry.actions,
+      ...(entry.bonusActions ?? []),
+      ...(entry.reactions ?? []),
+      ...(entry.legendaryActions ?? []),
+      ...(entry.lairActions ?? []),
+    ].some((action) => `${entry.id}:${action.id}` === source.id))
+    return (draft.headlessActions ?? []).some((entry) => entry.id === source.id)
+  }
+  for (const activity of draft.activities ?? []) {
+    if (!sourceExists(activity)) errors.push(`Activity ${activity.id} references missing content: ${activity.legacySource?.kind}:${activity.legacySource?.id}`)
+  }
   return errors
 }
 
 export function buildDnd5eCustomRulesPluginSource(draft: Dnd5eCustomRulesPluginDraft): string {
   const errors = validateDnd5eCustomRulesPluginDraft(draft)
   if (errors.length > 0) throw new Error(errors.join('\n'))
-  if ((draft.classes?.length ?? 0) > 0) {
+  if ((draft.classes?.length ?? 0) > 0 || (draft.activities?.length ?? 0) > 0) {
     throw new Error('声明式职业只能导出为纯 JSON .dndstars5e 包，不能降级为旧版 JavaScript 插件。')
   }
   const manifest = JSON.stringify(draft.manifest, null, 2)
@@ -425,7 +538,7 @@ export default plugin;
 export function buildDnd5eCustomRulesPluginPackageV1(draft: Dnd5eCustomRulesPluginDraft): string {
   const errors = validateDnd5eCustomRulesPluginDraft(draft)
   if (errors.length > 0) throw new Error(errors.join('\n'))
-  const legacy: Dnd5eCustomRulesPluginDraft = { ...draft, subclasses: undefined, classes: undefined }
+  const legacy: Dnd5eCustomRulesPluginDraft = { ...draft, subclasses: undefined, classes: undefined, activities: undefined }
   const value: Dnd5eDeclarativeRulesPackageV1 = {
     format: DND5E_DECLARATIVE_PACKAGE_FORMAT,
     schemaVersion: DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION,

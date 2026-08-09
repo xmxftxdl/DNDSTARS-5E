@@ -2,11 +2,16 @@ import { automationCapabilityFromLegacyStatus, type AutomationCapability } from 
 import type { RegisteredContentDefinition } from '../../../domain/content/contentDefinitionRegistry'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../conditions'
 import type { Dnd5eContentPackageV2 } from '../contentPackageV2'
-import type { Dnd5ePluginStaticCombatModifiers } from '../pluginApi'
+import type {
+  Dnd5ePluginFeatureDefinition,
+  Dnd5ePluginItemDefinition,
+  Dnd5ePluginStaticCombatModifiers,
+} from '../pluginApi'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import type { Dnd5eAdvancementDefinitionV1 } from './dnd5eAdvancementContracts'
 import { dnd5eContentPackageActivityProjectionV1 } from './dnd5eContentPackageActivityProjection'
 import type { Dnd5eEffectDefinitionV1, Dnd5eEffectModifierV1 } from './dnd5eEffectContracts'
+import type { Dnd5eFormulaV1 } from './dnd5eFormula'
 
 const CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 
@@ -47,6 +52,121 @@ function permanentEffect(
     grants,
     stacking: 'unique-by-source',
   }
+}
+
+function diceFormula(id: string, dice: { count: number; sides: number; bonus: number }): Dnd5eFormulaV1 {
+  const rolled: Dnd5eFormulaV1 = { kind: 'dice', rollId: id, count: dice.count, sides: dice.sides }
+  return dice.bonus === 0 ? rolled : { kind: 'add', values: [rolled, { kind: 'constant', value: dice.bonus }] }
+}
+
+function featurePassiveEffects(
+  ownerId: string,
+  ownerName: string,
+  feature: Pick<Dnd5ePluginFeatureDefinition, 'passiveEffects'>,
+): readonly Dnd5eEffectDefinitionV1[] {
+  return (feature.passiveEffects ?? []).map((passive) => {
+    const id = `${ownerId}.passive.${safeSegment(passive.id)}`
+    return {
+      schemaVersion: 1,
+      id,
+      name: `${ownerName} · ${passive.id}`,
+      duration: { kind: 'permanent' },
+      modifiers: [{
+        kind: 'damage-reduction',
+        amount: { kind: 'constant', value: passive.amount },
+        damageTypes: passive.damageTypes,
+        minimumIncomingDamage: passive.minimumIncomingDamage,
+        maximumCurrentHitPointPercent: passive.maximumCurrentHitPointPercent,
+        oncePerTurn: passive.oncePerTurn,
+      }],
+      triggers: [{
+        id: `${id}.trigger`, event: 'before-damage', effectId: id, decision: 'automatic',
+        ...(passive.oncePerTurn ? { limit: { uses: 1, reset: 'turn' as const } } : {}),
+      }],
+      stacking: 'unique-by-source',
+    }
+  })
+}
+
+function itemEffectDefinitions(
+  ownerId: string,
+  item: Dnd5ePluginItemDefinition,
+): readonly Dnd5eEffectDefinitionV1[] {
+  const effects: Dnd5eEffectDefinitionV1[] = []
+  const equipment = item.equipment?.effects
+  if (equipment) {
+    const modifiers: Dnd5eEffectModifierV1[] = []
+    if (equipment.weaponAttackBonus) modifiers.push({ kind: 'attack-roll', mode: 'add', value: { kind: 'constant', value: equipment.weaponAttackBonus } })
+    if (equipment.weaponDamageBonus) modifiers.push({
+      kind: 'weapon-damage-roll', mode: 'add', value: { kind: 'constant', value: equipment.weaponDamageBonus },
+      appliesTo: item.equipment?.dnd5e?.kind === 'weapon' ? 'this-weapon' : 'all-weapon-attacks',
+    })
+    if (equipment.armorClassBonus) modifiers.push({ kind: 'armor-class', mode: 'add', value: { kind: 'constant', value: equipment.armorClassBonus } })
+    if (equipment.savingThrowBonus) modifiers.push({ kind: 'saving-throw', mode: 'add', value: { kind: 'constant', value: equipment.savingThrowBonus } })
+    if (equipment.speedBonusFeet) modifiers.push({ kind: 'speed', mode: 'add', value: { kind: 'constant', value: equipment.speedBonusFeet } })
+    if (modifiers.length) effects.push({
+      schemaVersion: 1, id: `${ownerId}.equipment`, name: `${item.name} · equipment`,
+      duration: { kind: 'permanent' }, modifiers, stacking: 'unique-by-source',
+    })
+  }
+  for (const [index, headless] of (item.headlessEffects ?? []).entries()) {
+    const localId = safeSegment(headless.id ?? `${headless.kind}.${index}`)
+    const id = `${ownerId}.headless.${localId}`
+    const resource = headless.resourceId ? {
+      resourceId: headless.resourceId,
+      resourceCost: headless.resourceCost ?? 1,
+    } : {}
+    let modifier: Dnd5eEffectModifierV1
+    let event: 'after-attack-roll' | 'attack-hit' | 'before-damage' | 'before-drop-to-zero'
+    let decision: 'automatic' | 'actor-choice' = 'automatic'
+    if (headless.kind === 'attack-roll-reroll') {
+      modifier = {
+        kind: 'attack-roll-reroll', maximumDice: headless.maximumDice,
+        appliesTo: headless.appliesTo === 'attacks-with-this-weapon' ? 'this-weapon' : 'all-weapon-attacks',
+        ...resource,
+      }
+      event = 'after-attack-roll'
+      decision = 'actor-choice'
+    } else if (headless.kind === 'on-hit-bonus-damage') {
+      modifier = {
+        kind: 'on-hit-bonus-damage', amount: diceFormula(`${id}.damage`, headless.damage),
+        damageType: headless.damageType === 'inherit' ? 'inherit-primary' : headless.damageType,
+        appliesTo: headless.appliesTo === 'attacks-with-this-weapon' ? 'this-weapon' : 'all-weapon-attacks',
+        doubleDiceOnCritical: headless.doubleDiceOnCritical,
+        oncePerTurn: headless.oncePerTurn,
+        targetCreatureTypes: headless.targetCreatureTypes,
+        ...resource,
+      }
+      event = 'attack-hit'
+    } else if (headless.kind === 'damage-reduction') {
+      modifier = {
+        kind: 'damage-reduction',
+        amount: headless.dice ? diceFormula(`${id}.reduction`, headless.dice) : { kind: 'constant', value: headless.amount },
+        damageTypes: headless.damageTypes,
+        oncePerTurn: headless.oncePerTurn,
+        ...resource,
+      }
+      event = 'before-damage'
+    } else {
+      modifier = {
+        kind: 'death-prevention', hitPointsAfter: headless.hitPointsAfter,
+        preventsMassiveDamage: headless.preventsMassiveDamage,
+        ...resource,
+      }
+      event = 'before-drop-to-zero'
+    }
+    const oncePerTurn = 'oncePerTurn' in headless && headless.oncePerTurn === true
+    effects.push({
+      schemaVersion: 1, id, name: `${item.name} · ${localId}`,
+      duration: { kind: 'permanent' }, modifiers: [modifier],
+      triggers: [{
+        id: `${id}.trigger`, event, effectId: id, decision,
+        ...(oncePerTurn ? { limit: { uses: 1, reset: 'turn' as const } } : {}),
+      }],
+      stacking: 'unique-by-source',
+    })
+  }
+  return effects
 }
 
 function combinedCapability(activities: readonly Dnd5eActivityDefinitionV1[]): AutomationCapability {
@@ -105,6 +225,7 @@ export function dnd5eContentDefinitionsFromPackageV2(
   const definitions: RegisteredContentDefinition[] = []
 
   for (const race of value.content.races) {
+    const activities = activitiesBySource.get(`race:${race.id}`) ?? []
     const id = definitionId('race', race.id)
     const effect = permanentEffect(id, race.name, race.staticModifiers)
     const advancements: Dnd5eAdvancementDefinitionV1[] = race.grantedFeatureIds?.length ? [{
@@ -112,35 +233,40 @@ export function dnd5eContentDefinitionsFromPackageV2(
       grants: race.grantedFeatureIds.map((featureId) => ({ namespace: value.manifest.id, id: definitionId('feature', featureId) })),
     }] : []
     definitions.push(definition(value, 'race', race.id, race.name, race,
-      automationCapabilityFromLegacyStatus(race.automation ?? 'full', race.automationReasons), {
-        description: race.description, effects: effect ? [effect] : [], advancements,
+      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(race.automation ?? 'full', race.automationReasons), {
+        description: race.description, activities, effects: effect ? [effect] : [], advancements,
       }))
   }
   for (const background of value.content.backgrounds) {
+    const activities = activitiesBySource.get(`background:${background.id}`) ?? []
     const id = definitionId('background', background.id)
     const advancements: Dnd5eAdvancementDefinitionV1[] = background.skillProficiencies.length ? [{
       schemaVersion: 1, id: `${id}.skills`, level: 1, kind: 'proficiency',
       category: 'skill', choices: background.skillProficiencies, count: background.skillProficiencies.length,
     }] : []
     definitions.push(definition(value, 'background', background.id, background.name, background,
-      automationCapabilityFromLegacyStatus('full'), { description: background.description, advancements }))
+      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus('full'), {
+        description: background.description, activities, advancements,
+      }))
   }
   for (const feature of value.content.features) {
     const activities = activitiesBySource.get(`feature:${feature.id}`) ?? []
     const id = definitionId('feature', feature.id)
     const effect = permanentEffect(id, feature.name, feature.staticModifiers)
+    const passiveEffects = featurePassiveEffects(id, feature.name, feature)
     definitions.push(definition(value, 'feature', feature.id, feature.name, feature,
       activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(feature.automation), {
-        description: feature.description, activities, effects: effect ? [effect] : [],
+        description: feature.description, activities, effects: [...(effect ? [effect] : []), ...passiveEffects],
       }))
   }
   for (const feat of value.content.feats) {
     const activities = activitiesBySource.get(`feat:${feat.id}`) ?? []
     const id = definitionId('feat', feat.id)
     const effect = permanentEffect(id, feat.name, feat.staticModifiers)
+    const passiveEffects = featurePassiveEffects(id, feat.name, feat)
     definitions.push(definition(value, 'feat', feat.id, feat.name, feat,
       activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(feat.automation), {
-        description: feat.description, activities, effects: effect ? [effect] : [],
+        description: feat.description, activities, effects: [...(effect ? [effect] : []), ...passiveEffects],
       }))
   }
   for (const spell of value.content.spells) {
@@ -150,12 +276,13 @@ export function dnd5eContentDefinitionsFromPackageV2(
   }
   for (const item of value.content.items) {
     const activities = activitiesBySource.get(`item:${item.id}`) ?? []
+    const effects = itemEffectDefinitions(definitionId('item', item.id), item)
     const status = item.magicItem?.automation === 'dm-adjudication'
       ? 'manual' as const
       : activities.length || item.equipment ? 'full' as const : 'reference-only' as const
     definitions.push(definition(value, 'item', item.id, item.name, item,
       activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(status), {
-        description: item.description, activities,
+        description: item.description, activities, effects,
       }))
   }
   for (const method of value.content.abilityGenerationMethods) {
@@ -165,6 +292,8 @@ export function dnd5eContentDefinitionsFromPackageV2(
   for (const classDefinition of value.content.classes ?? []) {
     const advancements: Dnd5eAdvancementDefinitionV1[] = []
     for (const feature of classDefinition.features) {
+      const featureSourceId = `class-feature.${classDefinition.id}.${feature.id}`
+      const featureActivities = activitiesBySource.get(`feature:${featureSourceId}`) ?? []
       const featureContentId = definitionId('feature', `class-feature.${classDefinition.id}.${feature.id}`)
       definitions.push(definition(
         value,
@@ -172,8 +301,8 @@ export function dnd5eContentDefinitionsFromPackageV2(
         `class-feature.${classDefinition.id}.${feature.id}`,
         feature.name,
         feature,
-        automationCapabilityFromLegacyStatus(feature.automation),
-        { description: feature.description },
+        featureActivities.length ? combinedCapability(featureActivities) : automationCapabilityFromLegacyStatus(feature.automation),
+        { description: feature.description, activities: featureActivities },
       ))
       advancements.push({
         schemaVersion: 1,
@@ -220,14 +349,15 @@ export function dnd5eContentDefinitionsFromPackageV2(
         : classDefinition.features.length > 0
           ? 'full' as const
           : 'reference-only' as const
+    const classActivities = activitiesBySource.get(`class:${classDefinition.id}`) ?? []
     definitions.push(definition(
       value,
       'class',
       classDefinition.id,
       classDefinition.name,
       classDefinition,
-      automationCapabilityFromLegacyStatus(classStatus),
-      { description: classDefinition.summary, advancements },
+      classActivities.length ? combinedCapability(classActivities) : automationCapabilityFromLegacyStatus(classStatus),
+      { description: classDefinition.summary, activities: classActivities, advancements },
     ))
   }
   for (const subclass of value.content.subclasses) {
@@ -252,15 +382,21 @@ export function dnd5eContentDefinitionsFromPackageV2(
       kind: 'spell-progression', progression: subclass.spellcasting.progression,
       ability: subclass.spellcasting.ability, spellListId: subclass.spellcasting.spellListClassId,
     })
+    const directSubclassActivities = activitiesBySource.get(`subclass:${subclass.id}`) ?? []
     definitions.push(definition(value, 'subclass', subclass.id, subclass.name, subclass,
-      combinedCapability(subclassActivities), { description: subclass.summary, advancements: grants }))
+      combinedCapability([...subclassActivities, ...directSubclassActivities]), {
+        description: subclass.summary, activities: directSubclassActivities, advancements: grants,
+      }))
   }
   for (const monster of value.content.monsters) {
     const monsterActivities = activityProjection.entries
       .filter((entry) => entry.sourceKind === 'monster-action' && entry.sourceId.startsWith(`${monster.id}:`))
       .flatMap((entry) => activityProjection.activities.filter((activity) => activity.id === entry.activityId))
+    const directMonsterActivities = activitiesBySource.get(`monster:${monster.id}`) ?? []
     definitions.push(definition(value, 'monster', monster.slug, monster.name, monster,
-      combinedCapability(monsterActivities), { description: monster.description, activities: monsterActivities }))
+      combinedCapability([...monsterActivities, ...directMonsterActivities]), {
+        description: monster.description, activities: [...monsterActivities, ...directMonsterActivities],
+      }))
     for (const activity of monsterActivities) {
       const sourceId = activity.legacySource?.id?.split(':').at(-1) ?? activity.id
       definitions.push(definition(value, 'monster-action', `${monster.slug}.${sourceId}`, activity.name,

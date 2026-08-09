@@ -3,6 +3,7 @@ import { DND5E_SRD_ITEM_TEMPLATES } from './items'
 import {
   DND5E_SRD_MAGIC_ARMOR_TEMPLATES,
   DND5E_SRD_MAGIC_CONSUMABLE_TEMPLATES,
+  DND5E_SRD_DRAGON_SLAYER_TEMPLATES,
   DND5E_SRD_MAGIC_ITEM_CATALOG,
   DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES,
   DND5E_SRD_MAGIC_SHIELD_TEMPLATES,
@@ -107,12 +108,167 @@ describe('SRD 5.1 magic items', () => {
     })
   })
 
+  it('expands Dragon Slayer into concrete swords with Host-validated Dragon damage', () => {
+    expect(DND5E_SRD_DRAGON_SLAYER_TEMPLATES).toHaveLength(5)
+    const longsword = DND5E_SRD_DRAGON_SLAYER_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:dragon-slayer-longsword',
+    )
+    expect(longsword).toMatchObject({
+      name: '屠龙长剑',
+      equipment: {
+        dnd5e: { kind: 'weapon', magical: true },
+        effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+      },
+      headlessEffects: [{
+        kind: 'on-hit-bonus-damage',
+        damage: { count: 3, sides: 6, bonus: 0 },
+        damageType: 'inherit',
+        targetCreatureTypes: ['龙类', '龙', 'dragon'],
+      }],
+      magicItem: { kind: 'weapon', rarity: 'rare', automation: 'headless' },
+    })
+    expect(DND5E_SRD_ITEM_TEMPLATES.some(
+      (item) => item.id === 'srd-5.1:magic-item:dragon-slayer',
+    )).toBe(true)
+  })
+
+  it('publishes Pearl of Power as an attuned daily Headless spell-slot recovery item', () => {
+    expect(DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:pearl-of-power',
+    )).toMatchObject({
+      resources: [{ id: 'daily-use', maximum: 1, initial: 1, resetOn: 'dawn' }],
+      use: {
+        economy: 'action',
+        consumeQuantity: 0,
+        resourceCost: { resourceId: 'daily-use', amount: 1 },
+        effect: { kind: 'spell-slot-recovery', maximumSlotLevel: 3, amount: 1 },
+      },
+      magicItem: { attunement: 'required', automation: 'headless' },
+    })
+  })
+
+  it('publishes Host-validated spell transactions for Circlet of Blasting and Ring of Jumping', () => {
+    expect(DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:circlet-of-blasting',
+    )).toMatchObject({
+      equipment: { slot: 'helmet' },
+      resources: [{ id: 'daily-use', maximum: 1, initial: 1, resetOn: 'dawn' }],
+      use: {
+        economy: 'action',
+        consumeQuantity: 0,
+        resourceCost: { resourceId: 'daily-use', amount: 1 },
+        effect: {
+          kind: 'spell-cast',
+          schemaVersion: 1,
+          spellId: 'scorching-ray',
+          castAtLevel: 2,
+          spellAttackBonus: 5,
+        },
+      },
+      magicItem: { attunement: 'none', automation: 'headless' },
+    })
+    expect(DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:ring-of-jumping',
+    )).toMatchObject({
+      use: {
+        economy: 'bonusAction',
+        consumeQuantity: 0,
+        effect: {
+          kind: 'spell-cast',
+          schemaVersion: 1,
+          spellId: 'jump',
+          castAtLevel: 1,
+          targeting: 'self-only',
+        },
+      },
+      magicItem: { attunement: 'required', automation: 'headless' },
+    })
+  })
+
+  it('publishes shared-charge spell menus for the SRD wands and Staff of Healing', () => {
+    const missiles = DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:wand-of-magic-missiles',
+    )
+    expect(missiles).toMatchObject({
+      equipment: { slot: 'mainWeapon' },
+      resources: [{
+        id: 'charges', maximum: 7, initial: 7, resetOn: 'dawn',
+        recovery: { kind: 'dice', dice: { count: 1, sides: 6, bonus: 1 } },
+        lastChargeDestruction: { dieSides: 20, destroyOn: 1 },
+      }],
+      magicItem: { attunement: 'none', automation: 'headless' },
+    })
+    expect(missiles?.useActions).toHaveLength(7)
+    expect(missiles?.useActions?.[6]).toMatchObject({
+      id: 'magic-missile-level-7',
+      resourceCost: { resourceId: 'charges', amount: 7 },
+      effect: { kind: 'spell-cast', spellId: 'magic-missile', castAtLevel: 7 },
+    })
+
+    const web = DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:wand-of-web',
+    )
+    expect(web?.useActions).toContainEqual(expect.objectContaining({
+      id: 'cast-web',
+      resourceCost: { resourceId: 'charges', amount: 1 },
+      effect: expect.objectContaining({ kind: 'spell-cast', spellId: 'web', castAtLevel: 2, spellSaveDc: 15 }),
+    }))
+
+    const healing = DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:staff-of-healing',
+    )
+    expect(healing).toMatchObject({
+      equipment: { slot: 'mainWeapon', baseEquipmentId: 'dnd5e-quarterstaff' },
+      resources: [{ maximum: 10, recovery: { dice: { bonus: 4 } } }],
+      magicItem: { attunement: 'required', automation: 'headless' },
+    })
+    expect(healing?.useActions?.map((action) => action.effect.kind === 'spell-cast'
+      ? [action.effect.spellId, action.effect.castAtLevel, action.resourceCost?.amount]
+      : [])).toEqual([
+      ['cure-wounds', 1, 1],
+      ['cure-wounds', 2, 2],
+      ['cure-wounds', 3, 3],
+      ['cure-wounds', 4, 4],
+      ['lesser-restoration', 2, 2],
+      ['mass-cure-wounds', 5, 5],
+    ])
+  })
+
+  it('publishes Ring of Protection as an attuned authoritative AC and save modifier', () => {
+    expect(DND5E_SRD_ITEM_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:ring-of-protection',
+    )).toMatchObject({
+      equipment: {
+        slot: 'ring',
+        effects: { armorClassBonus: 1, savingThrowBonus: 1 },
+      },
+      magicItem: { attunement: 'required', automation: 'headless' },
+    })
+  })
+
   it('marks rings and belts as wearable inventory equipment', () => {
     expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:ring-of-warmth')).toMatchObject({
       equipment: { slot: 'ring' },
     })
     expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:belt-of-dwarvenkind')).toMatchObject({
       equipment: { slot: 'belt' },
+    })
+  })
+
+  it('projects every magic staff as a magical quarterstaff that can be held in either hand', () => {
+    const staffs = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.filter((item) => item.magicItem?.kind === 'staff')
+    expect(staffs.length).toBeGreaterThan(0)
+    for (const staff of staffs) {
+      expect(staff.equipment, staff.id).toMatchObject({
+        slot: 'mainWeapon',
+        allowedSlots: ['mainWeapon', 'offHand'],
+        baseEquipmentId: 'dnd5e-quarterstaff',
+        dnd5e: { kind: 'weapon', magical: true },
+      })
+    }
+    expect(staffs.find((item) => item.id === 'srd-5.1:magic-item:staff-of-striking')).toMatchObject({
+      name: '打击法杖',
+      equipment: { name: '打击法杖' },
     })
   })
 

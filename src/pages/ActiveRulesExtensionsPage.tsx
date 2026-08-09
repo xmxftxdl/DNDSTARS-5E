@@ -11,11 +11,94 @@ import type {
   Dnd5eContentAutomationCoverageReportV2,
   Dnd5eContentPackageSummaryV2,
 } from '../rulesets/dnd5e'
+import {
+  dnd5eRulesPluginRegistrySnapshot,
+  registeredDeclarativeClassesV1,
+  registeredDnd5ePluginBackgrounds,
+  registeredDnd5ePluginFeats,
+  registeredDnd5ePluginFeatures,
+  registeredDnd5ePluginItems,
+  registeredDnd5ePluginMonsters,
+  registeredDnd5ePluginRaces,
+  registeredDnd5ePluginSpells,
+  registeredDnd5ePluginSubclasses,
+  subscribeDnd5eRulesPluginRegistry,
+} from '../rulesets/dnd5e'
 import { activeRulesExtensionRecords } from './activeRulesExtensionsModel'
 
 interface ActiveExtensionDetails {
   summary?: Dnd5eContentPackageSummaryV2
   coverage?: Dnd5eContentAutomationCoverageReportV2
+}
+
+interface ActiveExtensionContentGroup {
+  label: string
+  names: string[]
+}
+
+function uniqueNames(names: readonly string[]): string[] {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+}
+
+function activeExtensionContentGroups(ownerPluginId: string): ActiveExtensionContentGroup[] {
+  return [
+    {
+      label: '职业',
+      names: registeredDeclarativeClassesV1()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.definition.name),
+    },
+    {
+      label: '子职',
+      names: registeredDnd5ePluginSubclasses()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '种族',
+      names: registeredDnd5ePluginRaces()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '背景',
+      names: registeredDnd5ePluginBackgrounds()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '专长',
+      names: registeredDnd5ePluginFeats()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '特性',
+      names: registeredDnd5ePluginFeatures()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '法术',
+      names: registeredDnd5ePluginSpells()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '物品',
+      names: registeredDnd5ePluginItems()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+    {
+      label: '怪物',
+      names: registeredDnd5ePluginMonsters()
+        .filter((entry) => entry.ownerPluginId === ownerPluginId)
+        .map((entry) => entry.name),
+    },
+  ].map((group) => ({ ...group, names: uniqueNames(group.names) }))
+    .filter((group) => group.names.length > 0)
 }
 
 export default function ActiveRulesExtensionsPage() {
@@ -25,6 +108,11 @@ export default function ActiveRulesExtensionsPage() {
     subscribeRoomRules,
     getRoomRulesSnapshot,
     getRoomRulesSnapshot,
+  )
+  useSyncExternalStore(
+    subscribeDnd5eRulesPluginRegistry,
+    dnd5eRulesPluginRegistrySnapshot,
+    dnd5eRulesPluginRegistrySnapshot,
   )
   const [revision, setRevision] = useState(0)
   const [details, setDetails] = useState<Record<string, ActiveExtensionDetails>>({})
@@ -138,6 +226,8 @@ export default function ActiveRulesExtensionsPage() {
             const inspected = details[manifest.id]
             const summary = inspected?.summary
             const coverage = inspected?.coverage
+            const contentGroups = activeExtensionContentGroups(manifest.id)
+            const contentCount = contentGroups.reduce((total, group) => total + group.names.length, 0)
             const counts = summary ? [
               ['种族', summary.races], ['背景', summary.backgrounds], ['特性', summary.features],
               ['专长', summary.feats], ['法术', summary.spells], ['物品', summary.items],
@@ -179,6 +269,34 @@ export default function ActiveRulesExtensionsPage() {
                     自动化：完整 {coverage.totals.full} · 部分 {coverage.totals.partial} ·
                     手动 {coverage.totals.manual} · 仅资料 {coverage.totals.referenceOnly}
                   </p>
+                )}
+                {contentCount > 0 && (
+                  <details
+                    open={contentCount <= 20}
+                    className="mt-4 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] px-4 py-3"
+                    data-testid={`active-extension-content-${manifest.id}`}
+                  >
+                    <summary className="cursor-pointer text-sm font-semibold text-cyan-100 marker:text-cyan-400">
+                      本房间已激活规则内容 · {contentCount} 项
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                      {contentGroups.map((group) => (
+                        <div key={group.label} className="grid gap-2 sm:grid-cols-[4rem_minmax(0,1fr)]">
+                          <span className="text-xs font-semibold text-cyan-200/75">{group.label}</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {group.names.map((name) => (
+                              <span
+                                key={name}
+                                className="rounded-md border border-white/8 bg-black/15 px-2 py-1 text-xs text-slate-300"
+                              >
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
                 <p className="mt-3 break-all font-mono text-[10px] text-slate-700">
                   {installed.integrity}

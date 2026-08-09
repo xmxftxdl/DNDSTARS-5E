@@ -200,13 +200,34 @@ test('DM can click the current manually controlled monster and move it through H
     })
     if (!response.ok()) return null
     const state = await response.json() as {
-      maps?: Array<{ id: string; tokens: Array<{ id: string; x: number; y: number }> }>
+      maps?: Array<{
+        id: string
+        tokens: Array<{
+          id: string
+          x: number
+          y: number
+          movementAnimation?: {
+            id: string
+            points: Array<{ x: number; y: number }>
+          }
+        }>
+      }>
     }
     const moved = state.maps
       ?.find((map) => map.id === mapId)
       ?.tokens.find((token) => token.id === monsterTokenId)
-    return moved ? { x: moved.x, y: moved.y } : null
-  }, { timeout: 20_000 }).toEqual({ x: 375, y: 325 })
+    return moved ?? null
+  }, { timeout: 20_000 }).toMatchObject({
+    x: 375,
+    y: 325,
+    movementAnimation: {
+      id: expect.stringMatching(/^monster-move:/),
+      points: expect.arrayContaining([
+        expect.objectContaining({ x: 325, y: 325 }),
+        expect.objectContaining({ x: 375, y: 325 }),
+      ]),
+    },
+  })
 
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/state/combat?room=${room.roomId}`, {

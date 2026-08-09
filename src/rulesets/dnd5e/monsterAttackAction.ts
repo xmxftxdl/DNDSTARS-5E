@@ -1066,6 +1066,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
     occurrenceIndex: number
   }
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+  optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -1099,6 +1100,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
           rolls: weaponRolls,
         }),
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+    optionalBonusDice: input.optionalBonusDice,
   }
   const fallPreview = input.airborneFallDamageRollsByCombatantId == null
     ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)

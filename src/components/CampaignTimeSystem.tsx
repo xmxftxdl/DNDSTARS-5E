@@ -13,6 +13,10 @@ import { useMapStore } from '../store/maps'
 import { getRoomSession } from '../lib/roomSession'
 import { roomOwnedPlayerCharacters } from '../lib/playerView'
 import Dnd5eShortRestRecoveryActions from './Dnd5eShortRestRecoveryActions'
+import {
+  campaignRestReceiptBaselineIds,
+  latestCampaignRestAdvanceForViewer,
+} from './campaignRestNotificationModel'
 
 const RECOVERY_CATEGORY_LABELS: Record<CampaignRestRecoveryEntry['category'], string> = {
   'hit-points': '生命值',
@@ -23,7 +27,8 @@ const RECOVERY_CATEGORY_LABELS: Record<CampaignRestRecoveryEntry['category'], st
 }
 
 function restReceiptStorageKey(): string {
-  return `stars-rest-recovery-receipts-v1:${getRoomSession()?.roomId ?? 'local'}`
+  const session = getRoomSession()
+  return `stars-rest-recovery-receipts-v2:${session?.roomId ?? 'local'}:${session?.memberId ?? session?.role ?? 'local'}`
 }
 
 function readRestReceipts(): Set<string> {
@@ -55,6 +60,7 @@ function recoveryValue(entry: CampaignRestRecoveryEntry): string | null {
 
 export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   const clock = useCampaignTimeStore((state) => state.state)
+  const hydratedRoomId = useCampaignTimeStore((state) => state.hydratedRoomId)
   const mutate = useCampaignTimeStore((state) => state.mutate)
   const characters = useCharacterStore((state) => state.characters)
   const maps = useMapStore((state) => state.maps)
@@ -63,7 +69,9 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   const [restAdvance, setRestAdvance] = useState<CampaignTimeAdvance | null>(null)
   const seenTimerIds = useRef(new Set<string>())
   const seenRestIds = useRef(readRestReceipts())
+  const restBaselineReady = useRef(false)
   const roomSession = getRoomSession()
+  const currentRoomId = roomSession?.roomId ?? '__local__'
   const playerOwnedCharacterIds = useMemo(() => {
     if (roomSession?.role !== 'player') return new Set<string>()
     return new Set(roomOwnedPlayerCharacters(characters, roomSession.roomId, roomSession.memberId)
@@ -89,14 +97,35 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   }, [clock.timers, notification])
 
   useEffect(() => {
-    if (restAdvance) return
-    const unseen = [...clock.advances].reverse().find((advance) =>
-      (advance.kind === 'short-rest' || advance.kind === 'long-rest') &&
-      (advance.restRecoveryReports?.length ?? 0) > 0 &&
-      !seenRestIds.current.has(advance.id),
-    )
-    if (unseen) setRestAdvance(unseen)
-  }, [clock.advances, restAdvance])
+    if (hydratedRoomId !== currentRoomId || restBaselineReady.current) return
+    let changed = false
+    for (const advanceId of campaignRestReceiptBaselineIds(clock.advances)) {
+      if (!seenRestIds.current.has(advanceId)) {
+        seenRestIds.current.add(advanceId)
+        changed = true
+      }
+    }
+    if (changed) writeRestReceipts(seenRestIds.current)
+    restBaselineReady.current = true
+  }, [clock.advances, currentRoomId, hydratedRoomId])
+
+  useEffect(() => {
+    if (hydratedRoomId !== currentRoomId || !restBaselineReady.current || restAdvance) return
+    const unseen = latestCampaignRestAdvanceForViewer(clock.advances, {
+      isDm,
+      playerOwnedCharacterIds,
+      seenIds: seenRestIds.current,
+    })
+    if (!unseen) return
+    for (const advance of clock.advances) {
+      if (
+        advance.id !== unseen.id &&
+        (advance.kind === 'short-rest' || advance.kind === 'long-rest')
+      ) seenRestIds.current.add(advance.id)
+    }
+    writeRestReceipts(seenRestIds.current)
+    setRestAdvance(unseen)
+  }, [clock.advances, currentRoomId, hydratedRoomId, isDm, playerOwnedCharacterIds, restAdvance])
 
   const close = () => {
     if (!notification) return

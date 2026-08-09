@@ -322,7 +322,9 @@ function migrateCombatInterruptEnvelope(input: Record<string, unknown>): {
               Number.isInteger(entry.replacementValue) &&
               Number(entry.replacementValue) >= 1 && Number(entry.replacementValue) <= 20) ||
             (entry.kind === 'adjust-d20' && typeof entry.featureId === 'string' && !!entry.featureId.trim() &&
-              (entry.direction === 'add' || entry.direction === 'subtract'))
+              (entry.direction === 'add' || entry.direction === 'subtract')) ||
+            (entry.kind === 'choice-reroll' && typeof entry.featureId === 'string' && !!entry.featureId.trim() &&
+              (entry.decision === 'use' || entry.decision === 'decline'))
           )
           if (
             !isPlainObject(entry) || !contributionShapeValid ||
@@ -663,8 +665,15 @@ export function latestSharedIntegrityIssue(): SharedIntegrityIssue | null {
   return storedIssues()[0] ?? null
 }
 
-export function clearSharedIntegrityIssues(): void {
+export function clearSharedIntegrityIssues(resource?: string): void {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem(SHARED_RESOURCE_QUARANTINE_KEY)
+  const remaining = resource
+    ? storedIssues().filter((issue) => issue.resource !== resource)
+    : []
+  if (remaining.length > 0) {
+    window.localStorage.setItem(SHARED_RESOURCE_QUARANTINE_KEY, JSON.stringify(remaining))
+  } else {
+    window.localStorage.removeItem(SHARED_RESOURCE_QUARANTINE_KEY)
+  }
   window.dispatchEvent(new CustomEvent(SHARED_INTEGRITY_EVENT))
 }

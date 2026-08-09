@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Hammer, Search, Skull, Swords, X } from 'lucide-react'
+import { Hammer, Search, ShieldCheck, Skull, Swords, X } from 'lucide-react'
 import {
   DND5E_SRD_ENEMY_POOL,
   searchEnemyPool,
@@ -15,6 +15,10 @@ import {
 } from '../../rulesets/dnd5e/pluginApi'
 import Dnd5eMonsterWorkshopDialog from './Dnd5eMonsterWorkshopDialog'
 import { composeDnd5eEnemyPool } from './enemyPoolComposition'
+
+export interface EnemyPoolPlacementOptions {
+  side: 'player' | 'enemy'
+}
 
 function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
   const [failedSource, setFailedSource] = useState<string>()
@@ -48,6 +52,7 @@ export default function EnemyPoolPicker({
   onPick,
   onBuildEncounter,
   enableAutomaticAppearanceSelection = false,
+  allowFriendlyPlacement = false,
   getUsedVisualVariantIds,
 }: {
   open: boolean
@@ -55,13 +60,18 @@ export default function EnemyPoolPicker({
   hint?: string
   canManageCustom?: boolean
   onClose: () => void
-  onPick: (template: EnemyTemplate) => void
-  onBuildEncounter?: (entries: readonly Dnd5eEncounterEntry[]) => void
+  onPick: (template: EnemyTemplate, options: EnemyPoolPlacementOptions) => void
+  onBuildEncounter?: (
+    entries: readonly Dnd5eEncounterEntry[],
+    options: EnemyPoolPlacementOptions,
+  ) => void
   enableAutomaticAppearanceSelection?: boolean
+  allowFriendlyPlacement?: boolean
   getUsedVisualVariantIds?: (template: EnemyTemplate) => readonly (string | undefined)[]
 }) {
   const [query, setQuery] = useState('')
   const [autoSelectNextAppearance, setAutoSelectNextAppearance] = useState(false)
+  const [addAsFriendly, setAddAsFriendly] = useState(false)
   const [encounterOpen, setEncounterOpen] = useState(false)
   const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [appearanceTarget, setAppearanceTarget] = useState<EnemyTemplate>()
@@ -100,7 +110,10 @@ export default function EnemyPoolPicker({
   }
 
   const finishPick = (template: EnemyTemplate, visualVariantId?: string) => {
-    onPick({ ...template, visualVariantId })
+    onPick(
+      { ...template, visualVariantId },
+      { side: allowFriendlyPlacement && addAsFriendly ? 'player' : 'enemy' },
+    )
     setAppearanceTarget(undefined)
     setQuery('')
     onClose()
@@ -171,6 +184,23 @@ export default function EnemyPoolPicker({
                 <span className="block text-sm font-medium text-slate-200">自动选择下一张不同立绘</span>
                 <span className="mt-0.5 block text-xs text-slate-500">
                   勾选后不再询问立绘，优先使用当前地图中尚未添加的形象；全部用过后按顺序循环。
+                </span>
+              </span>
+            </label>
+          )}
+          {allowFriendlyPlacement && (
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-3 py-2.5 hover:bg-emerald-500/[0.1]">
+              <input
+                type="checkbox"
+                checked={addAsFriendly}
+                onChange={(event) => setAddAsFriendly(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-500"
+              />
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-emerald-100">作为玩家友方添加</span>
+                <span className="mt-0.5 block text-xs text-emerald-200/60">
+                  该怪物保留完整怪物能力，但与玩家同阵营；敌对怪物会将它视为敌人。
                 </span>
               </span>
             </label>
@@ -319,7 +349,10 @@ export default function EnemyPoolPicker({
       pool={pool}
       onClose={() => setEncounterOpen(false)}
       onConfirm={(entries) => {
-        onBuildEncounter?.(entries)
+        onBuildEncounter?.(
+          entries,
+          { side: allowFriendlyPlacement && addAsFriendly ? 'player' : 'enemy' },
+        )
         setEncounterOpen(false)
         closePicker()
       }}

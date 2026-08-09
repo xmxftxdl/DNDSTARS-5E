@@ -67,7 +67,8 @@ export interface DiceEngineBox {
   // Resolves with the same DiceOutcome that onComplete receives — exactly once.
   roll(notation: string): Promise<DiceOutcome>
   correctVisibleFaces(values: number[]): boolean
-  arrangeSettledDice(): Promise<void>
+  visibleValues(): number[]
+  arrangeSettledDice(values?: number[]): Promise<void>
   clear(): void
   destroy(): void
 }
@@ -246,6 +247,84 @@ function straightenedD6Quaternion(die: RuntimeDie): QuaternionValue {
   return multiplyQuaternion(yawCorrection, leveled)
 }
 
+function d4SettledFaceValue(die: RuntimeDie): number | undefined {
+  if (die.shape !== 'd4') return undefined
+  const normals = die.geometry?.getAttribute?.('normal')?.array
+  const groups = die.geometry?.groups
+  if (!normals || !groups?.length) return undefined
+  const sourceQuaternion = die.body?.quaternion ?? die.quaternion
+  const quaternion = normalizedQuaternion({
+    x: sourceQuaternion?.x ?? 0,
+    y: sourceQuaternion?.y ?? 0,
+    z: sourceQuaternion?.z ?? 0,
+    w: sourceQuaternion?.w ?? 1,
+  })
+  let lowestZ = Number.POSITIVE_INFINITY
+  let value: number | undefined
+  for (let index = 0; index < groups.length; index += 1) {
+    const materialIndex = groups[index].materialIndex
+    if (!materialIndex) continue
+    const offset = index * 9
+    if (offset + 2 >= normals.length) continue
+    const worldNormal = rotateVector({
+      x: Number(normals[offset]),
+      y: Number(normals[offset + 1]),
+      z: Number(normals[offset + 2]),
+    }, quaternion)
+    if (worldNormal.z < lowestZ) {
+      lowestZ = worldNormal.z
+      value = materialIndex - 1
+    }
+  }
+  return value != null && value >= 1 && value <= 4 ? value : undefined
+}
+
+function d4ResultQuaternion(die: RuntimeDie, targetValue: number | undefined): QuaternionValue {
+  const current = normalizedQuaternion({
+    x: die.quaternion?.x ?? 0,
+    y: die.quaternion?.y ?? 0,
+    z: die.quaternion?.z ?? 0,
+    w: die.quaternion?.w ?? 1,
+  })
+  if (die.shape !== 'd4' || targetValue == null) return current
+  const normals = die.geometry?.getAttribute?.('normal')?.array
+  const groups = die.geometry?.groups
+  if (!normals || !groups?.length) return current
+  const groupIndex = groups.findIndex((group) => group.materialIndex === targetValue + 1)
+  const offset = groupIndex * 9
+  if (groupIndex < 0 || offset + 2 >= normals.length) return current
+  const worldNormal = rotateVector({
+    x: Number(normals[offset]),
+    y: Number(normals[offset + 1]),
+    z: Number(normals[offset + 2]),
+  }, current)
+  const length = Math.hypot(worldNormal.x, worldNormal.y, worldNormal.z) || 1
+  const from = {
+    x: worldNormal.x / length,
+    y: worldNormal.y / length,
+    z: worldNormal.z / length,
+  }
+  const to = { x: 0, y: 0, z: -1 }
+  const dot = Math.max(-1, Math.min(1, from.x * to.x + from.y * to.y + from.z * to.z))
+  let correction: QuaternionValue
+  if (dot < -0.999999) {
+    correction = { x: 1, y: 0, z: 0, w: 0 }
+  } else {
+    correction = normalizedQuaternion({
+      x: from.y * to.z - from.z * to.y,
+      y: from.z * to.x - from.x * to.z,
+      z: from.x * to.y - from.y * to.x,
+      w: 1 + dot,
+    })
+  }
+  return multiplyQuaternion(correction, current)
+}
+
+function settledQuaternion(die: RuntimeDie, targetValue: number | undefined): QuaternionValue {
+  if (die.shape === 'd4') return d4ResultQuaternion(die, targetValue)
+  return straightenedD6Quaternion(die)
+}
+
 function geometryBounds(
   die: RuntimeDie,
   quaternion: QuaternionValue,
@@ -398,7 +477,22 @@ export async function createDiceBox(
         const die = dice[index]
         const target = Math.round(values[index])
         const current = die?.getLastValue?.()
-        if (!die || !Number.isFinite(target) || current?.value === target) continue
+        if (!die || !Number.isFinite(target)) continue
+        const physicalValue = d4SettledFaceValue(die)
+        const currentValue = physicalValue ?? current?.value
+        if (currentValue === target) {
+          if (current?.value !== target) {
+            die.setLastValue?.({ value: target, label: String(target), reason: 'forced' })
+          }
+          continue
+        }
+        if (physicalValue != null && current?.value !== physicalValue) {
+          die.setLastValue?.({
+            value: physicalValue,
+            label: String(physicalValue),
+            reason: current?.reason ?? 'natural',
+          })
+        }
         runtimeBox.swapDiceFace(die, target)
         die.setLastValue?.({ value: target, label: String(target), reason: 'forced' })
         changed = true
@@ -408,7 +502,12 @@ export async function createDiceBox(
       }
       return changed
     },
-    arrangeSettledDice(): Promise<void> {
+    visibleValues(): number[] {
+      return (runtimeBox.diceList ?? []).map((die) =>
+        d4SettledFaceValue(die) ?? Number(die.getLastValue?.().value),
+      ).filter((value) => Number.isFinite(value))
+    },
+    arrangeSettledDice(values: number[] = []): Promise<void> {
       const dice = runtimeBox.diceList?.filter((die) =>
         die.position && die.quaternion && die.geometry,
       ) ?? []
@@ -418,7 +517,8 @@ export async function createDiceBox(
       const tableHeight = Math.max(260, runtimeBox.display?.containerHeight ?? 420)
       const grid = settledDiceGrid(dice.length, tableWidth, tableHeight)
       const targets = dice.map((die, index) => {
-        const quaternion = straightenedD6Quaternion(die)
+        const targetValue = Number.isFinite(values[index]) ? Math.round(values[index]) : undefined
+        const quaternion = settledQuaternion(die, targetValue)
         const bounds = geometryBounds(die, quaternion)
         return { die, grid: grid[index], quaternion, bounds }
       })
@@ -489,6 +589,15 @@ export async function createDiceBox(
               quaternion.z,
               quaternion.w,
             )
+            transition.die.body?.position?.set?.(position.x, position.y, position.z)
+            transition.die.body?.quaternion?.set?.(
+              quaternion.x,
+              quaternion.y,
+              quaternion.z,
+              quaternion.w,
+            )
+            transition.die.body?.velocity?.set?.(0, 0, 0)
+            transition.die.body?.angularVelocity?.set?.(0, 0, 0)
           }
           if (runtimeBox.renderer && runtimeBox.scene && runtimeBox.camera) {
             runtimeBox.renderer.render(runtimeBox.scene, runtimeBox.camera)

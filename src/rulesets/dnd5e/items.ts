@@ -61,9 +61,10 @@ const AMMUNITION_KIND_BY_WEAPON_ID: Readonly<Record<string, Dnd5eAmmunitionKind>
 
 function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
-  if (!rules) return `该装备不替换基础武器或护甲公式。${equipmentEffectsText(item) || '具体规则由当前规则包或 DM 裁定。'}`
+  const focusText = equipmentSpellcastingFocusText(item)
+  if (!rules) return `该装备不替换基础武器或护甲公式。${equipmentEffectsText(item) || '具体规则由当前规则包或 DM 裁定。'}${focusText}`
   if (item.id === 'dnd5e-net') return '射程 5/15 尺；命中大型或更小生物时使其受束缚。挣脱、破坏捕网以及每次只能进行一次捕网攻击由 Headless/DM 按 SRD 5.1 裁定。'
-  if (rules.kind === 'shield') return `盾牌。持用时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}`
+  if (rules.kind === 'shield') return `盾牌。持用时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}${focusText}`
   if (rules.kind === 'armor') {
     const category = rules.category === 'light' ? '轻甲' : rules.category === 'medium' ? '中甲' : '重甲'
     const dexterity = rules.dexterityBonus === 'full'
@@ -71,14 +72,24 @@ function equipmentRulesText(item: EquipmentItem): string {
       : rules.dexterityBonus === 'max-2'
         ? '加上至多 +2 的敏捷调整值'
         : '不加敏捷调整值'
-    return `${category}。护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}`
+    return `${category}。护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}${focusText}`
   }
   const category = rules.category === 'simple' ? '简易武器' : '军用武器'
   const range = rules.mode === 'ranged' && rules.rangeFeet
     ? `，射程 ${rules.rangeFeet.normal}/${rules.rangeFeet.long} 尺`
     : `，触及 ${rules.reachFeet ?? 5} 尺`
   const properties = rules.properties?.length ? `；属性：${rules.properties.join('、')}` : ''
-  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}`
+  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}${focusText}`
+}
+
+function equipmentSpellcastingFocusText(item: EquipmentItem): string {
+  const classIds = item.spellcastingFocusClassIds
+  if (!classIds?.length) return ''
+  const classLabels: Readonly<Record<string, string>> = {
+    bard: '吟游诗人', cleric: '牧师', druid: '德鲁伊', paladin: '圣武士', ranger: '游侠',
+    sorcerer: '术士', warlock: '邪术师', wizard: '法师',
+  }
+  return ` 持用时可作为${classIds.map((classId) => classLabels[classId] ?? classId).join('、')}的施法法器。`
 }
 
 function equipmentEffectsText(item: EquipmentItem): string {
@@ -222,21 +233,21 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('sling-bullets', '投石索弹丸', 'Sling bullets', 'adventuring-gear', 'generic', 0.075, 4, 'cp', '投石索使用的铅制弹丸。'),
   gear('blowgun-needles', '吹箭针', 'Blowgun needles', 'adventuring-gear', 'generic', 0.02, 2, 'cp', '吹箭筒使用的细针。'),
   gear('component-pouch', '材料包', 'Component pouch', 'container', 'generic', 2, 25, 'gp', '存放施展法术所需、未标明价格且不会被消耗的材料成分。'),
-  gear('arcane-focus', '奥术法器', 'Arcane focus', 'adventuring-gear', 'generic', 1, 10, 'gp', '奥术施法职业可用作法术材料成分替代物。'),
-  gear('druidic-focus', '德鲁伊法器', 'Druidic focus', 'adventuring-gear', 'generic', 1, 1, 'gp', '德鲁伊可用作法术材料成分替代物。'),
+  gear('arcane-focus', '奥术法器', 'Arcane focus', 'adventuring-gear', 'spellcasting-focus', 1, 10, 'gp', '奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。', undefined, handheldFocus('arcane-focus', '奥术法器')),
+  gear('druidic-focus', '德鲁伊法器', 'Druidic focus', 'adventuring-gear', 'generic', 1, 1, 'gp', '德鲁伊可用作法术材料成分替代物；使用时必须持在手中。', undefined, handheldFocus('druidic-focus', '德鲁伊法器')),
   gear('holy-symbol', '圣徽', 'Holy symbol', 'adventuring-gear', 'generic', 1, 5, 'gp', '牧师和圣武士可用作法术材料成分替代物。'),
   gear('spellbook', '法术书', 'Spellbook', 'adventuring-gear', 'generic', 3, 50, 'gp', '法师记录已知法术的书册。'),
   gear('thieves-tools', '盗贼工具', "Thieves' tools", 'tool', 'generic', 1, 25, 'gp', '开锁与拆除陷阱使用的专用工具。'),
-  gear('bagpipes', '风笛', 'Bagpipes', 'tool', 'generic', 6, 30, 'gp', '一种乐器。'),
-  gear('drum', '鼓', 'Drum', 'tool', 'generic', 3, 6, 'gp', '一种乐器。'),
-  gear('dulcimer', '扬琴', 'Dulcimer', 'tool', 'generic', 10, 25, 'gp', '一种乐器。'),
-  gear('lute', '鲁特琴', 'Lute', 'tool', 'generic', 2, 35, 'gp', '吟游诗人常用的乐器。'),
-  gear('flute', '长笛', 'Flute', 'tool', 'generic', 1, 2, 'gp', '一种便携乐器。'),
-  gear('horn', '号角', 'Horn', 'tool', 'generic', 2, 3, 'gp', '一种乐器。'),
-  gear('lyre', '里拉琴', 'Lyre', 'tool', 'generic', 2, 30, 'gp', '一种乐器。'),
-  gear('pan-flute', '排箫', 'Pan flute', 'tool', 'generic', 2, 12, 'gp', '一种乐器。'),
-  gear('shawm', '肖姆管', 'Shawm', 'tool', 'generic', 1, 2, 'gp', '一种乐器。'),
-  gear('viol', '维奥尔琴', 'Viol', 'tool', 'generic', 1, 30, 'gp', '一种乐器。'),
+  gear('bagpipes', '风笛', 'Bagpipes', 'tool', 'generic', 6, 30, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('bagpipes', '风笛')),
+  gear('drum', '鼓', 'Drum', 'tool', 'generic', 3, 6, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('drum', '鼓')),
+  gear('dulcimer', '扬琴', 'Dulcimer', 'tool', 'generic', 10, 25, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('dulcimer', '扬琴')),
+  gear('lute', '鲁特琴', 'Lute', 'tool', 'generic', 2, 35, 'gp', '吟游诗人常用的乐器；作为施法法器时必须持用。', undefined, handheldFocus('lute', '鲁特琴')),
+  gear('flute', '长笛', 'Flute', 'tool', 'generic', 1, 2, 'gp', '一种便携乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('flute', '长笛')),
+  gear('horn', '号角', 'Horn', 'tool', 'generic', 2, 3, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('horn', '号角')),
+  gear('lyre', '里拉琴', 'Lyre', 'tool', 'generic', 2, 30, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('lyre', '里拉琴')),
+  gear('pan-flute', '排箫', 'Pan flute', 'tool', 'generic', 2, 12, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('pan-flute', '排箫')),
+  gear('shawm', '肖姆管', 'Shawm', 'tool', 'generic', 1, 2, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('shawm', '肖姆管')),
+  gear('viol', '维奥尔琴', 'Viol', 'tool', 'generic', 1, 30, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('viol', '维奥尔琴')),
   gear('prayer-book', '祈祷书', 'Prayer book', 'adventuring-gear', 'generic', 0, 0, 'cp', '侍僧背景的祈祷文本。'),
   gear('prayer-wheel', '经轮', 'Prayer wheel', 'adventuring-gear', 'generic', 0, 0, 'cp', '侍僧背景使用的宗教器物。'),
   gear('coin-pouch-15gp', '钱袋（15 gp）', 'Pouch containing 15 gp', 'container', 'generic', 1, 15, 'gp', '侍僧背景携带的钱袋；其中金币由角色与 DM 共同记账。'),
@@ -297,6 +308,13 @@ export const DND5E_SRD_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
 ]
 
 const ITEM_TEMPLATE_BY_ID = new Map(DND5E_SRD_ITEM_TEMPLATES.map((item) => [item.id, item]))
+const CANONICAL_ARCANE_FOCUS_TEMPLATE_ID = 'srd-5.1:item:arcane-focus'
+const LEGACY_ARCANE_FOCUS_IDS = new Set([
+  'arcane-focus',
+  'dnd5e-arcane-focus',
+  'srd-5.1:magic-item:arcane-focus',
+  CANONICAL_ARCANE_FOCUS_TEMPLATE_ID,
+])
 
 export function dnd5eInventoryItemTemplate(templateId: string): Dnd5eInventoryItemTemplate | undefined {
   return ITEM_TEMPLATE_BY_ID.get(templateId) ?? dnd5ePluginItemDefinition(templateId)
@@ -305,6 +323,13 @@ export function dnd5eInventoryItemTemplate(templateId: string): Dnd5eInventoryIt
 export function dnd5eInventoryItemTemplateForEquipment(equipmentId: string): Dnd5eInventoryItemTemplate | undefined {
   return DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES.find((item) => item.equipment?.id === equipmentId) ??
     registeredDnd5ePluginItems().find((item) => item.equipment?.id === equipmentId)
+}
+
+function inventoryTemplateForStoredEntry(entry: Dnd5eInventoryEntry): Dnd5eInventoryItemTemplate {
+  if (LEGACY_ARCANE_FOCUS_IDS.has(entry.templateId) || LEGACY_ARCANE_FOCUS_IDS.has(entry.item.id)) {
+    return ITEM_TEMPLATE_BY_ID.get(CANONICAL_ARCANE_FOCUS_TEMPLATE_ID) ?? entry.item
+  }
+  return dnd5eInventoryItemTemplate(entry.templateId) ?? entry.item
 }
 
 export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id' | 'equipment'>): Dnd5eInventory {
@@ -349,7 +374,7 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
   const entries: Dnd5eInventoryEntry[] = (raw?.entries ?? [])
     .filter((entry) => entry && typeof entry.instanceId === 'string' && typeof entry.templateId === 'string')
     .map((entry) => {
-      const item = cloneItemTemplate(dnd5eInventoryItemTemplate(entry.templateId) ?? entry.item)
+      const item = cloneItemTemplate(inventoryTemplateForStoredEntry(entry))
       const quantity = Math.max(1, Math.floor(Number(entry.quantity) || 1))
       const resources = normalizeInventoryResources(item, quantity, entry.resources, entry.remainingCharges)
       return {
@@ -483,6 +508,15 @@ export function dnd5eInventoryEntryResource(
   return entry.resources?.[resourceId]
 }
 
+/** Resolves a declared item action from the authoritative template snapshot. */
+export function dnd5eInventoryEntryUseAction(
+  entry: Dnd5eInventoryEntry,
+  actionId?: string,
+) {
+  if (actionId != null) return entry.item.useActions?.find((action) => action.id === actionId)
+  return entry.item.useActions?.length ? undefined : entry.item.use
+}
+
 /** 权威事务使用的实例资源扣除函数。资源归零后仍保留物品实例。 */
 export type Dnd5eInventoryActivityCost =
   | { kind: 'resource'; resourceId: string; amount: number }
@@ -499,6 +533,13 @@ export type Dnd5eInventoryActivityCostFailure =
   | 'insufficient-resource'
   | 'insufficient-quantity'
 
+export interface Dnd5eInventoryLastChargeCheck {
+  resourceId: string
+  roll: number
+  dieSides: number
+  destroyed: boolean
+}
+
 /** Preflights every cost before producing one authoritative inventory snapshot. */
 export function applyDnd5eInventoryActivityCosts(
   character: Character,
@@ -507,9 +548,11 @@ export function applyDnd5eInventoryActivityCosts(
     costs: readonly Dnd5eInventoryActivityCost[]
     receiptId: string
     expectedInventoryRevision: number
+    /** Optional deterministic rolls used by tests/replays; the Host rolls when omitted. */
+    lastChargeDestructionRolls?: Readonly<Record<string, number>>
   },
 ):
-  | { ok: true; character: Character; deduplicated: boolean }
+  | { ok: true; character: Character; deduplicated: boolean; lastChargeChecks?: readonly Dnd5eInventoryLastChargeCheck[] }
   | { ok: false; character: Character; reason: Dnd5eInventoryActivityCostFailure } {
   const inventory = normalizeDnd5eInventory(character)
   if (!validAuthorityReceiptId(input.receiptId)) {
@@ -552,19 +595,46 @@ export function applyDnd5eInventoryActivityCosts(
   }
 
   let next: Character = { ...character, dnd5eInventory: inventory }
+  const lastChargeChecks: Dnd5eInventoryLastChargeCheck[] = []
   for (const [resourceId, amount] of resourceCosts) {
     if (amount === 0) continue
+    const resource = entry.resources?.[resourceId]
+    if (!resource) return { ok: false, character, reason: 'resource-not-found' }
     const spent = spendDnd5eInventoryResource(next, input.instanceId, resourceId, amount)
     if (!spent.ok) return { ok: false, character, reason: spent.reason }
     next = spent.character
+    const destruction = resourceCosts.get(resourceId) === resource.current
+      ? resource.lastChargeDestruction
+      : undefined
+    if (destruction) {
+      const supplied = input.lastChargeDestructionRolls?.[resourceId]
+      const roll = Number.isInteger(supplied) && supplied! >= 1 && supplied! <= destruction.dieSides
+        ? supplied!
+        : secureDie(destruction.dieSides)
+      lastChargeChecks.push({
+        resourceId,
+        roll,
+        dieSides: destruction.dieSides,
+        destroyed: roll === destruction.destroyOn,
+      })
+    }
   }
   if (quantityCost > 0) {
     const currentEntry = normalizeDnd5eInventory(next).entries.find((candidate) => candidate.instanceId === input.instanceId)
     if (!currentEntry) return { ok: false, character, reason: 'item-not-found' }
     next = removeItem(next, currentEntry, quantityCost)
   }
+  if (lastChargeChecks.some((check) => check.destroyed)) {
+    const currentEntry = normalizeDnd5eInventory(next).entries.find((candidate) => candidate.instanceId === input.instanceId)
+    if (currentEntry) next = removeItem(next, currentEntry, currentEntry.quantity)
+  }
   next = recordDnd5eInventoryUseReceipt(next, input.receiptId)
-  return { ok: true, character: next, deduplicated: false }
+  return {
+    ok: true,
+    character: next,
+    deduplicated: false,
+    ...(lastChargeChecks.length ? { lastChargeChecks } : {}),
+  }
 }
 
 export function spendDnd5eInventoryResource(
@@ -591,10 +661,11 @@ export function spendDnd5eInventoryResource(
   }
 }
 
-/** 恢复明确绑定到短休／长休的实例资源；黎明资源由未来的战役日历事务处理。 */
+/** 恢复绑定到短休、长休或黎明的实例资源；随机恢复骰由 Host 权威投掷。 */
 export function restoreDnd5eInventoryResources(
   character: Character,
   rest: 'short-rest' | 'long-rest' | 'dawn',
+  recoveryRolls: Readonly<Record<string, readonly number[]>> = {},
 ): Character {
   const inventory = normalizeDnd5eInventory(character)
   let changed = false
@@ -604,6 +675,20 @@ export function restoreDnd5eInventoryResources(
     const resources = Object.fromEntries(Object.entries(entry.resources).map(([id, resource]) => {
       const resets = resource.resetOn === rest || (rest === 'long-rest' && resource.resetOn === 'short-rest')
       if (!resets || resource.current === resource.maximum) return [id, resource]
+      if (resource.recovery?.trigger === rest && resource.recovery.kind === 'dice') {
+        const key = `${entry.instanceId}:${id}`
+        const supplied = recoveryRolls[key]
+        const { count, sides, bonus } = resource.recovery.dice
+        const rolls = supplied?.length === count && supplied.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= sides)
+          ? supplied
+          : Array.from({ length: count }, () => secureDie(sides))
+        const recovered = rolls.reduce((sum, roll) => sum + roll, 0) + bonus
+        const current = Math.min(resource.maximum, resource.current + Math.max(0, recovered))
+        if (current === resource.current) return [id, resource]
+        changed = true
+        entryChanged = true
+        return [id, { ...resource, current }]
+      }
       changed = true
       entryChanged = true
       return [id, { ...resource, current: resource.maximum }]
@@ -851,8 +936,12 @@ function applyDnd5eInventoryMutationInternal(
   if (mutation.type === 'equip') {
     if (!entry.item.equipment) return failed(characters, 'not-equipment')
     if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
-    const requestedSlot = mutation.slot ?? defaultEquipmentDestination(source, entry.item.equipment.slot)
-    if (!isEquipmentSlot(requestedSlot) || !equipmentSlotAcceptsItemSlot(requestedSlot, entry.item.equipment.slot)) {
+    const requestedSlot = mutation.slot ?? defaultEquipmentDestination(source, entry.item.equipment)
+    if (!isEquipmentSlot(requestedSlot) || !equipmentSlotAcceptsItemSlot(
+      requestedSlot,
+      entry.item.equipment.slot,
+      entry.item.equipment.allowedSlots,
+    )) {
       return failed(characters, 'invalid-equipment-slot')
     }
     const next = equipEntry(source, entry, requestedSlot)
@@ -942,6 +1031,7 @@ function applyDnd5eInventoryMutationInternal(
 
   const use = entry.item.use
   if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
+  if (!dnd5eInventoryEntryIsActive(entry)) return failed(characters, 'item-inactive')
   if (!use) return failed(characters, 'not-usable')
   if (
     entry.quantity < use.consumeQuantity ||
@@ -1009,6 +1099,11 @@ function applyDnd5eInventoryMutationInternal(
       },
     }
     nextTarget = nextSource
+  } else if (use.effect.kind === 'spell-cast') {
+    // Item spells must use dnd5e-spell-cast so targeting, range, visibility,
+    // saves, damage, concentration and resource spending remain one Host
+    // transaction. Direct inventory-use requests fail closed.
+    return failed(characters, 'not-usable')
   } else {
     requiresDmAdjudication = use.effect.adjudication
   }
@@ -1050,6 +1145,7 @@ function gear(
   currency: 'cp' | 'sp' | 'gp',
   rulesText: string,
   use?: Dnd5eInventoryItemTemplate['use'],
+  equipment?: EquipmentItem,
 ): Dnd5eInventoryItemTemplate {
   return {
     id: `srd-5.1:item:${id}`,
@@ -1061,11 +1157,27 @@ function gear(
     rulesText,
     weightLb,
     cost: { amount, currency },
-    stackable: category !== 'container',
+    stackable: equipment ? false : category !== 'container',
     containerCapacityWeightLb: CONTAINER_CAPACITY_WEIGHT_LB[id],
     ammunitionKind: AMMUNITION_KIND_BY_ITEM_ID[id],
     use,
+    equipment,
     source: SRD_SOURCE,
+  }
+}
+
+function handheldFocus(id: string, name: string): EquipmentItem {
+  const classIds = id === 'arcane-focus'
+    ? ['wizard', 'sorcerer', 'warlock']
+    : id === 'druidic-focus'
+      ? ['druid']
+      : ['bard']
+  return {
+    id: `dnd5e-${id}`,
+    name,
+    slot: 'mainWeapon',
+    allowedSlots: ['mainWeapon', 'offHand'],
+    spellcastingFocusClassIds: classIds,
   }
 }
 
@@ -1095,6 +1207,10 @@ function cloneItemTemplate(item: Dnd5eInventoryItemTemplate): Dnd5eInventoryItem
     cost: item.cost ? { ...item.cost } : undefined,
     equipment: item.equipment ? {
       ...item.equipment,
+      allowedSlots: item.equipment.allowedSlots ? [...item.equipment.allowedSlots] : undefined,
+      spellcastingFocusClassIds: item.equipment.spellcastingFocusClassIds
+        ? [...item.equipment.spellcastingFocusClassIds]
+        : undefined,
       effects: item.equipment.effects ? { ...item.equipment.effects } : undefined,
       dnd5e: item.equipment.dnd5e ? structuredClone(item.equipment.dnd5e) : undefined,
     } : undefined,
@@ -1199,8 +1315,13 @@ function dnd5eAttunementRequirementMet(
   return decision === 'met' || (decision === 'dm-confirmation-required' && dmPrerequisiteConfirmed)
 }
 
-function defaultEquipmentDestination(character: Character, itemSlot: EquipmentSlot): EquipmentSlot {
-  if (itemSlot !== 'ring') return itemSlot
+function defaultEquipmentDestination(character: Character, item: EquipmentItem): EquipmentSlot {
+  const allowedSlots = item.allowedSlots ?? []
+  if (allowedSlots.length > 0) {
+    const preferred = [item.slot, ...allowedSlots.filter((slot) => slot !== item.slot)]
+    return preferred.find((slot) => !character.equipment?.[slot]) ?? item.slot
+  }
+  if (item.slot !== 'ring') return item.slot
   if (!character.equipment?.ring) return 'ring'
   if (!character.equipment?.ring2) return 'ring2'
   return 'ring'
@@ -1275,6 +1396,10 @@ function inventoryResourceDefinitions(item: Dnd5eInventoryItemTemplate): Dnd5eIn
   if (item.use?.chargesPerItem && !definitions.some((resource) => resource.id === 'uses')) {
     definitions.push({ id: 'uses', label: '使用次数', maximum: item.use.chargesPerItem, initial: item.use.chargesPerItem, resetOn: 'none' })
   }
+  const actionCharges = item.useActions?.find((action) => action.chargesPerItem)?.chargesPerItem
+  if (actionCharges && !definitions.some((resource) => resource.id === 'uses')) {
+    definitions.push({ id: 'uses', label: '使用次数', maximum: actionCharges, initial: actionCharges, resetOn: 'none' })
+  }
   return definitions
 }
 
@@ -1290,6 +1415,8 @@ function createInventoryResources(item: Dnd5eInventoryItemTemplate, quantity: nu
       current: Math.min(maximum, Math.max(0, Math.floor(initialPerItem)) * quantity),
       maximum,
       resetOn: definition.resetOn,
+      ...(definition.recovery ? { recovery: structuredClone(definition.recovery) } : {}),
+      ...(definition.lastChargeDestruction ? { lastChargeDestruction: { ...definition.lastChargeDestruction } } : {}),
     }]
   }))
 }
@@ -1328,6 +1455,8 @@ function addInventoryResourceCapacity(
       current: (existing?.current ?? 0) + initialAdded,
       maximum: (existing?.maximum ?? 0) + maximumAdded,
       resetOn: definition.resetOn,
+      ...(definition.recovery ? { recovery: structuredClone(definition.recovery) } : {}),
+      ...(definition.lastChargeDestruction ? { lastChargeDestruction: { ...definition.lastChargeDestruction } } : {}),
     }]
   }))
 }
@@ -1347,6 +1476,8 @@ function resizeInventoryResources(
       current: Math.min(maximum, Math.max(0, existing?.current ?? 0)),
       maximum,
       resetOn: definition.resetOn,
+      ...(definition.recovery ? { recovery: structuredClone(definition.recovery) } : {}),
+      ...(definition.lastChargeDestruction ? { lastChargeDestruction: { ...definition.lastChargeDestruction } } : {}),
     }]
   }))
 }

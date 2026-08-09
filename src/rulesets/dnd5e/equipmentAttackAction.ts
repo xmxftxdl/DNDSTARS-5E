@@ -1,5 +1,4 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
@@ -42,6 +41,7 @@ import {
   dnd5eIsFavoredEnemy,
   dnd5eSourceLinkedRelations,
   dnd5eWeaponClassDamageDefinitions,
+  dnd5eEffectiveSizeRank,
   previewDnd5ePostD20AdjustedAttack,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
@@ -77,6 +77,7 @@ import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 import { dnd5eMartialSpellBonusAttackAvailable } from './martialSpellSynergy'
 import { dnd5eActiveMagicWeaponBonus } from './activeEffects'
+import { dnd5eMapTokenDistanceFeet } from './verticalCombatGeometry'
 import type { Dnd5ePluginDiceRollResult } from './pluginApi'
 import {
   dnd5eOpeningAttackHasAdvantage,
@@ -205,6 +206,19 @@ export function prepareDnd5eEquipmentAttack(input: {
     actorToken.id,
     'free-hand',
   ).length
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const tokenDistanceFeet = (left: Token, right: Token): number => {
+    const leftCombatant = handSnapshot.state.combatants[left.id]
+    const rightCombatant = handSnapshot.state.combatants[right.id]
+    return dnd5eMapTokenDistanceFeet({
+      map: input.map,
+      geometry,
+      left,
+      right,
+      leftSizeRank: leftCombatant ? dnd5eEffectiveSizeRank(leftCombatant) : undefined,
+      rightSizeRank: rightCombatant ? dnd5eEffectiveSizeRank(rightCombatant) : undefined,
+    })
+  }
   if (offHandAttack && maintainedGrapples > 0) {
     return { ok: false, reason: 'off-hand-attack-unavailable' }
   }
@@ -233,7 +247,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       action.dnd5eWeaponAttackOptions?.frenzyAttack || action.dnd5eWeaponAttackOptions?.hordeBreakerAttack
     )
   ) return { ok: false, reason: 'off-hand-attack-unavailable' }
-  const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+  const distanceFeet = tokenDistanceFeet(actorToken, targetToken)
   const extendedReachIntent = action.dnd5eWeaponAttackOptions?.declarativeIntentFeatureIds?.some((featureId) =>
     dnd5eDeclarativeCombatManeuverDefinition(featureId)?.mechanic.operation === 'extended-reach'
   ) === true
@@ -241,7 +255,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     (profile.mode === 'melee' && extendedReachIntent ? 5 : 0)
   if (distanceFeet > effectiveRangeFeet) return { ok: false, reason: 'target-out-of-range' }
   const underwater = dnd5eUnderwaterWeaponAttack({
-    environment: mapGeometryRuntimeForMap(input.map.id)?.environment,
+    environment: geometry?.environment,
     weaponId: profile.weaponId,
     mode: profile.mode,
     distanceFeet,
@@ -302,7 +316,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       loadingWeapon ||
       hordeSourceToken.id === targetToken.id || !areOpposedCombatTokens(actorToken, hordeSourceToken) ||
       !areOpposedCombatTokens(actorToken, targetToken) ||
-      tokenFootprintDistanceCells(hordeSourceToken, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) > 5
+      tokenDistanceFeet(hordeSourceToken, targetToken) > 5
     )
   ) return { ok: false, reason: 'horde-breaker-unavailable' }
   const stunningStrike = action.dnd5eWeaponAttackOptions?.stunningStrike === true
@@ -370,11 +384,11 @@ export function prepareDnd5eEquipmentAttack(input: {
   const adjacentEnemyOfTarget = input.map.tokens.some((token) => {
     if (token.id === actorToken.id || token.id === targetToken.id || !areOpposedCombatTokens(token, targetToken)) return false
     const combatant = snapshot.state.combatants[token.id]
-    return !!combatant && combatant.currentHp > 0 && tokenFootprintDistanceCells(token, targetToken, input.map) *
-      Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+    return !!combatant && combatant.currentHp > 0 && tokenDistanceFeet(token, targetToken) <= 5
   })
   const classDamageContext: Dnd5eWeaponClassDamageContext = {
     weaponId: profile.weaponId,
+    weaponProperties: [...profile.properties],
     mode: profile.mode,
     distanceFeet,
     normalRangeFeet: profile.rangeFeet?.normal,
@@ -423,7 +437,7 @@ export function prepareDnd5eEquipmentAttack(input: {
         return candidate.id !== actorToken.id && candidate.type !== 'obstacle' &&
           areOpposedCombatTokens(actorToken, candidate) &&
           dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
-          tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+          tokenDistanceFeet(actorToken, candidate) <= 5
       })
     ))
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||

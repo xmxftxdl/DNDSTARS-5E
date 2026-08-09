@@ -48,6 +48,24 @@ describe('PDF 人物关系图', () => {
     expect(model.nodes[0].description).toContain('DM 确认')
   })
 
+  it('V2 关系优先使用 Host 分配的实体 ID，而不是重新按名称猜测', () => {
+    const model = buildPdfRelationshipGraphModel({
+      people: [{
+        id: 'entity-person-1', aliases: ['灰羽女士'], name: '艾琳', description: '', role: '', appearance: '',
+        personality: '', motivation: '', secret: '', voice: '', citations: citation,
+      }],
+      factions: [],
+      locations: [{ id: 'entity-location-1', aliases: [], name: '暮钟旅馆', description: '', citations: citation }],
+      relationships: [{
+        id: 'relationship-1', from: '旧称艾琳', to: '旧旅馆名', fromEntityId: 'entity-person-1',
+        toEntityId: 'entity-location-1', type: '经营', description: '', citations: citation,
+      }],
+    })
+
+    expect(model.nodes.map((node) => node.id)).toEqual(['entity-person-1', 'entity-location-1'])
+    expect(model.edges[0]).toMatchObject({ id: 'relationship-1', sourceId: 'entity-person-1', targetId: 'entity-location-1' })
+  })
+
   it('在关系图层把被模型误放入人物列表的派系纠正为势力节点', () => {
     const model = buildPdfRelationshipGraphModel({
       people: [{

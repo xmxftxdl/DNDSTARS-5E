@@ -29,6 +29,13 @@ export interface EquipmentItem {
   baseEquipmentId?: string
   name: string
   slot: EquipmentSlot
+  /** 可放入的全部槽位；未声明时只能放入 slot（戒指仍可放入任一戒指槽）。 */
+  allowedSlots?: readonly EquipmentSlot[]
+  /**
+   * DM 明确声明该装备持用时可作为哪些职业的施法法器。
+   * 字段缺失或空数组表示绝不能视为法器；不根据名称或武器类别自动推断。
+   */
+  spellcastingFocusClassIds?: readonly string[]
   /** 兼容旧装备的显示值；规则结算读取 dnd5e。 */
   ac?: number
   /** 装备在任意槽位后，由 Host 汇总并写入 Headless 快照。 */

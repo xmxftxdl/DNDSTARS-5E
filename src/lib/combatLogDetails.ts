@@ -288,6 +288,32 @@ function eventDetails(
         : ''
       return [`${resolveName(event.targetId)}｜受到 ${event.amount} 点伤害｜${hpChange(event.hpBefore, event.hpAfter)}${tempHp}`]
     }
+    case 'damage-defense-resolved': {
+      const damageType = event.damageType
+        ? DND5E_DAMAGE_TYPE_LABELS[event.damageType]
+        : '未分类'
+      const defenseKinds = [...new Set(event.defenses.map((defense) =>
+        defense.kind === 'immune'
+          ? '免疫'
+          : defense.kind === 'resistant'
+            ? '抗性'
+            : '易伤',
+      ))].join('、')
+      const source = event.damageSource.delivery === 'weapon-attack'
+        ? `${event.damageSource.magical ? '魔法' : '非魔法'}武器攻击${
+          event.damageSource.weaponMaterial === 'adamantine'
+            ? '（精金）'
+            : event.damageSource.weaponMaterial === 'silvered'
+              ? '（镀银）'
+              : '（普通材质）'
+        }`
+        : event.damageSource.delivery === 'spell'
+          ? '法术伤害'
+          : '其他伤害'
+      return [
+        `${resolveName(event.targetId)}｜${damageType}伤害${defenseKinds}生效｜${event.damageBefore} → ${event.damageAfter}｜来源：${source}`,
+      ]
+    }
     case 'class-damage-applied':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${CLASS_DAMAGE_LABELS[event.source] ?? event.source}造成 ${event.amount} 点额外伤害`]
     case 'movement-granted':
@@ -296,6 +322,13 @@ function eventDetails(
       return [`${resolveName(event.actorId)}｜获得撤离状态`]
     case 'damage-reduced':
       return [`${resolveName(event.targetId)}｜伤害减免 ${event.amount}（${event.damageBefore} → ${event.damageAfter}）${event.caught ? '｜接住投射物' : ''}`]
+    case 'inventory-headless-effect-applied': {
+      if (event.effectKind !== 'damage-reduction') return []
+      const roll = event.dice
+        ? `｜减伤骰 ${event.dice.rolls.map((value) => `d${event.dice!.sides}(${value})`).join(' + ')}${event.dice.bonus === 0 ? '' : ` ${signed(event.dice.bonus)}`}`
+        : ''
+      return [`${resolveName(event.actorId)}｜${event.itemName} 减免 ${event.amount} 点伤害${roll}`]
+    }
     case 'healing-applied':
       return [`${resolveName(event.targetId)}｜恢复 ${event.amount} 点生命值｜${hpChange(event.hpBefore, event.hpAfter)}`]
     case 'temporary-hit-points-gained':
@@ -311,6 +344,12 @@ function eventDetails(
         : '一次法术伤害掷骰'
       return [
         `${resolveName(event.actorId)}｜法师特性「强化塑能」｜${ABILITY_LABELS[event.ability]}调整值 ${signed(event.amount)} 加入${spellName}的${application}`,
+      ]
+    }
+    case 'spell-sculpted': {
+      const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      return [
+        `${resolveName(event.targetId)}｜受到${resolveName(event.actorId)}的法师特性「法术塑形」保护｜对${spellName}的豁免自动成功，且不受伤害`,
       ]
     }
     case 'magic-missile-damage-resolved':
@@ -370,6 +409,10 @@ function eventDetails(
       return [`${resolveName(event.actorId)}｜${classStateLabel(event.stateKey)}${event.active ? '生效' : '结束'}${event.value == null ? '' : `｜数值 ${event.value}`}${event.targetId ? `｜目标 ${resolveName(event.targetId)}` : ''}`]
     case 'spell-cast':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜${event.slotConsumed === false ? `按 ${event.slotLevel} 环结算，不消耗法术位` : `使用 ${event.slotLevel} 环法术位`}`]
+    case 'item-last-charge-check':
+      return [
+        `${resolveName(event.actorId)}｜${event.itemName}最后一发检定 d${event.dieSides} = ${event.roll}｜${event.destroyed ? '物品损毁' : '物品保留'}`,
+      ]
     case 'post-spell-random-table-check-required':
       return [
         `${resolveName(event.actorId)}｜施法后随机表待判定｜${event.forceTable ? '直接进入结果表' : `掷 d${event.triggerDieSides}，${event.triggerValues.join('、')} 时触发`}`,
@@ -408,6 +451,8 @@ function eventDetails(
       return [`${resolveName(event.targetId)}｜效果生效：${effectDefinitionLabel(event.definitionId)}`]
     case 'active-effect-refreshed':
       return [`${resolveName(event.targetId)}｜效果刷新：${effectDefinitionLabel(event.definitionId)}`]
+    case 'optional-bonus-die-used':
+      return [`${resolveName(event.targetId)}｜${event.rollKind === 'saving-throw' ? '豁免' : '属性检定'}奖励骰：${event.label} d${event.dieSides}=${event.roll}｜已消耗`]
     case 'active-effect-removed':
       return [`${resolveName(event.targetId)}｜效果结束：${effectDefinitionLabel(event.definitionId)}｜${REMOVAL_REASON_LABELS[event.reason] ?? event.reason}`]
     case 'active-effect-save-required':

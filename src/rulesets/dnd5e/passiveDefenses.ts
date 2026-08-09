@@ -5,6 +5,7 @@ import type { Dnd5eDamageType } from './monsters'
 import {
   dnd5eActiveConditionImmunities,
   dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveSavingThrowAdvantages,
   dnd5eActiveSavingThrowDisadvantages,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveSpeedBonus,
@@ -250,6 +251,12 @@ export function dnd5eSavingThrowModeExplanation(
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: dodgeDexterity, reason: 'dodge' },
       { active: strengthEffect.advantage, reason: 'active-effect-strength-advantage' },
+      {
+        active: dnd5eActiveSavingThrowAdvantages(
+          creature.classState.activeEffects,
+        ).includes(ability),
+        reason: 'active-effect-save-advantage',
+      },
       {
         active: dnd5eNextD20AdvantageApplies(creature, 'saving-throw'),
         reason: 'next-d20-advantage',

@@ -1216,7 +1216,7 @@ export function MaterialAreaSpellEffect({
   const image = loadedImage
   const reducedMotion = usePrefersReducedMotion()
   if (!image) return null
-  if (isWallOfFire && projectile.areaShape === 'ring') {
+  if ((isWallOfFire || isBladeBarrier) && projectile.areaShape === 'ring') {
     return (
       <WallOfFireRingVisual
         image={image}
@@ -1519,7 +1519,7 @@ export function FireballProjectile({ projectile }: { projectile: MapProjectile }
         fireImage={fireImage}
         explosionImage={explosionImage}
         spriteSize={92}
-        impactDiameter={radius * 2.15}
+      impactDiameter={radius * 2} clipImpactToCircle
       />
     )
   }

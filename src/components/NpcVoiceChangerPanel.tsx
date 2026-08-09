@@ -45,12 +45,18 @@ export default function NpcVoiceChangerPanel() {
 
   const updateSlot = (shortcut: number, patch: Partial<VoiceNpcQuickSlot>) => {
     const current = config.slots.find((slot) => slot.shortcut === shortcut)
-    if (!current && (!patch.npcTokenId || !patch.npcName)) return
+    const npcName = (patch.npcName ?? current?.npcName ?? '').slice(0, 80)
+    if (!npcName.trim()) {
+      voice.setVoiceNpcQuickSlot({ shortcut, clear: true })
+      return
+    }
+    const npcTokenId = patch.npcTokenId ?? current?.npcTokenId
+    const mapId = patch.mapId ?? current?.mapId
     voice.setVoiceNpcQuickSlot({
       shortcut,
-      npcTokenId: patch.npcTokenId ?? current?.npcTokenId ?? '',
-      npcName: patch.npcName ?? current?.npcName ?? '未命名 NPC',
-      ...(patch.mapId ?? current?.mapId ? { mapId: patch.mapId ?? current?.mapId } : {}),
+      npcName,
+      ...(npcTokenId ? { npcTokenId } : {}),
+      ...(npcTokenId && mapId ? { mapId } : {}),
       selection: patch.selection ?? current?.selection ?? config.selection,
     })
   }
@@ -62,14 +68,14 @@ export default function NpcVoiceChangerPanel() {
           <UserRoundCog className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold text-slate-100">DM NPC 变声台</h3>
+          <h3 className="text-sm font-bold text-slate-100">DM 角色变声台</h3>
           <p className="mt-1 text-xs leading-5 text-slate-400">
-            先选择男声、女声或原声，再叠加角色效果。数字 1–9 切换完整 NPC 声线；在输入框内不会触发快捷键。
+            声线可以自定义命名，也可以选择性关联地图 NPC。数字 1–9 切换完整角色声线；再次按下当前数字键恢复原声。
           </p>
         </div>
         <div className="rounded-xl border border-violet-300/15 bg-black/20 px-3 py-2 text-right">
           <p className="text-[10px] uppercase tracking-wider text-slate-500">当前身份</p>
-          <p className="mt-0.5 text-xs font-bold text-violet-200">{activeSlot ? `${activeSlot.shortcut} · ${activeSlot.npcName}` : '未绑定 NPC'}</p>
+          <p className="mt-0.5 text-xs font-bold text-violet-200">{activeSlot ? `${activeSlot.shortcut} · ${activeSlot.npcName}` : '原声'}</p>
         </div>
       </div>
 
@@ -127,33 +133,45 @@ export default function NpcVoiceChangerPanel() {
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-bold text-slate-300">NPC 快捷槽</p>
-            <span className="text-[11px] text-slate-500">点击槽位或按数字键切换</span>
+            <p className="text-xs font-bold text-slate-300">角色声线快捷槽</p>
+            <span className="text-[11px] text-slate-500">地图角色关联为可选；同键再次按下即取消</span>
           </div>
           <div className="mt-2 grid gap-2">
             {Array.from({ length: 9 }, (_, index) => index + 1).map((shortcut) => {
               const slot = config.slots.find((candidate) => candidate.shortcut === shortcut)
-              const slotValue = slot ? encodedNpcValue(slot.mapId ?? '', slot.npcTokenId) : ''
+              const slotValue = slot?.npcTokenId ? encodedNpcValue(slot.mapId ?? '', slot.npcTokenId) : ''
               return (
                 <div
                   key={shortcut}
-                  className={`grid items-center gap-2 rounded-xl border p-2 sm:grid-cols-[36px_minmax(140px,1fr)_110px_130px_34px] ${config.activeShortcut === shortcut ? 'border-violet-300/45 bg-violet-500/10' : 'border-white/8 bg-black/10'}`}
+                  className={`grid items-center gap-2 rounded-xl border p-2 sm:grid-cols-[36px_minmax(110px,0.8fr)_minmax(140px,1fr)_110px_130px_34px] ${config.activeShortcut === shortcut ? 'border-violet-300/45 bg-violet-500/10' : 'border-white/8 bg-black/10'}`}
                 >
                   <button
                     type="button"
                     disabled={!slot}
                     onClick={() => voice.activateVoiceNpcQuickSlot(shortcut)}
                     className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs font-black ${config.activeShortcut === shortcut ? 'bg-violet-400 text-violet-950' : 'bg-white/5 text-slate-400 disabled:opacity-35'}`}
-                    title={slot ? `切换为 ${slot.npcName}` : `快捷键 ${shortcut} 尚未绑定`}
+                    title={slot ? (config.activeShortcut === shortcut ? '恢复原声' : `切换为 ${slot.npcName}`) : `快捷键 ${shortcut} 尚未配置`}
                   >
                     {shortcut}
                   </button>
+                  <input
+                    aria-label={`快捷键 ${shortcut} 的角色名称`}
+                    value={slot?.npcName ?? ''}
+                    maxLength={80}
+                    placeholder="自定义角色名"
+                    onChange={(event) => updateSlot(shortcut, { npcName: event.target.value })}
+                    className="min-w-0 rounded-lg border border-white/8 bg-slate-950 px-2 py-2 text-xs text-slate-200 placeholder:text-slate-600"
+                  />
                   <select
-                    aria-label={`快捷键 ${shortcut} 的 NPC`}
+                    aria-label={`快捷键 ${shortcut} 关联的地图角色`}
                     value={slotValue}
                     onChange={(event) => {
                       if (!event.target.value) {
-                        voice.setVoiceNpcQuickSlot({ shortcut, clear: true })
+                        if (slot) voice.setVoiceNpcQuickSlot({
+                          shortcut,
+                          npcName: slot.npcName,
+                          selection: slot.selection,
+                        })
                         return
                       }
                       const option = npcOptions.find((candidate) => candidate.value === event.target.value)
@@ -167,7 +185,7 @@ export default function NpcVoiceChangerPanel() {
                     }}
                     className="min-w-0 rounded-lg border border-white/8 bg-slate-950 px-2 py-2 text-xs text-slate-200"
                   >
-                    <option value="">选择 NPC／怪物…</option>
+                    <option value="">不关联地图角色</option>
                     {npcOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.tokenName} · {option.mapName}</option>
                     ))}

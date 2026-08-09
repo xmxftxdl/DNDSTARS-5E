@@ -845,6 +845,41 @@ describe('SRD monster 5e turn planner', () => {
     })
   })
 
+  it('selects no more than three targets for Kraken Lightning Storm', () => {
+    const kraken = token({
+      id: 'kraken', label: 'Kraken', poolId: 'srd-5.1:kraken',
+      x: 5, y: 45, hp: 472, maxHp: 472,
+    })
+    const heroes = Array.from({ length: 4 }, (_, index) => token({
+      id: `kraken-target-${index + 1}`,
+      label: `Kraken Target ${index + 1}`,
+      type: 'player',
+      characterId: `kraken-character-${index + 1}`,
+      x: 25 + index * 20,
+      y: 45,
+      hp: 100,
+      maxHp: 100,
+    }))
+    const plan = planDnd5eMonsterTurn(
+      map([kraken, ...heroes]),
+      kraken,
+      heroes.map((hero) => character({
+        id: hero.characterId!, currentHp: 100, maxHp: 100,
+      })),
+      {
+        requiredActionId: 'lightning-storm',
+        requiredTargetId: heroes[0].id,
+      },
+    )
+    expect(plan.areaAction).toMatchObject({
+      actionId: 'lightning-storm',
+      saveAbility: 'dex',
+      saveDc: 23,
+    })
+    expect(plan.areaAction?.targetTokenIds).toHaveLength(3)
+    expect(plan.areaAction?.targetTokenIds).toContain(heroes[0].id)
+  })
+
   it('aims a self-origin breath along an airborne hostile line and excludes the ground below it', () => {
     const dragon = token({
       id: 'dragon', label: '成年黑龙', poolId: 'srd-5.1:adult-black-dragon',

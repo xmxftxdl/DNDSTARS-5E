@@ -29,6 +29,7 @@ import { DND5E_CLUB, DND5E_LEATHER_ARMOR, DND5E_LONGSWORD } from './equipment'
 import { applyDnd5eLongRestBenefits } from './campaignTimeRules'
 import { createDnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from './items'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -148,6 +149,215 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     } finally {
       dispose()
     }
+  })
+
+  it('casts Scorching Ray from the authoritative Circlet of Blasting without preparing or spending a class spell slot', () => {
+    const fighter = character('fighter', '战士', {
+      classResources: {},
+      dnd5eClassChoices: { classes: { fighter: { selections: {} } } },
+    })
+    const granted = applyDnd5eInventoryMutation([fighter], {
+      type: 'grant',
+      characterId: fighter.id,
+      templateId: 'srd-5.1:magic-item:circlet-of-blasting',
+      quantity: 1,
+    })
+    expect(granted.ok).toBe(true)
+    let owner = granted.characters[0]
+    const circlet = normalizeDnd5eInventory(owner).entries.find(
+      (entry) => entry.templateId === 'srd-5.1:magic-item:circlet-of-blasting',
+    )
+    expect(circlet).toBeDefined()
+    if (!circlet) return
+    const equipped = applyDnd5eInventoryMutation([owner], {
+      type: 'equip',
+      characterId: owner.id,
+      instanceId: circlet.instanceId,
+      slot: 'helmet',
+    })
+    expect(equipped.ok).toBe(true)
+    owner = equipped.characters[0]
+
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(owner, 'scorching-ray', 2, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'scorching-ray',
+      slotLevel: 2,
+      itemInstanceId: circlet.instanceId,
+      targetTokenId: enemy.id,
+      targetTokenIds: [enemy.id],
+      projectileTargetIds: [enemy.id, enemy.id, enemy.id],
+    }
+
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      castingClassId: undefined,
+      racialInnate: false,
+      spellAttackModifier: 5,
+      itemSpellSource: {
+        instanceId: circlet.instanceId,
+        itemName: circlet.item.name,
+        economy: 'action',
+      },
+    })
+    expect(previewDnd5eSpellAttack(prepared.prepared, 10).roll).toMatchObject({
+      d20: 10,
+      modifier: 5,
+      total: 15,
+    })
+
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      targetAttacks: Array.from({ length: 3 }, () => ({
+        targetId: enemy.id,
+        d20: 15,
+        effectRolls: [3, 4],
+      })),
+      effectRolls: [],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application).toBeDefined()
+    const settledOwner = resolved.application?.characters.find((candidate) => candidate.id === owner.id)
+    const settledCirclet = settledOwner
+      ? normalizeDnd5eInventory(settledOwner).entries.find((entry) => entry.instanceId === circlet.instanceId)
+      : undefined
+    expect(settledCirclet?.resources?.['daily-use']?.current).toBe(0)
+    expect(settledOwner?.classResources?.['dnd5e-spell-slot-2']).toBeUndefined()
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'spell-cast',
+      itemInstanceId: circlet.instanceId,
+      itemName: circlet.item.name,
+    }))
+
+    if (!settledOwner) return
+    const second = fixture(settledOwner, 'scorching-ray', 2, enemy)
+    second.action.dnd5eSpellCast = {
+      ...input.action.dnd5eSpellCast,
+      itemInstanceId: circlet.instanceId,
+    }
+    expect(prepareDnd5eSpellCast(second)).toEqual({ ok: false, reason: 'item-resource-unavailable' })
+  })
+
+  it('rejects a forged item spell source that is absent from the authoritative inventory', () => {
+    const fighter = character('fighter', '战士')
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(fighter, 'scorching-ray', 2, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'scorching-ray',
+      slotLevel: 2,
+      itemInstanceId: 'forged-circlet',
+      targetTokenId: enemy.id,
+      targetTokenIds: [enemy.id],
+      projectileTargetIds: [enemy.id, enemy.id, enemy.id],
+    }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'item-spell-unavailable' })
+  })
+
+  it('casts an explicitly selected upcast Magic Missile action and spends the shared wand charges', () => {
+    const fighter = character('wand-fighter', '战士', { classResources: {} })
+    const granted = applyDnd5eInventoryMutation([fighter], {
+      type: 'grant', characterId: fighter.id,
+      templateId: 'srd-5.1:magic-item:wand-of-magic-missiles', quantity: 1,
+    })
+    const wand = normalizeDnd5eInventory(granted.characters[0]).entries.find(
+      (entry) => entry.templateId === 'srd-5.1:magic-item:wand-of-magic-missiles',
+    )
+    expect(wand).toBeDefined()
+    if (!wand) return
+    const owner = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'equip', characterId: fighter.id, instanceId: wand.instanceId, slot: 'mainWeapon',
+    }).characters[0]
+    const enemy = token('wand-target', 'enemy', 125)
+    const input = fixture(owner, 'magic-missile', 3, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'magic-missile', slotLevel: 3,
+      itemInstanceId: wand.instanceId,
+      itemUseActionId: 'magic-missile-level-3',
+      targetTokenId: enemy.id,
+      targetTokenIds: [enemy.id],
+      projectileTargetIds: [enemy.id, enemy.id, enemy.id, enemy.id, enemy.id],
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      slotLevel: 3,
+      diceCount: 5,
+      itemSpellSource: {
+        instanceId: wand.instanceId,
+        useActionId: 'magic-missile-level-3',
+        costs: [{ kind: 'resource', resourceId: 'charges', amount: 3 }],
+      },
+    })
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      effectRolls: [1, 2, 3, 4, 1],
+    })
+    expect(resolved.result.ok).toBe(true)
+    const settledOwner = resolved.application?.characters.find((candidate) => candidate.id === owner.id)
+    expect(settledOwner && normalizeDnd5eInventory(settledOwner).entries.find(
+      (entry) => entry.instanceId === wand.instanceId,
+    )?.resources?.charges.current).toBe(4)
+    expect(settledOwner?.classResources?.['dnd5e-spell-slot-3']).toBeUndefined()
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'spell-cast', itemInstanceId: wand.instanceId,
+      itemUseActionId: 'magic-missile-level-3',
+    }))
+
+    const forged = fixture(owner, 'magic-missile', 3, enemy)
+    forged.action.dnd5eSpellCast = {
+      ...input.action.dnd5eSpellCast,
+      itemUseActionId: 'magic-missile-level-7',
+      slotLevel: 3,
+    }
+    expect(prepareDnd5eSpellCast(forged)).toEqual({ ok: false, reason: 'item-spell-unavailable' })
+  })
+
+  it('enforces the Ring of Jumping self-only target restriction from authoritative item data', () => {
+    const wizard = character('ring-wizard', '法师')
+    const granted = applyDnd5eInventoryMutation([wizard], {
+      type: 'grant',
+      characterId: wizard.id,
+      templateId: 'srd-5.1:magic-item:ring-of-jumping',
+      quantity: 1,
+    })
+    let owner = granted.characters[0]
+    const ring = normalizeDnd5eInventory(owner).entries.find(
+      (entry) => entry.templateId === 'srd-5.1:magic-item:ring-of-jumping',
+    )
+    expect(ring).toBeDefined()
+    if (!ring) return
+    owner = applyDnd5eInventoryMutation([owner], {
+      type: 'equip', characterId: owner.id, instanceId: ring.instanceId, slot: 'ring',
+    }).characters[0]
+    const inventory = normalizeDnd5eInventory(owner)
+    owner = {
+      ...owner,
+      dnd5eInventory: {
+        ...inventory,
+        entries: inventory.entries.map((entry) => entry.instanceId === ring.instanceId
+          ? { ...entry, attuned: true, attunedAt: 1 }
+          : entry),
+      },
+    }
+
+    const enemy = token('enemy', 'enemy', 125)
+    const hostile = fixture(owner, 'jump', 1, enemy)
+    hostile.action.dnd5eSpellCast = {
+      spellId: 'jump', slotLevel: 1, itemInstanceId: ring.instanceId,
+      targetTokenId: enemy.id, targetTokenIds: [enemy.id],
+    }
+    expect(prepareDnd5eSpellCast(hostile)).toEqual({ ok: false, reason: 'invalid-target' })
+
+    const self = fixture(owner, 'jump', 1, enemy)
+    self.action.targetTokenId = `${owner.id}-token`
+    self.action.dnd5eSpellCast = {
+      spellId: 'jump', slotLevel: 1, itemInstanceId: ring.instanceId,
+      targetTokenId: `${owner.id}-token`, targetTokenIds: [`${owner.id}-token`],
+    }
+    expect(prepareDnd5eSpellCast(self).ok).toBe(true)
   })
 
   it('binds a guessed spell-attack cell to the Host authoritative token snapshot', () => {
@@ -2055,7 +2265,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'invalid-target' })
   })
 
-  it('casts Spirit Guardians as an enemy-only aura attached to an evil caster', () => {
+  it('casts Spirit Guardians as a selectable-exclusion aura attached to an evil caster', () => {
     const cleric = character('cleric', '牧师', {
       alignment: '守序邪恶',
       dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['spirit-guardians'] } } } },
@@ -2066,6 +2276,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     input.action.dnd5eSpellCast = {
       spellId: 'spirit-guardians', slotLevel: 3,
       targetTokenId: input.action.actorTokenId, targetTokenIds: [],
+      excludedAreaTargetIds: [enemy.id],
     }
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
@@ -2074,7 +2285,8 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     const area = resolved.application?.map.dnd5ePluginAreas?.[0]
     expect(area).toMatchObject({
       coreSpellId: 'spirit-guardians', anchorMode: 'source-token',
-      anchorTokenId: input.action.actorTokenId, relation: 'enemy', movementCostMultiplier: 2,
+      anchorTokenId: input.action.actorTokenId, relation: 'any', movementCostMultiplier: 2,
+      excludedTargetIds: [enemy.id],
       visual: { preset: 'spirit-guardians', intensity: 'normal' },
     })
     expect(area?.triggers?.[0]).toMatchObject({

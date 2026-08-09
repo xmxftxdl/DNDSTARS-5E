@@ -41,6 +41,14 @@ export interface PdfRelationshipGraphPoint {
   y: number
 }
 
+type PdfGraphNamedRecord = PdfNamedRecordV1 & { id?: string; aliases?: string[] }
+type PdfGraphPersonRecord = PdfPersonRecordV1 & { id?: string; aliases?: string[] }
+type PdfGraphRelationshipRecord = PdfRelationshipRecordV1 & {
+  id?: string
+  fromEntityId?: string
+  toEntityId?: string
+}
+
 function normalizedName(value: string): string {
   return value.trim().toLocaleLowerCase()
 }
@@ -49,9 +57,9 @@ function nodeId(kind: PdfRelationshipNodeKind, name: string): string {
   return `${kind}:${normalizedName(name)}`
 }
 
-function namedNode(kind: Exclude<PdfRelationshipNodeKind, 'person' | 'unknown'>, record: PdfNamedRecordV1): PdfRelationshipGraphNode {
+function namedNode(kind: Exclude<PdfRelationshipNodeKind, 'person' | 'unknown'>, record: PdfGraphNamedRecord): PdfRelationshipGraphNode {
   return {
-    id: nodeId(kind, record.name),
+    id: record.id || nodeId(kind, record.name),
     kind,
     name: record.name,
     description: record.description,
@@ -59,9 +67,9 @@ function namedNode(kind: Exclude<PdfRelationshipNodeKind, 'person' | 'unknown'>,
   }
 }
 
-function personNode(record: PdfPersonRecordV1): PdfRelationshipGraphNode {
+function personNode(record: PdfGraphPersonRecord): PdfRelationshipGraphNode {
   return {
-    id: nodeId('person', record.name),
+    id: record.id || nodeId('person', record.name),
     kind: 'person',
     name: record.name,
     description: record.description,
@@ -86,10 +94,10 @@ function unorderedPair(left: string, right: string): string {
 }
 
 export function buildPdfRelationshipGraphModel(input: {
-  people: readonly PdfPersonRecordV1[]
-  factions: readonly PdfNamedRecordV1[]
-  locations: readonly PdfNamedRecordV1[]
-  relationships: readonly PdfRelationshipRecordV1[]
+  people: readonly PdfGraphPersonRecord[]
+  factions: readonly PdfGraphNamedRecord[]
+  locations: readonly PdfGraphNamedRecord[]
+  relationships: readonly PdfGraphRelationshipRecord[]
   scenes?: readonly PdfSceneRecordV1[]
 }): PdfRelationshipGraphModel {
   const nodes = new Map<string, PdfRelationshipGraphNode>()
@@ -98,16 +106,19 @@ export function buildPdfRelationshipGraphModel(input: {
   const seenEdges = new Set<string>()
   const explicitPairs = new Set<string>()
 
-  const register = (node: PdfRelationshipGraphNode) => {
+  const register = (node: PdfRelationshipGraphNode, record?: PdfGraphNamedRecord) => {
     nodes.set(node.id, node)
     if (!aliases.has(normalizedName(node.name))) aliases.set(normalizedName(node.name), node.id)
+    record?.aliases?.forEach((alias) => {
+      if (!aliases.has(normalizedName(alias))) aliases.set(normalizedName(alias), node.id)
+    })
   }
 
   input.people.forEach((record) => register(personRecordLooksLikeFaction(record)
     ? namedNode('faction', record)
-    : personNode(record)))
-  input.factions.forEach((record) => register(namedNode('faction', record)))
-  input.locations.forEach((record) => register(namedNode('location', record)))
+    : personNode(record), record))
+  input.factions.forEach((record) => register(namedNode('faction', record), record))
+  input.locations.forEach((record) => register(namedNode('location', record), record))
   for (const scene of input.scenes ?? []) {
     const sceneLocation = scene.location.trim()
     if (sceneLocation && !aliases.has(normalizedName(sceneLocation))) {
@@ -139,9 +150,13 @@ export function buildPdfRelationshipGraphModel(input: {
     return id
   }
 
-  const pushEdge = (relationship: PdfRelationshipRecordV1, origin: PdfRelationshipEdgeOrigin) => {
-    const sourceId = resolveEndpoint(relationship.from, relationship.citations)
-    const targetId = resolveEndpoint(relationship.to, relationship.citations)
+  const pushEdge = (relationship: PdfGraphRelationshipRecord, origin: PdfRelationshipEdgeOrigin) => {
+    const sourceId = relationship.fromEntityId && nodes.has(relationship.fromEntityId)
+      ? relationship.fromEntityId
+      : resolveEndpoint(relationship.from, relationship.citations)
+    const targetId = relationship.toEntityId && nodes.has(relationship.toEntityId)
+      ? relationship.toEntityId
+      : resolveEndpoint(relationship.to, relationship.citations)
     if (!sourceId || !targetId || sourceId === targetId) return
     const key = `${sourceId}\u0000${targetId}\u0000${normalizedName(relationship.type)}`
     if (seenEdges.has(key)) return
@@ -149,7 +164,7 @@ export function buildPdfRelationshipGraphModel(input: {
     seenEdges.add(key)
     if (origin === 'explicit') explicitPairs.add(unorderedPair(sourceId, targetId))
     edges.push({
-      id: `${origin}:${edges.length}:${sourceId}:${targetId}`,
+      id: relationship.id || `${origin}:${edges.length}:${sourceId}:${targetId}`,
       sourceId,
       targetId,
       relationship,

@@ -1,4 +1,5 @@
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
+import { syncCharacterClassResources } from '../../lib/classResources'
 import type {
   Character,
   Dnd5eLevelAdvancementDecisionV1,
@@ -33,6 +34,7 @@ import {
 } from './hitPoints'
 import {
   dnd5ePluginFeatAvailableForCharacter,
+  dnd5ePluginFeatureDefinition,
   dnd5ePluginSubclassChoiceLimit,
   dnd5ePluginSubclassDefinition,
   registeredDnd5ePluginFeats,
@@ -51,6 +53,10 @@ import {
   buildDnd5eSpellAdvancementPlan,
   type Dnd5eSpellAdvancementPlan,
 } from './spellAdvancement'
+import {
+  declarativeClassAdvancementResolutionV1,
+  declarativeClassContentBindingV1,
+} from './declarativeClass'
 
 const ABILITY_KEYS: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
 
@@ -87,10 +93,18 @@ export interface Dnd5eLevelAdvancementPlan {
   rolledHitPointsAllowed: boolean
 }
 
+export interface Dnd5eLevelAdvancementGrantedFeature {
+  id: string
+  level: number
+  name: string
+  description: string
+}
+
 export type Dnd5eLevelAdvancementFailure =
   | 'invalid-level-gain'
   | 'maximum-level'
   | 'invalid-class'
+  | 'class-content-version-mismatch'
   | 'multiclass-prerequisite'
   | 'rolled-hit-points-not-supported-for-multiclass'
   | 'invalid-hit-point-rolls'
@@ -118,6 +132,9 @@ function advancementSnapshot(character: Character): Dnd5eLevelAdvancementSnapsho
   return {
     level: character.level,
     dnd5eClassLevels: character.dnd5eClassLevels ? structuredClone(character.dnd5eClassLevels) : undefined,
+    dnd5eClassContentBindings: character.dnd5eClassContentBindings
+      ? structuredClone(character.dnd5eClassContentBindings)
+      : undefined,
     abilities: { ...character.abilities },
     skills: [...character.skills],
     dnd5eClassChoices: character.dnd5eClassChoices ? structuredClone(character.dnd5eClassChoices) : undefined,
@@ -173,7 +190,48 @@ function subclassProgressionFeatures(
     feature.level > fromClassLevel && feature.level <= toClassLevel)
 }
 
+/** Resolve the fixed class/subclass features saved by an advancement receipt. */
+export function dnd5eLevelAdvancementGrantedFeatures(
+  record: Pick<
+    Dnd5eLevelAdvancementRecordV1,
+    'classId' | 'fromClassLevel' | 'toClassLevel' | 'decision' | 'grantedFeatureIds'
+  >,
+): readonly Dnd5eLevelAdvancementGrantedFeature[] {
+  const candidates = [
+    ...progressionFeatures(record.classId, record.fromClassLevel, record.toClassLevel),
+    ...subclassProgressionFeatures(
+      record.classId,
+      record.decision.subclassId,
+      record.fromClassLevel,
+      record.toClassLevel,
+    ),
+  ]
+  const byId = new Map(candidates.map((feature) => [feature.id, feature]))
+  return [...new Set(record.grantedFeatureIds)]
+    .filter((featureId) => !featureId.startsWith('asi-'))
+    .map((featureId) => {
+      const feature = byId.get(featureId)
+      if (feature) return { ...feature }
+      const pluginFeature = dnd5ePluginFeatureDefinition(featureId)
+      return pluginFeature
+        ? {
+            id: pluginFeature.id,
+            level: record.toClassLevel,
+            name: pluginFeature.name,
+            description: pluginFeature.description,
+          }
+        : {
+            id: featureId,
+            level: record.toClassLevel,
+            name: featureId,
+            description: '对应规则内容当前未安装；升级授予记录仍然保留。',
+          }
+    })
+}
+
 function asiLevelsFor(classId: Dnd5eClassId, fromClassLevel: number, toClassLevel: number): number[] {
+  const declarative = declarativeClassAdvancementResolutionV1(classId, fromClassLevel, toClassLevel)
+  if (declarative) return [...declarative.abilityScoreImprovementLevels]
   return progressionFeatures(classId, fromClassLevel, toClassLevel)
     .filter((feature) => feature.id.startsWith('asi-'))
     .map((feature) => feature.level)
@@ -603,6 +661,14 @@ export function applyDnd5eLevelAdvancement(
   ) return { ok: false, reason: 'invalid-level-gain' }
   const definition = dnd5eClassDefinition(decision.classId)
   if (!definition) return { ok: false, reason: 'invalid-class' }
+  const installedBinding = declarativeClassContentBindingV1(decision.classId)
+  const storedBinding = character.dnd5eClassContentBindings?.[decision.classId]
+  if (storedBinding && (!installedBinding ||
+    storedBinding.packageId !== installedBinding.packageId ||
+    storedBinding.packageVersion !== installedBinding.packageVersion ||
+    storedBinding.contentVersion !== installedBinding.contentVersion)) {
+    return { ok: false, reason: 'class-content-version-mismatch' }
+  }
   const plan = buildDnd5eLevelAdvancementPlan(
     character,
     decision.classId,
@@ -650,6 +716,12 @@ export function applyDnd5eLevelAdvancement(
     ...character,
     level: plan.toLevel,
     dnd5eClassLevels: levels,
+    ...(installedBinding ? {
+      dnd5eClassContentBindings: {
+        ...character.dnd5eClassContentBindings,
+        [decision.classId]: installedBinding,
+      },
+    } : {}),
   }
   const asi = applyAsiChoices(provisional, plan, decision)
   if (!asi.ok) return asi
@@ -681,20 +753,18 @@ export function applyDnd5eLevelAdvancement(
   } else {
     provisional.hitPointMaximumMode = 'fixed'
   }
-  const advanced = syncDnd5eHitPoints(provisional)
+  const advanced = syncCharacterClassResources(syncDnd5eHitPoints(provisional))
   const now = options.completedAt ?? Date.now()
   const before = advancementSnapshot(character)
   const after = advancementSnapshot(advanced)
-  const featureIds = [
-    ...progressionFeatures(decision.classId, plan.fromClassLevel, plan.toClassLevel)
-      .map((feature) => feature.id),
-    ...subclassProgressionFeatures(
+  const featureIds = [...new Set([
+    ...(declarativeClassAdvancementResolutionV1(
       decision.classId,
-      subclassId,
       plan.fromClassLevel,
       plan.toClassLevel,
-    ).map((feature) => feature.id),
-  ]
+    )?.grantedFeatureIds ?? []),
+    ...plan.grantedFeatures.map((feature) => feature.id),
+  ])]
   const record: Dnd5eLevelAdvancementRecordV1 = {
     schemaVersion: 1,
     id: options.recordId ?? nextRecordId(now),

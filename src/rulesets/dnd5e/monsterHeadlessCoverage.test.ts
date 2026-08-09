@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   auditDnd5eMonsterHeadlessCoverage,
+  DND5E_MONSTER_NON_COMBAT_ACTION_KEYS,
   DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET,
   verifyDnd5eMonsterHeadlessCoverageRatchet,
 } from './monsterHeadlessCoverage'
@@ -27,12 +28,18 @@ describe('D&D 5e monster Headless coverage audit', () => {
       effective.headless +
       effective.dmAdjudication +
       effective.unstructured +
+      effective.nonCombat +
       effective.blockedByChild +
       effective.invalid,
     ).toBe(report.actions.summary.total)
     expect(effective.headless).toBeGreaterThanOrEqual(ratchet.actions.headlessMinimum)
     expect(effective.dmAdjudication).toBeLessThanOrEqual(ratchet.actions.dmAdjudicationMaximum)
     expect(effective.unstructured).toBeLessThanOrEqual(ratchet.actions.unstructuredMaximum)
+    expect(effective.nonCombat).toBe(ratchet.actions.nonCombatExact)
+    expect(report.actions.rows
+      .filter((row) => row.effectiveAutomation === 'non-combat')
+      .map((row) => `${row.slug}:${row.section}:${row.actionId}`).sort())
+      .toEqual([...DND5E_MONSTER_NON_COMBAT_ACTION_KEYS].sort())
     expect(effective.blockedByChild).toBeLessThanOrEqual(ratchet.actions.blockedByChildMaximum)
     expect(effective.invalid).toBe(0)
     expect(report.actions.rows

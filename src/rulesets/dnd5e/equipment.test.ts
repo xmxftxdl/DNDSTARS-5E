@@ -76,6 +76,25 @@ describe('D&D 5e 2014 fighter equipment', () => {
     })
   })
 
+  it('round-trips a held spellcasting focus without misclassifying it as a magic item', () => {
+    const focus = {
+      id: 'dnd5e-arcane-focus',
+      name: '奥术法器',
+      slot: 'mainWeapon' as const,
+      allowedSlots: ['mainWeapon', 'offHand'] as const,
+      spellcastingFocusClassIds: ['wizard', 'sorcerer', 'warlock'],
+    }
+
+    const normalized = normalizeDnd5eCharacterEquipment({
+      charClass: '法师',
+      equipment: { offHand: focus },
+    })
+
+    expect(normalized?.offHand).toEqual(focus)
+    expect(normalized?.offHand?.dnd5e).toBeUndefined()
+    expect(normalized?.offHand?.effects).toBeUndefined()
+  })
+
   it('migrates legacy +N magic weapons and drops invalid provenance values', () => {
     const legacyMagicWeapon = {
       ...structuredClone(DND5E_SHORTSWORD),

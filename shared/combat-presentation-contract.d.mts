@@ -77,6 +77,7 @@ export type CombatPresentationTargetEffectSpellId =
   | 'shillelagh'
 
 export type CombatPresentationAreaSpellId =
+  | 'dancing-lights'
   | 'burning-hands'
   | 'thunderwave'
   | 'shatter'

@@ -23,6 +23,10 @@ import { dnd5eInventoryHeadlessEffectSnapshots } from './inventoryHeadlessRuntim
 import { normalizeDnd5eInventory } from './items'
 import { normalizeDnd5eHitPointMaximumReductionLedger } from './hitPointMaximumReductions'
 import {
+  dnd5ePluginFeaturePassiveEffectSnapshots,
+  type Dnd5ePluginFeaturePassiveEffectSnapshot,
+} from './pluginFeaturePassiveEffects'
+import {
   dnd5eCharacterHasPluginFeature,
   dnd5ePluginBackgroundDefinition,
   dnd5ePluginRaceDefinition,
@@ -40,6 +44,7 @@ import {
   dnd5eRacialRulesForCharacter,
   type Dnd5eRacialRulesSnapshot,
 } from './racialAutomation'
+import { declarativeClassResourceDefinitionsV1 } from './declarativeClass'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -75,6 +80,7 @@ export interface Dnd5eCharacter {
   conditions: readonly string[]
   classResources: Record<string, { current: number; max: number }>
   inventoryHeadlessEffects?: readonly Dnd5eInventoryHeadlessEffectSnapshot[]
+  pluginFeaturePassiveEffects?: readonly Dnd5ePluginFeaturePassiveEffectSnapshot[]
   inventoryRevision?: number
   classId?: Dnd5eClassId
   subclassId?: string
@@ -95,6 +101,16 @@ export interface Dnd5eCharacter {
   armorStealthDisadvantage: boolean
   wearingHeavyArmor: boolean
   wearingMetalArmor: boolean
+  equippedArmor?: {
+    instanceId: string
+    equipmentId: string
+    magical: boolean
+    metal: boolean
+    baseProvidedArmorClass: number
+    armorClassPenalty: number
+    unarmoredArmorClass: number
+    destroyed: boolean
+  }
   hasShield: boolean
   classState: NonNullable<Character['dnd5eCombatState']>
   savingThrowEquipmentBonus?: number
@@ -131,7 +147,7 @@ function dnd5eRaceSizeRank(
 
 function dnd5eClassResources(character: Character): Record<string, { current: number; max: number }> {
   const resources = Object.fromEntries(Object.entries(character.classResources ?? {}).map(([key, value]) => [key, { ...value }]))
-  for (const definition of dnd5eRacialResourceDefinitions(character)) {
+  for (const definition of [...dnd5eRacialResourceDefinitions(character), ...declarativeClassResourceDefinitionsV1(character)]) {
     const maximum = Math.max(0, Math.floor(definition.max(character)))
     const existing = resources[definition.key]
     resources[definition.key] = {
@@ -256,6 +272,41 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     staticModifiers.flatMap((modifier) => modifier.damageImmunities ?? []),
   ) ?? []
   const inventory = normalizeDnd5eInventory(character)
+  const baseAbilities = character.rulesetId
+    ? { ...character.abilities }
+    : normalizeLegacyAbilities(character.abilities)
+  const abilityScoreReductionLedger = character.dnd5eCombatState?.abilityScoreReductionLedger ?? []
+  const effectiveAbilities = Object.fromEntries(
+    (Object.keys(baseAbilities) as AbilityKey[]).map((ability) => [
+      ability,
+      Math.max(0, baseAbilities[ability] - abilityScoreReductionLedger.reduce(
+        (sum, entry) => sum + (entry.ability === ability ? Math.max(0, Math.floor(entry.amount)) : 0),
+        0,
+      )),
+    ]),
+  ) as Record<AbilityKey, number>
+  const armorEntry = inventory.entries.find((entry) =>
+    entry.equippedSlot === 'armor' && entry.item.equipment?.dnd5e?.kind === 'armor')
+  const equippedArmorDefinition = armorEntry?.item.equipment?.dnd5e
+  const armorClassPenalty = Math.max(0, Math.floor(armorEntry?.condition?.armorClassPenalty ?? 0))
+  const armorDestroyed = armorEntry?.condition?.destroyed === true
+  const unarmoredArmorClass = dnd5eArmorClass({
+    ...character,
+    equipment: { ...character.equipment, armor: undefined },
+  })
+  const equippedArmor = armorEntry && equippedArmorDefinition?.kind === 'armor'
+    ? {
+        instanceId: armorEntry.instanceId,
+        equipmentId: armorEntry.item.equipment!.id,
+        magical: armorEntry.item.magicItem != null,
+        metal: equippedArmorDefinition.material === 'metal' ||
+          (equippedArmorDefinition.material == null && equippedArmorDefinition.category === 'heavy'),
+        baseProvidedArmorClass: equippedArmorDefinition.baseArmorClass,
+        armorClassPenalty,
+        unarmoredArmorClass,
+        destroyed: armorDestroyed,
+      }
+    : undefined
   return {
     id: character.id,
     name: character.name,
@@ -263,7 +314,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     race: character.race,
     raceId: character.dnd5eRaceId,
     level,
-    abilities: character.rulesetId ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
+    abilities: effectiveAbilities,
     savingThrowProficiencies: [...dnd5eEffectiveSavingThrowProficiencies(character)],
     skillProficiencies: [...new Set([
       ...character.skills,
@@ -274,7 +325,10 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       ...beguilingInfluenceSkills,
     ])],
     passivePerception: Math.max(0, Math.floor(character.passivePerception)),
-    armorClass: dnd5eArmorClass(character) + staticModifierTotal(staticModifiers, 'armorClassBonus'),
+    armorClass: (armorDestroyed
+      ? unarmoredArmorClass
+      : Math.max(0, dnd5eArmorClass(character) - armorClassPenalty)) +
+      staticModifierTotal(staticModifiers, 'armorClassBonus'),
     currentHp: exhaustionLevel >= 6 ? 0 : Math.max(0, Math.min(effectiveMaxHp, character.currentHp)),
     maxHp: effectiveMaxHp,
     temporaryHp: Math.max(0, Math.floor(character.tempHp)),
@@ -297,6 +351,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     conditions: [...character.conditions],
     classResources: dnd5eClassResources(character),
     inventoryHeadlessEffects: dnd5eInventoryHeadlessEffectSnapshots(character),
+    pluginFeaturePassiveEffects: dnd5ePluginFeaturePassiveEffectSnapshots(selectedPluginFeatures),
     inventoryRevision: inventory.revision ?? 0,
     classId: classDefinition?.id,
     subclassId,
@@ -322,13 +377,14 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     damageResistances: [...new Set(pluginDamageResistances)],
     damageImmunities: [...new Set(pluginDamageImmunities)],
     conditionImmunities: [...new Set(staticModifiers.flatMap((modifier) => modifier.conditionImmunities ?? []))],
-    wearingArmor: armor?.kind === 'armor' || !!character.equipment?.armor,
+    wearingArmor: !armorDestroyed && (armor?.kind === 'armor' || !!character.equipment?.armor),
     wearingUnproficientArmor: dnd5eWearingUnproficientArmor(character),
     armorStealthDisadvantage: dnd5eArmorImposesStealthDisadvantage(character),
-    wearingHeavyArmor: armor?.kind === 'armor' && armor.category === 'heavy',
-    wearingMetalArmor: armor?.kind === 'armor' && (
+    wearingHeavyArmor: !armorDestroyed && armor?.kind === 'armor' && armor.category === 'heavy',
+    wearingMetalArmor: !armorDestroyed && armor?.kind === 'armor' && (
       armor.material === 'metal' || (armor.material == null && armor.category === 'heavy')
     ),
+    equippedArmor,
     hasShield: character.equipment?.offHand?.dnd5e?.kind === 'shield',
     classState: { ...character.dnd5eCombatState },
     savingThrowEquipmentBonus: dnd5eEquippedEffectTotal(character, 'savingThrowBonus'),
@@ -385,8 +441,11 @@ export function createCombatantFromDnd5eCharacter(input: {
     position: { ...input.position },
     concentrating: character.concentrating,
     creatureType: '类人生物',
+    race: character.race,
+    raceId: character.raceId,
     classResources: character.classResources,
     inventoryHeadlessEffects: character.inventoryHeadlessEffects,
+    pluginFeaturePassiveEffects: character.pluginFeaturePassiveEffects,
     inventoryRevision: character.inventoryRevision,
     classId: character.classId,
     subclassId: character.subclassId,
@@ -400,6 +459,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     armorStealthDisadvantage: character.armorStealthDisadvantage,
     wearingHeavyArmor: character.wearingHeavyArmor,
     wearingMetalArmor: character.wearingMetalArmor,
+    equippedArmor: character.equippedArmor ? { ...character.equippedArmor } : undefined,
     hasShield: character.hasShield,
     damageResistances: character.damageResistances,
     damageImmunities: character.damageImmunities,

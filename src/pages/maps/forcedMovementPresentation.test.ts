@@ -7,12 +7,17 @@ function token(id: string, x: number, y: number): Token {
   return { id, x, y, label: id } as Token
 }
 
-function plan(tokens: Token[], changedTokenIds: string[]): Dnd5eMapResultPlan {
+function plan(
+  tokens: Token[],
+  changedTokenIds: string[],
+  tokenPatches?: Dnd5eMapResultPlan['tokenPatches'],
+): Dnd5eMapResultPlan {
   return {
     map: { id: 'map', tokens } as BattleMap,
     characters: [],
     changedCharacterIds: [],
     changedTokenIds,
+    tokenPatches,
   }
 }
 
@@ -32,6 +37,35 @@ describe('forced movement presentation', () => {
     })
 
     expect(result.map.tokens[0]).toMatchObject({
+      x: 60,
+      y: 20,
+      movementAnimation: {
+        id: 'forced-move:tx:goblin',
+        issuedAt: 1_000,
+        points: [{ x: 10, y: 20 }, { x: 60, y: 20 }],
+      },
+    })
+  })
+
+  it('copies the animation into an existing entity patch used by the commit coordinator', () => {
+    const result = withForcedMovementPresentation({
+      beforeMap: { id: 'map', tokens: [token('goblin', 10, 20)] } as BattleMap,
+      application: plan(
+        [token('goblin', 60, 20)],
+        ['goblin'],
+        { goblin: { x: 60, y: 20 } },
+      ),
+      events: [{
+        type: 'moved',
+        actorId: 'goblin',
+        from: { x: 10, y: 20 },
+        to: { x: 60, y: 20 },
+      }],
+      transactionId: 'tx',
+      issuedAt: 1_000,
+    })
+
+    expect(result.tokenPatches?.goblin).toMatchObject({
       x: 60,
       y: 20,
       movementAnimation: {

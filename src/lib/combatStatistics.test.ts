@@ -93,6 +93,16 @@ describe('Headless combat statistics', () => {
     expect(session.combatants.fighter).toMatchObject({ turnsTaken: 1 })
     expect(session.combatants.cleric).toMatchObject({ turnsTaken: 1 })
     expect(session.combatants.fighter.combatD20FaceCounts[19]).toBe(1)
+    expect(session.activityUsage['dnd5e-2014:core:movement:move']).toMatchObject({
+      definitionId: 'dnd5e-2014:core:movement:move',
+      executions: 2,
+      attacks: 1,
+      hits: 1,
+      criticalHits: 1,
+      damageDealt: 45,
+      healingDone: 8,
+      lastExecutionId: 'r2',
+    })
     const party = [session.combatants.fighter, session.combatants.cleric]
     expect(combatantOffensiveContributionIndex(session.combatants.fighter, party)).toBe(100)
     expect(combatantDefensiveContributionIndex(session.combatants.cleric, party)).toBe(100)
@@ -202,6 +212,7 @@ describe('Headless combat statistics', () => {
     const first = applyDnd5eCombatStatisticsObservation(undefined, observation)
     const replayed = applyDnd5eCombatStatisticsObservation(first, observation)
     expect(replayed.combatants.fighter.damageDealt).toBe(5)
+    expect(replayed.activityUsage['dnd5e-2014:core:movement:move'].executions).toBe(1)
 
     const shared = { schemaVersion: 1, sessions: [replayed], updatedAt: 10 }
     expect(normalizeSharedCombatStatistics(shared)?.sessions).toHaveLength(1)

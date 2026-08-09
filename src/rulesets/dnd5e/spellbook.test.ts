@@ -103,8 +103,8 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
       .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(107)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(78)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(29)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'full')).toHaveLength(79)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.automationLevel === 'partial')).toHaveLength(28)
     expect(entries.find((entry) => entry.id === 'meteor-swarm')).toMatchObject({
       headless: true,
       automationLevel: 'partial',
@@ -115,13 +115,17 @@ describe('D&D 5e room spellbook import', () => {
         additionalDamageComponents: [{ damageType: 'bludgeoning' }],
       },
     })
-    for (const spellId of ['mage-hand', 'darkness', 'daylight', 'spike-growth', 'spirit-guardians', 'see-invisibility', 'faerie-fire', 'shillelagh']) {
+    for (const spellId of ['mage-hand', 'darkness', 'daylight', 'spike-growth', 'see-invisibility', 'faerie-fire', 'shillelagh']) {
       expect(entries.find((entry) => entry.id === spellId)).toMatchObject({
         headless: true,
         automationLevel: 'partial',
         automationReason: expect.any(String),
       })
     }
+    expect(entries.find((entry) => entry.id === 'spirit-guardians')).toMatchObject({
+      headless: true,
+      automationLevel: 'full',
+    })
     expect(entries.find((entry) => entry.id === 'prayer-of-healing')).toMatchObject({
       headless: true,
       automationLevel: 'partial',

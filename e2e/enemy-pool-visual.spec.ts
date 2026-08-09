@@ -23,8 +23,37 @@ test('the complete monster pool keeps goblin searchable and shows its bundled to
     })
   })
 
+  await page.evaluate(() => {
+    const state = window as Window & {
+      __sawGlobalMapToolsLoading?: boolean
+      __mapToolsLoadingObserver?: MutationObserver
+    }
+    const detectGlobalFallback = () => {
+      if (document.body.textContent?.includes('正在加载地图工具')) {
+        state.__sawGlobalMapToolsLoading = true
+      }
+    }
+    state.__sawGlobalMapToolsLoading = false
+    state.__mapToolsLoadingObserver?.disconnect()
+    state.__mapToolsLoadingObserver = new MutationObserver(detectGlobalFallback)
+    state.__mapToolsLoadingObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    })
+    detectGlobalFallback()
+  })
+
   await page.getByRole('button', { name: '添加怪物' }).click()
   await expect(page.getByText('显示 334/334 项', { exact: false })).toBeVisible()
+  expect(await page.evaluate(() => {
+    const state = window as Window & {
+      __sawGlobalMapToolsLoading?: boolean
+      __mapToolsLoadingObserver?: MutationObserver
+    }
+    state.__mapToolsLoadingObserver?.disconnect()
+    return state.__sawGlobalMapToolsLoading
+  })).toBe(false)
 
   const search = page.getByPlaceholder('搜索名称、标签或描述…')
   await search.fill('哥布林')

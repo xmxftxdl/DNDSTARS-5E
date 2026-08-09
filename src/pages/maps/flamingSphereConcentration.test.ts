@@ -170,7 +170,15 @@ describe('Flaming Sphere concentration damage transaction', () => {
     })
 
     expect(rollD20).toHaveBeenCalledTimes(1)
-    expect(rollD20).toHaveBeenCalledWith('专注·体质豁免 DC 10', targetToken.label)
+    expect(rollD20).toHaveBeenCalledWith(
+      '专注·体质豁免 DC 10',
+      targetToken.label,
+      {
+        rollKind: 'saving-throw',
+        rollerCharacterId: 'target',
+        targetCharacterId: 'target',
+      },
+    )
     expect(settled.result.events).toContainEqual(expect.objectContaining({
       type: 'concentration-resolved',
       actorId: targetToken.id,

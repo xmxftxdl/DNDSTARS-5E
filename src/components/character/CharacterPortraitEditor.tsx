@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Crop, ImagePlus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import { Crop, ImagePlus, RotateCcw, Trash2, X } from 'lucide-react'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { generatedImageDataUrlToFile } from '../../lib/generatedImage'
+import AiImageGenerationButton from '../AiImageGenerationButton'
 import CharacterPortraitCropDialog from './CharacterTokenCropDialog'
 
 interface CharacterPortraitEditorProps {
@@ -11,6 +13,7 @@ interface CharacterPortraitEditorProps {
   portrait?: string
   initiativePortrait?: string
   tokenPortrait?: string
+  promptContext?: string
   editable?: boolean
   onChange: (portrait?: string) => void
   onInitiativePortraitChange: (initiativePortrait?: string) => void
@@ -24,6 +27,7 @@ export default function CharacterPortraitEditor({
   portrait,
   initiativePortrait,
   tokenPortrait,
+  promptContext,
   editable = true,
   onChange,
   onInitiativePortraitChange,
@@ -196,14 +200,17 @@ export default function CharacterPortraitEditor({
               >
                 <RotateCcw className="h-4 w-4" />跟随完整立绘
               </button>
-              <button
-                type="button"
-                disabled
-                title="AI 立绘生成功能将在后续版本接入"
-                className="flex items-center justify-center gap-2 rounded-xl border border-violet-400/10 bg-violet-500/[0.06] px-3 py-3 text-sm font-semibold text-violet-300/45"
-              >
-                <Sparkles className="h-4 w-4" />AI 生成（稍后）
-              </button>
+              <AiImageGenerationButton
+                label="AI 生成完整立绘"
+                title="AI 生成角色立绘"
+                disabled={busy}
+                className="py-3 text-sm"
+                defaultPrompt={`为 D&D 5E 角色“${name || '未命名冒险者'}”绘制高质量奇幻人物立绘。${promptContext ? `角色资料：${promptContext}。` : ''}单人，全身或四分之三身，清晰面部与服装细节，适合角色卡和圆形 Token 裁切，竖构图，画面中不要出现文字、标志、水印或边框。`}
+                onGenerated={async ({ dataUrl, mimeType }) => {
+                  const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]
+                  await upload(await generatedImageDataUrlToFile(dataUrl, `character-ai-portrait.${extension}`))
+                }}
+              />
               <button
                 type="button"
                 onClick={() => {

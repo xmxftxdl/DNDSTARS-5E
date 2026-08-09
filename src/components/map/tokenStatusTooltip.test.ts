@@ -38,6 +38,10 @@ describe('map Token status tooltips', () => {
       title: '伤害畏避',
       description: expect.stringContaining('火焰伤害'),
     })
+    expect(spellStatusTokenTooltip('monster-berserk')).toMatchObject({
+      title: '狂暴',
+      description: expect.stringContaining('最近的可见生物'),
+    })
   })
 
   it('names the concentrated spell and lists hidden overflow conditions', () => {

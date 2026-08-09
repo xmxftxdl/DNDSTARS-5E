@@ -92,9 +92,14 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('bless')!)).toMatchObject({
       automation: 'manual',
     })
-    for (const spellId of ['counterspell', 'darkness', 'shield']) {
+    for (const spellId of ['counterspell', 'shield']) {
       expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toMatchObject({
         automation: 'manual',
+      })
+    }
+    for (const spellId of ['cloudkill', 'darkness', 'spirit-guardians', 'wall-of-fire']) {
+      expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toEqual({
+        automation: 'full',
       })
     }
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('blight')!)).toMatchObject({

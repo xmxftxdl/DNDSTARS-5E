@@ -178,6 +178,34 @@ export function projectCharactersForRoomMember(
   value: Record<string, unknown>,
   member: Record<string, unknown>,
 ): Record<string, unknown> & { characters: Array<Record<string, unknown>> }
+export type PlayerExplorationMoveMutationResult =
+  | { ok: false; changed: false; status: number; error: string }
+  | {
+      ok: true
+      changed: boolean
+      next: Record<string, unknown> & {
+        maps: Array<Record<string, unknown> & {
+          tokens: Array<Record<string, unknown> & {
+            x: number
+            y: number
+            elevationFeet?: number
+          }>
+        }>
+        updatedAt?: number
+      }
+      mapId: string
+      tokenId: string
+      characterId: string
+      acceptedPosition: { x: number; y: number }
+      acceptedElevationFeet: number
+    }
+export function mutatePlayerExplorationMoveState(
+  current: unknown,
+  mutation: Record<string, unknown>,
+  now: number,
+  member: Record<string, unknown>,
+  context?: Record<string, unknown>,
+): PlayerExplorationMoveMutationResult
 export function projectDiceForRoomMember(value: Record<string, unknown>): Record<string, unknown> | null
 export function projectDiceEventsForRoomMember(
   value: Record<string, unknown>,

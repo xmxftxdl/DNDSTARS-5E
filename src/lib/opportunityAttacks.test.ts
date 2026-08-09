@@ -22,4 +22,17 @@ describe('D&D 5e combat token sides', () => {
     expect(areOpposedCombatTokens(hero, alliedSummon)).toBe(false)
     expect(areOpposedCombatTokens(enemy, alliedSummon)).toBe(true)
   })
+
+  it('treats a friendly monster as part of the player side', () => {
+    const hero = token('hero', 'player')
+    const hostileMonster = token('hostile', 'enemy')
+    const friendlyMonster = {
+      ...token('friendly', 'enemy'),
+      dnd5eSide: 'player' as const,
+    }
+
+    expect(dnd5eCombatTokenSide(friendlyMonster)).toBe('player')
+    expect(areOpposedCombatTokens(hero, friendlyMonster)).toBe(false)
+    expect(areOpposedCombatTokens(hostileMonster, friendlyMonster)).toBe(true)
+  })
 })

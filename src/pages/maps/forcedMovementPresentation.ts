@@ -1,6 +1,7 @@
 import type { BattleMap } from '../../store/maps'
 import type { Dnd5eMapResultPlan } from '../../rulesets/dnd5e'
 import { createTokenMovementAnimation } from '../../lib/tokenMovementAnimation'
+import { withTokenMovementPresentations } from './tokenMovementPresentation'
 
 export interface AuthoritativeMovedEvent {
   type: 'moved'
@@ -36,21 +37,23 @@ export function withForcedMovementPresentation(input: {
   if (paths.size === 0) return input.application
 
   const changed = new Set(input.application.changedTokenIds)
-  let decorated = false
-  const tokens = input.application.map.tokens.map((token) => {
+  const byTokenId: Record<
+    string,
+    NonNullable<ReturnType<typeof createTokenMovementAnimation>>
+  > = {}
+  for (const token of input.application.map.tokens) {
     const path = paths.get(token.id)
-    if (!path || !changed.has(token.id)) return token
+    if (!path || !changed.has(token.id)) continue
     const animation = createTokenMovementAnimation({
       id: `forced-move:${input.transactionId}:${token.id}`,
       path,
       finalPosition: { x: token.x, y: token.y },
       issuedAt: input.issuedAt,
     })
-    if (!animation) return token
-    decorated = true
-    return { ...token, movementAnimation: animation }
+    if (animation) byTokenId[token.id] = animation
+  }
+  return withTokenMovementPresentations({
+    application: input.application,
+    byTokenId,
   })
-  return decorated
-    ? { ...input.application, map: { ...input.application.map, tokens } }
-    : input.application
 }

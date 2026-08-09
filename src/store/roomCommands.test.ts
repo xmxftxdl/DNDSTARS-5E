@@ -9,7 +9,11 @@ import {
   removeRoomSpellEffectToken,
   replaceRoomCombatantActiveEffects,
   replaceRoomCharacterSpellSelections,
+  isEditableDnd5eSpellSlotResourceKey,
+  setRoomMonsterBerserk,
+  spendRoomCharacterClassResources,
   setRoomCharacterHitPoints,
+  setRoomCharacterSpellSlot,
 } from './roomCommands'
 import {
   clearPendingLocalCharacterHitPointEditsForTest,
@@ -78,6 +82,11 @@ describe('room command aggregate routing', () => {
       tokenId: 'token-a',
       activeEffects: [],
     })
+    await setRoomMonsterBerserk({
+      mapId: 'map-a',
+      tokenId: 'token-a',
+      active: true,
+    })
     await mutateRoomCharacterInventory({
       type: 'grant',
       characterId: 'character-a',
@@ -96,7 +105,9 @@ describe('room command aggregate routing', () => {
     expect(aggregateIds(commands[1])).toEqual([characterAggregate, tokenAggregate])
     expect(aggregateIds(commands[2])).toEqual([characterAggregate])
     expect(aggregateIds(commands[3])).toEqual([characterAggregate, tokenAggregate])
-    expect(aggregateIds(commands[4])).toEqual([characterAggregate])
+    expect(aggregateIds(commands[4])).toEqual([characterAggregate, tokenAggregate])
+    expect(commands[4]).toMatchObject({ type: 'combat.monster-berserk.set', active: true })
+    expect(aggregateIds(commands[5])).toEqual([characterAggregate])
   })
 
   it('orders HP and movement for one unlinked token without blocking another token', async () => {
@@ -183,6 +194,149 @@ describe('room command aggregate routing', () => {
       'room:maps:map-sphere:tokens:sphere-token',
       'room:maps:map-sphere:tokens:caster-token',
     ])
+  })
+})
+
+describe('spell slot room command authority', () => {
+  beforeEach(() => {
+    useCharacterStore.setState({
+      characters: [normalizeCharacter({
+        id: 'wizard-a',
+        name: '法师',
+        charClass: '法师',
+        level: 5,
+        dnd5eClassLevels: { wizard: 5 },
+        classResources: {
+          'dnd5e-spell-slot-1': { current: 4, max: 4 },
+        },
+      })],
+      selectedId: 'wizard-a',
+    })
+    vi.spyOn(useCharacterStore.getState(), 'saveSharedNow').mockResolvedValue(Date.now())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('lets the authority command change only the current count', async () => {
+    const result = await setRoomCharacterSpellSlot({
+      characterId: 'wizard-a',
+      resourceKey: 'dnd5e-spell-slot-1',
+      current: 2,
+    })
+
+    expect(result.status).toBe('applied')
+    expect(useCharacterStore.getState().characters[0].classResources?.['dnd5e-spell-slot-1']).toEqual({
+      current: 2,
+      max: 4,
+    })
+  })
+
+  it('rejects an over-maximum value and non-slot resources', async () => {
+    const excessive = await setRoomCharacterSpellSlot({
+      characterId: 'wizard-a',
+      resourceKey: 'dnd5e-spell-slot-1',
+      current: 5,
+    })
+    const unrelated = await setRoomCharacterSpellSlot({
+      characterId: 'wizard-a',
+      resourceKey: 'dnd5e-arcane-recovery',
+      current: 0,
+    })
+
+    expect(excessive.status).toBe('rejected')
+    expect(unrelated.status).toBe('rejected')
+    expect(useCharacterStore.getState().characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(4)
+    expect(isEditableDnd5eSpellSlotResourceKey('dnd5e-pact-slot')).toBe(true)
+    expect(isEditableDnd5eSpellSlotResourceKey('dnd5e-mystic-arcanum-6')).toBe(false)
+  })
+})
+
+describe('class resource spend room command authority', () => {
+  beforeEach(() => {
+    useCharacterStore.setState({
+      characters: [normalizeCharacter({
+        id: 'lucky-hero',
+        name: '幸运角色',
+        charClass: '法师',
+        level: 5,
+        dnd5eClassLevels: { wizard: 5 },
+        classResources: {
+          'dnd5e-spell-slot-1': { current: 3, max: 4 },
+        },
+      })],
+      selectedId: 'lucky-hero',
+    })
+    vi.spyOn(useCharacterStore.getState(), 'saveSharedNow').mockResolvedValue(Date.now())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('rejects an unavailable multi-resource cost without partially spending earlier entries', async () => {
+    const rejected = await spendRoomCharacterClassResources({
+      characterId: 'lucky-hero',
+      costs: [
+        { resourceKey: 'dnd5e-spell-slot-1', amount: 1 },
+        { resourceKey: 'test.lucky:missing-resource', amount: 1 },
+      ],
+      transactionId: 'choice-reroll-rejected',
+    })
+    expect(rejected.status).toBe('rejected')
+    expect(useCharacterStore.getState().characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(3)
+
+    const applied = await spendRoomCharacterClassResources({
+      characterId: 'lucky-hero',
+      costs: [{ resourceKey: 'dnd5e-spell-slot-1', amount: 1 }],
+      transactionId: 'choice-reroll-applied',
+    })
+    expect(applied.status).toBe('applied')
+    expect(useCharacterStore.getState().characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(2)
+
+    const replayed = await spendRoomCharacterClassResources({
+      characterId: 'lucky-hero',
+      costs: [{ resourceKey: 'dnd5e-spell-slot-1', amount: 1 }],
+      transactionId: 'choice-reroll-applied',
+    })
+    expect(replayed.status).toBe('applied')
+    expect(useCharacterStore.getState().characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(2)
+  })
+
+  it('spends character Inspiration atomically and does not double-spend a replayed transaction', async () => {
+    useCharacterStore.getState().applyAuthorityUpdate('lucky-hero', { inspiration: 2 })
+
+    const applied = await spendRoomCharacterClassResources({
+      characterId: 'lucky-hero',
+      costs: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }],
+      transactionId: 'core-inspiration-reroll',
+    })
+    expect(applied.status).toBe('applied')
+    expect(useCharacterStore.getState().characters[0].inspiration).toBe(1)
+
+    const replayed = await spendRoomCharacterClassResources({
+      characterId: 'lucky-hero',
+      costs: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }],
+      transactionId: 'core-inspiration-reroll',
+    })
+    expect(replayed.status).toBe('applied')
+    expect(useCharacterStore.getState().characters[0].inspiration).toBe(1)
+  })
+
+  it('rolls back a mixed Inspiration and class-resource spend when either cost is unavailable', async () => {
+    useCharacterStore.getState().applyAuthorityUpdate('lucky-hero', { inspiration: 1 })
+
+    const rejected = await spendRoomCharacterClassResources({
+      characterId: 'lucky-hero',
+      costs: [
+        { resourceKey: 'dnd5e-core-inspiration', amount: 1 },
+        { resourceKey: 'test.missing:resource', amount: 1 },
+      ],
+      transactionId: 'mixed-inspiration-rejected',
+    })
+    expect(rejected.status).toBe('rejected')
+    expect(useCharacterStore.getState().characters[0].inspiration).toBe(1)
   })
 })
 
@@ -302,7 +456,7 @@ describe('spell effect removal planning', () => {
     expect(plan.characters[0]?.dnd5eCombatState?.concentrationSpellId).toBe('fly')
   })
 
-  it('rejects a non-Flaming-Sphere spell entity instead of applying generic cleanup', () => {
+  it('removes any persistent spell entity without inventing a concentration cleanup', () => {
     const map = sphereMap()
     map.tokens[1] = {
       ...map.tokens[1],
@@ -315,10 +469,10 @@ describe('spell effect removal planning', () => {
 
     const plan = planRoomSpellEffectRemoval({ map, characters: [], tokenId: 'sphere-token' })
 
-    expect(plan.status).toBe('invalid')
-    expect(plan.map).toBe(map)
-    expect(plan.map.tokens.some((token) => token.id === 'sphere-token')).toBe(true)
-    expect(plan.map.dnd5ePluginAreas).toHaveLength(1)
+    expect(plan.status).toBe('removed')
+    expect(plan.concentrationEndedCharacterId).toBeUndefined()
+    expect(plan.map.tokens.some((token) => token.id === 'sphere-token')).toBe(false)
+    expect(plan.map.dnd5ePluginAreas).toHaveLength(0)
   })
 
   describe('authoritative command persistence', () => {
@@ -499,5 +653,52 @@ describe('room command HP conflict recovery', () => {
 
     settle({ status: 'submitted' })
     await expect(result).resolves.toEqual({ status: 'submitted' })
+  })
+})
+
+describe('DM monster runtime status commands', () => {
+  beforeEach(() => {
+    useCharacterStore.setState({ characters: [], selectedId: null })
+    useMapStore.setState({
+      maps: [{
+        id: 'map-berserk',
+        tokens: [{
+          id: 'flesh-golem',
+          label: '血肉魔像',
+          x: 0,
+          y: 0,
+          color: '#ef4444',
+          emoji: 'G',
+          type: 'enemy',
+          poolId: 'srd-5.1:flesh-golem',
+        }],
+      } as unknown as BattleMap],
+      selectedId: 'map-berserk',
+    })
+    vi.spyOn(useMapStore.getState(), 'saveSharedNow').mockResolvedValue()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('adds and removes berserk through the authoritative room command', async () => {
+    await expect(setRoomMonsterBerserk({
+      mapId: 'map-berserk',
+      tokenId: 'flesh-golem',
+      active: true,
+    })).resolves.toEqual({ status: 'applied' })
+    expect(useMapStore.getState().maps[0]?.tokens[0]?.dnd5eCombatState).toMatchObject({
+      schemaVersion: 2,
+      monsterBerserk: true,
+    })
+
+    await expect(setRoomMonsterBerserk({
+      mapId: 'map-berserk',
+      tokenId: 'flesh-golem',
+      active: false,
+    })).resolves.toEqual({ status: 'applied' })
+    expect(useMapStore.getState().maps[0]?.tokens[0]?.dnd5eCombatState?.monsterBerserk)
+      .toBeUndefined()
   })
 })

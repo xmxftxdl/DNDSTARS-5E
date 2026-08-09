@@ -32,7 +32,8 @@ export interface PlayerActionRejectionNotice {
 const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejectionNotice>> = {
   'component-unavailable': { title: '施法成分不可用', message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术需要尚未结构化管理的贵重／消耗材料。' },
   'verbal-component-unavailable': { title: '无法说出咒语', message: '角色处于沉默效果中，而该法术需要言语成分，本次施法未结算。' },
-  'material-component-unavailable': { title: '缺少施法材料', message: '该法术需要材料成分，但角色没有可用的材料包或对应职业施法法器，本次施法未结算。' },
+  'somatic-component-unavailable': { title: '无法完成施法姿势', message: '该法术需要姿势成分，但角色双手均被占用，且不能用持用法器的手完成该法术姿势；请先空出一只手。' },
+  'material-component-unavailable': { title: '缺少施法材料', message: '该法术需要材料成分，但角色没有用空手取用材料包，也没有在手中持用对应职业的施法法器，本次施法未结算。' },
   'costly-material-unavailable': { title: '缺少特殊材料', message: '该法术需要具有标价或会被消耗的材料；当前库存尚不能证明角色持有该材料，本次施法未结算。' },
   'spell-reaction-only': { title: '只能作为反应施放', message: '该法术的施法时间是反应，不能从普通动作法术栏直接发动；请等待对应触发条件。' },
   'spell-option-required': { title: '施法选项不完整', message: '该法术需要先选择伤害类型、效果分支或其他施法选项；当前选择缺失或已失效。' },

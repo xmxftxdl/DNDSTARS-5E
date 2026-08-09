@@ -98,6 +98,41 @@ describe('inventory Headless runtime V1', () => {
     })).toMatchObject({ amount: 12, applications: [] })
   })
 
+  it('rolls a Host-validated damage-reduction formula and reports the individual dice', () => {
+    const actor = combatant([snapshot({
+      schemaVersion: 1,
+      id: 'dice-ward',
+      kind: 'damage-reduction',
+      trigger: 'before-damage',
+      dice: { count: 2, sides: 6, bonus: 1 },
+    })])
+    const key = dnd5eInventoryEffectRollKey('item-1', 'dice-ward')
+    expect(resolveDnd5eInventoryDamageReduction({
+      combatant: actor,
+      amount: 20,
+      damageTypes: ['fire'],
+      turnKey: 'combat:1:hero',
+      rolls: { [key]: [2, 5] },
+    })).toEqual({
+      amount: 12,
+      applications: [{
+        instanceId: 'item-1', effectId: 'dice-ward', itemName: '测试魔法物品',
+        kind: 'damage-reduction', amount: 8,
+        dice: { sides: 6, rolls: [2, 5], bonus: 1 },
+      }],
+    })
+    expect(() => resolveDnd5eInventoryDamageReduction({
+      combatant: combatant([snapshot({
+        schemaVersion: 1, id: 'dice-ward', kind: 'damage-reduction', trigger: 'before-damage',
+        dice: { count: 1, sides: 4, bonus: 0 },
+      })]),
+      amount: 5,
+      damageTypes: ['fire'],
+      turnKey: 'combat:1:hero',
+      rolls: { [key]: [5] },
+    })).toThrow('invalid inventory damage reduction rolls')
+  })
+
   it('never spends a shared item resource more than once in one resolution', () => {
     const first = snapshot({
       schemaVersion: 1,

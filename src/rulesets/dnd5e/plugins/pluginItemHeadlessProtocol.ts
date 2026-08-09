@@ -2,12 +2,14 @@ import type {
   Dnd5eInventoryHeadlessEffect,
   Dnd5eInventoryItemTemplate,
   Dnd5eInventoryResourceDefinition,
+  Dnd5eInventoryUseAction,
 } from '../../../types/inventory'
 import { DND5E_DAMAGE_TYPES } from '../damageTypes'
+import { getDnd5eSrdCombatSpell } from '../spells'
 
 type ItemHeadlessDeclaration = Pick<
   Dnd5eInventoryItemTemplate,
-  'use' | 'resources' | 'headlessEffects'
+  'use' | 'useActions' | 'resources' | 'headlessEffects'
 >
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
@@ -26,11 +28,29 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
   hasEquipment: boolean
 }): {
   use: Dnd5eInventoryItemTemplate['use']
+  useActions: Dnd5eInventoryUseAction[] | undefined
   resources: Dnd5eInventoryResourceDefinition[] | undefined
   headlessEffects: Dnd5eInventoryHeadlessEffect[] | undefined
 } {
   const { itemId, definition } = input
   const use = definition.use
+  if (use && definition.useActions?.length) {
+    throw new Error(`Plugin item cannot declare both use and useActions: ${itemId}`)
+  }
+  const useActions = definition.useActions?.map((action) => {
+    if (!validId(action.id) || typeof action.label !== 'string' || !action.label.trim() || action.label.length > 160) {
+      throw new Error(`Invalid plugin item action: ${itemId}`)
+    }
+    const normalized = validateAndNormalizeDnd5ePluginItemHeadlessProtocol({
+      itemId: `${itemId}:${action.id}`,
+      definition: { use: action, resources: definition.resources },
+      hasEquipment: input.hasEquipment,
+    })
+    return { ...structuredClone(action), ...normalized.use!, label: action.label.trim() }
+  })
+  if (useActions && new Set(useActions.map((action) => action.id)).size !== useActions.length) {
+    throw new Error(`Duplicate plugin item action: ${itemId}`)
+  }
   if (use) {
     if (!['action', 'bonusAction', 'none'].includes(use.economy) || !finiteInteger(use.consumeQuantity, 0, 999)) {
       throw new Error(`Invalid plugin item use economy: ${itemId}`)
@@ -68,6 +88,25 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
         !finiteInteger(use.effect.amount, 1, 9) ||
         use.effect.selection !== 'selected-expended-slot'
       ) throw new Error(`Invalid plugin spell-slot recovery item: ${itemId}`)
+    } else if (use.effect.kind === 'spell-cast') {
+      const spell = typeof use.effect.spellId === 'string'
+        ? getDnd5eSrdCombatSpell(use.effect.spellId)
+        : undefined
+      const requiresSpellAttackBonus = spell?.effect === 'spell-attack'
+      const requiresSpellSaveDc = spell?.saveAbility != null || spell?.unwillingSaveAbility != null
+      if (
+        use.effect.schemaVersion !== 1 ||
+        !validId(use.effect.spellId) || !spell || spell.castingTime === 'reaction' ||
+        !finiteInteger(use.effect.castAtLevel, spell.level, 9) ||
+        (requiresSpellAttackBonus && use.effect.spellAttackBonus == null && use.effect.useCharacterSpellcasting !== true) ||
+        (requiresSpellSaveDc && use.effect.spellSaveDc == null && use.effect.useCharacterSpellcasting !== true) ||
+        (use.effect.spellSaveDc != null && !finiteInteger(use.effect.spellSaveDc, 1, 30)) ||
+        (use.effect.spellAttackBonus != null && !finiteInteger(use.effect.spellAttackBonus, -20, 30)) ||
+        (use.effect.useCharacterSpellcasting != null && typeof use.effect.useCharacterSpellcasting !== 'boolean') ||
+        (use.effect.requiresComponents != null && typeof use.effect.requiresComponents !== 'boolean') ||
+        (use.effect.targeting != null && !['spell-default', 'self-only'].includes(use.effect.targeting)) ||
+        use.targeting != null
+      ) throw new Error(`Invalid plugin item spell cast: ${itemId}`)
     } else {
       throw new Error(`Invalid plugin item effect: ${itemId}`)
     }
@@ -78,7 +117,18 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
       !validId(resource.id) || typeof resource.label !== 'string' || !resource.label.trim() || resource.label.length > 120 ||
       !finiteInteger(resource.maximum, 1, 1_000_000) ||
       (resource.initial != null && !finiteInteger(resource.initial, 0, resource.maximum)) ||
-      !['none', 'short-rest', 'long-rest', 'dawn'].includes(resource.resetOn)
+      !['none', 'short-rest', 'long-rest', 'dawn'].includes(resource.resetOn) ||
+      (resource.recovery != null && (
+        resource.recovery.kind !== 'dice' || resource.recovery.trigger !== 'dawn' || resource.resetOn !== 'dawn' ||
+        !finiteInteger(resource.recovery.dice.count, 1, 20) ||
+        !finiteInteger(resource.recovery.dice.sides, 2, 100) ||
+        !finiteInteger(resource.recovery.dice.bonus, -1000, 1000)
+      )) ||
+      (resource.lastChargeDestruction != null && (
+        resource.lastChargeDestruction.trigger !== 'spend-last-charge' ||
+        resource.lastChargeDestruction.dieSides !== 20 ||
+        !finiteInteger(resource.lastChargeDestruction.destroyOn, 1, 20)
+      ))
     ) throw new Error(`Invalid plugin item resource: ${itemId}:${resource.id}`)
     return { ...resource, label: resource.label.trim() }
   })
@@ -112,11 +162,23 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
         !finiteInteger(effect.damage.bonus, -1_000, 1_000) ||
         (effect.damageType !== 'inherit' && !(DND5E_DAMAGE_TYPES as readonly string[]).includes(effect.damageType)) ||
         (effect.doubleDiceOnCritical != null && typeof effect.doubleDiceOnCritical !== 'boolean') ||
-        (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean')
+        (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean') ||
+        (effect.targetCreatureTypes != null && (
+          !Array.isArray(effect.targetCreatureTypes) || effect.targetCreatureTypes.length > 32 ||
+          effect.targetCreatureTypes.some((type) => typeof type !== 'string' || !type.trim() || type.length > 80)
+        ))
       ) throw new Error(`Invalid plugin item bonus damage effect: ${itemId}`)
     } else if (effect.kind === 'damage-reduction') {
+      const hasFixedAmount = effect.amount != null
+      const hasDice = effect.dice != null
       if (
-        effect.trigger !== 'before-damage' || !finiteInteger(effect.amount, 1, 1_000_000) ||
+        effect.trigger !== 'before-damage' || hasFixedAmount === hasDice ||
+        (hasFixedAmount && !finiteInteger(effect.amount, 1, 1_000_000)) ||
+        (hasDice && (
+          !finiteInteger(effect.dice?.count, 1, 40) ||
+          !finiteInteger(effect.dice?.sides, 2, 100) ||
+          !finiteInteger(effect.dice?.bonus, -1_000, 1_000)
+        )) ||
         (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean') ||
         (effect.damageTypes != null && (
           !Array.isArray(effect.damageTypes) || effect.damageTypes.length > DND5E_DAMAGE_TYPES.length ||
@@ -135,5 +197,5 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
     return { ...effect, schemaVersion: 1 as const }
   })
 
-  return { use, resources, headlessEffects }
+  return { use, useActions, resources, headlessEffects }
 }

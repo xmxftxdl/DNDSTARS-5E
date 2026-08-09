@@ -131,6 +131,14 @@ export function resolveAndCommitDnd5eActivityCommand(
         consumptions: resolution.consumptions.filter((consumption) => consumption.kind !== 'item-charge'),
       }
     : resolution
+  const activity = getRegisteredDnd5eActivity(authority.command.packageId, authority.command.activityId)
+  const sourceKind = activity?.legacySource?.kind === 'spell'
+    ? 'spell' as const
+    : activity?.legacySource?.kind === 'item'
+      ? 'item' as const
+      : activity?.legacySource?.kind === 'monster' || activity?.legacySource?.kind === 'monster-action'
+        ? 'action' as const
+        : 'feature' as const
   const committed = commitDnd5eActivityExecution(source, {
     actorId: authority.command.actorId,
     activityId: authority.command.activityId,
@@ -138,6 +146,12 @@ export function resolveAndCommitDnd5eActivityCommand(
     targetIds: authority.command.targetIds,
     resolution: commitResolution,
     dmApproved: authority.dmApproved,
+    usageKeys: activity?.requirements?.flatMap((requirement) =>
+      requirement.kind === 'once-per-turn' ? [requirement.key] : []) ?? [],
+    source: {
+      kind: sourceKind,
+      id: activity?.legacySource?.id ?? authority.command.activityId,
+    },
   })
   return {
     phase: 'commit',

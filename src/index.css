@@ -1147,6 +1147,27 @@ html[data-theme="light"] :is([class~="fixed"][class~="inset-0"], [class~="fixed"
   animation: combat-banner-bard-sigil-bounce 1.35s cubic-bezier(.3, .05, .25, 1) infinite;
 }
 
+.combat-banner-class-backdrop__main--ranger {
+  width: 216px;
+  height: 216px;
+  opacity: .42;
+  animation-duration: 24s;
+}
+
+.combat-banner-class-backdrop__main--rogue {
+  width: 210px;
+  height: 210px;
+  opacity: .16;
+  animation-duration: 28s;
+}
+
+.combat-banner-class-backdrop__main--barbarian {
+  width: 220px;
+  height: 220px;
+  opacity: .18;
+  animation-duration: 12s;
+}
+
 .combat-banner-class-backdrop__mini {
   position: absolute;
   top: 50%;
@@ -1201,6 +1222,457 @@ html[data-theme="light"] :is([class~="fixed"][class~="inset-0"], [class~="fixed"
   right: 17%;
   --bard-note-x: -5px;
   animation-delay: -2.7s;
+}
+
+.combat-banner-class-backdrop__fighter-swords {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__fighter-sword {
+  position: absolute;
+  top: 50%;
+  width: 58px;
+  height: 76px;
+  overflow: visible;
+  opacity: .62;
+  filter:
+    saturate(.22)
+    drop-shadow(0 0 7px color-mix(in srgb, #cbd5e1 42%, transparent));
+  animation: combat-banner-fighter-sword-pulse 3.8s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__fighter-sword--left {
+  left: 8%;
+  transform: translateY(-52%);
+}
+
+.combat-banner-class-backdrop__fighter-sword--right {
+  right: 8%;
+  transform: translateY(-52%);
+  animation-delay: -1.9s;
+}
+
+@keyframes combat-banner-fighter-sword-pulse {
+  0%, 100% { opacity: .42; }
+  50% { opacity: .72; }
+}
+
+.combat-banner-class-backdrop__barbarian-skull {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: min(360px, 54%);
+  height: 198px;
+  overflow: visible;
+  opacity: .84;
+  transform: translate(-50%, -50%);
+  filter:
+    saturate(.72)
+    drop-shadow(0 0 13px color-mix(in srgb, var(--combat-banner-glow) 62%, transparent));
+}
+
+.combat-banner-class-backdrop__barbarian-skull-pulse {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: combat-banner-barbarian-skull-pulse 1.35s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__barbarian-eye-flare {
+  stroke-dasharray: 8 32;
+  animation: combat-banner-barbarian-eye-flare 1.35s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__barbarian-axes {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__barbarian-axe {
+  position: absolute;
+  top: 50%;
+  width: 78px;
+  height: 76px;
+  overflow: visible;
+  opacity: .66;
+  filter:
+    saturate(.55)
+    drop-shadow(0 0 8px color-mix(in srgb, var(--combat-banner-glow) 54%, transparent));
+  animation: combat-banner-barbarian-axe-pulse 2.7s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__barbarian-axe--left {
+  left: 6.5%;
+  transform: translateY(-50%) rotate(-4deg);
+}
+
+.combat-banner-class-backdrop__barbarian-axe--right {
+  right: 6.5%;
+  transform: translateY(-50%) scaleX(-1) rotate(-4deg);
+  animation-delay: -1.35s;
+}
+
+@keyframes combat-banner-barbarian-skull-pulse {
+  0%, 100% { transform: scale(.97); opacity: .48; }
+  45% { transform: scale(1.04); opacity: .92; }
+  62% { transform: scale(1); opacity: .72; }
+}
+
+@keyframes combat-banner-barbarian-eye-flare {
+  0%, 100% { stroke-dashoffset: 35; opacity: .25; }
+  45% { stroke-dashoffset: 0; opacity: 1; }
+}
+
+@keyframes combat-banner-barbarian-axe-pulse {
+  0%, 100% { opacity: .42; }
+  50% { opacity: .8; }
+}
+
+.combat-banner-class-backdrop__druid-saplings {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__druid-sapling {
+  position: absolute;
+  top: 50%;
+  width: 68px;
+  height: 74px;
+  overflow: visible;
+  opacity: .66;
+  filter:
+    saturate(.7)
+    drop-shadow(0 0 8px color-mix(in srgb, var(--combat-banner-glow) 48%, transparent));
+  animation: combat-banner-druid-sapling-pulse 4.2s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__druid-sapling--left {
+  left: 7.5%;
+  transform: translateY(-51%);
+}
+
+.combat-banner-class-backdrop__druid-sapling--right {
+  right: 7.5%;
+  transform: translateY(-51%) scaleX(-1);
+  animation-delay: -2.1s;
+}
+
+@keyframes combat-banner-druid-sapling-pulse {
+  0%, 100% { opacity: .44; }
+  50% { opacity: .76; }
+}
+
+.combat-banner-class-backdrop__sorcerer-waves {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave {
+  position: absolute;
+  top: 50%;
+  width: 94px;
+  height: 68px;
+  overflow: visible;
+  opacity: .68;
+  filter:
+    saturate(1.15)
+    drop-shadow(0 0 10px color-mix(in srgb, var(--combat-banner-glow) 58%, transparent));
+  animation: combat-banner-sorcerer-wave-pulse 3.2s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave--left {
+  left: 5.8%;
+  transform: translateY(-50%);
+}
+
+.combat-banner-class-backdrop__sorcerer-wave--right {
+  right: 5.8%;
+  transform: translateY(-50%) scaleX(-1);
+  animation-delay: -1.6s;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave-line {
+  stroke-dasharray: 13 8 3 8;
+  animation: combat-banner-sorcerer-wave-flow 2.4s linear infinite;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave-line--secondary {
+  animation-delay: -.8s;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave-line--tertiary {
+  animation-delay: -1.6s;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave-motes {
+  animation: combat-banner-sorcerer-wave-motes 2.2s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__sorcerer-wave--right .combat-banner-class-backdrop__sorcerer-wave-motes {
+  animation-delay: -1.1s;
+}
+
+@keyframes combat-banner-sorcerer-wave-pulse {
+  0%, 100% { opacity: .46; }
+  50% { opacity: .82; }
+}
+
+@keyframes combat-banner-sorcerer-wave-flow {
+  to { stroke-dashoffset: -32; }
+}
+
+@keyframes combat-banner-sorcerer-wave-motes {
+  0%, 100% { transform: translateX(-5px) translateY(4px); opacity: .28; }
+  50% { transform: translateX(5px) translateY(-4px); opacity: .92; }
+}
+
+.combat-banner-class-backdrop__warlock-books {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__warlock-book {
+  position: absolute;
+  top: 50%;
+  width: 82px;
+  height: 72px;
+  overflow: visible;
+  opacity: .7;
+  filter:
+    saturate(1.12)
+    drop-shadow(0 0 9px color-mix(in srgb, var(--combat-banner-glow) 58%, transparent));
+  animation: combat-banner-warlock-book-hover 3s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__warlock-book--left {
+  left: 6.5%;
+  transform: translateY(-50%);
+}
+
+.combat-banner-class-backdrop__warlock-book--right {
+  right: 6.5%;
+  transform: translateY(-50%);
+  animation-delay: -1.5s;
+}
+
+.combat-banner-class-backdrop__warlock-book-half {
+  transform-box: fill-box;
+  animation: combat-banner-warlock-book-open 2.8s cubic-bezier(.3, .04, .24, 1) infinite;
+}
+
+.combat-banner-class-backdrop__warlock-book-half--left {
+  transform-origin: right center;
+}
+
+.combat-banner-class-backdrop__warlock-book-half--right {
+  transform-origin: left center;
+}
+
+.combat-banner-class-backdrop__warlock-book--right .combat-banner-class-backdrop__warlock-book-half {
+  animation-delay: -.7s;
+}
+
+.combat-banner-class-backdrop__warlock-turning-page {
+  transform-box: fill-box;
+  transform-origin: left bottom;
+  animation: combat-banner-warlock-page-turn 2.8s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__warlock-book--right .combat-banner-class-backdrop__warlock-turning-page {
+  animation-delay: -.7s;
+}
+
+.combat-banner-class-backdrop__warlock-book-runes {
+  animation: combat-banner-warlock-runes-rise 2.8s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__warlock-book--right .combat-banner-class-backdrop__warlock-book-runes {
+  animation-delay: -.7s;
+}
+
+@keyframes combat-banner-warlock-book-hover {
+  0%, 100% { opacity: .5; }
+  50% { opacity: .82; }
+}
+
+@keyframes combat-banner-warlock-book-open {
+  0%, 8%, 100% { transform: scaleX(.2); opacity: .34; }
+  24%, 82% { transform: scaleX(1); opacity: 1; }
+  94% { transform: scaleX(.28); opacity: .5; }
+}
+
+@keyframes combat-banner-warlock-page-turn {
+  0%, 28% { transform: scaleX(1) skewY(0deg); opacity: 0; }
+  36% { opacity: .92; }
+  58% { transform: scaleX(.08) skewY(-8deg); opacity: .86; }
+  62% { transform: scaleX(-.08) skewY(8deg); opacity: .82; }
+  82% { transform: scaleX(-1) skewY(0deg); opacity: 0; }
+  100% { transform: scaleX(-1); opacity: 0; }
+}
+
+@keyframes combat-banner-warlock-runes-rise {
+  0%, 18%, 100% { transform: translateY(8px); opacity: 0; }
+  42%, 72% { transform: translateY(0); opacity: .9; }
+  88% { transform: translateY(-6px); opacity: 0; }
+}
+
+.combat-banner-class-backdrop__ranger-center {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: min(360px, 52%);
+  height: 180px;
+  overflow: visible;
+  opacity: .64;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 11px color-mix(in srgb, var(--combat-banner-glow) 52%, transparent));
+}
+
+.combat-banner-class-backdrop__ranger-compass-orbit {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: combat-banner-ranger-compass-orbit 15s linear infinite;
+}
+
+.combat-banner-class-backdrop__ranger-bows {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__ranger-bow {
+  position: absolute;
+  top: 50%;
+  width: 76px;
+  height: 70px;
+  overflow: visible;
+  opacity: .68;
+  filter:
+    saturate(.82)
+    drop-shadow(0 0 8px color-mix(in srgb, var(--combat-banner-glow) 52%, transparent));
+  animation: combat-banner-ranger-bow-pulse 4s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__ranger-bow--left {
+  left: 6.5%;
+  transform: translateY(-50%);
+}
+
+.combat-banner-class-backdrop__ranger-bow--right {
+  right: 6.5%;
+  transform: translateY(-50%) scaleX(-1);
+  animation-delay: -2s;
+}
+
+@keyframes combat-banner-ranger-compass-orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes combat-banner-ranger-bow-pulse {
+  0%, 100% { opacity: .46; }
+  50% { opacity: .8; }
+}
+
+.combat-banner-class-backdrop__rogue-eye {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: min(360px, 54%);
+  height: 164px;
+  overflow: visible;
+  opacity: .72;
+  transform: translate(-50%, -50%);
+  filter:
+    saturate(.26)
+    drop-shadow(0 0 11px color-mix(in srgb, var(--combat-banner-glow) 54%, transparent));
+}
+
+.combat-banner-class-backdrop__rogue-eye-lid {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: combat-banner-rogue-eye-blink 4s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__rogue-eye-scan {
+  stroke-dasharray: 14 130;
+  animation: combat-banner-rogue-eye-scan 2.3s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__rogue-eye-motes {
+  animation: combat-banner-rogue-eye-motes 2.8s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__rogue-tools {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__rogue-tool {
+  position: absolute;
+  top: 50%;
+  width: 78px;
+  height: 68px;
+  overflow: visible;
+  opacity: .68;
+  filter:
+    saturate(.28)
+    drop-shadow(0 0 8px color-mix(in srgb, var(--combat-banner-glow) 50%, transparent));
+  animation: combat-banner-rogue-tool-pulse 3.4s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__rogue-tool--left {
+  left: 6.5%;
+  transform: translateY(-50%);
+}
+
+.combat-banner-class-backdrop__rogue-tool--right {
+  right: 6.5%;
+  transform: translateY(-50%) scaleX(-1);
+  animation-delay: -1.7s;
+}
+
+.combat-banner-class-backdrop__rogue-tool-glint {
+  stroke-dasharray: 7 45;
+  animation: combat-banner-rogue-tool-glint 2s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__rogue-tool--right .combat-banner-class-backdrop__rogue-tool-glint {
+  animation-delay: -1s;
+}
+
+.combat-banner-class-backdrop__rogue-tool-sparks {
+  animation: combat-banner-rogue-tool-sparks 2.6s ease-in-out infinite;
+}
+
+@keyframes combat-banner-rogue-eye-blink {
+  0%, 38%, 50%, 100% { transform: scaleY(1); opacity: .82; }
+  44% { transform: scaleY(.12); opacity: .42; }
+}
+
+@keyframes combat-banner-rogue-eye-scan {
+  0%, 15% { stroke-dashoffset: 144; opacity: 0; }
+  42% { opacity: .95; }
+  75%, 100% { stroke-dashoffset: -144; opacity: 0; }
+}
+
+@keyframes combat-banner-rogue-eye-motes {
+  0%, 100% { transform: translate(-4px, 4px); opacity: .18; }
+  50% { transform: translate(5px, -4px); opacity: .72; }
+}
+
+@keyframes combat-banner-rogue-tool-pulse {
+  0%, 100% { opacity: .44; }
+  50% { opacity: .8; }
+}
+
+@keyframes combat-banner-rogue-tool-glint {
+  0%, 14% { stroke-dashoffset: 52; opacity: 0; }
+  42% { opacity: 1; }
+  75%, 100% { stroke-dashoffset: -52; opacity: 0; }
+}
+
+@keyframes combat-banner-rogue-tool-sparks {
+  0%, 100% { transform: translate(-3px, 4px); opacity: .2; }
+  50% { transform: translate(4px, -4px); opacity: .78; }
 }
 
 @keyframes combat-banner-class-sigil {
@@ -1305,7 +1777,27 @@ html[data-theme="light"] :is([class~="fixed"][class~="inset-0"], [class~="fixed"
   .combat-action-banner__aether,
   .combat-action-banner__runes,
   .combat-banner-class-backdrop__main--bard,
-  .combat-banner-class-backdrop__bard-note {
+  .combat-banner-class-backdrop__bard-note,
+  .combat-banner-class-backdrop__fighter-sword,
+  .combat-banner-class-backdrop__barbarian-skull-pulse,
+  .combat-banner-class-backdrop__barbarian-eye-flare,
+  .combat-banner-class-backdrop__barbarian-axe,
+  .combat-banner-class-backdrop__druid-sapling,
+  .combat-banner-class-backdrop__sorcerer-wave,
+  .combat-banner-class-backdrop__sorcerer-wave-line,
+  .combat-banner-class-backdrop__sorcerer-wave-motes,
+  .combat-banner-class-backdrop__warlock-book,
+  .combat-banner-class-backdrop__warlock-book-half,
+  .combat-banner-class-backdrop__warlock-turning-page,
+  .combat-banner-class-backdrop__warlock-book-runes,
+  .combat-banner-class-backdrop__ranger-compass-orbit,
+  .combat-banner-class-backdrop__ranger-bow,
+  .combat-banner-class-backdrop__rogue-eye-lid,
+  .combat-banner-class-backdrop__rogue-eye-scan,
+  .combat-banner-class-backdrop__rogue-eye-motes,
+  .combat-banner-class-backdrop__rogue-tool,
+  .combat-banner-class-backdrop__rogue-tool-glint,
+  .combat-banner-class-backdrop__rogue-tool-sparks {
     animation: none;
   }
 }

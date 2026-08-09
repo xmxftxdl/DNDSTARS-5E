@@ -14,11 +14,14 @@ export function wallOfFireTargetingCells(
   anchor: GridCell,
   map: BattleMap,
 ): GridCell[] | undefined {
-  if (targeting?.spellId !== 'wall-of-fire') return undefined
+  if (targeting?.spellId !== 'wall-of-fire' && targeting?.spellId !== 'blade-barrier') return undefined
+  const blade = targeting.spellId === 'blade-barrier'
   return dnd5eWallOfFireCells({
     anchor,
-    shape: targeting.wallOfFireShape ?? 'line',
-    angleDegrees: targeting.wallOfFireAngleDegrees ?? 0,
+    shape: blade ? targeting.bladeBarrierShape ?? 'line' : targeting.wallOfFireShape ?? 'line',
+    angleDegrees: blade ? targeting.bladeBarrierAngleDegrees ?? 0 : targeting.wallOfFireAngleDegrees ?? 0,
+    lengthFeet: blade ? targeting.bladeBarrierLengthFeet ?? 100 : targeting.wallOfFireLengthFeet,
+    diameterFeet: blade ? targeting.bladeBarrierDiameterFeet ?? 60 : targeting.wallOfFireDiameterFeet,
     map,
   })
 }
@@ -37,6 +40,9 @@ export function wallOfFireTargetingPreview(input: {
     input.caster,
     input.caster,
   )
+  if (input.targeting.spellId === 'blade-barrier') {
+    return { cells, hazardCells: [], rangeCells, valid, variant: 'attack' as const, areaPolygon: undefined }
+  }
   const shape = input.targeting.wallOfFireShape ?? 'line'
   const angleDegrees = input.targeting.wallOfFireAngleDegrees ?? 0
   const damagingSide = input.targeting.wallOfFireDamagingSide ??
@@ -48,6 +54,8 @@ export function wallOfFireTargetingPreview(input: {
     shape,
     angleDegrees,
     damagingSide,
+    lengthFeet: input.targeting.wallOfFireLengthFeet,
+    diameterFeet: input.targeting.wallOfFireDiameterFeet,
     map: input.map,
   }).filter((cell) => !wallCellKeys.has(cellKey(cell)))
   const radians = angleDegrees * Math.PI / 180
@@ -57,7 +65,7 @@ export function wallOfFireTargetingPreview(input: {
   }
   const along = { x: Math.cos(radians), y: Math.sin(radians) }
   const normal = { x: -along.y, y: along.x }
-  const halfLength = input.map.gridSize * 6
+  const halfLength = input.map.gridSize * ((input.targeting.wallOfFireLengthFeet ?? 60) / 10)
   const halfWidth = input.map.gridSize * 0.5
   const areaPolygon = shape === 'line' ? [
     center.x - along.x * halfLength + normal.x * halfWidth, center.y - along.y * halfLength + normal.y * halfWidth,
@@ -69,10 +77,18 @@ export function wallOfFireTargetingPreview(input: {
 }
 
 export function wallOfFirePayload(targeting: Dnd5eSpellTargetingSession | null) {
+  if (targeting?.spellId === 'blade-barrier') return {
+    bladeBarrierShape: targeting.bladeBarrierShape ?? 'line' as const,
+    bladeBarrierAngleDegrees: targeting.bladeBarrierAngleDegrees ?? 0,
+    bladeBarrierLengthFeet: targeting.bladeBarrierLengthFeet ?? 100,
+    bladeBarrierDiameterFeet: targeting.bladeBarrierDiameterFeet ?? 60,
+  }
   return targeting?.spellId === 'wall-of-fire' ? {
     wallOfFireShape: targeting.wallOfFireShape ?? 'line' as const,
     wallOfFireAngleDegrees: targeting.wallOfFireAngleDegrees ?? 0,
     wallOfFireDamagingSide: targeting.wallOfFireDamagingSide ??
       ((targeting.wallOfFireShape ?? 'line') === 'ring' ? 'outside' as const : 'right' as const),
+    wallOfFireLengthFeet: targeting.wallOfFireLengthFeet ?? 60,
+    wallOfFireDiameterFeet: targeting.wallOfFireDiameterFeet ?? 20,
   } : {}
 }

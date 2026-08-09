@@ -22,8 +22,10 @@ import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus } from 'lu
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { generatedImageDataUrlToFile } from '../../lib/generatedImage'
 import { deleteImage, getImage, putImage } from '../../lib/imageStore'
-import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import AiImageGenerationButton from '../AiImageGenerationButton'
+import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import {
   getDnd5eSrdMonster,
   type Dnd5eMonsterBehaviorStyle,
@@ -94,6 +96,7 @@ export default function EnemyDetailPanel({
   removeToken,
   canManageConditions = false,
   onConditionsChange,
+  onMonsterBerserkChange,
   conditionSourceOptions = [],
   canUseMonsterActions = false,
   monsterActionUsed = false,
@@ -117,6 +120,7 @@ export default function EnemyDetailPanel({
   removeToken?: (mapId: string, tokenId: string) => void
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
+  onMonsterBerserkChange?: (active: boolean) => void
   conditionSourceOptions?: readonly { id: string; label: string }[]
   canUseMonsterActions?: boolean
   monsterActionUsed?: boolean
@@ -154,6 +158,10 @@ export default function EnemyDetailPanel({
   ]
   const description = template?.description ?? token.playerVisibleEnemyDetail?.description
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
+  const monsterCombatState = linked?.dnd5eCombatState ?? token.dnd5eCombatState
+  const supportsBerserk = monsterCombatState?.monsterBerserk === true ||
+    token.poolId?.endsWith(':flesh-golem') === true ||
+    stats?.traits.some((trait) => /狂暴|berserk/i.test(trait.name)) === true
   const authoritativeCurrentHp = linked?.currentHp ?? curHp
   const authoritativeMaxHp = linked?.maxHp ?? maxHp
   const [currentHpDraft, setCurrentHpDraft] = useState(String(authoritativeCurrentHp))
@@ -261,6 +269,11 @@ export default function EnemyDetailPanel({
             {stats && (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
                 CR {stats.cr}
+              </span>
+            )}
+            {dnd5eCombatTokenSide(token) === 'player' && (
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">
+                玩家友方
               </span>
             )}
           </div>
@@ -415,6 +428,17 @@ export default function EnemyDetailPanel({
                 <ImagePlus className="h-3.5 w-3.5" />
                 {portraitBusy ? '处理中…' : token.portraitImageId ? '替换怪物立绘' : '上传怪物立绘'}
               </button>
+              <AiImageGenerationButton
+                label="AI 生成"
+                title="AI 生成怪物立绘"
+                disabled={portraitBusy}
+                className="rounded-lg px-2 py-1"
+                defaultPrompt={`为 D&D 5E 怪物“${name}”绘制原创奇幻立绘。设定：${[creatureSize, ...creatureTypes, ...templateTags].filter(Boolean).join('、') || '未知怪物'}。${description ? `资料：${description}。` : ''}竖版 3:4，单体，全身或四分之三身，主体居中，轮廓清晰，适合裁切为圆形地图 Token；简洁背景，不要出现文字、标志、水印或边框。`}
+                onGenerated={async ({ dataUrl, mimeType }) => {
+                  const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]
+                  await uploadPortrait(await generatedImageDataUrlToFile(dataUrl, `monster-ai-portrait.${extension}`))
+                }}
+              />
               {(token.portraitImageId || token.tokenPortraitImageId) && (
                 <button
                   type="button"
@@ -542,6 +566,16 @@ export default function EnemyDetailPanel({
               targetId={token.id}
               sourceOptions={conditionSourceOptions}
               conditionImmunities={stats?.conditionImmunities}
+              runtimeStatuses={supportsBerserk ? [{
+                id: 'monster-berserk',
+                label: '狂暴',
+                description: '按狂暴规则攻击最近的可见生物，直到规则效果或 DM 将其解除。',
+                glyph: '怒',
+                active: monsterCombatState?.monsterBerserk === true,
+              }] : []}
+              onRuntimeStatusChange={(statusId, active) => {
+                if (statusId === 'monster-berserk') onMonsterBerserkChange?.(active)
+              }}
               onChange={onConditionsChange}
             />
           </div>

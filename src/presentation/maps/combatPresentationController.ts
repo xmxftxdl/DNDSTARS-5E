@@ -59,9 +59,9 @@ export async function publishNamedActionPresentation(input: {
   actionName: string
   character?: Character
   classId?: string
-}): Promise<void> {
+}): Promise<{ completesAt: number }> {
   const eventId = input.ids.create('named-action')
-  await publishAttackBannerPresentation({
+  return publishAttackBannerPresentation({
     id: `${eventId}:banner`,
     mapId: input.mapId,
     transactionId: input.transactionId ?? eventId,

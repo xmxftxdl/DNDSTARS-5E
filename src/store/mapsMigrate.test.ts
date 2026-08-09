@@ -87,6 +87,26 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.visualVariantId).toBeUndefined()
   })
 
+  it('keeps valid token sides and drops malformed allegiance values', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map',
+        name: '地图',
+        width: 100,
+        height: 100,
+        tokens: [
+          { id: 'friendly', type: 'enemy', dnd5eSide: 'player' },
+          { id: 'hostile', type: 'enemy', dnd5eSide: 'enemy' },
+          { id: 'unsafe', type: 'enemy', dnd5eSide: 'spectator' },
+        ],
+      }],
+    })
+
+    expect(result.maps[0].tokens.find((token) => token.id === 'friendly')?.dnd5eSide).toBe('player')
+    expect(result.maps[0].tokens.find((token) => token.id === 'hostile')?.dnd5eSide).toBe('enemy')
+    expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.dnd5eSide).toBeUndefined()
+  })
+
   it('keeps safe room portrait references and drops unsafe token-crop references', () => {
     const result = migrateMapsState({
       maps: [{

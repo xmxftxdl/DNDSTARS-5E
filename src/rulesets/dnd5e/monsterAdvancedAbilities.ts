@@ -56,8 +56,12 @@ const MONSTER_CORE_CONTROL_SPELL_IDS = new Set([
 
 const MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS = new Set([
   'blade-barrier',
+  'cloudkill',
+  'darkness',
   'entangle',
   'insect-plague',
+  'spirit-guardians',
+  'wall-of-fire',
 ])
 
 /**
@@ -75,12 +79,7 @@ export function dnd5eMonsterCoreSpellCompatibility(
     if (MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS.has(spell.id)) {
       return { automation: 'full' }
     }
-    return {
-      automation: 'manual',
-      reason: spell.id === 'cloudkill'
-        ? '毒雾的自动移动、下沉与强风驱散尚未进入共享地图事务'
-        : '该持续区域尚未进入怪物核心法术事务白名单',
-    }
+    return { automation: 'manual', reason: '该持续区域尚未进入怪物核心法术事务白名单' }
   }
   if (['blight', 'disintegrate', 'finger-of-death'].includes(spell.id)) {
     return {

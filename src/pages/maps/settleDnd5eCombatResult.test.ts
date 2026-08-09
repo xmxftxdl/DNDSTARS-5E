@@ -193,7 +193,11 @@ describe('地图战斗结果结算器', () => {
       rollDice: async () => [],
     })
 
-    expect(rollD20).toHaveBeenCalledWith('专注·体质豁免 DC 10', 'hero')
+    expect(rollD20).toHaveBeenCalledWith(
+      '专注·体质豁免 DC 10',
+      'hero',
+      expect.objectContaining({ rollKind: 'saving-throw' }),
+    )
     expect(settled.result.state.combatants.hero.concentrating).toBe(false)
     expect(settled.result.events).toContainEqual(expect.objectContaining({
       type: 'concentration-resolved',

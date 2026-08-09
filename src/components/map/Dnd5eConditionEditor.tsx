@@ -89,11 +89,21 @@ export interface Dnd5eConditionSourceOption {
   label: string
 }
 
+export interface Dnd5eRuntimeStatusOption {
+  id: string
+  label: string
+  description: string
+  glyph: string
+  active: boolean
+}
+
 export default function Dnd5eConditionEditor({
   activeEffects,
   targetId = 'unknown-target',
   sourceOptions = [],
   conditionImmunities = [],
+  runtimeStatuses = [],
+  onRuntimeStatusChange,
   onChange,
 }: {
   conditions: readonly string[]
@@ -101,6 +111,8 @@ export default function Dnd5eConditionEditor({
   targetId?: string
   sourceOptions?: readonly Dnd5eConditionSourceOption[]
   conditionImmunities?: readonly string[]
+  runtimeStatuses?: readonly Dnd5eRuntimeStatusOption[]
+  onRuntimeStatusChange?: (statusId: string, active: boolean) => void
   onChange: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
 }) {
   const effects = useMemo(() => normalizeDnd5eActiveEffects(activeEffects), [activeEffects])
@@ -148,6 +160,35 @@ export default function Dnd5eConditionEditor({
         </div>
         <span className="rounded-full bg-violet-400/10 px-2 py-0.5 text-[10px] text-violet-200">实例 {effects.length}</span>
       </div>
+
+      {runtimeStatuses.length > 0 ? (
+        <div className="mb-3 rounded-lg border border-rose-300/15 bg-rose-500/[0.06] p-2">
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-rose-200/75">怪物专属状态</p>
+          <div className="flex flex-wrap gap-1.5">
+            {runtimeStatuses.map((status) => (
+              <button
+                key={status.id}
+                type="button"
+                data-testid={`dnd5e-runtime-status-toggle-${status.id}`}
+                aria-pressed={status.active}
+                title={`${status.active ? '移除' : '附加'}${status.label}：${status.description}`}
+                onClick={() => onRuntimeStatusChange?.(status.id, !status.active)}
+                className={[
+                  'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors',
+                  status.active
+                    ? 'border-rose-300/55 bg-rose-500/25 font-semibold text-rose-50'
+                    : 'border-white/8 bg-void-950/35 text-slate-400 hover:border-rose-300/30 hover:bg-rose-500/10 hover:text-slate-200',
+                ].join(' ')}
+              >
+                <span aria-hidden="true" className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-950 text-[10px] text-rose-200">{status.glyph}</span>
+                {status.label}
+                {status.active ? <Trash2 className="h-3 w-3 text-rose-200/70" aria-hidden="true" /> : null}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] leading-4 text-slate-500">专属状态会直接影响怪物 Headless 行为，并与标准 ActiveEffect 分开保存。</p>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-3 gap-1.5">
         {DND5E_STANDARD_CONDITION_IDS.map((condition) => {

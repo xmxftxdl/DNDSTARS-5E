@@ -5,17 +5,19 @@ import {
   type PdfAnalysisDepthV1,
   type PdfCampaignChunkAnalysisV1,
 } from './pdfCampaignAnalysis'
+import { PDF_EVIDENCE_SCHEMA_VERSION, type PdfSourcePageV2 } from './pdfCampaignAnalysisV2'
+import { PDF_DOCUMENT_CHUNKER_VERSION } from './pdfDocumentChunker'
 
 const DATABASE_NAME = 'astral-trace-ai-cache'
-const DATABASE_VERSION = 1
-const STORE_NAME = 'pdf-analysis-v1'
-const CACHE_SCHEMA_VERSION = 1
+const DATABASE_VERSION = 2
+const STORE_NAME = 'pdf-analysis-v2'
+const CACHE_SCHEMA_VERSION = 2
 const MAX_CACHE_RECORDS = 8
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1_000
 const MAX_EXTRACTED_CHARACTERS = 80 * 1024 * 1024
 
 export interface PdfAnalysisCacheRecordV1 {
-  schemaVersion: 1
+  schemaVersion: 2
   cacheKey: string
   providerId: string
   modelId: string
@@ -71,6 +73,7 @@ export async function createPdfAnalysisCacheKey(input: {
   depth: PdfAnalysisDepthV1
   promptVersion: string
   routeModelIds?: { extraction: string; synthesis: string }
+  ocrProviderId?: string
 }): Promise<string> {
   const identity = JSON.stringify({
     schemaVersion: CACHE_SCHEMA_VERSION,
@@ -78,10 +81,13 @@ export async function createPdfAnalysisCacheKey(input: {
     providerId: input.selection.providerId,
     modelId: input.selection.modelId ?? '',
     routeModelIds: input.routeModelIds ?? null,
+    ocrProviderId: input.ocrProviderId ?? 'none',
     depth: input.depth,
     promptVersion: input.promptVersion,
+    chunkerVersion: PDF_DOCUMENT_CHUNKER_VERSION,
+    evidenceSchemaVersion: PDF_EVIDENCE_SCHEMA_VERSION,
   })
-  return `pdf-v1-${await sha256(identity)}`
+  return `pdf-v2-${await sha256(identity)}`
 }
 
 function validDocuments(value: unknown): value is ExtractedPdfDocumentV1[] {
@@ -94,10 +100,36 @@ function validDocuments(value: unknown): value is ExtractedPdfDocumentV1[] {
     if (typeof document.name !== 'string' || !document.name || document.name.length > 500) return false
     if (!Number.isSafeInteger(document.pageCount) || document.pageCount < 1 || document.pageCount > 20_000) return false
     if (!Number.isSafeInteger(document.extractedCharacters) || document.extractedCharacters < 1) return false
+    if (typeof document.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(document.sha256)) return false
+    if (!Number.isSafeInteger(document.sizeBytes) || Number(document.sizeBytes) < 1 || Number(document.sizeBytes) > 100 * 1024 * 1024) return false
     if (!Array.isArray(document.scannedPages) || document.scannedPages.some((page: unknown) => (
       !Number.isSafeInteger(page) || Number(page) < 1 || Number(page) > document.pageCount
     ))) return false
+    for (const pageList of [document.ocrPages, document.unresolvedPages]) {
+      if (pageList !== undefined && (!Array.isArray(pageList) || pageList.some((page: unknown) => (
+        !Number.isSafeInteger(page) || Number(page) < 1 || Number(page) > document.pageCount
+      )))) return false
+    }
     if (!Array.isArray(document.chunks) || document.chunks.length < 1 || document.chunks.length > 20_000) return false
+    if (!Array.isArray(document.pages) || document.pages.length !== document.pageCount || document.pages.some((page: PdfSourcePageV2) => (
+      !page || page.documentId !== document.id || page.documentSha256 !== document.sha256 || page.documentName !== document.name ||
+      !Number.isSafeInteger(page.page) || page.page < 1 || page.page > document.pageCount || typeof page.text !== 'string' ||
+      typeof page.normalizedText !== 'string' || typeof page.textSha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(page.textSha256) ||
+      !['pdf-text', 'ocr', 'vision'].includes(page.extractionMethod) ||
+      (page.extractionConfidence !== undefined && (
+        !Number.isFinite(page.extractionConfidence) || page.extractionConfidence < 0 || page.extractionConfidence > 1
+      )) ||
+      (page.textBlocks !== undefined && (!Array.isArray(page.textBlocks) || page.textBlocks.length > 10_000 ||
+        page.textBlocks.some((block) => (
+          !block || typeof block.text !== 'string' || block.text.length > 4_000 ||
+          !Array.isArray(block.bbox) || block.bbox.length !== 4 ||
+          block.bbox.some((coordinate) => !Number.isFinite(coordinate) || coordinate < 0 || coordinate > 1) ||
+          block.bbox[2] <= block.bbox[0] || block.bbox[3] <= block.bbox[1] ||
+          (block.confidence !== undefined && (
+            !Number.isFinite(block.confidence) || block.confidence < 0 || block.confidence > 1
+          ))
+        ))))
+    ))) return false
     extractedCharacters += document.extractedCharacters
     for (const chunk of document.chunks) {
       if (!chunk || typeof chunk !== 'object' || typeof chunk.id !== 'string' || !chunk.id || chunkIds.has(chunk.id)) return false
@@ -113,7 +145,7 @@ function validDocuments(value: unknown): value is ExtractedPdfDocumentV1[] {
 function normalizeCacheRecord(value: unknown): PdfAnalysisCacheRecordV1 | null {
   if (!value || typeof value !== 'object') return null
   const source = value as Partial<PdfAnalysisCacheRecordV1>
-  if (source.schemaVersion !== CACHE_SCHEMA_VERSION || typeof source.cacheKey !== 'string' || !source.cacheKey.startsWith('pdf-v1-')) return null
+  if (source.schemaVersion !== CACHE_SCHEMA_VERSION || typeof source.cacheKey !== 'string' || !source.cacheKey.startsWith('pdf-v2-')) return null
   if (typeof source.providerId !== 'string' || typeof source.modelId !== 'string' || typeof source.promptVersion !== 'string') return null
   if (source.depth !== 'quick' && source.depth !== 'deep') return null
   if (!Array.isArray(source.sourceFiles) || source.sourceFiles.length < 1 || source.sourceFiles.length > 12 ||

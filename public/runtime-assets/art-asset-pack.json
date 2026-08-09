@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "packId": "astraltrace.dnd5e-2014.art",
-  "version": "content-03c87adfb36d4d37",
+  "version": "content-be1313bcace7419c",
   "assetBasePath": "/assets/",
   "sourceCatalog": "src/lib/enemyPool.ts",
   "summary": {
-    "totalFiles": 2546,
-    "totalBytes": 3194382297,
-    "runtimeFiles": 1858,
-    "runtimeBytes": 535886821,
+    "totalFiles": 2873,
+    "totalBytes": 3279653464,
+    "runtimeFiles": 2185,
+    "runtimeBytes": 621157988,
     "authoringFiles": 688,
     "authoringBytes": 2658495476,
     "catalogTokenPortraits": 677,
@@ -17,7 +17,7 @@
     "legacyInitiativeDerivatives": 11,
     "authoringMasters": 426,
     "authoringRaw": 262,
-    "icons": 403,
+    "icons": 730,
     "vfx": 79
   },
   "files": [
@@ -256,6 +256,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/asi-feature-action.png",
+      "bytes": 271449,
+      "sha256": "ae5312ffc85f537920f417fdff1a117ae8ebe3c981a7749b3f6420bfc23c59c9",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/astral-projection-spell-action.png",
       "bytes": 281456,
       "sha256": "1c5f35c3dbe503f331f5ac3cfb5bdb85804ef6d5f3b4d9e4c8b5c4825105ad5b",
@@ -307,6 +313,162 @@
       "path": "assets/icons/banishment-spell-action.png",
       "bytes": 288114,
       "sha256": "e73016255907945d33cb5bc58ceb09f837e26133112a221140dbae7452c074f3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-berserker-frenzy-feature-action.png",
+      "bytes": 347998,
+      "sha256": "e6ae9c8bc1e42ffb36e6b7e4f76cf881ad15900a59eb4e1de4482494969c2097",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-berserker-intimidating-presence-feature-action.png",
+      "bytes": 298826,
+      "sha256": "8ae9094e6f4b4b717e7c78c992053cff69d76660307a7f95ee0f7ffcf528f68e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-berserker-mindless-rage-feature-action.png",
+      "bytes": 233193,
+      "sha256": "d382c2570231a756b23694f9b9d09e837e0b6e79c63b1662c23af0b20ca949a0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-berserker-retaliation-feature-action.png",
+      "bytes": 345704,
+      "sha256": "efd095f2fd93f2b0c8f62b1c5afeb3374931d962b17197d31e52d5be5eee25e2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-brutal-critical-feature-action.png",
+      "bytes": 326194,
+      "sha256": "c34f51264c50af4609726b7559b71c98e2ff181c7e84bb907710185eaa97cd5e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-danger-sense-feature-action.png",
+      "bytes": 229029,
+      "sha256": "b74d0cd69a3eef0434fde4db0422563d48c81d6577a4c1a2eef995b526188138",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-fast-movement-feature-action.png",
+      "bytes": 333040,
+      "sha256": "7e9ef963dbee7614645a1cfc0603d076d0f63107985ddbc4c00c04f74fb5154c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-feral-instinct-feature-action.png",
+      "bytes": 354465,
+      "sha256": "b1c8f7b539a677417304ef3894341a13468911099ea6ba6c78b8c1a1aebb1210",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-indomitable-might-feature-action.png",
+      "bytes": 339521,
+      "sha256": "a58cf7e980a96f81df5c9842ed4006ac6e0c0ad8917e6d43e7660a81f7bd3c4b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-primal-champion-feature-action.png",
+      "bytes": 319610,
+      "sha256": "279b6c936fa192a29624b30d307445bd59587f0839af22659f96293ed849827c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-primal-path-feature-action.png",
+      "bytes": 264513,
+      "sha256": "2f6a0cf2ec756f8a9e20e8ee85751c546affa71ac3b88a3355ed6663181385e5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-rage-feature-action.png",
+      "bytes": 279738,
+      "sha256": "bb82c393cd951a10f0197e5ec61028877f3cc6305e8480b0684990fc6230bca4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-reckless-attack-feature-action.png",
+      "bytes": 356559,
+      "sha256": "778f148b7c25473ff69b75d2ac94c534df184f2b08c20c417814b770db256fbd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/barbarian-relentless-rage-feature-action.png",
+      "bytes": 352878,
+      "sha256": "7915657d741e7d13cd51b1f8e340169e425a1badc1c0e34ca065d2daf27b8da4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-bard-college-feature-action.png",
+      "bytes": 384812,
+      "sha256": "9c4a59d434b5302e1a04058675109039e231dd95eecdc457627ae79bef0af7b8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-bardic-inspiration-feature-action.png",
+      "bytes": 342687,
+      "sha256": "c857f3ec0d34ea2a1a471e9885adbc89540f04028d8f5bd6f68bb8b0d5ef3d52",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-countercharm-feature-action.png",
+      "bytes": 272168,
+      "sha256": "cd844652c074e9f61ac0010ba2d7b428c2cdd15e90eb9b1a3c701f281a2cdb14",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-font-of-inspiration-feature-action.png",
+      "bytes": 276214,
+      "sha256": "3b032e70667f2eb3e73e1cb69986543bedfb09e210236c986845fabafbf50087",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-jack-of-all-trades-feature-action.png",
+      "bytes": 339204,
+      "sha256": "3ee2ea1cb800ae7acc00f631aece44f4808a33b8794a2de4ffe7f5798b1afac7",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-lore-additional-magical-secrets-feature-action.png",
+      "bytes": 334024,
+      "sha256": "c3c9de9aa305baac04028784c3e80b27809b8419319969cc44a3195f66c60898",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-lore-bonus-proficiencies-feature-action.png",
+      "bytes": 378077,
+      "sha256": "e4371c2ef36f317bc5da40af278f2e62ce97f86a3bf0e3104b6d031c8e831396",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-lore-cutting-words-feature-action.png",
+      "bytes": 345079,
+      "sha256": "2cabff1adc4fe8991dbb6c0fb5eaadf296045229d89667b402bd0e0837d95b32",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-lore-peerless-skill-feature-action.png",
+      "bytes": 388615,
+      "sha256": "21a4154018a5ca9adfe48aa5b70a95938ee26d211cc5c4ded84e7d173f4df5cb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-magical-secrets-feature-action.png",
+      "bytes": 368220,
+      "sha256": "2b97f62fc678655e5b4e526f0baa1d79d1009fcffa9fe4a3b847e45081aa8c63",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-song-of-rest-feature-action.png",
+      "bytes": 336614,
+      "sha256": "452a1451c9bb6d85fdbcb74213953e428d98308646ce7451d0a7262becfb5849",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/bard-superior-inspiration-feature-action.png",
+      "bytes": 373550,
+      "sha256": "1507ce7af397c154edd220db76dbba277626d4feef0a79572e839eaef4633080",
       "contentType": "image/png"
     },
     {
@@ -547,6 +709,78 @@
       "path": "assets/icons/clairvoyance-spell-action.png",
       "bytes": 314514,
       "sha256": "622d376a63e1821579dd8e76c7e7d3e2f75ed069d11abfd6a37092efa8c72d9b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-channel-divinity-feature-action.png",
+      "bytes": 306233,
+      "sha256": "7fe8d5a5a0b1bcafbd4ca58d14e3b095f50814e67a1185d11465561b3f6d3934",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-destroy-undead-feature-action.png",
+      "bytes": 260992,
+      "sha256": "53aad7ee5b6aa7274f5a653ef1e9e8454eb8c23701bec9312ef479264de02cef",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-divine-domain-feature-action.png",
+      "bytes": 285724,
+      "sha256": "37bba2a9f44f709957c26ba2d66c2ea48ef37ea7f4f78881fa0deb4d03b0ddb4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-divine-intervention-feature-action.png",
+      "bytes": 281265,
+      "sha256": "380cb943a5e9034c24ccbc674178f87e77c1f787574e714e28f57f41c3dcefe0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-blessed-healer-feature-action.png",
+      "bytes": 317043,
+      "sha256": "95ee2aadd192d58d00bc76a57f1c88e45420b014aa29c6b7b2908c59acc754b6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-bonus-proficiency-feature-action.png",
+      "bytes": 334558,
+      "sha256": "908861b85cb1824dec17a14e5c93158abe547bedff4243343dc78561a4becad6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-disciple-of-life-feature-action.png",
+      "bytes": 319391,
+      "sha256": "7358db300726fa0d312df8c93c6e95d04d1d8137250409321d7daa223b4f0eec",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-divine-strike-feature-action.png",
+      "bytes": 242308,
+      "sha256": "eb5de6fd428cc718fa7c053192ce76011dd4682bdd83443c15fd15ec07aa6715",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-domain-spells-feature-action.png",
+      "bytes": 300798,
+      "sha256": "10a44f847acab30b616c4618476d595fedd27e50f253f744f441cd22c1004d03",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-preserve-life-feature-action.png",
+      "bytes": 279115,
+      "sha256": "347c77c81886befe3e53d7f2c671d491ddac91c021da428612990cc214a82481",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-life-supreme-healing-feature-action.png",
+      "bytes": 209925,
+      "sha256": "aba3481b523edd04fcb62959fa45e28afc19a6a44cc1d37c83c45fba1ccf116c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/cleric-turn-undead-feature-action.png",
+      "bytes": 287673,
+      "sha256": "a5bf891a9cd14729eabac12a4b9e67a00d8e832e88ff47052562b1ec7ed3e6ff",
       "contentType": "image/png"
     },
     {
@@ -994,6 +1228,72 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/druid-archdruid-feature-action.png",
+      "bytes": 332295,
+      "sha256": "8ab63273e31cb5015765fc024636d7f9cf477f0220e916fd2acdc2767b14a18f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-beast-spells-feature-action.png",
+      "bytes": 404612,
+      "sha256": "a165a74d840cffea29a0f9074ba9763a3510603eaa66f1bd614091ed1a8898a4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-druid-circle-feature-action.png",
+      "bytes": 376322,
+      "sha256": "6ddf1a3f2d232e1ae62d5879f902947a568ce1877e5968d45bc3d9b00d1b2ff1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-druidic-feature-action.png",
+      "bytes": 447387,
+      "sha256": "c740f76146dd4735bbde25f7ab32b0db137e2efba56f0f07d129a34f01facec5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-land-bonus-cantrip-feature-action.png",
+      "bytes": 170401,
+      "sha256": "e5d107600c864d22f676dac818d9f5a1a4fc401c3beb5b7f717d6d421ebeccaf",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-land-circle-spells-feature-action.png",
+      "bytes": 406131,
+      "sha256": "fb779106734120caa9d3dda1d9020504a58fcbd893c93f606e4763e3b666fbb0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-land-natural-recovery-feature-action.png",
+      "bytes": 432897,
+      "sha256": "83277a001c0f43dad2b8b054237154615e33294a648ca872de711b895909c991",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-land-natures-sanctuary-feature-action.png",
+      "bytes": 382867,
+      "sha256": "4af6e597c4c7dcf7f8bfe9a5512c2a2e57531e3903cf305a2c1178197f3a6e1e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-land-natures-ward-feature-action.png",
+      "bytes": 398741,
+      "sha256": "6b39d2ddde3d2ed62f9ada8e458e54568178635ec9ddebe1e169454bd3c4d676",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-land-stride-feature-action.png",
+      "bytes": 385566,
+      "sha256": "8f917b57317f1f756af11d0819d4c7e08b4eb8b252ea71c5b3db348681bf9cfe",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/druid-wild-shape-feature-action.png",
+      "bytes": 363343,
+      "sha256": "12851f2c1521d639fca07e0329def1b7de5e9d3ed077f9c3103867a25e460540",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/druidcraft-spell-action.png",
       "bytes": 247630,
       "sha256": "f2ae17c1d446a3a62a053ea1e625c3a3b870d6904dab392409e888c4bf706642",
@@ -1096,6 +1396,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/evasion-feature-action.png",
+      "bytes": 220937,
+      "sha256": "cb3fc3f97f7f1dec62be96e7eb9fbc39e6ede7566a1286ab41cd744fdb4a40c6",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/eversmoking-bottle-item-action.png",
       "bytes": 306336,
       "sha256": "427862777ca0ac0888d8891c6bd2f06cae2844ce8f4fbd722d889486267b82af",
@@ -1108,6 +1414,18 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/expertise-feature-action.png",
+      "bytes": 258893,
+      "sha256": "ec36c606caed0c8c5b9f468f3c6693ca50faa4e2861c0c6ebf4764016679f18a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/extra-attack-feature-action.png",
+      "bytes": 265174,
+      "sha256": "970832b495fc2bf4313944ee98bbc3f1146515e069c5788f4560e3d13e4ff6ad",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/eyebite-spell-action.png",
       "bytes": 257802,
       "sha256": "b3877bb5b73402d8506a43416d7a5364f7d411cbfda5d8ec68f9005505e34297",
@@ -1117,6 +1435,18 @@
       "path": "assets/icons/eyes-of-charming-item-action.png",
       "bytes": 173452,
       "sha256": "47eee7691cfa66f2fa8d787d326e9c6d4716dbe600c73b7bd8549487382e6ce8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/eyes-of-minute-seeing-item-action.png",
+      "bytes": 149248,
+      "sha256": "3f5ca4435adcfc321329407fb70e19a7ddfebd8c3bd0bf26e47f33b432767207",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/eyes-of-the-eagle-item-action.png",
+      "bytes": 141521,
+      "sha256": "8a3f522a75612a84026a8d83bae4f6fd3df7928245a162b96dd3424f4b4fc5ed",
       "contentType": "image/png"
     },
     {
@@ -1156,9 +1486,81 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/feather-token-item-action.png",
+      "bytes": 426788,
+      "sha256": "7797ca744296bc8d469be723e24df250687e12a66cfd2dda4dccf53941e64cf8",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/feeblemind-spell-action.png",
       "bytes": 258104,
       "sha256": "9fcdfc57873f651d26333737910f44450b830cd59c20a07d7479ca39e47f1f92",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-action-surge-feature-action.png",
+      "bytes": 228016,
+      "sha256": "bd07402185c616d40f39f70d1b56859c77180c70a1b74e42a1245b24340a2fc9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-champion-additional-style-feature-action.png",
+      "bytes": 331307,
+      "sha256": "9b05fe656d6334836a9c8e9268b8724b07a07e6475deb3775d718335f9d30bee",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-champion-improved-critical-feature-action.png",
+      "bytes": 221733,
+      "sha256": "7f04841d10ae107bbcee2115b55703b905876ad0eaf2490fd188599302d16389",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-champion-remarkable-athlete-feature-action.png",
+      "bytes": 272217,
+      "sha256": "e4b93421f9e4fa87897c118fa5b393e3babb9a3a93d618fe125a7682185ffbd2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-champion-superior-critical-feature-action.png",
+      "bytes": 261416,
+      "sha256": "e08eef59cc4bb831258f339ddbfc3da49a7cfd24a6c34f7975e26059cad1c154",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-champion-survivor-feature-action.png",
+      "bytes": 298975,
+      "sha256": "a1cb8285df7101892ecd037e9f3f32a43fcac2d17a16985be79d2f8b9b0c1fbb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-indomitable-feature-action.png",
+      "bytes": 273766,
+      "sha256": "486d34fcd5df8fc3971a95b23f6421be80f45d35fa026e50dce0847504150b17",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-martial-archetype-feature-action.png",
+      "bytes": 239801,
+      "sha256": "022241b61401783f7225dead7514363998dafe80a602dd43a1a84c1c46289ba4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighter-second-wind-feature-action.png",
+      "bytes": 356193,
+      "sha256": "02ed2a97bb7b5a3db72e146f41cf34a6db4d872912bcf22b6a1e86abb2ca3785",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/fighting-style-feature-action.png",
+      "bytes": 280651,
+      "sha256": "a5316e7607f6dcb76fde2dfcef97a66aaa40b9ddca00b9b77e56a70fd77b70ee",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/figurine-of-wondrous-power-item-action.png",
+      "bytes": 265058,
+      "sha256": "bddf63ec287760587044c7adafcb52686c3dc0c5774ab05d24821d71a98bfad6",
       "contentType": "image/png"
     },
     {
@@ -1228,6 +1630,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/flame-tongue-item-action.png",
+      "bytes": 135250,
+      "sha256": "884d84fa01ad8b7ea25c91c423881fabfe6bfdd9286b31300ab5007f9cbc29c0",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/flaming-sphere-spell-action.png",
       "bytes": 313204,
       "sha256": "83113777a2a27e1267ed135efca401ddf270343612b5db4f9b9d2caf82dcb3a5",
@@ -1264,6 +1672,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/folding-boat-item-action.png",
+      "bytes": 280849,
+      "sha256": "b1cab4eed9df0545b1f7fc274a27effe25f6b99a16f85cde99f296dff4c5a191",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/forbiddance-spell-action.png",
       "bytes": 444101,
       "sha256": "caa2d21de40ba47f75bfb775a072df5c9720b8ab0ffa1940490bc4cf7690997b",
@@ -1294,6 +1708,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/frost-brand-item-action.png",
+      "bytes": 116754,
+      "sha256": "71708d4039937e01cb1f6fed4cfdf7d45781c53cf951de476a4058b281d8bd13",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/gaseous-form-spell-action.png",
       "bytes": 292666,
       "sha256": "961632d56a00dce4a314f5f2e7c030137ba4d5c49cfb0e5a770791e1327189ac",
@@ -1306,9 +1726,27 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/gauntlets-of-ogre-power-item-action.png",
+      "bytes": 321266,
+      "sha256": "31fdaa071ba15d4f3df74747bee9ddd13d82be2201c6b83608cfe265e4df3772",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/geas-spell-action.png",
       "bytes": 259819,
       "sha256": "adbafb302ce271246ca636ccb126ac9247ccb61b3edc907b8e60f847848e8a15",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/gem-of-brightness-item-action.png",
+      "bytes": 289625,
+      "sha256": "25ea92aab69e2513f599deaef7c804e911461e3ac079b6ab04edcdbb440dc822",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/gem-of-seeing-item-action.png",
+      "bytes": 256993,
+      "sha256": "c247e448b9d13f2b2ff1f2ecfe1441f2a9b7d3ca116333595f7ad600a5442136",
       "contentType": "image/png"
     },
     {
@@ -1324,6 +1762,18 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/giant-slayer-item-action.png",
+      "bytes": 116347,
+      "sha256": "35f352d8b800ca043767960bd097632c424f95ca7c950223a87d0ded0b969f2b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/glamoured-studded-leather-armor-item-action.png",
+      "bytes": 256235,
+      "sha256": "e10d7302428f4e473f5764b89554b79159ce04f0115b4b7d180f07d6bc5501b4",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/glibness-spell-action.png",
       "bytes": 232935,
       "sha256": "d67123e5d987e1257b24a822ca1ac57cfd647e2bfe3a972a15a218a74d92224f",
@@ -1336,9 +1786,27 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/gloves-of-missile-snaring-item-action.png",
+      "bytes": 297938,
+      "sha256": "fd114947b2d279a83a195997f7a81d4a0da4b9288b9dec40dd38db5d28fdc6bd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/gloves-of-swimming-and-climbing-item-action.png",
+      "bytes": 352192,
+      "sha256": "3b77bd2c5dd444fc3dc3bb1c6ec7506a03476eea3583e810d11f217584280793",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/glyph-of-warding-spell-action.png",
       "bytes": 305224,
       "sha256": "54498a7826ff336dea732a9b39486562b797fe9d2b246c911a2119f77aff7777",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/goggles-of-night-item-action.png",
+      "bytes": 196040,
+      "sha256": "f5d0084c236e45136bfbc429485a23d129d052e81c2a953e5f9e5a31bf66fc54",
       "contentType": "image/png"
     },
     {
@@ -1408,6 +1876,18 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/hammer-of-thunderbolts-item-action.png",
+      "bytes": 139249,
+      "sha256": "335cf3a589289bd4d67064183ad9e6d324b0c4b664992cadeecedafd0ee5fb6c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/handy-haversack-item-action.png",
+      "bytes": 355590,
+      "sha256": "69c8f6dff0315ebd4b26f2a4efb3382e2bf619ce455e5c0fbaadf506970623c7",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/harm-spell-action.png",
       "bytes": 245459,
       "sha256": "d09f701149c72b430d0d13ce73d20e7a6a8ae8567119a49843fe6a81ced43c95",
@@ -1417,6 +1897,18 @@
       "path": "assets/icons/haste-spell-action.png",
       "bytes": 281629,
       "sha256": "23cba7b829132948da1eeffc24e1832aaf893ccf2b57a2d055befe66b0ffd005",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/hat-of-disguise-item-action.png",
+      "bytes": 155954,
+      "sha256": "1c3075d9e408cfff81baf82f413a3ee4f1c9607bdfe199d5422598bbcf0959dd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/headband-of-intellect-item-action.png",
+      "bytes": 128208,
+      "sha256": "49cc72fae8cc000d116553ae1f6d485497572377a42c8fa5e3e28575dd684109",
       "contentType": "image/png"
     },
     {
@@ -1441,6 +1933,30 @@
       "path": "assets/icons/hellish-rebuke-spell-action.png",
       "bytes": 317549,
       "sha256": "e6bad7f6498adb4a053e87e160bb10fa7c43d0d9aaa7691bb61f9ffc4e0c088f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/helm-of-brilliance-item-action.png",
+      "bytes": 214116,
+      "sha256": "6517bd8212d3778434256363cf19bab9622722ddb21c315e469b2897d1bbfe23",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/helm-of-comprehending-languages-item-action.png",
+      "bytes": 348758,
+      "sha256": "4974f7fc3762a11fadbbe0af87faef23df6530ff4658d27541d18eaa6bf59ce6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/helm-of-telepathy-item-action.png",
+      "bytes": 281171,
+      "sha256": "50d2ad8185bc1a3ec9afd6f6457d113ed1fdda4a4a84b4283ca0173c930dd8d8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/helm-of-teleportation-item-action.png",
+      "bytes": 248348,
+      "sha256": "3d4a43f4d9b9f8f342cba3053327ba5eba983239d73989f75c686a464dca393e",
       "contentType": "image/png"
     },
     {
@@ -1480,6 +1996,36 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/holy-avenger-item-action.png",
+      "bytes": 95427,
+      "sha256": "b9bb990daeb8eb96786296d928f1090dd14a2c0b45f8eb0f7a50e4d71bf531f0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/horn-of-blasting-item-action.png",
+      "bytes": 193799,
+      "sha256": "a0f901dfe2eb2b8db8b09c8226b61178d81d530a0048f364696561851e0764dd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/horn-of-valhalla-item-action.png",
+      "bytes": 231422,
+      "sha256": "b9970a33b6339b09df818026ba172798e3e9fb15018474008e360ad86bc1e21e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/horseshoes-of-a-zephyr-item-action.png",
+      "bytes": 269849,
+      "sha256": "012efc7d39f80a51812730e27fd716be65d67fc3a2f60a0b7066fcc72737d02f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/horseshoes-of-speed-item-action.png",
+      "bytes": 209616,
+      "sha256": "85191b75a9e01c5730e5e9c838b5799fd23f00b919a4fb0338d79ff3af546c1d",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/hunters-mark-spell-action.png",
       "bytes": 210455,
       "sha256": "437c5966fdedc19891d08cc6859a17f41e42256e395c5266e8003fca9cc2c75d",
@@ -1510,6 +2056,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/immovable-rod-item-action.png",
+      "bytes": 278920,
+      "sha256": "81bfca7cee5788e2939e6454df1dec1595d9f1255a9d61b3ef578d3293f6754e",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/imprisonment-spell-action.png",
       "bytes": 288079,
       "sha256": "ce66728cdad0f078fab5e6a412e170fa505be8a13c865160676c4f1c2472ef52",
@@ -1534,6 +2086,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/instant-fortress-item-action.png",
+      "bytes": 204475,
+      "sha256": "9b7ad68b54d526016e0504cc64642b45eb5c2cc3692058bfb9e648ae78fcd908",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/instant-summons-spell-action.png",
       "bytes": 201210,
       "sha256": "fa3b3ef5387ccba03fc8a379953bb81893ab437ca4a3383fe89912843faba50a",
@@ -1546,9 +2104,33 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/ioun-stone-item-action.png",
+      "bytes": 196387,
+      "sha256": "869fdd1cdcf049ee94fdf7f03b4dd9c891563fff16c080627496e58000015684",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/iron-bands-of-binding-item-action.png",
+      "bytes": 344369,
+      "sha256": "a63eefd1000480b5a52991c0c77d9dccbf2f38ec7f37459186b9c9125d8de245",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/iron-flask-item-action.png",
+      "bytes": 215099,
+      "sha256": "39a5ca6ce390d741dbbb23a6aeeaa1167fbdc1d3a9739b163a05bff11714ea4e",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/irresistible-dance-spell-action.png",
       "bytes": 288358,
       "sha256": "cf1ca98e4997b5d65c07eeaabf0c1086d5b9a93d0cecd6b72d2aff3554e7fac1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/javelin-of-lightning-item-action.png",
+      "bytes": 63994,
+      "sha256": "37837c6879a8a621fb2be2625c6a377b8caa47aea473e34319f3a0dbf8c70a68",
       "contentType": "image/png"
     },
     {
@@ -1561,6 +2143,12 @@
       "path": "assets/icons/knock-spell-action.png",
       "bytes": 393441,
       "sha256": "b1ee2d55e21ed618562989255ae3dc0dfde424c55d149d1cda0f0dc38f61014c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/lantern-of-revealing-item-action.png",
+      "bytes": 182252,
+      "sha256": "c05a54688b1beecc0f457c104cc378f4fba59d1f257d89509da3ba89570fbbf7",
       "contentType": "image/png"
     },
     {
@@ -1618,6 +2206,30 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/luck-blade-item-action.png",
+      "bytes": 85054,
+      "sha256": "34e21f66b2aeb7ca3f4b9ec45311454a81a784f651982c00265182b351008ac5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/mace-of-disruption-item-action.png",
+      "bytes": 130171,
+      "sha256": "b0b12efdd1bf15593759a20513b97b32d68a9f7e54a89b1c7b5cb0b43f2dbab3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/mace-of-smiting-item-action.png",
+      "bytes": 141302,
+      "sha256": "7ceb6561e961ef907d44968153283edd703bda9a0a93a9ba6fa6eedd9801ce43",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/mace-of-terror-item-action.png",
+      "bytes": 127510,
+      "sha256": "02ded0bd7bec0739fa6ec9ec8fa5c7674a375fe21efc1dc3916748c479f119a9",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/mage-armor-spell-action.png",
       "bytes": 375758,
       "sha256": "a0e4070d9bd987e810f51fd49b801ff7718452acb87f50510fa59bd516a33844",
@@ -1672,6 +2284,48 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/mantle-of-spell-resistance-item-action.png",
+      "bytes": 292830,
+      "sha256": "c397175a93edd3c6d14175073628429f53b4e212af09625e855b2bf3f04f5bc6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/manual-of-bodily-health-item-action.png",
+      "bytes": 319195,
+      "sha256": "00e538fa78944d28a021359bd5720f69f5bc232372d6bd393dd31b1e8403a4ce",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/manual-of-gainful-exercise-item-action.png",
+      "bytes": 308417,
+      "sha256": "0efcecd65ba74a774d2167085555451b2da8554485b2fff17330fc42638cdc88",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/manual-of-golems-item-action.png",
+      "bytes": 371326,
+      "sha256": "b3de391af2e8fd9e8bb20cde75cc812751b971808da0522a482f7535027f335e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/manual-of-quickness-of-action-item-action.png",
+      "bytes": 307866,
+      "sha256": "d7a9f322c44276e230ccb65ab12f575eaa50b612a52d3a6093b07ae58d14227b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/mariners-armor-item-action.png",
+      "bytes": 338741,
+      "sha256": "4ed737df984ecdf1723506d875ddcdec113f346fbc4a7164a4e443c0e149ce07",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/marvelous-pigments-item-action.png",
+      "bytes": 407215,
+      "sha256": "d9a2bba047a39addbb493c5d0953879a7d2f144605c0617ab34302d460be2ac1",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/mass-cure-wounds-spell-action.png",
       "bytes": 282959,
       "sha256": "3c21aee559807d502307298976308e7c6fd8904e716d5f62169ae0bb6c689a5e",
@@ -1699,6 +2353,12 @@
       "path": "assets/icons/maze-spell-action.png",
       "bytes": 326648,
       "sha256": "5870f09413f1862f2f4a0c319825733ddda2d20cae911f6945e57569bc24dfd5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/medallion-of-thoughts-item-action.png",
+      "bytes": 122189,
+      "sha256": "bbb80c7a80ed89355d6e0b0c0b7349ed95f27eb237390f248a3fb3bb309cd42f",
       "contentType": "image/png"
     },
     {
@@ -1756,6 +2416,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/mirror-of-life-trapping-item-action.png",
+      "bytes": 144661,
+      "sha256": "fb8ee6fe4a7648c083c1f79424cc8ad09a6954a1679a60af958474e93fadc61a",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/mislead-spell-action.png",
       "bytes": 377016,
       "sha256": "2f7482ac6b2395e1cfedfcab67206d4629ca1ed1a3e98a870a73caf84c0df995",
@@ -1768,9 +2434,123 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/mithral-armor-item-action.png",
+      "bytes": 347680,
+      "sha256": "3adc72ed621bf31b4ad5467e80379809361f54026bcbde4b9c68ff68f4e00b91",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/modify-memory-spell-action.png",
       "bytes": 274265,
       "sha256": "67fc531a0590326a85ad5452b59bf9696420855886215a276e42b776e0a73031",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-deflect-missiles-feature-action.png",
+      "bytes": 264400,
+      "sha256": "3714b0a789dcbbbf06fb2a605fbb06af127a287fecd5f6056f91b513cb353a32",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-diamond-soul-feature-action.png",
+      "bytes": 333849,
+      "sha256": "1d2ce0e0b60f33fe821d7cb3efd6a064afaf9c0f36020d1fcb5c3e832a2193b3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-empty-body-feature-action.png",
+      "bytes": 323810,
+      "sha256": "177eeabe1fa755f9ad73959cfe6baa7399752909d94e8bb80a87dc04eb4462a8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-ki-empowered-strikes-feature-action.png",
+      "bytes": 373295,
+      "sha256": "e94bea53a9e90abc0a786b61d37d04fb0b241dc677bab2071cd4520ee6dcd9bd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-ki-feature-action.png",
+      "bytes": 352685,
+      "sha256": "8b122bc161d20c0d57ed9d092549b3e520c85b2e4bbb1192482c2b685720b2d1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-martial-arts-feature-action.png",
+      "bytes": 390012,
+      "sha256": "e8d3751b6d8efd5dd6149a76814dee00bcda56054f5b8c5c0caa0760e403943b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-monastic-tradition-feature-action.png",
+      "bytes": 357311,
+      "sha256": "86b4f3a36c512324035ea5a4091e432a0e5b7e9f138fd0f32fe9a5f833a79e99",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-open-hand-quivering-palm-feature-action.png",
+      "bytes": 286372,
+      "sha256": "c4400c29b7a960890d31bd2fe0ebdf3e9ae84596639ac20c403c36b8ae9efd1e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-open-hand-technique-feature-action.png",
+      "bytes": 350986,
+      "sha256": "62ded88c59b46890fdc27a309ecce723e2b6a4e04950c0cad95f8fdf5bb7bf88",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-open-hand-tranquility-feature-action.png",
+      "bytes": 352560,
+      "sha256": "9b68514927472df57402a004cc5d16829bdfcce7948a75123043ef25607b29b8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-open-hand-wholeness-feature-action.png",
+      "bytes": 352139,
+      "sha256": "377b65b6cdc88ac3042ded59d0a921e2633c2afac74ac979a30f286e3b3c7981",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-perfect-self-feature-action.png",
+      "bytes": 367232,
+      "sha256": "23971cc588d79444ef7f9eacfd93e52e6bd7680cea311909b9782cf8be29e970",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-purity-of-body-feature-action.png",
+      "bytes": 391832,
+      "sha256": "18f3a0b30391deb0d2b02cf8e40fa7f7006556dcca1599b2ceca09d19e979f39",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-slow-fall-feature-action.png",
+      "bytes": 269183,
+      "sha256": "d5b6db4e5840bb56ad95eb63701c7b78eb143472fec4d0a4f2d0e20481229f20",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-stillness-of-mind-feature-action.png",
+      "bytes": 354324,
+      "sha256": "916e52edd8f1fcd142b9256f5f6b47384f09fff68ec75b386981380d625de5a0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-stunning-strike-feature-action.png",
+      "bytes": 386991,
+      "sha256": "4c51021d3f6f2e881e8462fa9b123c6e8a5297ea6bd08bdef77f6aa463c3320e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-tongue-of-sun-and-moon-feature-action.png",
+      "bytes": 379705,
+      "sha256": "fd6c2c9b1011d416375cd4d466c1f7a368d2029bf7d89541effec1ffb0ce1a74",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/monk-unarmored-movement-feature-action.png",
+      "bytes": 342096,
+      "sha256": "58bb66f98f0561cb9096a6f1f924fb71304e84a50d07094f76fa19dda555c766",
       "contentType": "image/png"
     },
     {
@@ -1792,9 +2572,159 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/necklace-of-adaptation-item-action.png",
+      "bytes": 212727,
+      "sha256": "06635cd71e1b9089d2aa3e69e88fe5a69b7e695da9e58be8fd481dd7e3f98b0d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/necklace-of-fireballs-item-action.png",
+      "bytes": 148121,
+      "sha256": "178ef1440559d0122050b982dbd1290f40eadab3a014cca891b9a6eb2dc2d7c0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/necklace-of-prayer-beads-item-action.png",
+      "bytes": 119031,
+      "sha256": "82154ed46e5cf5a4bb566e0357895a34b3d583606e4b361d060ff034ed85a6e2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/nine-lives-stealer-item-action.png",
+      "bytes": 131233,
+      "sha256": "b40995f598dbcd8103fab6ef24b4ec3dac9d045822c3f55c035d1e0f1670ad0f",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/nondetection-spell-action.png",
       "bytes": 267458,
       "sha256": "5dad437e7f2b7c75dfe1511cdd47f6d591d77240d32f7ae95751b71d984d7a82",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/oathbow-item-action.png",
+      "bytes": 50738,
+      "sha256": "c95eb09efd6a2743821fa8de1e6e58bab6229da2f3ec46d248e71b5569ad0244",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/oil-of-etherealness-item-action.png",
+      "bytes": 139138,
+      "sha256": "c39562ca0b3654253486205adbdf14b0c00f25e269aca8c9e1c07f5c75151086",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/oil-of-sharpness-item-action.png",
+      "bytes": 117753,
+      "sha256": "22ea85abacbe870b9df7805ca5bbab829c33b700d7df34e9d3bdf058436f44bc",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/oil-of-slipperiness-item-action.png",
+      "bytes": 207011,
+      "sha256": "53b2fdb78c3eb2a196ab82592bf4ab679cfe7cec1d05e0bef8cf7dcc868ece05",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/orb-of-dragonkind-item-action.png",
+      "bytes": 351088,
+      "sha256": "1b52646e9f4e5150c7987ea6ca2c7192a5ab1f0bb7b69acc11166080fcc0bc9a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-aura-improvements-feature-action.png",
+      "bytes": 315793,
+      "sha256": "26fc410a59a7113a880f6bf355a279a12511198309ba6656e73055e94c3c0ab0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-aura-of-courage-feature-action.png",
+      "bytes": 401148,
+      "sha256": "4f5919dd64ffedcb214602a1c57411ff1102ec675edefe3b41ee2bdaaf0ab76a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-aura-of-protection-feature-action.png",
+      "bytes": 258750,
+      "sha256": "9663bd35e64e6f05ac79ede4e3d1d1e3f509bf71ceef6efabd9b2a62752a8070",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-cleansing-touch-feature-action.png",
+      "bytes": 312253,
+      "sha256": "3504f9df956b82dd9f50f9b6fa71d66951038ed527e5baf7793b591914581783",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-devotion-aura-feature-action.png",
+      "bytes": 264546,
+      "sha256": "d0604be62b19f6331d7de0dcd439ccbb1de6bac1eb8cfe79b7bf6bb4f7b9e7b6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-devotion-holy-nimbus-feature-action.png",
+      "bytes": 258270,
+      "sha256": "353c948d053dd0456a4ef6b4d241a6e683fe97c6e7861eb14643ccbc3509bab1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-devotion-oath-spells-feature-action.png",
+      "bytes": 186080,
+      "sha256": "2a1cd9fcf050409a7e8a538728e75ec81a44e7fa3050da5f29437a234503d7f9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-devotion-purity-feature-action.png",
+      "bytes": 287445,
+      "sha256": "50c0eff0b6437832aa0bc0d6a6497a76ef6440023a58c327130584698aaa6a27",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-devotion-sacred-weapon-feature-action.png",
+      "bytes": 198372,
+      "sha256": "2843c62a4d3781dddcefeaac9eadda363e253c53c5e7f9bbc577344d17cc002a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-devotion-turn-unholy-feature-action.png",
+      "bytes": 328475,
+      "sha256": "1e7155aa6c408fffe0a7abc2efb62138df43963a1a6e7eb420a066c92d3c9138",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-divine-health-feature-action.png",
+      "bytes": 328138,
+      "sha256": "da22de26e0076101c4e73cb9d275d6cf492fd604cc4f7c9030f3fe0a807c637c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-divine-sense-feature-action.png",
+      "bytes": 257140,
+      "sha256": "63fa73c9e819ad9e68a3a81ddc64086cf51c881b3f0084aa034317b0bdb0a8f6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-divine-smite-feature-action.png",
+      "bytes": 237014,
+      "sha256": "63b864211b2b04a4eedca0028cb618fb21b45717f8f9e514b360970701cd6ca4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-improved-divine-smite-feature-action.png",
+      "bytes": 183591,
+      "sha256": "1a26e5001e440156da783397572687865bc6df65b417b8f1b1cf0433d169852c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-lay-on-hands-feature-action.png",
+      "bytes": 307234,
+      "sha256": "97ba453e5ca2a144305d25315c8d83bbacd047cfcf7d7634241d69561c884022",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/paladin-sacred-oath-feature-action.png",
+      "bytes": 231777,
+      "sha256": "9df3d040c08570ae7e778840a89d4b6b34324e607a0c27be7d708a61f283c6bb",
       "contentType": "image/png"
     },
     {
@@ -1810,6 +2740,30 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/pearl-of-power-item-action.png",
+      "bytes": 293962,
+      "sha256": "fa20bc6a0233f69c4121660183da2c2eb51463dd74605de8e6992fe76d05b1e7",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/periapt-of-health-item-action.png",
+      "bytes": 191205,
+      "sha256": "715bc4b75e7885c43cb7d6dd45a686a61686d08ca5715d7c02af1d87029b6365",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/periapt-of-proof-against-poison-item-action.png",
+      "bytes": 191074,
+      "sha256": "fa3615ebff7b40d2ed569889033986760d9fb0da3639084e37aecfbb496d4349",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/periapt-of-wound-closure-item-action.png",
+      "bytes": 176336,
+      "sha256": "70bc28fc76a5a53f9f32ef921e2e75eb346467c89032655b57c1c31f774fd349",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/phantasmal-killer-spell-action.png",
       "bytes": 232276,
       "sha256": "61bb83f3e843b3bb6410026ff122c3f368e894ba2c975e2cb11a850553912756",
@@ -1819,6 +2773,24 @@
       "path": "assets/icons/phantom-steed-spell-action.png",
       "bytes": 384030,
       "sha256": "b3c6b167ac3db2eb6e36c1970daae4e8404dd0bb55f17a7aa6bc41b2b7f1d513",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/philter-of-love-item-action.png",
+      "bytes": 219275,
+      "sha256": "03a273ec12c40637566771e2a4892603d505ed2b72d99c4d9db3bba0b92ed67a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/pipes-of-haunting-item-action.png",
+      "bytes": 240211,
+      "sha256": "d277e96f35ee0b90f8a623c6983f5e5ad32ab6e837548392b0c3b22db57eee88",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/pipes-of-the-sewers-item-action.png",
+      "bytes": 301190,
+      "sha256": "07a72b0fde9d5a2896449893869c303e70b0ca9a33e6ff2edd44e3acd2e41444",
       "contentType": "image/png"
     },
     {
@@ -1846,6 +2818,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/plate-armor-of-etherealness-item-action.png",
+      "bytes": 241041,
+      "sha256": "efc10d6085095869d00d48577929ece5bad40433fc3c5d7bc0f871f42e2fe5c6",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/poison-spray-spell-action.png",
       "bytes": 305751,
       "sha256": "9e63927248055a96a48b488119643c51f908958fcb58b4a0bf234fa69f0ebd8e",
@@ -1855,6 +2833,102 @@
       "path": "assets/icons/polymorph-spell-action.png",
       "bytes": 291915,
       "sha256": "4058e64ce212c4f13b263fcf5487d9a553e852988b1307d5e609fa7034ce3af6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/portable-hole-item-action.png",
+      "bytes": 240832,
+      "sha256": "d6a9eb8ef3235491265b6c9aaece372c3ba9d1d214434266587efd7c1cd51eb4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-animal-friendship-item-action.png",
+      "bytes": 204871,
+      "sha256": "d076f9aef6140dfb350c9d37a1418c96388146780cddf50f024dcad5a6685f57",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-clairvoyance-item-action.png",
+      "bytes": 157601,
+      "sha256": "7958bbf424182f9ee03c121d0537aff46a4a456a430b15ffdca8e67cfeecd008",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-climbing-item-action.png",
+      "bytes": 254849,
+      "sha256": "23cec0d5c4796b1128212f0704b9e4bf67831a369676058a5b36b01ca285d2dd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-diminution-item-action.png",
+      "bytes": 239422,
+      "sha256": "093c028acc96a5c335122dd441eca81bd1794c99c94d9eeac83c8ba8b8e1e4f4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-flying-item-action.png",
+      "bytes": 144927,
+      "sha256": "38e760e35e791a9897439c23e8ccd8df0dbcdcd421977d6477ad106d18192746",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-gaseous-form-item-action.png",
+      "bytes": 222391,
+      "sha256": "acc6bbaab6602c0021b3809861280a75a59d71c2155109e56a61388f597ff0a9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-giant-strength-item-action.png",
+      "bytes": 218240,
+      "sha256": "aac75fb2882f4ad80a575d1e35d74bfa9a89b2557053c4aa5271db3678a08259",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-growth-item-action.png",
+      "bytes": 144479,
+      "sha256": "6d29e9173a0b405df16e054c856b3e18e2797b97a93ce1082924d4762ea2cfed",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-heroism-item-action.png",
+      "bytes": 210414,
+      "sha256": "1846e6c52bc892326c068759fe53f704b71c2ce39804fd972392ff0de7a0ae0a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-invisibility-item-action.png",
+      "bytes": 134213,
+      "sha256": "ce5f5e02e8097a4834c2ca98075fcd565995e24036b24c4a9dae67c94d433e2a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-mind-reading-item-action.png",
+      "bytes": 186171,
+      "sha256": "9f1bb1c6a972aeaa199252b4e7e94a7956f8ea305b2d37dba6cc579430a952df",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-poison-item-action.png",
+      "bytes": 159731,
+      "sha256": "3e1038966b8e674ffb7475dfb49c84133125571926d0609f745991240fefc3d9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-resistance-item-action.png",
+      "bytes": 184363,
+      "sha256": "cca2ce7ece8cc992516c6f1cc8bfecaaeb81cb259d8ad6f8c17f8223b38b1922",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-speed-item-action.png",
+      "bytes": 126228,
+      "sha256": "045c8fdcb51f0db196336a7dd0a45d353fc869483a0ae84fecabaaa4189adb87",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/potion-of-water-breathing-item-action.png",
+      "bytes": 275111,
+      "sha256": "189d70215f8883391bee4e98eab7191fdab1179ff9bee136cc3ca0e612c3bd01",
       "contentType": "image/png"
     },
     {
@@ -1954,6 +3028,84 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/ranger-favored-enemy-feature-action.png",
+      "bytes": 308842,
+      "sha256": "9e1472d7be2fa8f4e412adc0783020e07c0bf1084b03f50a819a2a94aeb1515b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-feral-senses-feature-action.png",
+      "bytes": 339831,
+      "sha256": "4729f3af75e870b02cdeba0646afcaf6b4d85f326dee5c48181539d41ca3007a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-foe-slayer-feature-action.png",
+      "bytes": 418674,
+      "sha256": "111e3273cddefd86673760ec3375a06b543b378407b97676b8ff9aeb178861b5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-hide-in-plain-sight-feature-action.png",
+      "bytes": 374359,
+      "sha256": "91e5a5dce5abfc0fe243cd596ca080a19cea70e7045f8bc4b2c1f3a5b67c0cf9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-hunter-defensive-tactics-feature-feature-action.png",
+      "bytes": 346120,
+      "sha256": "243c23bcd021fc9022b31d818df8b8827eb1e5b59011961f24197e805a89d52d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-hunter-multiattack-feature-feature-action.png",
+      "bytes": 232856,
+      "sha256": "89413250143d0406d9787be9bfbcc42c5259e8a83cd82932b170ea56d67cdcc8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-hunter-prey-feature-feature-action.png",
+      "bytes": 305680,
+      "sha256": "9ea8fbaaf8951baa65843910aed62bd402cca288044ddf7ea851f22f9836a26c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-hunter-superior-defense-feature-feature-action.png",
+      "bytes": 356670,
+      "sha256": "e894ddfb98a6e6f97753dfcd1944fffd8d6113b38c22158f0e950a4fa7e3d81a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-lands-stride-feature-action.png",
+      "bytes": 424318,
+      "sha256": "3bd9a510849147606d126491db28c1de7f7cadeba7a3b2babd4a6c1d07994dea",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-natural-explorer-feature-action.png",
+      "bytes": 413775,
+      "sha256": "65dbc4f60c74e874444a0592a09bd63da7e74e6849ae044399e0bacdc0f6d6ea",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-primeval-awareness-feature-action.png",
+      "bytes": 354525,
+      "sha256": "01379e0e8168a307dd04dee46efd3fd191408b199dd0e65f4292e44a599dcf17",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-ranger-archetype-feature-action.png",
+      "bytes": 299544,
+      "sha256": "acec1fdf380319c2121061dcf946b1f05df0c5cc91098a3f4527b4d7f37c71c7",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ranger-vanish-feature-action.png",
+      "bytes": 338953,
+      "sha256": "12dcecac4c24193d0b11f5fca28128385998da671e973075ea959cf18df3f77b",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/ray-of-enfeeblement-spell-action.png",
       "bytes": 243039,
       "sha256": "ff5b6fd447c5ad3b791c98f3b0d9675b327f7a58162b8162d1d549b206b5c616",
@@ -1996,6 +3148,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/restorative-ointment-item-action.png",
+      "bytes": 232077,
+      "sha256": "370e1275aaa132f12fb9b05c03ede2f153f60cf15faebe8255f133aad9bcc86c",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/resurrection-spell-action.png",
       "bytes": 205346,
       "sha256": "4d17761303f28a6a579d7ace3ac4023613507659cf86eeefb48f67a5b7b970b1",
@@ -2014,6 +3172,300 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/ring-of-animal-influence-item-action.png",
+      "bytes": 264251,
+      "sha256": "a812cfe78bb8f7374e432219fba67c2c6087c874cfa3d7392105f76ff3ae9b09",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-djinni-summoning-item-action.png",
+      "bytes": 270162,
+      "sha256": "f2dd54bdedfd08f3d5e4282c987a6cb78095dde82d06c63cb30ab2dd2ebf7576",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-elemental-command-item-action.png",
+      "bytes": 371979,
+      "sha256": "697c2ed68ddcdb0538600dc4909d5ab8acbf0956f1b0957aa0a5cc47ef0b6b69",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-evasion-item-action.png",
+      "bytes": 266899,
+      "sha256": "38cfece02893b8f7cb3ed98c34cfd2c352ebd7ec922cebf77c6036d4405859cf",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-feather-falling-item-action.png",
+      "bytes": 228373,
+      "sha256": "e4b57fe4a5d5d947706a2216b91b1f51889c715a22e024f10c893a5abf8ba602",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-free-action-item-action.png",
+      "bytes": 286882,
+      "sha256": "f80e0c2e3bb1434e60e5c89896cbf36d1698fae27df619668ae5f1de3025848b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-invisibility-item-action.png",
+      "bytes": 294014,
+      "sha256": "1d84e6b36fb2285f7df5ed06ff405c0e7460ee54ee8431458d6550eb3019f648",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-jumping-item-action.png",
+      "bytes": 303434,
+      "sha256": "40b818b9e02aaf0208dbebe315a864344a913ddfe4f479fc699eef1c0fd56bd3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-mind-shielding-item-action.png",
+      "bytes": 355632,
+      "sha256": "a8ab7eda1234afbfc0115bd5256ecf37e2661755f6a8cc4b24fd9a05310d33ed",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-protection-item-action.png",
+      "bytes": 297131,
+      "sha256": "5207897407b7a4e52fa24e1e1d1e4ac6f6c981b3d51bb73e63c1e155297471a4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-regeneration-item-action.png",
+      "bytes": 317858,
+      "sha256": "2057154bf635aaa470e22b76bf74a773df9399aae2ef93e7c7c2fa4cf6d74830",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-resistance-item-action.png",
+      "bytes": 336437,
+      "sha256": "778ee00f1bce6cbcfbcd209a6c3100b9a8b7d104c20ed5ad31c847ae4712f191",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-shooting-stars-item-action.png",
+      "bytes": 330342,
+      "sha256": "4257db29f23d31a169a58c9dbe3dc230b9c03e33fd8c50a5f46781a96f93e55b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-spell-storing-item-action.png",
+      "bytes": 410542,
+      "sha256": "8da42438d71b243357c832fecd3c5170543f229fa19c476b0c8a1ad0c3bb936c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-spell-turning-item-action.png",
+      "bytes": 240450,
+      "sha256": "52362f5b430159983069313f6f9c68daeac7f8d805466ce4faad97991f42a669",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-swimming-item-action.png",
+      "bytes": 319315,
+      "sha256": "b2d889e66151d5cb86db344bda5de945ac337617821390b371bcfdc564302908",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-telekinesis-item-action.png",
+      "bytes": 309110,
+      "sha256": "8c2b9a7aacd848425df126312d436833a0369517af43b346a502c19acd5af4e2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-the-ram-item-action.png",
+      "bytes": 356879,
+      "sha256": "783607150312fd3ac320e4b54db19463bc05d5d0efaf173d05f292b767d53582",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-three-wishes-item-action.png",
+      "bytes": 348280,
+      "sha256": "bd6397873f4f3562afc72bd6cd52581b0c043a059a92f88cdda0fc68faff7510",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-warmth-item-action.png",
+      "bytes": 360023,
+      "sha256": "f8d83c18be77d628bd05aaaa279dbef8cd914770445575aece89e6ce8f1f69ee",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-water-walking-item-action.png",
+      "bytes": 310319,
+      "sha256": "de18c030c265a0d0433a4c607c0a7f0e2410f3e120e7a9040526bce084e64aa7",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/ring-of-x-ray-vision-item-action.png",
+      "bytes": 270840,
+      "sha256": "6d44975931ad82bd66855a2fc945666cf744822c29fc0205d522de89e2f7ee4f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/robe-of-eyes-item-action.png",
+      "bytes": 273660,
+      "sha256": "549149bcbbb2e4580c34265027119324d9503f18268ec11a4593655f127add2d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/robe-of-scintillating-colors-item-action.png",
+      "bytes": 281903,
+      "sha256": "c4e0b1cf787e1f33eef38d91f1339b4715400e0555ec4033753b71fafb58407c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/robe-of-stars-item-action.png",
+      "bytes": 213383,
+      "sha256": "8be6e67d441912d38f9e1a9abea201116df439bd8f390d6cb9f23d0cbd00f90e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/robe-of-the-archmagi-item-action.png",
+      "bytes": 283508,
+      "sha256": "5678d539277816ab1d0f16832667ace746218b1d780ca74502ac8e04f5ff678f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/robe-of-useful-items-item-action.png",
+      "bytes": 269377,
+      "sha256": "6c162abd31bee48128ebf13b824000758cd057e8217f8dc80df3a5b03cfd7279",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rod-of-absorption-item-action.png",
+      "bytes": 125096,
+      "sha256": "73e8a3529e67f112dbca3c9c906f4af1fba838eecbe5de205ceeb8add2cabade",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rod-of-alertness-item-action.png",
+      "bytes": 92139,
+      "sha256": "3c784b5857d4f5bdcd20cfcdbcde8edadf575151809fd942c67c953d2c807b65",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rod-of-lordly-might-item-action.png",
+      "bytes": 108767,
+      "sha256": "536d8cb985ef2528d5e4438381beaf12214689b8e9d73cac5815efb92aebbfce",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rod-of-rulership-item-action.png",
+      "bytes": 68269,
+      "sha256": "53568eda884138ad667d457cbe328e59e001524bb6959df16f27918018e160cd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rod-of-security-item-action.png",
+      "bytes": 93146,
+      "sha256": "43763b9fbf06bcd2b63f3b402e63b9f90b066ca91350ad789cc0ad44bdfde53c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-blindsense-feature-action.png",
+      "bytes": 261878,
+      "sha256": "b6e3ed7865ef51fdfdad3f0990e64b0571cc4dad2df4649440b0f982159b92b7",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-cunning-action-feature-action.png",
+      "bytes": 265021,
+      "sha256": "361c9d6956bdc20ee58bbaccf661de224ad91399c2e01a346623f73c956a7767",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-elusive-feature-action.png",
+      "bytes": 245933,
+      "sha256": "b185e5567087b6c81b5bc90b9f10c5e7ddcdd0e1379f444332e7bc2510d4f926",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-reliable-talent-feature-action.png",
+      "bytes": 336415,
+      "sha256": "f392fc409dd1bf54fc575fd77c9a8ffea5e84e7fa7ae7bd5c050d98e6c8a4194",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-roguish-archetype-feature-action.png",
+      "bytes": 291146,
+      "sha256": "3feed2bc9e3b477c81b585afff119b7848948d8a909b32780d3d2e00f9ae33bb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-slippery-mind-feature-action.png",
+      "bytes": 367637,
+      "sha256": "674e70de5ed32cde84b90770bb3b5fcfc146c8015aeea3e48b3d9f871133345a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-sneak-attack-feature-action.png",
+      "bytes": 310121,
+      "sha256": "126ee15c8115fa42f658cb15f7a758920f23253faad1ab9b380d4c8c16037a0f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-stroke-of-luck-feature-action.png",
+      "bytes": 230764,
+      "sha256": "ed88b8cdd0e1ac7490cc5d9d50b1dcd09c51f8de8fb5b6a4d793392525850a35",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-thief-fast-hands-feature-action.png",
+      "bytes": 357791,
+      "sha256": "b7e37fb67e2cf8f8776b44afa8142a0c2421d44d69d689c1ab559adf5feaac97",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-thief-reflexes-feature-action.png",
+      "bytes": 297493,
+      "sha256": "012e1ae0837b2a63b84c93b6c748814ed775a36da81f232116f61e4f3422fdcb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-thief-second-story-work-feature-action.png",
+      "bytes": 304457,
+      "sha256": "4197e267bdcb7e2ef1630e9b424e043a6958d9c0e96d62c6ca3af39bf85b2c8c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-thief-supreme-sneak-feature-action.png",
+      "bytes": 263194,
+      "sha256": "e2f6a27399072334fd74ff934170ffedcd0ed109c7f170b4efea3d4e15a4ceb6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-thief-use-magic-device-feature-action.png",
+      "bytes": 300251,
+      "sha256": "8dc86506de4bdd24a80c60172c21c1755529201de5b0c386c642c106558314b5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-thieves-cant-feature-action.png",
+      "bytes": 314030,
+      "sha256": "3a314efcfacc365a40b92e32e3e8dd79418816fccf4ebfc25679ff63e07923d3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rogue-uncanny-dodge-feature-action.png",
+      "bytes": 290248,
+      "sha256": "54f06f6d31bcb5034d79879261166210e198ca6af48f64bf22341fc6420458ab",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rope-of-climbing-item-action.png",
+      "bytes": 198217,
+      "sha256": "6303eac7bf05382c00dff731bf0614a4a0234dc39e4a7b57433553e86835a824",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/rope-of-entanglement-item-action.png",
+      "bytes": 297397,
+      "sha256": "57ac1f414c0cb16585ce6bec138087c5094042fd8f1b8bdd7c96efa5ac6afd6a",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/rope-trick-spell-action.png",
       "bytes": 90360,
       "sha256": "558923acb3efed98eb0aff77e38ddfa66afc5cd029a0953c07939d6009c2833e",
@@ -2029,6 +3481,18 @@
       "path": "assets/icons/sanctuary-spell-action.png",
       "bytes": 345667,
       "sha256": "94faf546962ff8a4dd005be285ec50bd2df81ee6838f448ce50c2879e1e0da1d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/scarab-of-protection-item-action.png",
+      "bytes": 308451,
+      "sha256": "17dc300a80e4a927b17fa5a60be9e2f4d1d46e587696cf927ffe4c1a682f8206",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/scimitar-of-speed-item-action.png",
+      "bytes": 153088,
+      "sha256": "077ee639677545de4791c35fa05e00ca11f862db7e0c745212837ab580e1547d",
       "contentType": "image/png"
     },
     {
@@ -2092,6 +3556,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/shield-of-missile-attraction-item-action.png",
+      "bytes": 325017,
+      "sha256": "04789943993d3b40709e45142d63fbba2ebf3823cef1c5301680b85d6c1672f8",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/shield-spell-action.png",
       "bytes": 266409,
       "sha256": "a9ee9811f298c0f8c8347df95703d9e5f4d7919ad4dce81f9ad856468920c7ae",
@@ -2140,9 +3610,75 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/slippers-of-spider-climbing-item-action.png",
+      "bytes": 259815,
+      "sha256": "e6284ae1d6fe451d1f6341f55dc374fd461b1fbec4294ac7c5ecf326f60fe1c5",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/slow-spell-action.png",
       "bytes": 282024,
       "sha256": "b90f55048a0360f46b8f96f72930a9135b207df53b064407bff8038beec1c22c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-draconic-ancestor-feature-action.png",
+      "bytes": 354654,
+      "sha256": "497205b0000266775e272ee2404ce1bd360b068a8688ed9a0c00e65ad59d1d5a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-draconic-elemental-affinity-feature-action.png",
+      "bytes": 342678,
+      "sha256": "08beb8abaa1d22c3007797946715c5e313f0ed2e0f4ce8abafb2b325d06195ce",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-draconic-presence-feature-action.png",
+      "bytes": 386151,
+      "sha256": "679942c84a0698957f9466e03892395f732b1a5932eb6e27eab82fd092bd0362",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-draconic-resilience-feature-action.png",
+      "bytes": 335291,
+      "sha256": "89316b7fb10a19082890d122d15044e68783fe6d3100441e0e901148c82161f0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-draconic-wings-feature-action.png",
+      "bytes": 291740,
+      "sha256": "3df771e29907659fd5fdbf070ea57eb8fe7858ca88c35cec045a723c4594d72b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-font-of-magic-feature-action.png",
+      "bytes": 275632,
+      "sha256": "d4b4b02134a0ea92a935509a61517c46a2031570a42f2d7b4acf309b6cf9e9c1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-metamagic-feature-action.png",
+      "bytes": 263729,
+      "sha256": "934ab85fa22757edb3c3c6093d457a45b4635f19a1024226df778a60ec98b9cd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-sorcerous-origin-feature-action.png",
+      "bytes": 370623,
+      "sha256": "98c810e58a47f933cbaa71c71a1f2a59f82a676f86f353606bb9e827b838ccf8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sorcerer-sorcerous-restoration-feature-action.png",
+      "bytes": 263970,
+      "sha256": "728050eaeda333324f76dadde915dc187a9738643269c0dc26860c98543dd3f5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sovereign-glue-item-action.png",
+      "bytes": 219854,
+      "sha256": "0faf27aacbff981c11d7af08124f10f57cb4755ad8d8f329365d69791e3d7fc9",
       "contentType": "image/png"
     },
     {
@@ -2170,6 +3706,30 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/spell-scroll-item-action.png",
+      "bytes": 258874,
+      "sha256": "501f393755ce75dc5ef0ffdd7a82709a2d3327786202066b5f5c3d51d5718e28",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/spellcasting-feature-action.png",
+      "bytes": 263536,
+      "sha256": "df27ea92fda433b6dfe841efdacb7cb517fa2fa29de5377e819b6a0571f2efab",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/spellguard-shield-item-action.png",
+      "bytes": 277178,
+      "sha256": "41759d484b6b4d70f1bcf51ae501908b5fd8fa330c030edeb810cc29490354ac",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sphere-of-annihilation-item-action.png",
+      "bytes": 148172,
+      "sha256": "72db81b7c006cf00c583857a6a6b44c7cd6aafbc93a518f42b50b6acb69ddbe0",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/spider-climb-spell-action.png",
       "bytes": 374355,
       "sha256": "bc88887c40c4eea54d6ee4b9fea14b8f277dbb4fd4fea3d1bbac29eaf75317f1",
@@ -2194,9 +3754,93 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/staff-of-charming-item-action.png",
+      "bytes": 80075,
+      "sha256": "05ca776d0b87b8dbcaa117987294160639fe86c59b8486e0be5ca78dd1046c5e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-fire-item-action.png",
+      "bytes": 70965,
+      "sha256": "8e421381fd34cafe25ad9d5f4bb724295da1b1b352d776e809ff093927fdd12c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-frost-item-action.png",
+      "bytes": 77820,
+      "sha256": "b84f85141237fae5968001571384f64617de6d40ac767f197f0503a7f1108f2e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-healing-item-action.png",
+      "bytes": 74759,
+      "sha256": "8c23b703edda8aadfd975acd38a540674353015fbef6b2e9071c4e2edc55b339",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-power-item-action.png",
+      "bytes": 72493,
+      "sha256": "11da442d77e7c8e7acc23197d28bcf9820e0ae054f54eb59e15bda679f44213a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-striking-item-action.png",
+      "bytes": 123636,
+      "sha256": "d3b391dd05e3c0ad6f1fc1efdefb438dbb8786750a61a63e4ca80c9b13be4990",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-swarming-insects-item-action.png",
+      "bytes": 90219,
+      "sha256": "9b32374e06bbcea7c465f48b2b5cbcebb6a209c2df8f8f9edd4c43959d8e31ff",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-the-magi-item-action.png",
+      "bytes": 83246,
+      "sha256": "984ff5eadd955e3a1b9bb78a52e774272b94cf83b6159e28f43e18debbd18275",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-the-python-item-action.png",
+      "bytes": 72213,
+      "sha256": "6a49d8ce825bc62043b1566d2a3ec07edb7ba590acde4f1532744d69ddfa71e5",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-the-woodlands-item-action.png",
+      "bytes": 119709,
+      "sha256": "b507b2cf6a03c98b76d2ba86a1e61abafe5bcf1e0f749d9aec4e077a1066f1a0",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-thunder-and-lightning-item-action.png",
+      "bytes": 93264,
+      "sha256": "6ed93d189b9ae96202be1f7971ae4d69648b76f163ed7e13897147387209982e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/staff-of-withering-item-action.png",
+      "bytes": 87055,
+      "sha256": "515ccdbf3ec7678edd47a3374e878760befdc309368fb3fb7af7b0271f595a4c",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/stinking-cloud-spell-action.png",
       "bytes": 340347,
       "sha256": "3e7f9f98eedb984dba3f20043bcaa0fe4f896f24b177ecef59cf9a2fb76fc043",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/stone-of-controlling-earth-elementals-item-action.png",
+      "bytes": 340890,
+      "sha256": "758fb6b13f750585635fdd75218c3ad84b671495fe3db812049dc23a96184901",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/stone-of-good-luck-luckstone-item-action.png",
+      "bytes": 276111,
+      "sha256": "18028e27520d389b4729b1bf0b609fe8537fde7617e76e9340136f7490df053d",
       "contentType": "image/png"
     },
     {
@@ -2224,6 +3868,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/sun-blade-item-action.png",
+      "bytes": 63390,
+      "sha256": "b54d7b7dc656b323acae7a8383fdefb1c2f3165cb58a03019e13564aa7dbae69",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/sunbeam-spell-action.png",
       "bytes": 284301,
       "sha256": "c22fe29ced62bada16520124818cac5a78a4346a350be2bd1f2e7730bc8284c5",
@@ -2236,9 +3886,45 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/sword-of-life-stealing-item-action.png",
+      "bytes": 75457,
+      "sha256": "7e55e78bbdc6774180cde3f5eb35506fc090c24654158b9dce23f254e49c328f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sword-of-sharpness-item-action.png",
+      "bytes": 80723,
+      "sha256": "0217e13905891f0cad6269ce2f0179f801ed93e090b6baa58abaf7b7783ef19b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/sword-of-wounding-item-action.png",
+      "bytes": 102850,
+      "sha256": "66dc7cb31cafd0183725ca47ceed11b6299d383dd08db73713408e1228ed1474",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/symbol-spell-action.png",
       "bytes": 322626,
       "sha256": "19df93fa26c3e9b1c73a55c01b62ec77562b602c69b49abc8136937414859f67",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/talisman-of-pure-good-item-action.png",
+      "bytes": 130107,
+      "sha256": "99f516999bed5fa1bf6c61a29168da970de026f9204880721519b8fab5c5cfe2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/talisman-of-the-sphere-item-action.png",
+      "bytes": 169524,
+      "sha256": "574464c9dacb1153d5cff9de0cf7175d39d89cf66bded78b6c858aa60c4f4cc8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/talisman-of-ultimate-evil-item-action.png",
+      "bytes": 193516,
+      "sha256": "e9d09e53997f332d4f5484a63072e78405da3820ca51652b7f9e7019de68a63a",
       "contentType": "image/png"
     },
     {
@@ -2284,9 +3970,33 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/timeless-body-feature-action.png",
+      "bytes": 290459,
+      "sha256": "79e74ec96a2606921a9cb8e9db81698ad2c02311db3eca2c8fea1ff2b35a140f",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/tiny-hut-spell-action.png",
       "bytes": 320909,
       "sha256": "bb02c01f966a1399d22092ef5d78246b572fd0e51c4aca465d8c1986337f6623",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/tome-of-clear-thought-item-action.png",
+      "bytes": 358549,
+      "sha256": "eadc0f0b65c05f3162abf16f04284482865e65f48a2b05452f5b6e6f72fa88f6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/tome-of-leadership-and-influence-item-action.png",
+      "bytes": 333972,
+      "sha256": "d872dcc756a23ac2424d22f52df69cd6df6d0003fef115ff8282c976e64ad82f",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/tome-of-understanding-item-action.png",
+      "bytes": 377291,
+      "sha256": "3aa29dacf6e99895b4bc7fdc5311cdf193e128299062fc1e0464396aba5ab3c1",
       "contentType": "image/png"
     },
     {
@@ -2305,6 +4015,12 @@
       "path": "assets/icons/tree-stride-spell-action.png",
       "bytes": 365999,
       "sha256": "8f4d9930b57ad605404c11ac5942c7cacf0026b804bdc7fe98936a0069ac8013",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/trident-of-fish-command-item-action.png",
+      "bytes": 88640,
+      "sha256": "a15c20910d2b1fb10dea4717caf6119bd29c115f969a83f51cc281e03064cc28",
       "contentType": "image/png"
     },
     {
@@ -2332,6 +4048,18 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/unarmored-defense-feature-action.png",
+      "bytes": 315928,
+      "sha256": "89c4614cec6e66cbd930c8744f169c019a20b168c37f874794a7efd7b1bca0e8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/universal-solvent-item-action.png",
+      "bytes": 317177,
+      "sha256": "f2809f837da71c1ad172b62f74d01dffc942e21c0575148725c8cee709c3710d",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/unseen-servant-spell-action.png",
       "bytes": 264701,
       "sha256": "b2fc6f6fe05572747b3bfb7438393446c0bac42e7f6e761ec2cbd0be1b4d21a6",
@@ -2347,6 +4075,18 @@
       "path": "assets/icons/vicious-mockery-spell-action.png",
       "bytes": 323976,
       "sha256": "2e713388848c9f264208f8032a8b2ecce1d3cdb72d48bcc8b3a637b456377740",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/vicious-weapon-item-action.png",
+      "bytes": 156715,
+      "sha256": "458fd980befec3710ab58bea24e4c4f0eda520e0f9b891f0b0478c6df9e53d53",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/vorpal-sword-item-action.png",
+      "bytes": 128513,
+      "sha256": "734889d6bb70756b48b97a50e0c550ced7052188df4ea134ca86bb913de5e23e",
       "contentType": "image/png"
     },
     {
@@ -2380,9 +4120,153 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/wand-of-binding-item-action.png",
+      "bytes": 113565,
+      "sha256": "20df5411d1a4ba20183f547ccd82fef982a7b3ce7d262630f923bf9783b2bd0d",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-enemy-detection-item-action.png",
+      "bytes": 96910,
+      "sha256": "8fe6244a671170fa3f82600e3d462b588a80a8c1684184c7ae2231b6d5dd8a27",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-fear-item-action.png",
+      "bytes": 93519,
+      "sha256": "df63e77e844e7fd42d53ff3b2cfad00af419db63f8fb82b1a0d2e39b876bca49",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-fireballs-item-action.png",
+      "bytes": 104530,
+      "sha256": "67d0d598408dbc59e5a4a58431226e03ceb57709168d36c33c1f344a01f29e8a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-lightning-bolts-item-action.png",
+      "bytes": 93110,
+      "sha256": "14fccda8f8feeaace74bb31cc524fe9202c1a126ccee8d8161cdd9bb637788fb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-magic-detection-item-action.png",
+      "bytes": 78040,
+      "sha256": "ef1f55e29de141420b547990599208ce80644b30fba15f9713a745169dddb63a",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-magic-missiles-item-action.png",
+      "bytes": 95781,
+      "sha256": "6a01b7e666f14b1613b2ee2db906fac2f024aa13cf2975e6158c8a3b144166f8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-paralysis-item-action.png",
+      "bytes": 118508,
+      "sha256": "34eafc1f49af4b7b87c5048ab668882d9275ac6fcbc6a49de89d465c48226fbb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-polymorph-item-action.png",
+      "bytes": 129501,
+      "sha256": "c569ed86bdb70293f2c367b075b918e160244b80be44dcb59a258d87b9cda608",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-secrets-item-action.png",
+      "bytes": 91826,
+      "sha256": "d89e2ff10be517c697d36f80f2ce2441b610d1fce265810a68f452ce45ef6def",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-the-war-mage-item-action.png",
+      "bytes": 83718,
+      "sha256": "561e30349fd1ed20a0551b76dd023ca529f1c65c0a17bf4f2817bfdac3c144e2",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-web-item-action.png",
+      "bytes": 109235,
+      "sha256": "31efeb3058521b48b064b8a4d771cd74ddab29e3caa4e32094efc94838fd16b9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wand-of-wonder-item-action.png",
+      "bytes": 117546,
+      "sha256": "261bbc663a53fd77d2379226cd8b5a9416406ed64366bccb6ebcb32d2b50eaf1",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/warding-bond-spell-action.png",
       "bytes": 297283,
       "sha256": "248725cc702a09ed83584104dfd12b21d359d224536b1e7b9b14b91edf554d91",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-eldritch-invocations-feature-action.png",
+      "bytes": 375118,
+      "sha256": "cff6ab4cd0e74a3f93a2d2f59ae14c181cf8e6e33d2f6cf99f89f486c71b7d65",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-eldritch-master-feature-action.png",
+      "bytes": 340850,
+      "sha256": "3826bf5e170a4fdee65b1604499bed6516e879886fb575c9e5c7430348938bb8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-fiend-dark-ones-blessing-feature-action.png",
+      "bytes": 286674,
+      "sha256": "57375cc78db3f1d73be4bf827ccc5cb6d20d2700429c5be2711daf600b4d9d47",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-fiend-dark-ones-own-luck-feature-action.png",
+      "bytes": 343905,
+      "sha256": "356fa80d45ce5e8198564896ddcf5bacb24c10054b948967cd7fccd41f7093c9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-fiend-expanded-spells-feature-action.png",
+      "bytes": 280501,
+      "sha256": "54e407aa0e6b6d6fb53f85652e432ee34ae069dae43deca32986cd9b43d0e7fa",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-fiend-hurl-through-hell-feature-action.png",
+      "bytes": 375600,
+      "sha256": "5c681704431ac68adb2e2e001fd80550819e963e88b693b98174586436f79858",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-fiendish-resilience-feature-action.png",
+      "bytes": 337698,
+      "sha256": "2406a67b5d68d777999adaacbe230f743b1401469cb92024efe45228376f0e91",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-mystic-arcanum-feature-action.png",
+      "bytes": 242869,
+      "sha256": "0b5b2070d47e4ddd64925112f60787ea1d9f1d345e62fd5af3d02f5369aac22b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-otherworldly-patron-feature-action.png",
+      "bytes": 347994,
+      "sha256": "db10f2b952e4a61ebce7e1958287592a4851033124ab8f8d7eee5aff467017d3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-pact-boon-feature-action.png",
+      "bytes": 241135,
+      "sha256": "141ab01fa480ba45cf4c98197abc76f89dbdb2192660f2053e3cd3c5746f05d8",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/warlock-pact-magic-feature-action.png",
+      "bytes": 368718,
+      "sha256": "265d5487c0508ca09937c755ef0b742df601bbe23dda9b36ba0375d057efe316",
       "contentType": "image/png"
     },
     {
@@ -2410,6 +4294,18 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/well-of-many-worlds-item-action.png",
+      "bytes": 304002,
+      "sha256": "25b6cb70b358545d9e499f08f9ae771131291334206ab7db895bb08247fe504b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wind-fan-item-action.png",
+      "bytes": 265923,
+      "sha256": "e1989477be7874e8e848614537317e785414e429b4e66ec98821324cef975c8d",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/wind-walk-spell-action.png",
       "bytes": 323780,
       "sha256": "55c78248a22833320959c120c446060c00b74ac963e009150af30711d4cb1719",
@@ -2422,9 +4318,75 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/icons/winged-boots-item-action.png",
+      "bytes": 281071,
+      "sha256": "4507224567042441b86342e0e1e671a1135b8ba6a03ced307341de287ce15420",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wings-of-flying-item-action.png",
+      "bytes": 242219,
+      "sha256": "8319cc4ae6d3b3d4f28c4ba8ad7978eb1e7107dd733fef7392e754c177dafaf2",
+      "contentType": "image/png"
+    },
+    {
       "path": "assets/icons/wish-spell-action.png",
       "bytes": 443714,
       "sha256": "8d32e4e8bab404a714a29696a99b1ade99f61d8b31a3bdc0c3c1f8f913ae4996",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-arcane-recovery-feature-action.png",
+      "bytes": 297318,
+      "sha256": "2a029630141d798ecd94397679f63bb095717a9a720488c9a76fa55c6bd6b8e6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-arcane-tradition-feature-action.png",
+      "bytes": 317335,
+      "sha256": "2627c3e39500e81a8ab31cec31d088b93bc95222c6bd8c6d806c2cefaa117abb",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-evocation-empowered-feature-action.png",
+      "bytes": 286503,
+      "sha256": "77259f239ab41782745008521d9cdba3d8bbc33fe35ea121490c03ae7ed56816",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-evocation-overchannel-feature-action.png",
+      "bytes": 428501,
+      "sha256": "8fc2e85f98a7f3cdb8e52709f921ddff78ba75e417e6301f24b9e8defe830987",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-evocation-potent-cantrip-feature-action.png",
+      "bytes": 235922,
+      "sha256": "b8ffe493ac3e0b4de44b54061cc8ae05401a34d655bc3225af8c8573255662e3",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-evocation-savant-feature-action.png",
+      "bytes": 313549,
+      "sha256": "4ce4e7279e854e621c6e3a4c7de30bde5b7da7e600dbc5e99d6b0bfeeff1c6aa",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-evocation-sculpt-spells-feature-action.png",
+      "bytes": 329550,
+      "sha256": "3a2443a17575d3b9c4d724f718b27e3967063e0e149fbcfb357a4e25299e0adf",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-signature-spells-feature-action.png",
+      "bytes": 280713,
+      "sha256": "f94de4d561fefdeb572b2e837b7fa9bb5681ecf7e4fc991cd4700f89bdc90bd6",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/wizard-spell-mastery-feature-action.png",
+      "bytes": 291678,
+      "sha256": "b8ff9a96fa8e10851de0a70cee8afb0658f8594e294ff8b97e30dabca343b2cd",
       "contentType": "image/png"
     },
     {
@@ -19676,6 +21638,12 @@
           "sha256": "1b95176b9438554a246422035135070c47e0531681c1548b4dc2e4787c7ee1c3"
         },
         {
+          "path": "/assets/icons/asi-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 271449,
+          "sha256": "ae5312ffc85f537920f417fdff1a117ae8ebe3c981a7749b3f6420bfc23c59c9"
+        },
+        {
           "path": "/assets/icons/astral-projection-spell-action.png",
           "mediaType": "image/png",
           "bytes": 281456,
@@ -19728,6 +21696,162 @@
           "mediaType": "image/png",
           "bytes": 288114,
           "sha256": "e73016255907945d33cb5bc58ceb09f837e26133112a221140dbae7452c074f3"
+        },
+        {
+          "path": "/assets/icons/barbarian-berserker-frenzy-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 347998,
+          "sha256": "e6ae9c8bc1e42ffb36e6b7e4f76cf881ad15900a59eb4e1de4482494969c2097"
+        },
+        {
+          "path": "/assets/icons/barbarian-berserker-intimidating-presence-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 298826,
+          "sha256": "8ae9094e6f4b4b717e7c78c992053cff69d76660307a7f95ee0f7ffcf528f68e"
+        },
+        {
+          "path": "/assets/icons/barbarian-berserker-mindless-rage-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 233193,
+          "sha256": "d382c2570231a756b23694f9b9d09e837e0b6e79c63b1662c23af0b20ca949a0"
+        },
+        {
+          "path": "/assets/icons/barbarian-berserker-retaliation-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 345704,
+          "sha256": "efd095f2fd93f2b0c8f62b1c5afeb3374931d962b17197d31e52d5be5eee25e2"
+        },
+        {
+          "path": "/assets/icons/barbarian-brutal-critical-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 326194,
+          "sha256": "c34f51264c50af4609726b7559b71c98e2ff181c7e84bb907710185eaa97cd5e"
+        },
+        {
+          "path": "/assets/icons/barbarian-danger-sense-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 229029,
+          "sha256": "b74d0cd69a3eef0434fde4db0422563d48c81d6577a4c1a2eef995b526188138"
+        },
+        {
+          "path": "/assets/icons/barbarian-fast-movement-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 333040,
+          "sha256": "7e9ef963dbee7614645a1cfc0603d076d0f63107985ddbc4c00c04f74fb5154c"
+        },
+        {
+          "path": "/assets/icons/barbarian-feral-instinct-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 354465,
+          "sha256": "b1c8f7b539a677417304ef3894341a13468911099ea6ba6c78b8c1a1aebb1210"
+        },
+        {
+          "path": "/assets/icons/barbarian-indomitable-might-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 339521,
+          "sha256": "a58cf7e980a96f81df5c9842ed4006ac6e0c0ad8917e6d43e7660a81f7bd3c4b"
+        },
+        {
+          "path": "/assets/icons/barbarian-primal-champion-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 319610,
+          "sha256": "279b6c936fa192a29624b30d307445bd59587f0839af22659f96293ed849827c"
+        },
+        {
+          "path": "/assets/icons/barbarian-primal-path-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 264513,
+          "sha256": "2f6a0cf2ec756f8a9e20e8ee85751c546affa71ac3b88a3355ed6663181385e5"
+        },
+        {
+          "path": "/assets/icons/barbarian-rage-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 279738,
+          "sha256": "bb82c393cd951a10f0197e5ec61028877f3cc6305e8480b0684990fc6230bca4"
+        },
+        {
+          "path": "/assets/icons/barbarian-reckless-attack-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 356559,
+          "sha256": "778f148b7c25473ff69b75d2ac94c534df184f2b08c20c417814b770db256fbd"
+        },
+        {
+          "path": "/assets/icons/barbarian-relentless-rage-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 352878,
+          "sha256": "7915657d741e7d13cd51b1f8e340169e425a1badc1c0e34ca065d2daf27b8da4"
+        },
+        {
+          "path": "/assets/icons/bard-bard-college-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 384812,
+          "sha256": "9c4a59d434b5302e1a04058675109039e231dd95eecdc457627ae79bef0af7b8"
+        },
+        {
+          "path": "/assets/icons/bard-bardic-inspiration-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 342687,
+          "sha256": "c857f3ec0d34ea2a1a471e9885adbc89540f04028d8f5bd6f68bb8b0d5ef3d52"
+        },
+        {
+          "path": "/assets/icons/bard-countercharm-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 272168,
+          "sha256": "cd844652c074e9f61ac0010ba2d7b428c2cdd15e90eb9b1a3c701f281a2cdb14"
+        },
+        {
+          "path": "/assets/icons/bard-font-of-inspiration-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 276214,
+          "sha256": "3b032e70667f2eb3e73e1cb69986543bedfb09e210236c986845fabafbf50087"
+        },
+        {
+          "path": "/assets/icons/bard-jack-of-all-trades-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 339204,
+          "sha256": "3ee2ea1cb800ae7acc00f631aece44f4808a33b8794a2de4ffe7f5798b1afac7"
+        },
+        {
+          "path": "/assets/icons/bard-lore-additional-magical-secrets-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 334024,
+          "sha256": "c3c9de9aa305baac04028784c3e80b27809b8419319969cc44a3195f66c60898"
+        },
+        {
+          "path": "/assets/icons/bard-lore-bonus-proficiencies-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 378077,
+          "sha256": "e4371c2ef36f317bc5da40af278f2e62ce97f86a3bf0e3104b6d031c8e831396"
+        },
+        {
+          "path": "/assets/icons/bard-lore-cutting-words-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 345079,
+          "sha256": "2cabff1adc4fe8991dbb6c0fb5eaadf296045229d89667b402bd0e0837d95b32"
+        },
+        {
+          "path": "/assets/icons/bard-lore-peerless-skill-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 388615,
+          "sha256": "21a4154018a5ca9adfe48aa5b70a95938ee26d211cc5c4ded84e7d173f4df5cb"
+        },
+        {
+          "path": "/assets/icons/bard-magical-secrets-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 368220,
+          "sha256": "2b97f62fc678655e5b4e526f0baa1d79d1009fcffa9fe4a3b847e45081aa8c63"
+        },
+        {
+          "path": "/assets/icons/bard-song-of-rest-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 336614,
+          "sha256": "452a1451c9bb6d85fdbcb74213953e428d98308646ce7451d0a7262becfb5849"
+        },
+        {
+          "path": "/assets/icons/bard-superior-inspiration-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 373550,
+          "sha256": "1507ce7af397c154edd220db76dbba277626d4feef0a79572e839eaef4633080"
         },
         {
           "path": "/assets/icons/barkskin-spell-action.png",
@@ -19968,6 +22092,78 @@
           "mediaType": "image/png",
           "bytes": 314514,
           "sha256": "622d376a63e1821579dd8e76c7e7d3e2f75ed069d11abfd6a37092efa8c72d9b"
+        },
+        {
+          "path": "/assets/icons/cleric-channel-divinity-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 306233,
+          "sha256": "7fe8d5a5a0b1bcafbd4ca58d14e3b095f50814e67a1185d11465561b3f6d3934"
+        },
+        {
+          "path": "/assets/icons/cleric-destroy-undead-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 260992,
+          "sha256": "53aad7ee5b6aa7274f5a653ef1e9e8454eb8c23701bec9312ef479264de02cef"
+        },
+        {
+          "path": "/assets/icons/cleric-divine-domain-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 285724,
+          "sha256": "37bba2a9f44f709957c26ba2d66c2ea48ef37ea7f4f78881fa0deb4d03b0ddb4"
+        },
+        {
+          "path": "/assets/icons/cleric-divine-intervention-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 281265,
+          "sha256": "380cb943a5e9034c24ccbc674178f87e77c1f787574e714e28f57f41c3dcefe0"
+        },
+        {
+          "path": "/assets/icons/cleric-life-blessed-healer-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 317043,
+          "sha256": "95ee2aadd192d58d00bc76a57f1c88e45420b014aa29c6b7b2908c59acc754b6"
+        },
+        {
+          "path": "/assets/icons/cleric-life-bonus-proficiency-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 334558,
+          "sha256": "908861b85cb1824dec17a14e5c93158abe547bedff4243343dc78561a4becad6"
+        },
+        {
+          "path": "/assets/icons/cleric-life-disciple-of-life-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 319391,
+          "sha256": "7358db300726fa0d312df8c93c6e95d04d1d8137250409321d7daa223b4f0eec"
+        },
+        {
+          "path": "/assets/icons/cleric-life-divine-strike-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 242308,
+          "sha256": "eb5de6fd428cc718fa7c053192ce76011dd4682bdd83443c15fd15ec07aa6715"
+        },
+        {
+          "path": "/assets/icons/cleric-life-domain-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 300798,
+          "sha256": "10a44f847acab30b616c4618476d595fedd27e50f253f744f441cd22c1004d03"
+        },
+        {
+          "path": "/assets/icons/cleric-life-preserve-life-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 279115,
+          "sha256": "347c77c81886befe3e53d7f2c671d491ddac91c021da428612990cc214a82481"
+        },
+        {
+          "path": "/assets/icons/cleric-life-supreme-healing-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 209925,
+          "sha256": "aba3481b523edd04fcb62959fa45e28afc19a6a44cc1d37c83c45fba1ccf116c"
+        },
+        {
+          "path": "/assets/icons/cleric-turn-undead-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 287673,
+          "sha256": "a5bf891a9cd14729eabac12a4b9e67a00d8e832e88ff47052562b1ec7ed3e6ff"
         },
         {
           "path": "/assets/icons/cloak-of-arachnida-item-action.png",
@@ -20414,6 +22610,72 @@
           "sha256": "2a8722cf2c68d389cd4080c425b74129ec6a36e0b9eb256d3a41cb0bdfdf2129"
         },
         {
+          "path": "/assets/icons/druid-archdruid-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 332295,
+          "sha256": "8ab63273e31cb5015765fc024636d7f9cf477f0220e916fd2acdc2767b14a18f"
+        },
+        {
+          "path": "/assets/icons/druid-beast-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 404612,
+          "sha256": "a165a74d840cffea29a0f9074ba9763a3510603eaa66f1bd614091ed1a8898a4"
+        },
+        {
+          "path": "/assets/icons/druid-druid-circle-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 376322,
+          "sha256": "6ddf1a3f2d232e1ae62d5879f902947a568ce1877e5968d45bc3d9b00d1b2ff1"
+        },
+        {
+          "path": "/assets/icons/druid-druidic-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 447387,
+          "sha256": "c740f76146dd4735bbde25f7ab32b0db137e2efba56f0f07d129a34f01facec5"
+        },
+        {
+          "path": "/assets/icons/druid-land-bonus-cantrip-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 170401,
+          "sha256": "e5d107600c864d22f676dac818d9f5a1a4fc401c3beb5b7f717d6d421ebeccaf"
+        },
+        {
+          "path": "/assets/icons/druid-land-circle-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 406131,
+          "sha256": "fb779106734120caa9d3dda1d9020504a58fcbd893c93f606e4763e3b666fbb0"
+        },
+        {
+          "path": "/assets/icons/druid-land-natural-recovery-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 432897,
+          "sha256": "83277a001c0f43dad2b8b054237154615e33294a648ca872de711b895909c991"
+        },
+        {
+          "path": "/assets/icons/druid-land-natures-sanctuary-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 382867,
+          "sha256": "4af6e597c4c7dcf7f8bfe9a5512c2a2e57531e3903cf305a2c1178197f3a6e1e"
+        },
+        {
+          "path": "/assets/icons/druid-land-natures-ward-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 398741,
+          "sha256": "6b39d2ddde3d2ed62f9ada8e458e54568178635ec9ddebe1e169454bd3c4d676"
+        },
+        {
+          "path": "/assets/icons/druid-land-stride-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 385566,
+          "sha256": "8f917b57317f1f756af11d0819d4c7e08b4eb8b252ea71c5b3db348681bf9cfe"
+        },
+        {
+          "path": "/assets/icons/druid-wild-shape-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 363343,
+          "sha256": "12851f2c1521d639fca07e0329def1b7de5e9d3ed077f9c3103867a25e460540"
+        },
+        {
           "path": "/assets/icons/druidcraft-spell-action.png",
           "mediaType": "image/png",
           "bytes": 247630,
@@ -20516,6 +22778,12 @@
           "sha256": "221173398c6278f42db03c6fce5d9e89a1f0df901cfdbfd1729d560439f49fd7"
         },
         {
+          "path": "/assets/icons/evasion-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 220937,
+          "sha256": "cb3fc3f97f7f1dec62be96e7eb9fbc39e6ede7566a1286ab41cd744fdb4a40c6"
+        },
+        {
           "path": "/assets/icons/eversmoking-bottle-item-action.png",
           "mediaType": "image/png",
           "bytes": 306336,
@@ -20528,6 +22796,18 @@
           "sha256": "525db9f66fd9b3c3d24b8e3d1313f6d75fea6447f2da765fc44f24340851147f"
         },
         {
+          "path": "/assets/icons/expertise-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 258893,
+          "sha256": "ec36c606caed0c8c5b9f468f3c6693ca50faa4e2861c0c6ebf4764016679f18a"
+        },
+        {
+          "path": "/assets/icons/extra-attack-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 265174,
+          "sha256": "970832b495fc2bf4313944ee98bbc3f1146515e069c5788f4560e3d13e4ff6ad"
+        },
+        {
           "path": "/assets/icons/eyebite-spell-action.png",
           "mediaType": "image/png",
           "bytes": 257802,
@@ -20538,6 +22818,18 @@
           "mediaType": "image/png",
           "bytes": 173452,
           "sha256": "47eee7691cfa66f2fa8d787d326e9c6d4716dbe600c73b7bd8549487382e6ce8"
+        },
+        {
+          "path": "/assets/icons/eyes-of-minute-seeing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 149248,
+          "sha256": "3f5ca4435adcfc321329407fb70e19a7ddfebd8c3bd0bf26e47f33b432767207"
+        },
+        {
+          "path": "/assets/icons/eyes-of-the-eagle-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 141521,
+          "sha256": "8a3f522a75612a84026a8d83bae4f6fd3df7928245a162b96dd3424f4b4fc5ed"
         },
         {
           "path": "/assets/icons/fabricate-spell-action.png",
@@ -20576,10 +22868,82 @@
           "sha256": "de457e32cdf6fd4daff675d3e1c9ea2cfbba014dc43382837313d9b81494472b"
         },
         {
+          "path": "/assets/icons/feather-token-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 426788,
+          "sha256": "7797ca744296bc8d469be723e24df250687e12a66cfd2dda4dccf53941e64cf8"
+        },
+        {
           "path": "/assets/icons/feeblemind-spell-action.png",
           "mediaType": "image/png",
           "bytes": 258104,
           "sha256": "9fcdfc57873f651d26333737910f44450b830cd59c20a07d7479ca39e47f1f92"
+        },
+        {
+          "path": "/assets/icons/fighter-action-surge-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 228016,
+          "sha256": "bd07402185c616d40f39f70d1b56859c77180c70a1b74e42a1245b24340a2fc9"
+        },
+        {
+          "path": "/assets/icons/fighter-champion-additional-style-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 331307,
+          "sha256": "9b05fe656d6334836a9c8e9268b8724b07a07e6475deb3775d718335f9d30bee"
+        },
+        {
+          "path": "/assets/icons/fighter-champion-improved-critical-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 221733,
+          "sha256": "7f04841d10ae107bbcee2115b55703b905876ad0eaf2490fd188599302d16389"
+        },
+        {
+          "path": "/assets/icons/fighter-champion-remarkable-athlete-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 272217,
+          "sha256": "e4b93421f9e4fa87897c118fa5b393e3babb9a3a93d618fe125a7682185ffbd2"
+        },
+        {
+          "path": "/assets/icons/fighter-champion-superior-critical-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 261416,
+          "sha256": "e08eef59cc4bb831258f339ddbfc3da49a7cfd24a6c34f7975e26059cad1c154"
+        },
+        {
+          "path": "/assets/icons/fighter-champion-survivor-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 298975,
+          "sha256": "a1cb8285df7101892ecd037e9f3f32a43fcac2d17a16985be79d2f8b9b0c1fbb"
+        },
+        {
+          "path": "/assets/icons/fighter-indomitable-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 273766,
+          "sha256": "486d34fcd5df8fc3971a95b23f6421be80f45d35fa026e50dce0847504150b17"
+        },
+        {
+          "path": "/assets/icons/fighter-martial-archetype-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 239801,
+          "sha256": "022241b61401783f7225dead7514363998dafe80a602dd43a1a84c1c46289ba4"
+        },
+        {
+          "path": "/assets/icons/fighter-second-wind-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 356193,
+          "sha256": "02ed2a97bb7b5a3db72e146f41cf34a6db4d872912bcf22b6a1e86abb2ca3785"
+        },
+        {
+          "path": "/assets/icons/fighting-style-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 280651,
+          "sha256": "a5316e7607f6dcb76fde2dfcef97a66aaa40b9ddca00b9b77e56a70fd77b70ee"
+        },
+        {
+          "path": "/assets/icons/figurine-of-wondrous-power-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 265058,
+          "sha256": "bddf63ec287760587044c7adafcb52686c3dc0c5774ab05d24821d71a98bfad6"
         },
         {
           "path": "/assets/icons/find-familiar-spell-action.png",
@@ -20648,6 +23012,12 @@
           "sha256": "c225ca062611cce84028588c0013589406a1d64183d20e41e218864a53fb85c2"
         },
         {
+          "path": "/assets/icons/flame-tongue-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 135250,
+          "sha256": "884d84fa01ad8b7ea25c91c423881fabfe6bfdd9286b31300ab5007f9cbc29c0"
+        },
+        {
           "path": "/assets/icons/flaming-sphere-spell-action.png",
           "mediaType": "image/png",
           "bytes": 313204,
@@ -20684,6 +23054,12 @@
           "sha256": "838c6b86f6c74f7891400256ce5ab7bf20ac368ad8de71c6a55f0075a56b3770"
         },
         {
+          "path": "/assets/icons/folding-boat-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 280849,
+          "sha256": "b1cab4eed9df0545b1f7fc274a27effe25f6b99a16f85cde99f296dff4c5a191"
+        },
+        {
           "path": "/assets/icons/forbiddance-spell-action.png",
           "mediaType": "image/png",
           "bytes": 444101,
@@ -20714,6 +23090,12 @@
           "sha256": "1ee3f10ecc54a06016322b2c8218993766779996141ef01c2a9263dc84d8efc1"
         },
         {
+          "path": "/assets/icons/frost-brand-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 116754,
+          "sha256": "71708d4039937e01cb1f6fed4cfdf7d45781c53cf951de476a4058b281d8bd13"
+        },
+        {
           "path": "/assets/icons/gaseous-form-spell-action.png",
           "mediaType": "image/png",
           "bytes": 292666,
@@ -20726,10 +23108,28 @@
           "sha256": "5740f4404c6e795aa1b3cc1c2711b436c60a1a2278715d99a2d0c76d13633f43"
         },
         {
+          "path": "/assets/icons/gauntlets-of-ogre-power-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 321266,
+          "sha256": "31fdaa071ba15d4f3df74747bee9ddd13d82be2201c6b83608cfe265e4df3772"
+        },
+        {
           "path": "/assets/icons/geas-spell-action.png",
           "mediaType": "image/png",
           "bytes": 259819,
           "sha256": "adbafb302ce271246ca636ccb126ac9247ccb61b3edc907b8e60f847848e8a15"
+        },
+        {
+          "path": "/assets/icons/gem-of-brightness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 289625,
+          "sha256": "25ea92aab69e2513f599deaef7c804e911461e3ac079b6ab04edcdbb440dc822"
+        },
+        {
+          "path": "/assets/icons/gem-of-seeing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 256993,
+          "sha256": "c247e448b9d13f2b2ff1f2ecfe1441f2a9b7d3ca116333595f7ad600a5442136"
         },
         {
           "path": "/assets/icons/gentle-repose-spell-action.png",
@@ -20744,6 +23144,18 @@
           "sha256": "e1a90d6bf469c3f4a313574b4b491cc1ca53b3048198b5abf7867f0ab4e58b4f"
         },
         {
+          "path": "/assets/icons/giant-slayer-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 116347,
+          "sha256": "35f352d8b800ca043767960bd097632c424f95ca7c950223a87d0ded0b969f2b"
+        },
+        {
+          "path": "/assets/icons/glamoured-studded-leather-armor-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 256235,
+          "sha256": "e10d7302428f4e473f5764b89554b79159ce04f0115b4b7d180f07d6bc5501b4"
+        },
+        {
           "path": "/assets/icons/glibness-spell-action.png",
           "mediaType": "image/png",
           "bytes": 232935,
@@ -20756,10 +23168,28 @@
           "sha256": "4b716259acf8f4f32a15c6108b13c02580f2f9dca25dbcb2a1834bcc482fc52b"
         },
         {
+          "path": "/assets/icons/gloves-of-missile-snaring-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 297938,
+          "sha256": "fd114947b2d279a83a195997f7a81d4a0da4b9288b9dec40dd38db5d28fdc6bd"
+        },
+        {
+          "path": "/assets/icons/gloves-of-swimming-and-climbing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 352192,
+          "sha256": "3b77bd2c5dd444fc3dc3bb1c6ec7506a03476eea3583e810d11f217584280793"
+        },
+        {
           "path": "/assets/icons/glyph-of-warding-spell-action.png",
           "mediaType": "image/png",
           "bytes": 305224,
           "sha256": "54498a7826ff336dea732a9b39486562b797fe9d2b246c911a2119f77aff7777"
+        },
+        {
+          "path": "/assets/icons/goggles-of-night-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 196040,
+          "sha256": "f5d0084c236e45136bfbc429485a23d129d052e81c2a953e5f9e5a31bf66fc54"
         },
         {
           "path": "/assets/icons/goodberry-spell-action.png",
@@ -20828,6 +23258,18 @@
           "sha256": "7c06a2cf0ea6074dae0cb3719a3d78e9d6ac3ff0472508164d9f01c95c10448c"
         },
         {
+          "path": "/assets/icons/hammer-of-thunderbolts-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 139249,
+          "sha256": "335cf3a589289bd4d67064183ad9e6d324b0c4b664992cadeecedafd0ee5fb6c"
+        },
+        {
+          "path": "/assets/icons/handy-haversack-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 355590,
+          "sha256": "69c8f6dff0315ebd4b26f2a4efb3382e2bf619ce455e5c0fbaadf506970623c7"
+        },
+        {
           "path": "/assets/icons/harm-spell-action.png",
           "mediaType": "image/png",
           "bytes": 245459,
@@ -20838,6 +23280,18 @@
           "mediaType": "image/png",
           "bytes": 281629,
           "sha256": "23cba7b829132948da1eeffc24e1832aaf893ccf2b57a2d055befe66b0ffd005"
+        },
+        {
+          "path": "/assets/icons/hat-of-disguise-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 155954,
+          "sha256": "1c3075d9e408cfff81baf82f413a3ee4f1c9607bdfe199d5422598bbcf0959dd"
+        },
+        {
+          "path": "/assets/icons/headband-of-intellect-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 128208,
+          "sha256": "49cc72fae8cc000d116553ae1f6d485497572377a42c8fa5e3e28575dd684109"
         },
         {
           "path": "/assets/icons/heal-spell-action.png",
@@ -20862,6 +23316,30 @@
           "mediaType": "image/png",
           "bytes": 317549,
           "sha256": "e6bad7f6498adb4a053e87e160bb10fa7c43d0d9aaa7691bb61f9ffc4e0c088f"
+        },
+        {
+          "path": "/assets/icons/helm-of-brilliance-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 214116,
+          "sha256": "6517bd8212d3778434256363cf19bab9622722ddb21c315e469b2897d1bbfe23"
+        },
+        {
+          "path": "/assets/icons/helm-of-comprehending-languages-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 348758,
+          "sha256": "4974f7fc3762a11fadbbe0af87faef23df6530ff4658d27541d18eaa6bf59ce6"
+        },
+        {
+          "path": "/assets/icons/helm-of-telepathy-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 281171,
+          "sha256": "50d2ad8185bc1a3ec9afd6f6457d113ed1fdda4a4a84b4283ca0173c930dd8d8"
+        },
+        {
+          "path": "/assets/icons/helm-of-teleportation-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 248348,
+          "sha256": "3d4a43f4d9b9f8f342cba3053327ba5eba983239d73989f75c686a464dca393e"
         },
         {
           "path": "/assets/icons/heroes-feast-spell-action.png",
@@ -20900,6 +23378,36 @@
           "sha256": "60750fccad686ac833c79c39884abfae56ce96c2c5f59ee1ddf52e49c4831ffc"
         },
         {
+          "path": "/assets/icons/holy-avenger-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 95427,
+          "sha256": "b9bb990daeb8eb96786296d928f1090dd14a2c0b45f8eb0f7a50e4d71bf531f0"
+        },
+        {
+          "path": "/assets/icons/horn-of-blasting-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 193799,
+          "sha256": "a0f901dfe2eb2b8db8b09c8226b61178d81d530a0048f364696561851e0764dd"
+        },
+        {
+          "path": "/assets/icons/horn-of-valhalla-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 231422,
+          "sha256": "b9970a33b6339b09df818026ba172798e3e9fb15018474008e360ad86bc1e21e"
+        },
+        {
+          "path": "/assets/icons/horseshoes-of-a-zephyr-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 269849,
+          "sha256": "012efc7d39f80a51812730e27fd716be65d67fc3a2f60a0b7066fcc72737d02f"
+        },
+        {
+          "path": "/assets/icons/horseshoes-of-speed-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 209616,
+          "sha256": "85191b75a9e01c5730e5e9c838b5799fd23f00b919a4fb0338d79ff3af546c1d"
+        },
+        {
           "path": "/assets/icons/hunters-mark-spell-action.png",
           "mediaType": "image/png",
           "bytes": 210455,
@@ -20930,6 +23438,12 @@
           "sha256": "0c85046d96c2d40921192839aad27bb77cb6a207e5bbaae55ae89b91bab3caf5"
         },
         {
+          "path": "/assets/icons/immovable-rod-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 278920,
+          "sha256": "81bfca7cee5788e2939e6454df1dec1595d9f1255a9d61b3ef578d3293f6754e"
+        },
+        {
           "path": "/assets/icons/imprisonment-spell-action.png",
           "mediaType": "image/png",
           "bytes": 288079,
@@ -20954,6 +23468,12 @@
           "sha256": "ecd9b2f14913171a431524b5305a4c9597d6dd20e0239fe30c41a265f30ac241"
         },
         {
+          "path": "/assets/icons/instant-fortress-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 204475,
+          "sha256": "9b7ad68b54d526016e0504cc64642b45eb5c2cc3692058bfb9e648ae78fcd908"
+        },
+        {
           "path": "/assets/icons/instant-summons-spell-action.png",
           "mediaType": "image/png",
           "bytes": 201210,
@@ -20966,10 +23486,34 @@
           "sha256": "424377972a97bf0b25e05f598e11fd42ac598cff1267a585b3689f781ad1d33b"
         },
         {
+          "path": "/assets/icons/ioun-stone-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 196387,
+          "sha256": "869fdd1cdcf049ee94fdf7f03b4dd9c891563fff16c080627496e58000015684"
+        },
+        {
+          "path": "/assets/icons/iron-bands-of-binding-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 344369,
+          "sha256": "a63eefd1000480b5a52991c0c77d9dccbf2f38ec7f37459186b9c9125d8de245"
+        },
+        {
+          "path": "/assets/icons/iron-flask-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 215099,
+          "sha256": "39a5ca6ce390d741dbbb23a6aeeaa1167fbdc1d3a9739b163a05bff11714ea4e"
+        },
+        {
           "path": "/assets/icons/irresistible-dance-spell-action.png",
           "mediaType": "image/png",
           "bytes": 288358,
           "sha256": "cf1ca98e4997b5d65c07eeaabf0c1086d5b9a93d0cecd6b72d2aff3554e7fac1"
+        },
+        {
+          "path": "/assets/icons/javelin-of-lightning-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 63994,
+          "sha256": "37837c6879a8a621fb2be2625c6a377b8caa47aea473e34319f3a0dbf8c70a68"
         },
         {
           "path": "/assets/icons/jump-spell-action.png",
@@ -20982,6 +23526,12 @@
           "mediaType": "image/png",
           "bytes": 393441,
           "sha256": "b1ee2d55e21ed618562989255ae3dc0dfde424c55d149d1cda0f0dc38f61014c"
+        },
+        {
+          "path": "/assets/icons/lantern-of-revealing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 182252,
+          "sha256": "c05a54688b1beecc0f457c104cc378f4fba59d1f257d89509da3ba89570fbbf7"
         },
         {
           "path": "/assets/icons/legend-lore-spell-action.png",
@@ -21038,6 +23588,30 @@
           "sha256": "0ad1a3f5451577ea969164b9877054f17919cc4861f27767c5afd2898dced883"
         },
         {
+          "path": "/assets/icons/luck-blade-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 85054,
+          "sha256": "34e21f66b2aeb7ca3f4b9ec45311454a81a784f651982c00265182b351008ac5"
+        },
+        {
+          "path": "/assets/icons/mace-of-disruption-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 130171,
+          "sha256": "b0b12efdd1bf15593759a20513b97b32d68a9f7e54a89b1c7b5cb0b43f2dbab3"
+        },
+        {
+          "path": "/assets/icons/mace-of-smiting-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 141302,
+          "sha256": "7ceb6561e961ef907d44968153283edd703bda9a0a93a9ba6fa6eedd9801ce43"
+        },
+        {
+          "path": "/assets/icons/mace-of-terror-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 127510,
+          "sha256": "02ded0bd7bec0739fa6ec9ec8fa5c7674a375fe21efc1dc3916748c479f119a9"
+        },
+        {
           "path": "/assets/icons/mage-armor-spell-action.png",
           "mediaType": "image/png",
           "bytes": 375758,
@@ -21092,6 +23666,48 @@
           "sha256": "7d4b8d713e24dcccc1bcb197bc95aaad217e98233d94e78f6583df1d3386e4f0"
         },
         {
+          "path": "/assets/icons/mantle-of-spell-resistance-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 292830,
+          "sha256": "c397175a93edd3c6d14175073628429f53b4e212af09625e855b2bf3f04f5bc6"
+        },
+        {
+          "path": "/assets/icons/manual-of-bodily-health-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 319195,
+          "sha256": "00e538fa78944d28a021359bd5720f69f5bc232372d6bd393dd31b1e8403a4ce"
+        },
+        {
+          "path": "/assets/icons/manual-of-gainful-exercise-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 308417,
+          "sha256": "0efcecd65ba74a774d2167085555451b2da8554485b2fff17330fc42638cdc88"
+        },
+        {
+          "path": "/assets/icons/manual-of-golems-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 371326,
+          "sha256": "b3de391af2e8fd9e8bb20cde75cc812751b971808da0522a482f7535027f335e"
+        },
+        {
+          "path": "/assets/icons/manual-of-quickness-of-action-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 307866,
+          "sha256": "d7a9f322c44276e230ccb65ab12f575eaa50b612a52d3a6093b07ae58d14227b"
+        },
+        {
+          "path": "/assets/icons/mariners-armor-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 338741,
+          "sha256": "4ed737df984ecdf1723506d875ddcdec113f346fbc4a7164a4e443c0e149ce07"
+        },
+        {
+          "path": "/assets/icons/marvelous-pigments-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 407215,
+          "sha256": "d9a2bba047a39addbb493c5d0953879a7d2f144605c0617ab34302d460be2ac1"
+        },
+        {
           "path": "/assets/icons/mass-cure-wounds-spell-action.png",
           "mediaType": "image/png",
           "bytes": 282959,
@@ -21120,6 +23736,12 @@
           "mediaType": "image/png",
           "bytes": 326648,
           "sha256": "5870f09413f1862f2f4a0c319825733ddda2d20cae911f6945e57569bc24dfd5"
+        },
+        {
+          "path": "/assets/icons/medallion-of-thoughts-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 122189,
+          "sha256": "bbb80c7a80ed89355d6e0b0c0b7349ed95f27eb237390f248a3fb3bb309cd42f"
         },
         {
           "path": "/assets/icons/meld-into-stone-spell-action.png",
@@ -21176,6 +23798,12 @@
           "sha256": "ca860a7724bc73673459578f1a490956487e73ea48fa46fc31baf48c2aea68de"
         },
         {
+          "path": "/assets/icons/mirror-of-life-trapping-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 144661,
+          "sha256": "fb8ee6fe4a7648c083c1f79424cc8ad09a6954a1679a60af958474e93fadc61a"
+        },
+        {
           "path": "/assets/icons/mislead-spell-action.png",
           "mediaType": "image/png",
           "bytes": 377016,
@@ -21188,10 +23816,124 @@
           "sha256": "c09b6bca112b0389c8d650542eb1bbbbce5402edb2380d1ff5e1ab0d97217f71"
         },
         {
+          "path": "/assets/icons/mithral-armor-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 347680,
+          "sha256": "3adc72ed621bf31b4ad5467e80379809361f54026bcbde4b9c68ff68f4e00b91"
+        },
+        {
           "path": "/assets/icons/modify-memory-spell-action.png",
           "mediaType": "image/png",
           "bytes": 274265,
           "sha256": "67fc531a0590326a85ad5452b59bf9696420855886215a276e42b776e0a73031"
+        },
+        {
+          "path": "/assets/icons/monk-deflect-missiles-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 264400,
+          "sha256": "3714b0a789dcbbbf06fb2a605fbb06af127a287fecd5f6056f91b513cb353a32"
+        },
+        {
+          "path": "/assets/icons/monk-diamond-soul-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 333849,
+          "sha256": "1d2ce0e0b60f33fe821d7cb3efd6a064afaf9c0f36020d1fcb5c3e832a2193b3"
+        },
+        {
+          "path": "/assets/icons/monk-empty-body-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 323810,
+          "sha256": "177eeabe1fa755f9ad73959cfe6baa7399752909d94e8bb80a87dc04eb4462a8"
+        },
+        {
+          "path": "/assets/icons/monk-ki-empowered-strikes-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 373295,
+          "sha256": "e94bea53a9e90abc0a786b61d37d04fb0b241dc677bab2071cd4520ee6dcd9bd"
+        },
+        {
+          "path": "/assets/icons/monk-ki-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 352685,
+          "sha256": "8b122bc161d20c0d57ed9d092549b3e520c85b2e4bbb1192482c2b685720b2d1"
+        },
+        {
+          "path": "/assets/icons/monk-martial-arts-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 390012,
+          "sha256": "e8d3751b6d8efd5dd6149a76814dee00bcda56054f5b8c5c0caa0760e403943b"
+        },
+        {
+          "path": "/assets/icons/monk-monastic-tradition-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 357311,
+          "sha256": "86b4f3a36c512324035ea5a4091e432a0e5b7e9f138fd0f32fe9a5f833a79e99"
+        },
+        {
+          "path": "/assets/icons/monk-open-hand-quivering-palm-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 286372,
+          "sha256": "c4400c29b7a960890d31bd2fe0ebdf3e9ae84596639ac20c403c36b8ae9efd1e"
+        },
+        {
+          "path": "/assets/icons/monk-open-hand-technique-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 350986,
+          "sha256": "62ded88c59b46890fdc27a309ecce723e2b6a4e04950c0cad95f8fdf5bb7bf88"
+        },
+        {
+          "path": "/assets/icons/monk-open-hand-tranquility-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 352560,
+          "sha256": "9b68514927472df57402a004cc5d16829bdfcce7948a75123043ef25607b29b8"
+        },
+        {
+          "path": "/assets/icons/monk-open-hand-wholeness-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 352139,
+          "sha256": "377b65b6cdc88ac3042ded59d0a921e2633c2afac74ac979a30f286e3b3c7981"
+        },
+        {
+          "path": "/assets/icons/monk-perfect-self-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 367232,
+          "sha256": "23971cc588d79444ef7f9eacfd93e52e6bd7680cea311909b9782cf8be29e970"
+        },
+        {
+          "path": "/assets/icons/monk-purity-of-body-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 391832,
+          "sha256": "18f3a0b30391deb0d2b02cf8e40fa7f7006556dcca1599b2ceca09d19e979f39"
+        },
+        {
+          "path": "/assets/icons/monk-slow-fall-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 269183,
+          "sha256": "d5b6db4e5840bb56ad95eb63701c7b78eb143472fec4d0a4f2d0e20481229f20"
+        },
+        {
+          "path": "/assets/icons/monk-stillness-of-mind-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 354324,
+          "sha256": "916e52edd8f1fcd142b9256f5f6b47384f09fff68ec75b386981380d625de5a0"
+        },
+        {
+          "path": "/assets/icons/monk-stunning-strike-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 386991,
+          "sha256": "4c51021d3f6f2e881e8462fa9b123c6e8a5297ea6bd08bdef77f6aa463c3320e"
+        },
+        {
+          "path": "/assets/icons/monk-tongue-of-sun-and-moon-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 379705,
+          "sha256": "fd6c2c9b1011d416375cd4d466c1f7a368d2029bf7d89541effec1ffb0ce1a74"
+        },
+        {
+          "path": "/assets/icons/monk-unarmored-movement-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 342096,
+          "sha256": "58bb66f98f0561cb9096a6f1f924fb71304e84a50d07094f76fa19dda555c766"
         },
         {
           "path": "/assets/icons/moonbeam-spell-action.png",
@@ -21212,10 +23954,160 @@
           "sha256": "adaf1b49cc5f1456d5fe7c27872490e457dfbb165e975c8fb431637626fabf2e"
         },
         {
+          "path": "/assets/icons/necklace-of-adaptation-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 212727,
+          "sha256": "06635cd71e1b9089d2aa3e69e88fe5a69b7e695da9e58be8fd481dd7e3f98b0d"
+        },
+        {
+          "path": "/assets/icons/necklace-of-fireballs-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 148121,
+          "sha256": "178ef1440559d0122050b982dbd1290f40eadab3a014cca891b9a6eb2dc2d7c0"
+        },
+        {
+          "path": "/assets/icons/necklace-of-prayer-beads-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 119031,
+          "sha256": "82154ed46e5cf5a4bb566e0357895a34b3d583606e4b361d060ff034ed85a6e2"
+        },
+        {
+          "path": "/assets/icons/nine-lives-stealer-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 131233,
+          "sha256": "b40995f598dbcd8103fab6ef24b4ec3dac9d045822c3f55c035d1e0f1670ad0f"
+        },
+        {
           "path": "/assets/icons/nondetection-spell-action.png",
           "mediaType": "image/png",
           "bytes": 267458,
           "sha256": "5dad437e7f2b7c75dfe1511cdd47f6d591d77240d32f7ae95751b71d984d7a82"
+        },
+        {
+          "path": "/assets/icons/oathbow-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 50738,
+          "sha256": "c95eb09efd6a2743821fa8de1e6e58bab6229da2f3ec46d248e71b5569ad0244"
+        },
+        {
+          "path": "/assets/icons/oil-of-etherealness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 139138,
+          "sha256": "c39562ca0b3654253486205adbdf14b0c00f25e269aca8c9e1c07f5c75151086"
+        },
+        {
+          "path": "/assets/icons/oil-of-sharpness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 117753,
+          "sha256": "22ea85abacbe870b9df7805ca5bbab829c33b700d7df34e9d3bdf058436f44bc"
+        },
+        {
+          "path": "/assets/icons/oil-of-slipperiness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 207011,
+          "sha256": "53b2fdb78c3eb2a196ab82592bf4ab679cfe7cec1d05e0bef8cf7dcc868ece05"
+        },
+        {
+          "path": "/assets/icons/orb-of-dragonkind-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 351088,
+          "sha256": "1b52646e9f4e5150c7987ea6ca2c7192a5ab1f0bb7b69acc11166080fcc0bc9a"
+        },
+        {
+          "path": "/assets/icons/paladin-aura-improvements-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 315793,
+          "sha256": "26fc410a59a7113a880f6bf355a279a12511198309ba6656e73055e94c3c0ab0"
+        },
+        {
+          "path": "/assets/icons/paladin-aura-of-courage-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 401148,
+          "sha256": "4f5919dd64ffedcb214602a1c57411ff1102ec675edefe3b41ee2bdaaf0ab76a"
+        },
+        {
+          "path": "/assets/icons/paladin-aura-of-protection-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 258750,
+          "sha256": "9663bd35e64e6f05ac79ede4e3d1d1e3f509bf71ceef6efabd9b2a62752a8070"
+        },
+        {
+          "path": "/assets/icons/paladin-cleansing-touch-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 312253,
+          "sha256": "3504f9df956b82dd9f50f9b6fa71d66951038ed527e5baf7793b591914581783"
+        },
+        {
+          "path": "/assets/icons/paladin-devotion-aura-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 264546,
+          "sha256": "d0604be62b19f6331d7de0dcd439ccbb1de6bac1eb8cfe79b7bf6bb4f7b9e7b6"
+        },
+        {
+          "path": "/assets/icons/paladin-devotion-holy-nimbus-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 258270,
+          "sha256": "353c948d053dd0456a4ef6b4d241a6e683fe97c6e7861eb14643ccbc3509bab1"
+        },
+        {
+          "path": "/assets/icons/paladin-devotion-oath-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 186080,
+          "sha256": "2a1cd9fcf050409a7e8a538728e75ec81a44e7fa3050da5f29437a234503d7f9"
+        },
+        {
+          "path": "/assets/icons/paladin-devotion-purity-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 287445,
+          "sha256": "50c0eff0b6437832aa0bc0d6a6497a76ef6440023a58c327130584698aaa6a27"
+        },
+        {
+          "path": "/assets/icons/paladin-devotion-sacred-weapon-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 198372,
+          "sha256": "2843c62a4d3781dddcefeaac9eadda363e253c53c5e7f9bbc577344d17cc002a"
+        },
+        {
+          "path": "/assets/icons/paladin-devotion-turn-unholy-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 328475,
+          "sha256": "1e7155aa6c408fffe0a7abc2efb62138df43963a1a6e7eb420a066c92d3c9138"
+        },
+        {
+          "path": "/assets/icons/paladin-divine-health-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 328138,
+          "sha256": "da22de26e0076101c4e73cb9d275d6cf492fd604cc4f7c9030f3fe0a807c637c"
+        },
+        {
+          "path": "/assets/icons/paladin-divine-sense-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 257140,
+          "sha256": "63fa73c9e819ad9e68a3a81ddc64086cf51c881b3f0084aa034317b0bdb0a8f6"
+        },
+        {
+          "path": "/assets/icons/paladin-divine-smite-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 237014,
+          "sha256": "63b864211b2b04a4eedca0028cb618fb21b45717f8f9e514b360970701cd6ca4"
+        },
+        {
+          "path": "/assets/icons/paladin-improved-divine-smite-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 183591,
+          "sha256": "1a26e5001e440156da783397572687865bc6df65b417b8f1b1cf0433d169852c"
+        },
+        {
+          "path": "/assets/icons/paladin-lay-on-hands-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 307234,
+          "sha256": "97ba453e5ca2a144305d25315c8d83bbacd047cfcf7d7634241d69561c884022"
+        },
+        {
+          "path": "/assets/icons/paladin-sacred-oath-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 231777,
+          "sha256": "9df3d040c08570ae7e778840a89d4b6b34324e607a0c27be7d708a61f283c6bb"
         },
         {
           "path": "/assets/icons/pass-without-trace-spell-action.png",
@@ -21230,6 +24122,30 @@
           "sha256": "f5ee0fec58df7748243accbf2be5e2458be902d405d2ecb8b7b0cf3427166800"
         },
         {
+          "path": "/assets/icons/pearl-of-power-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 293962,
+          "sha256": "fa20bc6a0233f69c4121660183da2c2eb51463dd74605de8e6992fe76d05b1e7"
+        },
+        {
+          "path": "/assets/icons/periapt-of-health-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 191205,
+          "sha256": "715bc4b75e7885c43cb7d6dd45a686a61686d08ca5715d7c02af1d87029b6365"
+        },
+        {
+          "path": "/assets/icons/periapt-of-proof-against-poison-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 191074,
+          "sha256": "fa3615ebff7b40d2ed569889033986760d9fb0da3639084e37aecfbb496d4349"
+        },
+        {
+          "path": "/assets/icons/periapt-of-wound-closure-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 176336,
+          "sha256": "70bc28fc76a5a53f9f32ef921e2e75eb346467c89032655b57c1c31f774fd349"
+        },
+        {
           "path": "/assets/icons/phantasmal-killer-spell-action.png",
           "mediaType": "image/png",
           "bytes": 232276,
@@ -21240,6 +24156,24 @@
           "mediaType": "image/png",
           "bytes": 384030,
           "sha256": "b3c6b167ac3db2eb6e36c1970daae4e8404dd0bb55f17a7aa6bc41b2b7f1d513"
+        },
+        {
+          "path": "/assets/icons/philter-of-love-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 219275,
+          "sha256": "03a273ec12c40637566771e2a4892603d505ed2b72d99c4d9db3bba0b92ed67a"
+        },
+        {
+          "path": "/assets/icons/pipes-of-haunting-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 240211,
+          "sha256": "d277e96f35ee0b90f8a623c6983f5e5ad32ab6e837548392b0c3b22db57eee88"
+        },
+        {
+          "path": "/assets/icons/pipes-of-the-sewers-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 301190,
+          "sha256": "07a72b0fde9d5a2896449893869c303e70b0ca9a33e6ff2edd44e3acd2e41444"
         },
         {
           "path": "/assets/icons/planar-ally-spell-action.png",
@@ -21266,6 +24200,12 @@
           "sha256": "20efc9bbeb72e140b45d42da6baf422e3edc037c55d1476355d0306bd1fbbe3c"
         },
         {
+          "path": "/assets/icons/plate-armor-of-etherealness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 241041,
+          "sha256": "efc10d6085095869d00d48577929ece5bad40433fc3c5d7bc0f871f42e2fe5c6"
+        },
+        {
           "path": "/assets/icons/poison-spray-spell-action.png",
           "mediaType": "image/png",
           "bytes": 305751,
@@ -21276,6 +24216,102 @@
           "mediaType": "image/png",
           "bytes": 291915,
           "sha256": "4058e64ce212c4f13b263fcf5487d9a553e852988b1307d5e609fa7034ce3af6"
+        },
+        {
+          "path": "/assets/icons/portable-hole-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 240832,
+          "sha256": "d6a9eb8ef3235491265b6c9aaece372c3ba9d1d214434266587efd7c1cd51eb4"
+        },
+        {
+          "path": "/assets/icons/potion-of-animal-friendship-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 204871,
+          "sha256": "d076f9aef6140dfb350c9d37a1418c96388146780cddf50f024dcad5a6685f57"
+        },
+        {
+          "path": "/assets/icons/potion-of-clairvoyance-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 157601,
+          "sha256": "7958bbf424182f9ee03c121d0537aff46a4a456a430b15ffdca8e67cfeecd008"
+        },
+        {
+          "path": "/assets/icons/potion-of-climbing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 254849,
+          "sha256": "23cec0d5c4796b1128212f0704b9e4bf67831a369676058a5b36b01ca285d2dd"
+        },
+        {
+          "path": "/assets/icons/potion-of-diminution-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 239422,
+          "sha256": "093c028acc96a5c335122dd441eca81bd1794c99c94d9eeac83c8ba8b8e1e4f4"
+        },
+        {
+          "path": "/assets/icons/potion-of-flying-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 144927,
+          "sha256": "38e760e35e791a9897439c23e8ccd8df0dbcdcd421977d6477ad106d18192746"
+        },
+        {
+          "path": "/assets/icons/potion-of-gaseous-form-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 222391,
+          "sha256": "acc6bbaab6602c0021b3809861280a75a59d71c2155109e56a61388f597ff0a9"
+        },
+        {
+          "path": "/assets/icons/potion-of-giant-strength-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 218240,
+          "sha256": "aac75fb2882f4ad80a575d1e35d74bfa9a89b2557053c4aa5271db3678a08259"
+        },
+        {
+          "path": "/assets/icons/potion-of-growth-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 144479,
+          "sha256": "6d29e9173a0b405df16e054c856b3e18e2797b97a93ce1082924d4762ea2cfed"
+        },
+        {
+          "path": "/assets/icons/potion-of-heroism-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 210414,
+          "sha256": "1846e6c52bc892326c068759fe53f704b71c2ce39804fd972392ff0de7a0ae0a"
+        },
+        {
+          "path": "/assets/icons/potion-of-invisibility-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 134213,
+          "sha256": "ce5f5e02e8097a4834c2ca98075fcd565995e24036b24c4a9dae67c94d433e2a"
+        },
+        {
+          "path": "/assets/icons/potion-of-mind-reading-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 186171,
+          "sha256": "9f1bb1c6a972aeaa199252b4e7e94a7956f8ea305b2d37dba6cc579430a952df"
+        },
+        {
+          "path": "/assets/icons/potion-of-poison-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 159731,
+          "sha256": "3e1038966b8e674ffb7475dfb49c84133125571926d0609f745991240fefc3d9"
+        },
+        {
+          "path": "/assets/icons/potion-of-resistance-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 184363,
+          "sha256": "cca2ce7ece8cc992516c6f1cc8bfecaaeb81cb259d8ad6f8c17f8223b38b1922"
+        },
+        {
+          "path": "/assets/icons/potion-of-speed-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 126228,
+          "sha256": "045c8fdcb51f0db196336a7dd0a45d353fc869483a0ae84fecabaaa4189adb87"
+        },
+        {
+          "path": "/assets/icons/potion-of-water-breathing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 275111,
+          "sha256": "189d70215f8883391bee4e98eab7191fdab1179ff9bee136cc3ca0e612c3bd01"
         },
         {
           "path": "/assets/icons/power-word-kill-spell-action.png",
@@ -21374,6 +24410,84 @@
           "sha256": "3d37ec5e4fde65b27fe8b9568603c7fdfb7a267467a2a8a8dc72cb27e1045cc9"
         },
         {
+          "path": "/assets/icons/ranger-favored-enemy-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 308842,
+          "sha256": "9e1472d7be2fa8f4e412adc0783020e07c0bf1084b03f50a819a2a94aeb1515b"
+        },
+        {
+          "path": "/assets/icons/ranger-feral-senses-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 339831,
+          "sha256": "4729f3af75e870b02cdeba0646afcaf6b4d85f326dee5c48181539d41ca3007a"
+        },
+        {
+          "path": "/assets/icons/ranger-foe-slayer-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 418674,
+          "sha256": "111e3273cddefd86673760ec3375a06b543b378407b97676b8ff9aeb178861b5"
+        },
+        {
+          "path": "/assets/icons/ranger-hide-in-plain-sight-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 374359,
+          "sha256": "91e5a5dce5abfc0fe243cd596ca080a19cea70e7045f8bc4b2c1f3a5b67c0cf9"
+        },
+        {
+          "path": "/assets/icons/ranger-hunter-defensive-tactics-feature-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 346120,
+          "sha256": "243c23bcd021fc9022b31d818df8b8827eb1e5b59011961f24197e805a89d52d"
+        },
+        {
+          "path": "/assets/icons/ranger-hunter-multiattack-feature-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 232856,
+          "sha256": "89413250143d0406d9787be9bfbcc42c5259e8a83cd82932b170ea56d67cdcc8"
+        },
+        {
+          "path": "/assets/icons/ranger-hunter-prey-feature-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 305680,
+          "sha256": "9ea8fbaaf8951baa65843910aed62bd402cca288044ddf7ea851f22f9836a26c"
+        },
+        {
+          "path": "/assets/icons/ranger-hunter-superior-defense-feature-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 356670,
+          "sha256": "e894ddfb98a6e6f97753dfcd1944fffd8d6113b38c22158f0e950a4fa7e3d81a"
+        },
+        {
+          "path": "/assets/icons/ranger-lands-stride-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 424318,
+          "sha256": "3bd9a510849147606d126491db28c1de7f7cadeba7a3b2babd4a6c1d07994dea"
+        },
+        {
+          "path": "/assets/icons/ranger-natural-explorer-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 413775,
+          "sha256": "65dbc4f60c74e874444a0592a09bd63da7e74e6849ae044399e0bacdc0f6d6ea"
+        },
+        {
+          "path": "/assets/icons/ranger-primeval-awareness-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 354525,
+          "sha256": "01379e0e8168a307dd04dee46efd3fd191408b199dd0e65f4292e44a599dcf17"
+        },
+        {
+          "path": "/assets/icons/ranger-ranger-archetype-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 299544,
+          "sha256": "acec1fdf380319c2121061dcf946b1f05df0c5cc91098a3f4527b4d7f37c71c7"
+        },
+        {
+          "path": "/assets/icons/ranger-vanish-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 338953,
+          "sha256": "12dcecac4c24193d0b11f5fca28128385998da671e973075ea959cf18df3f77b"
+        },
+        {
           "path": "/assets/icons/ray-of-enfeeblement-spell-action.png",
           "mediaType": "image/png",
           "bytes": 243039,
@@ -21416,6 +24530,12 @@
           "sha256": "cd59b1ee981e4ec21e142f45b74ce66bc44b255fcde7b22c8c4fc2257a18ae7d"
         },
         {
+          "path": "/assets/icons/restorative-ointment-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 232077,
+          "sha256": "370e1275aaa132f12fb9b05c03ede2f153f60cf15faebe8255f133aad9bcc86c"
+        },
+        {
           "path": "/assets/icons/resurrection-spell-action.png",
           "mediaType": "image/png",
           "bytes": 205346,
@@ -21434,6 +24554,300 @@
           "sha256": "6ffbf33bed5aa468fac761eb66544ed24e9727633cc12b237bb1332ec7b2bd18"
         },
         {
+          "path": "/assets/icons/ring-of-animal-influence-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 264251,
+          "sha256": "a812cfe78bb8f7374e432219fba67c2c6087c874cfa3d7392105f76ff3ae9b09"
+        },
+        {
+          "path": "/assets/icons/ring-of-djinni-summoning-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 270162,
+          "sha256": "f2dd54bdedfd08f3d5e4282c987a6cb78095dde82d06c63cb30ab2dd2ebf7576"
+        },
+        {
+          "path": "/assets/icons/ring-of-elemental-command-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 371979,
+          "sha256": "697c2ed68ddcdb0538600dc4909d5ab8acbf0956f1b0957aa0a5cc47ef0b6b69"
+        },
+        {
+          "path": "/assets/icons/ring-of-evasion-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 266899,
+          "sha256": "38cfece02893b8f7cb3ed98c34cfd2c352ebd7ec922cebf77c6036d4405859cf"
+        },
+        {
+          "path": "/assets/icons/ring-of-feather-falling-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 228373,
+          "sha256": "e4b57fe4a5d5d947706a2216b91b1f51889c715a22e024f10c893a5abf8ba602"
+        },
+        {
+          "path": "/assets/icons/ring-of-free-action-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 286882,
+          "sha256": "f80e0c2e3bb1434e60e5c89896cbf36d1698fae27df619668ae5f1de3025848b"
+        },
+        {
+          "path": "/assets/icons/ring-of-invisibility-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 294014,
+          "sha256": "1d84e6b36fb2285f7df5ed06ff405c0e7460ee54ee8431458d6550eb3019f648"
+        },
+        {
+          "path": "/assets/icons/ring-of-jumping-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 303434,
+          "sha256": "40b818b9e02aaf0208dbebe315a864344a913ddfe4f479fc699eef1c0fd56bd3"
+        },
+        {
+          "path": "/assets/icons/ring-of-mind-shielding-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 355632,
+          "sha256": "a8ab7eda1234afbfc0115bd5256ecf37e2661755f6a8cc4b24fd9a05310d33ed"
+        },
+        {
+          "path": "/assets/icons/ring-of-protection-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 297131,
+          "sha256": "5207897407b7a4e52fa24e1e1d1e4ac6f6c981b3d51bb73e63c1e155297471a4"
+        },
+        {
+          "path": "/assets/icons/ring-of-regeneration-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 317858,
+          "sha256": "2057154bf635aaa470e22b76bf74a773df9399aae2ef93e7c7c2fa4cf6d74830"
+        },
+        {
+          "path": "/assets/icons/ring-of-resistance-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 336437,
+          "sha256": "778ee00f1bce6cbcfbcd209a6c3100b9a8b7d104c20ed5ad31c847ae4712f191"
+        },
+        {
+          "path": "/assets/icons/ring-of-shooting-stars-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 330342,
+          "sha256": "4257db29f23d31a169a58c9dbe3dc230b9c03e33fd8c50a5f46781a96f93e55b"
+        },
+        {
+          "path": "/assets/icons/ring-of-spell-storing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 410542,
+          "sha256": "8da42438d71b243357c832fecd3c5170543f229fa19c476b0c8a1ad0c3bb936c"
+        },
+        {
+          "path": "/assets/icons/ring-of-spell-turning-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 240450,
+          "sha256": "52362f5b430159983069313f6f9c68daeac7f8d805466ce4faad97991f42a669"
+        },
+        {
+          "path": "/assets/icons/ring-of-swimming-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 319315,
+          "sha256": "b2d889e66151d5cb86db344bda5de945ac337617821390b371bcfdc564302908"
+        },
+        {
+          "path": "/assets/icons/ring-of-telekinesis-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 309110,
+          "sha256": "8c2b9a7aacd848425df126312d436833a0369517af43b346a502c19acd5af4e2"
+        },
+        {
+          "path": "/assets/icons/ring-of-the-ram-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 356879,
+          "sha256": "783607150312fd3ac320e4b54db19463bc05d5d0efaf173d05f292b767d53582"
+        },
+        {
+          "path": "/assets/icons/ring-of-three-wishes-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 348280,
+          "sha256": "bd6397873f4f3562afc72bd6cd52581b0c043a059a92f88cdda0fc68faff7510"
+        },
+        {
+          "path": "/assets/icons/ring-of-warmth-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 360023,
+          "sha256": "f8d83c18be77d628bd05aaaa279dbef8cd914770445575aece89e6ce8f1f69ee"
+        },
+        {
+          "path": "/assets/icons/ring-of-water-walking-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 310319,
+          "sha256": "de18c030c265a0d0433a4c607c0a7f0e2410f3e120e7a9040526bce084e64aa7"
+        },
+        {
+          "path": "/assets/icons/ring-of-x-ray-vision-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 270840,
+          "sha256": "6d44975931ad82bd66855a2fc945666cf744822c29fc0205d522de89e2f7ee4f"
+        },
+        {
+          "path": "/assets/icons/robe-of-eyes-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 273660,
+          "sha256": "549149bcbbb2e4580c34265027119324d9503f18268ec11a4593655f127add2d"
+        },
+        {
+          "path": "/assets/icons/robe-of-scintillating-colors-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 281903,
+          "sha256": "c4e0b1cf787e1f33eef38d91f1339b4715400e0555ec4033753b71fafb58407c"
+        },
+        {
+          "path": "/assets/icons/robe-of-stars-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 213383,
+          "sha256": "8be6e67d441912d38f9e1a9abea201116df439bd8f390d6cb9f23d0cbd00f90e"
+        },
+        {
+          "path": "/assets/icons/robe-of-the-archmagi-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 283508,
+          "sha256": "5678d539277816ab1d0f16832667ace746218b1d780ca74502ac8e04f5ff678f"
+        },
+        {
+          "path": "/assets/icons/robe-of-useful-items-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 269377,
+          "sha256": "6c162abd31bee48128ebf13b824000758cd057e8217f8dc80df3a5b03cfd7279"
+        },
+        {
+          "path": "/assets/icons/rod-of-absorption-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 125096,
+          "sha256": "73e8a3529e67f112dbca3c9c906f4af1fba838eecbe5de205ceeb8add2cabade"
+        },
+        {
+          "path": "/assets/icons/rod-of-alertness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 92139,
+          "sha256": "3c784b5857d4f5bdcd20cfcdbcde8edadf575151809fd942c67c953d2c807b65"
+        },
+        {
+          "path": "/assets/icons/rod-of-lordly-might-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 108767,
+          "sha256": "536d8cb985ef2528d5e4438381beaf12214689b8e9d73cac5815efb92aebbfce"
+        },
+        {
+          "path": "/assets/icons/rod-of-rulership-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 68269,
+          "sha256": "53568eda884138ad667d457cbe328e59e001524bb6959df16f27918018e160cd"
+        },
+        {
+          "path": "/assets/icons/rod-of-security-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 93146,
+          "sha256": "43763b9fbf06bcd2b63f3b402e63b9f90b066ca91350ad789cc0ad44bdfde53c"
+        },
+        {
+          "path": "/assets/icons/rogue-blindsense-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 261878,
+          "sha256": "b6e3ed7865ef51fdfdad3f0990e64b0571cc4dad2df4649440b0f982159b92b7"
+        },
+        {
+          "path": "/assets/icons/rogue-cunning-action-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 265021,
+          "sha256": "361c9d6956bdc20ee58bbaccf661de224ad91399c2e01a346623f73c956a7767"
+        },
+        {
+          "path": "/assets/icons/rogue-elusive-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 245933,
+          "sha256": "b185e5567087b6c81b5bc90b9f10c5e7ddcdd0e1379f444332e7bc2510d4f926"
+        },
+        {
+          "path": "/assets/icons/rogue-reliable-talent-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 336415,
+          "sha256": "f392fc409dd1bf54fc575fd77c9a8ffea5e84e7fa7ae7bd5c050d98e6c8a4194"
+        },
+        {
+          "path": "/assets/icons/rogue-roguish-archetype-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 291146,
+          "sha256": "3feed2bc9e3b477c81b585afff119b7848948d8a909b32780d3d2e00f9ae33bb"
+        },
+        {
+          "path": "/assets/icons/rogue-slippery-mind-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 367637,
+          "sha256": "674e70de5ed32cde84b90770bb3b5fcfc146c8015aeea3e48b3d9f871133345a"
+        },
+        {
+          "path": "/assets/icons/rogue-sneak-attack-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 310121,
+          "sha256": "126ee15c8115fa42f658cb15f7a758920f23253faad1ab9b380d4c8c16037a0f"
+        },
+        {
+          "path": "/assets/icons/rogue-stroke-of-luck-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 230764,
+          "sha256": "ed88b8cdd0e1ac7490cc5d9d50b1dcd09c51f8de8fb5b6a4d793392525850a35"
+        },
+        {
+          "path": "/assets/icons/rogue-thief-fast-hands-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 357791,
+          "sha256": "b7e37fb67e2cf8f8776b44afa8142a0c2421d44d69d689c1ab559adf5feaac97"
+        },
+        {
+          "path": "/assets/icons/rogue-thief-reflexes-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 297493,
+          "sha256": "012e1ae0837b2a63b84c93b6c748814ed775a36da81f232116f61e4f3422fdcb"
+        },
+        {
+          "path": "/assets/icons/rogue-thief-second-story-work-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 304457,
+          "sha256": "4197e267bdcb7e2ef1630e9b424e043a6958d9c0e96d62c6ca3af39bf85b2c8c"
+        },
+        {
+          "path": "/assets/icons/rogue-thief-supreme-sneak-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 263194,
+          "sha256": "e2f6a27399072334fd74ff934170ffedcd0ed109c7f170b4efea3d4e15a4ceb6"
+        },
+        {
+          "path": "/assets/icons/rogue-thief-use-magic-device-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 300251,
+          "sha256": "8dc86506de4bdd24a80c60172c21c1755529201de5b0c386c642c106558314b5"
+        },
+        {
+          "path": "/assets/icons/rogue-thieves-cant-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 314030,
+          "sha256": "3a314efcfacc365a40b92e32e3e8dd79418816fccf4ebfc25679ff63e07923d3"
+        },
+        {
+          "path": "/assets/icons/rogue-uncanny-dodge-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 290248,
+          "sha256": "54f06f6d31bcb5034d79879261166210e198ca6af48f64bf22341fc6420458ab"
+        },
+        {
+          "path": "/assets/icons/rope-of-climbing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 198217,
+          "sha256": "6303eac7bf05382c00dff731bf0614a4a0234dc39e4a7b57433553e86835a824"
+        },
+        {
+          "path": "/assets/icons/rope-of-entanglement-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 297397,
+          "sha256": "57ac1f414c0cb16585ce6bec138087c5094042fd8f1b8bdd7c96efa5ac6afd6a"
+        },
+        {
           "path": "/assets/icons/rope-trick-spell-action.png",
           "mediaType": "image/png",
           "bytes": 90360,
@@ -21450,6 +24864,18 @@
           "mediaType": "image/png",
           "bytes": 345667,
           "sha256": "94faf546962ff8a4dd005be285ec50bd2df81ee6838f448ce50c2879e1e0da1d"
+        },
+        {
+          "path": "/assets/icons/scarab-of-protection-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 308451,
+          "sha256": "17dc300a80e4a927b17fa5a60be9e2f4d1d46e587696cf927ffe4c1a682f8206"
+        },
+        {
+          "path": "/assets/icons/scimitar-of-speed-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 153088,
+          "sha256": "077ee639677545de4791c35fa05e00ca11f862db7e0c745212837ab580e1547d"
         },
         {
           "path": "/assets/icons/scorching-ray-spell-action.png",
@@ -21512,6 +24938,12 @@
           "sha256": "2aedb34344366b25e11b0536d6943d5bc3f04a022b7ed580160cc480d5e9bea3"
         },
         {
+          "path": "/assets/icons/shield-of-missile-attraction-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 325017,
+          "sha256": "04789943993d3b40709e45142d63fbba2ebf3823cef1c5301680b85d6c1672f8"
+        },
+        {
           "path": "/assets/icons/shield-spell-action.png",
           "mediaType": "image/png",
           "bytes": 266409,
@@ -21560,10 +24992,76 @@
           "sha256": "a01c5b77e5b6b96d2e2b1d3fd863c9fd8ab2566baf23a5e52ac3315d4090ad01"
         },
         {
+          "path": "/assets/icons/slippers-of-spider-climbing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 259815,
+          "sha256": "e6284ae1d6fe451d1f6341f55dc374fd461b1fbec4294ac7c5ecf326f60fe1c5"
+        },
+        {
           "path": "/assets/icons/slow-spell-action.png",
           "mediaType": "image/png",
           "bytes": 282024,
           "sha256": "b90f55048a0360f46b8f96f72930a9135b207df53b064407bff8038beec1c22c"
+        },
+        {
+          "path": "/assets/icons/sorcerer-draconic-ancestor-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 354654,
+          "sha256": "497205b0000266775e272ee2404ce1bd360b068a8688ed9a0c00e65ad59d1d5a"
+        },
+        {
+          "path": "/assets/icons/sorcerer-draconic-elemental-affinity-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 342678,
+          "sha256": "08beb8abaa1d22c3007797946715c5e313f0ed2e0f4ce8abafb2b325d06195ce"
+        },
+        {
+          "path": "/assets/icons/sorcerer-draconic-presence-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 386151,
+          "sha256": "679942c84a0698957f9466e03892395f732b1a5932eb6e27eab82fd092bd0362"
+        },
+        {
+          "path": "/assets/icons/sorcerer-draconic-resilience-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 335291,
+          "sha256": "89316b7fb10a19082890d122d15044e68783fe6d3100441e0e901148c82161f0"
+        },
+        {
+          "path": "/assets/icons/sorcerer-draconic-wings-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 291740,
+          "sha256": "3df771e29907659fd5fdbf070ea57eb8fe7858ca88c35cec045a723c4594d72b"
+        },
+        {
+          "path": "/assets/icons/sorcerer-font-of-magic-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 275632,
+          "sha256": "d4b4b02134a0ea92a935509a61517c46a2031570a42f2d7b4acf309b6cf9e9c1"
+        },
+        {
+          "path": "/assets/icons/sorcerer-metamagic-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 263729,
+          "sha256": "934ab85fa22757edb3c3c6093d457a45b4635f19a1024226df778a60ec98b9cd"
+        },
+        {
+          "path": "/assets/icons/sorcerer-sorcerous-origin-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 370623,
+          "sha256": "98c810e58a47f933cbaa71c71a1f2a59f82a676f86f353606bb9e827b838ccf8"
+        },
+        {
+          "path": "/assets/icons/sorcerer-sorcerous-restoration-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 263970,
+          "sha256": "728050eaeda333324f76dadde915dc187a9738643269c0dc26860c98543dd3f5"
+        },
+        {
+          "path": "/assets/icons/sovereign-glue-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 219854,
+          "sha256": "0faf27aacbff981c11d7af08124f10f57cb4755ad8d8f329365d69791e3d7fc9"
         },
         {
           "path": "/assets/icons/spare-the-dying-spell-action.png",
@@ -21590,6 +25088,30 @@
           "sha256": "a7e4dc983090ff0648a6dea215e2bb77aba30dac7262a501d4ab3883e8078931"
         },
         {
+          "path": "/assets/icons/spell-scroll-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 258874,
+          "sha256": "501f393755ce75dc5ef0ffdd7a82709a2d3327786202066b5f5c3d51d5718e28"
+        },
+        {
+          "path": "/assets/icons/spellcasting-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 263536,
+          "sha256": "df27ea92fda433b6dfe841efdacb7cb517fa2fa29de5377e819b6a0571f2efab"
+        },
+        {
+          "path": "/assets/icons/spellguard-shield-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 277178,
+          "sha256": "41759d484b6b4d70f1bcf51ae501908b5fd8fa330c030edeb810cc29490354ac"
+        },
+        {
+          "path": "/assets/icons/sphere-of-annihilation-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 148172,
+          "sha256": "72db81b7c006cf00c583857a6a6b44c7cd6aafbc93a518f42b50b6acb69ddbe0"
+        },
+        {
           "path": "/assets/icons/spider-climb-spell-action.png",
           "mediaType": "image/png",
           "bytes": 374355,
@@ -21614,10 +25136,94 @@
           "sha256": "aafc8c9fc1bd0bb77cb65c3ef2db2cf969aa6eb6519e54f5aa376bdbe6305ca0"
         },
         {
+          "path": "/assets/icons/staff-of-charming-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 80075,
+          "sha256": "05ca776d0b87b8dbcaa117987294160639fe86c59b8486e0be5ca78dd1046c5e"
+        },
+        {
+          "path": "/assets/icons/staff-of-fire-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 70965,
+          "sha256": "8e421381fd34cafe25ad9d5f4bb724295da1b1b352d776e809ff093927fdd12c"
+        },
+        {
+          "path": "/assets/icons/staff-of-frost-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 77820,
+          "sha256": "b84f85141237fae5968001571384f64617de6d40ac767f197f0503a7f1108f2e"
+        },
+        {
+          "path": "/assets/icons/staff-of-healing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 74759,
+          "sha256": "8c23b703edda8aadfd975acd38a540674353015fbef6b2e9071c4e2edc55b339"
+        },
+        {
+          "path": "/assets/icons/staff-of-power-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 72493,
+          "sha256": "11da442d77e7c8e7acc23197d28bcf9820e0ae054f54eb59e15bda679f44213a"
+        },
+        {
+          "path": "/assets/icons/staff-of-striking-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 123636,
+          "sha256": "d3b391dd05e3c0ad6f1fc1efdefb438dbb8786750a61a63e4ca80c9b13be4990"
+        },
+        {
+          "path": "/assets/icons/staff-of-swarming-insects-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 90219,
+          "sha256": "9b32374e06bbcea7c465f48b2b5cbcebb6a209c2df8f8f9edd4c43959d8e31ff"
+        },
+        {
+          "path": "/assets/icons/staff-of-the-magi-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 83246,
+          "sha256": "984ff5eadd955e3a1b9bb78a52e774272b94cf83b6159e28f43e18debbd18275"
+        },
+        {
+          "path": "/assets/icons/staff-of-the-python-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 72213,
+          "sha256": "6a49d8ce825bc62043b1566d2a3ec07edb7ba590acde4f1532744d69ddfa71e5"
+        },
+        {
+          "path": "/assets/icons/staff-of-the-woodlands-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 119709,
+          "sha256": "b507b2cf6a03c98b76d2ba86a1e61abafe5bcf1e0f749d9aec4e077a1066f1a0"
+        },
+        {
+          "path": "/assets/icons/staff-of-thunder-and-lightning-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 93264,
+          "sha256": "6ed93d189b9ae96202be1f7971ae4d69648b76f163ed7e13897147387209982e"
+        },
+        {
+          "path": "/assets/icons/staff-of-withering-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 87055,
+          "sha256": "515ccdbf3ec7678edd47a3374e878760befdc309368fb3fb7af7b0271f595a4c"
+        },
+        {
           "path": "/assets/icons/stinking-cloud-spell-action.png",
           "mediaType": "image/png",
           "bytes": 340347,
           "sha256": "3e7f9f98eedb984dba3f20043bcaa0fe4f896f24b177ecef59cf9a2fb76fc043"
+        },
+        {
+          "path": "/assets/icons/stone-of-controlling-earth-elementals-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 340890,
+          "sha256": "758fb6b13f750585635fdd75218c3ad84b671495fe3db812049dc23a96184901"
+        },
+        {
+          "path": "/assets/icons/stone-of-good-luck-luckstone-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 276111,
+          "sha256": "18028e27520d389b4729b1bf0b609fe8537fde7617e76e9340136f7490df053d"
         },
         {
           "path": "/assets/icons/stone-shape-spell-action.png",
@@ -21644,6 +25250,12 @@
           "sha256": "67e01ae2997ac1d1f67860b809f193ced3192d9df23bf163f1c5f735b31e9fb7"
         },
         {
+          "path": "/assets/icons/sun-blade-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 63390,
+          "sha256": "b54d7b7dc656b323acae7a8383fdefb1c2f3165cb58a03019e13564aa7dbae69"
+        },
+        {
           "path": "/assets/icons/sunbeam-spell-action.png",
           "mediaType": "image/png",
           "bytes": 284301,
@@ -21656,10 +25268,46 @@
           "sha256": "233617162abf8275a2c06e3792a8f28dde5d39a26cbdb3051c0caf005ffe5f3e"
         },
         {
+          "path": "/assets/icons/sword-of-life-stealing-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 75457,
+          "sha256": "7e55e78bbdc6774180cde3f5eb35506fc090c24654158b9dce23f254e49c328f"
+        },
+        {
+          "path": "/assets/icons/sword-of-sharpness-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 80723,
+          "sha256": "0217e13905891f0cad6269ce2f0179f801ed93e090b6baa58abaf7b7783ef19b"
+        },
+        {
+          "path": "/assets/icons/sword-of-wounding-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 102850,
+          "sha256": "66dc7cb31cafd0183725ca47ceed11b6299d383dd08db73713408e1228ed1474"
+        },
+        {
           "path": "/assets/icons/symbol-spell-action.png",
           "mediaType": "image/png",
           "bytes": 322626,
           "sha256": "19df93fa26c3e9b1c73a55c01b62ec77562b602c69b49abc8136937414859f67"
+        },
+        {
+          "path": "/assets/icons/talisman-of-pure-good-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 130107,
+          "sha256": "99f516999bed5fa1bf6c61a29168da970de026f9204880721519b8fab5c5cfe2"
+        },
+        {
+          "path": "/assets/icons/talisman-of-the-sphere-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 169524,
+          "sha256": "574464c9dacb1153d5cff9de0cf7175d39d89cf66bded78b6c858aa60c4f4cc8"
+        },
+        {
+          "path": "/assets/icons/talisman-of-ultimate-evil-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 193516,
+          "sha256": "e9d09e53997f332d4f5484a63072e78405da3820ca51652b7f9e7019de68a63a"
         },
         {
           "path": "/assets/icons/telekinesis-spell-action.png",
@@ -21704,10 +25352,34 @@
           "sha256": "d23db0a5ca0ac35ae2e9ca1524f48e8577c1fa17da8685188804073696060382"
         },
         {
+          "path": "/assets/icons/timeless-body-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 290459,
+          "sha256": "79e74ec96a2606921a9cb8e9db81698ad2c02311db3eca2c8fea1ff2b35a140f"
+        },
+        {
           "path": "/assets/icons/tiny-hut-spell-action.png",
           "mediaType": "image/png",
           "bytes": 320909,
           "sha256": "bb02c01f966a1399d22092ef5d78246b572fd0e51c4aca465d8c1986337f6623"
+        },
+        {
+          "path": "/assets/icons/tome-of-clear-thought-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 358549,
+          "sha256": "eadc0f0b65c05f3162abf16f04284482865e65f48a2b05452f5b6e6f72fa88f6"
+        },
+        {
+          "path": "/assets/icons/tome-of-leadership-and-influence-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 333972,
+          "sha256": "d872dcc756a23ac2424d22f52df69cd6df6d0003fef115ff8282c976e64ad82f"
+        },
+        {
+          "path": "/assets/icons/tome-of-understanding-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 377291,
+          "sha256": "3aa29dacf6e99895b4bc7fdc5311cdf193e128299062fc1e0464396aba5ab3c1"
         },
         {
           "path": "/assets/icons/tongues-spell-action.png",
@@ -21726,6 +25398,12 @@
           "mediaType": "image/png",
           "bytes": 365999,
           "sha256": "8f4d9930b57ad605404c11ac5942c7cacf0026b804bdc7fe98936a0069ac8013"
+        },
+        {
+          "path": "/assets/icons/trident-of-fish-command-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 88640,
+          "sha256": "a15c20910d2b1fb10dea4717caf6119bd29c115f969a83f51cc281e03064cc28"
         },
         {
           "path": "/assets/icons/true-polymorph-spell-action.png",
@@ -21752,6 +25430,18 @@
           "sha256": "503da557e1c85e7cba04678c6c982fa40e7b3b94fa6eb87683743a36e57b4fb8"
         },
         {
+          "path": "/assets/icons/unarmored-defense-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 315928,
+          "sha256": "89c4614cec6e66cbd930c8744f169c019a20b168c37f874794a7efd7b1bca0e8"
+        },
+        {
+          "path": "/assets/icons/universal-solvent-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 317177,
+          "sha256": "f2809f837da71c1ad172b62f74d01dffc942e21c0575148725c8cee709c3710d"
+        },
+        {
           "path": "/assets/icons/unseen-servant-spell-action.png",
           "mediaType": "image/png",
           "bytes": 264701,
@@ -21768,6 +25458,18 @@
           "mediaType": "image/png",
           "bytes": 323976,
           "sha256": "2e713388848c9f264208f8032a8b2ecce1d3cdb72d48bcc8b3a637b456377740"
+        },
+        {
+          "path": "/assets/icons/vicious-weapon-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 156715,
+          "sha256": "458fd980befec3710ab58bea24e4c4f0eda520e0f9b891f0b0478c6df9e53d53"
+        },
+        {
+          "path": "/assets/icons/vorpal-sword-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 128513,
+          "sha256": "734889d6bb70756b48b97a50e0c550ced7052188df4ea134ca86bb913de5e23e"
         },
         {
           "path": "/assets/icons/wall-of-fire-spell-action.png",
@@ -21800,10 +25502,154 @@
           "sha256": "593a49065de99d85da27dc9eb6524ce9817709404a3964e2ac25b72f18d40cf2"
         },
         {
+          "path": "/assets/icons/wand-of-binding-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 113565,
+          "sha256": "20df5411d1a4ba20183f547ccd82fef982a7b3ce7d262630f923bf9783b2bd0d"
+        },
+        {
+          "path": "/assets/icons/wand-of-enemy-detection-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 96910,
+          "sha256": "8fe6244a671170fa3f82600e3d462b588a80a8c1684184c7ae2231b6d5dd8a27"
+        },
+        {
+          "path": "/assets/icons/wand-of-fear-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 93519,
+          "sha256": "df63e77e844e7fd42d53ff3b2cfad00af419db63f8fb82b1a0d2e39b876bca49"
+        },
+        {
+          "path": "/assets/icons/wand-of-fireballs-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 104530,
+          "sha256": "67d0d598408dbc59e5a4a58431226e03ceb57709168d36c33c1f344a01f29e8a"
+        },
+        {
+          "path": "/assets/icons/wand-of-lightning-bolts-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 93110,
+          "sha256": "14fccda8f8feeaace74bb31cc524fe9202c1a126ccee8d8161cdd9bb637788fb"
+        },
+        {
+          "path": "/assets/icons/wand-of-magic-detection-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 78040,
+          "sha256": "ef1f55e29de141420b547990599208ce80644b30fba15f9713a745169dddb63a"
+        },
+        {
+          "path": "/assets/icons/wand-of-magic-missiles-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 95781,
+          "sha256": "6a01b7e666f14b1613b2ee2db906fac2f024aa13cf2975e6158c8a3b144166f8"
+        },
+        {
+          "path": "/assets/icons/wand-of-paralysis-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 118508,
+          "sha256": "34eafc1f49af4b7b87c5048ab668882d9275ac6fcbc6a49de89d465c48226fbb"
+        },
+        {
+          "path": "/assets/icons/wand-of-polymorph-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 129501,
+          "sha256": "c569ed86bdb70293f2c367b075b918e160244b80be44dcb59a258d87b9cda608"
+        },
+        {
+          "path": "/assets/icons/wand-of-secrets-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 91826,
+          "sha256": "d89e2ff10be517c697d36f80f2ce2441b610d1fce265810a68f452ce45ef6def"
+        },
+        {
+          "path": "/assets/icons/wand-of-the-war-mage-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 83718,
+          "sha256": "561e30349fd1ed20a0551b76dd023ca529f1c65c0a17bf4f2817bfdac3c144e2"
+        },
+        {
+          "path": "/assets/icons/wand-of-web-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 109235,
+          "sha256": "31efeb3058521b48b064b8a4d771cd74ddab29e3caa4e32094efc94838fd16b9"
+        },
+        {
+          "path": "/assets/icons/wand-of-wonder-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 117546,
+          "sha256": "261bbc663a53fd77d2379226cd8b5a9416406ed64366bccb6ebcb32d2b50eaf1"
+        },
+        {
           "path": "/assets/icons/warding-bond-spell-action.png",
           "mediaType": "image/png",
           "bytes": 297283,
           "sha256": "248725cc702a09ed83584104dfd12b21d359d224536b1e7b9b14b91edf554d91"
+        },
+        {
+          "path": "/assets/icons/warlock-eldritch-invocations-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 375118,
+          "sha256": "cff6ab4cd0e74a3f93a2d2f59ae14c181cf8e6e33d2f6cf99f89f486c71b7d65"
+        },
+        {
+          "path": "/assets/icons/warlock-eldritch-master-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 340850,
+          "sha256": "3826bf5e170a4fdee65b1604499bed6516e879886fb575c9e5c7430348938bb8"
+        },
+        {
+          "path": "/assets/icons/warlock-fiend-dark-ones-blessing-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 286674,
+          "sha256": "57375cc78db3f1d73be4bf827ccc5cb6d20d2700429c5be2711daf600b4d9d47"
+        },
+        {
+          "path": "/assets/icons/warlock-fiend-dark-ones-own-luck-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 343905,
+          "sha256": "356fa80d45ce5e8198564896ddcf5bacb24c10054b948967cd7fccd41f7093c9"
+        },
+        {
+          "path": "/assets/icons/warlock-fiend-expanded-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 280501,
+          "sha256": "54e407aa0e6b6d6fb53f85652e432ee34ae069dae43deca32986cd9b43d0e7fa"
+        },
+        {
+          "path": "/assets/icons/warlock-fiend-hurl-through-hell-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 375600,
+          "sha256": "5c681704431ac68adb2e2e001fd80550819e963e88b693b98174586436f79858"
+        },
+        {
+          "path": "/assets/icons/warlock-fiendish-resilience-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 337698,
+          "sha256": "2406a67b5d68d777999adaacbe230f743b1401469cb92024efe45228376f0e91"
+        },
+        {
+          "path": "/assets/icons/warlock-mystic-arcanum-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 242869,
+          "sha256": "0b5b2070d47e4ddd64925112f60787ea1d9f1d345e62fd5af3d02f5369aac22b"
+        },
+        {
+          "path": "/assets/icons/warlock-otherworldly-patron-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 347994,
+          "sha256": "db10f2b952e4a61ebce7e1958287592a4851033124ab8f8d7eee5aff467017d3"
+        },
+        {
+          "path": "/assets/icons/warlock-pact-boon-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 241135,
+          "sha256": "141ab01fa480ba45cf4c98197abc76f89dbdb2192660f2053e3cd3c5746f05d8"
+        },
+        {
+          "path": "/assets/icons/warlock-pact-magic-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 368718,
+          "sha256": "265d5487c0508ca09937c755ef0b742df601bbe23dda9b36ba0375d057efe316"
         },
         {
           "path": "/assets/icons/water-breathing-spell-action.png",
@@ -21830,6 +25676,18 @@
           "sha256": "3b7cf68edbcc5ba3bb2651d3ba4b2db007325b6e35b9e300b5ab387dc8a1d06a"
         },
         {
+          "path": "/assets/icons/well-of-many-worlds-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 304002,
+          "sha256": "25b6cb70b358545d9e499f08f9ae771131291334206ab7db895bb08247fe504b"
+        },
+        {
+          "path": "/assets/icons/wind-fan-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 265923,
+          "sha256": "e1989477be7874e8e848614537317e785414e429b4e66ec98821324cef975c8d"
+        },
+        {
           "path": "/assets/icons/wind-walk-spell-action.png",
           "mediaType": "image/png",
           "bytes": 323780,
@@ -21842,10 +25700,76 @@
           "sha256": "ab7485429544643da34e798cbc7a052cf99ddc82db25fb7b860bfcc9f0128437"
         },
         {
+          "path": "/assets/icons/winged-boots-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 281071,
+          "sha256": "4507224567042441b86342e0e1e671a1135b8ba6a03ced307341de287ce15420"
+        },
+        {
+          "path": "/assets/icons/wings-of-flying-item-action.png",
+          "mediaType": "image/png",
+          "bytes": 242219,
+          "sha256": "8319cc4ae6d3b3d4f28c4ba8ad7978eb1e7107dd733fef7392e754c177dafaf2"
+        },
+        {
           "path": "/assets/icons/wish-spell-action.png",
           "mediaType": "image/png",
           "bytes": 443714,
           "sha256": "8d32e4e8bab404a714a29696a99b1ade99f61d8b31a3bdc0c3c1f8f913ae4996"
+        },
+        {
+          "path": "/assets/icons/wizard-arcane-recovery-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 297318,
+          "sha256": "2a029630141d798ecd94397679f63bb095717a9a720488c9a76fa55c6bd6b8e6"
+        },
+        {
+          "path": "/assets/icons/wizard-arcane-tradition-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 317335,
+          "sha256": "2627c3e39500e81a8ab31cec31d088b93bc95222c6bd8c6d806c2cefaa117abb"
+        },
+        {
+          "path": "/assets/icons/wizard-evocation-empowered-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 286503,
+          "sha256": "77259f239ab41782745008521d9cdba3d8bbc33fe35ea121490c03ae7ed56816"
+        },
+        {
+          "path": "/assets/icons/wizard-evocation-overchannel-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 428501,
+          "sha256": "8fc2e85f98a7f3cdb8e52709f921ddff78ba75e417e6301f24b9e8defe830987"
+        },
+        {
+          "path": "/assets/icons/wizard-evocation-potent-cantrip-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 235922,
+          "sha256": "b8ffe493ac3e0b4de44b54061cc8ae05401a34d655bc3225af8c8573255662e3"
+        },
+        {
+          "path": "/assets/icons/wizard-evocation-savant-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 313549,
+          "sha256": "4ce4e7279e854e621c6e3a4c7de30bde5b7da7e600dbc5e99d6b0bfeeff1c6aa"
+        },
+        {
+          "path": "/assets/icons/wizard-evocation-sculpt-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 329550,
+          "sha256": "3a2443a17575d3b9c4d724f718b27e3967063e0e149fbcfb357a4e25299e0adf"
+        },
+        {
+          "path": "/assets/icons/wizard-signature-spells-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 280713,
+          "sha256": "f94de4d561fefdeb572b2e837b7fa9bb5681ecf7e4fc991cd4700f89bdc90bd6"
+        },
+        {
+          "path": "/assets/icons/wizard-spell-mastery-feature-action.png",
+          "mediaType": "image/png",
+          "bytes": 291678,
+          "sha256": "b8ff9a96fa8e10851de0a70cee8afb0658f8594e294ff8b97e30dabca343b2cd"
         },
         {
           "path": "/assets/icons/word-of-recall-spell-action.png",
@@ -26472,5 +30396,5 @@
       ]
     }
   },
-  "contentSha256": "03c87adfb36d4d373c61ec3e75eb5f6edca126d45a06484f2be1111192cf5610"
+  "contentSha256": "be1313bcace7419c29442167f2346f24f0d9836f4e18f4b2d447d58e83ff65fb"
 }

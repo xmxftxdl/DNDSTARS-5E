@@ -40,12 +40,23 @@ describe('D&D 5e root action transactions', () => {
       combatId: 'combat',
       actorId: 'actor',
       actionKind: 'attack',
+      activity: {
+        schemaVersion: 1,
+        definitionId: 'dnd5e-2014:core:attack:attack',
+        executionId: 'action-1',
+      },
       status: 'committed',
     })
     expect(result.transaction?.rollLedger.entries.filter((entry) => entry.kind === 'attack')).toHaveLength(1)
     expect(result.transaction?.rollLedger.entries).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'attack', dice: { sides: 20, values: [15] } }),
-      expect.objectContaining({ kind: 'damage', dice: { sides: 8, values: [6] }, modifier: 3 }),
+      expect.objectContaining({
+        kind: 'attack', dice: { sides: 20, values: [15] },
+        activityDefinitionId: 'dnd5e-2014:core:attack:attack', activityExecutionId: 'action-1',
+      }),
+      expect.objectContaining({
+        kind: 'damage', dice: { sides: 8, values: [6] }, modifier: 3,
+        activityDefinitionId: 'dnd5e-2014:core:attack:attack', activityExecutionId: 'action-1',
+      }),
     ]))
   })
 

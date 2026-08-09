@@ -9,7 +9,7 @@ import {
 } from '../../lib/combatTransaction'
 import { DND_FEET_PER_CELL, pixelToCell, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
-import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells, type SkillAoeTargeting } from '../../lib/skillTargeting'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, resolveAoeDimensions, tokensInCells, type SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { D20RollMode } from '../contracts'
@@ -49,6 +49,7 @@ import {
 } from './spellComponents'
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import { dnd5ePluginSpellArea, dnd5ePluginSpellTargetCapacity } from './pluginSpellTargeting'
+import { dnd5eTrackableDefinitionIdV1 } from './activities/dnd5eActivityIdentity'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -242,7 +243,18 @@ export function prepareDnd5ePluginSpellCast(input: {
     if ((actor.classResources?.[resourceKey]?.current ?? 0) < 1) return { ok: false, reason: 'slot-unavailable' }
   }
 
-  const area = dnd5ePluginSpellArea(spell)
+  const areaTemplate = dnd5ePluginSpellArea(spell)
+  const area = areaTemplate ? resolveAoeDimensions(areaTemplate, {
+    radiusFeet: payload.areaTargetRadiusFeet,
+    widthFeet: payload.areaTargetWidthFeet,
+    heightFeet: payload.areaTargetHeightFeet,
+    lengthFeet: payload.areaTargetLengthFeet,
+  }) : undefined
+  if (areaTemplate && !area) return { ok: false, reason: 'invalid-target' }
+  if (!areaTemplate && (
+    payload.areaTargetRadiusFeet != null || payload.areaTargetWidthFeet != null ||
+    payload.areaTargetHeightFeet != null || payload.areaTargetLengthFeet != null
+  )) return { ok: false, reason: 'invalid-target' }
   const targetCapacity = dnd5ePluginSpellTargetCapacity(spell, slotLevel)
   let targetTokens: Token[]
   if (area) {
@@ -394,7 +406,7 @@ export function prepareDnd5ePluginSpellCast(input: {
       targetToken,
       targetTokens,
       targets,
-      area,
+      area: area ?? undefined,
       slotLevel,
       castingTime,
       componentCheck,
@@ -412,7 +424,23 @@ export function prepareDnd5ePluginSpellCast(input: {
       },
       concentrationRounds,
       upcastDurationRounds: upcast.durationRounds,
-      transaction: createCombatTransaction({ id: input.action.id, mapId: input.map.id, combatId: input.action.combatId, actorId: actor.id, actionId: input.action.id, actionKind: 'plugin-spell', now }),
+      transaction: createCombatTransaction({
+        id: input.action.id,
+        mapId: input.map.id,
+        combatId: input.action.combatId,
+        actorId: actor.id,
+        actionId: input.action.id,
+        actionKind: 'plugin-spell',
+        activityDefinitionId: dnd5eTrackableDefinitionIdV1({
+          namespace: spell.ownerPluginId,
+          kind: 'spell',
+          localId: spell.id.startsWith(`${spell.ownerPluginId}:`)
+            ? spell.id.slice(spell.ownerPluginId.length + 1)
+            : spell.id,
+        }),
+        activityExecutionId: input.action.id,
+        now,
+      }),
     },
   }
 }
