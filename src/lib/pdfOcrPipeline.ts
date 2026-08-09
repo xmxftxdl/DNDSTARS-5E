@@ -52,7 +52,7 @@ function normalizedCoordinate(value: unknown, maximum: number): number | null {
 
 function cleanOcrText(value: unknown, maximum: number): string {
   return String(value ?? '')
-    .replace(/\u0000/g, '')
+    .replaceAll('\u0000', '')
     .replace(/\r\n?/g, '\n')
     .replace(/[\t\f\v]+/g, ' ')
     .replace(/ +\n/g, '\n')

@@ -37,10 +37,10 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/pages/MapsPage.tsx'],
+    files: ['src/pages/MapsPage.tsx', 'src/pages/MapsWorkspacePage.tsx'],
     rules: {
-      // MapsPage still mirrors authoritative async state in refs while its
-      // transaction coordinators are migrated behind Application services.
+      // The map workspace still mirrors authoritative async state in refs while
+      // its transaction coordinators are migrated behind Application services.
       // The refs are projections, not React-owned mutable props.
       'react-hooks/immutability': 'off',
     },
