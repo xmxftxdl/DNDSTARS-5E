@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   applyDnd5eStandardConditionEffect,
+  createDnd5eCombatant,
   dnd5eEffectiveFlySpeed,
   dnd5eTargetArmorClassForAttack,
   endDnd5eConcentration,
@@ -2725,6 +2726,23 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       to: { x: 75, y: 25 },
     })).toMatchObject({
       groundedAtSource: false,
+      fallDistanceFeet: 0,
+      toElevationFeet: undefined,
+    })
+    const flyer = createDnd5eCombatant({
+      id: 'grounded-flyer', name: 'Grounded flyer', controller: 'dm', initiative: 10,
+      abilities: { str: 10, dex: 14, con: 10, int: 10, wis: 10, cha: 10 },
+      proficiencyBonus: 2, armorClass: 12, currentHp: 10, maxHp: 10, temporaryHp: 0,
+      speed: 30, position: { x: 125, y: 25 }, concentrating: false,
+      elevationFeet: 40, groundElevationFeet: 40, airborne: false,
+      movementSpeeds: { walk: 30, fly: 60 },
+    })
+    expect(dnd5eForcedMovementFall({
+      geometry, target: groundedTarget, targetCombatant: flyer, to: { x: 75, y: 25 },
+    })).toMatchObject({
+      groundedAtSource: true,
+      canRemainAirborne: true,
+      landingGroundElevationFeet: 0,
       fallDistanceFeet: 0,
       toElevationFeet: undefined,
     })

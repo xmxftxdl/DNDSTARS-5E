@@ -2110,7 +2110,7 @@ function actionExpectedValue(input: {
             )
         const fall = dnd5eForcedMovementFall({
           geometry,
-          target,
+          target, targetCombatant: plannerTokenCombatant(target, characters),
           to: destination.to,
         })
         const fallingDamage =
@@ -2543,7 +2543,7 @@ function monsterAreaFailedSaveOutcomeValue(input: {
     if (push.distanceFeet > 0) {
       const fall = dnd5eForcedMovementFall({
         geometry: mapGeometryRuntimeForMap(input.map.id),
-        target: input.target,
+        target: input.target, targetCombatant: plannerTokenCombatant(input.target, input.characters),
         to: push.to,
       })
       expectedAdditionalDamage +=

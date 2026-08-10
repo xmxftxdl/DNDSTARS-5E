@@ -12,6 +12,9 @@ import type {
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
 import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
+import type { SharedCampaignTimeState } from '../../lib/campaignTime'
+import { useCampaignTimeStore } from '../../store/campaignTime'
+import { canonicalizePdfPersonRelationships, mergePdfPersonRecords } from '../../lib/pdfPersonDeduplication'
 import {
   commaSeparatedValues,
   emptyPdfClue,
@@ -22,6 +25,7 @@ import {
   emptyPdfPrepTip,
   emptyPdfRelationship,
   emptyPdfScene,
+  emptyPdfTimelineEvent,
   removePdfAnalysisEntry,
   renamePdfAnalysisEntity,
 } from './pdfCampaignAnalysisEditorModel'
@@ -30,6 +34,7 @@ import PdfSourceEvidenceDrawer, {
   PdfCitationButtons,
 } from './PdfSourceEvidenceDrawer'
 import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
+import PdfTimelineGameTimeField from './PdfTimelineGameTimeField'
 
 type EditorTab =
   | 'overview'
@@ -38,6 +43,7 @@ type EditorTab =
   | 'factions'
   | 'locations'
   | 'clues'
+  | 'timeline'
   | 'scenes'
   | 'encounters'
   | 'imports'
@@ -51,6 +57,7 @@ const EDITOR_TABS: Array<{ id: EditorTab; label: string }> = [
   { id: 'factions', label: '势力' },
   { id: 'locations', label: '地点' },
   { id: 'clues', label: '线索' },
+  { id: 'timeline', label: '关键时间线' },
   { id: 'scenes', label: '场景' },
   { id: 'encounters', label: '遭遇' },
   { id: 'imports', label: '待导入资源' },
@@ -70,6 +77,7 @@ function tabCount(analysis: PdfCampaignAnalysisView, tab: EditorTab): number | n
   if (tab === 'relationships') return analysis.relationships.length
   if (tab === 'imports') return analysis.importCandidates.length
   if (tab === 'tips') return analysis.prepTips.length
+  if (tab === 'timeline') return analysis.timelineEvents?.length ?? 0
   return analysis[tab].length
 }
 
@@ -157,7 +165,11 @@ function replaceAt<T>(entries: readonly T[], index: number, value: T): T[] {
 
 export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose, onExport }: PdfCampaignAnalysisEditorProps) {
   const [activeTab, setActiveTab] = useState<EditorTab>('overview')
+  const [selectedPersonIndex, setSelectedPersonIndex] = useState(0)
   const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
+  const campaignClock = useCampaignTimeStore((state) => state.state)
+  const mergedPeople = useMemo(() => mergePdfPersonRecords(analysis.people), [analysis.people])
+  const duplicatePeopleCount = analysis.people.length - mergedPeople.length
   const entityNames = useMemo(() => [
     ...analysis.people.map((entry) => entry.name),
     ...analysis.factions.map((entry) => entry.name),
@@ -180,14 +192,19 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
       tone: 'danger',
     })) return
     onChange(removePdfAnalysisEntry(analysis, collection, index))
+    if (collection === 'people') setSelectedPersonIndex(Math.max(0, Math.min(index, analysis.people.length - 2)))
   }
 
   const addForTab = () => {
-    if (activeTab === 'people') onChange({ ...analysis, people: [...analysis.people, emptyPdfPerson()] })
+    if (activeTab === 'people') {
+      setSelectedPersonIndex(analysis.people.length)
+      onChange({ ...analysis, people: [...analysis.people, emptyPdfPerson()] })
+    }
     else if (activeTab === 'relationships') onChange({ ...analysis, relationships: [...analysis.relationships, emptyPdfRelationship()] })
     else if (activeTab === 'factions') onChange({ ...analysis, factions: [...analysis.factions, emptyPdfNamedRecord('新势力')] })
     else if (activeTab === 'locations') onChange({ ...analysis, locations: [...analysis.locations, emptyPdfNamedRecord('新地点')] })
     else if (activeTab === 'clues') onChange({ ...analysis, clues: [...analysis.clues, emptyPdfClue()] })
+    else if (activeTab === 'timeline') onChange({ ...analysis, timelineEvents: [...(analysis.timelineEvents ?? []), emptyPdfTimelineEvent(campaignClock.worldMinute)] })
     else if (activeTab === 'scenes') onChange({ ...analysis, scenes: [...analysis.scenes, emptyPdfScene()] })
     else if (activeTab === 'encounters') onChange({ ...analysis, encounters: [...analysis.encounters, emptyPdfEncounter()] })
     else if (activeTab === 'imports') onChange({ ...analysis, importCandidates: [...analysis.importCandidates, emptyPdfImportCandidate()] })
@@ -246,11 +263,29 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
                   <h3 className="text-sm font-semibold text-slate-100">{EDITOR_TABS.find((tab) => tab.id === activeTab)?.label}</h3>
                   <p className="mt-1 text-[10px] text-slate-600">AI 内容不是权威规则；确认无误后再导入工坊或场景。</p>
                 </div>
-                {canAdd && (
-                  <button type="button" onClick={addForTab} className="inline-flex items-center gap-1.5 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
-                    <Plus className="h-4 w-4" />新增条目
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {activeTab === 'people' && duplicatePeopleCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPersonIndex(0)
+                        onChange({
+                          ...analysis,
+                          people: mergedPeople,
+                          relationships: canonicalizePdfPersonRelationships(analysis.relationships, mergedPeople),
+                        })
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/15"
+                    >
+                      合并 {duplicatePeopleCount} 个重复人物
+                    </button>
+                  )}
+                  {canAdd && (
+                    <button type="button" onClick={addForTab} className="inline-flex items-center gap-1.5 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
+                      <Plus className="h-4 w-4" />{activeTab === 'timeline' ? '新增时间节点' : '新增条目'}
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="space-y-4">
                 {activeTab === 'overview' && (
@@ -262,9 +297,38 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
                   </section>
                 )}
 
-                {activeTab === 'people' && analysis.people.map((person, index) => (
-                  <PersonEditor key={index} person={person} index={index} onChange={(next) => onChange({ ...analysis, people: replaceAt(analysis.people, index, next) })} onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'people', index, name))} onRemove={() => void remove('people', index)} />
-                ))}
+                {activeTab === 'people' && analysis.people.length > 0 && (() => {
+                  const index = Math.min(selectedPersonIndex, analysis.people.length - 1)
+                  const person = analysis.people[index]
+                  return (
+                    <div className="grid items-start gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+                      <div className="overflow-hidden rounded-2xl border border-white/8 bg-black/15 xl:sticky xl:top-0">
+                        {analysis.people.map((entry, entryIndex) => (
+                          <button
+                            key={`${entry.name}:${entryIndex}`}
+                            type="button"
+                            onClick={() => setSelectedPersonIndex(entryIndex)}
+                            className={`block w-full border-b border-white/6 px-3 py-3 text-left transition last:border-b-0 ${entryIndex === index ? 'bg-violet-500/12' : 'hover:bg-white/[0.025]'}`}
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <strong className="truncate text-xs text-slate-100">{entry.name || '未命名人物'}</strong>
+                              <span className="shrink-0 text-[9px] text-violet-300">{entry.role || '身份待确认'}</span>
+                            </div>
+                            <p className="mt-1 truncate text-[10px] text-slate-600">{entry.description || entry.motivation || '点击填写人物详情'}</p>
+                            {!!entry.aliases?.length && <p className="mt-1 truncate text-[9px] text-slate-700">别名：{entry.aliases.join('、')}</p>}
+                          </button>
+                        ))}
+                      </div>
+                      <PersonEditor
+                        person={person}
+                        index={index}
+                        onChange={(next) => onChange({ ...analysis, people: replaceAt(analysis.people, index, next) })}
+                        onRename={(name) => onChange(renamePdfAnalysisEntity(analysis, 'people', index, name))}
+                        onRemove={() => void remove('people', index)}
+                      />
+                    </div>
+                  )
+                })()}
                 {activeTab === 'relationships' && analysis.relationships.map((relationship, index) => (
                   <RelationshipEditor key={index} relationship={relationship} index={index} entityNames={entityNames} onChange={(next) => onChange({ ...analysis, relationships: replaceAt(analysis.relationships, index, next) })} onRemove={() => void remove('relationships', index)} />
                 ))}
@@ -276,6 +340,9 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
                 ))}
                 {activeTab === 'clues' && analysis.clues.map((record, index) => (
                   <ClueEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, clues: replaceAt(analysis.clues, index, next) })} onRemove={() => void remove('clues', index)} />
+                ))}
+                {activeTab === 'timeline' && (analysis.timelineEvents ?? []).map((record, index) => (
+                  <SceneEditor key={index} record={record} index={index} timelineMode campaignClock={campaignClock} onChange={(next) => onChange({ ...analysis, timelineEvents: replaceAt(analysis.timelineEvents ?? [], index, next) })} onRemove={() => void remove('timelineEvents', index)} />
                 ))}
                 {activeTab === 'scenes' && analysis.scenes.map((record, index) => (
                   <SceneEditor key={index} record={record} index={index} onChange={(next) => onChange({ ...analysis, scenes: replaceAt(analysis.scenes, index, next) })} onRemove={() => void remove('scenes', index)} />
@@ -311,7 +378,8 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
 
 function PersonEditor({ person, index, onChange, onRename, onRemove }: { person: PdfPersonRecordV1; index: number; onChange: (value: PdfPersonRecordV1) => void; onRename: (name: string) => void; onRemove: () => void }) {
   return <RecordCard title={person.name} index={index} citations={person.citations} onRemove={onRemove}>
-    <div className="grid gap-3 md:grid-cols-2"><Field label="人物名称" value={person.name} onChange={onRename} /><Field label="身份／角色" value={person.role} onChange={(role) => onChange({ ...person, role })} /></div>
+    <div className="grid gap-3 md:grid-cols-2"><Field label="人物正式全名" value={person.name} onChange={onRename} /><Field label="身份／角色" value={person.role} onChange={(role) => onChange({ ...person, role })} /></div>
+    <Field label="别名、简称与头衔（逗号分隔）" value={(person.aliases ?? []).join('，')} onChange={(value) => onChange({ ...person, aliases: commaSeparatedValues(value).slice(0, 8) })} />
     <Field label="人物概述" value={person.description} multiline onChange={(description) => onChange({ ...person, description })} />
     <div className="grid gap-3 md:grid-cols-2"><Field label="外貌与辨识特征" value={person.appearance ?? ''} multiline onChange={(appearance) => onChange({ ...person, appearance })} /><Field label="性格" value={person.personality} multiline onChange={(personality) => onChange({ ...person, personality })} /></div>
     <div className="grid gap-3 md:grid-cols-2"><Field label="动机" value={person.motivation} multiline onChange={(motivation) => onChange({ ...person, motivation })} /><Field label="秘密" value={person.secret} multiline onChange={(secret) => onChange({ ...person, secret })} /></div>
@@ -339,8 +407,36 @@ function ClueEditor({ record, index, onChange, onRemove }: { record: PdfClueReco
   return <RecordCard title={record.name} index={index} citations={record.citations} onRemove={onRemove}><Field label="线索名称" value={record.name} onChange={(name) => onChange({ ...record, name })} /><Field label="线索内容" value={record.description} multiline onChange={(description) => onChange({ ...record, description })} /><div className="grid gap-3 md:grid-cols-2"><Field label="线索来源" value={record.source} onChange={(source) => onChange({ ...record, source })} /><Field label="发现方式" value={record.discovery} onChange={(discovery) => onChange({ ...record, discovery })} /></div><Field label="失败后如何继续" value={record.failForward} multiline onChange={(failForward) => onChange({ ...record, failForward })} /></RecordCard>
 }
 
-function SceneEditor({ record, index, onChange, onRemove }: { record: PdfSceneRecordV1; index: number; onChange: (value: PdfSceneRecordV1) => void; onRemove: () => void }) {
-  return <RecordCard title={record.name} index={index} citations={record.citations} onRemove={onRemove}><div className="grid gap-3 md:grid-cols-2"><Field label="场景名称" value={record.name} onChange={(name) => onChange({ ...record, name })} /><Field label="地点" value={record.location} onChange={(location) => onChange({ ...record, location })} /></div><Field label="场景目标、触发与关键选择" value={record.description} multiline onChange={(description) => onChange({ ...record, description })} /><div className="grid gap-3 md:grid-cols-2"><Field label="参与 NPC（逗号分隔）" value={record.npcs.join('，')} onChange={(value) => onChange({ ...record, npcs: commaSeparatedValues(value) })} /><Field label="参与怪物（逗号分隔）" value={record.monsters.join('，')} onChange={(value) => onChange({ ...record, monsters: commaSeparatedValues(value) })} /></div></RecordCard>
+function SceneEditor({ record, index, onChange, onRemove, timelineMode = false, campaignClock }: {
+  record: PdfSceneRecordV1
+  index: number
+  onChange: (value: PdfSceneRecordV1) => void
+  onRemove: () => void
+  timelineMode?: boolean
+  campaignClock?: SharedCampaignTimeState
+}) {
+  return (
+    <RecordCard title={record.name} index={index} citations={record.citations} onRemove={onRemove}>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="事件／场景名称" value={record.name} onChange={(name) => onChange({ ...record, name })} />
+        <Field label="地点" value={record.location} onChange={(location) => onChange({ ...record, location })} />
+      </div>
+      {timelineMode && campaignClock && <PdfTimelineGameTimeField record={record} clock={campaignClock} onChange={onChange} />}
+      <div className="grid gap-3 md:grid-cols-3">
+        <Field label="原文时间或相对锚点" value={record.time ?? ''} onChange={(time) => onChange({ ...record, time })} />
+        <SelectField label="时间类型" value={record.timelineKind ?? 'current'} onChange={(timelineKind) => onChange({ ...record, timelineKind: timelineKind as PdfSceneRecordV1['timelineKind'] })}>
+          <option value="history">背景历史</option><option value="current">当前流程</option><option value="deadline">期限</option><option value="conditional">条件分支</option>
+        </SelectField>
+        <Field label="全书顺序" value={String(record.timelineOrder ?? 0)} onChange={(value) => onChange({ ...record, timelineOrder: Math.max(0, Number.parseInt(value, 10) || 0) })} />
+      </div>
+      <Field label="事件详情、触发、参与者与直接后果" value={record.description} multiline onChange={(description) => onChange({ ...record, description })} />
+      <Field label="标签（逗号分隔）" value={(record.tags ?? []).join('，')} onChange={(value) => onChange({ ...record, tags: commaSeparatedValues(value).slice(0, 8) })} />
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="参与 NPC（逗号分隔）" value={record.npcs.join('，')} onChange={(value) => onChange({ ...record, npcs: commaSeparatedValues(value) })} />
+        <Field label="参与怪物（逗号分隔）" value={record.monsters.join('，')} onChange={(value) => onChange({ ...record, monsters: commaSeparatedValues(value) })} />
+      </div>
+    </RecordCard>
+  )
 }
 
 function EncounterEditor({ record, index, onChange, onRemove }: { record: PdfEncounterRecordV1; index: number; onChange: (value: PdfEncounterRecordV1) => void; onRemove: () => void }) {

@@ -26,6 +26,7 @@ import {
   resolvePdfRelationshipEndpoints,
   stablePdfIdentityHash,
 } from './pdfKnowledgeIdentity'
+import { mergePdfEncounterRecords, mergePdfSceneRecords } from './pdfCampaignEventDeduplication'
 
 export interface TypedPdfCampaignAnalysisArtifactV1 {
   schemaVersion: 1
@@ -100,6 +101,7 @@ function legacyEvidenceForAnalysis(analysis: PdfCampaignAnalysisV1, documents: P
     ...analysis.locations.flatMap((entry) => entry.citations),
     ...analysis.factions.flatMap((entry) => entry.citations),
     ...analysis.clues.flatMap((entry) => entry.citations),
+    ...(analysis.timelineEvents ?? []).flatMap((entry) => entry.citations),
     ...analysis.scenes.flatMap((entry) => entry.citations),
     ...analysis.encounters.flatMap((entry) => entry.citations),
     ...analysis.importCandidates.flatMap((entry) => entry.citations),
@@ -187,8 +189,9 @@ export function migratePdfCampaignAnalysisV1ToV2(analysis: PdfCampaignAnalysisV1
     locations,
     factions,
     clues: disambiguatePdfEntityIds(analysis.clues.map((entry) => migrateNamed(entry, 'clue', legacy.citation, legacy.evidence))),
-    scenes: disambiguatePdfEntityIds(analysis.scenes.map((entry) => migrateNamed(entry, 'scene', legacy.citation, legacy.evidence))),
-    encounters: disambiguatePdfEntityIds(analysis.encounters.map((entry) => migrateNamed(entry, 'encounter', legacy.citation, legacy.evidence))),
+    timelineEvents: disambiguatePdfEntityIds((analysis.timelineEvents ?? []).map((entry) => migrateNamed(entry, 'scene', legacy.citation, legacy.evidence))),
+    scenes: disambiguatePdfEntityIds(mergePdfSceneRecords(analysis.scenes).map((entry) => migrateNamed(entry, 'scene', legacy.citation, legacy.evidence))),
+    encounters: disambiguatePdfEntityIds(mergePdfEncounterRecords(analysis.encounters).map((entry) => migrateNamed(entry, 'encounter', legacy.citation, legacy.evidence))),
     importCandidates: disambiguatePdfEntityIds(analysis.importCandidates.map((entry) => migrateNamed(entry, 'import-candidate', legacy.citation, legacy.evidence))),
     prepTips: disambiguatePdfEntityIds(analysis.prepTips.map((entry) => migratePrepTip(entry, legacy.citation, legacy.evidence))),
     warnings: [...analysis.warnings],
@@ -224,6 +227,7 @@ export function projectPdfCampaignAnalysisV2ToLegacyView(analysis: PdfCampaignAn
     locations: analysis.locations.map(named),
     factions: analysis.factions.map(named),
     clues: analysis.clues.map(named),
+    timelineEvents: (analysis.timelineEvents ?? []).map(named),
     scenes: analysis.scenes.map(named),
     encounters: analysis.encounters.map(named),
     importCandidates: analysis.importCandidates.map(named),
@@ -241,7 +245,7 @@ export function projectPdfCampaignAnalysisV2ToLegacyView(analysis: PdfCampaignAn
 export function materializePdfCampaignAnalysis(value: PdfCampaignAnalysisArtifact | PdfCampaignAnalysisV1 | PdfCampaignAnalysisV2): PdfCampaignAnalysisV2 {
   const payload = 'kind' in value ? value.payload : value
   return payload.schemaVersion === 2
-    ? structuredClone(payload as PdfCampaignAnalysisV2)
+    ? normalizeDmEditedPdfCampaignAnalysisV2(structuredClone(payload as PdfCampaignAnalysisV2))
     : migratePdfCampaignAnalysisV1ToV2(payload as PdfCampaignAnalysisV1)
 }
 
@@ -289,8 +293,9 @@ export function normalizeDmEditedPdfCampaignAnalysisV2(analysis: PdfCampaignAnal
     factions,
     relationships: resolvePdfRelationshipEndpoints({ people, locations, factions, relationships: disambiguatePdfRelationshipIds(relationships) }),
     clues: disambiguatePdfEntityIds(analysis.clues.map((entry) => named(entry, 'clue'))),
-    scenes: disambiguatePdfEntityIds(analysis.scenes.map((entry) => named(entry, 'scene'))),
-    encounters: disambiguatePdfEntityIds(analysis.encounters.map((entry) => named(entry, 'encounter'))),
+    timelineEvents: disambiguatePdfEntityIds((analysis.timelineEvents ?? []).map((entry) => named(entry, 'scene'))),
+    scenes: disambiguatePdfEntityIds(mergePdfSceneRecords(analysis.scenes).map((entry) => named(entry, 'scene'))),
+    encounters: disambiguatePdfEntityIds(mergePdfEncounterRecords(analysis.encounters).map((entry) => named(entry, 'encounter'))),
     importCandidates: disambiguatePdfEntityIds(analysis.importCandidates.map((entry) => named(entry, 'import-candidate'))),
     prepTips: disambiguatePdfEntityIds(analysis.prepTips.map((entry) => {
       const citations = entry.citations.filter((citation) => evidence.has(citation.evidenceId))

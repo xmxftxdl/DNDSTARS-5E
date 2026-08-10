@@ -328,6 +328,45 @@ describe('shared combat sync', () => {
     }
   })
 
+  it('treats an atomic combat recovery snapshot as an authority rollback', () => {
+    const decision = resolveSharedCombatStateApply({
+      state: makeState({
+        updatedAt: 100,
+        dnd5eTurnEconomyByToken: {
+          'hero-token': {
+            turnKey: 'combat-1:1:hero-token',
+            attacksUsed: 0,
+            action: { current: 1, max: 1 },
+            bonusAction: { current: 1, max: 1 },
+            reaction: { current: 1, max: 1 },
+            objectInteraction: { current: 1, max: 1 },
+            movement: { current: 30, max: 30 },
+          },
+        },
+        _sync: {
+          schemaVersion: 1,
+          revision: 12,
+          writerId: 'dm-combat-recovery:transaction-7',
+          writtenAt: 2_000,
+        },
+      }),
+      mapId: 'map-1',
+      validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: 'combat-1',
+      lastAppliedRevision: 11,
+      lastAppliedUpdatedAt: 1_000,
+      lastSnapshot: '',
+      isDm: false,
+    })
+
+    expect(decision.status).toBe('apply')
+    if (decision.status === 'apply') {
+      expect(decision.dnd5eTurnEconomyByToken['hero-token'].action.current).toBe(1)
+      expect(decision.authorityRollback).toBe(true)
+    }
+  })
+
   it('does not mark an ordinary newer authority snapshot as a rollback', () => {
     const decision = resolveSharedCombatStateApply({
       state: makeState({

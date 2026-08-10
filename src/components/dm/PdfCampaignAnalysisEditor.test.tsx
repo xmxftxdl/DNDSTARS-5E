@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { PdfCampaignAnalysisV1 } from '../../lib/pdfCampaignAnalysis'
 import PdfCampaignAnalysisEditor from './PdfCampaignAnalysisEditor'
+import { emptyPdfTimelineEvent } from './pdfCampaignAnalysisEditorModel'
 
 const analysis: PdfCampaignAnalysisV1 = {
   schemaVersion: 1,
@@ -21,6 +22,10 @@ const analysis: PdfCampaignAnalysisV1 = {
 }
 
 describe('PdfCampaignAnalysisEditor', () => {
+  it('新增时间节点默认绑定当前房间游戏时间', () => {
+    expect(emptyPdfTimelineEvent(735)).toMatchObject({ name: '新时间节点', gameTimeWorldMinute: 735 })
+  })
+
   it('提供分类审阅、可编辑概览和只读证据说明', () => {
     const html = renderToStaticMarkup(<PdfCampaignAnalysisEditor analysis={analysis} onChange={() => undefined} onClose={() => undefined} />)
 

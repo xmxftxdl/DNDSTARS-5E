@@ -4,6 +4,7 @@ import {
   campaignGregorianDate,
   campaignLightIsActive,
   campaignLightPresetPatch,
+  campaignWorldMinuteFromDisplay,
   canBenefitFromLongRest,
   formatCampaignTime,
   normalizeSharedCampaignTime,
@@ -31,6 +32,13 @@ describe('campaign time model', () => {
     })
     expect(formatCampaignTime(clock)).toBe('1992年10月10日 08:00')
     expect(campaignGregorianDate({ ...clock, worldMinute: 1_440 + 75 })).toBe('1992-10-11')
+    expect(campaignWorldMinuteFromDisplay(clock, { date: '1992-10-11', hour: 1, minute: 15 })).toBe(1_440 + 75)
+  })
+
+  it('converts an editable campaign-day display time back to the authoritative minute', () => {
+    expect(campaignWorldMinuteFromDisplay({ displayMode: 'campaign-day', displayMinuteOffset: 60 }, {
+      day: 2, hour: 2, minute: 30,
+    })).toBe(1_530)
   })
 
   it('requires 24 campaign hours between long-rest benefits', () => {

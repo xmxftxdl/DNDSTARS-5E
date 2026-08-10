@@ -86,6 +86,7 @@ const TARGETING_LABELS: Record<Dnd5eCombatActionTargeting, string> = {
 
 interface PlayerCombatHotbarProps {
   character: Character
+  mode?: 'combat' | 'exploration'
   canAct: boolean
   pending: boolean
   turnEconomy: {
@@ -187,6 +188,7 @@ function readBackpackOpen(characterId: string): boolean {
 
 export default function PlayerCombatHotbar({
   character,
+  mode = 'combat',
   canAct,
   pending,
   turnEconomy,
@@ -198,6 +200,7 @@ export default function PlayerCombatHotbar({
   onCommand,
   onUnavailable,
 }: PlayerCombatHotbarProps) {
+  const exploration = mode === 'exploration'
   const actionRemaining = turnEconomy.action.current
   const bonusActionRemaining = turnEconomy.bonusAction.current
   const movementRemaining = turnEconomy.movement.current
@@ -1043,9 +1046,13 @@ export default function PlayerCombatHotbar({
   return (<>
     <section
       data-testid="player-combat-hotbar"
-      className="pointer-events-auto w-full max-w-[1320px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
+      data-mode={mode}
+      data-action-remaining={actionRemaining}
+      data-bonus-action-remaining={bonusActionRemaining}
+      data-movement-remaining={movementRemaining}
+      className={`pointer-events-auto w-full overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl ${exploration ? 'max-w-[760px]' : 'max-w-[1320px]'}`}
     >
-      <div className="grid min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px] gap-1.5">
+      <div className={`grid gap-1.5 ${exploration ? 'min-w-[460px] grid-cols-[82px_minmax(330px,1fr)]' : 'min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px]'}`}>
         <aside className="flex flex-col items-center justify-between rounded-lg border border-amber-100/10 bg-black/25 p-1.5">
           <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)]">
             {portrait
@@ -1056,11 +1063,15 @@ export default function PlayerCombatHotbar({
             <div className="h-1.5 overflow-hidden rounded-full bg-black/70"><div className="h-full rounded-full bg-gradient-to-r from-rose-700 to-emerald-400" style={{ width: `${hpPercentage}%` }} /></div>
             <div className="mt-0.5 text-center text-[9px] font-semibold tabular-nums text-slate-300">{character.currentHp}/{character.maxHp}</div>
           </div>
-          <div className="mt-1 grid w-full grid-cols-3 gap-0.5 text-center text-[8px] font-bold">
-            <span title="动作" className={`rounded py-0.5 ${actionRemaining > 0 ? 'bg-emerald-400/20 text-emerald-200' : 'bg-white/5 text-slate-600'}`}>动 {actionRemaining}</span>
-            <span title="附赠动作" className={`rounded py-0.5 ${bonusActionRemaining > 0 ? 'bg-sky-400/20 text-sky-200' : 'bg-white/5 text-slate-600'}`}>附 {bonusActionRemaining}</span>
-            <span title="剩余移动力" className={`rounded py-0.5 ${movementRemaining > 0 ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-slate-600'}`}>{movementRemaining}</span>
-          </div>
+          {exploration ? (
+            <div className="mt-1 w-full rounded bg-violet-400/10 py-0.5 text-center text-[8px] font-bold text-violet-200">探索施法</div>
+          ) : (
+            <div className="mt-1 grid w-full grid-cols-3 gap-0.5 text-center text-[8px] font-bold">
+              <span title="动作" className={`rounded py-0.5 ${actionRemaining > 0 ? 'bg-emerald-400/20 text-emerald-200' : 'bg-white/5 text-slate-600'}`}>动 {actionRemaining}</span>
+              <span title="附赠动作" className={`rounded py-0.5 ${bonusActionRemaining > 0 ? 'bg-sky-400/20 text-sky-200' : 'bg-white/5 text-slate-600'}`}>附 {bonusActionRemaining}</span>
+              <span title="剩余移动力" className={`rounded py-0.5 ${movementRemaining > 0 ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-slate-600'}`}>{movementRemaining}</span>
+            </div>
+          )}
         </aside>
 
         <div data-testid="combat-hotbar-spells" className="rounded-lg border border-violet-300/15 bg-violet-950/15 p-1.5">
@@ -1074,6 +1085,9 @@ export default function PlayerCombatHotbar({
               {spellSlots.map((slot) => (
                 <span
                   key={slot.key}
+                  data-spell-slot-summary-level={slot.level}
+                  data-spell-slot-summary-current={slot.current}
+                  data-spell-slot-summary-max={slot.max}
                   title={`${slot.isPact ? '契约法术位' : `${slot.level}环法术位`}：剩余 ${slot.current}，总计 ${slot.max}`}
                   className={[
                     'whitespace-nowrap rounded border px-1.5 py-px text-[9px] font-semibold tabular-nums',
@@ -1102,6 +1116,7 @@ export default function PlayerCombatHotbar({
           </div>
         </div>
 
+        {!exploration ? (
         <div data-testid="combat-hotbar-features" className="rounded-lg border border-emerald-300/15 bg-emerald-950/10 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-emerald-100/80">
             <Sparkles className="h-3 w-3" />职业特性
@@ -1117,7 +1132,9 @@ export default function PlayerCombatHotbar({
             <button type="button" onClick={() => setFeaturePage(Math.min(featurePageCount - 1, activeFeaturePage + 1))} disabled={activeFeaturePage >= featurePageCount - 1} aria-label="下一页职业特性" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronRight className="h-3.5 w-3.5" /></button>
           </div>
         </div>
+        ) : null}
 
+        {!exploration ? (
         <div data-testid="combat-hotbar-items" className="rounded-lg border border-amber-300/15 bg-amber-950/10 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-amber-100/80">
             <PackageOpen className="h-3 w-3" />道具
@@ -1142,7 +1159,9 @@ export default function PlayerCombatHotbar({
             </button>
           </div>
         </div>
+        ) : null}
 
+        {!exploration ? (
         <div data-testid="combat-hotbar-basics" className="rounded-lg border border-slate-200/15 bg-slate-900/30 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-300">
             <Swords className="h-3 w-3" />基础动作
@@ -1152,6 +1171,7 @@ export default function PlayerCombatHotbar({
             {grouped.basics.map(actionButton)}
           </div>
         </div>
+        ) : null}
       </div>
     </section>
     {backpackOpen && typeof document !== 'undefined' ? createPortal(

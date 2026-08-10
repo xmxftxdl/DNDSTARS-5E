@@ -271,9 +271,12 @@ export type RollConfirmationInterruptPayload = Record<string, unknown> & {
     dieSides?: number
     direction?: 'add' | 'subtract'
     rerollScope?: 'self-roll' | 'attack-against-self'
+    additionalDice?: 1 | 2
+    selectionPolicy?: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
     resourceCosts?: Array<{ resourceKey: string; amount: number }>
     decisionRequired?: boolean
   }>
+  rollOptions?: { contributionId: string; values: number[] }
   allowDmOverride?: boolean
   transaction: CombatTransaction
 }
@@ -295,6 +298,9 @@ export type RollConfirmationInterruptResponse = Record<string, unknown> & {
     scope: 'self-roll' | 'attack-against-self'
     originalValue: number
     rerollValue: number
+    rerollValues?: number[]
+    selectedIndex?: number
+    selectionPolicy?: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
     selectedValue: number
   }
   dmOverrideApplied?: boolean

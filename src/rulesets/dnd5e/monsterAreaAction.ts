@@ -145,12 +145,14 @@ export function dnd5eMonsterAreaForcedMovementPlans(
     const fall = dnd5eForcedMovementFall({
       geometry,
       target,
+      targetCombatant: prepared.state.combatants[target.id],
       to: destination.to,
     })
     return {
       targetId: target.id,
       ...destination,
       toElevationFeet: fall.toElevationFeet,
+      toGroundElevationFeet: fall.landingGroundElevationFeet,
       sourceElevationFeet: fall.sourceElevationFeet,
       sourceGroundElevationFeet: fall.sourceGroundElevationFeet,
       landingGroundElevationFeet: fall.landingGroundElevationFeet,

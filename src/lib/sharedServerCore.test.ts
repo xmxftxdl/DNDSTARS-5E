@@ -2988,22 +2988,28 @@ describe('combat interrupt atomic mutation', () => {
     const contribution = {
       id: 'confirm:hero:choice-reroll', kind: 'choice-reroll', characterId: 'hero',
       characterName: '角色', featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
-      decision: 'use', createdAt: 150,
+      decision: 'use', selectedIndex: 1, createdAt: 150,
     }
     const contributed = mutateCombatInterruptQueue(queue, {
       operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution,
     }, 200, 'player', ['hero'])
+    expect(contributed.next.interrupts[0]).toMatchObject({ expiresAt: 10_200 })
+    const rolled = mutateCombatInterruptQueue(contributed.next, {
+      operation: 'roll-options', mapId: 'map-1', id: 'confirm',
+      rollOptions: { contributionId: contribution.id, values: [7, 18] },
+    }, 210, 'dm')
+    expect(rolled.next.interrupts[0]).toMatchObject({ expiresAt: 10_210 })
     const response = {
       decision: 'continue', finalValue: 18, acceptedContributionId: contribution.id,
       choiceReroll: {
         characterId: 'hero', featureId: 'dnd5e-core-inspiration', resourceCosts,
-        scope: 'self-roll', originalValue: 7, rerollValue: 18, selectedValue: 18,
+        scope: 'self-roll', originalValue: 7, rerollValue: 18, selectedValue: 18, selectedIndex: 1,
       },
     }
-    expect(mutateCombatInterruptQueue(contributed.next, {
+    expect(mutateCombatInterruptQueue(rolled.next, {
       operation: 'answer', mapId: 'map-1', id: 'confirm', response,
     }, 220, 'dm')).toMatchObject({ ok: true, changed: true })
-    expect(mutateCombatInterruptQueue(contributed.next, {
+    expect(mutateCombatInterruptQueue(rolled.next, {
       operation: 'answer', mapId: 'map-1', id: 'confirm',
       response: { ...response, finalValue: 19 },
     }, 220, 'dm')).toMatchObject({
@@ -3011,6 +3017,97 @@ describe('combat interrupt atomic mutation', () => {
       status: 409,
       error: 'roll-confirmation-value-conflict',
     })
+  })
+
+  it('enforces three-result and must-use-latest policies on the authoritative response', () => {
+    const resourceCosts = [{ resourceKey: 'fortune', amount: 1 }]
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: {
+          originalValue: 20,
+          eligibleModifiers: [{
+            characterId: 'hero', featureId: 'forced', featureLabel: '强制重掷',
+            modifierKind: 'choice-reroll', rerollScope: 'self-roll', additionalDice: 2,
+            selectionPolicy: 'must-use-latest', resourceCosts,
+          }],
+        }, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const contribution = {
+      id: 'confirm:hero:choice-reroll', kind: 'choice-reroll', characterId: 'hero',
+      characterName: '角色', featureId: 'forced', featureLabel: '强制重掷', decision: 'use', createdAt: 150,
+    }
+    const contributed = mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution,
+    }, 200, 'player', ['hero'])
+    expect(mutateCombatInterruptQueue(contributed.next, {
+      operation: 'roll-options', mapId: 'map-1', id: 'confirm',
+      rollOptions: { contributionId: contribution.id, values: [20, 9, 2] },
+    }, 205, 'player', ['hero'])).toMatchObject({ ok: false, status: 403 })
+    const rolled = mutateCombatInterruptQueue(contributed.next, {
+      operation: 'roll-options', mapId: 'map-1', id: 'confirm',
+      rollOptions: { contributionId: contribution.id, values: [20, 9, 2] },
+    }, 210, 'dm')
+    const choiceReroll = {
+      characterId: 'hero', featureId: 'forced', resourceCosts, scope: 'self-roll',
+      originalValue: 20, rerollValue: 9, rerollValues: [9, 2], selectedValue: 2,
+      selectedIndex: 2, selectionPolicy: 'must-use-latest',
+    }
+    expect(mutateCombatInterruptQueue(rolled.next, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { decision: 'continue', finalValue: 2, acceptedContributionId: contribution.id, choiceReroll },
+    }, 220, 'dm')).toMatchObject({ ok: true, changed: true })
+    expect(mutateCombatInterruptQueue(rolled.next, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { decision: 'continue', finalValue: 20, acceptedContributionId: contribution.id,
+        choiceReroll: { ...choiceReroll, selectedValue: 20, selectedIndex: 0 } },
+    }, 220, 'dm')).toMatchObject({ ok: false, status: 409, error: 'roll-choice-reroll-conflict' })
+  })
+
+  it('accepts an owned generic decline without a DM review contribution', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm',
+        payload: { originalValue: 12, eligibleModifiers: [
+          { characterId: 'wizard', featureId: 'portent', featureLabel: '预兆' },
+        ] }, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const contributed = mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:wizard:decline', kind: 'decline-d20', characterId: 'wizard',
+        characterName: '法师', featureLabel: '不使用投骰修正', createdAt: 150,
+      },
+    }, 200, 'player', ['wizard'])
+    expect(contributed).toMatchObject({ ok: true, changed: true })
+    expect(mutateCombatInterruptQueue(contributed.next, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { decision: 'continue', finalValue: 12 },
+    }, 220, 'dm')).toMatchObject({ ok: true, changed: true })
+  })
+
+  it('lets the Host continue with the original d20 after the player decision deadline', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'rollback', expiresAt: 10_100,
+        payload: { originalValue: 13, eligibleModifiers: [{ characterId: 'hero', featureId: 'luck', featureLabel: '幸运' }] },
+        createdAt: 100, updatedAt: 100,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { decision: 'continue', finalValue: 13 },
+    }, 10_099, 'dm')).toMatchObject({ ok: false, error: 'roll-choice-decision-pending' })
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm',
+      response: { decision: 'continue', finalValue: 13 },
+    }, 10_100, 'dm')).toMatchObject({ ok: true, changed: true })
   })
 
   it('rejects a roll replacement from a character or feature not declared by the Host', () => {
@@ -3220,7 +3317,7 @@ describe('combat interrupt atomic mutation', () => {
     })
   })
 
-  it('normalizes a newly published roll confirmation to an open DM-owned window', () => {
+  it('normalizes a newly published public roll confirmation to a timed player window', () => {
     const result = mutateCombatInterruptQueue(null, {
       operation: 'upsert', mapId: 'map-1', interrupt: {
         id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation', status: 'done',
@@ -3233,7 +3330,7 @@ describe('combat interrupt atomic mutation', () => {
     }, 100, 'player')
     expect(result).toMatchObject({ ok: true, changed: true })
     expect(result.next.interrupts[0]).toMatchObject({
-      status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', contributions: [],
+      status: 'pending', phase: 'after-roll', timeoutPolicy: 'rollback', expiresAt: 10_100, contributions: [],
     })
     expect((result.next.interrupts[0] as { response?: unknown }).response).toBeUndefined()
   })

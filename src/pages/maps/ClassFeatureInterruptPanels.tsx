@@ -106,11 +106,11 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
       )}
 
       {sharedBardicInspirationPrompt && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div data-testid="roll-adjustment-drawer" className="pointer-events-none absolute inset-y-0 left-0 z-[60] flex w-[min(25rem,calc(100%-0.75rem))] items-center p-3">
           <div
             role="dialog"
             aria-labelledby="shared-bardic-inspiration-prompt-title"
-            className="relative mx-4 w-full max-w-md rounded-2xl border border-amber-400/35 bg-void-950/95 p-5 shadow-2xl"
+            className="pointer-events-auto relative w-full rounded-2xl border border-amber-400/35 bg-void-950/95 p-5 shadow-2xl backdrop-blur-xl"
           >
             {sharedBardicInspirationPrompt.expiresAt != null && (
               <div className="absolute right-5 top-5 rounded-full border border-amber-300/40 bg-amber-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-100">
@@ -150,11 +150,11 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
       )}
 
       {sharedCuttingWordsPrompt && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div data-testid="roll-adjustment-drawer" className="pointer-events-none absolute inset-y-0 left-0 z-[60] flex w-[min(25rem,calc(100%-0.75rem))] items-center p-3">
           <div
             role="dialog"
             aria-labelledby="shared-cutting-words-prompt-title"
-            className="relative mx-4 w-full max-w-md rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl"
+            className="pointer-events-auto relative w-full rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl backdrop-blur-xl"
           >
             {sharedCuttingWordsPrompt.expiresAt != null && (
               <div className="absolute right-5 top-5 rounded-full border border-violet-300/40 bg-violet-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-violet-100">
@@ -192,11 +192,11 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
       )}
 
       {sharedDarkOnesOwnLuckPrompt && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div data-testid="roll-adjustment-drawer" className="pointer-events-none absolute inset-y-0 left-0 z-[60] flex w-[min(25rem,calc(100%-0.75rem))] items-center p-3">
           <div
             role="dialog"
             aria-labelledby="shared-dark-ones-own-luck-prompt-title"
-            className="relative mx-4 w-full max-w-md rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl"
+            className="pointer-events-auto relative w-full rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl backdrop-blur-xl"
           >
             {sharedDarkOnesOwnLuckPrompt.expiresAt != null && (
               <div className="absolute right-5 top-5 rounded-full border border-violet-300/40 bg-violet-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-violet-100">
@@ -232,11 +232,11 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
       )}
 
       {sharedStrokeOfLuckPrompt && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div data-testid="roll-adjustment-drawer" className="pointer-events-none absolute inset-y-0 left-0 z-[60] flex w-[min(25rem,calc(100%-0.75rem))] items-center p-3">
           <div
             role="dialog"
             aria-labelledby="shared-stroke-of-luck-prompt-title"
-            className="relative mx-4 w-full max-w-md rounded-2xl border border-amber-400/35 bg-void-950/95 p-5 shadow-2xl"
+            className="pointer-events-auto relative w-full rounded-2xl border border-amber-400/35 bg-void-950/95 p-5 shadow-2xl backdrop-blur-xl"
           >
             {sharedStrokeOfLuckPrompt.expiresAt != null && (
               <div className="absolute right-5 top-5 rounded-full border border-amber-300/40 bg-amber-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-100">
@@ -274,11 +274,11 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
       )}
 
       {sharedEmpoweredSpellPrompt && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div data-testid="roll-adjustment-drawer" className="pointer-events-none absolute inset-y-0 left-0 z-[60] flex w-[min(28rem,calc(100%-0.75rem))] items-center p-3">
           <div
             role="dialog"
             aria-labelledby="shared-empowered-spell-prompt-title"
-            className="relative mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-rose-400/35 bg-void-950/95 p-5 shadow-2xl"
+            className="pointer-events-auto relative max-h-[calc(100vh-1.5rem)] w-full overflow-y-auto rounded-2xl border border-rose-400/35 bg-void-950/95 p-5 shadow-2xl backdrop-blur-xl"
           >
             {sharedEmpoweredSpellPrompt.expiresAt != null && (
               <div className="absolute right-5 top-5 rounded-full border border-rose-300/40 bg-rose-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-rose-100">

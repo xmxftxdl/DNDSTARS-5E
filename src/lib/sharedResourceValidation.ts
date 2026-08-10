@@ -324,7 +324,10 @@ function migrateCombatInterruptEnvelope(input: Record<string, unknown>): {
             (entry.kind === 'adjust-d20' && typeof entry.featureId === 'string' && !!entry.featureId.trim() &&
               (entry.direction === 'add' || entry.direction === 'subtract')) ||
             (entry.kind === 'choice-reroll' && typeof entry.featureId === 'string' && !!entry.featureId.trim() &&
-              (entry.decision === 'use' || entry.decision === 'decline'))
+              (entry.decision === 'use' || entry.decision === 'decline') &&
+              (entry.selectedIndex == null || Number.isInteger(entry.selectedIndex) &&
+                Number(entry.selectedIndex) >= 0 && Number(entry.selectedIndex) <= 2)) ||
+            entry.kind === 'decline-d20'
           )
           if (
             !isPlainObject(entry) || !contributionShapeValid ||

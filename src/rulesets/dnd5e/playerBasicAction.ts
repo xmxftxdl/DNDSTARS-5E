@@ -299,6 +299,7 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   targetHalflingLuckyD20?: number
   targetHalflingLuckyD20Second?: number
   pushToElevationFeet?: number
+  pushToGroundElevationFeet?: number
   fallingDamageRolls?: readonly number[]
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
 }): {
@@ -342,6 +343,7 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       targetDefense: prepared.targetDefense ?? payload.targetDefense, outcome: payload.outcome,
       pushTo: prepared.pushTo,
       pushToElevationFeet: input.pushToElevationFeet,
+      pushToGroundElevationFeet: input.pushToGroundElevationFeet,
       fallingDamageRolls: input.fallingDamageRolls,
       spendAction: prepared.spendsAction,
     }; break

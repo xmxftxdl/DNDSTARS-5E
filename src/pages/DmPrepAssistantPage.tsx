@@ -138,6 +138,7 @@ export default function DmPrepAssistantPage() {
   const [pdfNotice, setPdfNotice] = useState<string | null>(null)
   const [pdfAnalysisBusy, setPdfAnalysisBusy] = useState(false)
   const pdfAnalysisRunRef = useRef(false)
+  const pdfSaveRunRef = useRef(false)
   const [pdfAnalysisProgress, setPdfAnalysisProgress] = useState<PdfAnalysisProgressV1 | null>(null)
   const [pdfAnalysisResult, setPdfAnalysisResult] = useState<PdfCampaignAnalysisV2 | null>(null)
   const [pdfAnalysisEditorOpen, setPdfAnalysisEditorOpen] = useState(false)
@@ -373,8 +374,10 @@ export default function DmPrepAssistantPage() {
     URL.revokeObjectURL(url)
   }
 
-  const savePdfAnalysisDraft = async () => {
-    if (!pdfAnalysisResult || !activeAiJob || pdfSaveBusy) return
+  const persistPdfAnalysisDraft = async (analysis: PdfCampaignAnalysisV2): Promise<boolean> => {
+    if (!activeAiJob || pdfSaveRunRef.current) return false
+    const normalized = normalizeDmEditedPdfCampaignAnalysisV2(analysis)
+    pdfSaveRunRef.current = true
     setPdfSaveBusy(true)
     try {
       const updated = await updateCampaignAiJobArtifact(
@@ -384,17 +387,29 @@ export default function DmPrepAssistantPage() {
         {
           schemaVersion: 2,
           kind: 'pdf-campaign-analysis',
-          payload: pdfAnalysisResult,
+          payload: normalized,
         },
       )
       setActiveAiJob(updated)
+      setAiJobs((current) => [updated, ...current.filter((candidate) => candidate.jobId !== updated.jobId)])
+      setPdfAnalysisResult(updated.artifact
+        ? materializePdfCampaignAnalysis(updated.artifact as PdfCampaignAnalysisArtifact)
+        : normalized)
       setPdfAnalysisDirty(false)
       setPdfNotice('DM 修改已保存到账号战役，可在其他设备恢复。')
+      return true
     } catch (error) {
       setPdfNotice(aiJobApiErrorMessage(error))
+      return false
     } finally {
+      pdfSaveRunRef.current = false
       setPdfSaveBusy(false)
     }
+  }
+
+  const savePdfAnalysisDraft = async () => {
+    if (!pdfAnalysisResult) return
+    await persistPdfAnalysisDraft(pdfAnalysisResult)
   }
 
   const updatePdfPersonPortrait = (personName: string, portraitDataUrl: string) => {
@@ -766,6 +781,23 @@ export default function DmPrepAssistantPage() {
               mapHref={`${campaignBasePath}/maps`}
               onEdit={() => setPdfAnalysisEditorOpen(true)}
               onPortraitChange={updatePdfPersonPortrait}
+              onTimelineEventsChange={(timelineEvents) => {
+                setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                  ...current,
+                  timelineEvents: timelineEvents as unknown as PdfCampaignAnalysisV2['timelineEvents'],
+                }) : current)
+                setPdfAnalysisDirty(true)
+              }}
+              onTimelineEventsCommit={async (timelineEvents) => {
+                if (!pdfAnalysisResult) return false
+                const next = normalizeDmEditedPdfCampaignAnalysisV2({
+                  ...pdfAnalysisResult,
+                  timelineEvents: timelineEvents as unknown as PdfCampaignAnalysisV2['timelineEvents'],
+                })
+                setPdfAnalysisResult(next)
+                setPdfAnalysisDirty(true)
+                return persistPdfAnalysisDraft(next)
+              }}
             />
 
             {pdfAnalysisResult.warnings.length > 0 && (

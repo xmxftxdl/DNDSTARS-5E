@@ -334,8 +334,8 @@ export interface DeclarativeD20ChoiceRerollMechanicV1 {
   kind: 'd20-choice-reroll'
   rollKinds: readonly DeclarativeNextD20RollKindV1[]
   scopes: readonly DeclarativeD20ChoiceRerollScopeV1[]
-  additionalDice: 1
-  selection: 'owner-chooses'
+  additionalDice: 1 | 2
+  selection: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
 }
 
 export interface DeclarativePostSpellRandomTableOutcomeV1 {
@@ -947,8 +947,8 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         new Set(value.mechanic.scopes).size !== value.mechanic.scopes.length ||
         value.mechanic.scopes.some((scope) =>
           !['self-roll', 'attack-against-self'].includes(String(scope))) ||
-        value.mechanic.additionalDice !== 1 ||
-        value.mechanic.selection !== 'owner-chooses'
+        ![1, 2].includes(Number(value.mechanic.additionalDice)) ||
+        !['owner-chooses', 'highest', 'lowest', 'must-use-latest'].includes(String(value.mechanic.selection))
       ) throw new Error(`${path} d20 choice reroll declaration is invalid`)
       if (value.trigger.kind !== 'after-d20-roll') {
         throw new Error(`${path} d20 choice reroll must trigger after a d20 roll`)

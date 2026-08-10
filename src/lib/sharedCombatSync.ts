@@ -209,7 +209,9 @@ export function resolveSharedCombatStateApply(input: {
   if (snapshot === input.lastSnapshot) return { status: 'ignored', reason: 'unchanged' }
 
   const combatChanged = incomingCombatId !== input.currentCombatId
-  const authorityRollback = state._sync?.writerId.startsWith('dm-undo:') === true
+  const writerId = state._sync?.writerId ?? ''
+  const authorityRollback =
+    writerId.startsWith('dm-undo:') || writerId.startsWith('dm-combat-recovery:')
   return {
     status: 'apply',
     active,

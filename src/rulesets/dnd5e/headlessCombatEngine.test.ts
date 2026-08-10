@@ -8795,6 +8795,43 @@ describe('D&D 5e 2014 headless combat engine', () => {
       }
     })
 
+    it('keeps a supported flyer at its current height when a push carries it off a ledge', () => {
+      const shover = fighter('shover', 20, { position: { x: 0, y: 0 } })
+      const flyer = fighter('flyer', 10, {
+        controller: 'dm', position: { x: 5, y: 0 },
+        elevationFeet: 40, groundElevationFeet: 40, airborne: false,
+        movementSpeeds: { walk: 30, fly: 60 },
+      })
+      const state = startDnd5eHeadlessCombat('forced-flight-support', [shover, flyer])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(shover.id, flyer.id)]: 5,
+      }
+      const push = {
+        type: 'shove' as const, actorId: shover.id, targetId: flyer.id,
+        actorD20: 20, targetD20: 1, targetDefense: 'acrobatics' as const,
+        outcome: 'push' as const, pushTo: { x: 10, y: 0 },
+        pushToGroundElevationFeet: 0,
+      }
+
+      const resolved = resolveDnd5eHeadlessAction(state, push)
+      expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+      if (!resolved.ok) return
+      expect(resolved.state.combatants.flyer).toMatchObject({
+        currentHp: 20,
+        position: { x: 10, y: 0 },
+        elevationFeet: 40,
+        groundElevationFeet: 0,
+        airborne: true,
+      })
+      expect(resolved.events.some((event) => event.type === 'falling-damage-resolved')).toBe(false)
+
+      expect(resolveDnd5eHeadlessAction(state, {
+        ...push,
+        pushToElevationFeet: 0,
+        fallingDamageRolls: [2, 3, 4, 5],
+      })).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    })
+
     it('falls when incapacitation ends the Fly spell concentration', () => {
       const attacker = fighter('attacker', 20, {
         controller: 'dm',

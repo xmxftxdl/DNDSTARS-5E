@@ -51,6 +51,7 @@ import {
   isCombatPresentationAreaSpellId,
 } from '../shared/combat-presentation-contract.mjs'
 import { normalizeCombatTargetPresentationEvent } from './combat-target-presentation.mjs'
+import { applyRollOptionsMutation, ROLL_CONFIRMATION_STAGE_TIMEOUT_MS, validateChoiceRerollResponse } from './roll-confirmation-policy.mjs'
 import {
   analyzeMarketplaceDeclarativePackage,
   MARKETPLACE_CREATOR_NOTICE_VERSION,
@@ -94,6 +95,11 @@ import { sharedAuthenticatedSystemRoute, sharedPublicSystemRoute } from './share
 import { createInMemorySseEventPublisher } from './adapters/in-memory-sse-event-publisher.mjs'
 import { listCampaignSnapshotSummaries, readCampaignSnapshot } from './application/campaign-snapshot-catalog.mjs'
 import { handleRoomVoiceApi } from './application/room-voice-api.mjs'
+import {
+  applyDmAuthoritativeCombatRecovery as recoverDmCombat,
+  dmUndoAfterMetadata,
+  dmUndoPublicTransaction,
+} from './dm-combat-recovery.mjs'
 import {
   applyCors,
   applySecurityHeaders,
@@ -2167,6 +2173,10 @@ export function mutateCombatInterruptQueue(
         typeof interrupt.payload.label !== 'string' || !interrupt.payload.label.trim() ||
         !Number.isInteger(interrupt.payload.originalValue) || interrupt.payload.originalValue < 1 || interrupt.payload.originalValue > 20 ||
         (interrupt.payload.visibility !== 'public' && interrupt.payload.visibility !== 'dm-only') ||
+        (interrupt.payload.eligibleModifiers != null && (!Array.isArray(interrupt.payload.eligibleModifiers) ||
+          interrupt.payload.eligibleModifiers.some((entry) => !plainObject(entry) ||
+            (entry.additionalDice != null && ![1, 2].includes(entry.additionalDice)) ||
+            (entry.selectionPolicy != null && !['owner-chooses', 'highest', 'lowest', 'must-use-latest'].includes(entry.selectionPolicy))))) ||
         !plainObject(interrupt.payload.transaction)
       )
     ) return { ok: false, status: 400, error: 'invalid-roll-confirmation' }
@@ -2194,7 +2204,8 @@ export function mutateCombatInterruptQueue(
       ...(interrupt.kind === 'roll-confirmation' ? {
         status: 'pending',
         phase: 'after-roll',
-        timeoutPolicy: 'wait-for-dm',
+        timeoutPolicy: interrupt.payload?.visibility === 'dm-only' ? 'wait-for-dm' : 'rollback',
+        expiresAt: interrupt.payload?.visibility === 'dm-only' ? undefined : now + ROLL_CONFIRMATION_STAGE_TIMEOUT_MS,
         response: undefined,
         contributions: [],
       } : {}),
@@ -2210,13 +2221,17 @@ export function mutateCombatInterruptQueue(
     }
   }
 
-  if (!['contribute', 'answer', 'rolling', 'finish', 'wait', 'rollback'].includes(operation)) {
+  if (!['contribute', 'roll-options', 'answer', 'rolling', 'finish', 'wait', 'rollback'].includes(operation)) {
     return { ok: false, status: 400, error: 'invalid-operation' }
   }
   const id = String(mutation?.id ?? '')
   const index = base.interrupts.findIndex((item) => item.id === id)
   if (index < 0) return { ok: false, status: 404, error: 'interrupt-not-found' }
   const current = base.interrupts[index]
+  if (operation === 'roll-options') {
+    if (authorityRole === 'player') return { ok: false, status: 403, error: 'dm-authority-required' }
+    return applyRollOptionsMutation(base, index, mutation, now)
+  }
   if (current.kind === 'roll-confirmation' && authorityRole === 'player' && operation !== 'contribute') {
     return { ok: false, status: 403, error: 'dm-authority-required' }
   }
@@ -2262,13 +2277,13 @@ export function mutateCombatInterruptQueue(
       ? current.payload.eligibleModifiers
       : []
     const requiredChoiceCharacterIds = new Set(eligibleModifiers
-      .filter((entry) => entry?.modifierKind === 'choice-reroll' && entry?.decisionRequired === true)
       .map((entry) => entry?.characterId)
       .filter((characterId) => typeof characterId === 'string' && characterId))
     const choiceDecisions = (Array.isArray(current.contributions) ? current.contributions : [])
-      .filter((entry) => entry?.kind === 'choice-reroll' && requiredChoiceCharacterIds.has(entry.characterId))
+      .filter((entry) => requiredChoiceCharacterIds.has(entry?.characterId))
     if ([...requiredChoiceCharacterIds].some((characterId) =>
-      !choiceDecisions.some((entry) => entry.characterId === characterId))) {
+      !choiceDecisions.some((entry) => entry.characterId === characterId)) &&
+      (!Number.isFinite(current.expiresAt) || now < current.expiresAt)) {
       return { ok: false, status: 409, error: 'roll-choice-decision-pending' }
     }
     if (acceptedContribution?.kind === 'adjust-d20') {
@@ -2288,36 +2303,12 @@ export function mutateCombatInterruptQueue(
     } else if (response.adjustment != null) {
       return { ok: false, status: 400, error: 'unexpected-roll-adjustment' }
     }
-    let choiceRerollFinalValue
-    if (acceptedContribution?.kind === 'choice-reroll') {
-      const choiceReroll = response.choiceReroll
-      const rerollScope = acceptedEligibleModifier?.rerollScope
-      const expectedResourceCosts = Array.isArray(acceptedEligibleModifier?.resourceCosts)
-        ? acceptedEligibleModifier.resourceCosts
-        : []
-      if (
-        acceptedContribution.decision !== 'use' ||
-        !acceptedEligibleModifier || acceptedEligibleModifier.modifierKind !== 'choice-reroll' ||
-        !['self-roll', 'attack-against-self'].includes(rerollScope) ||
-        expectedResourceCosts.length < 1 || !choiceReroll ||
-        choiceReroll.characterId !== acceptedContribution.characterId ||
-        choiceReroll.featureId !== acceptedContribution.featureId ||
-        choiceReroll.scope !== rerollScope ||
-        choiceReroll.originalValue !== originalValue ||
-        !Number.isInteger(choiceReroll.rerollValue) || choiceReroll.rerollValue < 1 || choiceReroll.rerollValue > 20 ||
-        !Array.isArray(choiceReroll.resourceCosts) ||
-        JSON.stringify(choiceReroll.resourceCosts) !== JSON.stringify(expectedResourceCosts)
-      ) return { ok: false, status: 409, error: 'roll-choice-reroll-conflict' }
-      const expectedSelectedValue = rerollScope === 'attack-against-self'
-        ? Math.min(originalValue, choiceReroll.rerollValue)
-        : Math.max(originalValue, choiceReroll.rerollValue)
-      if (choiceReroll.selectedValue !== expectedSelectedValue) {
-        return { ok: false, status: 409, error: 'roll-choice-reroll-conflict' }
-      }
-      choiceRerollFinalValue = expectedSelectedValue
-    } else if (response.choiceReroll != null) {
-      return { ok: false, status: 400, error: 'unexpected-choice-reroll' }
-    }
+    const choiceValidation = validateChoiceRerollResponse({
+      acceptedContribution, eligibleModifier: acceptedEligibleModifier, response, originalValue,
+      rollOptions: current.payload?.rollOptions,
+    })
+    if (!choiceValidation.ok) return choiceValidation
+    const choiceRerollFinalValue = choiceValidation.finalValue
     const dmOverrideAllowed =
       current.payload?.visibility === 'dm-only' &&
       current.payload?.allowDmOverride === true &&
@@ -2340,7 +2331,7 @@ export function mutateCombatInterruptQueue(
     ) return { ok: false, status: 409, error: 'invalid-transition' }
     const contribution = mutation?.contribution
     if (
-      !contribution || !['replace-d20', 'adjust-d20', 'choice-reroll'].includes(contribution.kind) ||
+      !contribution || !['replace-d20', 'adjust-d20', 'choice-reroll', 'decline-d20'].includes(contribution.kind) ||
       typeof contribution.id !== 'string' || !contribution.id ||
       typeof contribution.characterId !== 'string' || !contribution.characterId ||
       typeof contribution.characterName !== 'string' || !contribution.characterName.trim() ||
@@ -2359,20 +2350,23 @@ export function mutateCombatInterruptQueue(
       )) ||
       (contribution.kind === 'choice-reroll' && (
         typeof contribution.featureId !== 'string' || !contribution.featureId.trim() ||
-        !['use', 'decline'].includes(contribution.decision)
+        !['use', 'decline'].includes(contribution.decision) ||
+        (contribution.selectedIndex != null && (!Number.isInteger(contribution.selectedIndex) ||
+          contribution.selectedIndex < 0 || contribution.selectedIndex > 2))
       ))
     ) return { ok: false, status: 400, error: 'invalid-contribution' }
     const eligibleModifiers = Array.isArray(current.payload?.eligibleModifiers)
       ? current.payload.eligibleModifiers
       : []
     const eligibleModifier = eligibleModifiers.find((entry) =>
-      entry?.characterId === contribution.characterId &&
+      entry?.characterId === contribution.characterId && (
+      contribution.kind === 'decline-d20' || (
       entry?.featureId === contribution.featureId &&
       entry?.featureLabel === contribution.featureLabel &&
       (entry?.modifierKind ?? 'replace-d20') === contribution.kind &&
       (contribution.kind !== 'adjust-d20' || entry?.direction === contribution.direction) &&
       (contribution.kind !== 'choice-reroll' ||
-        ['self-roll', 'attack-against-self'].includes(entry?.rerollScope)),
+        ['self-roll', 'attack-against-self'].includes(entry?.rerollScope)))),
     )
     if (!eligibleModifier) {
       return { ok: false, status: 403, error: 'ineligible-roll-modifier' }
@@ -2388,6 +2382,8 @@ export function mutateCombatInterruptQueue(
     }
     const expectedContributionId = contribution.kind === 'choice-reroll'
       ? `${current.id}:${contribution.characterId}:choice-reroll`
+      : contribution.kind === 'decline-d20'
+        ? `${current.id}:${contribution.characterId}:decline`
       : `${current.id}:${contribution.characterId}`
     if (contribution.id !== expectedContributionId) {
       return { ok: false, status: 400, error: 'invalid-contribution-id' }
@@ -2409,6 +2405,14 @@ export function mutateCombatInterruptQueue(
       featureId: contribution.featureId.trim().slice(0, 160),
       featureLabel: contribution.featureLabel.trim().slice(0, 120),
       decision: contribution.decision,
+      ...(contribution.selectedIndex != null ? { selectedIndex: contribution.selectedIndex } : {}),
+      createdAt: contribution.createdAt,
+    } : contribution.kind === 'decline-d20' ? {
+      id: contribution.id.slice(0, 240),
+      kind: 'decline-d20',
+      characterId: contribution.characterId.slice(0, 160),
+      characterName: contribution.characterName.trim().slice(0, 80),
+      featureLabel: '不使用投骰修正',
       createdAt: contribution.createdAt,
     } : {
       id: contribution.id.slice(0, 240),
@@ -2423,14 +2427,20 @@ export function mutateCombatInterruptQueue(
     }
     const contributions = [
       ...(Array.isArray(current.contributions) ? current.contributions : [])
-        .filter((entry) => entry?.id !== normalizedContribution.id && !(
-          entry?.kind === 'choice-reroll' && normalizedContribution.kind === 'choice-reroll' &&
-          entry?.characterId === normalizedContribution.characterId
-        )),
+        .filter((entry) => entry?.id !== normalizedContribution.id &&
+          entry?.characterId !== normalizedContribution.characterId),
       normalizedContribution,
     ].sort((a, b) => Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0)).slice(-32)
+    const startsChoiceRoll = normalizedContribution.kind === 'choice-reroll' && normalizedContribution.decision === 'use' &&
+      !(Array.isArray(current.contributions) && current.contributions.some((entry) =>
+        entry?.characterId === normalizedContribution.characterId && entry?.kind === 'choice-reroll' && entry?.decision === 'use'))
     const interrupts = [...base.interrupts]
-    interrupts[index] = { ...current, contributions, updatedAt: now }
+    interrupts[index] = {
+      ...current, contributions,
+      ...(startsChoiceRoll && current.payload?.visibility !== 'dm-only'
+        ? { expiresAt: now + ROLL_CONFIRMATION_STAGE_TIMEOUT_MS } : {}),
+      updatedAt: now,
+    }
     return {
       ok: true,
       changed: true,
@@ -5592,6 +5602,10 @@ async function appendDmUndoChange(ctx, input) {
     const change = {
       resource: input.resource,
       before: input.before ?? null,
+      // Recovery only needs the full pre-transaction snapshot. Retain a tiny
+      // post-combat projection for UI labels instead of duplicating entire
+      // character/map payloads in the bounded journal.
+      after: dmUndoAfterMetadata(input.resource, input.after),
       beforeRevision: input.beforeRevision,
       afterRevision: input.afterRevision,
     }
@@ -5635,22 +5649,11 @@ async function recordDmUndoMutation(req, ctx, member, resource, result, label) {
     actorMemberId: member.memberId,
     resource,
     before: result.previous,
+    after: result.next,
     beforeRevision: sharedStateRevision(result.previous),
     afterRevision: sharedStateRevision(result.next),
     changedAt: Number(result.next?._sync?.writtenAt) || Date.now(),
   })
-}
-
-function dmUndoPublicTransaction(transaction) {
-  return {
-    transactionId: transaction.transactionId,
-    label: transaction.label,
-    status: transaction.status,
-    resources: transaction.changes.map((change) => change.resource),
-    createdAt: transaction.createdAt,
-    updatedAt: transaction.updatedAt,
-    ...(Number.isFinite(transaction.undoneAt) ? { undoneAt: transaction.undoneAt } : {}),
-  }
 }
 
 async function readDmUndoJournal(ctx) {
@@ -5783,6 +5786,23 @@ async function applyDmAuthoritativeUndo(ctx, requestedTransactionId, actorMember
       })),
     }
     })
+  })
+}
+
+async function applyDmAuthoritativeCombatRecovery(ctx, requestedTransactionId, actorMemberId) {
+  return recoverDmCombat(ctx, requestedTransactionId, actorMemberId, {
+    RoomProtocolError,
+    dmUndoJournalFile,
+    withWriteLock,
+    sharedStateTransactionLockPath,
+    recoverSharedStateTransaction,
+    normalizeDmUndoJournal,
+    safeName,
+    sharedStateRevision,
+    atomicDeleteJsonStateCasLocked,
+    atomicWriteJsonStateCasLocked,
+    validateSharedStateShape,
+    atomicRename,
   })
 }
 
@@ -11599,11 +11619,22 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 400, { error: 'invalid-dm-undo-transaction' })
           return true
         }
-        const result = await applyDmAuthoritativeUndo(
-          ctx,
-          requestedTransactionId,
-          authenticatedRoomMember.memberId,
-        )
+        const combatRecovery = payload?.mode === 'combat-cascade'
+        if (payload?.mode != null && !combatRecovery) {
+          writeJson(res, 400, { error: 'invalid-dm-undo-mode' })
+          return true
+        }
+        const result = combatRecovery
+          ? await applyDmAuthoritativeCombatRecovery(
+              ctx,
+              requestedTransactionId,
+              authenticatedRoomMember.memberId,
+            )
+          : await applyDmAuthoritativeUndo(
+              ctx,
+              requestedTransactionId,
+              authenticatedRoomMember.memberId,
+            )
         const now = Date.now()
         for (const restored of result.restored) {
           publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
@@ -11615,6 +11646,9 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 200, {
           ok: true,
           transaction: dmUndoPublicTransaction(result.transaction),
+          ...(result.transactions ? {
+            transactions: result.transactions.map(dmUndoPublicTransaction),
+          } : {}),
           restored: result.restored,
         })
         return true
@@ -11963,6 +11997,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             actorMemberId: authenticatedRoomMember?.memberId ?? 'local-dm',
             resource: entry.name,
             before: entry.current,
+            after: entry.data,
             beforeRevision: entry.currentRevision,
             afterRevision: entry.revision,
             changedAt: entry.writtenAt,
@@ -12711,6 +12746,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             actorMemberId: authenticatedRoomMember.memberId,
             resource: name,
             before: writeResult.current,
+            after: writeResult.value,
             beforeRevision: writeResult.currentRevision,
             afterRevision: writeResult.revision,
             changedAt: writeResult.writtenAt,
@@ -12776,6 +12812,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             actorMemberId: authenticatedRoomMember.memberId,
             resource: name,
             before: deleteResult.current,
+            after: null,
             beforeRevision: deleteResult.currentRevision,
             afterRevision: deleteResult.revision,
             changedAt: deleteResult.writtenAt,

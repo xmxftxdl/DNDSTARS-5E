@@ -3,6 +3,7 @@ import { validateAndMigrateSharedResource } from './sharedResourceValidation'
 import { createDnd5eConditionEffect } from '../rulesets/dnd5e/activeEffects'
 import {
   createD20ChoiceRerollContribution,
+  createD20DeclineContribution,
   createD20RollConfirmationInterrupt,
 } from './rollConfirmation'
 
@@ -415,6 +416,12 @@ describe('shared resource runtime validation', () => {
     }
 
     expect(validateAndMigrateSharedResource('combat-interrupts', envelope).status).toBe('valid')
+    const decline = createD20DeclineContribution({
+      interruptId: interrupt.id, characterId: 'wizard', characterName: 'Wizard', now: 3,
+    })
+    expect(validateAndMigrateSharedResource('combat-interrupts', {
+      ...envelope, interrupts: [{ ...interrupt, contributions: [decline], updatedAt: 3 }],
+    }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('combat-interrupts', {
       ...envelope,
       interrupts: [{

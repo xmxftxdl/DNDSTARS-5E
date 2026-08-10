@@ -67,6 +67,8 @@ describe('d20 interrupt policy', () => {
       modifierKind: 'choice-reroll',
       sourceTokenId: 'hero-token',
       rerollScope: 'self-roll',
+      additionalDice: 1,
+      selectionPolicy: 'owner-chooses',
       resourceCosts: [{ resourceKey: DND5E_CORE_INSPIRATION_RESOURCE_KEY, amount: 1 }],
       decisionRequired: true,
     })

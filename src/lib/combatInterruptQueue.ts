@@ -37,6 +37,16 @@ export interface D20ChoiceRerollInterruptContribution {
   featureId: string
   featureLabel: string
   decision: 'use' | 'decline'
+  selectedIndex?: number
+  createdAt: number
+}
+
+export interface D20DeclineInterruptContribution {
+  id: string
+  kind: 'decline-d20'
+  characterId: string
+  characterName: string
+  featureLabel: string
   createdAt: number
 }
 
@@ -44,6 +54,7 @@ export type CombatInterruptContribution =
   | D20ReplacementInterruptContribution
   | D20AdjustmentInterruptContribution
   | D20ChoiceRerollInterruptContribution
+  | D20DeclineInterruptContribution
 
 const TERMINAL_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>(['done', 'rolled-back'])
 
@@ -236,9 +247,13 @@ export function contributeCombatInterrupt(
   } else if (contribution.kind === 'adjust-d20') {
     if (!contribution.featureId.trim() ||
       (contribution.direction !== 'add' && contribution.direction !== 'subtract')) return queue ?? null
+  } else if (contribution.kind === 'decline-d20') {
+    // A decline is a character-level decision and deliberately has no feature/resource payload.
   } else if (
     contribution.kind !== 'choice-reroll' || !contribution.featureId.trim() ||
-    (contribution.decision !== 'use' && contribution.decision !== 'decline')
+    (contribution.decision !== 'use' && contribution.decision !== 'decline') ||
+    (contribution.selectedIndex != null && (!Number.isInteger(contribution.selectedIndex) ||
+      contribution.selectedIndex < 0 || contribution.selectedIndex > 2))
   ) return queue ?? null
   return updateCombatInterrupt(queue, id, (interrupt) => {
     if (
@@ -259,6 +274,12 @@ export function contributeCombatInterrupt(
             featureId: contribution.featureId.trim().slice(0, 160),
             featureLabel: contribution.featureLabel.trim().slice(0, 120),
           }
+        : contribution.kind === 'decline-d20'
+          ? {
+              ...contribution,
+              characterName: contribution.characterName.trim().slice(0, 80),
+              featureLabel: contribution.featureLabel.trim().slice(0, 120),
+            }
         : {
           ...contribution,
           characterName: contribution.characterName.trim().slice(0, 80),
@@ -267,13 +288,22 @@ export function contributeCombatInterrupt(
         }
     const contributions = [
       ...(interrupt.contributions ?? []).filter((entry) =>
-        entry.id !== contribution.id &&
-        !(entry.kind === 'choice-reroll' && contribution.kind === 'choice-reroll' &&
-          entry.characterId === contribution.characterId)),
+        entry.id !== contribution.id && entry.characterId !== contribution.characterId),
       normalizedContribution,
     ].sort((left, right) => left.createdAt - right.createdAt).slice(-32)
     return { ...interrupt, contributions, updatedAt: now }
   }, now)
+}
+
+export function recordCombatInterruptRollOptions(
+  queue: SharedCombatInterruptQueueState | null | undefined,
+  id: string,
+  rollOptions: { contributionId: string; values: number[] },
+  now = Date.now(),
+): SharedCombatInterruptQueueState | null {
+  return updateCombatInterrupt(queue, id, (interrupt) => ({
+    ...interrupt, payload: { ...interrupt.payload, rollOptions }, updatedAt: now,
+  }), now)
 }
 
 export function waitCombatInterruptForDm(

@@ -278,6 +278,7 @@ interface Props {
   draftStorageScope?: string
   knownCustomSpells?: readonly Dnd5eMonsterContentSpellReference[]
   onCreateCustomSpellDraft?: (request: Dnd5eMonsterWorkshopCustomSpellDraftRequest) => void
+  onMonsterSaved?: (monster: Dnd5eMonsterStatBlock) => void | Promise<void>
 }
 
 export default function Dnd5eMonsterWorkshopDialog({
@@ -290,6 +291,7 @@ export default function Dnd5eMonsterWorkshopDialog({
   draftStorageScope = 'local',
   knownCustomSpells = [],
   onCreateCustomSpellDraft,
+  onMonsterSaved,
 }: Props) {
   const roomMonsters = useCustomMonsterStore((state) => state.monsters)
   const upsertRoomMonster = useCustomMonsterStore((state) => state.upsertMonster)
@@ -700,6 +702,7 @@ export default function Dnd5eMonsterWorkshopDialog({
         onPluginMonstersChange: onMonstersChange,
         upsertRoomMonster,
       })
+      await onMonsterSaved?.(monster)
       setSelectedId(monster.id)
       setDraft(dnd5eCustomMonsterDraftFromStatBlock(monster))
       setMessage(commit.savedToPluginDraft && commit.savedToCurrentRoom

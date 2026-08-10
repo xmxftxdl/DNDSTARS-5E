@@ -282,6 +282,163 @@ describe('DM 权威撤销事务', () => {
     })
     expect(repeated.status).toBe(404)
   })
+
+  it('原子恢复完整战斗事务范围，包括法术位、位置、HP、行动经济和中断队列', async () => {
+    const createResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '完整战斗恢复测试',
+        displayName: '恢复 DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'dm-combat-recovery-test-client',
+        activePlugins: [],
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const created = await createResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const query = `?room=${created.roomId}`
+    const memberHeaders = {
+      'X-Stars-Protocol': '5',
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    }
+    const put = async (
+      name: string,
+      data: unknown,
+      expectedRevision: number,
+      transactionId: string,
+      label: string,
+    ) => {
+      const response = await fetch(`${offServer.base}/api/state/${name}${query}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Expected-Revision': String(expectedRevision),
+          'X-Stars-Undo-Group': transactionId,
+          'X-Stars-Undo-Label': encodeURIComponent(label),
+          ...memberHeaders,
+        },
+        body: JSON.stringify(data),
+      })
+      expect(response.status, `${name} should save`).toBe(200)
+    }
+    const economy = (action: number, movement: number) => ({
+      turnKey: 'combat-recovery:1:hero-token',
+      attacksUsed: action === 0 ? 1 : 0,
+      action: { current: action, max: 1 },
+      bonusAction: { current: 1, max: 1 },
+      reaction: { current: 1, max: 1 },
+      movement: { current: movement, max: 30 },
+    })
+    const character = (currentHp: number, slots: number, updatedAt: number) => ({
+      characters: [{
+        id: 'hero', name: '恢复法师', currentHp, maxHp: 20,
+        classResources: { 'dnd5e-spell-slot-2': { current: slots, max: 2 } },
+        conditions: currentHp < 20 ? ['poisoned'] : [],
+      }],
+      selectedId: 'hero',
+      updatedAt,
+    })
+    const maps = (x: number, hp: number, updatedAt: number) => ({
+      maps: [{
+        id: 'combat-recovery-map', name: '恢复地图', image: '', width: 100,
+        height: 100, gridSize: 50, tokens: [{
+          id: 'hero-token', type: 'player', characterId: 'hero', label: '恢复法师',
+          x, y: 0, size: 1, hp, maxHp: 20,
+        }],
+      }],
+      selectedId: 'combat-recovery-map',
+      updatedAt,
+    })
+    const combat = (action: number, movement: number, updatedAt: number) => ({
+      mapId: 'combat-recovery-map', combatId: 'combat-recovery', active: true,
+      round: 1, initiativeIndex: 0,
+      initiativeOrder: [{ tokenId: 'hero-token', label: '恢复法师', emoji: '', color: '', roll: 20 }],
+      dnd5eTurnEconomyByToken: { 'hero-token': economy(action, movement) },
+      updatedAt,
+    })
+
+    await put('characters', character(20, 2, 100), 0, 'setup:combat-recovery', '建立战斗检查点')
+    await put('maps', maps(0, 20, 100), 0, 'setup:combat-recovery', '建立战斗检查点')
+    await put('combat', combat(1, 30, 100), 0, 'setup:combat-recovery', '建立战斗检查点')
+    await put('combat-interrupts', { mapId: 'combat-recovery-map', interrupts: [], updatedAt: 100 }, 0, 'setup:combat-recovery', '建立战斗检查点')
+    await put('combat-log', { mapId: 'combat-recovery-map', entries: [], updatedAt: 100 }, 0, 'setup:combat-recovery', '建立战斗检查点')
+
+    await put('characters', character(15, 1, 200), 1, 'player-action:spell', '结算玩家行动')
+    await put('maps', maps(50, 15, 200), 1, 'player-action:spell', '结算玩家行动')
+    await put('combat', combat(0, 10, 200), 1, 'player-action:spell', '结算玩家行动')
+    await put('combat-log', {
+      mapId: 'combat-recovery-map',
+      entries: [{ id: 201, round: 1, text: '恢复法师施法并移动。', kind: 'attack', time: '10:00' }],
+      updatedAt: 201,
+    }, 1, 'combat-log:spell', '记录玩家行动')
+    await put('combat-interrupts', {
+      mapId: 'combat-recovery-map', updatedAt: 202,
+      interrupts: [{
+        id: 'pending-shield', transactionId: 'next-action', mapId: 'combat-recovery-map',
+        kind: 'shield-spell', status: 'pending', phase: 'before-hit', timeoutPolicy: 'rollback',
+        payload: {}, createdAt: 202, updatedAt: 202,
+      }],
+    }, 1, 'combat-interrupt:next', '等待玩家反应')
+
+    // Pause/system notices use the dedicated append route and therefore do
+    // not create a DM undo row. They are still a derived part of the combat
+    // range and must not make full recovery fail with state-changed.
+    const derivedLogAppend = await fetch(`${offServer.base}/api/state/combat-log/entry${query}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      body: JSON.stringify({
+        operation: 'append',
+        mapId: 'combat-recovery-map',
+        entry: {
+          id: 202,
+          round: 1,
+          text: 'DM 已暂停战斗流程。',
+          kind: 'system',
+          time: '10:01',
+        },
+      }),
+    })
+    expect(derivedLogAppend.status).toBe(200)
+
+    const recovery = await fetch(`${offServer.base}/api/dm/undo${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      body: JSON.stringify({ transactionId: 'player-action:spell', mode: 'combat-cascade' }),
+    })
+    expect(recovery.status).toBe(200)
+    await expect(recovery.json()).resolves.toMatchObject({
+      ok: true,
+      transaction: { transactionId: 'player-action:spell', status: 'undone' },
+      transactions: expect.arrayContaining([
+        expect.objectContaining({ transactionId: 'player-action:spell', status: 'undone' }),
+        expect.objectContaining({ transactionId: 'combat-log:spell', status: 'undone' }),
+        expect.objectContaining({ transactionId: 'combat-interrupt:next', status: 'undone' }),
+      ]),
+    })
+
+    const read = (name: string) => fetch(`${offServer.base}/api/state/${name}${query}`, {
+      headers: memberHeaders,
+    }).then((response) => response.json())
+    const [restoredCharacters, restoredMaps, restoredCombat, restoredInterrupts, restoredLog] =
+      await Promise.all(['characters', 'maps', 'combat', 'combat-interrupts', 'combat-log'].map(read))
+    expect(restoredCharacters.characters[0]).toMatchObject({
+      currentHp: 20,
+      classResources: { 'dnd5e-spell-slot-2': { current: 2, max: 2 } },
+      conditions: [],
+    })
+    expect(restoredMaps.maps[0].tokens[0]).toMatchObject({ x: 0, hp: 20 })
+    expect(restoredCombat.dnd5eTurnEconomyByToken['hero-token']).toMatchObject({
+      action: { current: 1, max: 1 },
+      movement: { current: 30, max: 30 },
+    })
+    expect(restoredInterrupts.interrupts).toEqual([])
+    expect(restoredLog.entries).toEqual([])
+  })
 })
 
 describe('production same-origin and room authentication boundary', () => {
@@ -3620,11 +3777,40 @@ describe('账号战役 AI Job V2', () => {
     expect(rejected.status).toBe(400)
     await expect(rejected.json()).resolves.toMatchObject({ error: 'invalid-ai-job-artifact' })
 
+    const timelineEdit = {
+      ...artifact,
+      payload: {
+        ...artifact.payload,
+        timelineEvents: [{
+          name: 'DM 新增时间节点',
+          description: '刷新后仍应恢复的战役事件。',
+          location: '白鹿小教堂',
+          npcs: ['艾莉'],
+          monsters: [],
+          time: '第 2 日清晨',
+          gameTimeWorldMinute: 1_800,
+          citations: [],
+        }],
+      },
+    }
+    const savedTimelineResponse = await fetch(`${jobsUrl}/${created.job.jobId}/artifact`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ expectedRevision: result.job.revision, artifact: timelineEdit }),
+    })
+    expect(savedTimelineResponse.status).toBe(200)
+    const savedTimeline = await savedTimelineResponse.json() as {
+      job: { revision: number; artifact: { payload: { timelineEvents: Array<{ name: string; gameTimeWorldMinute: number }> } } }
+    }
+    expect(savedTimeline.job.artifact.payload.timelineEvents).toEqual([
+      expect.objectContaining({ name: 'DM 新增时间节点', gameTimeWorldMinute: 1_800 }),
+    ])
+
     const listResponse = await fetch(`${jobsUrl}?includeArtifact=1`, { headers })
     expect(listResponse.status).toBe(200)
     await expect(listResponse.json()).resolves.toMatchObject({
       schemaVersion: 2,
-      jobs: [{ jobId: created.job.jobId, status: 'review-required', artifact }],
+      jobs: [{ jobId: created.job.jobId, status: 'review-required', artifact: timelineEdit }],
     })
 
     const failedCreateResponse = await fetch(jobsUrl, {
@@ -3705,7 +3891,7 @@ describe('账号战役 AI Job V2', () => {
     const reviewDelete = await fetch(`${jobsUrl}/${created.job.jobId}`, {
       method: 'DELETE',
       headers,
-      body: JSON.stringify({ expectedRevision: result.job.revision }),
+      body: JSON.stringify({ expectedRevision: savedTimeline.job.revision }),
     })
     expect(reviewDelete.status).toBe(200)
     const emptyListResponse = await fetch(`${jobsUrl}?includeArtifact=1`, { headers })

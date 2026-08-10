@@ -392,6 +392,36 @@ export function formatCampaignTime(clock: number | Pick<SharedCampaignTimeState,
   return `第 ${campaignDay(displayMinute)} 日 ${hour}:${minute}`
 }
 
+export interface CampaignDisplayTimeInput {
+  day?: number
+  date?: string
+  hour: number
+  minute: number
+}
+
+/** Converts a time written in the room's display calendar back to its authoritative world minute. */
+export function campaignWorldMinuteFromDisplay(
+  clock: Pick<SharedCampaignTimeState, 'displayMode' | 'displayMinuteOffset' | 'calendarEpochDate'>,
+  input: CampaignDisplayTimeInput,
+): number | undefined {
+  const hour = integer(input.hour, 0, 23)
+  const minute = integer(input.minute, 0, 59)
+  if (hour == null || minute == null) return undefined
+  let displayMinute: number | undefined
+  if (clock.displayMode === 'gregorian') {
+    const epochDay = clock.calendarEpochDate == null ? undefined : campaignGregorianDayNumber(clock.calendarEpochDate)
+    const targetDay = input.date == null ? undefined : campaignGregorianDayNumber(input.date)
+    if (epochDay == null || targetDay == null || targetDay < epochDay) return undefined
+    displayMinute = (targetDay - epochDay) * 1_440 + hour * 60 + minute
+  } else {
+    const day = integer(input.day, 1)
+    if (day == null) return undefined
+    displayMinute = (day - 1) * 1_440 + hour * 60 + minute
+  }
+  const worldMinute = displayMinute - clock.displayMinuteOffset
+  return Number.isSafeInteger(worldMinute) && worldMinute >= 0 ? worldMinute : undefined
+}
+
 export function formatCampaignDuration(minutes: number): string {
   const value = Math.max(0, Math.floor(minutes))
   const days = Math.floor(value / 1_440)

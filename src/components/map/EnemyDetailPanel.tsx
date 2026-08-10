@@ -18,7 +18,7 @@ import {
   type CreatureSize,
   type CreatureType,
 } from '../../lib/monsterTypes'
-import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus } from 'lucide-react'
+import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus, Wrench } from 'lucide-react'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
@@ -29,6 +29,7 @@ import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportun
 import {
   getDnd5eSrdMonster,
   type Dnd5eMonsterBehaviorStyle,
+  type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterTargetPriority,
 } from '../../rulesets/dnd5e/monsters'
 import {
@@ -40,6 +41,16 @@ import {
   dnd5eManualMonsterMultiattackContinuation,
   type Dnd5eManualMonsterMultiattackContinuation,
 } from '../../lib/monsterManualControl'
+import Dnd5eMonsterWorkshopDialog, {
+  type Dnd5eMonsterWorkshopEditRequest,
+} from './Dnd5eMonsterWorkshopDialog'
+import {
+  createDnd5eMonsterInstanceOverride,
+  dnd5eMonsterOverrideTokenPatch,
+  dnd5eMonsterOverrideTargets,
+  isDnd5eMonsterInstanceOverride,
+  type Dnd5eMonsterOverrideScope,
+} from '../../rulesets/dnd5e/monsterInstanceOverride'
 
 function SharedMonsterPortrait({
   imageId,
@@ -133,6 +144,13 @@ export default function EnemyDetailPanel({
   const portraitInputRef = useRef<HTMLInputElement>(null)
   const [portraitBusy, setPortraitBusy] = useState(false)
   const [portraitError, setPortraitError] = useState('')
+  const [overrideScope, setOverrideScope] = useState<Dnd5eMonsterOverrideScope>('instance')
+  const [overrideMessage, setOverrideMessage] = useState('')
+  const [overrideEditor, setOverrideEditor] = useState<{
+    sourceMonsterId: string
+    scope: Dnd5eMonsterOverrideScope
+    editRequest: Dnd5eMonsterWorkshopEditRequest
+  }>()
   const { template, stats } = resolveEnemyDetail(token)
   const multiattackContinuation = canUseMonsterActions
     ? dnd5eManualMonsterMultiattackContinuation(token)
@@ -212,6 +230,59 @@ export default function EnemyDetailPanel({
     candidate.id !== token.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(token, candidate),
   )
 
+  const openMonsterOverrideEditor = () => {
+    if (!canEdit || !token.poolId || !monsterDefinition) {
+      setOverrideMessage('该 Token 尚未关联可编辑的 D&D 5e 怪物属性块。')
+      return
+    }
+    const editable = createDnd5eMonsterInstanceOverride({
+      monster: monsterDefinition,
+      tokenId: token.id,
+      scope: overrideScope,
+    })
+    setOverrideEditor({
+      sourceMonsterId: token.poolId,
+      scope: overrideScope,
+      editRequest: { requestId: Date.now(), monster: editable },
+    })
+    setOverrideMessage('')
+  }
+
+  const applySavedMonsterOverride = async (monster: Dnd5eMonsterStatBlock) => {
+    if (!overrideEditor || !mapId || !updateToken) return
+    const targets = dnd5eMonsterOverrideTargets({
+      tokens,
+      selectedTokenId: token.id,
+      sourceMonsterId: overrideEditor.sourceMonsterId,
+      scope: overrideEditor.scope,
+    })
+    for (const target of targets) {
+      const tokenPatch = dnd5eMonsterOverrideTokenPatch({
+        monster,
+        currentHp: target.id === token.id
+          ? authoritativeCurrentHp
+          : target.hp ?? monster.hitPoints.average,
+      })
+      updateToken(mapId, target.id, {
+        ...tokenPatch,
+        playerVisibleEnemyDetail: target.showDetailOnToken !== false
+          ? buildEnemyPlayerVisibleDetail(monster.id)
+          : undefined,
+      })
+      if (target.id === token.id && onSetHitPoints) {
+        await onSetHitPoints({
+          currentHp: tokenPatch.hp,
+          maxHp: tokenPatch.maxHp,
+          manuallySetMaximum: true,
+        })
+      }
+    }
+    setOverrideEditor((current) => current ? { ...current, sourceMonsterId: monster.id } : current)
+    setOverrideMessage(overrideEditor.scope === 'instance'
+      ? `已将“${monster.name}”应用到当前怪物实例；Headless 将立即读取新属性。`
+      : `已将“${monster.name}”应用到当前地图的 ${targets.length} 个同类怪物。`)
+  }
+
   const uploadPortrait = async (file: File) => {
     if (!canEdit) return
     setPortraitBusy(true)
@@ -243,7 +314,7 @@ export default function EnemyDetailPanel({
     }
   }
 
-  return (
+  return (<>
     <div data-testid="enemy-detail-panel" className="glass absolute bottom-3 right-3 z-[90] flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
@@ -496,6 +567,30 @@ export default function EnemyDetailPanel({
                 </button>
               )}
             </div>
+            {monsterDefinition && (
+              <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/[0.06] p-3">
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-4 w-4 text-amber-200" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-amber-100">DM 自由编辑属性块{isDnd5eMonsterInstanceOverride(token.poolId) ? ' · 已覆盖' : ''}</p>
+                    <p className="mt-0.5 text-[10px] leading-relaxed text-amber-100/60">可修改属性、豁免、技能、特性、攻击骰、附加伤害、传奇及巢穴动作；保存后由 Headless 重新校验。</p>
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                  <select
+                    aria-label="怪物编辑作用范围"
+                    value={overrideScope}
+                    onChange={(event) => setOverrideScope(event.target.value as Dnd5eMonsterOverrideScope)}
+                    className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+                  >
+                    <option value="instance">仅当前怪物实例</option>
+                    <option value="same-template">当前地图全部同类</option>
+                  </select>
+                  <button type="button" disabled={monsterActionPending} onClick={openMonsterOverrideEditor} className="rounded-lg bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-400/30 disabled:cursor-wait disabled:opacity-40">{isDnd5eMonsterInstanceOverride(token.poolId) ? '继续编辑' : '打开编辑器'}</button>
+                </div>
+                {overrideMessage && <p className="mt-2 text-[10px] leading-relaxed text-emerald-200">{overrideMessage}</p>}
+              </div>
+            )}
             {isStructured5eMonster && token.type === 'enemy' && (
               <div className="mt-3 border-t border-white/10 pt-3">
                 <label className="block text-xs text-slate-500">
@@ -824,5 +919,17 @@ export default function EnemyDetailPanel({
 
       </div>
     </div>
+    {overrideEditor && (
+      <Dnd5eMonsterWorkshopDialog
+        key={overrideEditor.editRequest.requestId}
+        open
+        context="room"
+        editRequest={overrideEditor.editRequest}
+        draftStorageScope={`map-token:${token.id}`}
+        onMonsterSaved={applySavedMonsterOverride}
+        onClose={() => setOverrideEditor(undefined)}
+      />
+    )}
+    </>
   )
 }

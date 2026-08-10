@@ -22,6 +22,26 @@ function monsterToken(patch: Partial<Token> = {}): Token {
 }
 
 describe('EnemyDetailPanel monster thumbnail', () => {
+  it('offers stat-block override editing only to a DM with map write access', () => {
+    const playerMarkup = renderToStaticMarkup(
+      <EnemyDetailPanel token={monsterToken()} onClose={() => {}} />,
+    )
+    const dmMarkup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken()}
+        onClose={() => {}}
+        isDM
+        mapId="map-1"
+        updateToken={() => {}}
+      />,
+    )
+
+    expect(playerMarkup).not.toContain('DM 自由编辑属性块')
+    expect(dmMarkup).toContain('DM 自由编辑属性块')
+    expect(dmMarkup).toContain('仅当前怪物实例')
+    expect(dmMarkup).toContain('当前地图全部同类')
+  })
+
   it('marks implemented monster traits as HEADLESS', () => {
     const markup = renderToStaticMarkup(
       <EnemyDetailPanel

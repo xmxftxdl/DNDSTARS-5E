@@ -93,6 +93,23 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('/assets/icons/fighter-action-surge-feature-action.png')
   })
 
+  it('renders a spell-only hotbar during exploration', () => {
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: character(),
+      mode: 'exploration',
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('data-mode="exploration"')
+    expect(html).toContain('data-testid="combat-hotbar-spells"')
+    expect(html).not.toContain('data-testid="combat-hotbar-features"')
+    expect(html).not.toContain('data-testid="combat-hotbar-items"')
+    expect(html).not.toContain('data-testid="combat-hotbar-basics"')
+  })
+
   it('keeps an active grapple escape command visible in the default hotbar', () => {
     const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
       character: character(),

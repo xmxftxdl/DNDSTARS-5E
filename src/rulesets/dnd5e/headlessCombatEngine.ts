@@ -1582,6 +1582,8 @@ export interface Dnd5eSpellForcedMovement {
   to: { x: number; y: number }
   distanceFeet: number
   toElevationFeet?: number
+  /** Authoritative terrain/support height at the forced-movement destination. */
+  toGroundElevationFeet?: number
   fallingDamageRolls?: readonly number[]
 }
 
@@ -1612,6 +1614,7 @@ export interface Dnd5eSpellTargetAttackRoll {
   repellingBlastPushTo?: { x: number; y: number }
   repellingBlastPushDistanceFeet?: number
   repellingBlastPushToElevationFeet?: number
+  repellingBlastPushToGroundElevationFeet?: number
   repellingBlastFallingDamageRolls?: readonly number[]
   effectRolls: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
@@ -2113,7 +2116,7 @@ export type Dnd5eAction = (
   | { type: 'use-object'; actorId: string; interactionId: string }
   | { type: 'adjudicate-basic-action'; actorId: string; economy: 'action' | 'bonusAction'; description: string }
   | { type: 'grapple'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; actorHalflingLuckyD20?: number; actorHalflingLuckyD20Second?: number; targetD20: number; targetD20Second?: number; targetHalflingLuckyD20?: number; targetHalflingLuckyD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; spendAction?: boolean }
-  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; actorHalflingLuckyD20?: number; actorHalflingLuckyD20Second?: number; targetD20: number; targetD20Second?: number; targetHalflingLuckyD20?: number; targetHalflingLuckyD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; pushTo?: { x: number; y: number }; pushToElevationFeet?: number; fallingDamageRolls?: readonly number[]; spendAction?: boolean }
+  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; actorHalflingLuckyD20?: number; actorHalflingLuckyD20Second?: number; targetD20: number; targetD20Second?: number; targetHalflingLuckyD20?: number; targetHalflingLuckyD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; pushTo?: { x: number; y: number }; pushToElevationFeet?: number; pushToGroundElevationFeet?: number; fallingDamageRolls?: readonly number[]; spendAction?: boolean }
   | { type: 'release-grapple'; actorId: string; targetId: string; effectId?: string }
   | { type: 'escape-grapple'; actorId: string; grapplerId: string; actorD20: number; actorD20Second?: number; actorHalflingLuckyD20?: number; actorHalflingLuckyD20Second?: number; targetD20: number; targetD20Second?: number; targetHalflingLuckyD20?: number; targetHalflingLuckyD20Second?: number }
   | { type: 'escape-active-effect'; actorId: string; effectId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number }
@@ -7206,16 +7209,42 @@ function applyDnd5eForcedMovementElevation(
   toElevationFeet: number | undefined,
   fallingDamageRolls: readonly number[] | undefined,
   events: Dnd5eCombatEvent[],
+  toGroundElevationFeet?: number,
 ): boolean {
-  if (toElevationFeet == null) return (fallingDamageRolls?.length ?? 0) === 0
-  const fromElevationFeet = target.elevationFeet ?? 0
+  const fromGroundElevationFeet = target.groundElevationFeet ?? 0
+  const fromElevationFeet = target.elevationFeet ?? fromGroundElevationFeet
+  const destinationGroundElevationFeet = toGroundElevationFeet ?? toElevationFeet
+  if (
+    destinationGroundElevationFeet != null && (
+      !Number.isFinite(destinationGroundElevationFeet) ||
+      destinationGroundElevationFeet < -1_000 ||
+      destinationGroundElevationFeet > 10_000 ||
+      destinationGroundElevationFeet > fromElevationFeet + 1e-4
+    )
+  ) return false
+  if (toElevationFeet == null) {
+    if ((fallingDamageRolls?.length ?? 0) > 0) return false
+    if (destinationGroundElevationFeet == null) return true
+    const remainsAboveGround = fromElevationFeet > destinationGroundElevationFeet + 1e-4
+    if (remainsAboveGround && !dnd5eCombatantCanRemainAirborne(target)) return false
+    target.elevationFeet = fromElevationFeet
+    target.groundElevationFeet = destinationGroundElevationFeet
+    target.airborne = remainsAboveGround
+    return true
+  }
   if (
     !Number.isFinite(toElevationFeet) || toElevationFeet < -1_000 || toElevationFeet > 10_000 ||
-    toElevationFeet > fromElevationFeet
+    toElevationFeet > fromElevationFeet ||
+    toElevationFeet < (destinationGroundElevationFeet ?? toElevationFeet) - 1e-4 ||
+    (
+      toGroundElevationFeet != null &&
+      fromElevationFeet > toElevationFeet + 1e-4 &&
+      dnd5eCombatantCanRemainAirborne(target)
+    )
   ) return false
   target.elevationFeet = toElevationFeet
-  target.groundElevationFeet = toElevationFeet
-  target.airborne = false
+  target.groundElevationFeet = destinationGroundElevationFeet ?? toElevationFeet
+  target.airborne = toElevationFeet > target.groundElevationFeet + 1e-4
   if (toElevationFeet !== fromElevationFeet) {
     events.push({ type: 'elevation-changed', actorId: target.id, fromElevationFeet, toElevationFeet, mode: 'fall' })
   }
@@ -7236,7 +7265,7 @@ function dnd5eCombatantIsMagicallyHeldAloft(target: Dnd5eCombatant): boolean {
     (effect.modifiers?.flySpeedFeet ?? 0) > 0 && effect.source.kind === 'spell')
 }
 
-function dnd5eCombatantCanRemainAirborne(target: Dnd5eCombatant): boolean {
+export function dnd5eCombatantCanRemainAirborne(target: Dnd5eCombatant): boolean {
   if (target.movementSpeeds?.hover === true || dnd5eCombatantIsMagicallyHeldAloft(target)) {
     return true
   }
@@ -13432,6 +13461,7 @@ function resolveSpellCast(
         movement.toElevationFeet,
         movement.fallingDamageRolls,
         events,
+        movement.toGroundElevationFeet,
       )) return false
     }
     return true
@@ -14157,11 +14187,13 @@ function resolveSpellCast(
           const pushDistance = supplied.repellingBlastPushDistanceFeet
           if (!repellingBlast && (
             pushTo || pushDistance != null || supplied.repellingBlastPushToElevationFeet != null ||
+            supplied.repellingBlastPushToGroundElevationFeet != null ||
             (supplied.repellingBlastFallingDamageRolls?.length ?? 0) > 0
           )) return fail(state, events, 'invalid-class-feature')
           if ((pushTo == null) !== (pushDistance == null)) return fail(state, events, 'invalid-class-feature')
           if (!pushTo && (
             supplied.repellingBlastPushToElevationFeet != null ||
+            supplied.repellingBlastPushToGroundElevationFeet != null ||
             (supplied.repellingBlastFallingDamageRolls?.length ?? 0) > 0
           )) return fail(state, events, 'invalid-class-feature')
           if (pushTo && pushDistance != null) {
@@ -14181,6 +14213,7 @@ function resolveSpellCast(
               supplied.repellingBlastPushToElevationFeet,
               supplied.repellingBlastFallingDamageRolls,
               events,
+              supplied.repellingBlastPushToGroundElevationFeet,
             )) return fail(state, events, 'invalid-dice')
           }
         } else {
@@ -14188,6 +14221,7 @@ function resolveSpellCast(
             supplied.effectRolls.length > 0 || (supplied.hurlThroughHellDamageRolls?.length ?? 0) > 0 ||
             supplied.repellingBlastPushTo || supplied.repellingBlastPushDistanceFeet != null ||
             supplied.repellingBlastPushToElevationFeet != null ||
+            supplied.repellingBlastPushToGroundElevationFeet != null ||
             (supplied.repellingBlastFallingDamageRolls?.length ?? 0) > 0
           ) {
             return fail(state, events, 'invalid-dice')
@@ -16388,6 +16422,7 @@ function applyResolvedDnd5eMonsterForcedMovements(
         movement.toElevationFeet,
         movement.fallingDamageRolls,
         events,
+        movement.toGroundElevationFeet,
       )) return false
     }
     if (
@@ -18048,6 +18083,7 @@ function resolveMonsterSourceLinkedReelAction(
       movement.toElevationFeet,
       movement.fallingDamageRolls,
       events,
+      movement.toGroundElevationFeet,
     )) return fail(state, events, 'invalid-dice')
   }
   events.push({
@@ -19311,6 +19347,7 @@ function resolveMonsterThrowLinkedTargetAction(
     movement.toElevationFeet,
     movement.fallingDamageRolls,
     events,
+    movement.toGroundElevationFeet,
   )) return fail(state, events, 'invalid-dice')
 
   removeDnd5eEffectsByPredicate(
@@ -19792,7 +19829,7 @@ function dnd5eMonsterCoreForcedMovementIsValid(input: {
     movement.distanceFeet >= 0 &&
     movement.distanceFeet <= maximumDistanceFeet &&
     (movement.distanceFeet === 0
-      ? samePosition && movement.toElevationFeet == null &&
+      ? samePosition && movement.toElevationFeet == null && movement.toGroundElevationFeet == null &&
         (movement.fallingDamageRolls?.length ?? 0) === 0
       : !samePosition && directionMatches &&
         Math.abs(actualDistanceFeet - movement.distanceFeet) <= 1e-6)
@@ -20577,6 +20614,7 @@ function resolveMonsterCoreSpell(
               movement.toElevationFeet,
               movement.fallingDamageRolls,
               events,
+              movement.toGroundElevationFeet,
             )) return fail(state, events, 'invalid-dice')
           }
         }
@@ -21116,6 +21154,7 @@ function resolveMonsterAreaAction(
           movement.toElevationFeet,
           movement.fallingDamageRolls,
           events,
+          movement.toGroundElevationFeet,
         )) return fail(state, events, 'invalid-dice')
       }
     }
@@ -26856,10 +26895,14 @@ function resolveDnd5eHeadlessActionInternal(
         action.pushToElevationFeet,
         action.fallingDamageRolls,
         events,
+        action.pushToGroundElevationFeet,
       )) return fail(state, events, 'invalid-dice')
     } else if (
       action.type === 'shove' &&
-      (action.pushToElevationFeet != null || (action.fallingDamageRolls?.length ?? 0) > 0)
+      (
+        action.pushToElevationFeet != null || action.pushToGroundElevationFeet != null ||
+        (action.fallingDamageRolls?.length ?? 0) > 0
+      )
     ) return fail(state, events, 'invalid-dice')
     return { ok: true, state, events }
   }

@@ -1,9 +1,17 @@
 import type {
+  PdfEncounterRecordV1,
   PdfImportCandidateV1,
   PdfNamedRecordV1,
+  PdfSceneRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
 import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
+import {
+  mergePdfEncounterRecords,
+  mergePdfSceneRecords,
+  normalizePdfEventIdentityName,
+  pdfEventRecordsLikelySame,
+} from '../../lib/pdfCampaignEventDeduplication'
 
 export type PdfKnowledgeTabV1 =
   | 'overview'
@@ -35,6 +43,17 @@ export interface PdfMapIndexEntryV1 {
   citations: PdfSourceCitationV1[]
 }
 
+export interface PdfEventIndexEntryV1 {
+  name: string
+  description: string
+  kind: 'scene' | 'encounter' | 'scene-encounter'
+  location: string
+  npcs: string[]
+  creatures: string[]
+  notes: string
+  citations: PdfSourceCitationV1[]
+}
+
 function normalized(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase('zh-CN') : ''
 }
@@ -56,6 +75,64 @@ function mergeCitations(...collections: readonly PdfSourceCitationV1[][]): PdfSo
     seen.add(key)
     return true
   })
+}
+
+function longerText(left: string, right: string): string {
+  return right.trim().length > left.trim().length ? right.trim() : left.trim()
+}
+
+function encounterAsEvent(encounter: PdfEncounterRecordV1): PdfEventIndexEntryV1 {
+  return {
+    name: encounter.name,
+    description: encounter.description,
+    kind: 'encounter',
+    location: '',
+    npcs: [],
+    creatures: [...encounter.creatures],
+    notes: encounter.notes,
+    citations: [...encounter.citations],
+  }
+}
+
+function sceneAsEvent(scene: PdfSceneRecordV1): PdfEventIndexEntryV1 {
+  return {
+    name: scene.name,
+    description: scene.description,
+    kind: 'scene',
+    location: scene.location,
+    npcs: [...scene.npcs],
+    creatures: [...scene.monsters],
+    notes: '',
+    citations: [...scene.citations],
+  }
+}
+
+/** Combines legacy duplicate scenes and their same-named combat encounters into one readable row. */
+export function buildPdfEventIndex(analysis: PdfCampaignAnalysisView): PdfEventIndexEntryV1[] {
+  const entries = new Map<string, PdfEventIndexEntryV1>()
+  for (const scene of mergePdfSceneRecords(analysis.scenes)) {
+    entries.set(normalizePdfEventIdentityName(scene.name), sceneAsEvent(scene))
+  }
+  for (const encounter of mergePdfEncounterRecords(analysis.encounters)) {
+    const key = normalizePdfEventIdentityName(encounter.name)
+    const exact = entries.get(key)
+    const similar = exact ? null : [...entries.entries()].find(([, entry]) => pdfEventRecordsLikelySame(entry, encounter))
+    const currentKey = exact ? key : similar?.[0]
+    const current = exact ?? similar?.[1]
+    if (!current) {
+      entries.set(key, encounterAsEvent(encounter))
+      continue
+    }
+    entries.set(currentKey ?? key, {
+      ...current,
+      kind: 'scene-encounter',
+      description: longerText(current.description, encounter.description),
+      creatures: [...new Set([...current.creatures, ...encounter.creatures])],
+      notes: longerText(current.notes, encounter.notes),
+      citations: mergeCitations(current.citations, encounter.citations),
+    })
+  }
+  return [...entries.values()]
 }
 
 export function buildPdfMonsterCodex(analysis: PdfCampaignAnalysisView): PdfMonsterCodexEntryV1[] {
@@ -152,9 +229,9 @@ export function pdfKnowledgeTabCounts(analysis: PdfCampaignAnalysisView): Record
     people: analysis.people.length,
     factions: analysis.factions.length,
     locations: analysis.locations.length,
-    events: analysis.scenes.length + analysis.encounters.length,
+    events: buildPdfEventIndex(analysis).length,
     clues: analysis.clues.length,
-    timeline: analysis.scenes.length,
+    timeline: analysis.timelineEvents?.length ?? 0,
     maps: buildPdfMapIndex(analysis).length,
     monsters: buildPdfMonsterCodex(analysis).length,
     relationships: analysis.relationships.length,

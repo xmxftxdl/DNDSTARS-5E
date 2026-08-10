@@ -1,10 +1,57 @@
 import type { BattleMap } from '../../store/maps'
+import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
+import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
   isCombatPresentationAreaSpellId,
 } from '../../../shared/combat-presentation-contract.mjs'
 import type { CombatPresentationAreaSpellId } from '../../../shared/combat-presentation-contract.mjs'
+
+export function dnd5eSpellResolutionInitiativeOrder(input: {
+  combatActive: boolean
+  map: BattleMap
+  actorTokenId: string
+  initiativeOrder: readonly InitiativeEntry[]
+}): readonly InitiativeEntry[] {
+  if (input.combatActive) return input.initiativeOrder
+  return input.map.tokens
+    .filter((token) => token.type === 'player' || token.type === 'enemy')
+    .sort((left, right) => left.id === input.actorTokenId
+      ? -1
+      : right.id === input.actorTokenId ? 1 : left.id.localeCompare(right.id))
+    .map((token, index) => ({
+      slotId: `exploration:${token.id}`,
+      tokenId: token.id,
+      label: token.label,
+      emoji: token.emoji,
+      color: token.color,
+      roll: Math.max(1, 20 - index),
+    }))
+}
+
+export function dnd5eSpellAuthorityResolutionContext(input: {
+  combatActive: boolean
+  combatId?: string
+  map: BattleMap
+  actorTokenId: string
+  initiativeOrder: readonly InitiativeEntry[]
+  turnEconomy?: Dnd5eTurnEconomyCounts
+  turnEconomyByToken?: Dnd5eTurnEconomyByToken
+}) {
+  const exploration = !input.combatActive && input.combatId == null
+  return {
+    exploration,
+    initiativeOrder: dnd5eSpellResolutionInitiativeOrder({
+      combatActive: !exploration,
+      map: input.map,
+      actorTokenId: input.actorTokenId,
+      initiativeOrder: input.initiativeOrder,
+    }),
+    turnEconomy: exploration ? undefined : input.turnEconomy,
+    turnEconomyByToken: exploration ? undefined : input.turnEconomyByToken,
+  }
+}
 
 export interface FireballPresentationSettlement {
   id: string

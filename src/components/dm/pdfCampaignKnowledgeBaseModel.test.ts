@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PdfCampaignAnalysisV1 } from '../../lib/pdfCampaignAnalysis'
 import {
+  buildPdfEventIndex,
   buildPdfMapIndex,
   buildPdfMonsterCodex,
   buildPdfPersonPortraitPrompt,
@@ -33,6 +34,24 @@ function analysis(): PdfCampaignAnalysisV1 {
 }
 
 describe('PDF 战役知识库模型', () => {
+  it('把同一剧情节点的场景与遭遇合并为一条事件', () => {
+    const fixture = analysis()
+    fixture.scenes = [{
+      name: '黑桦弯伏击', description: '玩家在黑桦弯遭到伏击。', location: '黑桦弯', npcs: ['瑟维迪尔'], monsters: ['伏击者'], citations: [citation],
+    }]
+    fixture.encounters = [{
+      name: '黑桦弯伏击战', description: '伏击者发动攻击。', creatures: ['伏击者'], notes: '允许玩家提前察觉。', citations: [citation],
+    }]
+
+    const result = buildPdfEventIndex(fixture)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ name: '黑桦弯伏击', kind: 'scene-encounter', location: '黑桦弯' })
+    expect(result[0]?.npcs).toEqual(['瑟维迪尔'])
+    expect(result[0]?.creatures).toEqual(['伏击者'])
+    expect(result[0]?.notes).toContain('提前察觉')
+  })
+
   it('把结构化怪物和遭遇引用合并为图鉴，并保留自动化状态', () => {
     const entries = buildPdfMonsterCodex(analysis())
 

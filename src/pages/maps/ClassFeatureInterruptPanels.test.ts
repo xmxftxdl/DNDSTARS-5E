@@ -58,4 +58,16 @@ describe('职业与插件中断面板', () => {
     expect(html).toContain('data-testid="shared-plugin-choice-options"')
     expect(html).toContain('overflow-y-auto')
   })
+
+  it('激励等投骰修正使用左侧非遮罩侧栏', () => {
+    const html = render({
+      bardicInspirationPrompt: {
+        id: 'bardic', targetChar: { id: 'hero', name: '吟游诗人' } as never,
+        dieSides: 8, rollType: '攻击检定', total: 13, targetNumber: 15,
+      },
+    })
+    expect(html).toContain('data-testid="roll-adjustment-drawer"')
+    expect(html).toContain('pointer-events-none')
+    expect(html).not.toContain('bg-black/55')
+  })
 })

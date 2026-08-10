@@ -552,6 +552,15 @@ export interface DmUndoTransactionSummary {
   createdAt: number
   updatedAt: number
   undoneAt?: number
+  combatRecoverable?: boolean
+  combat?: {
+    mapId?: string
+    combatId?: string
+    beforeRound?: number
+    afterRound?: number
+    beforeInitiativeIndex?: number
+    afterInitiativeIndex?: number
+  }
 }
 
 export async function loadDmUndoHistory(): Promise<DmUndoTransactionSummary[]> {
@@ -599,6 +608,37 @@ export async function undoDmTransaction(transactionId?: string): Promise<{
     }
   }
   throw new Error('dm-undo-unavailable')
+}
+
+export async function recoverDmCombatToTransaction(transactionId: string): Promise<{
+  transaction: DmUndoTransactionSummary
+  transactions: DmUndoTransactionSummary[]
+  restored: Array<{ resource: string; revision: number }>
+}> {
+  for (const api of sharedWriteApiCandidates()) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/dm/undo`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...sharedMemberHeaders(),
+          ...sharedProtocolHeaders(),
+        },
+        body: JSON.stringify({ transactionId, mode: 'combat-cascade' }),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? `dm-combat-recovery-${response.status}`)
+      }
+      return await response.json()
+    } catch (error) {
+      if (error instanceof Error && (
+        error.message.startsWith('dm-undo-') ||
+        error.message.startsWith('dm-combat-recovery-')
+      )) throw error
+    }
+  }
+  throw new Error('dm-combat-recovery-unavailable')
 }
 
 export async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
@@ -691,6 +731,7 @@ export function clearSharedResource(name: string): Promise<void> {
 export type SharedCombatInterruptMutation =
   | { operation: 'upsert'; mapId: string; interrupt: object }
   | { operation: 'contribute'; mapId: string; id: string; contribution: object }
+  | { operation: 'roll-options'; mapId: string; id: string; rollOptions: { contributionId: string; values: number[] } }
   | { operation: 'answer' | 'rolling' | 'finish' | 'wait'; mapId: string; id: string; response?: Record<string, unknown> }
   | { operation: 'rollback'; mapId: string; id: string; response?: Record<string, unknown>; rollbackReason: 'timeout' | 'dm-disconnected' | 'cancelled' | 'stale-transaction' }
 

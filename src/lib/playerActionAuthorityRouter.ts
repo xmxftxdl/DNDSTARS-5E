@@ -107,6 +107,19 @@ export function preflightPlayerActionAuthority(
     return { status: 'accepted', currentToken: actorToken }
   }
 
+  const explorationSpell =
+    action.type === 'dnd5e-spell-cast' || action.type === 'dnd5e-adjudicated-spell'
+  if (explorationSpell && !context.combatActive) {
+    // Exploration spell requests must be authored without a combat identity.
+    // This prevents a delayed request from a previous initiative from being
+    // reinterpreted as an out-of-combat cast after that combat has ended.
+    if (action.combatId) return { status: 'rejected', reason: 'stale-combat' }
+    if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
+      return { status: 'ignored' }
+    }
+    return { status: 'accepted', currentToken: actorToken }
+  }
+
   if (!action.combatId || action.combatId !== context.combatId) {
     return { status: 'rejected', reason: 'stale-combat' }
   }
@@ -155,6 +168,34 @@ export function canSubmitPlayerCombatAction(input: {
   if (input.currentInitiativeToken.characterId !== input.turnCharacter.id) return false
   if (input.turnCharacter.id !== input.playerCharacter?.id) return false
   return isTokenAlive(input.currentInitiativeToken, input.characters)
+}
+
+export function canSubmitPlayerSpellAction(input: {
+  activeMap?: BattleMap
+  mode?: 'dm' | 'player' | null
+  playerCombatLocked: boolean
+  combatActive: boolean
+  combatActiveSnapshot: boolean
+  turnCharacter?: Pick<Character, 'id'> | null
+  currentInitiativeToken?: Token
+  pendingAction?: PendingPlayerActionLock | null
+  playerCharacter?: Pick<Character, 'id'> | null
+  characters: Character[]
+}): boolean {
+  if (!input.activeMap || input.mode !== 'player') return false
+  if (input.pendingAction || !input.playerCharacter) return false
+  if (input.combatActive && input.playerCombatLocked) return false
+
+  // A transition where the rendered state and the authority snapshot disagree
+  // is deliberately fail-closed. Once combat is live, the existing strict
+  // initiative check is the only path that may authorize a spell.
+  if (input.combatActive !== input.combatActiveSnapshot) return false
+  if (input.combatActive) return canSubmitPlayerCombatAction(input)
+
+  const actorToken = input.activeMap.tokens.find((token) =>
+    token.type === 'player' && token.characterId === input.playerCharacter?.id,
+  )
+  return !!actorToken && isTokenAlive(actorToken, input.characters)
 }
 
 export function playerActionNeedsExecutionDedupe(action: Pick<PlayerActionAuthorityAction, 'type'>): boolean {

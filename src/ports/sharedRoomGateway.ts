@@ -26,6 +26,7 @@ export interface SharedResourceTransactionResult {
 export type SharedCombatInterruptMutation =
   | { operation: 'upsert'; mapId: string; interrupt: object }
   | { operation: 'contribute'; mapId: string; id: string; contribution: object }
+  | { operation: 'roll-options'; mapId: string; id: string; rollOptions: { contributionId: string; values: number[] } }
   | { operation: 'answer' | 'rolling' | 'finish' | 'wait'; mapId: string; id: string; response?: Record<string, unknown> }
   | { operation: 'rollback'; mapId: string; id: string; response?: Record<string, unknown>; rollbackReason: 'timeout' | 'dm-disconnected' | 'cancelled' | 'stale-transaction' }
 
@@ -37,6 +38,21 @@ export interface DmUndoTransactionSummary {
   createdAt: number
   updatedAt: number
   undoneAt?: number
+  combatRecoverable?: boolean
+  combat?: {
+    mapId?: string
+    combatId?: string
+    beforeRound?: number
+    afterRound?: number
+    beforeInitiativeIndex?: number
+    afterInitiativeIndex?: number
+  }
+}
+
+export interface DmCombatRecoveryResult {
+  transaction: DmUndoTransactionSummary
+  transactions: DmUndoTransactionSummary[]
+  restored: Array<{ resource: string; revision: number }>
 }
 
 export interface SharedServerClockSample {
@@ -60,6 +76,7 @@ export interface SharedRoomGatewayPort {
     transaction: DmUndoTransactionSummary
     restored: Array<{ resource: string; revision: number }>
   }>
+  recoverDmCombatToTransaction(transactionId: string): Promise<DmCombatRecoveryResult>
   publishEvent<T>(channel: string, data: T): Promise<void>
   clearEventBacklog(channels?: string[]): Promise<void>
   clearResource(name: string): Promise<void>

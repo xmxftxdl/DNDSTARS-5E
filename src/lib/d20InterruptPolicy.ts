@@ -12,6 +12,10 @@ export interface D20EnemyModifierOption {
   dieSides?: number
   direction?: 'add' | 'subtract'
   rerollScope?: 'self-roll' | 'attack-against-self'
+  /** One extra die creates a two-result choice; two create a three-result choice. */
+  additionalDice?: 1 | 2
+  /** Controls which result the authoritative Host must apply after the reroll. */
+  selectionPolicy?: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
   resourceCosts?: readonly { resourceKey: string; amount: number }[]
   decisionRequired?: boolean
 }
@@ -34,6 +38,8 @@ export function dnd5eCoreInspirationChoiceRerollOption(
     modifierKind: 'choice-reroll',
     sourceTokenId,
     rerollScope: 'self-roll',
+    additionalDice: 1,
+    selectionPolicy: 'owner-chooses',
     resourceCosts: [{ resourceKey: DND5E_CORE_INSPIRATION_RESOURCE_KEY, amount: 1 }],
     decisionRequired: true,
   }

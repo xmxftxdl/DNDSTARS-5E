@@ -3,6 +3,8 @@ import type { AiDocumentChunkV1, AiProviderExecutionResult, JsonSchemaV1 } from 
 import { AiProviderRegistryV1, executeStructuredAiTask } from './aiProvider'
 import { createPdfDocumentChunks, type PdfDocumentChunkV2 } from './pdfDocumentChunker'
 import { pdfPageNeedsOcr, resolvePdfPageText } from './pdfOcrPipeline'
+import { canonicalizePdfPersonRelationships, mergePdfPersonRecords } from './pdfPersonDeduplication'
+import { mergePdfEncounterRecords, mergePdfSceneRecords } from './pdfCampaignEventDeduplication'
 import {
   createPdfDocumentIdentity,
   expandShortPdfEvidenceQuote,
@@ -58,10 +60,20 @@ export interface PdfClueRecordV1 extends PdfNamedRecordV1 {
   failForward: string
 }
 
+export type PdfTimelineKindV1 = 'history' | 'current' | 'deadline' | 'conditional'
+
 export interface PdfSceneRecordV1 extends PdfNamedRecordV1 {
   location: string
   npcs: string[]
   monsters: string[]
+  /** Exact temporal phrase from the source, such as “数年前” or “黑桦弯伏击后”. */
+  time?: string
+  /** Cross-document chronological order assigned during synthesis; lower values happen first. */
+  timelineOrder?: number
+  /** DM-authored authoritative campaign minute used to place this event against the room clock. */
+  gameTimeWorldMinute?: number
+  timelineKind?: PdfTimelineKindV1
+  tags?: string[]
 }
 
 export interface PdfEncounterRecordV1 extends PdfNamedRecordV1 {
@@ -91,6 +103,8 @@ export interface PdfCampaignChunkAnalysisV1 {
   locations: PdfNamedRecordV1[]
   factions: PdfNamedRecordV1[]
   clues: PdfClueRecordV1[]
+  /** Full-book, synthesis-only major events. Raw runnable scenes remain in `scenes`. */
+  timelineEvents?: PdfSceneRecordV1[]
   scenes: PdfSceneRecordV1[]
   encounters: PdfEncounterRecordV1[]
   importCandidates: PdfImportCandidateV1[]
@@ -395,6 +409,17 @@ function listIsValid(value: unknown, predicate: (entry: unknown) => boolean): va
   return Array.isArray(value) && value.length <= MAX_RESULT_ITEMS && value.every(predicate)
 }
 
+function sceneRecordIsValid(entry: unknown): entry is PdfSceneRecordV1 {
+  return namedRecordIsValid(entry) &&
+    typeof field(entry, 'location') === 'string' && String(field(entry, 'location')).length <= 2_000 &&
+    stringsAreValid(field(entry, 'npcs')) && stringsAreValid(field(entry, 'monsters')) &&
+    (field(entry, 'time') === undefined || (typeof field(entry, 'time') === 'string' && String(field(entry, 'time')).length <= 300)) &&
+    (field(entry, 'timelineOrder') === undefined || (Number.isSafeInteger(field(entry, 'timelineOrder')) && Number(field(entry, 'timelineOrder')) >= 0)) &&
+    (field(entry, 'gameTimeWorldMinute') === undefined || (Number.isSafeInteger(field(entry, 'gameTimeWorldMinute')) && Number(field(entry, 'gameTimeWorldMinute')) >= 0)) &&
+    (field(entry, 'timelineKind') === undefined || ['history', 'current', 'deadline', 'conditional'].includes(String(field(entry, 'timelineKind')))) &&
+    (field(entry, 'tags') === undefined || stringsAreValid(field(entry, 'tags'), 8))
+}
+
 export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCampaignChunkAnalysisV1 {
   if (!isPlainObject(value) || value.schemaVersion !== 1 || typeof value.overview !== 'string' || value.overview.length > 12_000) return false
   if (!listIsValid(value.people, (entry) => (
@@ -421,11 +446,8 @@ export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCa
     typeof field(entry, 'discovery') === 'string' && String(field(entry, 'discovery')).length <= 4_000 &&
     typeof field(entry, 'failForward') === 'string' && String(field(entry, 'failForward')).length <= 4_000
   ))) return false
-  if (!listIsValid(value.scenes, (entry) => (
-    namedRecordIsValid(entry) &&
-    typeof field(entry, 'location') === 'string' && String(field(entry, 'location')).length <= 2_000 &&
-    stringsAreValid(field(entry, 'npcs')) && stringsAreValid(field(entry, 'monsters'))
-  ))) return false
+  if (!listIsValid(value.scenes, sceneRecordIsValid)) return false
+  if (value.timelineEvents !== undefined && !listIsValid(value.timelineEvents, sceneRecordIsValid)) return false
   if (!listIsValid(value.encounters, (entry) => (
     namedRecordIsValid(entry) && stringsAreValid(field(entry, 'creatures')) &&
     typeof field(entry, 'notes') === 'string' && String(field(entry, 'notes')).length <= 4_000
@@ -470,7 +492,7 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
   additionalProperties: false,
   required: [
     'schemaVersion', 'overview', 'people', 'relationships', 'locations', 'factions', 'clues',
-    'scenes', 'encounters', 'importCandidates', 'prepTips', 'warnings',
+    'timelineEvents', 'scenes', 'encounters', 'importCandidates', 'prepTips', 'warnings',
   ],
   properties: {
     schemaVersion: { type: 'integer', const: 1 },
@@ -546,6 +568,29 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
           location: { type: 'string', maxLength: 120 },
           npcs: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
           monsters: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
+          time: { type: 'string', maxLength: 120 },
+          timelineOrder: { type: 'integer', minimum: 0, maximum: 10_000 },
+          timelineKind: { type: 'string', enum: ['history', 'current', 'deadline', 'conditional'] },
+          tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 40 } },
+        },
+      },
+    },
+    timelineEvents: {
+      type: 'array',
+      maxItems: 12,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'description', 'aliases', 'location', 'npcs', 'monsters', 'time', 'timelineOrder', 'timelineKind', 'tags', 'citations'],
+        properties: {
+          ...NAMED_RECORD_PROPERTIES,
+          location: { type: 'string', maxLength: 120 },
+          npcs: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
+          monsters: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
+          time: { type: 'string', maxLength: 120 },
+          timelineOrder: { type: 'integer', minimum: 0, maximum: 10_000 },
+          timelineKind: { type: 'string', enum: ['history', 'current', 'deadline', 'conditional'] },
+          tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 40 } },
         },
       },
     },
@@ -625,26 +670,26 @@ function schemaForSource(input: {
 
 type PdfAnalysisSchemaModeV1 = PdfAnalysisPassV1 | 'synthesis'
 
-const PDF_PASS_ARRAY_LIMITS: Record<PdfAnalysisSchemaModeV1, Record<string, number>> = {
+const PDF_PASS_ARRAY_LIMITS: Record<PdfAnalysisSchemaModeV1, Record<string, number | null>> = {
   quick: {
     people: 10, relationships: 20, locations: 8, factions: 6, clues: 10,
-    scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 6,
+    timelineEvents: 0, scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 6,
   },
   entities: {
     people: 8, relationships: 0, locations: 6, factions: 4, clues: 0,
-    scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 3,
+    timelineEvents: 0, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 3,
   },
   relationships: {
     people: 0, relationships: 12, locations: 0, factions: 0, clues: 0,
-    scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 4,
+    timelineEvents: 0, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 4,
   },
   adventure: {
     people: 0, relationships: 0, locations: 0, factions: 0, clues: 10,
-    scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 4,
+    timelineEvents: 0, scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 4,
   },
   synthesis: {
     people: 0, relationships: 28, locations: 0, factions: 0, clues: 0,
-    scenes: 0, encounters: 0, importCandidates: 0, prepTips: 10, warnings: 6,
+    timelineEvents: null, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 10, warnings: 6,
   },
 }
 
@@ -653,7 +698,7 @@ const PDF_PASS_OUTPUT_TOKENS: Record<PdfAnalysisSchemaModeV1, number> = {
   entities: 1_400,
   relationships: 1_200,
   adventure: 1_600,
-  synthesis: 2_200,
+  synthesis: 3_200,
 }
 
 export function pdfAnalysisSchemaForPass(input: {
@@ -672,7 +717,12 @@ export function pdfAnalysisSchemaForPass(input: {
     : {}
   for (const [fieldName, maxItems] of Object.entries(PDF_PASS_ARRAY_LIMITS[input.pass])) {
     const property = properties[fieldName]
-    if (isPlainObject(property)) properties[fieldName] = { ...property, maxItems }
+    if (isPlainObject(property)) {
+      const nextProperty = { ...property }
+      if (maxItems == null) delete nextProperty.maxItems
+      else nextProperty.maxItems = maxItems
+      properties[fieldName] = nextProperty
+    }
   }
   if (isPlainObject(properties.overview)) {
     properties.overview = {
@@ -721,8 +771,8 @@ function compactPdfAnalysisRetrySchema(source: JsonSchemaV1): JsonSchemaV1 {
 function analysisMatchesPass(value: PdfCampaignChunkAnalysisV1, pass: PdfAnalysisSchemaModeV1): boolean {
   const limits = PDF_PASS_ARRAY_LIMITS[pass]
   return Object.entries(limits).every(([fieldName, maximum]) => {
-    const fieldValue = value[fieldName as keyof PdfCampaignChunkAnalysisV1]
-    return Array.isArray(fieldValue) && fieldValue.length <= maximum
+    const fieldValue = value[fieldName as keyof PdfCampaignChunkAnalysisV1] ?? []
+    return Array.isArray(fieldValue) && (maximum == null || fieldValue.length <= maximum)
   })
 }
 
@@ -733,6 +783,7 @@ function analysisCitations(value: PdfCampaignChunkAnalysisV1): PdfSourceCitation
     ...value.locations.flatMap((entry) => entry.citations),
     ...value.factions.flatMap((entry) => entry.citations),
     ...value.clues.flatMap((entry) => entry.citations),
+    ...(value.timelineEvents ?? []).flatMap((entry) => entry.citations),
     ...value.scenes.flatMap((entry) => entry.citations),
     ...value.encounters.flatMap((entry) => entry.citations),
     ...value.importCandidates.flatMap((entry) => entry.citations),
@@ -743,7 +794,7 @@ function analysisCitations(value: PdfCampaignChunkAnalysisV1): PdfSourceCitation
 function repairShortPdfCitationQuotes(value: unknown, sourcePages: readonly PdfSourcePageV2[]): void {
   if (!isPlainObject(value) || sourcePages.length === 0) return
   const citationFields = [
-    'people', 'relationships', 'locations', 'factions', 'clues', 'scenes', 'encounters',
+    'people', 'relationships', 'locations', 'factions', 'clues', 'timelineEvents', 'scenes', 'encounters',
     'importCandidates', 'prepTips',
   ] as const
   for (const fieldName of citationFields) {
@@ -1041,8 +1092,12 @@ function mergeChunkAnalyses(
   documents: readonly ExtractedPdfDocumentV1[],
   analyses: readonly PdfCampaignChunkAnalysisV1[],
 ): PdfCampaignAnalysisV1 {
+  const people = mergePdfPersonRecords(analyses.flatMap((analysis) => analysis.people))
   const relationshipMap = new Map<string, PdfRelationshipRecordV1>()
-  for (const relationship of analyses.flatMap((analysis) => analysis.relationships)) {
+  for (const relationship of canonicalizePdfPersonRelationships(
+    analyses.flatMap((analysis) => analysis.relationships),
+    people,
+  )) {
     const key = `${relationship.from}|${relationship.to}|${relationship.type}`.toLocaleLowerCase()
     const current = relationshipMap.get(key)
     relationshipMap.set(key, current ? {
@@ -1063,13 +1118,14 @@ function mergeChunkAnalyses(
       scannedPages: document.scannedPages,
     })),
     analyzedChunks: analyses.length,
-    people: mergeNamedRecords(analyses.flatMap((analysis) => analysis.people)),
+    people,
     relationships: uniqueRelationships,
     locations: mergeNamedRecords(analyses.flatMap((analysis) => analysis.locations)),
     factions: mergeNamedRecords(analyses.flatMap((analysis) => analysis.factions)),
     clues: mergeNamedRecords(analyses.flatMap((analysis) => analysis.clues)),
-    scenes: mergeNamedRecords(analyses.flatMap((analysis) => analysis.scenes)),
-    encounters: mergeNamedRecords(analyses.flatMap((analysis) => analysis.encounters)),
+    timelineEvents: [],
+    scenes: mergePdfSceneRecords(analyses.flatMap((analysis) => analysis.scenes)),
+    encounters: mergePdfEncounterRecords(analyses.flatMap((analysis) => analysis.encounters)),
     importCandidates: mergeNamedRecords(analyses.flatMap((analysis) => analysis.importCandidates)),
     prepTips: mergeNamedRecords(analyses.flatMap((analysis) => analysis.prepTips.map((tip) => ({ ...tip, name: tip.title })))).map((tip) => ({
       title: tip.title,
@@ -1099,7 +1155,13 @@ const PDF_ANALYSIS_SYSTEM_PROMPT = [
   '所有引用必须使用输入提供的准确 documentId、文件名、chunkId 和页码；年份、纪年、等级、DC 和表格编号绝不是页码。',
   '可导入内容只是待 DM 审阅的草稿，不得声称已经接入 Headless。',
   '严格区分人物、势力和地点：组织、家族、派系与阵营不得放入 people；relationships 的端点必须使用实体在文档中的正式名称。',
+  '人物 name 必须使用当前页段能够确认的最完整正式姓名；简称、名、姓、头衔、代号和其他写法放入 aliases。同一人物不得因为“简称”和“全名”并存而输出成两个条目。',
+  '只有文本不能确认两个称呼属于同一人物时才保留为不同条目，并在 warnings 说明歧义；不得仅凭姓名相似强行合并。',
   '人物 appearance 只填写原文明确描述的年龄、种族、外貌、服装、神态或标志性物品；没有依据时填写空字符串。',
+  '人物 description 应概括背景、当前身份、经历和剧情作用；role 只写简洁身份，motivation 写其主动追求，personality 写可观察性格，避免把同一句泛化描述复制到多个字段。',
+  'scenes 是可运行场景，不是最终时间线。只有全书综合阶段可以填写 timelineEvents；其他阶段必须返回空数组。',
+  'timelineEvents 的 time 使用原文明确时间或相对锚点；timelineKind 区分 history、current、deadline、conditional；timelineOrder 表达全书剧情先后。不得把 PDF 页码当作剧情时间。',
+  '原文没有时间依据时 time 填“时间未注明”，不得自行发明日期；条件分支必须标记 conditional，不能当作已经发生的事实。',
   '严格区分 NPC 与怪物导入候选：社交、剧情或服务型非玩家角色归为 npc；出现体型＋生物类型＋阵营式数据、属性块、战斗动作、法术战斗能力或召唤战斗单位的生物归为 monster，即使它拥有专名。',
   '只有原文提供的结构化数据足以直接完成 Host 校验与权威结算时，automation 才能标记 full；缺少属性块、动作数值或规则细节时必须标记 partial 或 manual。',
   '使用自然、准确、适合中文跑团语境的表述，优先保留动机、因果、冲突和可运行信息，而不是泛泛复述。',
@@ -1120,7 +1182,7 @@ function deepFocusPrompt(focus: DeepAnalysisFocus): string {
       '完整提取势力、家族、派系和地点；不要把群体、势力、家族或章节标题当成人物。',
       '本阶段不提取关系；relationships 必须返回空数组，关系由下一个独立事务处理。',
       '每个页段最多输出 8 个人物、6 个地点和 4 个势力；这些数字是严格上限而不是填充目标，原文没有的项目不得生成；超出时优先保留有姓名、动机、冲突或后续作用的实体。',
-      'people、locations、factions 可以填写；relationships、clues、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
+      'people、locations、factions 可以填写；relationships、clues、timelineEvents、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
       'overview 只总结本页段的人物冲突与势力结构；warnings 只记录确实存在的类型歧义或原文矛盾。',
     ].join('\n')
   }
@@ -1131,25 +1193,25 @@ function deepFocusPrompt(focus: DeepAnalysisFocus): string {
       '关系可以连接人物、势力和地点，但 from 与 to 必须使用原文出现的正式实体名称。',
       '仅在同一页出现不能自动视为关系，不得用常识或推测补齐缺失联系。',
       '每个页段最多输出 12 条关系；这是严格上限而不是填充目标，同义、重复或反向重复关系只保留一条。',
-      'relationships 可以填写；people、locations、factions、clues、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
+      'relationships 可以填写；people、locations、factions、clues、timelineEvents、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
       'overview 只总结本页段的关系网；warnings 只记录端点名称或关系方向无法确认的情况。',
     ].join('\n')
   }
   return [
     '这是深度分析的“剧情与可运行内容”阶段。',
-    '提取真正能在桌面跑团中使用的关键线索、可运行场景、遭遇、明确资源和备团风险。',
+    '提取真正能在桌面跑团中使用的关键线索、可运行场景、遭遇、明确资源和备团风险。不要在页段阶段生成全书时间线。',
     '场景描述要说明触发条件、目标、参与者、关键选择和失败后如何继续；不得只复述章节标题。',
     '附录标题、朗读文本、时间表、家族立场、写作提示和剧情概念本身不是法术、怪物、NPC 或可导入资源。',
     '只有原文提供了可结构化数据、明确规则正文、具体地图/讲义或独立实体资料时，才能加入 importCandidates。',
     '“中型/大型等体型＋类人生物等类型＋阵营”、战斗单位、守卫、军兵、召唤生物及带动作/法术战斗能力的条目应作为 monster 候选；不要因为它有名字就标记为 npc。',
     '每个页段最多输出 10 条线索、8 个场景、6 个遭遇、8 个资源候选和 6 条备团提示；这些数字是严格上限而不是填充目标，原文没有的项目不得生成；合并同义或重复项目。',
-    'people、relationships、locations、factions 必须返回空数组；clues、scenes、encounters、importCandidates、prepTips 可以填写。',
+    'people、relationships、locations、factions、timelineEvents 必须返回空数组；clues、scenes、encounters、importCandidates、prepTips 可以填写。',
     'overview 只总结本页段的因果链、玩家选择和后果；warnings 记录资料缺口，不得把普通剧情建议写成高危警告。',
   ].join('\n')
 }
 
 function quickAnalysisPrompt(): string {
-  return '分析附带页段，提取人物、关系、地点、势力、关键线索、场景、遭遇、可导入资源与备团风险。关系应覆盖人物之间以及人物、势力、地点之间有直接文本依据的联系；不能仅凭同场推测。空缺字段使用空字符串或空数组。'
+  return '分析附带页段，提取人物、关系、地点、势力、关键线索、场景、遭遇、可导入资源与备团风险。关系应覆盖人物之间以及人物、势力、地点之间有直接文本依据的联系；不能仅凭同场推测。timelineEvents 必须返回空数组；快速分析不生成全书时间线。空缺字段使用空字符串或空数组。'
 }
 
 function compactCampaignDraft(value: PdfCampaignAnalysisV1): string {
@@ -1165,22 +1227,36 @@ function compactCampaignDraft(value: PdfCampaignAnalysisV1): string {
   }
   const lines = [
     `文档：${value.documents.map((document) => `${document.name}(${document.pageCount}页)`).join('；')}`,
+    ...value.scenes.slice(0, 48).map((entry) => `事件|${entry.name}|${entry.time || '时间未注明'}|${entry.timelineKind || 'current'}|${entry.location}|${entry.description.slice(0, 120)}|${citation(entry)}`),
     ...value.people.slice(0, 48).map((entry) => `人物|${entry.name}|${entry.role}|${entry.motivation.slice(0, 100)}|${citation(entry)}`),
     ...value.factions.slice(0, 32).map((entry) => `势力|${entry.name}|${entry.description.slice(0, 100)}|${citation(entry)}`),
     ...value.locations.slice(0, 32).map((entry) => `地点|${entry.name}|${entry.description.slice(0, 80)}|${citation(entry)}`),
     ...value.relationships.slice(0, 64).map((entry) => `关系|${entry.from}|${entry.type}|${entry.to}|${entry.description.slice(0, 90)}|${citation(entry)}`),
     ...value.clues.slice(0, 40).map((entry) => `线索|${entry.name}|${entry.discovery.slice(0, 100)}|${entry.failForward.slice(0, 80)}|${citation(entry)}`),
-    ...value.scenes.slice(0, 32).map((entry) => `场景|${entry.name}|${entry.location}|${entry.description.slice(0, 120)}|${citation(entry)}`),
     ...value.encounters.slice(0, 24).map((entry) => `遭遇|${entry.name}|${entry.description.slice(0, 100)}|${citation(entry)}`),
   ]
   const result: string[] = []
   let characters = 0
   for (const line of lines) {
-    if (characters + line.length > 7_000) break
+    if (characters + line.length > 10_000) break
     result.push(line)
     characters += line.length + 1
   }
   return result.join('\n')
+}
+
+function synthesisTimelineMetadataIsComplete(
+  synthesis: PdfCampaignChunkAnalysisV1,
+  mergedDraft: PdfCampaignAnalysisV1,
+): boolean {
+  const events = synthesis.timelineEvents ?? []
+  if (events.length === 0) return mergedDraft.scenes.length === 0
+  return events.every((scene) => (
+    typeof scene.time === 'string' && scene.time.trim().length > 0 &&
+    Number.isSafeInteger(scene.timelineOrder) &&
+    typeof scene.timelineKind === 'string' &&
+    Array.isArray(scene.tags)
+  ))
 }
 
 async function executePdfAnalysisPass(input: {
@@ -1451,7 +1527,8 @@ export async function analyzeExtractedPdfDocuments(input: {
       const cachedSynthesis = input.cachedSynthesis
       const synthesis = cachedSynthesis && validatePdfCampaignChunkAnalysis(cachedSynthesis) &&
         analysisMatchesPass(cachedSynthesis, 'synthesis') &&
-        analysisCitationsMatchDocuments(cachedSynthesis, documents)
+        analysisCitationsMatchDocuments(cachedSynthesis, documents) &&
+        synthesisTimelineMetadataIsComplete(cachedSynthesis, result)
         ? cachedSynthesis
         : await executePdfAnalysisPass({
             registry: input.registry,
@@ -1464,16 +1541,32 @@ export async function analyzeExtractedPdfDocuments(input: {
               '这是已经通过第一阶段引用校验的全书提取草稿。',
               '请进行跨章节综合：说明核心冲突、反派计划、证据因果链、玩家选择如何改变结局，以及下一场真正需要准备的事项。',
               'relationships 应补齐跨章节关系网：人物之间，以及人物与势力、人物与地点、势力与地点之间，分别保留亲属、雇佣、同盟、敌对、控制、调查、知情、隶属和关键活动联系，不要只保留少数主线关系。',
+              'timelineEvents 应重建为去重后的全书关键事件表；数量必须由原文中可辨认的独立重大事件自然决定，不设固定目标或上限。scenes 必须为空，原始可运行场景由 Host 另行保留。',
+              '不要为了凑数量拆分事件，也不要为了压缩数量合并具有不同时间锚点、因果结果或互斥分支的事件。通常每个明确幕／阶段保留一至两个真正改变剧情状态的事件即可，但原文明确列出的历史起因、期限和结局分支必须保留。',
+              '优先使用原文中的“真正发生了什么”“事件顺序”“时间表”“幕／章流程”等明确顺序；再使用直接因果关系补齐顺序。PDF 页码只能作为证据，绝不是剧情时间。',
+              'timelineOrder 从 10 开始按 10 递增；time 必须保留原文中最准确的时间或相对锚点，例如“数年前”“故事开始前”“当日”“伏击后”“三日后（若玩家选择）”。',
+              '只保留会改变剧情状态、触发下一阶段或形成明确期限的关键事件。人物档案、地点介绍、设施说明、线索条目、单次检定、规则建议、附录说明和可选日常片段不得成为事件。',
+              '同一事件跨页、换名或从不同视角重复描述时必须合并。互斥或尚未发生的玩家选择只保留少量关键分支，并标记 conditional，不能混入主线已发生事件。',
+              '每项 description 用一至三句说明发生了什么、核心参与者、原因和直接后果；不得拆成多个细碎步骤。',
               '每条关系都必须有草稿中的直接证据和引用；端点必须来自草稿中的人物、势力或地点，不能仅凭同场或常识推测关系。',
               'prepTips 应具体、可执行并与当前剧本内容直接相关；不要输出“注意玩家自由度”一类泛化建议。',
-              'overview、relationships、prepTips、warnings 可以填写；其他数组必须为空。所有结论继续逐字沿用草稿中的 documentId、原始文件名、真实页码、quote 与 chunkId，不得重写 quote。',
+              'overview、relationships、timelineEvents、prepTips、warnings 可以填写；其他数组必须为空。所有结论继续逐字沿用草稿中的 documentId、原始文件名、真实页码、quote 与 chunkId，不得重写 quote。',
             ].join('\n'),
             validateOutput: (value): value is PdfCampaignChunkAnalysisV1 => (
               validatePdfCampaignChunkAnalysis(value) &&
               analysisMatchesPass(value, 'synthesis') &&
-              analysisCitationsMatchDocuments(value, documents)
+              analysisCitationsMatchDocuments(value, documents) &&
+              synthesisTimelineMetadataIsComplete(value, result)
             ),
-            describeInvalidOutput: (value) => describeDocumentDomainValidation(value, documents),
+            describeInvalidOutput: (value) => {
+              if (
+                validatePdfCampaignChunkAnalysis(value) &&
+                analysisMatchesPass(value, 'synthesis') &&
+                analysisCitationsMatchDocuments(value, documents) &&
+                !synthesisTimelineMetadataIsComplete(value, result)
+              ) return '全书综合没有生成具备时间、类型与唯一顺序的关键事件'
+              return describeDocumentDomainValidation(value, documents)
+            },
             onRetry: (maxOutputTokens, retryNumber, reason) => input.onProgress?.({
               stage: 'analyzing',
               current: completedSteps + 1,
@@ -1494,12 +1587,14 @@ export async function analyzeExtractedPdfDocuments(input: {
           relationships: [...result.relationships, ...synthesis.relationships],
         }]).relationships,
         prepTips: synthesis.prepTips.length > 0 ? synthesis.prepTips : result.prepTips,
+        timelineEvents: mergeNamedRecords(synthesis.timelineEvents ?? []),
         warnings: [...new Set([...result.warnings, ...synthesis.warnings])].slice(0, 100),
       }
     } catch {
       result = {
         ...result,
-        warnings: [...new Set([...result.warnings, '全书级综合未通过 Host 校验；已安全保留经过页段引用校验的深度提取结果。'])],
+        timelineEvents: [],
+        warnings: [...new Set([...result.warnings, '全书级综合未通过 Host 校验；已保留场景资料，但不会把页段场景冒充全书时间线。'])],
       }
     }
   }

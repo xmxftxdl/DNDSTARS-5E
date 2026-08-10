@@ -3,6 +3,8 @@ import {
   Bot,
   Boxes,
   CalendarClock,
+  Check,
+  ChevronRight,
   ExternalLink,
   FileSearch,
   GitBranch,
@@ -11,10 +13,12 @@ import {
   LoaderCircle,
   MapPinned,
   PencilLine,
+  Plus,
   Search,
   Shield,
   Sparkles,
   Swords,
+  Trash2,
   Upload,
   UserRound,
 } from 'lucide-react'
@@ -26,17 +30,34 @@ import type {
   PdfImportCandidateV1,
   PdfNamedRecordV1,
   PdfPersonRecordV1,
+  PdfSceneRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
 import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
+import {
+  campaignDay,
+  campaignDisplayMinute,
+  campaignGregorianDate,
+  campaignMinuteOfDay,
+  formatCampaignTime,
+  type CampaignTimeDisplayMode,
+  type SharedCampaignTimeState,
+} from '../../lib/campaignTime'
+import { useCampaignTimeStore } from '../../store/campaignTime'
+import { canonicalizePdfPersonRelationships, mergePdfPersonRecords } from '../../lib/pdfPersonDeduplication'
+import { PDF_TIMELINE_KIND_LABELS, pdfTimelineTimeLabel, schedulePdfCampaignTimeline } from '../../lib/pdfCampaignTimeline'
 import PdfRelationshipGraph from './PdfRelationshipGraph'
 import PdfSourceEvidenceDrawer, {
   PdfCitationButtons,
 } from './PdfSourceEvidenceDrawer'
 import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
+import PdfTimelineGameTimeField from './PdfTimelineGameTimeField'
+import { commaSeparatedValues, emptyPdfTimelineEvent } from './pdfCampaignAnalysisEditorModel'
+import { showAppConfirm } from '../../lib/appDialog'
 import {
   buildPdfMapIndex,
   buildPdfMonsterCodex,
+  buildPdfEventIndex,
   buildPdfPersonPortraitPrompt,
   pdfKnowledgeMatches,
   pdfKnowledgeTabCounts,
@@ -98,9 +119,9 @@ function KnowledgeCard({ title, description, citations, children }: {
   children?: ReactNode
 }) {
   return (
-    <article className="rounded-2xl border border-white/8 bg-white/[0.018] p-4 transition hover:border-violet-400/20 hover:bg-violet-500/[0.025]">
-      <h4 className="text-sm font-semibold text-slate-100">{title}</h4>
-      {description && <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-400">{description}</p>}
+    <article className="rounded-2xl border border-white/8 bg-white/[0.018] p-4 sm:p-5 transition hover:border-violet-400/20 hover:bg-violet-500/[0.025]">
+      <h4 className="text-base font-semibold leading-6 text-slate-100">{title}</h4>
+      {description && <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-300">{description}</p>}
       {children}
       {!!citations?.length && <EvidenceButtons citations={citations} />}
     </article>
@@ -206,11 +227,190 @@ function PersonPortraitStudio({ person, onPortraitChange }: {
   )
 }
 
+function PersonDetailField({ label, value }: { label: string; value?: string }) {
+  if (!value?.trim()) return null
+  return (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</dt>
+      <dd className="mt-1.5 whitespace-pre-wrap text-sm leading-7 text-slate-200">{value}</dd>
+    </div>
+  )
+}
+
+function PersonKnowledgeDetail({ person, onPortraitChange }: {
+  person: PdfPersonRecordV1
+  onPortraitChange: (personName: string, portraitDataUrl: string) => void
+}) {
+  return (
+    <aside data-testid="pdf-person-detail" className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.025] p-4 xl:sticky xl:top-4 xl:self-start">
+      <div className="flex items-start gap-4">
+        <div className="grid h-28 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl border border-violet-400/25 bg-violet-500/10 text-2xl font-bold text-violet-200">
+          {person.portraitDataUrl
+            ? <img src={person.portraitDataUrl} alt={`${person.name}的立绘`} className="h-full w-full object-cover" />
+            : Array.from(person.name).slice(0, 2).join('')}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-300/70">人物详情</p>
+          <h3 className="mt-1 text-lg font-semibold text-slate-100">{person.name}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-300">{person.role || '身份待确认'}</p>
+          {!!person.aliases?.length && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {person.aliases.map((alias) => <span key={alias} className="rounded-full border border-white/8 bg-black/20 px-2 py-1 text-[9px] text-slate-400">别名：{alias}</span>)}
+            </div>
+          )}
+        </div>
+      </div>
+      <dl className="mt-5 space-y-4 border-t border-white/8 pt-4">
+        <PersonDetailField label="详细信息" value={person.description} />
+        <PersonDetailField label="外貌描述" value={person.appearance} />
+        <PersonDetailField label="性格" value={person.personality} />
+        <PersonDetailField label="欲望或目标" value={person.motivation} />
+        <PersonDetailField label="秘密" value={person.secret} />
+        <PersonDetailField label="扮演与声线提示" value={person.voice} />
+      </dl>
+      <PersonPortraitStudio person={person} onPortraitChange={onPortraitChange} />
+      {!!person.citations.length && <EvidenceButtons citations={person.citations} />}
+    </aside>
+  )
+}
+
+function TimelineClockEditor({ clock }: { clock: SharedCampaignTimeState }) {
+  const mutate = useCampaignTimeStore((state) => state.mutate)
+  const initialDisplayMinute = campaignDisplayMinute(clock)
+  const initialMinuteOfDay = campaignMinuteOfDay(initialDisplayMinute)
+  const today = new Date()
+  const localDate = `${today.getFullYear().toString().padStart(4, '0')}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`
+  const [mode, setMode] = useState<CampaignTimeDisplayMode>(clock.displayMode)
+  const [day, setDay] = useState(campaignDay(initialDisplayMinute))
+  const [date, setDate] = useState(campaignGregorianDate(clock) ?? localDate)
+  const [time, setTime] = useState(`${Math.floor(initialMinuteOfDay / 60).toString().padStart(2, '0')}:${(initialMinuteOfDay % 60).toString().padStart(2, '0')}`)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const apply = async () => {
+    const [hour, minute] = time.split(':').map(Number)
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+      setError('请输入有效时刻。')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await mutate({
+        operation: 'set-time',
+        displayMode: mode,
+        day: mode === 'campaign-day' ? day : undefined,
+        date: mode === 'gregorian' ? date : undefined,
+        hour,
+        minute,
+        reason: 'DM 在时间线中校准当前时间',
+      })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-rose-400/15 bg-rose-500/[0.025] p-4" data-testid="pdf-timeline-clock-editor">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-300/70">房间当前时间</p>
+          <p className="mt-1 text-base font-bold text-rose-100">{formatCampaignTime(clock)}</p>
+        </div>
+        <div className="flex rounded-xl border border-white/10 bg-black/20 p-1">
+          <button type="button" onClick={() => setMode('campaign-day')} className={`rounded-lg px-3 py-1.5 text-[10px] font-semibold ${mode === 'campaign-day' ? 'bg-violet-500/25 text-violet-100' : 'text-slate-500'}`}>战役时间</button>
+          <button type="button" onClick={() => setMode('gregorian')} className={`rounded-lg px-3 py-1.5 text-[10px] font-semibold ${mode === 'gregorian' ? 'bg-violet-500/25 text-violet-100' : 'text-slate-500'}`}>公历日期</button>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
+        {mode === 'campaign-day' ? (
+          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-400">第
+            <input type="number" min={1} value={day} onChange={(event) => setDay(Math.max(1, Number(event.target.value) || 1))} className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none" />日
+          </label>
+        ) : (
+          <input aria-label="公历日期" type="date" min="0001-01-01" max="9999-12-31" value={date} onChange={(event) => setDate(event.target.value)} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100" />
+        )}
+        <input aria-label="当前时刻" type="time" value={time} onChange={(event) => setTime(event.target.value)} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100" />
+        <button type="button" disabled={busy} onClick={() => void apply()} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-500/15 px-4 py-2 text-xs font-semibold text-rose-100 disabled:opacity-50">
+          <Check className="h-3.5 w-3.5" />{busy ? '正在应用' : '应用当前时间'}
+        </button>
+      </div>
+      {error && <p className="mt-2 text-[10px] text-rose-300">{error}</p>}
+      <p className="mt-2 text-[10px] leading-5 text-slate-500">切换显示方式会同步房间权威时钟，时间线红线和所有已绑定事件会使用同一历法。</p>
+    </section>
+  )
+}
+
+function TimelineInlineEditor({ record, clock, busy = false, onSave, onCancel, onDelete }: {
+  record: PdfSceneRecordV1
+  clock: SharedCampaignTimeState
+  busy?: boolean
+  onSave: (record: PdfSceneRecordV1) => void | Promise<void>
+  onCancel: () => void
+  onDelete: () => void | Promise<void>
+}) {
+  const [draft, setDraft] = useState(record)
+  const inputClass = 'mt-1 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-400/45'
+  return (
+    <aside className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.035] p-4 xl:sticky xl:top-4 xl:self-start" data-testid="pdf-timeline-inline-editor">
+      <div className="flex items-center justify-between gap-3">
+        <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300/70">编辑时间节点</p><h3 className="mt-1 text-sm font-semibold text-slate-100">{draft.name || '未命名事件'}</h3></div>
+        <button type="button" disabled={busy} onClick={() => void onDelete()} className="rounded-lg border border-rose-400/20 p-2 text-rose-300 hover:bg-rose-500/10 disabled:opacity-40" title="删除时间节点"><Trash2 className="h-4 w-4" /></button>
+      </div>
+      <div className="mt-4 space-y-3">
+        <label className="block text-[10px] font-semibold text-slate-500">事件名称<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className={inputClass} /></label>
+        <PdfTimelineGameTimeField record={draft} clock={clock} onChange={setDraft} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-[10px] font-semibold text-slate-500">地点<input value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} className={inputClass} /></label>
+          <label className="block text-[10px] font-semibold text-slate-500">原文时间／相对锚点<input value={draft.time ?? ''} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className={inputClass} /></label>
+        </div>
+        <label className="block text-[10px] font-semibold text-slate-500">事件详情<textarea rows={5} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className={`${inputClass} resize-y`} /></label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-[10px] font-semibold text-slate-500">相关人物（逗号分隔）<input value={draft.npcs.join('，')} onChange={(event) => setDraft({ ...draft, npcs: commaSeparatedValues(event.target.value) })} className={inputClass} /></label>
+          <label className="block text-[10px] font-semibold text-slate-500">相关怪物（逗号分隔）<input value={draft.monsters.join('，')} onChange={(event) => setDraft({ ...draft, monsters: commaSeparatedValues(event.target.value) })} className={inputClass} /></label>
+        </div>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" disabled={busy} onClick={onCancel} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-400 disabled:opacity-40">取消</button>
+        <button type="button" disabled={busy || !draft.name.trim()} onClick={() => void onSave({ ...draft, name: draft.name.trim() })} className="rounded-xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{busy ? '正在保存' : '保存节点'}</button>
+      </div>
+    </aside>
+  )
+}
+
+function TimelineEventDetail({ scene, campaignClock, onEdit }: { scene: PdfSceneRecordV1; campaignClock: SharedCampaignTimeState; onEdit?: () => void }) {
+  const kind = scene.timelineKind ?? 'current'
+  return (
+    <aside className="rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.025] p-4 xl:sticky xl:top-4 xl:self-start">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-300/70">事件详情</p>
+      <h3 className="mt-1 text-base font-semibold text-slate-100">{scene.name}</h3>
+      <div className="mt-3 flex flex-wrap gap-2 text-[9px]">
+        {Number.isSafeInteger(scene.gameTimeWorldMinute) && Number(scene.gameTimeWorldMinute) >= 0 && (
+          <span className="rounded-full bg-rose-500/10 px-2 py-1 text-rose-200">游戏时间：{formatCampaignTime({ ...campaignClock, worldMinute: Number(scene.gameTimeWorldMinute) })}</span>
+        )}
+        <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-cyan-200">{pdfTimelineTimeLabel(scene)}</span>
+        <span className="rounded-full bg-violet-500/10 px-2 py-1 text-violet-200">{PDF_TIMELINE_KIND_LABELS[kind]}</span>
+        {scene.location && <span className="rounded-full bg-white/[0.04] px-2 py-1 text-slate-400">{scene.location}</span>}
+      </div>
+      <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-200">{scene.description}</p>
+      {!!scene.tags?.length && <div className="mt-4 flex flex-wrap gap-1.5">{scene.tags.map((tag) => <span key={tag} className="rounded-lg border border-white/8 px-2 py-1 text-[9px] text-slate-500">{tag}</span>)}</div>}
+      {!!scene.npcs.length && <p className="mt-4 text-xs leading-6 text-slate-400">相关人物：{scene.npcs.join('、')}</p>}
+      {!!scene.monsters.length && <p className="text-xs leading-6 text-slate-400">相关怪物：{scene.monsters.join('、')}</p>}
+      {!!scene.citations.length && <EvidenceButtons citations={scene.citations} />}
+      {onEdit && <button type="button" onClick={onEdit} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100"><PencilLine className="h-3.5 w-3.5" />直接编辑此节点</button>}
+    </aside>
+  )
+}
+
 interface PdfCampaignKnowledgeBaseProps {
   analysis: PdfCampaignAnalysisView
   mapHref: string
   onEdit: () => void
   onPortraitChange: (personName: string, portraitDataUrl: string) => void
+  onTimelineEventsChange?: (events: PdfSceneRecordV1[]) => void
+  onTimelineEventsCommit?: (events: PdfSceneRecordV1[]) => Promise<boolean>
   initialTab?: PdfKnowledgeTabV1
 }
 
@@ -219,27 +419,41 @@ export default function PdfCampaignKnowledgeBase({
   mapHref,
   onEdit,
   onPortraitChange,
+  onTimelineEventsChange,
+  onTimelineEventsCommit,
   initialTab = 'overview',
 }: PdfCampaignKnowledgeBaseProps) {
   const [activeTab, setActiveTab] = useState<PdfKnowledgeTabV1>(initialTab)
   const [query, setQuery] = useState('')
   const [searchScope, setSearchScope] = useState<'current' | 'all'>('current')
+  const [selectedPersonName, setSelectedPersonName] = useState(analysis.people[0]?.name ?? '')
+  const [selectedTimelineName, setSelectedTimelineName] = useState(analysis.timelineEvents?.[0]?.name ?? '')
+  const [editingTimelineIndex, setEditingTimelineIndex] = useState<number | null>(null)
+  const [timelineCommitBusy, setTimelineCommitBusy] = useState(false)
   const [selectedImport, setSelectedImport] = useState<PdfImportCandidateV1 | null>(null)
   const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
-  const counts = useMemo(() => pdfKnowledgeTabCounts(analysis), [analysis])
+  const campaignClock = useCampaignTimeStore((state) => state.state)
+  const normalizedPeople = useMemo(() => mergePdfPersonRecords(analysis.people), [analysis.people])
+  const normalizedRelationships = useMemo(
+    () => canonicalizePdfPersonRelationships(analysis.relationships, normalizedPeople),
+    [analysis.relationships, normalizedPeople],
+  )
+  const counts = useMemo(() => pdfKnowledgeTabCounts({ ...analysis, people: normalizedPeople }), [analysis, normalizedPeople])
   const monsterCodex = useMemo(() => buildPdfMonsterCodex(analysis), [analysis])
   const mapIndex = useMemo(() => buildPdfMapIndex(analysis), [analysis])
+  const eventIndex = useMemo(() => buildPdfEventIndex(analysis), [analysis])
 
-  const people = filterRecords(analysis.people, query, (person) => [person.role, person.appearance, person.personality, person.motivation, person.secret, person.voice])
+  const people = filterRecords(normalizedPeople, query, (person) => [person.role, person.appearance, person.personality, person.motivation, person.secret, person.voice])
   const factions = filterRecords(analysis.factions, query)
   const locations = filterRecords(analysis.locations, query)
   const clues = filterRecords(analysis.clues, query, (clue) => [clue.source, clue.discovery, clue.failForward])
   const scenes = filterRecords(analysis.scenes, query, (scene) => [scene.location, scene.npcs, scene.monsters])
-  const encounters = filterRecords(analysis.encounters, query, (encounter) => [encounter.creatures, encounter.notes])
+  const timelineEvents = filterRecords(analysis.timelineEvents ?? [], query, (event) => [event.time, event.timelineKind, event.tags, event.location, event.npcs, event.monsters])
+  const events = eventIndex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.location, entry.npcs, entry.creatures, entry.notes))
   const imports = filterRecords(analysis.importCandidates, query, (entry) => [entry.kind, entry.automation, KIND_LABELS[entry.kind], KIND_LABELS[entry.automation]])
   const monsters = monsterCodex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.encounterNames, KIND_LABELS[entry.automation]))
   const maps = mapIndex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.sceneNames))
-  const relationships = analysis.relationships.filter((entry) => pdfKnowledgeMatches(query, entry.from, entry.to, entry.type, entry.description))
+  const relationships = normalizedRelationships.filter((entry) => pdfKnowledgeMatches(query, entry.from, entry.to, entry.type, entry.description))
   const hasGlobalQuery = searchScope === 'all' && query.trim().length > 0
 
   const renderNamedRecords = (records: readonly PdfNamedRecordV1[], empty: string) => records.length === 0
@@ -251,7 +465,8 @@ export default function PdfCampaignKnowledgeBase({
       { title: '人物', entries: people.map((entry) => ({ title: entry.name, description: entry.description, meta: entry.role })) },
       { title: '组织与势力', entries: factions.map((entry) => ({ title: entry.name, description: entry.description, meta: '势力' })) },
       { title: '地点与地图', entries: maps.map((entry) => ({ title: entry.name, description: entry.description, meta: entry.source === 'map-candidate' ? '地图资源' : '地点' })) },
-      { title: '场景与事件', entries: [...scenes, ...encounters].map((entry) => ({ title: entry.name, description: entry.description, meta: '场景' })) },
+      { title: '场景与事件', entries: events.map((entry) => ({ title: entry.name, description: entry.description, meta: entry.kind === 'scene-encounter' ? '场景＋遭遇' : entry.kind === 'encounter' ? '遭遇' : '场景' })) },
+      { title: '关键时间线', entries: timelineEvents.map((entry) => ({ title: entry.name, description: entry.description, meta: pdfTimelineTimeLabel(entry) })) },
       { title: '线索', entries: clues.map((entry) => ({ title: entry.name, description: entry.description, meta: '线索' })) },
       { title: '怪物图鉴', entries: monsters.map((entry) => ({ title: entry.name, description: entry.description, meta: KIND_LABELS[entry.automation] })) },
       { title: '关系', entries: relationships.map((entry) => ({ title: `${entry.from} → ${entry.to}`, description: entry.description, meta: entry.type })) },
@@ -264,7 +479,7 @@ export default function PdfCampaignKnowledgeBase({
         <div className="grid gap-2 lg:grid-cols-2">{group.entries.map((entry, index) => (
           <article key={`${group.title}:${entry.title}:${index}`} className="rounded-xl border border-white/8 bg-white/[0.018] p-3">
             <div className="flex items-center gap-2"><strong className="text-xs text-slate-100">{entry.title}</strong><span className="text-[9px] text-violet-300">{entry.meta}</span></div>
-            <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-slate-500">{entry.description}</p>
+            <p className="mt-1 line-clamp-3 text-sm leading-6 text-slate-400">{entry.description}</p>
           </article>
         ))}</div>
       </section>
@@ -290,36 +505,196 @@ export default function PdfCampaignKnowledgeBase({
         </div>
       </div>
     )
-    if (activeTab === 'people') return people.length === 0 ? <EmptyState>没有匹配的人物档案。</EmptyState> : (
-      <div className="grid gap-3 xl:grid-cols-2">{people.map((person, index) => (
-        <article key={`${person.name}:${index}`} className="rounded-2xl border border-white/8 bg-white/[0.018] p-4">
-          <div className="flex gap-4">
-            <div className="grid h-24 w-20 shrink-0 place-items-center overflow-hidden rounded-xl border border-violet-400/20 bg-violet-500/10 text-xl font-bold text-violet-200">
-              {person.portraitDataUrl ? <img src={person.portraitDataUrl} alt={`${person.name}的立绘`} className="h-full w-full object-cover" /> : Array.from(person.name).slice(0, 2).join('')}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold text-slate-100">{person.name}</h4><span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[9px] text-violet-200">{person.role || '身份待确认'}</span></div>
-              <p className="mt-2 text-xs leading-5 text-slate-400">{person.description}</p>
-              {person.appearance && <p className="mt-1 text-[11px] leading-5 text-slate-500">外貌：{person.appearance}</p>}
-              {person.personality && <p className="text-[11px] leading-5 text-slate-500">性格：{person.personality}</p>}
-              {person.motivation && <p className="text-[11px] leading-5 text-slate-500">动机：{person.motivation}</p>}
-            </div>
+    if (activeTab === 'people') {
+      if (people.length === 0) return <EmptyState>没有匹配的人物档案。</EmptyState>
+      const selectedPerson = people.find((person) => person.name === selectedPersonName) ?? people[0]
+      return (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="overflow-hidden rounded-2xl border border-white/8 bg-black/10">
+            {people.map((person, index) => {
+              const active = person.name === selectedPerson.name
+              return (
+                <button
+                  key={`${person.name}:${index}`}
+                  type="button"
+                  data-testid="pdf-person-row"
+                  onClick={() => setSelectedPersonName(person.name)}
+                  className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-white/6 px-3 py-2.5 text-left transition last:border-b-0 ${active ? 'bg-violet-500/10' : 'hover:bg-white/[0.025]'}`}
+                >
+                  <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl border border-violet-400/20 bg-violet-500/10 text-xs font-bold text-violet-200">
+                    {person.portraitDataUrl
+                      ? <img src={person.portraitDataUrl} alt="" className="h-full w-full object-cover" />
+                      : Array.from(person.name).slice(0, 2).join('')}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <strong className="truncate text-xs text-slate-100">{person.name}</strong>
+                      <span className="shrink-0 truncate text-[9px] text-violet-300">{person.role || '身份待确认'}</span>
+                    </div>
+                    <p className="mt-1 truncate text-[10px] text-slate-500">{person.description || person.motivation || '暂无人物详情'}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!!person.aliases?.length && <span className="hidden text-[9px] text-slate-600 sm:inline">{person.aliases.length} 个别名</span>}
+                    <ChevronRight className={`h-4 w-4 ${active ? 'text-violet-300' : 'text-slate-700'}`} />
+                  </div>
+                </button>
+              )
+            })}
           </div>
-          <PersonPortraitStudio person={person} onPortraitChange={onPortraitChange} />
-          {!!person.citations.length && <EvidenceButtons citations={person.citations} />}
-        </article>
-      ))}</div>
-    )
+          <PersonKnowledgeDetail person={selectedPerson} onPortraitChange={onPortraitChange} />
+        </div>
+      )
+    }
     if (activeTab === 'factions') return renderNamedRecords(factions, '没有匹配的组织或势力。')
     if (activeTab === 'locations') return renderNamedRecords(locations, '没有匹配的地点。')
     if (activeTab === 'clues') return clues.length === 0 ? <EmptyState>没有匹配的线索。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{clues.map((clue, index) => <KnowledgeCard key={`${clue.name}:${index}`} title={clue.name} description={clue.description} citations={clue.citations}><div className="mt-3 space-y-1 text-[11px] leading-5 text-slate-500">{clue.source && <p>来源：{clue.source}</p>}{clue.discovery && <p>发现方式：{clue.discovery}</p>}{clue.failForward && <p>失败推进：{clue.failForward}</p>}</div></KnowledgeCard>)}</div>
     if (activeTab === 'events') {
-      const entries = [...scenes.map((entry) => ({ ...entry, kind: '场景' })), ...encounters.map((entry) => ({ ...entry, kind: '遭遇' }))]
-      return entries.length === 0 ? <EmptyState>没有匹配的事件或场景。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{entries.map((entry, index) => <KnowledgeCard key={`${entry.kind}:${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><span className="mt-3 inline-flex rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] text-cyan-200">{entry.kind}</span></KnowledgeCard>)}</div>
+      return events.length === 0 ? <EmptyState>没有匹配的事件或场景。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{events.map((entry, index) => (
+        <KnowledgeCard key={`${entry.kind}:${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="inline-flex rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] text-cyan-200">{entry.kind === 'scene-encounter' ? '场景＋遭遇' : entry.kind === 'encounter' ? '遭遇' : '场景'}</span>
+            {entry.location && <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{entry.location}</span>}
+          </div>
+          {!!entry.npcs.length && <p className="mt-3 text-xs leading-6 text-slate-400">相关人物：{entry.npcs.join('、')}</p>}
+          {!!entry.creatures.length && <p className="text-xs leading-6 text-slate-400">相关生物：{entry.creatures.join('、')}</p>}
+          {entry.notes && <p className="mt-2 text-xs leading-6 text-slate-400">遭遇备注：{entry.notes}</p>}
+        </KnowledgeCard>
+      ))}</div>
     }
     if (activeTab === 'timeline') {
-      const timeline = [...scenes].sort((left, right) => (left.citations[0]?.page ?? 0) - (right.citations[0]?.page ?? 0))
-      return timeline.length === 0 ? <EmptyState>尚未生成可以排序的场景时间线。</EmptyState> : <ol className="relative ml-3 border-l border-violet-400/20 pl-6">{timeline.map((scene, index) => <li key={`${scene.name}:${index}`} className="relative pb-7"><span className="absolute -left-[31px] top-0 grid h-3 w-3 place-items-center rounded-full border-2 border-slate-950 bg-violet-400" /><p className="text-[10px] font-semibold text-violet-300">节点 {String(index + 1).padStart(2, '0')} · 第 {scene.citations[0]?.page ?? '？'} 页</p><h4 className="mt-1 text-sm font-semibold text-slate-100">{scene.name}</h4><p className="mt-1 text-xs leading-5 text-slate-500">{scene.description}</p>{scene.location && <p className="mt-1 text-[10px] text-cyan-300">地点：{scene.location}</p>}</li>)}</ol>
+      const schedule = schedulePdfCampaignTimeline(timelineEvents, campaignClock.worldMinute)
+      const timeline = [...schedule.scheduled, ...schedule.unscheduled]
+      const selected = timeline.find((scene) => scene.name === selectedTimelineName) ?? timeline[0] ?? null
+      const selectedSourceIndex = selected ? (analysis.timelineEvents ?? []).indexOf(selected) : -1
+      const editingRecord = editingTimelineIndex === null ? null : analysis.timelineEvents?.[editingTimelineIndex] ?? null
+      const addTimelineNode = () => {
+        if (!onTimelineEventsChange) return
+        const nextRecord = emptyPdfTimelineEvent(campaignClock.worldMinute)
+        const next = [...(analysis.timelineEvents ?? []), nextRecord]
+        setQuery('')
+        setSelectedTimelineName(nextRecord.name)
+        setEditingTimelineIndex(next.length - 1)
+        onTimelineEventsChange(next)
+      }
+      const saveTimelineNode = async (record: PdfSceneRecordV1) => {
+        if (!onTimelineEventsChange || editingTimelineIndex === null) return
+        const next = (analysis.timelineEvents ?? []).map((entry, index) => index === editingTimelineIndex ? record : entry)
+        onTimelineEventsChange(next)
+        if (onTimelineEventsCommit) {
+          setTimelineCommitBusy(true)
+          try {
+            const persisted = await onTimelineEventsCommit(next)
+            if (!persisted) return
+          } finally {
+            setTimelineCommitBusy(false)
+          }
+        }
+        setSelectedTimelineName(record.name)
+        setEditingTimelineIndex(null)
+      }
+      const deleteTimelineNode = async () => {
+        if (!onTimelineEventsChange || editingTimelineIndex === null || !editingRecord) return
+        const confirmed = await showAppConfirm({
+          title: '删除时间节点',
+          message: `确定删除“${editingRecord.name}”吗？确认后会直接保存到账号战役。`,
+          confirmLabel: '删除节点',
+          cancelLabel: '取消',
+          tone: 'danger',
+        })
+        if (!confirmed) return
+        const next = (analysis.timelineEvents ?? []).filter((_, index) => index !== editingTimelineIndex)
+        onTimelineEventsChange(next)
+        if (onTimelineEventsCommit) {
+          setTimelineCommitBusy(true)
+          try {
+            const persisted = await onTimelineEventsCommit(next)
+            if (!persisted) return
+          } finally {
+            setTimelineCommitBusy(false)
+          }
+        }
+        setSelectedTimelineName(next[0]?.name ?? '')
+        setEditingTimelineIndex(null)
+      }
+      const nowMarker = (
+        <div className="flex items-center gap-3 border-b border-rose-400/15 bg-rose-500/[0.035] px-3 py-2" data-testid="pdf-timeline-now-marker">
+          <span className="h-px flex-1 bg-rose-500/70" />
+          <span className="shrink-0 text-[10px] font-bold text-rose-300">当前时间 · {formatCampaignTime(campaignClock)}</span>
+          <span className="h-px flex-1 bg-rose-500/70" />
+        </div>
+      )
+      const eventRow = (scene: PdfSceneRecordV1, key: string, scheduled: boolean) => {
+        const active = scene.name === selected.name
+        const kind = scene.timelineKind ?? 'current'
+        const gameTimeLabel = scheduled
+          ? formatCampaignTime({ ...campaignClock, worldMinute: Number(scene.gameTimeWorldMinute) })
+          : pdfTimelineTimeLabel(scene)
+        return (
+          <button key={key} type="button" onClick={() => setSelectedTimelineName(scene.name)} className={`grid w-full gap-2 border-b border-white/6 px-4 py-4 text-left transition last:border-b-0 xl:grid-cols-[10rem_12rem_minmax(0,1fr)_auto] xl:items-center xl:gap-3 ${active ? 'bg-cyan-500/[0.07]' : 'hover:bg-white/[0.025]'}`}>
+            <span className="min-w-0">
+              <span className={`block truncate text-xs font-semibold ${scheduled ? 'text-rose-200' : 'text-cyan-200'}`}>{gameTimeLabel}</span>
+              {scheduled && <span className="mt-0.5 block truncate text-[9px] text-slate-600">原文：{pdfTimelineTimeLabel(scene)}</span>}
+            </span>
+            <strong className="truncate text-sm text-slate-100">{scene.name}</strong>
+            <span className="line-clamp-2 text-xs leading-5 text-slate-400">{scene.description}</span>
+            <span className="justify-self-start rounded-full bg-violet-500/10 px-2 py-1 text-[10px] text-violet-200 xl:justify-self-end">{PDF_TIMELINE_KIND_LABELS[kind]}</span>
+          </button>
+        )
+      }
+      return (
+        <div className="space-y-4">
+          <TimelineClockEditor key={`${campaignClock.updatedAt}:${campaignClock.displayMode}`} clock={campaignClock} />
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.018] px-4 py-3">
+            <div>
+              <p className="text-xs font-semibold text-slate-200">关键时间节点 · {(analysis.timelineEvents ?? []).length}</p>
+              <p className="mt-1 text-[10px] text-slate-500">直接在本页安排事件；点击“保存节点”或确认删除后，会立即保存到账号战役并可在刷新后恢复。</p>
+            </div>
+            {onTimelineEventsChange && <button type="button" onClick={addTimelineNode} className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white"><Plus className="h-3.5 w-3.5" />新增时间节点</button>}
+          </div>
+          {timeline.length === 0 ? (
+            <EmptyState>尚未生成全书关键时间线。DM 可以直接新增时间节点，或使用“深度分析”重新分析；页段场景不会再被当作时间线展示。</EmptyState>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+              <div className="overflow-hidden rounded-2xl border border-white/8 bg-black/10">
+                <div className="hidden grid-cols-[10rem_12rem_minmax(0,1fr)_auto] gap-3 border-b border-white/8 bg-white/[0.025] px-4 py-2.5 text-xs font-semibold text-slate-500 xl:grid">
+                  <span>时间</span><span>事件</span><span>详细信息</span><span>类型</span>
+                </div>
+                {schedule.scheduled.length === 0 && (
+                  <div className="border-b border-amber-400/15 bg-amber-500/[0.035] px-3 py-3 text-[10px] leading-5 text-amber-100/80">尚未有事件绑定游戏时间。选择右侧事件并直接编辑，即可设定战役日或公历日期。</div>
+                )}
+                {schedule.scheduled.map((scene, index) => (
+                  <div key={`scheduled:${scene.name}:${index}`}>
+                    {index === schedule.currentMarkerIndex && nowMarker}
+                    {eventRow(scene, `scheduled-row:${scene.name}:${index}`, true)}
+                  </div>
+                ))}
+                {schedule.scheduled.length > 0 && schedule.currentMarkerIndex === schedule.scheduled.length && nowMarker}
+                {schedule.unscheduled.length > 0 && (
+                  <div className="border-b border-white/8 bg-white/[0.018] px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600">未绑定游戏时间 · {schedule.unscheduled.length}</div>
+                )}
+                {schedule.unscheduled.map((scene, index) => eventRow(scene, `unscheduled:${scene.name}:${index}`, false))}
+              </div>
+              {editingRecord && onTimelineEventsChange ? (
+                <TimelineInlineEditor
+                  key={`${editingTimelineIndex}:${editingRecord.name}:${editingRecord.gameTimeWorldMinute ?? ''}`}
+                  record={editingRecord}
+                  clock={campaignClock}
+                  busy={timelineCommitBusy}
+                  onSave={saveTimelineNode}
+                  onCancel={() => setEditingTimelineIndex(null)}
+                  onDelete={() => void deleteTimelineNode()}
+                />
+              ) : selected ? (
+                <TimelineEventDetail
+                  scene={selected}
+                  campaignClock={campaignClock}
+                  onEdit={onTimelineEventsChange && selectedSourceIndex >= 0 ? () => setEditingTimelineIndex(selectedSourceIndex) : undefined}
+                />
+              ) : null}
+            </div>
+          )}
+        </div>
+      )
     }
     if (activeTab === 'maps') return maps.length === 0 ? <EmptyState>没有识别到地图或可建立场景的地点。</EmptyState> : <div className="space-y-3"><div className="flex justify-end"><Link to={mapHref} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-2 text-[10px] font-semibold text-emerald-100 hover:bg-emerald-500/20"><ExternalLink className="h-3.5 w-3.5" />进入地图与场景编排</Link></div><div className="grid gap-3 lg:grid-cols-2">{maps.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200">{entry.source === 'map-candidate' ? '地图资源' : '地点索引'}</span>{entry.sceneNames.map((scene) => <span key={scene} className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{scene}</span>)}</div></KnowledgeCard>)}</div></div>
     if (activeTab === 'monsters') return monsters.length === 0 ? <EmptyState>没有识别到怪物。遭遇中的生物和怪物导入候选都会显示在这里。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{monsters.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-[9px] ${entry.automation === 'full' ? 'bg-emerald-500/10 text-emerald-200' : entry.automation === 'partial' ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-500/10 text-slate-400'}`}>{KIND_LABELS[entry.automation]}</span>{entry.encounterNames.map((encounter) => <span key={encounter} className="rounded-full bg-rose-500/10 px-2 py-1 text-[9px] text-rose-200">{encounter}</span>)}</div></KnowledgeCard>)}</div>
@@ -335,13 +710,13 @@ export default function PdfCampaignKnowledgeBase({
           <h4 className="text-sm font-semibold text-slate-100">{entry.name}</h4>
           <span className="shrink-0 text-[9px] font-semibold text-violet-300">查看详情</span>
         </div>
-        {entry.description && <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-xs leading-6 text-slate-400">{entry.description}</p>}
+        {entry.description && <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{entry.description}</p>}
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] text-cyan-200">{KIND_LABELS[entry.kind]}</span>
           <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{KIND_LABELS[entry.automation]}</span>
           {likelyCombatNpc(entry) && <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[9px] text-amber-200">可能应归类为怪物</span>}
         </div>
-        {!!entry.citations.length && <p className="mt-3 text-[10px] font-medium leading-5 text-slate-400">{citationText(entry.citations)}</p>}
+        {!!entry.citations.length && <p className="mt-3 text-xs font-medium leading-6 text-slate-400">{citationText(entry.citations)}</p>}
       </button>
     ))}</div>
   }

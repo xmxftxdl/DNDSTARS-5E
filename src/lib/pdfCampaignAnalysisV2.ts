@@ -3,6 +3,7 @@ import type {
   PdfAnalysisModelRoutingV1,
   PdfCampaignAnalysisV1,
   PdfImportCandidateKindV1,
+  PdfTimelineKindV1,
 } from './pdfCampaignAnalysis'
 
 export const PDF_CAMPAIGN_ANALYSIS_SCHEMA_VERSION = 2 as const
@@ -141,6 +142,12 @@ export interface PdfSceneRecordV2 extends PdfNamedRecordV2 {
   location: string
   npcs: string[]
   monsters: string[]
+  time?: string
+  timelineOrder?: number
+  /** DM-authored authoritative campaign minute used to place this event against the room clock. */
+  gameTimeWorldMinute?: number
+  timelineKind?: PdfTimelineKindV1
+  tags?: string[]
 }
 
 export interface PdfEncounterRecordV2 extends PdfNamedRecordV2 {
@@ -170,6 +177,7 @@ export interface PdfCampaignAnalysisV2 {
   locations: PdfNamedRecordV2[]
   factions: PdfNamedRecordV2[]
   clues: PdfClueRecordV2[]
+  timelineEvents?: PdfSceneRecordV2[]
   scenes: PdfSceneRecordV2[]
   encounters: PdfEncounterRecordV2[]
   importCandidates: PdfImportCandidateV2[]

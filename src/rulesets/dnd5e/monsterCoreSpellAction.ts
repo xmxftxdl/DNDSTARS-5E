@@ -533,10 +533,13 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
         const fall = dnd5eForcedMovementFall({
           geometry,
           target,
+          targetCombatant: prepared.state.combatants[target.id],
           to: expected.to,
         })
         const expectedFallDice = dnd5eFallingDamageDice(fall.fallDistanceFeet)
         return movement.toElevationFeet === fall.toElevationFeet &&
+          (movement.toGroundElevationFeet == null ||
+            movement.toGroundElevationFeet === fall.landingGroundElevationFeet) &&
           (movement.fallingDamageRolls?.length ?? 0) === expectedFallDice
       })
     if (!valid) {

@@ -2357,6 +2357,8 @@ export type Dnd5eD20ChoiceRerollScope = 'self-roll' | 'attack-against-self'
 export interface Dnd5eD20ChoiceRerollFeature {
   feature: RegisteredDnd5ePluginFeature
   resourceCosts: readonly { resourceKey: string; amount: number }[]
+  additionalDice: 1 | 2
+  selectionPolicy: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
 }
 
 export function dnd5eD20ChoiceRerollFeaturesForCharacter(
@@ -2386,7 +2388,7 @@ export function dnd5eD20ChoiceRerollFeaturesForCharacter(
       resourceCosts.some((cost) =>
         (character.classResources?.[cost.resourceKey]?.current ?? 0) < cost.amount)
     ) return []
-    return [{ feature, resourceCosts }]
+    return [{ feature, resourceCosts, additionalDice: mechanic.additionalDice, selectionPolicy: mechanic.selection }]
   })
 }
 

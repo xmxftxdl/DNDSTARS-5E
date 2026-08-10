@@ -26,6 +26,8 @@ export class SharedRoomService {
   readonly appendSharedPlayerActionRequest = <T>(action: T) => this.gateway.appendPlayerActionRequest(action)
   readonly loadDmUndoHistory = () => this.gateway.loadDmUndoHistory()
   readonly undoDmTransaction = (transactionId?: string) => this.gateway.undoDmTransaction(transactionId)
+  readonly recoverDmCombatToTransaction = (transactionId: string) =>
+    this.gateway.recoverDmCombatToTransaction(transactionId)
   readonly publishSharedEvent = <T>(channel: string, data: T) => this.gateway.publishEvent(channel, data)
   readonly clearSharedEventBacklog = (channels?: string[]) => this.gateway.clearEventBacklog(channels)
   readonly clearSharedResource = (name: string) => this.gateway.clearResource(name)

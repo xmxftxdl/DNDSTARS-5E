@@ -18,7 +18,8 @@ import {
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
-import { setDnd5eRoomMonsterCatalog } from './monsters'
+import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
+import { createDnd5eMonsterInstanceOverride } from './monsterInstanceOverride'
 import {
   DND5E_LONGSWORD,
   DND5E_OFFHAND_SHORTSWORD,
@@ -412,6 +413,70 @@ describe('D&D 5e map bridge', () => {
       monsterReactiveAvailableTurnKey: 'custom-resources:1:other',
       monsterReactiveUsedTurnKey: 'custom-resources:1:other',
     })
+  })
+
+  it('projects DM instance overrides into the authoritative Headless snapshot', () => {
+    const goblin = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const monster = createDnd5eMonsterInstanceOverride({
+      monster: goblin,
+      tokenId: 'edited-goblin',
+      scope: 'instance',
+    })
+    monster.armorClass = { value: 19, note: 'DM override' }
+    monster.abilities = { ...monster.abilities, str: 18, dex: 16 }
+    monster.savingThrows = { ...monster.savingThrows, str: 7 }
+    monster.skills = [
+      ...(monster.skills ?? []).filter((skill) => skill.key !== 'athletics'),
+      { key: 'athletics', name: '运动', bonus: 7 },
+    ]
+    monster.speed = { ...monster.speed, walk: 45 }
+    monster.actions = monster.actions.map((action, index) => index === 0
+      ? { ...action, name: 'DM 强化攻击' }
+      : action)
+    setDnd5eRoomMonsterCatalog([monster])
+
+    const monsterToken = token({
+      id: 'edited-goblin',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'dm-monster-override',
+      name: 'DM monster override',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'dm-monster-override',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: monsterToken.id,
+        label: monsterToken.label,
+        emoji: '',
+        color: '',
+        roll: 10,
+      }],
+    })
+
+    expect(snapshot.state.combatants[monsterToken.id]).toMatchObject({
+      statBlockId: monster.id,
+      armorClass: 19,
+      abilities: { str: 18, dex: 16 },
+      savingThrowBonuses: { str: 7 },
+      skillProficiencies: expect.arrayContaining(['athletics']),
+      speed: 45,
+      movementSpeeds: { walk: 45 },
+    })
+    expect(getDnd5eSrdMonster(snapshot.state.combatants[monsterToken.id].statBlockId!)?.actions[0]?.name)
+      .toBe('DM 强化攻击')
   })
 
   it('projects monster hover and authoritative terrain-relative airborne state', () => {

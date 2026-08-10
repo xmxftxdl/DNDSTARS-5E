@@ -21,6 +21,7 @@ import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eCombatantPairKey,
+  dnd5eCombatantCanRemainAirborne,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
@@ -46,6 +47,7 @@ import {
   type Dnd5eSpellForcedMovement,
   type Dnd5eSpellTeleportDestination,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eCombatant,
   type Dnd5eOptionalBonusDieUse,
   type Dnd5ePostD20AdjustmentUse,
   type Dnd5eSpellTargetAttackRoll,
@@ -357,12 +359,14 @@ export function dnd5eRepellingBlastPushDestination(
 export function dnd5eForcedMovementFall(input: {
   geometry?: MapGeometryState
   target: Pick<Token, 'x' | 'y' | 'elevationFeet'>
+  targetCombatant?: Dnd5eCombatant
   to: { x: number; y: number }
 }): {
   sourceElevationFeet: number
   sourceGroundElevationFeet: number
   landingGroundElevationFeet: number
   groundedAtSource: boolean
+  canRemainAirborne: boolean
   fallDistanceFeet: number
   toElevationFeet?: number
 } {
@@ -370,7 +374,9 @@ export function dnd5eForcedMovementFall(input: {
   const sourceElevationFeet = mapGeometryTokenElevation(input.geometry, input.target)
   const landingGroundElevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, input.to, 0)
   const groundedAtSource = Math.abs(sourceElevationFeet - sourceGroundElevationFeet) <= 1e-4
-  const fallDistanceFeet = groundedAtSource
+  const canRemainAirborne = input.targetCombatant != null &&
+    dnd5eCombatantCanRemainAirborne(input.targetCombatant)
+  const fallDistanceFeet = groundedAtSource && !canRemainAirborne
     ? Math.max(0, sourceElevationFeet - landingGroundElevationFeet)
     : 0
   return {
@@ -378,6 +384,7 @@ export function dnd5eForcedMovementFall(input: {
     sourceGroundElevationFeet,
     landingGroundElevationFeet,
     groundedAtSource,
+    canRemainAirborne,
     fallDistanceFeet,
     toElevationFeet: fallDistanceFeet > 0 ? landingGroundElevationFeet : undefined,
   }

@@ -2648,6 +2648,7 @@ function thunderwaveEnvironmentalImpact(input: {
     const fall = dnd5eForcedMovementFall({
       geometry: input.battlefield.geometry,
       target: targetToken,
+      targetCombatant: simulationHeadlessCombatant(target, 1),
       to: push.to,
     })
     const fallDistanceFeet = fall.fallDistanceFeet
@@ -2718,6 +2719,7 @@ function simulationThunderwaveForcedMovements(input: {
     const fall = dnd5eForcedMovementFall({
       geometry: input.battlefield!.geometry,
       target: targetToken,
+      targetCombatant: target,
       to: push.to,
     })
     const toElevationFeet = fall.toElevationFeet
@@ -2730,6 +2732,7 @@ function simulationThunderwaveForcedMovements(input: {
       to: push.to,
       distanceFeet: push.distanceFeet,
       toElevationFeet,
+      toGroundElevationFeet: fall.landingGroundElevationFeet,
       fallingDamageRolls,
     }]
   })
@@ -3622,6 +3625,7 @@ function executeHeadlessMonsterAreaAction(input: {
           const fall = dnd5eForcedMovementFall({
             geometry: input.battlefield!.geometry,
             target: targetToken,
+            targetCombatant: holder.state.combatants[target.id],
             to: push.to,
           })
           const fallingDamageRolls = dnd5eFallingDamageDice(fall.fallDistanceFeet) > 0
@@ -3635,6 +3639,7 @@ function executeHeadlessMonsterAreaAction(input: {
             to: push.to,
             distanceFeet: push.distanceFeet,
             toElevationFeet: fall.toElevationFeet,
+            toGroundElevationFeet: fall.landingGroundElevationFeet,
             fallingDamageRolls,
           }]
         })
@@ -3865,6 +3870,7 @@ function simulationCompositeForcedMovement(input: {
   const fall = dnd5eForcedMovementFall({
     geometry: input.battlefield.geometry,
     target,
+    targetCombatant: simulationHeadlessCombatant(input.target, 1),
     to: destination.to,
   })
   const fallingDice = dnd5eFallingDamageDice(fall.fallDistanceFeet)
@@ -3872,6 +3878,7 @@ function simulationCompositeForcedMovement(input: {
     targetId: input.target.id,
     ...destination,
     toElevationFeet: fall.toElevationFeet,
+    toGroundElevationFeet: fall.landingGroundElevationFeet,
     fallingDamageRolls: fallingDice > 0
       ? Array.from({ length: fallingDice }, () => input.random.die(6))
       : undefined,
@@ -4451,6 +4458,7 @@ function executeHeadlessWeaponAction(input: {
       const fall = dnd5eForcedMovementFall({
         geometry: input.battlefield.geometry,
         target: targetToken,
+        targetCombatant: occurrenceTargetCombatant,
         to: destination.to,
       })
       const fallingDice = dnd5eFallingDamageDice(fall.fallDistanceFeet)
@@ -4458,6 +4466,7 @@ function executeHeadlessWeaponAction(input: {
         targetId: occurrenceTarget.id,
         ...destination,
         toElevationFeet: fall.toElevationFeet,
+        toGroundElevationFeet: fall.landingGroundElevationFeet,
         fallingDamageRolls: fallingDice > 0
           ? Array.from({ length: fallingDice }, () => random.die(6))
           : undefined,

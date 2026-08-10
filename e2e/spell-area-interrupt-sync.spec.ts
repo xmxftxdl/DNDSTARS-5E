@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { createD20RollConfirmationInterrupt } from '../src/lib/rollConfirmation'
 
 const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
 const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
@@ -1008,5 +1009,112 @@ test('核心持续区域由 DM 原子创建，并在玩家刷新和重复投递�
   expect(rejoined.maps.find((map) => map.id === mapId)?.dnd5ePluginAreas).toContainEqual(expect.objectContaining({
     sourceKind: 'core-spell', coreSpellId: 'moonbeam', anchorCell: { col: 5, row: 2 },
   }))
+  await context.close()
+})
+
+test('投骰修正只在玩家左侧显示，玩家决定后 Host 无需 DM 复核即自动结算', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `roll-adjustment-drawer-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, [])
+  await putState(request, 'characters', {
+    characters: [{ ...seeded.character, inspiration: 1 }],
+    selectedId: seeded.character.id,
+    updatedAt: Date.now(),
+  })
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    expect(dm.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 }),
+    expect(player.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 }),
+  ])
+  await useDeterministicBrowserRandom(dm, 0.7)
+  const interrupt = createD20RollConfirmationInterrupt({
+    mapId, combatId: `${mapId}:combat`, rollId: `${mapId}:attack-roll`,
+    label: '跨端攻击检定', targetName: '跨端测试食人魔', originalValue: 7,
+    rollerCharacterId: seeded.character.id,
+    eligibleModifiers: [{
+      characterId: seeded.character.id, featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      modifierKind: 'choice-reroll', sourceTokenId: seeded.actorToken.id, rerollScope: 'self-roll',
+      additionalDice: 1, selectionPolicy: 'owner-chooses',
+      resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }], decisionRequired: true,
+    }],
+    now: Date.now(),
+  })
+  await putState(request, 'combat-interrupts', {
+    mapId, interrupts: [interrupt], revision: 1, updatedAt: Date.now(),
+  })
+
+  const drawer = player.getByTestId('d20-roll-confirmation')
+  await expect(drawer).toBeVisible({ timeout: 20_000 })
+  await expect(drawer).toHaveAttribute('data-layout', 'left-drawer')
+  await expect(drawer).toContainText('激励')
+  await expect(drawer).toContainText('额外投掷 1 枚 d20')
+  await expect(drawer).not.toContainText('2 个结果中采用')
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/\d+ 秒/)
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
+  const box = await drawer.boundingBox()
+  expect(box?.x).toBeLessThan(20)
+  expect(box?.width).toBeLessThan(400)
+
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/2 秒|1 秒/, { timeout: 9_000 })
+  await drawer.getByTestId('d20-roll-contribute').click()
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
+  await expect(drawer.getByTestId('d20-result-options')).toBeVisible({ timeout: 30_000 })
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/10 秒|9 秒/)
+  await expect(drawer.locator('[data-testid^="d20-result-option-"]')).toHaveCount(2)
+  await drawer.getByTestId('d20-result-option-1').click()
+  await expect(drawer).toHaveCount(0, { timeout: 30_000 })
+  await expect.poll(async () => {
+    const state = await getState<{
+      interrupts: Array<{ id: string; status: string; response?: { choiceReroll?: { selectionPolicy?: string } } }>
+    }>(request, 'combat-interrupts')
+    const settled = state.interrupts.find((entry) => entry.id === interrupt.id)
+    return `${settled?.status}:${settled?.response?.choiceReroll?.selectionPolicy ?? ''}`
+  }, { timeout: 30_000 }).toBe('done:owner-chooses')
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return (state.characters[0] as ResourceCharacter & { inspiration?: number }).inspiration
+  }).toBe(0)
+
+  const charactersAfterUse = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+  await putState(request, 'characters', {
+    ...charactersAfterUse,
+    characters: [{ ...charactersAfterUse.characters[0], inspiration: 1 }],
+  })
+  const timeoutInterrupt = createD20RollConfirmationInterrupt({
+    mapId, combatId: `${mapId}:combat`, rollId: `${mapId}:timeout-roll`,
+    label: '超时攻击检定', targetName: '跨端测试食人魔', originalValue: 11,
+    rollerCharacterId: seeded.character.id,
+    eligibleModifiers: [{
+      characterId: seeded.character.id, featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      modifierKind: 'choice-reroll', sourceTokenId: seeded.actorToken.id, rerollScope: 'self-roll',
+      additionalDice: 1, selectionPolicy: 'owner-chooses',
+      resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }], decisionRequired: true,
+    }],
+    now: Date.now(),
+  })
+  await putState(request, 'combat-interrupts', {
+    mapId, interrupts: [timeoutInterrupt], revision: 20, updatedAt: Date.now(),
+  })
+  await expect(drawer).toBeVisible({ timeout: 20_000 })
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/10|9/)
+  await expect(drawer).toHaveCount(0, { timeout: 15_000 })
+  await expect.poll(async () => {
+    const state = await getState<{
+      interrupts: Array<{ id: string; status: string; rollbackReason?: string; response?: { finalValue?: number; choiceReroll?: unknown } }>
+    }>(request, 'combat-interrupts')
+    const settled = state.interrupts.find((entry) => entry.id === timeoutInterrupt.id)
+    if (settled?.status === 'rolled-back') return settled.rollbackReason === 'timeout'
+    return settled?.status === 'done' && settled.response?.finalValue === 11 && settled.response.choiceReroll == null
+  }, { timeout: 20_000 }).toBe(true)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return (state.characters[0] as ResourceCharacter & { inspiration?: number }).inspiration
+  }).toBe(1)
   await context.close()
 })

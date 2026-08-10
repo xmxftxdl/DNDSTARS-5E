@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { CheckCircle2, Clock3, Dices, EyeOff, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CheckCircle2, Clock3, Dices, EyeOff } from 'lucide-react'
 import type { CombatInterruptByKind } from '../../lib/combatInterruptProtocol'
 
 interface D20RollConfirmationOverlayProps {
@@ -13,8 +13,34 @@ interface D20RollConfirmationOverlayProps {
     replacementValue?: number
     direction?: 'add' | 'subtract'
     choiceDecision?: 'use' | 'decline'
+    decline?: boolean
+    selectedIndex?: number
   }) => void | Promise<void>
   onContinue: (acceptedContributionId?: string, dmOverrideValue?: number) => void | Promise<void>
+}
+
+function featurePresentation(input: {
+  featureLabel: string
+  modifierKind?: 'replace-d20' | 'adjust-d20' | 'choice-reroll'
+  dieSides?: number
+  direction?: 'add' | 'subtract'
+  additionalDice?: 1 | 2
+}) {
+  if (input.modifierKind === 'adjust-d20') return {
+    kind: '奖励骰',
+    hint: `投掷 d${input.dieSides ?? '?'}，${input.direction === 'subtract' ? '从本次结果中减去' : '加入本次结果'}`,
+    classes: 'border-amber-300/35 bg-amber-500/10 text-amber-100',
+  }
+  if (input.modifierKind === 'choice-reroll') return {
+    kind: /幸运|luck/i.test(input.featureLabel) ? '幸运' : '重掷',
+    hint: `额外投掷 ${input.additionalDice ?? 1} 枚 d20`,
+    classes: 'border-violet-300/35 bg-violet-500/12 text-violet-100',
+  }
+  return {
+    kind: /预言|portent/i.test(input.featureLabel) ? '预言骰' : '替换结果',
+    hint: '使用该特性保存的结果替换本次 d20',
+    classes: 'border-sky-300/35 bg-sky-500/10 text-sky-100',
+  }
 }
 
 export default function D20RollConfirmationOverlay({
@@ -25,327 +51,189 @@ export default function D20RollConfirmationOverlay({
   onContribute,
   onContinue,
 }: D20RollConfirmationOverlayProps) {
-  const contributions = useMemo(
-    () => [...(interrupt.contributions ?? [])].sort((left, right) => left.createdAt - right.createdAt),
-    [interrupt.contributions],
-  )
-  const eligibleModifiers = Array.isArray(interrupt.payload.eligibleModifiers)
-    ? interrupt.payload.eligibleModifiers
-    : []
+  const eligibleModifiers = useMemo(() => Array.isArray(interrupt.payload.eligibleModifiers)
+    ? interrupt.payload.eligibleModifiers : [], [interrupt.payload.eligibleModifiers])
   const ownEligibleFeatures = playerCharacter
-    ? eligibleModifiers.filter((entry) => entry.characterId === playerCharacter.id)
-    : []
-  const requiredChoiceCharacterIds = new Set(eligibleModifiers
-    .filter((entry) => entry.modifierKind === 'choice-reroll' && entry.decisionRequired === true)
-    .map((entry) => entry.characterId))
-  const pendingRequiredDecision = [...requiredChoiceCharacterIds].some((characterId) =>
-    !contributions.some((entry) => entry.kind === 'choice-reroll' && entry.characterId === characterId))
-  const requiredUseContribution = contributions.find((entry) =>
-    entry.kind === 'choice-reroll' && entry.decision === 'use' &&
-    requiredChoiceCharacterIds.has(entry.characterId))
-  const [selectedContributionId, setSelectedContributionId] = useState('')
+    ? eligibleModifiers.filter((entry) => entry.characterId === playerCharacter.id) : []
+  const ownContribution = playerCharacter
+    ? interrupt.contributions?.find((entry) => entry.characterId === playerCharacter.id) : undefined
   const [selectedFeatureId, setSelectedFeatureId] = useState(ownEligibleFeatures[0]?.featureId ?? '')
   const [replacementValue, setReplacementValue] = useState('')
   const [dmOverrideValue, setDmOverrideValue] = useState(String(interrupt.payload.originalValue))
   const [submitting, setSubmitting] = useState(false)
-  const [pendingChoiceDecision, setPendingChoiceDecision] = useState<'use' | 'decline' | null>(null)
-  const isSecretDmRoll = interrupt.payload.visibility === 'dm-only' &&
-    interrupt.payload.allowDmOverride === true
+  const [clockNow, setClockNow] = useState(() => Date.now())
+  const [timedOutInterruptId, setTimedOutInterruptId] = useState('')
+  const timeoutHandledRef = useRef('')
+  const selectedFeature = ownEligibleFeatures.find((entry) => entry.featureId === selectedFeatureId) ?? ownEligibleFeatures[0]
+  const rollOptions = ownContribution?.kind === 'choice-reroll' &&
+    interrupt.payload.rollOptions?.contributionId === ownContribution.id
+    ? interrupt.payload.rollOptions.values : undefined
+  const requiresResultChoice = (selectedFeature?.selectionPolicy ?? 'owner-chooses') === 'owner-chooses' && !!rollOptions
+  const isSecretDmRoll = interrupt.payload.visibility === 'dm-only' && interrupt.payload.allowDmOverride === true
+  const deadline = !isSecretDmRoll ? interrupt.expiresAt ?? interrupt.createdAt + 10_000 : undefined
+  const remainingMs = deadline == null ? 0 : Math.max(0, deadline - clockNow)
+  const countdownPercent = deadline == null ? 0 : Math.max(0, Math.min(100,
+    remainingMs / Math.max(1, deadline - interrupt.createdAt) * 100))
+  const parsedOverride = Number(dmOverrideValue)
+  const overrideValid = Number.isInteger(parsedOverride) && parsedOverride >= 1 && parsedOverride <= 20
 
-  const ownContribution = playerCharacter
-    ? contributions.find((entry) => entry.characterId === playerCharacter.id)
-    : undefined
-  const effectiveSelectedContributionId = contributions.some((entry) => entry.id === selectedContributionId)
-    ? selectedContributionId
-    : ''
-  const selectedContribution = contributions.find((entry) => entry.id === effectiveSelectedContributionId)
-  const selectedFeature = ownEligibleFeatures.find((entry) => entry.featureId === selectedFeatureId)
-  const selectedFeatureAdjusts = selectedFeature?.modifierKind === 'adjust-d20'
-  const selectedFeatureChoiceReroll = selectedFeature?.modifierKind === 'choice-reroll'
-  const parsedDmOverride = Number(dmOverrideValue)
-  const dmOverrideValid = Number.isInteger(parsedDmOverride) && parsedDmOverride >= 1 && parsedDmOverride <= 20
-  const finalValue = isSecretDmRoll && dmOverrideValid
-    ? parsedDmOverride
-    : selectedContribution?.kind === 'replace-d20'
-      ? selectedContribution.replacementValue
-      : interrupt.payload.originalValue
+  useEffect(() => {
+    if (deadline == null) return
+    const updateClock = window.setInterval(() => setClockNow(Date.now()), 100)
+    const timeout = window.setTimeout(() => {
+      const timeoutKey = `${interrupt.id}:${deadline}`
+      if (timeoutHandledRef.current === timeoutKey) return
+      timeoutHandledRef.current = timeoutKey
+      setTimedOutInterruptId(interrupt.id)
+      const result = isDM
+        ? onContinue()
+        : playerCharacter && ownEligibleFeatures.length > 0
+          ? onContribute({ featureId: '', featureLabel: '', decline: true })
+          : undefined
+      if (result) void Promise.resolve(result).catch(() => undefined)
+    }, Math.max(0, deadline - Date.now()))
+    return () => { window.clearInterval(updateClock); window.clearTimeout(timeout) }
+  }, [deadline, interrupt.id, isDM, onContinue, onContribute, ownEligibleFeatures.length, playerCharacter])
 
-  const submitContribution = async () => {
-    const parsedValue = Number(replacementValue)
-    if (!selectedFeature) return
-    if (!selectedFeatureAdjusts && !selectedFeatureChoiceReroll &&
-      (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 20)) return
+  // Public adjustments belong to the owning player. The DM Host settles them
+  // automatically in the background and never receives a second review dialog.
+  if (timedOutInterruptId === interrupt.id || (isDM && !isSecretDmRoll) ||
+    (!isDM && (!playerCharacter || ownEligibleFeatures.length < 1))) return null
+
+  const submit = async (decline = false, selectedIndex?: number) => {
+    if (!selectedFeature && !decline) return
+    const parsedReplacement = Number(replacementValue)
+    if (!decline && selectedFeature?.modifierKind !== 'adjust-d20' &&
+      selectedFeature?.modifierKind !== 'choice-reroll' &&
+      (!Number.isInteger(parsedReplacement) || parsedReplacement < 1 || parsedReplacement > 20)) return
     setSubmitting(true)
     try {
       await onContribute({
-        featureId: selectedFeature.featureId,
-        featureLabel: selectedFeature.featureLabel,
-        ...(selectedFeatureAdjusts
-          ? { direction: selectedFeature.direction }
-          : selectedFeatureChoiceReroll
-            ? { choiceDecision: 'use' as const }
-          : { replacementValue: parsedValue }),
+        featureId: selectedFeature?.featureId ?? '',
+        featureLabel: selectedFeature?.featureLabel ?? '',
+        ...(decline ? { decline: true } : selectedFeature?.modifierKind === 'choice-reroll'
+          ? { choiceDecision: 'use' as const }
+          : selectedFeature?.modifierKind === 'adjust-d20'
+            ? { direction: selectedFeature.direction }
+            : { replacementValue: parsedReplacement }),
+        ...(selectedIndex != null ? { selectedIndex } : {}),
       })
-      if (selectedFeatureChoiceReroll) setPendingChoiceDecision('use')
-    } catch {
-      if (selectedFeatureChoiceReroll) setPendingChoiceDecision(null)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const submitChoiceDecision = async (decision: 'use' | 'decline') => {
-    if (!selectedFeature || !selectedFeatureChoiceReroll) return
-    setSubmitting(true)
-    try {
-      await onContribute({
-        featureId: selectedFeature.featureId,
-        featureLabel: selectedFeature.featureLabel,
-        choiceDecision: decision,
-      })
-      setPendingChoiceDecision(decision)
-    } catch {
-      setPendingChoiceDecision(null)
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
-      data-testid="d20-roll-confirmation"
-      role="dialog"
-      aria-modal="true"
-      aria-label={isSecretDmRoll ? 'DM 暗骰确认' : 'd20 结果调整'}
-    >
-      <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-violet-300/25 bg-void-950 shadow-[0_28px_100px_rgba(0,0,0,0.7)]">
-        <div className="border-b border-white/10 bg-gradient-to-r from-violet-500/20 via-indigo-500/10 to-transparent px-6 py-5">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-200">
-              {isSecretDmRoll ? <EyeOff className="h-6 w-6" /> : <Dices className="h-6 w-6" />}
+    <div className="pointer-events-none fixed inset-y-0 left-0 z-[120] flex w-[min(23rem,calc(100vw-1rem))] items-center p-3">
+      <section
+        className="pointer-events-auto max-h-[min(38rem,calc(100vh-1.5rem))] w-full overflow-y-auto rounded-2xl border border-violet-300/30 bg-void-950/96 shadow-[0_22px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl"
+        data-testid="d20-roll-confirmation"
+        data-layout="left-drawer"
+        role="dialog"
+        aria-label={isSecretDmRoll ? 'DM 暗骰确认' : 'd20 结果调整'}
+      >
+        <header className="border-b border-white/10 bg-gradient-to-r from-violet-500/20 to-transparent p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/20 text-violet-200">
+              {isSecretDmRoll ? <EyeOff className="h-5 w-5" /> : <Dices className="h-5 w-5" />}
             </div>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">
-                {isSecretDmRoll ? '暗骰待 DM 确认' : 'd20 结果 · 反应窗口'}
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-300">
+                {isSecretDmRoll ? 'DM 暗骰' : '投骰修正'}
               </p>
-              <h2 className="mt-1 truncate text-xl font-bold text-slate-50">{interrupt.payload.label}</h2>
-              {interrupt.payload.targetName && (
-                <p className="mt-1 text-sm text-slate-400">目标：{interrupt.payload.targetName}</p>
-              )}
+              <h2 className="mt-0.5 truncate text-base font-bold text-slate-50">{interrupt.payload.label}</h2>
+              {interrupt.payload.targetName && <p className="truncate text-xs text-slate-400">目标：{interrupt.payload.targetName}</p>}
             </div>
-            <div className="ml-auto rounded-2xl border border-violet-300/20 bg-black/25 px-4 py-2 text-center">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">原始 d20</p>
-              <p className="text-3xl font-black tabular-nums text-violet-100">
-                {interrupt.payload.originalValue}
-              </p>
+            <div className="rounded-xl border border-violet-300/20 bg-black/25 px-3 py-1.5 text-center">
+              <p className="text-[9px] text-slate-500">原始 d20</p>
+              <p className="text-2xl font-black tabular-nums text-violet-100">{interrupt.payload.originalValue}</p>
             </div>
           </div>
-        </div>
+        </header>
 
-        <div className="space-y-5 px-6 py-5">
-          <div className="flex items-center gap-2 rounded-xl border border-amber-300/15 bg-amber-500/8 px-3 py-2 text-xs text-amber-100/80">
-            <Clock3 className="h-4 w-4 shrink-0" />
-            {isSecretDmRoll
-              ? '暗骰不会向玩家公开。DM 可修正骰面后继续，最终值会写入权威 RollLedger。'
-              : isDM
-                ? requiredChoiceCharacterIds.size > 0
-                  ? '相关玩家必须明确选择使用或不使用。玩家作出决定前，DM 不能继续本次结算。'
-                  : '只有拥有已声明改骰特性的玩家可以提交结果；DM 可采用一项声明，或保留原始骰值继续。'
-                : ownEligibleFeatures.length > 0
-                  ? ownEligibleFeatures.some((entry) => entry.modifierKind === 'choice-reroll' && entry.decisionRequired)
-                    ? '你拥有可用于本次 d20 的选择式重掷能力。请明确选择“使用能力”或“不使用”；在你决定前结算保持暂停。'
-                    : '你拥有可改变本次 d20 的特性。若不使用，无需操作，DM 可以直接继续。'
-                  : '你没有可用于本次 d20 的特性，请等待 DM 继续结算。'}
+        {!isSecretDmRoll && deadline != null && (
+          <div className="border-b border-white/8 px-4 py-2" data-testid="d20-countdown">
+            <div className="mb-1 flex items-center justify-between text-[10px] text-slate-400">
+              <span>未选择将自动跳过</span>
+              <span className="font-bold tabular-nums text-violet-200">{Math.ceil(remainingMs / 1000)} 秒</span>
+            </div>
+            <div className="h-1 overflow-hidden rounded-full bg-white/8">
+              <div data-testid="d20-countdown-bar" className="h-full rounded-full bg-gradient-to-r from-violet-500 to-sky-300 transition-[width] duration-100 ease-linear"
+                style={{ width: `${countdownPercent}%` }} />
+            </div>
           </div>
+        )}
 
-          {isDM ? (
-            <div className="space-y-3">
-              {isSecretDmRoll ? (
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    DM 最终暗骰值
-                  </span>
-                  <input
-                    data-testid="d20-dm-override"
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={dmOverrideValue}
-                    onChange={(event) => setDmOverrideValue(event.target.value)}
-                    className="w-full rounded-xl border border-fuchsia-400/25 bg-black/25 px-4 py-3 text-center text-2xl font-black tabular-nums text-fuchsia-100 outline-none focus:border-fuchsia-300/60"
-                  />
-                </label>
-              ) : (
-                <>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    DM 选择最终结果
-                  </p>
-                  <label className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 ${effectiveSelectedContributionId === '' ? 'border-violet-400/45 bg-violet-500/12' : 'border-white/10 bg-white/[0.03]'}`}>
-                    <input
-                      type="radio"
-                      name="d20-confirmation-result"
-                      checked={effectiveSelectedContributionId === ''}
-                      onChange={() => setSelectedContributionId('')}
-                    />
-                    <div>
-                      <p className="font-semibold text-slate-100">保留原始投掷</p>
-                      <p className="text-xs text-slate-500">采用 {interrupt.payload.originalValue}</p>
-                    </div>
-                  </label>
-                  {contributions.map((entry) => (
-                    <label key={entry.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 ${effectiveSelectedContributionId === entry.id ? 'border-emerald-400/45 bg-emerald-500/10' : 'border-white/10 bg-white/[0.03]'}`}>
-                      <input
-                        type="radio"
-                        name="d20-confirmation-result"
-                        checked={effectiveSelectedContributionId === entry.id}
-                        onChange={() => setSelectedContributionId(entry.id)}
-                      />
-                      <Sparkles className="h-4 w-4 text-emerald-300" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold text-slate-100">
-                          {entry.characterName} · {entry.featureLabel}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {entry.kind === 'adjust-d20'
-                            ? `声明${entry.direction === 'add' ? '增加' : '降低'}本次总值；调整骰由 Host 掷`
-                            : entry.kind === 'choice-reroll'
-                              ? entry.decision === 'use'
-                                ? '玩家选择使用；额外 d20 由 Host 投掷并采用有利结果'
-                                : '玩家选择不使用，本次保留原始 d20'
-                            : `声明将 d20 替换为 ${entry.replacementValue}`}
-                        </p>
-                      </div>
-                      <span className="text-2xl font-black tabular-nums text-emerald-200">
-                        {entry.kind === 'adjust-d20'
-                          ? entry.direction === 'add' ? '+' : '−'
-                          : entry.kind === 'choice-reroll'
-                            ? entry.decision === 'use' ? '使用' : '放弃'
-                          : entry.replacementValue}
-                      </span>
-                    </label>
-                  ))}
-                  {contributions.length === 0 && (
-                    <p className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-center text-sm text-slate-500">
-                      尚无玩家提交特性声明。DM 可以保留原始结果继续。
-                    </p>
-                  )}
-                </>
-              )}
-              <button
-                type="button"
-                disabled={busy || pendingRequiredDecision || (isSecretDmRoll && !dmOverrideValid)}
-                onClick={() => void onContinue(
-                  isSecretDmRoll
-                    ? undefined
-                    : requiredUseContribution?.id || effectiveSelectedContributionId || undefined,
-                  isSecretDmRoll ? parsedDmOverride : undefined,
-                )}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-3 font-bold text-white transition hover:bg-violet-400 disabled:cursor-wait disabled:opacity-50"
-                data-testid="d20-roll-continue"
-              >
-                <CheckCircle2 className="h-5 w-5" />
-                {busy
-                  ? '正在提交…'
-                  : pendingRequiredDecision
-                    ? '等待相关玩家决定是否使用重掷能力'
-                    : `采用 ${finalValue} 并继续结算`}
+        <div className="space-y-3 p-4">
+          {isSecretDmRoll ? (
+            <>
+              <p className="flex gap-2 rounded-lg border border-fuchsia-300/15 bg-fuchsia-500/8 p-2 text-xs text-fuchsia-100/80">
+                <Clock3 className="h-4 w-4 shrink-0" />暗骰只在 DM 端显示；确认后直接写入权威账本。
+              </p>
+              <input data-testid="d20-dm-override" type="number" min={1} max={20}
+                value={dmOverrideValue} onChange={(event) => setDmOverrideValue(event.target.value)}
+                className="w-full rounded-xl border border-fuchsia-400/25 bg-black/25 px-4 py-3 text-center text-2xl font-black text-fuchsia-100 outline-none focus:border-fuchsia-300/60" />
+              <button type="button" disabled={busy || !overrideValid}
+                onClick={() => void onContinue(undefined, parsedOverride)} data-testid="d20-roll-continue"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 font-bold text-white disabled:opacity-45">
+                <CheckCircle2 className="h-4 w-4" />{busy ? '正在提交…' : '确认并继续'}
               </button>
-            </div>
-          ) : playerCharacter && ownEligibleFeatures.length > 0 ? (
-            <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                {playerCharacter.name} 的可用特性
-              </p>
+            </>
+          ) : (
+            <>
               {ownContribution && (
-                <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">
-                  已提交：{ownContribution.featureLabel}，
-                  {ownContribution.kind === 'adjust-d20'
-                    ? `等待 Host 掷骰并${ownContribution.direction === 'add' ? '增加' : '降低'}本次总值。`
-                    : ownContribution.kind === 'choice-reroll'
-                      ? ownContribution.decision === 'use'
-                        ? '已选择使用，等待 Host 投出额外 d20。'
-                        : '已选择不使用，本次保留原始结果。'
-                    : `替换为 ${ownContribution.replacementValue}。`}
-                  再次提交会更新本次声明。
+                <p className="rounded-lg border border-emerald-400/25 bg-emerald-500/10 p-2 text-xs text-emerald-100" data-testid="d20-player-decision-sent">
+                  {ownContribution.kind === 'decline-d20' ? '已选择不更改点数，Host 正在继续结算。' : requiresResultChoice ? 'Host 已完成额外投骰，请选择最终采用的结果。' : `已选择「${ownContribution.featureLabel}」，Host 正在自动结算。`}
+                </p>
+              )}
+              {requiresResultChoice && rollOptions && (
+                <div className="grid grid-cols-3 gap-2" data-testid="d20-result-options">
+                  {rollOptions.map((value, index) => (
+                    <button key={`${index}:${value}`} type="button" onClick={() => void submit(false, index)}
+                      data-testid={`d20-result-option-${index}`}
+                      className="rounded-xl border border-violet-300/25 bg-violet-500/12 px-2 py-3 text-center hover:bg-violet-500/25">
+                      <span className="block text-[10px] text-slate-400">{index === 0 ? '原始结果' : `新骰 ${index}`}</span>
+                      <span className="text-2xl font-black tabular-nums text-violet-100">{value}</span>
+                    </button>
+                  ))}
                 </div>
               )}
-              <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
-                <label className="space-y-1">
-                  <span className="text-xs text-slate-400">能力／特性</span>
-                  <select
-                    value={selectedFeatureId}
-                    onChange={(event) => setSelectedFeatureId(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60"
-                  >
-                    {ownEligibleFeatures.map((feature) => (
-                      <option key={feature.featureId} value={feature.featureId}>
-                        {feature.featureLabel}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {selectedFeatureAdjusts ? (
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-300">
-                    Host 掷 d{selectedFeature?.dieSides}，并
-                    {selectedFeature?.direction === 'add' ? '增加' : '降低'}总值
-                  </div>
-                ) : selectedFeatureChoiceReroll ? (
-                  <div className="rounded-xl border border-violet-400/20 bg-violet-500/8 px-3 py-2.5 text-sm text-violet-100">
-                    使用后由 Host 投出额外 d20；自己的投掷取较高值，针对你的攻击取较低值。
-                  </div>
-                ) : (
-                  <label className="space-y-1">
-                    <span className="text-xs text-slate-400">替换点数</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={replacementValue}
-                      onChange={(event) => setReplacementValue(event.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60"
-                    />
-                  </label>
-                )}
-              </div>
-              <div className={selectedFeatureChoiceReroll ? 'grid grid-cols-2 gap-3' : ''}>
-                <button
-                  type="button"
-                  disabled={submitting || !selectedFeatureId || (!selectedFeatureAdjusts &&
-                    !selectedFeatureChoiceReroll &&
-                    (Number(replacementValue) < 1 || Number(replacementValue) > 20))}
-                  onClick={() => void submitContribution()}
-                  className="w-full rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-3 font-semibold text-violet-100 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-                  data-testid="d20-roll-contribute"
-                >
-                  {submitting
-                    ? '正在提交…'
-                    : selectedFeatureChoiceReroll && pendingChoiceDecision === 'use'
-                      ? '已选择使用，等待 Host'
-                      : selectedFeatureChoiceReroll
-                        ? '使用能力'
-                        : '提交给 DM 审核'}
-                </button>
-                {selectedFeatureChoiceReroll && selectedFeature && (
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => void submitChoiceDecision('decline')}
-                    className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 font-semibold text-slate-300 hover:bg-white/[0.08] disabled:opacity-40"
-                    data-testid="d20-roll-decline"
-                  >
-                    {pendingChoiceDecision === 'decline' ? '已选择不使用，等待 Host' : '不使用'}
+              <div className="space-y-1.5" data-testid="d20-feature-options" role="radiogroup" aria-label="可用投骰特性">
+                <span className="text-xs text-slate-400">选择要使用的特性</span>
+                {ownEligibleFeatures.map((feature) => {
+                  const presentation = featurePresentation(feature)
+                  const selected = selectedFeature?.featureId === feature.featureId
+                  return <button key={feature.featureId} type="button" role="radio" aria-checked={selected}
+                    disabled={requiresResultChoice} onClick={() => setSelectedFeatureId(feature.featureId)}
+                    data-testid={`d20-feature-option-${feature.featureId}`}
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${presentation.classes} ${selected ? 'ring-2 ring-white/25' : 'opacity-75 hover:opacity-100'}`}>
+                    <span className="min-w-0"><strong className="block truncate text-sm">{feature.featureLabel}</strong>
+                      <span className="block truncate text-[10px] opacity-70">{presentation.hint}</span></span>
+                    <span className="shrink-0 rounded-full border border-current/20 px-2 py-0.5 text-[9px] font-bold">{presentation.kind}</span>
                   </button>
-                )}
+                })}
               </div>
-            </div>
-          ) : (
-            <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-5 text-center text-sm text-slate-400">
-              当前没有可用于本次投掷的特性，等待 DM 继续。
-            </p>
+              {selectedFeature?.modifierKind !== 'adjust-d20' && selectedFeature?.modifierKind !== 'choice-reroll' && (
+                <label className="block space-y-1"><span className="text-xs text-slate-400">替换点数</span>
+                  <input type="number" min={1} max={20} value={replacementValue}
+                    onChange={(event) => setReplacementValue(event.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60" />
+                </label>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" disabled={submitting || requiresResultChoice} onClick={() => void submit(true)} data-testid="d20-roll-decline"
+                  className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:opacity-40">
+                  不使用
+                </button>
+                <button type="button" disabled={submitting || !selectedFeature || requiresResultChoice} onClick={() => void submit()} data-testid="d20-roll-contribute"
+                  className="rounded-xl border border-violet-400/30 bg-violet-500/18 px-3 py-2.5 text-sm font-semibold text-violet-100 hover:bg-violet-500/28 disabled:opacity-40">
+                  {submitting ? '提交中…' : `使用${selectedFeature?.featureLabel ?? '特性'}`}
+                </button>
+              </div>
+            </>
           )}
         </div>
-      </div>
+      </section>
     </div>
   )
 }

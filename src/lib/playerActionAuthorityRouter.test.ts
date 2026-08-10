@@ -3,6 +3,7 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import {
   canSubmitPlayerCombatAction,
+  canSubmitPlayerSpellAction,
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
   type PlayerActionAuthorityAction,
@@ -134,6 +135,26 @@ describe('player action authority router', () => {
     )).toEqual({ status: 'rejected', reason: 'stale-combat' })
   })
 
+  it.each(['dnd5e-spell-cast', 'dnd5e-adjudicated-spell'])(
+    'allows an owned %s request outside combat without weakening combat turns',
+    (type) => {
+      expect(preflightPlayerActionAuthority(
+        makeAction({ type, combatId: undefined }),
+        makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+      ).status).toBe('accepted')
+
+      expect(preflightPlayerActionAuthority(
+        makeAction({ type, combatId: 'ended-combat' }),
+        makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+      )).toEqual({ status: 'rejected', reason: 'stale-combat' })
+
+      expect(preflightPlayerActionAuthority(
+        makeAction({ type, actorTokenId: 'hero-token', characterId: 'hero', round: 2 }),
+        makeContext({ round: 1 }),
+      )).toEqual({ status: 'rejected', reason: 'stale-turn' })
+    },
+  )
+
   it('rejects actions that do not match the current initiative actor', () => {
     const result = preflightPlayerActionAuthority(
       makeAction({ round: 2 }),
@@ -261,5 +282,42 @@ describe('player action authority router', () => {
     expect(canSubmitPlayerCombatAction({ ...base, playerCharacter: makeCharacter({ id: 'other' }) })).toBe(false)
     expect(canSubmitPlayerCombatAction({ ...base, characters: [makeCharacter({ currentHp: 0 })] })).toBe(false)
     expect(canSubmitPlayerCombatAction({ ...base, currentInitiativeToken: makeToken({ type: 'enemy' }) })).toBe(false)
+  })
+
+  it('allows an alive owned caster outside combat and uses strict initiative authority in combat', () => {
+    const base = {
+      activeMap: makeMap(),
+      mode: 'player' as const,
+      playerCombatLocked: false,
+      combatActive: false,
+      combatActiveSnapshot: false,
+      turnCharacter: null,
+      currentInitiativeToken: undefined,
+      pendingAction: null,
+      playerCharacter: makeCharacter(),
+      characters: [makeCharacter()],
+    }
+
+    expect(canSubmitPlayerSpellAction(base)).toBe(true)
+    expect(canSubmitPlayerSpellAction({ ...base, playerCombatLocked: true })).toBe(true)
+    expect(canSubmitPlayerSpellAction({ ...base, combatActiveSnapshot: true })).toBe(false)
+    expect(canSubmitPlayerSpellAction({ ...base, pendingAction: { id: 'action-1' } })).toBe(false)
+    expect(canSubmitPlayerSpellAction({ ...base, characters: [makeCharacter({ currentHp: 0 })] })).toBe(false)
+    expect(canSubmitPlayerSpellAction({ ...base, playerCharacter: makeCharacter({ id: 'other' }) })).toBe(false)
+
+    expect(canSubmitPlayerSpellAction({
+      ...base,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      turnCharacter: makeCharacter(),
+      currentInitiativeToken: makeToken(),
+    })).toBe(true)
+    expect(canSubmitPlayerSpellAction({
+      ...base,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      turnCharacter: makeCharacter(),
+      currentInitiativeToken: makeToken({ type: 'enemy' }),
+    })).toBe(false)
   })
 })
