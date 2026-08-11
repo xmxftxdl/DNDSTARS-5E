@@ -14,19 +14,17 @@ function renderPage(campaignId = 'campaign-01') {
 }
 
 describe('DmPrepAssistantPage', () => {
-  it('按 PDF 解析、场景制作、开团记录和战役导出组织备团流程', () => {
+  it('默认进入本次备团，并把长页面收拢为五类工作区', () => {
     const html = renderPage()
 
-    expect(html).toContain('导入模组并建立 AI 战役索引')
-    expect(html).toContain('地图与场景制作')
-    expect(html).toContain('语音转录与持续战役记忆')
-    expect(html).toContain('导出完整战役设置')
-    expect(html).toContain('人物关系图')
-    expect(html).toContain('人物形象与档案')
-    expect(html).toContain('关键线索')
-    expect(html).toContain('DM 可以编辑或删除结果')
-    expect(html).toContain('地图智能识别与 UVTT 转换')
-    expect(html).toContain('导出含原图的 UVTT')
+    expect(html).toContain('备团工作台')
+    expect(html).toContain('本次备团')
+    expect(html).toContain('剧情')
+    expect(html).toContain('世界')
+    expect(html).toContain('资源')
+    expect(html).toContain('团务复盘')
+    expect(html).toContain('备团就绪度')
+    expect(html).toContain('先建立这场战役的备团档案')
   })
 
   it('把现有工具入口绑定到当前战役', () => {
@@ -38,23 +36,14 @@ describe('DmPrepAssistantPage', () => {
     expect(html).toContain('/campaign/campaign%20with%20spaces/communications')
   })
 
-  it('显示已接通的 PDF 分析入口，并保留云端与语音能力的明确边界', () => {
+  it('把 AI 导入与任务收拢到独立复核入口', () => {
     const html = renderPage()
 
     expect(html).not.toContain('本地免费模型')
     expect(html).not.toContain('Ollama')
-    expect(html).toContain('AI 执行方式')
-    expect(html).toContain('使用自己的 API Key')
-    expect(html).toContain('选择 PDF')
-    expect(html).toContain('点击选择 PDF，或将文件拖到这里')
-    expect(html).toContain('深度分析')
-    expect(html).toContain('实体、剧情分开提取，再做全书综合')
-    expect(html).toContain('快速提取')
-    expect(html).toContain('扫描页会被标记')
-    expect(html).not.toContain('自带 API 不可用时')
-    expect(html).toContain('模型 API Bridge 配对')
-    expect(html).toContain('六位配对码')
-    expect(html).toContain('重新检测')
-    expect(html).toContain('待接入')
+    expect(html).toContain('AI 导入与任务')
+    expect(html).toContain('external-account')
+    expect(html).toContain('导入并分析模组')
+    expect(html).not.toContain('第一阶段：导入模组并建立 AI 战役索引')
   })
 })

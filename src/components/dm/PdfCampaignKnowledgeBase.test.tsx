@@ -34,6 +34,26 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('编辑知识库')
   })
 
+  it('按备团工作区收拢剧情、世界与资源页签', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={analysis}
+          section="story"
+          mapHref="/campaign/test/maps"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('时间线')
+    expect(html).toContain('事件与场景')
+    expect(html).toContain('线索')
+    expect(html).not.toContain('怪物图鉴')
+    expect(html).not.toContain('人物关系图')
+  })
+
   it('把 NPC 待导入草稿渲染为可打开详情的按钮，并提示战斗单位可能误分类', () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

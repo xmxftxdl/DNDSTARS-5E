@@ -185,6 +185,7 @@ describe('CombatActionBanner', () => {
 
   it('keeps banners, transient controls, initiative, and player actions in a stable stacking order', () => {
     const mapsPageSource = readFileSync(new URL('../../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+    const playerHotbarSource = readFileSync(new URL('./PlayerMapSpellHotbar.tsx', import.meta.url), 'utf8')
     const wallOfFireSource = readFileSync(new URL('../../pages/maps/WallOfFireTargetingControls.tsx', import.meta.url), 'utf8')
     const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
 
@@ -212,7 +213,7 @@ describe('CombatActionBanner', () => {
     expect(mapsPageSource).toContain(
       'pointer-events-none absolute bottom-6 left-1/2 z-[110] -translate-x-1/2',
     )
-    expect(mapsPageSource).toContain(
+    expect(playerHotbarSource).toContain(
       'pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex justify-center',
     )
     expect(css).toMatch(/\.kill-streak-presentation\s*{[^}]*z-index:\s*130;/s)

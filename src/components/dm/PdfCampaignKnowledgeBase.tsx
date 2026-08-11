@@ -83,6 +83,15 @@ const KNOWLEDGE_TABS: Array<{
   { id: 'imports', label: '待导入资源', icon: Boxes },
 ]
 
+export type PdfKnowledgeSectionV1 = 'all' | 'story' | 'world' | 'resources'
+
+const KNOWLEDGE_SECTION_TABS: Record<PdfKnowledgeSectionV1, PdfKnowledgeTabV1[]> = {
+  all: KNOWLEDGE_TABS.map((tab) => tab.id),
+  story: ['timeline', 'events', 'clues'],
+  world: ['people', 'relationships', 'factions', 'locations'],
+  resources: ['maps', 'monsters', 'imports'],
+}
+
 const KIND_LABELS: Record<string, string> = {
   monster: '怪物',
   npc: 'NPC',
@@ -412,6 +421,8 @@ interface PdfCampaignKnowledgeBaseProps {
   onTimelineEventsChange?: (events: PdfSceneRecordV1[]) => void
   onTimelineEventsCommit?: (events: PdfSceneRecordV1[]) => Promise<boolean>
   initialTab?: PdfKnowledgeTabV1
+  section?: PdfKnowledgeSectionV1
+  compactHeader?: boolean
 }
 
 export default function PdfCampaignKnowledgeBase({
@@ -422,8 +433,12 @@ export default function PdfCampaignKnowledgeBase({
   onTimelineEventsChange,
   onTimelineEventsCommit,
   initialTab = 'overview',
+  section = 'all',
+  compactHeader = false,
 }: PdfCampaignKnowledgeBaseProps) {
-  const [activeTab, setActiveTab] = useState<PdfKnowledgeTabV1>(initialTab)
+  const allowedTabs = KNOWLEDGE_SECTION_TABS[section]
+  const [requestedActiveTab, setActiveTab] = useState<PdfKnowledgeTabV1>(() => allowedTabs.includes(initialTab) ? initialTab : allowedTabs[0])
+  const activeTab = allowedTabs.includes(requestedActiveTab) ? requestedActiveTab : allowedTabs[0]
   const [query, setQuery] = useState('')
   const [searchScope, setSearchScope] = useState<'current' | 'all'>('current')
   const [selectedPersonName, setSelectedPersonName] = useState(analysis.people[0]?.name ?? '')
@@ -724,7 +739,7 @@ export default function PdfCampaignKnowledgeBase({
   return (
     <PdfCitationOpenContext.Provider value={setSelectedCitation}>
     <section className="overflow-hidden rounded-2xl border border-white/8 bg-black/15" data-testid="pdf-campaign-knowledge-base">
-      <header className="border-b border-white/8 p-4">
+      <header className={`border-b border-white/8 ${compactHeader ? 'p-3' : 'p-4'}`}>
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h2 className="flex items-center gap-2 font-semibold text-slate-100"><FileSearch className="h-4 w-4 text-violet-300" />战役知识库</h2>
@@ -745,7 +760,7 @@ export default function PdfCampaignKnowledgeBase({
       </header>
 
       <nav className="flex gap-1 overflow-x-auto border-b border-white/8 p-2" aria-label="战役知识库分类">
-        {KNOWLEDGE_TABS.map((tab) => {
+        {KNOWLEDGE_TABS.filter((tab) => allowedTabs.includes(tab.id)).map((tab) => {
           const Icon = tab.icon
           const active = !hasGlobalQuery && activeTab === tab.id
           return <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-semibold transition ${active ? 'border-violet-400/25 bg-violet-500/15 text-violet-100' : 'border-transparent text-slate-500 hover:border-white/8 hover:text-slate-300'}`}>
