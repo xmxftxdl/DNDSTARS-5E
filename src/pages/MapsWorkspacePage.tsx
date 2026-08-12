@@ -176,6 +176,7 @@ import {
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
   type MapGeometryTool,
+  type MapGeometryState,
   type SharedMapGeometryState,
   type MapGeometryWallMaterial,
 } from '../lib/mapGeometry'
