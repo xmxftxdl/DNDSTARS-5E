@@ -14,7 +14,7 @@ function renderPage(campaignId = 'campaign-01') {
 }
 
 describe('DmPrepAssistantPage', () => {
-  it('默认进入本次备团，并把长页面收拢为五类工作区', () => {
+  it('默认进入本次备团，并把长页面收拢为六类工作区', () => {
     const html = renderPage()
 
     expect(html).toContain('备团工作台')
@@ -23,8 +23,13 @@ describe('DmPrepAssistantPage', () => {
     expect(html).toContain('世界')
     expect(html).toContain('资源')
     expect(html).toContain('团务复盘')
-    expect(html).toContain('备团就绪度')
-    expect(html).toContain('先建立这场战役的备团档案')
+    expect(html).toContain('导入与复核')
+    expect(html).toContain('团务模式 · 备团')
+    expect(html).not.toContain('备团就绪度')
+    expect(html).not.toContain('快速前往')
+    expect(html).toContain('max-w-[1800px]')
+    expect(html).toContain('可恢复的场次计划')
+    expect(html).toContain('尚未导入模组资料')
   })
 
   it('把现有工具入口绑定到当前战役', () => {

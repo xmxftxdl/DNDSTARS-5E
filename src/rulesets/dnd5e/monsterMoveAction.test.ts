@@ -570,4 +570,142 @@ describe('D&D 5e monster map movement', () => {
       amount: 60,
     }))
   })
+
+  it('resolves Dash and Disengage in the same authoritative movement transaction', () => {
+    const goblin = token({
+      id: 'goblin', poolId: 'srd-5.1:goblin', x: 5, y: 5, hp: 7, maxHp: 7,
+    })
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token', type: 'player', characterId: hero.id,
+      x: 145, y: 45, hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'basic-move-map', name: 'Basic move map', width: 160, height: 60,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [goblin, heroToken],
+    }
+    const initiativeOrder = [
+      { tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const dashed = resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 75, y: 5 }, dash: true,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(dashed.ok).toBe(true)
+    if (!dashed.ok) return
+    expect(dashed.result.ok, dashed.result.ok ? undefined : dashed.result.reason).toBe(true)
+    expect(dashed.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: goblin.id, resource: 'action',
+    }))
+
+    const disengaged = resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 25, y: 5 }, disengage: true,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(disengaged.ok).toBe(true)
+    if (!disengaged.ok) return
+    expect(disengaged.result.ok, disengaged.result.ok ? undefined : disengaged.result.reason).toBe(true)
+    expect(disengaged.result.state.combatants[goblin.id].disengaged).toBe(true)
+  })
+
+  it('uses the monster Strength score for running and standing long jumps', () => {
+    const goblin = token({
+      id: 'goblin', poolId: 'srd-5.1:goblin', x: 5, y: 5, hp: 7, maxHp: 7,
+    })
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token', type: 'player', characterId: hero.id,
+      x: 65, y: 45, hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'jump-map', name: 'Jump map', width: 80, height: 60,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [goblin, heroToken],
+    }
+    const initiativeOrder = [
+      { tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const running = resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 15, y: 5 },
+      traversalMode: 'long-jump-running',
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(running.ok).toBe(true)
+    if (running.ok) expect(running.result.ok).toBe(true)
+
+    expect(resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 15, y: 5 },
+      traversalMode: 'long-jump-standing',
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })).toEqual({ ok: false, reason: 'movement-blocked' })
+  })
+
+  it('moves a carried engulfed target without treating it as an occupied blocker', () => {
+    const mound = token({
+      id: 'mound', label: 'Shambling Mound', poolId: 'srd-5.1:shambling-mound',
+      x: 5, y: 5, hp: 136, maxHp: 136, size: 2,
+    })
+    const relation = createDnd5eConditionEffect({
+      id: 'mound-engulf',
+      condition: 'grappled',
+      source: { kind: 'monster', actorId: mound.id, rulesId: 'monster:srd-5.1:shambling-mound:engulf' },
+      targetId: 'carried-token',
+      relation: {
+        schemaVersion: 1,
+        kind: 'engulfed',
+        sourceActorId: mound.id,
+        sourceActionId: 'engulf',
+        slotGroup: 'engulf',
+        maxDistanceFeet: 5,
+        movement: 'carry-target',
+        endsOnSourceIncapacitated: false,
+      },
+    })
+    const carriedToken = token({
+      id: 'carried-token', type: 'enemy', poolId: 'srd-5.1:goblin',
+      x: 5, y: 5, hp: 7, maxHp: 7,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        conditions: ['grappled'],
+        activeEffects: [relation],
+      },
+    })
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token', type: 'player', characterId: hero.id,
+      x: 85, y: 85, hp: 20, maxHp: 20,
+    })
+    const map: BattleMap = {
+      id: 'carry-map', name: 'Carry map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [mound, carriedToken, heroToken],
+    }
+    const result = resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: mound.id, label: mound.label, emoji: '', color: '', roll: 20 },
+        { tokenId: carriedToken.id, label: carriedToken.label, emoji: '', color: '', roll: 15 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: mound.id, to: { x: 25, y: 5 },
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
+    expect(result.result.state.combatants[carriedToken.id]?.position).toEqual({ x: 25, y: 5 })
+    expect(result.application?.map.tokens.find((entry) => entry.id === carriedToken.id))
+      .toMatchObject({ x: 25, y: 5 })
+    expect(result.movementTraces).toContainEqual(expect.objectContaining({
+      tokenId: carriedToken.id,
+      to: { x: 25, y: 5 },
+    }))
+  })
 })

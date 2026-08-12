@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import {
   Upload,
+  FileUp,
   Grid3x3,
   Trash2,
   Skull,
@@ -27,6 +28,7 @@ import {
   Circle as CircleIcon,
   Eraser,
   RotateCcw,
+  Sparkles,
 } from 'lucide-react'
 import type {
   AoeHighlight,
@@ -134,6 +136,7 @@ import { useBrowserSceneWorldMinute } from '../composition/browserSceneClock'
 import { browserRuntime } from '../adapters/browser/browserRuntime'
 import { dnd5eWeaponDamagePreviewTotal } from '../domain/combat/combatMath'
 import { dnd5eMonsterTokenEffectiveSpeed } from '../application/combat/monsterMovementProjection'
+import { buildDnd5eManualMonsterSpellPlan } from '../lib/monsterManualSpell'
 import { coordinateDnd5eMovementHazards } from '../application/maps/MovementHazardCoordinator'
 import { coordinateForcedMovementPersistentAreas } from '../application/maps/ForcedMovementPersistentAreaCoordinator'
 import { coordinateCombatEnd } from '../application/combat/CombatEndCoordinator'
@@ -147,6 +150,7 @@ import {
 } from '../application/combat/spells/SpellTargetingCoordinator'
 import { coordinateResolvedSpellSettlement } from '../application/combat/spells/SpellSettlementCoordinator'
 import { MapEditingCoordinator } from '../application/maps/MapEditingCoordinator'
+import { importUvttGeometry, uvttEmbeddedImageBlob } from '../lib/uvttImport'
 import { createBrowserCombatInterruptCoordinator } from '../composition/maps/createBrowserCombatInterruptCoordinator'
 import {
   publishNamedActionPresentation as publishNamedActionPresentationWithRuntime,
@@ -576,6 +580,7 @@ import {
   dnd5eMonsterMapSpeed,
   dnd5eMonsterAreaSavingThrowEffect,
   dnd5eMonsterAreaForcedMovementPlans,
+  dnd5eMonsterAreaSuccessfulSaveExitOptions,
   DND5E_RACIAL_RESOURCE_KEYS,
   dnd5eDragonbornBreathArea,
   dnd5eDragonbornBreathDiceCount,
@@ -621,6 +626,7 @@ import {
   prepareDnd5eMonsterSpecialAction,
   prepareDnd5eDragonbornBreathAction,
   prepareDnd5eMonsterCoreSpell,
+  dnd5eMonsterCoreSpellAreaTargetIds,
   prepareDnd5eOpportunityAttack,
   prepareDnd5eBeginTurn,
   prepareDnd5ePlayerEndTurn,
@@ -651,6 +657,7 @@ import {
   dnd5ePreparedMonsterAttackMode,
   dnd5eSpellAttackModeWithProtection,
   dnd5eCanSculptSpell,
+  dnd5eHeldSpellcastingFocus,
   dnd5eSculptSpellMaximumTargets,
   dnd5eSpellAllowsRepeatedTargets,
   dnd5eSpellcastingClassIdForSpell,
@@ -736,6 +743,10 @@ import {
   dnd5eMapTokenDistanceFeet,
   type Dnd5ePluginSpellResolutionRolls,
 } from '../application/combat/dnd5eCombatRules'
+import {
+  dnd5eTokenStatusMarkersFromActiveEffects,
+  type Dnd5eTokenStatusMarker,
+} from '../rulesets/dnd5e/tokenStatusMarkers'
 import { resolveDnd5eAuthoritativeItemUse } from '../application/combat/dnd5eItemUseCoordinator'
 import {
   dnd5ePluginSpellArea,
@@ -983,11 +994,13 @@ import {
 } from '../lib/monsterControlState'
 import {
   buildDnd5eManualMonsterContinuationAttack,
+  dnd5eManualMonsterMovementIntent,
   dnd5eManualMonsterContinuationMatches,
   dnd5eManualMonsterMultiattackContinuation,
   dnd5eMonsterAttackExecutionMode,
   type Dnd5eManualMonsterMultiattackContinuation,
   type Dnd5eManualMonsterMultiattackContinuationCredential,
+  type Dnd5eManualMonsterMovementKind,
 } from '../lib/monsterManualControl'
 
 // Feature panels are not part of the canvas-critical path. Keep their code out
@@ -1038,6 +1051,7 @@ const runtimeNumericId = browserRuntime.createNumeric.bind(browserRuntime)
 const randomDieValue = (sides: number) => browserRuntime.integer(1, sides)
 export default function MapsWorkspacePage() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const uvttFileRef = useRef<HTMLInputElement>(null)
   const {
     maps, selectedId, select, addMap, updateMap, removeMap, addToken, addEnemyFromPool,
     addEncounterFromPool, addCharacterToken, updateToken, applyAuthorityTokenUpdate,
@@ -1305,6 +1319,7 @@ export default function MapsWorkspacePage() {
     actorTokenId: string
     actionIndex: number
     actionName: string
+    resourceKind: 'action' | 'bonus-action'
     multiattackContinuation?: Dnd5eManualMonsterMultiattackContinuationCredential
   } | null>(null)
   const [manualMonsterMovePending, setManualMonsterMovePending] = useState<{
@@ -1315,6 +1330,16 @@ export default function MapsWorkspacePage() {
   const [manualMonsterMoveSelection, setManualMonsterMoveSelection] = useState<{
     tokenId: string
     turnKey: string
+    intent: ReturnType<typeof dnd5eManualMonsterMovementIntent>
+  } | null>(null)
+  const [dnd5eManualMonsterSpellTargeting, setDnd5eManualMonsterSpellTargeting] = useState<{
+    actorTokenId: string
+    spellId: string
+    spellName: string
+    slotLevel: number
+    castingTime: 'action' | 'bonus-action' | 'reaction'
+    target: 'hostile' | 'ally' | 'creature' | 'area'
+    area?: SkillAoeTargeting
   } | null>(null)
   const manualMonsterMovePendingTokenId =
     manualMonsterMovePending?.tokenId ?? null
@@ -1911,7 +1936,7 @@ export default function MapsWorkspacePage() {
       try {
         const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
         if (queue?.mapId === interrupt.mapId) {
-          activeInterrupt = findCurrentD20RollConfirmation(queue, interrupt) ?? interrupt
+          activeInterrupt = findCurrentD20RollConfirmation(queue, interrupt, runtimeNow()) ?? interrupt
         }
       } catch {
         // A reconnect recovery read is opportunistic; publication remains the fallback.
@@ -3083,6 +3108,19 @@ export default function MapsWorkspacePage() {
     }
     return result
   })()
+  const dnd5eTokenStatusMarkersByToken = (() => {
+    const result: Record<string, readonly Dnd5eTokenStatusMarker[]> = {}
+    for (const token of activeMap?.tokens ?? []) {
+      const linked = token.characterId
+        ? characters.find((character) => character.id === token.characterId)
+        : undefined
+      const markers = dnd5eTokenStatusMarkersFromActiveEffects(normalizeDnd5eActiveEffects(
+        linked?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects,
+      ))
+      if (markers.length > 0) result[token.id] = markers
+    }
+    return result
+  })()
   const conditionSourceOptions = (activeMap?.tokens ?? []).flatMap((token) => {
     if (token.type !== 'player' && token.type !== 'enemy' && token.type !== 'npc') return []
     const linked = token.characterId ? characters.find((character) => character.id === token.characterId) : undefined
@@ -3578,11 +3616,22 @@ export default function MapsWorkspacePage() {
       manualMonsterActionPending ||
       (manualMonsterTurnEconomy?.action.current ?? 1) < 1
     )
+  const manualMonsterBonusActionUsed =
+    !!manualMonsterTurnKey && (
+      manualMonsterActionPending ||
+      (manualMonsterTurnEconomy?.bonusAction.current ?? 1) < 1
+    )
   const activeManualMonsterAttackTargeting =
     dnd5eManualMonsterAttackTargeting &&
     manualMonsterTurnKey &&
     dnd5eManualMonsterAttackTargeting.actorTokenId === currentInitiativeToken?.id
       ? dnd5eManualMonsterAttackTargeting
+      : null
+  const activeManualMonsterSpellTargeting =
+    dnd5eManualMonsterSpellTargeting &&
+    manualMonsterTurnKey &&
+    dnd5eManualMonsterSpellTargeting.actorTokenId === currentInitiativeToken?.id
+      ? dnd5eManualMonsterSpellTargeting
       : null
   const manualMonsterAttackTargetIds =
     activeManualMonsterAttackTargeting && activeMap && currentInitiativeToken
@@ -3594,6 +3643,27 @@ export default function MapsWorkspacePage() {
             : [],
         )
       : []
+  const manualMonsterSpellTargetIds =
+    activeManualMonsterSpellTargeting &&
+    !activeManualMonsterSpellTargeting.area &&
+    activeMap &&
+    currentInitiativeToken
+      ? activeMap.tokens.flatMap((token) => {
+          if (token.type === 'obstacle') return []
+          const opposed = areOpposedCombatTokens(currentInitiativeToken, token)
+          if (activeManualMonsterSpellTargeting.target === 'hostile' && !opposed) return []
+          if (activeManualMonsterSpellTargeting.target === 'ally' && opposed) return []
+          return [token.id]
+        })
+      : []
+  useEffect(() => {
+    if (!dnd5eManualMonsterSpellTargeting || activeManualMonsterSpellTargeting) return
+    const timer = window.setTimeout(() => {
+      setDnd5eManualMonsterSpellTargeting(null)
+      setAoePreviewCell(null)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeManualMonsterSpellTargeting, dnd5eManualMonsterSpellTargeting, setAoePreviewCell])
   useEffect(() => {
     if (!manualMonsterMoveSelection) return
     if (manualMonsterMoveToken) return
@@ -3825,19 +3895,25 @@ export default function MapsWorkspacePage() {
     token: Token,
     actionIndex: number,
     actionName: string,
+    resourceKind: 'action' | 'bonus-action' = 'action',
   ) => {
+    const resourceUsed = resourceKind === 'bonus-action'
+      ? manualMonsterBonusActionUsed
+      : manualMonsterActionUsed
     if (
       !manualMonsterTurnKey ||
-      manualMonsterActionUsed ||
+      resourceUsed ||
       token.id !== currentInitiativeToken?.id ||
       !dnd5eMonsterManualControlEnabled(monsterControlRef.current)
     ) return
     setManualMonsterMoveSelection(null)
     playerMovement.clear()
+    setDnd5eManualMonsterSpellTargeting(null)
     setDnd5eManualMonsterAttackTargeting({
       actorTokenId: token.id,
       actionIndex,
       actionName,
+      resourceKind,
     })
     void showCombatNotice(
       `选择${actionName}的目标`,
@@ -3859,10 +3935,12 @@ export default function MapsWorkspacePage() {
     ) return
     setManualMonsterMoveSelection(null)
     playerMovement.clear()
+    setDnd5eManualMonsterSpellTargeting(null)
     setDnd5eManualMonsterAttackTargeting({
       actorTokenId: token.id,
       actionIndex: continuation.actionIndex,
       actionName: continuation.actionName,
+      resourceKind: 'action',
       multiattackContinuation: continuation,
     })
     void showCombatNotice(
@@ -4273,11 +4351,16 @@ export default function MapsWorkspacePage() {
         ...(manualMonsterMoveToken.dnd5eCombatState?.conditions ?? []),
         ...(dnd5eConditionsByToken[manualMonsterMoveToken.id] ?? []),
       ]
-      const availableFeet = manualMonsterTurnEconomy?.movement.current ??
+      const currentAvailableFeet = manualMonsterTurnEconomy?.movement.current ??
         dnd5eMonsterTokenEffectiveSpeed(
           manualMonsterMoveToken,
           dnd5eMonsterMapSpeed(monster),
         )
+      const availableFeet = currentAvailableFeet + (
+        manualMonsterMoveSelection?.intent.kind === 'dash'
+          ? manualMonsterTurnEconomy?.movement.max ?? dnd5eMonsterMapSpeed(monster)
+          : 0
+      )
       const isProne = conditions.some((condition) =>
         dnd5eStandardConditionId(condition) === 'prone')
       const standCost = isProne
@@ -4465,6 +4548,7 @@ export default function MapsWorkspacePage() {
   const activeAoeTargeting = dnd5eCoreAreaMoveTargeting?.targeting ??
     dnd5ePluginAreaTargeting?.targeting.template ??
     extraActionTeleportTargetingTemplate ??
+    activeManualMonsterSpellTargeting?.area ??
     (dnd5eSpellTargeting?.guessedTargeting && dnd5eSpellTargeting.areaTargetSelected
       ? undefined
       : selectedSpellAoeTargeting)
@@ -4481,6 +4565,11 @@ export default function MapsWorkspacePage() {
       : undefined
   const aoeCasterCell = ((): GridCell | null => {
     if (dnd5eCoreAreaMoveTargeting) return dnd5eCoreAreaMoveTargeting.originCell
+    if (activeManualMonsterSpellTargeting && activeMap) {
+      const caster = activeMap.tokens.find((token) =>
+        token.id === activeManualMonsterSpellTargeting.actorTokenId)
+      return caster ? tokenAnchorCellFromPixel(caster.x, caster.y, caster, activeMap) : null
+    }
     if (dnd5eSpellTargeting?.areaOriginCell) return dnd5eSpellTargeting.areaOriginCell
     if (!activeMap || !activeAoeCasterId) return null
     const casterToken = activeMap.tokens.find((t) => t.characterId === activeAoeCasterId)
@@ -5320,8 +5409,10 @@ export default function MapsWorkspacePage() {
     targetPosition: { x: number; y: number },
     options: {
       dash?: boolean
+      disengage?: boolean
       targetElevationFeet?: number
       nimbleEscape?: 'disengage'
+      traversalMode?: Dnd5eTraversalMode
       animate?: boolean
     } = {},
   ) => {
@@ -5336,7 +5427,9 @@ export default function MapsWorkspacePage() {
       actorTokenId: enemy.id,
       to: targetPosition,
       targetElevationFeet: options.targetElevationFeet,
+      traversalMode: options.traversalMode,
       dash: options.dash,
+      disengage: options.disengage,
       nimbleEscape: options.nimbleEscape,
       turnEconomy: currentDnd5eTurnEconomy(enemy.id, roundRef.current),
     })
@@ -5480,7 +5573,10 @@ export default function MapsWorkspacePage() {
       resolved.result.events,
       [
         options.dash ? '移动方式：疾走' : '移动方式：正常移动',
+        ...(options.disengage ? ['动作：撤离，本次移动不触发借机攻击'] : []),
         ...(options.nimbleEscape === 'disengage' ? ['灵巧脱逃：附赠动作撤离'] : []),
+        ...(options.traversalMode === 'long-jump-running' ? ['移动模式：助跑跳跃'] : []),
+        ...(options.traversalMode === 'long-jump-standing' ? ['移动模式：立定跳跃'] : []),
       ],
     )
     return true
@@ -6264,10 +6360,157 @@ export default function MapsWorkspacePage() {
         token,
       })
   }
+  const selectManualMonsterSpell = (
+    token: Token,
+    spellId: string,
+    spellName: string,
+    slotLevel: number,
+    castingTime: 'action' | 'bonus-action' | 'reaction',
+  ) => {
+    const spell = getDnd5eSrdCombatSpell(spellId)
+    const resourceUsed = castingTime === 'bonus-action'
+      ? manualMonsterBonusActionUsed
+      : castingTime === 'reaction'
+        ? true
+        : manualMonsterActionUsed
+    if (
+      !spell ||
+      !manualMonsterTurnKey ||
+      resourceUsed ||
+      token.id !== currentInitiativeToken?.id ||
+      !dnd5eMonsterManualControlEnabled(monsterControlRef.current)
+    ) return
+    setDnd5eManualMonsterAttackTargeting(null)
+    setDnd5eManualMonsterSpellTargeting(null)
+    setManualMonsterMoveSelection(null)
+    playerMovement.clear()
+    const targeting = {
+      actorTokenId: token.id,
+      spellId,
+      spellName,
+      slotLevel,
+      castingTime,
+      target: spell.target,
+      area: spell.area,
+    }
+    setDnd5eManualMonsterSpellTargeting(targeting)
+    if (spell.area && activeMap) {
+      setAoePreviewCell(
+        spell.area.origin === 'self'
+          ? tokenAnchorCellFromPixel(token.x, token.y, token, activeMap)
+          : null,
+      )
+    }
+    void showCombatNotice(
+      `施放${spellName}`,
+      spell.area
+        ? '在地图上移动范围模板并点击确认；范围内目标、视线与高度由 Headless 重新计算。'
+        : '请点击地图上高亮的合法目标；射程、视线与目标关系由 Headless 重新检查。',
+      'sky',
+    )
+  }
+  const settleManualMonsterSpell = (input: {
+    targeting: NonNullable<typeof activeManualMonsterSpellTargeting>
+    targetTokenIds: readonly string[]
+    areaTargetCell?: GridCell
+    areaTargetOrientation?: 0 | 1 | 2 | 3
+  }) => {
+    if (!activeMap || !manualMonsterTurnKey || manualMonsterActionPending) return false
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const actor = latestMap.tokens.find((token) => token.id === input.targeting.actorTokenId)
+    const currentActorId = initiativeOrderRef.current[initiativeIndexRef.current]?.tokenId
+    if (
+      !actor ||
+      actor.id !== currentActorId ||
+      !combatActiveRef.current ||
+      !dnd5eMonsterManualControlEnabled(monsterControlRef.current)
+    ) return false
+    const firstTarget = latestMap.tokens.find((token) => token.id === input.targetTokenIds[0])
+    const plan = buildDnd5eManualMonsterSpellPlan({
+      actor,
+      spellId: input.targeting.spellId,
+      slotLevel: input.targeting.slotLevel,
+      targetTokenIds: input.targetTokenIds,
+      targetCharacterId: firstTarget?.characterId,
+      areaTargetCell: input.areaTargetCell,
+      areaTargetOrientation: input.areaTargetOrientation,
+    })
+    if (!plan) return false
+    const isStillManualTurn = () =>
+      combatActiveRef.current &&
+      initiativeOrderRef.current[initiativeIndexRef.current]?.tokenId === actor.id &&
+      dnd5eMonsterManualControlEnabled(monsterControlRef.current)
+    setManualMonsterActionPendingKey(manualMonsterTurnKey)
+    setDnd5eManualMonsterSpellTargeting(null)
+    setAoePreviewCell(null)
+    void finishEnemyCoreSpell(plan, isStillManualTurn).then((settled) => {
+      completeManualMonsterAction({
+        clearPendingAction: () => setManualMonsterActionPendingKey(null),
+        hasCombatOutcome: hasCombatOutcomeNow,
+        endCombatIfNeeded: () => { tryEndCombatIfNeeded() },
+      })
+      if (!settled) {
+        void showCombatNotice(
+          '法术未能结算',
+          '目标、视线、施法资源或行动资源已经变化，请重新选择法术。',
+          'amber',
+        )
+      }
+    }).catch((error) => {
+      setManualMonsterActionPendingKey(null)
+      void showCombatNotice(
+        '法术结算失败',
+        error instanceof Error ? error.message : '权威施法事务未能完成。',
+        'amber',
+      )
+    })
+    return true
+  }
+  const beginManualMonsterMovement = (
+    token: Token,
+    kind: Dnd5eManualMonsterMovementKind = 'move',
+  ): boolean => {
+    if (!manualMonsterTurnKey || !isCurrentManualMonsterMoveActor(token)) return false
+    if (manualMonsterActionPending || manualMonsterMovePendingTokenId === token.id) {
+      void showCombatNotice(
+        '怪物正在结算',
+        '请等待当前攻击或移动完成后再选择下一段移动。',
+        'amber',
+      )
+      return false
+    }
+    const currentElevationFeet = mapGeometryTokenElevation(activeGeometry, token)
+    const groundElevationFeet = mapGeometryTerrainElevationAtPoint(activeGeometry, token)
+    const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
+    const baseIntent = dnd5eManualMonsterMovementIntent(kind)
+    const intent = (
+      !['running-jump', 'standing-jump'].includes(kind) &&
+      (monster?.speed.fly ?? 0) > 0 &&
+      (
+        currentElevationFeet > groundElevationFeet ||
+        (monster?.speed.walk ?? 0) <= 0
+      )
+    )
+      ? { ...baseIntent, traversalMode: 'fly' as const }
+      : baseIntent
+    setDnd5eManualMonsterAttackTargeting(null)
+    setDnd5eManualMonsterSpellTargeting(null)
+    setAoePreviewCell(null)
+    setManualMonsterMoveSelection({
+      tokenId: token.id,
+      turnKey: manualMonsterTurnKey,
+      intent,
+    })
+    playerMovement.clear()
+    playerMovement.begin(currentElevationFeet)
+    setDnd5eTraversalMode(intent.traversalMode)
+    return true
+  }
   const submitManualMonsterMove = (
     token: Token,
     position: { x: number; y: number },
     targetElevationFeet?: number,
+    intent = dnd5eManualMonsterMovementIntent('move'),
   ) => {
     if (!activeMap || !isCurrentManualMonsterMoveActor(token)) return false
     if (manualMonsterMovePendingTokenId === token.id) return false
@@ -6286,6 +6529,10 @@ export default function MapsWorkspacePage() {
       actorTokenId: latestToken.id,
       to: position,
       targetElevationFeet,
+      traversalMode: intent.traversalMode,
+      dash: intent.kind === 'dash',
+      disengage: intent.kind === 'disengage',
+      nimbleEscape: intent.kind === 'nimble-disengage' ? 'disengage' : undefined,
       turnEconomy: currentDnd5eTurnEconomy(latestToken.id, roundRef.current),
     })
     if (!prepared.ok || !prepared.result.ok || !prepared.application) return false
@@ -6299,7 +6546,7 @@ export default function MapsWorkspacePage() {
         await resolveDnd5eOpportunityAttacksForMove(
           latestToken,
           position,
-          false,
+          intent.kind === 'disengage' || intent.kind === 'nimble-disengage',
           prepared.traversalMode,
         )
         const mapAfterReactions = useMapStore.getState().maps.find((map) => map.id === activeMap.id)
@@ -6315,7 +6562,13 @@ export default function MapsWorkspacePage() {
         const moved = await resolveSrd5eMonsterMoveThroughHeadless(
           tokenAfterReactions,
           position,
-          { targetElevationFeet },
+          {
+            targetElevationFeet,
+            traversalMode: intent.traversalMode,
+            dash: intent.kind === 'dash',
+            disengage: intent.kind === 'disengage',
+            nimbleEscape: intent.kind === 'nimble-disengage' ? 'disengage' : undefined,
+          },
         )
         if (!moved) {
           void showCombatNotice(
@@ -6367,6 +6620,12 @@ export default function MapsWorkspacePage() {
         manualMonsterMoveToken,
         pos,
         targetElevationFeet,
+        manualMonsterMoveSelection
+          ? {
+              ...manualMonsterMoveSelection.intent,
+              traversalMode: dnd5eTraversalMode,
+            }
+          : undefined,
       )) {
         void showCombatNotice(
           '怪物无法移动',
@@ -6590,6 +6849,7 @@ export default function MapsWorkspacePage() {
       })
       const payload: Dnd5eSpellCastPayload = {
         spellId: nextTargeting.spellId,
+        focusItemInstanceId: nextTargeting.focusItemInstanceId,
         itemInstanceId: nextTargeting.itemInstanceId,
         itemUseActionId: nextTargeting.itemUseActionId,
         castingClassId: nextTargeting.castingClassId,
@@ -6636,6 +6896,33 @@ export default function MapsWorkspacePage() {
     return true
   }
   const handleAoeConfirm = (cell: GridCell) => {
+    if (activeManualMonsterSpellTargeting?.area && activeMap) {
+      if (!aoeHighlight?.valid) return
+      const areaTargetOrientation = activeManualMonsterSpellTargeting.area.shape === 'rect' &&
+        activeManualMonsterSpellTargeting.area.rotatable
+        ? aoeRectRotation as 0 | 1 | 2 | 3
+        : undefined
+      const targetTokenIds = dnd5eMonsterCoreSpellAreaTargetIds({
+        map: activeMap,
+        actorTokenId: activeManualMonsterSpellTargeting.actorTokenId,
+        spellId: activeManualMonsterSpellTargeting.spellId,
+        areaTargetCell: cell,
+        areaTargetOrientation,
+      })
+      if (!targetTokenIds) {
+        void showCombatNotice('范围无效', '该位置不符合此法术的范围、方向或地图边界规则。', 'amber')
+        return
+      }
+      if (!settleManualMonsterSpell({
+        targeting: activeManualMonsterSpellTargeting,
+        targetTokenIds,
+        areaTargetCell: cell,
+        areaTargetOrientation,
+      })) {
+        void showCombatNotice('无法施法', '怪物回合、接管状态或施法资源已经变化。', 'amber')
+      }
+      return
+    }
     if (dnd5eExtraActionTeleportTargeting) {
       if (!aoeHighlight?.valid) return
       const submitted = sendPlayerDnd5eClassFeatureRequest({
@@ -6669,6 +6956,7 @@ export default function MapsWorkspacePage() {
         : undefined
       const payload: Dnd5eSpellCastPayload = {
         spellId: dnd5eSpellTargeting.spellId,
+        focusItemInstanceId: dnd5eSpellTargeting.focusItemInstanceId,
         itemInstanceId: dnd5eSpellTargeting.itemInstanceId,
         itemUseActionId: dnd5eSpellTargeting.itemUseActionId,
         castingClassId: dnd5eSpellTargeting.castingClassId,
@@ -6816,8 +7104,116 @@ export default function MapsWorkspacePage() {
       return
     }
     if (playerCombatLocked) return
+    if (activeManualMonsterSpellTargeting && !activeManualMonsterSpellTargeting.area && activeMap) {
+      const targetToken = activeMap.tokens.find((token) => token.id === tokenId)
+      if (!targetToken || !manualMonsterSpellTargetIds.includes(targetToken.id)) {
+        void showCombatNotice('目标无效', '请选择地图上高亮的合法法术目标。', 'amber')
+        return
+      }
+      if (!settleManualMonsterSpell({
+        targeting: activeManualMonsterSpellTargeting,
+        targetTokenIds: [targetToken.id],
+      })) {
+        void showCombatNotice('无法施法', '怪物回合、接管状态或施法资源已经变化。', 'amber')
+      }
+      return
+    }
     if (tokenId && activeManualMonsterAttackTargeting && activeMap && currentInitiativeToken) {
       const targetToken = activeMap.tokens.find((token) => token.id === tokenId)
+      const manualMonster = currentInitiativeToken.poolId
+        ? getDnd5eSrdMonster(currentInitiativeToken.poolId)
+        : undefined
+      const manualAction = manualMonster?.actions[activeManualMonsterAttackTargeting.actionIndex]
+      const manualAreaRule = manualAction
+        ? dnd5eMonsterAreaSavingThrowEffect(manualAction)
+        : undefined
+      if (manualAction && manualAreaRule?.actorLanding && targetToken && manualMonsterTurnKey) {
+        if (
+          !isDM ||
+          !dnd5eMonsterManualControlEnabled(monsterControlRef.current) ||
+          currentInitiativeToken.id !== activeManualMonsterAttackTargeting.actorTokenId ||
+          manualMonsterActionPending ||
+          targetToken.type === 'obstacle' ||
+          targetToken.id === currentInitiativeToken.id
+        ) {
+          void showCombatNotice('落点无效', '请选择致命飞跃可以落入的生物占据空间。', 'amber')
+          return
+        }
+        const areaTargetCell = tokenAnchorCellFromPixel(
+          targetToken.x,
+          targetToken.y,
+          targetToken,
+          activeMap,
+        )
+        const landingPosition = tokenCenterForAnchorCell(
+          areaTargetCell,
+          currentInitiativeToken,
+          activeMap,
+        )
+        const targetTokenIds = tokensInCells(
+          activeMap,
+          activeMap.tokens,
+          tokenOccupiedCellsAt(currentInitiativeToken, activeMap, landingPosition),
+        ).flatMap((candidate) => {
+          if (
+            candidate.id === currentInitiativeToken.id ||
+            candidate.type === 'obstacle' ||
+            !isTokenAlive(candidate, characters) ||
+            (
+              manualAreaRule.target === 'hostile' &&
+              !areOpposedCombatTokens(currentInitiativeToken, candidate)
+            )
+          ) return []
+          return [candidate.id]
+        })
+        const plan: Dnd5eMonsterTurnPlan = {
+          moved: false,
+          attacked: false,
+          attackerTokenId: currentInitiativeToken.id,
+          targetTokenId: targetToken.id,
+          targetCharacterId: targetToken.characterId,
+          areaAction: {
+            actionId: manualAction.id,
+            actionName: manualAction.name,
+            targetTokenIds,
+            area: manualAreaRule.area,
+            areaTargetCell,
+            saveAbility: manualAreaRule.ability,
+            saveAbilityChoices: manualAreaRule.targetAbilityChoices,
+            saveDc: manualAreaRule.dc,
+            damage: manualAreaRule.damage ? {
+              diceCount: manualAreaRule.damage.count,
+              diceSides: manualAreaRule.damage.sides,
+              damageBonus: manualAreaRule.damage.bonus,
+              damageType: manualAreaRule.damage.type,
+            } : undefined,
+            conditionOnFailedSave: manualAreaRule.conditionOnFailedSave ? {
+              condition: manualAreaRule.conditionOnFailedSave.condition,
+              durationRounds: manualAreaRule.conditionOnFailedSave.durationRounds,
+            } : undefined,
+          },
+          message: `${currentInitiativeToken.label}准备使用${manualAction.name}。`,
+        }
+        setManualMonsterActionPendingKey(manualMonsterTurnKey)
+        setDnd5eManualMonsterAttackTargeting(null)
+        void finishEnemyAreaAction(plan).then((ok) => {
+          if (!ok) {
+            setManualMonsterActionPendingKey(null)
+            void showCombatNotice(
+              '致命飞跃不可用',
+              '落点、至少 15 尺跳跃距离、剩余移动力或占用空间未通过 Host 校验。',
+              'amber',
+            )
+            return
+          }
+          completeManualMonsterAction({
+            clearPendingAction: () => setManualMonsterActionPendingKey(null),
+            hasCombatOutcome: hasCombatOutcomeNow,
+            endCombatIfNeeded: () => { tryEndCombatIfNeeded() },
+          })
+        })
+        return
+      }
       const targetCharacter = targetToken?.characterId
         ? characters.find((character) => character.id === targetToken.characterId)
         : undefined
@@ -6851,13 +7247,19 @@ export default function MapsWorkspacePage() {
         )
         return
       }
-      if (!isMultiattackContinuation && manualMonsterActionUsed) {
-        void showCombatNotice('动作已经使用', '本回合不能再开始一个新的怪物动作。', 'amber')
+      const selectedResourceUsed =
+        activeManualMonsterAttackTargeting.resourceKind === 'bonus-action'
+          ? manualMonsterBonusActionUsed
+          : manualMonsterActionUsed
+      if (!isMultiattackContinuation && selectedResourceUsed) {
+        void showCombatNotice('行动资源已经使用', '本回合不能再使用这一类怪物行动资源。', 'amber')
         return
       }
       const occurrenceTargetTokenIds = isMultiattackContinuation
         ? [targetToken.id]
-        : automaticMonsterOccurrenceTargetIds({
+        : activeManualMonsterAttackTargeting.resourceKind === 'bonus-action'
+          ? [targetToken.id]
+          : automaticMonsterOccurrenceTargetIds({
             map: activeMap,
             actorToken: currentInitiativeToken,
             preferredTarget: targetToken,
@@ -6882,6 +7284,7 @@ export default function MapsWorkspacePage() {
         targetTokenId: targetToken.id,
         targetTokenIds: occurrenceTargetTokenIds,
         actionIndex: activeManualMonsterAttackTargeting.actionIndex,
+        resourceKind: activeManualMonsterAttackTargeting.resourceKind,
         multiattackContinuation: isMultiattackContinuation && requestedContinuation
           ? {
               schemaVersion: 1,
@@ -6917,6 +7320,7 @@ export default function MapsWorkspacePage() {
             targetToken,
             activeManualMonsterAttackTargeting.actionIndex,
             occurrenceTargetTokenIds,
+            activeManualMonsterAttackTargeting.resourceKind,
           )
       if (!result || !manualMonsterTurnKey) {
         void showCombatNotice('攻击不可用', '无法从怪物数据块建立这次攻击。', 'amber')
@@ -7104,6 +7508,7 @@ export default function MapsWorkspacePage() {
       }
       const payload: Dnd5eSpellCastPayload = {
         spellId: dnd5eSpellTargeting.spellId,
+        focusItemInstanceId: dnd5eSpellTargeting.focusItemInstanceId,
         itemInstanceId: dnd5eSpellTargeting.itemInstanceId,
         itemUseActionId: dnd5eSpellTargeting.itemUseActionId,
         castingClassId: dnd5eSpellTargeting.castingClassId,
@@ -7182,17 +7587,6 @@ export default function MapsWorkspacePage() {
       setSelectedTokenId(tok.id)
       setSelectedCharacterTokenId(null)
       setEnemyDetailOpen(true)
-      if (
-        manualMonsterActionPending ||
-        manualMonsterMovePendingTokenId === tok.id
-      ) {
-        void showCombatNotice(
-          '怪物正在结算',
-          '请等待当前攻击或移动完成后再选择下一段移动。',
-          'amber',
-        )
-        return
-      }
       const closing =
         manualMonsterMoveSelection?.turnKey === manualMonsterTurnKey &&
         manualMonsterMoveSelection.tokenId === tok.id &&
@@ -7202,24 +7596,7 @@ export default function MapsWorkspacePage() {
         playerMovement.clear()
         return
       }
-      setDnd5eManualMonsterAttackTargeting(null)
-      setManualMonsterMoveSelection({
-        tokenId: tok.id,
-        turnKey: manualMonsterTurnKey,
-      })
-      playerMovement.clear()
-      const currentElevationFeet = mapGeometryTokenElevation(activeGeometry, tok)
-      const groundElevationFeet = mapGeometryTerrainElevationAtPoint(activeGeometry, tok)
-      const monster = tok.poolId ? getDnd5eSrdMonster(tok.poolId) : undefined
-      playerMovement.begin(currentElevationFeet)
-      setDnd5eTraversalMode(
-        (monster?.speed.fly ?? 0) > 0 && (
-          currentElevationFeet > groundElevationFeet ||
-          (monster?.speed.walk ?? 0) <= 0
-        )
-          ? 'fly'
-          : 'walk',
-      )
+      beginManualMonsterMovement(tok, 'move')
       return
     }
     if (manualMonsterMoveSelection) {
@@ -7385,6 +7762,109 @@ export default function MapsWorkspacePage() {
     }
     img.src = objectUrl
     e.target.value = ''
+  }
+  const createMapFromUvtt = async (input: {
+    name: string
+    blob: Blob
+    width: number
+    height: number
+    pixelsPerGrid: number
+    geometry: MapGeometryState
+  }) => {
+    const newMapId = await addMap({
+      name: input.name || 'UVTT 地图',
+      width: input.width,
+      height: input.height,
+      blob: input.blob,
+    })
+    updateMap(newMapId, {
+      gridSize: input.pixelsPerGrid,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+    })
+    const replaced = mapEditingCoordinator.replace(newMapId, {
+      ...input.geometry,
+      mapId: newMapId,
+    })
+    if (!replaced.ok) {
+      removeMap(newMapId)
+      throw new Error('UVTT 背景已创建，但几何关系校验失败')
+    }
+    select(newMapId)
+    setSelectedTokenId(null)
+    setGeometryDiagnosticsEnabled(true)
+  }
+  const handleUvttFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !isDM) return
+    if (combatActive) {
+      await showAppAlert({
+        title: '战斗中无法导入 UVTT',
+        message: '请先结束当前战斗，再导入或替换地图墙体、门、窗和光源。',
+      })
+      return
+    }
+    try {
+      const raw = JSON.parse(await file.text()) as unknown
+      const provisional = importUvttGeometry(raw, {
+        mapId: 'uvtt-pending',
+        feetPerCell: activeMap?.feetPerCell ?? 5,
+      })
+      if (provisional.embeddedImageDataUrl) {
+        await createMapFromUvtt({
+          name: file.name.replace(/\.(?:uvtt|dd2vtt|df2vtt)$/i, ''),
+          blob: uvttEmbeddedImageBlob(provisional.embeddedImageDataUrl),
+          width: provisional.sourceWidth,
+          height: provisional.sourceHeight,
+          pixelsPerGrid: provisional.pixelsPerGrid,
+          geometry: provisional.geometry,
+        })
+        if (provisional.warnings.length > 0) {
+          await showAppAlert({
+            title: 'UVTT 已导入，但需要检查',
+            message: provisional.warnings.join('\n'),
+          })
+        }
+        return
+      }
+      if (!activeMap) {
+        await showAppAlert({
+          title: 'UVTT 没有内嵌地图图片',
+          message: '请先点击“上传地图图片”选择同一地图包中的 JPG、PNG 或 WebP，再重新导入这个 UVTT/DD2VTT 文件。',
+        })
+        return
+      }
+      const confirmed = await showAppConfirm({
+        title: '导入 UVTT 到当前地图',
+        message: `“${file.name}”没有内嵌底图。继续后会使用当前地图“${activeMap.name}”作为底图，并替换其墙、门、窗、障碍物和场景光源。`,
+        confirmLabel: '导入到当前地图',
+      })
+      if (!confirmed) return
+      const imported = importUvttGeometry(raw, {
+        mapId: activeMap.id,
+        targetWidth: activeMap.width,
+        targetHeight: activeMap.height,
+        feetPerCell: activeMap.feetPerCell,
+      })
+      const replaced = mapEditingCoordinator.replace(activeMap.id, imported.geometry)
+      if (!replaced.ok) throw new Error('当前地图拒绝替换几何数据')
+      setGeometryDiagnosticsEnabled(true)
+      await showAppAlert({
+        title: 'UVTT 已导入',
+        message: [
+          `已导入 ${imported.geometry.walls.length} 组墙体、${imported.geometry.doors.length} 扇门、${imported.geometry.windows?.length ?? 0} 扇窗和 ${imported.geometry.lights?.length ?? 0} 个光源。`,
+          ...imported.warnings,
+        ].join('\n'),
+      })
+    } catch (error) {
+      await showAppAlert({
+        title: 'UVTT 导入失败',
+        message: error instanceof Error ? error.message : '文件不是有效的 UVTT/DD2VTT。',
+      })
+    }
   }
   const removeDnd5eItemArea = (areaId: string, recover = false) => {
     if (!isDM || !activeMap) return
@@ -10885,6 +11365,7 @@ export default function MapsWorkspacePage() {
         targetTokenId: result.targetTokenId,
         targetTokenIds: attackTargetTokenIds,
         actionIndex: result.actionIndex,
+        resourceKind: result.monsterResourceKind,
         multiattackContinuation:
           result.multiattackStep?.mode === 'continue'
             ? {
@@ -10918,6 +11399,7 @@ export default function MapsWorkspacePage() {
             repeatRoll,
           ),
           actionIndex: result.actionIndex,
+          resourceKind: result.monsterResourceKind,
           multiattackContinuation:
             result.multiattackStep?.mode === 'continue'
               ? {
@@ -11334,7 +11816,7 @@ export default function MapsWorkspacePage() {
             )
           : []
         const traitDamageRolls: Array<{
-          traitId: 'sneak-attack' | 'martial-advantage'
+          traitId: 'sneak-attack' | 'martial-advantage' | 'charge-damage'
           rolls: number[]
         }> = []
         for (const definition of traitDamageDefinitions) {
@@ -12318,7 +12800,7 @@ export default function MapsWorkspacePage() {
           await finishSharedCombatInterruptEvent(interrupt.id, interrupt.response)
         }
       }
-      const activeRollConfirmation = currentD20RollConfirmations(queue)
+      const activeRollConfirmation = currentD20RollConfirmations(queue, now)
         .find((interrupt) => isDM || interrupt.payload.visibility === 'public')
       setSharedRollConfirmationPrompt((current) => {
         if (!activeRollConfirmation) return current ? null : current
@@ -12733,9 +13215,10 @@ export default function MapsWorkspacePage() {
     const casting = prepared.prepared
     const caster = casting.state.combatants[casting.actorToken.id]
     if (!caster) return false
+    const areaTransactionId = `${casting.state.combatId}:${roundRef.current}:${casting.actorToken.id}:area:${plan.areaAction.actionId}`
     await publishNamedActionPresentation({
       mapId: latestMap.id,
-      transactionId: `${casting.state.combatId}:${roundRef.current}:${casting.actorToken.id}:area:${plan.areaAction.actionId}`,
+      transactionId: areaTransactionId,
       sourceTokenId: casting.actorToken.id,
       actorName: casting.actorToken.label,
       actionName: plan.areaAction.actionName,
@@ -12746,19 +13229,60 @@ export default function MapsWorkspacePage() {
     for (const targetToken of casting.targetTokens) {
       const target = casting.state.combatants[targetToken.id]
       if (!target) return false
-      const baseSaveMode = dnd5eSavingThrowModeExplanation(target, plan.areaAction.saveAbility, {
+      const saveAbilityChoices = casting.variant.targetAbilityChoices ?? []
+      const defaultSaveAbility = saveAbilityChoices.length >= 2
+        ? [...saveAbilityChoices].sort((left, right) => {
+            const bonusFor = (ability: AbilityKey) =>
+              (target.savingThrowBonuses[ability] ?? Math.floor((target.abilities[ability] - 10) / 2)) +
+              dnd5eActiveSavingThrowBonus(target.classState.activeEffects, ability)
+            return bonusFor(right) - bonusFor(left) || left.localeCompare(right)
+          })[0]
+        : casting.variant.ability
+      const targetCharacter = targetToken.characterId
+        ? casting.characters.find((character) => character.id === targetToken.characterId)
+        : undefined
+      const selectedSaveAbility = saveAbilityChoices.length >= 2 && targetCharacter
+        ? await requestSharedChoiceWindow({
+            id: `monster-save-ability:${areaTransactionId}:${targetToken.id}`,
+            transactionId: areaTransactionId,
+            actor: targetCharacter,
+            targetCharId: targetCharacter.id,
+            pluginId: 'core:dnd5e',
+            featureId: `monster-area-save-ability:${plan.areaAction.actionId}`,
+            featureName: `${plan.areaAction.actionName}·选择豁免`,
+            prompt: `${targetToken.label}可以选择本次豁免使用的属性。`,
+            audience: 'target',
+            options: saveAbilityChoices.map((ability) => ({
+              id: ability,
+              label: combatPresentationSavingThrowAbilityLabel(ability),
+              description: `使用${combatPresentationSavingThrowAbilityLabel(ability)}完成 DC ${plan.areaAction!.saveDc} 豁免。`,
+            })),
+            defaultOptionId: defaultSaveAbility,
+            timeoutMs: 10_000,
+            phase: 'before-action',
+            context: {
+              choiceKind: 'saving-throw-ability',
+              targetTokenId: targetToken.id,
+              saveDc: plan.areaAction.saveDc,
+            },
+          }) as AbilityKey | undefined
+        : defaultSaveAbility
+      const saveAbility = saveAbilityChoices.includes(selectedSaveAbility as AbilityKey)
+        ? selectedSaveAbility as AbilityKey
+        : defaultSaveAbility
+      const baseSaveMode = dnd5eSavingThrowModeExplanation(target, saveAbility, {
         effectVisible: true,
         sourceCreatureType: caster.creatureType,
         sourceIsSpell: false,
       })
       const d20 = await rollDiceBoxD20(
-        `${plan.areaAction.actionName}·${combatPresentationSavingThrowAbilityLabel(plan.areaAction.saveAbility)}`,
+        `${plan.areaAction.actionName}·${combatPresentationSavingThrowAbilityLabel(saveAbility)}`,
         targetToken.label,
       )
       const d20Second = baseSaveMode.mode === 'normal'
-        ? undefined
-        : await rollDiceBoxD20(
-            `${plan.areaAction.actionName}·${combatPresentationSavingThrowAbilityLabel(plan.areaAction.saveAbility)}（${baseSaveMode.mode === 'advantage' ? '优势' : '劣势'}）`,
+          ? undefined
+          : await rollDiceBoxD20(
+            `${plan.areaAction.actionName}·${combatPresentationSavingThrowAbilityLabel(saveAbility)}（${baseSaveMode.mode === 'advantage' ? '优势' : '劣势'}）`,
             targetToken.label,
           )
       const blessRoll = dnd5eCombatantHasConcentrationEffect(casting.state, target.id, 'bless')
@@ -12778,9 +13302,9 @@ export default function MapsWorkspacePage() {
           ? [halflingLuckyD20 ?? d20]
           : [halflingLuckyD20 ?? d20, halflingLuckyD20Second ?? d20Second ?? 0],
         mode: baseSaveMode.mode,
-        modifier: (target.savingThrowBonuses[plan.areaAction.saveAbility] ??
-          Math.floor((target.abilities[plan.areaAction.saveAbility] - 10) / 2)) +
-          dnd5eActiveSavingThrowBonus(target.classState.activeEffects, plan.areaAction.saveAbility) +
+        modifier: (target.savingThrowBonuses[saveAbility] ??
+          Math.floor((target.abilities[saveAbility] - 10) / 2)) +
+          dnd5eActiveSavingThrowBonus(target.classState.activeEffects, saveAbility) +
           (blessRoll ?? 0) - (baneRoll ?? 0),
         dc: plan.areaAction.saveDc,
       })
@@ -12790,7 +13314,7 @@ export default function MapsWorkspacePage() {
       ) ? (await confirmSuccessfulEnemyD20({
           map: latestMap,
           characters: casting.characters,
-          label: `${plan.areaAction.actionName}·${combatPresentationSavingThrowAbilityLabel(plan.areaAction.saveAbility)}`,
+          label: `${plan.areaAction.actionName}·${combatPresentationSavingThrowAbilityLabel(saveAbility)}`,
           targetName: targetToken.label,
           originalValue: preview.roll.d20,
           rollerCharacterId: targetToken.characterId,
@@ -12805,6 +13329,7 @@ export default function MapsWorkspacePage() {
         })).postD20Adjustment : undefined
       targetSavingThrows.push({
         targetId: target.id,
+        ability: saveAbility,
         d20,
         d20Second,
         halflingLuckyD20,
@@ -12815,22 +13340,26 @@ export default function MapsWorkspacePage() {
       })
       savingThrowTraceDetails.push(...formatDnd5eSavingThrowResolutionTrace({
         targetName: targetToken.label,
-        ability: plan.areaAction.saveAbility,
+        ability: saveAbility,
         mode: baseSaveMode.mode,
         baseMode: baseSaveMode,
         d20,
         d20Second,
       }))
     }
-    const damageRolls = plan.areaAction.damage
-      ? await rollDiceBoxValues(
-          plan.areaAction.damage.diceCount,
-          plan.areaAction.damage.diceSides,
-          `${plan.areaAction.actionName}·${plan.areaAction.damage.damageType}伤害`,
-          casting.actorToken.label,
-        )
-      : []
-    const forcedMovements: Dnd5eSpellForcedMovement[] = await Promise.all(
+    const damageRolls: number[] = []
+    for (const component of [
+      ...(casting.variant.damage ? [casting.variant.damage] : []),
+      ...(casting.variant.additionalDamage ?? []),
+    ]) {
+      damageRolls.push(...await rollDiceBoxValues(
+        component.count,
+        component.sides,
+        `${plan.areaAction.actionName}·${component.type}伤害`,
+        casting.actorToken.label,
+      ))
+    }
+    let forcedMovements: Dnd5eSpellForcedMovement[] = await Promise.all(
       dnd5eMonsterAreaForcedMovementPlans(casting).map(async (movement) => {
         const fallingDice = dnd5eFallingDamageDice(movement.fallDistanceFeet)
         // The Host signs every potential fall before the transaction. Headless
@@ -12854,6 +13383,108 @@ export default function MapsWorkspacePage() {
         }
       }),
     )
+    if (casting.variant.forcedMovementOnSuccessfulSave) {
+      // Sign deterministic provisional destinations first so Headless can
+      // determine which targets actually succeeded after every reroll and
+      // optional bonus. The provisional state is never applied to the map.
+      const provisionalMovements = casting.targetTokens.map((targetToken) => {
+        const first = dnd5eMonsterAreaSuccessfulSaveExitOptions({
+          prepared: casting,
+          targetId: targetToken.id,
+        })[0]
+        return first ?? {
+          targetId: targetToken.id,
+          to: { x: targetToken.x, y: targetToken.y },
+          distanceFeet: 0,
+        }
+      })
+      const provisional = resolvePreparedDnd5eMonsterAreaAction({
+        prepared: casting,
+        resolution: {
+          targetSavingThrows,
+          damageRolls,
+          forcedMovements: provisionalMovements,
+        },
+      })
+      if (!provisional.result.ok) {
+        pushCombatLog(
+          `${casting.actorToken.label} 的${plan.areaAction.actionName}未通过 Headless 预结算：${provisional.result.reason}。`,
+          'system',
+        )
+        return false
+      }
+      const successfulTargetIds = new Set(
+        provisional.result.events.flatMap((event) =>
+          event.type === 'saving-throw-resolved' && event.success ? [event.targetId] : []),
+      )
+      const reservedDestinations: Array<{ x: number; y: number }> = []
+      forcedMovements = []
+      for (const targetToken of casting.targetTokens) {
+        const options = dnd5eMonsterAreaSuccessfulSaveExitOptions({
+          prepared: casting,
+          targetId: targetToken.id,
+          reservedDestinations,
+        })
+        let selected = options[0]
+        const targetCharacter = targetToken.characterId
+          ? casting.characters.find((character) => character.id === targetToken.characterId)
+          : undefined
+        if (successfulTargetIds.has(targetToken.id) && targetCharacter && options.length > 1) {
+          const selectedId = await requestSharedChoiceWindow({
+            id: `monster-success-exit:${areaTransactionId}:${targetToken.id}`,
+            transactionId: areaTransactionId,
+            actor: targetCharacter,
+            targetCharId: targetCharacter.id,
+            pluginId: 'core:dnd5e',
+            featureId: `monster-area-success-exit:${plan.areaAction.actionId}`,
+            featureName: `${plan.areaAction.actionName}·选择退出方向`,
+            prompt: `${targetToken.label}豁免成功：选择被移出怪物占据空间的方向。`,
+            audience: 'target',
+            options: options.map((option) => ({
+              id: `${option.cell.col},${option.cell.row}`,
+              label: `格 ${option.cell.col},${option.cell.row}`,
+              description: option.fallDistanceFeet > 0
+                ? `移动 ${option.distanceFeet} 尺；该位置会坠落 ${option.fallDistanceFeet} 尺。`
+                : `移动 ${option.distanceFeet} 尺至未占据空间。`,
+            })),
+            defaultOptionId: `${selected!.cell.col},${selected!.cell.row}`,
+            timeoutMs: 10_000,
+            phase: 'after-save',
+            context: {
+              choiceKind: 'successful-save-exit',
+              targetTokenId: targetToken.id,
+            },
+          })
+          selected = options.find((option) =>
+            `${option.cell.col},${option.cell.row}` === selectedId) ?? selected
+        }
+        if (successfulTargetIds.has(targetToken.id) && selected) {
+          reservedDestinations.push(selected.to)
+          const fallingDice = dnd5eFallingDamageDice(selected.fallDistanceFeet)
+          forcedMovements.push({
+            targetId: selected.targetId,
+            to: selected.to,
+            distanceFeet: selected.distanceFeet,
+            toElevationFeet: selected.toElevationFeet,
+            toGroundElevationFeet: selected.toGroundElevationFeet,
+            fallingDamageRolls: fallingDice > 0
+              ? await rollDiceBoxValues(
+                  fallingDice,
+                  6,
+                  `${plan.areaAction.actionName}·推出后坠落伤害`,
+                  targetToken.label,
+                )
+              : undefined,
+          })
+        } else {
+          forcedMovements.push({
+            targetId: targetToken.id,
+            to: { x: targetToken.x, y: targetToken.y },
+            distanceFeet: 0,
+          })
+        }
+      }
+    }
     const areaResolution = { targetSavingThrows, damageRolls, forcedMovements }
     let initial = resolvePreparedDnd5eMonsterAreaAction({
       prepared: casting,
@@ -12896,7 +13527,10 @@ export default function MapsWorkspacePage() {
       requestPostSpellRandomTableAdjudication: requestSharedPostSpellRandomTableAdjudication,
     })
     let areaApplication = settled.application
-    for (const tokenId of new Set(forcedMovements.map((movement) => movement.targetId))) {
+    for (const tokenId of new Set([
+      ...forcedMovements.map((movement) => movement.targetId),
+      ...(casting.actorMovement ? [casting.actorToken.id] : []),
+    ])) {
       const areaSettlement = await settleDnd5ePersistentAreasForForcedMovement({
         beforeMap: latestMap,
         afterMap: areaApplication.map,
@@ -12941,6 +13575,7 @@ export default function MapsWorkspacePage() {
       updateDnd5eTurnEconomy(casting.actorToken.id, (economy) => ({
         ...economy,
         action: { ...economy.action, current: actorTurn.actionAvailable ? economy.action.current : 0 },
+        movement: { ...economy.movement, current: actorTurn.movementRemaining },
       }))
     }
     const damage = settled.result.events
@@ -13917,7 +14552,9 @@ export default function MapsWorkspacePage() {
       : undefined
     const action = result.actionIndex == null
       ? undefined
-      : monster?.actions[result.actionIndex]
+      : result.monsterResourceKind === 'bonus-action'
+        ? monster?.bonusActions?.[result.actionIndex]
+        : monster?.actions[result.actionIndex]
     const executionMode = dnd5eMonsterAttackExecutionMode({
       actionKind: action?.kind,
       manualControl: dnd5eMonsterManualControlEnabled(monsterControlRef.current),
@@ -14271,13 +14908,13 @@ export default function MapsWorkspacePage() {
         })
       }
       setSharedRollConfirmationPrompt(null)
-    } catch {
-      await showCombatNotice('无法继续结算', '确认事务未能提交，投掷仍保持暂停，请重试。', 'rose')
+    } catch (error) {
+      console.error('[roll-confirmation] settlement failed', error)
+      void showCombatNotice('无法继续结算', '确认事务未能提交；系统会自动恢复或重试本次投掷。', 'rose')
     } finally {
       settlingRollConfirmationRef.current = false; setSettlingRollConfirmation(false)
     }
   }
-
   const rollDnd5eMonsterMechanics = async (requirements: readonly {
     actorId: string
     actorName: string
@@ -17247,7 +17884,7 @@ export default function MapsWorkspacePage() {
           castingClassId: pluginCast.castingClassId,
         })
         const sharedAreaDamage = !!pluginCast.area && mechanics.resolution !== 'spell-attack'
-        const sharedDamageRolls = sharedAreaDamage && mechanics.damage
+        const sharedDamageRolls = sharedAreaDamage && mechanics.damage && !pluginCast.overchannel
           ? await rollDiceBoxValues(pluginCast.damageDice.count, pluginCast.damageDice.sides, `${pluginCast.spell.name}·范围伤害`, '范围内目标')
           : []
         const targetRolls = [] as NonNullable<Dnd5ePluginSpellResolutionRolls['targetRolls']>
@@ -17292,7 +17929,7 @@ export default function MapsWorkspacePage() {
           const damageCount = !sharedAreaDamage && mechanics.damage && attackHit
             ? pluginCast.damageDice.count * (critical ? 2 : 1)
             : 0
-          const targetDamageRolls = damageCount > 0
+          const targetDamageRolls = damageCount > 0 && !pluginCast.overchannel
             ? await rollDiceBoxValues(damageCount, pluginCast.damageDice.sides, `${pluginCast.spell.name}·伤害`, target.token.label)
             : []
           targetRolls.push({ attackD20, attackD20Second, savingThrowD20, savingThrowD20Second, damageRolls: targetDamageRolls })
@@ -17303,11 +17940,27 @@ export default function MapsWorkspacePage() {
         const savingThrowD20 = firstTargetRolls.savingThrowD20
         const savingThrowD20Second = firstTargetRolls.savingThrowD20Second
         const damageRolls = sharedAreaDamage ? sharedDamageRolls : firstTargetRolls.damageRolls ?? []
+        const overchannelSelfDamageRolls = pluginCast.overchannelSelfDamageDiceCount > 0
+          ? await rollDiceBoxValues(
+              pluginCast.overchannelSelfDamageDiceCount,
+              12,
+              '超限导能 · 反噬伤害',
+              pluginCast.actor.name,
+            )
+          : undefined
         const resolvedPluginSpell = await resolveDnd5eFacadeWithAirborneFalls(
           resolvePreparedDnd5ePluginSpellCast,
           {
             prepared: pluginCast,
-            rolls: { attackD20, attackD20Second, savingThrowD20, savingThrowD20Second, damageRolls, targetRolls },
+            rolls: {
+              attackD20,
+              attackD20Second,
+              savingThrowD20,
+              savingThrowD20Second,
+              damageRolls,
+              targetRolls,
+              overchannelSelfDamageRolls,
+            },
             now: runtimeNow(),
           },
           pluginCast.map,
@@ -25609,12 +26262,37 @@ export default function MapsWorkspacePage() {
   ) => {
     const castingCharacter = combatActiveRef.current ? activeChar : playerChar
     if (!castingCharacter) return
+    const focusItemInstanceId = !source && castingClassId
+      ? dnd5eHeldSpellcastingFocus(castingCharacter, castingClassId)?.instanceId
+      : undefined
     setDnd5eWeaponTargeting(null)
     setDnd5eWeaponAttackOptions(undefined)
     const modifierIds = dnd5eSpellModifierIntentIdsFromOptions(options)
     const pluginSpell = source ? undefined : dnd5ePluginSpellDefinition(spellId)
     if (pluginSpell) {
-      if (modifierIds.length > 0) {
+      if (!castingClassId) return
+      const pluginModifierResolution = resolveDnd5eSpellModifierIntents({
+        character: castingCharacter,
+        castingClassId,
+        spellId,
+        slotLevel,
+        modifierIds,
+        pluginSpell: {
+          level: pluginSpell.level,
+          school: pluginSpell.school,
+          castingTime: pluginSpell.castingTime.unit === 'bonus-action'
+            ? 'bonus-action'
+            : pluginSpell.castingTime.unit === 'reaction'
+              ? 'reaction'
+              : pluginSpell.castingTime.unit === 'action'
+                ? 'action'
+                : 'special',
+          hasDamage: pluginSpell.mechanics?.damage != null,
+          areaSavingThrow: pluginSpell.range.shape != null &&
+            pluginSpell.mechanics?.resolution === 'saving-throw',
+        },
+      })
+      if (!pluginModifierResolution.ok) {
         void showCombatNotice('特性不适用', '当前插件法术没有声明与该职业施法特性兼容，未提交施法请求。', 'amber')
         return
       }
@@ -25623,7 +26301,10 @@ export default function MapsWorkspacePage() {
       const pluginArea = dnd5ePluginSpellArea(pluginSpell)
       const pluginCapacity = dnd5ePluginSpellTargetCapacity(pluginSpell, slotLevel)
       if (pluginSpell.range.type === 'self' && !pluginArea && casterToken) {
-        const payload: Dnd5eSpellCastPayload = { spellId, slotLevel, castingClassId, targetTokenId: casterToken.id }
+        const payload: Dnd5eSpellCastPayload = {
+          spellId, focusItemInstanceId, slotLevel, castingClassId, targetTokenId: casterToken.id,
+          overchannel: pluginModifierResolution.options.overchannel,
+        }
         sendPlayerDnd5eSpellCastRequest(payload)
         setDnd5eSpellTargeting(null)
         return
@@ -25632,17 +26313,20 @@ export default function MapsWorkspacePage() {
         setAoePreviewCell(pixelToCell(casterToken.x, casterToken.y, activeMap))
       }
       setDnd5eSpellTargeting({
-        characterId: castingCharacter.id, castingClassId, spellId, slotLevel,
+        characterId: castingCharacter.id, focusItemInstanceId, castingClassId, spellId, slotLevel,
         maximumTargets: pluginCapacity.maximumTargets,
         allowDuplicateTargets: pluginCapacity.allowDuplicateTargets,
-        targetTokenIds: [], overchannel: false, empowered: false,
-        draconicResistance: false, repellingBlast: false, canSculpt: false,
-        maximumSculptedTargets: 0, sculptedTargetIds: [], sculpting: false,
+        targetTokenIds: [], overchannel: pluginModifierResolution.options.overchannel === true, empowered: false,
+        draconicResistance: false, repellingBlast: false,
+        canSculpt: pluginModifierResolution.options.sculptSpell === true,
+        maximumSculptedTargets: pluginModifierResolution.options.sculptSpell === true ? pluginSpell.level + 1 : 0,
+        sculptedTargetIds: [], sculpting: false,
         maximumCarefulTargets: 0, carefulTargetIds: [], carefulSelecting: false,
         heightenedTargetId: undefined, heightenedSelecting: false,
         area: pluginArea,
         areaTargetAngleDegrees: 0,
         autoSubmitOnAreaSelection: options?.autoSubmitOnTargetSelection === true,
+        autoSculpt: pluginModifierResolution.options.sculptSpell === true,
       })
       return
     }
@@ -25757,6 +26441,7 @@ export default function MapsWorkspacePage() {
     if (spell.rangeFeet === 0 && spell.target === 'ally' && casterToken) {
       const payload: Dnd5eSpellCastPayload = {
         spellId,
+        focusItemInstanceId,
         itemInstanceId: source?.itemInstanceId,
         itemUseActionId: source?.itemUseActionId,
         castingClassId,
@@ -25795,6 +26480,7 @@ export default function MapsWorkspacePage() {
     const autoSculpt = validatedOptions.sculptSpell === true && canSculpt
     setDnd5eSpellTargeting({
       characterId: castingCharacter.id,
+      focusItemInstanceId,
       itemInstanceId: source?.itemInstanceId,
       itemUseActionId: source?.itemUseActionId,
       castingClassId,
@@ -25999,12 +26685,20 @@ export default function MapsWorkspacePage() {
     <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-400">正在加载地图工具…</div>}>
     <div className="h-full w-full">
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      <input
+        ref={uvttFileRef}
+        type="file"
+        accept="application/json,.uvtt,.dd2vtt,.df2vtt"
+        className="hidden"
+        onChange={(event) => void handleUvttFile(event)}
+      />
 
       {maps.length === 0 || !activeMap ? (
         <MapsEmptyMapPanel
           modeToggle={modeToggle}
           isDm={isDM}
           onUpload={() => fileRef.current?.click()}
+          onImportUvtt={() => uvttFileRef.current?.click()}
         />
       ) : (
         /* 全屏地图框，所有控件作为浮层 */
@@ -26018,7 +26712,12 @@ export default function MapsWorkspacePage() {
               combatActive={combatActive}
               selectedTokenId={selectedTokenId}
               onSelectToken={handleSelectToken}
-              targetSelectTokenIds={manualMonsterAttackTargetIds}
+              targetSelectTokenIds={[
+                ...new Set([
+                  ...manualMonsterAttackTargetIds,
+                  ...manualMonsterSpellTargetIds,
+                ]),
+              ]}
               isDM={isDM}
               optimisticTokenMoveIds={
                 manualMonsterMovePendingTokenId
@@ -26063,6 +26762,7 @@ export default function MapsWorkspacePage() {
               measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               hpByToken={hpByToken}
               dnd5eConditionsByToken={dnd5eConditionsByToken}
+              dnd5eTokenStatusMarkersByToken={dnd5eTokenStatusMarkersByToken}
               standardConditionTokenMarks={standardConditionTokenMarks}
               shillelaghTokenIds={shillelaghTokenIds}
               onDnd5eConditionClick={(tokenId) => {
@@ -26249,6 +26949,7 @@ export default function MapsWorkspacePage() {
                 setDnd5eItemCreatureTargeting(null)
                 setDnd5ePluginAreaTargeting(null)
                 setDnd5eManualMonsterAttackTargeting(null)
+                setDnd5eManualMonsterSpellTargeting(null)
                 setSelectedTokenId(null)
                 setSelectedCharacterTokenId(null)
                 setEnemyDetailOpen(false)
@@ -26423,6 +27124,36 @@ export default function MapsWorkspacePage() {
             </div>
           )}
 
+          {activeManualMonsterSpellTargeting ? (
+            <div
+              data-testid="manual-monster-spell-targeting"
+              className="absolute left-1/2 top-14 z-[110] flex max-w-[min(94vw,920px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-sky-400/40 bg-void-950/95 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm"
+            >
+              <Sparkles className="h-4 w-4 shrink-0 text-sky-300" />
+              <span className="text-slate-200">
+                <span className="font-semibold text-sky-200">
+                  {activeManualMonsterSpellTargeting.spellName}
+                </span>
+                {' '}· {activeManualMonsterSpellTargeting.slotLevel === 0
+                  ? '戏法'
+                  : `${activeManualMonsterSpellTargeting.slotLevel} 环`}
+                {' '}· {activeManualMonsterSpellTargeting.area
+                  ? '移动范围模板并点击有效格确认'
+                  : '点击高亮目标施放'}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDnd5eManualMonsterSpellTargeting(null)
+                  setAoePreviewCell(null)
+                }}
+                className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+              >
+                取消
+              </button>
+            </div>
+          ) : null}
+
           {manualMonsterMoveSelectMode && moveCircle && manualMonsterMoveToken ? (
             <div
               data-testid="manual-monster-move-targeting"
@@ -26433,23 +27164,27 @@ export default function MapsWorkspacePage() {
                 <span className="font-semibold text-cyan-200">{manualMonsterMoveToken.label}</span>
                 {' '}· 点击地图格移动 · 剩余 {moveCircle.feet} 尺
               </span>
-              {(manualMonsterMoveDefinition?.speed.fly ?? 0) > 0 ? (
-                <select
-                  aria-label="怪物移动方式"
-                  value={dnd5eTraversalMode === 'fly' ? 'fly' : 'walk'}
-                  onChange={(event) => playerMovement.selectTraversalMode(
-                    event.target.value as Dnd5eTraversalMode,
-                    movementActorElevationFeet,
-                  )}
-                  className="rounded-lg border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-200"
-                >
-                  {manualMonsterMoveElevationFeet <= manualMonsterMoveGroundElevationFeet &&
-                  (manualMonsterMoveDefinition?.speed.walk ?? 0) > 0 ? (
-                    <option value="walk">地面移动</option>
-                  ) : null}
+              <select
+                aria-label="怪物移动方式"
+                value={dnd5eTraversalMode}
+                onChange={(event) => playerMovement.selectTraversalMode(
+                  event.target.value as Dnd5eTraversalMode,
+                  movementActorElevationFeet,
+                )}
+                className="rounded-lg border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-200"
+              >
+                {manualMonsterMoveElevationFeet <= manualMonsterMoveGroundElevationFeet &&
+                (manualMonsterMoveDefinition?.speed.walk ?? 0) > 0 ? (
+                  <option value="walk">地面移动</option>
+                ) : null}
+                <option value="climb">攀爬（无攀爬速度时半速）</option>
+                <option value="swim">游泳（无游泳速度时半速）</option>
+                {(manualMonsterMoveDefinition?.speed.fly ?? 0) > 0 ? (
                   <option value="fly">飞行</option>
-                </select>
-              ) : null}
+                ) : null}
+                <option value="long-jump-running">助跑跳远</option>
+                <option value="long-jump-standing">立定跳远</option>
+              </select>
               {dnd5eTraversalMode === 'fly' && (
                 <div className="flex items-center gap-1 rounded-lg border border-cyan-300/15 bg-cyan-950/30 p-0.5">
                   <button
@@ -27216,6 +27951,16 @@ export default function MapsWorkspacePage() {
                   >
                     <Upload className="h-3.5 w-3.5" />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => uvttFileRef.current?.click()}
+                    disabled={combatActive}
+                    className="flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={combatActive ? '战斗中无法替换地图几何' : '直接导入 UVTT、DD2VTT 或 DF2VTT 地图'}
+                  >
+                    <FileUp className="h-3.5 w-3.5" />
+                    导入 UVTT
+                  </button>
 
                   <button
                     onClick={() => updateMap(activeMap.id, { showGrid: !activeMap.showGrid })}
@@ -27450,24 +28195,7 @@ export default function MapsWorkspacePage() {
                         setGeometryDetectionCandidateMapId(candidates.length > 0 ? activeMap.id : null)
                       }}
                       onCreateMapFromUvtt={async (input) => {
-                        const newMapId = await addMap({
-                          name: input.name || 'UVTT 地图',
-                          width: input.width,
-                          height: input.height,
-                          blob: input.blob,
-                        })
-                        updateMap(newMapId, {
-                          gridSize: input.pixelsPerGrid,
-                          gridOffsetX: 0,
-                          gridOffsetY: 0,
-                          showGrid: true,
-                          feetPerCell: 5,
-                        })
-                        if (!mapEditingCoordinator.replace(newMapId, { ...input.geometry, mapId: newMapId }).ok) {
-                          throw new Error('UVTT 背景已创建，但几何关系校验失败')
-                        }
-                        select(newMapId)
-                        setGeometryDiagnosticsEnabled(true)
+                        await createMapFromUvtt(input)
                       }}
                     />
                   )}
@@ -27681,6 +28409,9 @@ export default function MapsWorkspacePage() {
               mapId={activeMap.id}
               characters={characters}
               tokens={activeMap.tokens}
+              encounterParticipantTokenIds={combatActive
+                ? initiativeOrder.map((entry) => entry.tokenId)
+                : undefined}
               updateToken={updateToken}
               onSetHitPoints={({ currentHp, maxHp, manuallySetMaximum }) => {
                 return setRoomCharacterHitPoints({
@@ -27729,6 +28460,7 @@ export default function MapsWorkspacePage() {
                   actorTokenId: selectedToken.id,
                   actionIndex,
                   actionName,
+                  resourceKind: 'action',
                 })
                 void showCombatNotice(
                   `选择${actionName}的目标`,
@@ -27798,13 +28530,32 @@ export default function MapsWorkspacePage() {
               control={monsterControl}
               settlementMode={settlementMode}
               actionUsed={manualMonsterActionUsed}
+              bonusActionUsed={manualMonsterBonusActionUsed}
               actionPending={manualMonsterActionPending}
               movementRemainingFeet={manualMonsterTurnEconomy?.movement.current}
               movementMaximumFeet={manualMonsterTurnEconomy?.movement.max}
+              movementIntent={manualMonsterMoveSelection?.turnKey === manualMonsterTurnKey
+                ? manualMonsterMoveSelection?.intent
+                : undefined}
+              canNimbleEscape={currentInitiativeToken?.poolId
+                ? getDnd5eSrdMonster(currentInitiativeToken.poolId)?.traits.some((trait) =>
+                    trait.rule?.kind === 'nimble-escape')
+                : false}
               onRequestTakeover={requestMonsterTakeover}
               onResumeAutomation={resumeMonsterAutomation}
               onSelectAction={selectManualMonsterAction}
+              onSelectSpell={selectManualMonsterSpell}
               onSelectContinuation={selectManualMonsterMultiattackContinuation}
+              onSelectMovement={(token, kind) => {
+                setSelectedTokenId(token.id)
+                setSelectedCharacterTokenId(null)
+                setEnemyDetailOpen(true)
+                beginManualMonsterMovement(token, kind)
+              }}
+              onCancelMovement={() => {
+                setManualMonsterMoveSelection(null)
+                playerMovement.clear()
+              }}
               onEndTurn={advanceInitiative}
             />
           )}
@@ -28198,34 +28949,12 @@ export default function MapsWorkspacePage() {
                     onCastSpell={async (spellId, slotLevel, castingClassId, options) => {
                       setDnd5eWeaponTargeting(null)
                       setDnd5eWeaponAttackOptions(undefined)
+                      const focusItemInstanceId = !options?.racialInnate && castingClassId
+                        ? dnd5eHeldSpellcastingFocus(activeChar, castingClassId)?.instanceId
+                        : undefined
                       const pluginSpell = dnd5ePluginSpellDefinition(spellId)
                       if (pluginSpell) {
-                        if (!castingClassId) return
-                        setAoePreviewCell(null)
-                        const casterToken = activeMap?.tokens.find((token) => token.characterId === activeChar.id)
-                        const pluginArea = dnd5ePluginSpellArea(pluginSpell)
-                        const pluginCapacity = dnd5ePluginSpellTargetCapacity(pluginSpell, slotLevel)
-                        if (pluginSpell.range.type === 'self' && !pluginArea && casterToken) {
-                          const payload: Dnd5eSpellCastPayload = { spellId, slotLevel, castingClassId, targetTokenId: casterToken.id }
-                          sendPlayerDnd5eSpellCastRequest(payload)
-                          setDnd5eSpellTargeting(null)
-                          return
-                        }
-                        if (pluginArea && casterToken && activeMap) {
-                          setAoePreviewCell(pixelToCell(casterToken.x, casterToken.y, activeMap))
-                        }
-                        setDnd5eSpellTargeting({
-                          characterId: activeChar.id, castingClassId, spellId, slotLevel,
-                          maximumTargets: pluginCapacity.maximumTargets,
-                          allowDuplicateTargets: pluginCapacity.allowDuplicateTargets,
-                          targetTokenIds: [], overchannel: false, empowered: false,
-                          draconicResistance: false, repellingBlast: false, canSculpt: false,
-                          maximumSculptedTargets: 0, sculptedTargetIds: [], sculpting: false,
-                          maximumCarefulTargets: 0, carefulTargetIds: [], carefulSelecting: false,
-                          heightenedTargetId: undefined, heightenedSelecting: false,
-                          area: pluginArea,
-                          areaTargetAngleDegrees: 0,
-                        })
+                        await beginDnd5eSpellCast(spellId, slotLevel, castingClassId, options)
                         return
                       }
                       const spell = getDnd5eSrdCombatSpell(spellId)!
@@ -28313,6 +29042,7 @@ export default function MapsWorkspacePage() {
                       if (spell.rangeFeet === 0 && spell.target === 'ally' && casterToken) {
                         const payload: Dnd5eSpellCastPayload = {
                           spellId,
+                          focusItemInstanceId,
                           castingClassId,
                           racialInnate: options?.racialInnate,
                           slotLevel,
@@ -28350,6 +29080,7 @@ export default function MapsWorkspacePage() {
                       }, spell)
                       setDnd5eSpellTargeting({
                         characterId: activeChar.id,
+                        focusItemInstanceId,
                         castingClassId,
                         racialInnate: options?.racialInnate,
                         spellId,

@@ -24,6 +24,7 @@ export interface MonsterAction {
   range?: number
   kind?: 'melee' | 'ranged' | 'aoe' | 'multiattack'
   save?: { ability: AbilityKey; dc: number }
+  actorLanding?: boolean
   automation?: 'headless' | 'dm-adjudication' | 'invalid'
 }
 
@@ -80,6 +81,9 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
   const convertAction = (action: Dnd5eMonsterStatBlock['actions'][number]): MonsterAction => {
     const attack = action.attack
     const primaryDamage = attack?.damage[0]
+    const areaRule = action.rule?.kind === 'area-saving-throw' && !action.rule.variants
+      ? action.rule
+      : undefined
     return {
       name: action.name,
       description: action.description,
@@ -89,9 +93,13 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
       range: attack?.rangeFeet?.normal ?? attack?.reachFeet,
       kind: action.kind === 'multiattack'
         ? 'multiattack'
+        : areaRule
+          ? 'aoe'
         : attack
           ? (attack.mode === 'ranged' ? 'ranged' : 'melee')
           : undefined,
+      save: areaRule ? { ability: areaRule.ability, dc: areaRule.dc } : undefined,
+      actorLanding: areaRule?.actorLanding != null || undefined,
       automation: dnd5eMonsterActionAutomation(action),
     }
   }

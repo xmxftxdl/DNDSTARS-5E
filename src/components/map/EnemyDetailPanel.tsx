@@ -20,6 +20,8 @@ import {
 } from '../../lib/monsterTypes'
 import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus, Wrench } from 'lucide-react'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
+import Dnd5eTokenStatusMarkerEditor from './Dnd5eTokenStatusMarkerEditor'
+import { dnd5eTokenStatusMarkerOptionsForTarget } from '../../rulesets/dnd5e/tokenStatusMarkers'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { generatedImageDataUrlToFile } from '../../lib/generatedImage'
@@ -102,6 +104,7 @@ export default function EnemyDetailPanel({
   mapId,
   characters = [],
   tokens = [],
+  encounterParticipantTokenIds,
   updateToken,
   onSetHitPoints,
   removeToken,
@@ -122,6 +125,8 @@ export default function EnemyDetailPanel({
   mapId?: string
   characters?: Character[]
   tokens?: readonly Token[]
+  /** Current initiative roster. Omit outside combat to use every creature on the map. */
+  encounterParticipantTokenIds?: readonly string[]
   updateToken?: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   onSetHitPoints?: (input: {
     currentHp: number
@@ -229,6 +234,25 @@ export default function EnemyDetailPanel({
   const hostileTargets = tokens.filter((candidate) =>
     candidate.id !== token.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(token, candidate),
   )
+  const encounterParticipantIds = encounterParticipantTokenIds
+    ? new Set(encounterParticipantTokenIds)
+    : undefined
+  const markerParticipants = (tokens.some((candidate) => candidate.id === token.id)
+    ? tokens
+    : [...tokens, token])
+    .filter((candidate) => candidate.type !== 'obstacle' && (
+      !encounterParticipantIds || encounterParticipantIds.has(candidate.id)))
+    .map((candidate) => ({
+      tokenId: candidate.id,
+      label: candidate.characterId
+        ? characters.find((character) => character.id === candidate.characterId)?.name ?? candidate.label
+        : candidate.label,
+      monster: candidate.poolId ? getDnd5eSrdMonster(candidate.poolId) : undefined,
+    }))
+  const tokenStatusMarkerOptions = dnd5eTokenStatusMarkerOptionsForTarget({
+    targetTokenId: token.id,
+    participants: markerParticipants,
+  })
 
   const openMonsterOverrideEditor = () => {
     if (!canEdit || !token.poolId || !monsterDefinition) {
@@ -653,6 +677,17 @@ export default function EnemyDetailPanel({
             {portraitError && <p className="mt-2 text-xs text-rose-300">{portraitError}</p>}
           </section>
         )}
+        {canEdit ? (
+          <div className="mb-4">
+            <Dnd5eTokenStatusMarkerEditor
+              markers={token.dnd5eTokenStatusMarkers ?? []}
+              options={tokenStatusMarkerOptions}
+              onChange={(markers) => updateToken!(mapId!, token.id, {
+                dnd5eTokenStatusMarkers: markers.length > 0 ? markers : undefined,
+              })}
+            />
+          </div>
+        ) : null}
         {canManageConditions && onConditionsChange ? (
           <div className="mb-4">
             <Dnd5eConditionEditor

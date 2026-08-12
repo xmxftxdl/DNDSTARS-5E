@@ -1731,7 +1731,7 @@ function actionExpectedValue(input: {
   let controlValue = 0
   let probabilityTotal = 0
   const traitRemainingMissProbability =
-    new Map<'sneak-attack' | 'martial-advantage', number>()
+    new Map<'sneak-attack' | 'martial-advantage' | 'charge-damage', number>()
   let firstAttack: Dnd5eMonsterWeaponAttack | undefined
   const prospectiveLinkedTargetsBySlotGroup = new Map<string, Set<string>>()
   const weaponDamageSource: PlannerDamageSourceDetails = {
@@ -1786,6 +1786,32 @@ function actionExpectedValue(input: {
       turnKey: plannerTurnKey,
       usedTurnKeys: attackerState?.declarativeUsedTurnKeys,
       actorRecklessActive: attackerState?.recklessAttackTurnKey != null,
+      ...(() => {
+        const movementState = attacker.dnd5eCombatState
+        if (movementState?.monsterMechanicMovementTurnKey !== plannerTurnKey) {
+          return { actionId: child.id }
+        }
+        const origin = movementState.monsterMechanicMovementOrigin
+        const latest = movementState.monsterMechanicMovementLast ?? {
+          x: attacker.x,
+          y: attacker.y,
+        }
+        if (!origin) return { actionId: child.id }
+        const movementX = latest.x - origin.x
+        const movementY = latest.y - origin.y
+        const targetX = target.x - origin.x
+        const targetY = target.y - origin.y
+        return {
+          actionId: child.id,
+          movementDistanceFeet: movementState.monsterMechanicMovementFeet,
+          movementWasStraight:
+            movementState.monsterMechanicMovementStraight === true,
+          movementTowardTarget:
+            movementX * targetX + movementY * targetY > 0 &&
+            Math.hypot(target.x - latest.x, target.y - latest.y) + 1e-6 <
+              Math.hypot(target.x - origin.x, target.y - origin.y),
+        }
+      })(),
     }
     const packTacticsAdvantage = monsterPackTacticsAdvantage({
       map,
@@ -3358,6 +3384,9 @@ function createTacticalCandidates(input: {
       })
     }
     for (const { action, index, rule } of legalAreaActions) {
+      const totalAreaAverageDamage =
+        (rule.damage?.average ?? 0) +
+        (rule.additionalDamage ?? []).reduce((total, component) => total + component.average, 0)
       const outcomeValueByTargetId = new Map<string, {
         expectedAdditionalDamage: number
         controlValue: number
@@ -3380,7 +3409,7 @@ function createTacticalCandidates(input: {
         attacker: at,
         focusTarget: target,
         area: rule.area,
-        averageDamage: rule.damage?.average ?? 0,
+        averageDamage: totalAreaAverageDamage,
         savingThrow: true,
         targetMode: rule.target,
         minimumHostiles: 1,
@@ -3401,14 +3430,15 @@ function createTacticalCandidates(input: {
             magical: false,
             sourceMoralAlignment: plannerMoralAlignment(monster.alignment),
           }
-          const baseDamage = rule.damage
-            ? resolvePlannerDamage(
-                candidate,
-                rule.damage.average,
-                rule.damage.type,
-                source,
-              )
-            : 0
+          const baseDamage = [
+            ...(rule.damage ? [rule.damage] : []),
+            ...(rule.additionalDamage ?? []),
+          ].reduce((total, component) => total + resolvePlannerDamage(
+            candidate,
+            component.average,
+            component.type,
+            source,
+          ), 0)
           const fallingDamage = resolvePlannerDamage(
             candidate,
             outcomeValueForTarget(candidate).expectedAdditionalDamage,
@@ -3421,6 +3451,29 @@ function createTacticalCandidates(input: {
           outcomeValueForTarget(candidate).controlValue,
       })
       if (!areaPlacement) continue
+      const areaTargetTokenIds = rule.actorLanding
+        ? tokensInCells(
+            map,
+            map.tokens,
+            tokenOccupiedCellsAt(
+              at,
+              map,
+              tokenCenterForAnchorCell(areaPlacement.targetCell, at, map),
+            ),
+          )
+            .filter((candidate) =>
+              candidate.id !== at.id &&
+              candidate.type !== 'obstacle' &&
+              plannerMonsterAreaRuleAllowsTarget({
+                map,
+                attacker: at,
+                target: candidate,
+                characters,
+                rule,
+              }))
+            .map((candidate) => candidate.id)
+        : areaPlacement.targetTokenIds
+      if (areaTargetTokenIds.length === 0) continue
       const usesNimbleEscape = hasNimbleEscape && opportunityRiskAt > 0
       const plan: Dnd5eMonsterTurnPlan = {
         moved,
@@ -3436,11 +3489,12 @@ function createTacticalCandidates(input: {
           actionId: action.id,
           variantId: rule.id === 'default' ? undefined : rule.id,
           actionName: rule.id === 'default' ? action.name : `${action.name}：${rule.name}`,
-          targetTokenIds: areaPlacement.targetTokenIds,
+          targetTokenIds: areaTargetTokenIds,
           area: rule.area,
           areaTargetCell: areaPlacement.targetCell,
           areaTargetElevationFeet: areaPlacement.targetElevationFeet,
           saveAbility: rule.ability,
+          saveAbilityChoices: rule.targetAbilityChoices,
           saveDc: rule.dc,
           damage: rule.damage ? {
             diceCount: rule.damage.count,

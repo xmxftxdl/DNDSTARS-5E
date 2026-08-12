@@ -60,6 +60,18 @@ export function mapCanvasGeometryDrawShouldStart(
   return (tool !== 'door' && tool !== 'window') || openingAttachedToWall
 }
 
+/**
+ * Geometry tools reserve the primary button for selecting and drawing. Holding
+ * the secondary button temporarily switches the canvas to viewport panning,
+ * without changing the selected entity or the active geometry tool.
+ */
+export function mapCanvasGeometryRightButtonPanShouldStart(input: {
+  button: number
+  geometryEditMode: boolean
+}): boolean {
+  return input.geometryEditMode && input.button === 2
+}
+
 export function mapCanvasStageCanPan(input: {
   tabletopTool: MapTabletopTool
   measureMode: boolean

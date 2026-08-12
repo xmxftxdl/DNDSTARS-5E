@@ -36,6 +36,7 @@ import {
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
+import { validateDnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
 import type { Dnd5eClassId } from './classes'
 import type { Dnd5eMonsterStatBlock } from './monsters'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
@@ -648,6 +649,7 @@ function clonePersistentAreaTriggers(
     if (damage && (
       !finiteInteger(damage.count, 1, 40) || !finiteInteger(damage.sides, 2, 100) ||
       !finiteInteger(damage.modifier ?? 0, -1_000, 1_000) ||
+      (damage.modifierFormula != null && validateDnd5eWorkshopDamageFormulaV1(damage.modifierFormula).length > 0) ||
       !(DND5E_DAMAGE_TYPES as readonly string[]).includes(damage.type)
     )) throw new Error(`Invalid plugin persistent area damage: ${featureId}:${trigger.id}`)
     const savingThrow = trigger.savingThrow

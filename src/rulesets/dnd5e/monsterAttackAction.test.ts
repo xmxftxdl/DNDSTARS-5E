@@ -14,6 +14,7 @@ import {
   prepareDnd5eMonsterAfterHitMechanics,
   prepareDnd5eMonsterAttack,
   previewDnd5eMonsterAttack,
+  dnd5ePreparedMonsterTraitDamageDefinitions,
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
 import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
@@ -62,6 +63,138 @@ describe('SRD monster map action adapter', () => {
     expect(swimmingAttack.ok).toBe(true)
     if (!swimmingAttack.ok) return
     expect(swimmingAttack.prepared.attackModes[0]).toBe('normal')
+  })
+
+  it('prepares Charge dice and its save rider from persisted Host movement evidence', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:boar')!
+    const boar = token({
+      id: 'boar',
+      x: 40,
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+      dnd5eCombatState: {
+        monsterMechanicMovementTurnKey: 'charge-map:1:boar',
+        monsterMechanicMovementFeet: 20,
+        monsterMechanicMovementOrigin: { x: 0, y: 0 },
+        monsterMechanicMovementLast: { x: 40, y: 0 },
+        monsterMechanicMovementStraight: true,
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      x: 50,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'charge-map', name: 'Charge map', width: 100, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, tokens: [boar, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'charge-map',
+      map,
+      characters: [hero],
+      initiativeOrder: [boar, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: boar.id,
+      targetTokenId: heroToken.id,
+      actionIndex: monster.actions.findIndex((action) => action.id === 'tusk'),
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attacks[0]?.attack.onHitRule).toEqual({
+      kind: 'saving-throw-condition', ability: 'str', dc: 11, condition: 'prone',
+    })
+    expect(dnd5ePreparedMonsterTraitDamageDefinitions(
+      prepared.prepared,
+      0,
+      'normal',
+    )).toEqual([expect.objectContaining({
+      traitId: 'charge-damage',
+      damage: expect.objectContaining({ count: 1, sides: 6, type: 'slashing' }),
+    })])
+  })
+
+  it('prepares and resolves a Host-authorized Pounce follow-up as a bonus action', () => {
+    const hero = {
+      ...character(),
+      conditions: ['prone' as const],
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'prone',
+          source: {
+            kind: 'monster',
+            actorId: 'lion',
+            rulesId: 'monster:srd-5.1:lion:pounce',
+          },
+          targetId: 'hero-token',
+        })],
+      },
+    }
+    const lionMonster = getDnd5eSrdMonster('srd-5.1:lion')!
+    const lion = token({
+      id: 'lion',
+      x: 40,
+      poolId: lionMonster.id,
+      hp: lionMonster.hitPoints.average,
+      maxHp: lionMonster.hitPoints.average,
+      dnd5eCombatState: {
+        monsterTriggeredBonusAction: {
+          schemaVersion: 1,
+          combatId: 'pounce-map',
+          round: 1,
+          turnKey: 'pounce-map:1:lion',
+          actionId: 'pounce-bite-bonus-action',
+          referencedActionId: 'bite',
+          targetId: 'hero-token',
+          requiredTargetCondition: 'prone',
+        },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token', x: 50, type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'pounce-map', name: 'Pounce map', width: 100, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, tokens: [lion, heroToken],
+    }
+    const bonusActionIndex = lionMonster.bonusActions?.findIndex((action) =>
+      action.id === 'pounce-bite-bonus-action') ?? -1
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'pounce-map', round: 1, map, characters: [hero],
+      initiativeOrder: [lion, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: lion.id,
+      targetTokenId: heroToken.id,
+      actionIndex: bonusActionIndex,
+      resourceKind: 'bonus-action',
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      resourceKind: 'bonus-action',
+      resourceAction: { id: 'pounce-bite-bonus-action' },
+      action: { id: 'bite' },
+    })
+    const damageRolls = prepared.prepared.attacks[0]!.attack.damage.map((damage) =>
+      Array(damage.count).fill(1))
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 10, damageRolls }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants[lion.id].turn.bonusActionAvailable).toBe(false)
+    expect(resolved.result.state.combatants[lion.id].turn.actionAvailable).toBe(true)
   })
 
   it('keeps a mixed Roper Multiattack selected by either the parent or Tendril child', () => {

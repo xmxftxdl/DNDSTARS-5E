@@ -42,6 +42,34 @@ describe('EnemyDetailPanel monster thumbnail', () => {
     expect(dmMarkup).toContain('当前地图全部同类')
   })
 
+  it('gives the DM an always-available presentation marker editor without requiring condition authority', () => {
+    const playerMarkup = renderToStaticMarkup(
+      <EnemyDetailPanel token={monsterToken()} onClose={() => {}} />,
+    )
+    const dmMarkup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken({
+          dnd5eTokenStatusMarkers: [{
+            schemaVersion: 1,
+            id: 'dm:burning',
+            statusId: 'burning',
+            source: 'dm',
+          }],
+        })}
+        onClose={() => {}}
+        isDM
+        mapId="map-1"
+        updateToken={() => {}}
+        canManageConditions={false}
+      />,
+    )
+
+    expect(playerMarkup).not.toContain('dnd5e-token-status-marker-editor')
+    expect(dmMarkup).toContain('dnd5e-token-status-marker-editor')
+    expect(dmMarkup).toContain('仅用于地图显示')
+    expect(dmMarkup).toContain('燃烧')
+  })
+
   it('marks implemented monster traits as HEADLESS', () => {
     const markup = renderToStaticMarkup(
       <EnemyDetailPanel

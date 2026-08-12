@@ -27,6 +27,118 @@ function token(id: string, type: 'player' | 'enemy', x: number, characterId?: st
 }
 
 describe('plugin spell CombatTransaction', () => {
+  it('keeps Sculpt Spells and Overchannel on a workshop Wizard spell cast through a held arcane focus', () => {
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'com.example.focus-fireburst', name: 'Focus Fireburst', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'focus-fireburst', resolve: ({ succeed }) => succeed() })
+        spellId = api.registerSpell({
+          id: 'focus-fireburst', name: '奥术烈焰', level: 3, school: 'evocation', ritual: false,
+          castingTime: { value: 1, unit: 'action' },
+          range: { type: 'distance', feet: 150, shape: 'radius', sizeFeet: 10 },
+          targeting: { relation: 'any', includeSelf: false, maximumTargets: 64 },
+          components: { verbal: true, somatic: true, material: true, materialText: '一件奥术法器' },
+          duration: { type: 'instantaneous', concentration: false },
+          classes: ['wizard'], description: '验证工坊塑能法术的职业特性与法器来源。',
+          mechanics: {
+            kind: 'damage', resolution: 'saving-throw', savingThrow: { ability: 'dex', onSuccess: 'half' },
+            damage: { dice: { count: 8, sides: 6, bonus: 0 }, type: 'fire' },
+          },
+          automation: { mode: 'headless-action', actionId: 'focus-fireburst' },
+        })
+      },
+    })
+    try {
+      const focusInstanceId = 'wizard-held-focus'
+      const actor: Character = {
+        ...wizard(spellId),
+        level: 14,
+        maxHp: 60,
+        currentHp: 60,
+        dnd5eClassLevels: { wizard: 14 },
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              subclass: 'evocation',
+              selections: { 'spell-prepared': [spellId] },
+            },
+          },
+        },
+        classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 3 } },
+        dnd5eInventory: {
+          schemaVersion: 3,
+          entries: [{
+            instanceId: focusInstanceId,
+            templateId: 'srd-5.1:item:arcane-focus',
+            item: {
+              id: 'srd-5.1:item:arcane-focus', name: '奥术法器', category: 'adventuring-gear',
+              icon: 'magic-wand', description: '', rulesText: '', stackable: false,
+              source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+            },
+            quantity: 1,
+            equippedSlot: 'offHand',
+            acquiredAt: 1,
+          }],
+        },
+      }
+      const ally: Character = { ...wizard(''), id: 'ally', name: '友方', dnd5eClassChoices: undefined, classResources: {} }
+      const actorToken = token('wizard-token', 'player', 25, actor.id)
+      const enemy = { ...token('enemy-token', 'enemy', 125), hp: 100, maxHp: 100 }
+      const allyToken = token('ally-token', 'player', 175, ally.id)
+      const map: BattleMap = {
+        id: 'map', name: 'Map', width: 1000, height: 500, gridSize: 50,
+        gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+        tokens: [actorToken, enemy, allyToken],
+      }
+      const action: SharedPlayerActionState = {
+        id: 'focus-fireburst-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy.id,
+        dnd5eSpellCast: {
+          spellId,
+          castingClassId: 'wizard',
+          focusItemInstanceId: focusInstanceId,
+          slotLevel: 3,
+          targetTokenId: enemy.id,
+          areaTargetCell: { col: 2, row: 0 },
+          sculptedTargetIds: [allyToken.id],
+          overchannel: true,
+        },
+        round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const initiativeOrder = [actorToken, enemy, allyToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      }))
+      const prepared = prepareDnd5ePluginSpellCast({ action, map, characters: [actor, ally], initiativeOrder })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared).toMatchObject({
+        castingClassId: 'wizard',
+        overchannel: true,
+        sculptedTargetIds: [allyToken.id],
+      })
+      expect(prepared.prepared.targets.map((target) => target.token.id)).toEqual([enemy.id])
+
+      const resolved = resolvePreparedDnd5ePluginSpellCast({
+        prepared: prepared.prepared,
+        rolls: { targetRolls: [{ savingThrowD20: 1, damageRolls: [] }] },
+      })
+      expect(resolved.result.ok).toBe(true)
+      expect(resolved.result.state.combatants[enemy.id].currentHp).toBe(52)
+      expect(resolved.result.state.combatants[allyToken.id].currentHp).toBe(30)
+      expect(resolved.result.state.combatants[actorToken.id].classState.overchannelUsesSinceLongRest).toBe(1)
+      expect(resolved.result.events).toContainEqual({
+        type: 'spell-sculpted', actorId: actorToken.id, targetId: allyToken.id, spellId,
+      })
+
+      action.dnd5eSpellCast!.focusItemInstanceId = 'forged-or-unheld-focus'
+      expect(prepareDnd5ePluginSpellCast({ action, map, characters: [actor, ally], initiativeOrder }))
+        .toEqual({ ok: false, reason: 'component-unavailable' })
+    } finally {
+      dispose()
+    }
+  })
+
   it('uses a higher slot to authorize and settle additional creature targets', () => {
     let spellId = ''
     const dispose = registerDnd5eRulesPlugin({

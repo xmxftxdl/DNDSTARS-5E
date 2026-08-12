@@ -15,6 +15,7 @@ import {
   type Dnd5eMonsterTargetPriority,
 } from './monsters'
 import { dnd5eMonsterBerserkRule } from './monsterGenericAbilities'
+import type { Dnd5eDamageType } from './damageTypes'
 
 export const DND5E_MONSTER_TARGET_PRIORITY_OPTIONS: readonly {
   value: Dnd5eMonsterTargetPriority
@@ -133,6 +134,10 @@ export interface Dnd5eMonsterMechanicRuntimeContext {
   maxHp: number
   usedKeys?: Readonly<Record<string, string>>
   movementDistanceFeet?: number
+  attackMode?: 'melee' | 'ranged' | 'spell' | 'unarmed'
+  damageTypes?: readonly Dnd5eDamageType[]
+  savingThrowTiming?: 'before' | 'after'
+  savingThrowSuccess?: boolean
 }
 
 export interface Dnd5eMonsterMechanicCompatibility {
@@ -173,17 +178,22 @@ export function dnd5eMonsterMechanicCompatibility(
   const reasons: string[] = []
   const event = mechanic.trigger.event
   if (event === 'phase-transition') reasons.push('阶段切换需要即时阈值穿越检测和原子场景变更。')
+  if (
+    (event === 'saving-throw-magic' || event === 'saving-throw-physical') &&
+    (mechanic.trigger.savingThrowTiming ?? 'before') === 'before' &&
+    mechanic.effects.some((effect) => effect.kind !== 'roll-modifier' || effect.roll !== 'saving-throw')
+  ) reasons.push('豁免前触发只能修改当前豁免投骰。')
   for (const effect of mechanic.effects) {
     if (effect.kind === 'summon') reasons.push('召唤效果需要 DM 或触发来源提供合法地图落点。')
     if (effect.kind === 'area-attack') reasons.push('范围攻击需要 DM 确认范围方向、覆盖格与目标集合。')
     if (
-      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition' || effect.kind === 'roll-modifier' || effect.kind === 'attack') &&
-      effect.target === 'damage-source' && event !== 'after-damaged'
-    ) reasons.push('“伤害来源”只在受到伤害后的事件中存在。')
+      'target' in effect && effect.target === 'damage-source' &&
+      event !== 'before-damaged' && event !== 'after-damaged'
+    ) reasons.push('“伤害来源”只在受到伤害前后的事件中存在。')
     if (
-      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition' || effect.kind === 'roll-modifier' || effect.kind === 'attack') &&
+      'target' in effect &&
       effect.target === 'trigger-target' &&
-      !['after-hit', 'after-miss', 'when-hit', 'after-dealt-damage'].includes(event)
+      !['after-hit', 'after-move-hit', 'after-miss', 'when-hit', 'target-killed', 'after-dealt-damage'].includes(event)
     ) reasons.push('该触发时机没有可绑定的攻击目标。')
     if (
       effect.kind === 'damage' && effect.damageType === 'inherit-trigger' &&
@@ -218,11 +228,32 @@ export function dnd5eEligibleMonsterMechanics(
   return (monster.headlessMechanics ?? []).filter((mechanic) => {
     if (dnd5eMonsterMechanicEvent(mechanic) !== event) return false
     if (dnd5eMonsterMechanicCompatibility(mechanic).effective !== 'full') return false
-    if (mechanic.schemaVersion === 2 && mechanic.trigger.event === 'movement') {
+    if (mechanic.schemaVersion === 2 && (mechanic.trigger.event === 'movement' || mechanic.trigger.event === 'after-move-hit')) {
       const movement = mechanic.trigger.movement
       if (!movement || context.movementDistanceFeet == null) return false
       if (movement.comparison === 'at-least' && context.movementDistanceFeet < movement.feet) return false
       if (movement.comparison === 'at-most' && context.movementDistanceFeet > movement.feet) return false
+    }
+    if (
+      mechanic.schemaVersion === 2 && mechanic.trigger.attackMode && mechanic.trigger.attackMode !== 'any' &&
+      mechanic.trigger.attackMode !== context.attackMode
+    ) return false
+    if (mechanic.schemaVersion === 2 && (mechanic.trigger.damageTypes?.length ?? 0) > 0) {
+      if (!context.damageTypes?.some((type) => mechanic.trigger.damageTypes!.includes(type))) return false
+    }
+    if (
+      mechanic.schemaVersion === 2 &&
+      (mechanic.trigger.event === 'saving-throw-magic' || mechanic.trigger.event === 'saving-throw-physical')
+    ) {
+      const defaultTiming = mechanic.effects.every((effect) =>
+        effect.kind === 'roll-modifier' && effect.roll === 'saving-throw') ? 'before' : 'after'
+      const timing = mechanic.trigger.savingThrowTiming ?? defaultTiming
+      if (context.savingThrowTiming != null && timing !== context.savingThrowTiming) return false
+      const outcome = mechanic.trigger.savingThrowOutcome ?? 'any'
+      if (outcome !== 'any') {
+        if (context.savingThrowTiming !== 'after' || context.savingThrowSuccess == null) return false
+        if ((outcome === 'success') !== context.savingThrowSuccess) return false
+      }
     }
     const predicates = mechanic.predicates
     if (predicates.requiresPositiveHp && context.currentHp <= 0) return false

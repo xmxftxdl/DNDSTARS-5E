@@ -711,7 +711,12 @@ describe('地图几何的房间权限与安全投影', () => {
         id: 'secure-map', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
         tokens: [
           { id: 'hero', type: 'player', characterId: 'hero-character', x: 10, y: 20 },
-          { id: 'seen', type: 'enemy', x: 30, y: 20 },
+          {
+            id: 'seen', type: 'enemy', x: 30, y: 20,
+            dnd5eTokenStatusMarkers: [{
+              schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm',
+            }],
+          },
           { id: 'hidden', type: 'enemy', x: 90, y: 20 },
         ],
       }],
@@ -726,6 +731,24 @@ describe('地图几何的房间权限与安全投影', () => {
     expect((await fetch(stateUrl('maps'), {
       method: 'PUT', headers: dmHeaders, body: JSON.stringify(maps),
     })).status).toBe(200)
+    expect((await fetch(stateUrl('maps'), {
+      method: 'PUT',
+      headers: { ...dmHeaders, 'X-Stars-Expected-Revision': '1' },
+      body: JSON.stringify({
+        ...maps,
+        maps: maps.maps.map((map) => ({
+          ...map,
+          tokens: map.tokens.map((token) => token.id === 'seen'
+            ? {
+                ...token,
+                dnd5eTokenStatusMarkers: [{
+                  schemaVersion: 1, id: 'dm:unsafe', statusId: 'javascript', source: 'dm',
+                }],
+              }
+            : token),
+        })),
+      }),
+    })).status).toBe(422)
     expect((await fetch(stateUrl('maps'))).status).toBe(403)
 
     const playerHeaders = { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken }
@@ -734,8 +757,12 @@ describe('地图几何的房间权限与安全投影', () => {
     })).status).toBe(403)
     const playerMapsResponse = await fetch(stateUrl('maps'), { headers: playerHeaders })
     expect(playerMapsResponse.status).toBe(200)
-    const playerMaps = await playerMapsResponse.json() as { maps: Array<{ tokens: Array<{ id: string }> }> }
+    const playerMaps = await playerMapsResponse.json() as {
+      maps: Array<{ tokens: Array<{ id: string; dnd5eTokenStatusMarkers?: unknown[] }> }>
+    }
     expect(playerMaps.maps[0].tokens.map((token) => token.id)).toEqual(['hero', 'seen'])
+    expect(playerMaps.maps[0].tokens.find((token) => token.id === 'seen')?.dnd5eTokenStatusMarkers)
+      .toEqual([{ schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm' }])
 
     const playerGeometryResponse = await fetch(stateUrl('map-geometry'), { headers: playerHeaders })
     expect(playerGeometryResponse.status).toBe(200)
@@ -854,6 +881,107 @@ describe('账号恢复与账号角色库协议', () => {
 })
 
 describe('账号级战役与临时房间协议', () => {
+  it('按独立 revision 保存本次备团计划，并拒绝跨设备陈旧覆盖', async () => {
+    const accountResponse = await fetch(`${offServer.base}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: '备团计划 DM', clientId: 'prep-plan-owner' }),
+    })
+    expect(accountResponse.status).toBe(201)
+    const account = await accountResponse.json() as { session: { sessionToken: string } }
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Stars-Account-Token': account.session.sessionToken,
+    }
+    const createResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: '备团计划持久化',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const campaign = await createResponse.json() as { campaignId: string }
+    const prepPlan = {
+      schemaVersion: 1,
+      sessionTitle: '第二场：调查伪信',
+      objective: '找到伪信的来源，并决定下一站。',
+      selectedSceneIds: ['scene-chapel'],
+      selectedPersonIds: ['person-elinora'],
+      selectedClueIds: ['clue-forged-letter'],
+      checklist: [{ id: 'check-map', text: '检查教堂地图与灯光', completed: true }],
+      privateNotes: '如果玩家离开教堂，让信使在路上出现。',
+      storyWorkspace: {
+        schemaVersion: 1,
+        mode: 'running',
+        events: [{
+          id: 'story-chapel', title: '调查白鹿小教堂', summary: '调查伪信。', details: '', timeLabel: '当日黄昏',
+          status: 'active', source: 'analysis-timeline', sourceEventIds: ['timeline-chapel'], sceneIds: ['scene-chapel'],
+          personIds: ['person-elinora'], clueIds: ['clue-forged-letter'], tags: ['白鹿小教堂'], graphPosition: { x: 420, y: 56 },
+        }, {
+          id: 'story-survives', title: '艾莉诺拉继续调查', summary: '', details: '', timeLabel: '',
+          status: 'planned', source: 'dm', sourceEventIds: [], sceneIds: [], personIds: ['person-elinora'], clueIds: [], tags: [], graphPosition: { x: 420, y: 318 },
+        }],
+        graphLinks: [{
+          id: 'story-link-survives', fromEventId: 'story-chapel', toEventId: 'story-survives', label: '',
+          condition: { kind: 'person-state', personId: 'person-elinora', state: 'alive' },
+          labelPosition: { x: 688, y: 248 },
+        }],
+        graphInitialized: true,
+        graphLayoutVersion: 4,
+        timelineMarkers: [{ id: 'story-time-chapel', y: 224, label: '第 2 日 14:30', gameTimeWorldMinute: 2_310 }],
+        personStates: [{ personId: 'person-elinora', status: 'active', note: '仍在调查', updatedBySessionId: 'session-chapel' }], clueStates: [], recaps: [],
+        activeSession: {
+          id: 'session-chapel', title: '第二场：调查伪信', startedAt: 1_000,
+          baselineJournalEntryIds: ['journal-before'], journalEntryIds: [],
+        },
+      },
+    }
+    const saveResponse = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}`,
+      {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ prepPlan, expectedPrepPlanRevision: 0 }),
+      },
+    )
+    expect(saveResponse.status).toBe(200)
+    await expect(saveResponse.json()).resolves.toMatchObject({
+      campaignId: campaign.campaignId,
+      prepPlan: {
+        ...prepPlan,
+        selectedStoryEventIds: ['story-chapel'],
+        revision: 1,
+      },
+    })
+
+    const staleResponse = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}`,
+      {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          prepPlan: { ...prepPlan, sessionTitle: '陈旧设备覆盖' },
+          expectedPrepPlanRevision: 0,
+        }),
+      },
+    )
+    expect(staleResponse.status).toBe(409)
+    await expect(staleResponse.json()).resolves.toMatchObject({
+      error: 'campaign-prep-plan-revision-conflict',
+    })
+
+    const restoredResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, { headers })
+    expect(restoredResponse.status).toBe(200)
+    await expect(restoredResponse.json()).resolves.toMatchObject({
+      campaigns: [{
+        campaignId: campaign.campaignId,
+        prepPlan: { sessionTitle: '第二场：调查伪信', revision: 1 },
+      }],
+    })
+  })
+
   it('让同一战役跨多次房间继续读取共享状态，并拒绝并行开房', async () => {
     const accountResponse = await fetch(`${offServer.base}/api/accounts`, {
       method: 'POST',

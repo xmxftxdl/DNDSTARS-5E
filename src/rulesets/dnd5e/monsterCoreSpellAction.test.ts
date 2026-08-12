@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eAvailableMonsterSpellSlotLevels,
+  dnd5eMonsterCoreSpellAreaTargetIds,
   prepareDnd5eMonsterCoreSpell,
   resolvePreparedDnd5eMonsterCoreSpell,
 } from './monsterCoreSpellAction'
@@ -247,6 +248,46 @@ describe('monster core spell map action', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(28)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id)
       ?.dnd5eCombatState?.monsterSpellSlots?.['1'].current).toBe(0)
+  })
+
+  it('shares the authoritative area target declaration with manual DM spell placement', () => {
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: {
+        monsterSpellSlots: { 3: { current: 1, max: 3 } },
+      },
+    })
+    const first = token({
+      id: 'first', type: 'player', characterId: 'first-character', x: 55, y: 5,
+    })
+    const second = token({
+      id: 'second', type: 'player', characterId: 'second-character', x: 65, y: 5,
+    })
+    const map = battleMap([mage, first, second])
+    const targetTokenIds = dnd5eMonsterCoreSpellAreaTargetIds({
+      map,
+      actorTokenId: mage.id,
+      spellId: 'fireball',
+      areaTargetCell: { col: 5, row: 0 },
+    })
+
+    expect(targetTokenIds).toEqual(expect.arrayContaining([first.id, second.id]))
+    expect(prepareDnd5eMonsterCoreSpell({
+      combatId: 'manual-monster-fireball',
+      map,
+      characters: [
+        { ...character(), id: 'first-character' },
+        { ...character(), id: 'second-character' },
+      ],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: targetTokenIds ?? [],
+      areaTargetCell: { col: 5, row: 0 },
+      spellId: 'fireball',
+      slotLevel: 3,
+    })).toMatchObject({ ok: true })
   })
 
   it('prepares and resolves a monster Misty Step into a visible unoccupied cell', () => {

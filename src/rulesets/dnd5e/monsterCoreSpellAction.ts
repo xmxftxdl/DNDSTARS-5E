@@ -160,6 +160,102 @@ export function dnd5eAvailableMonsterSpellSlotLevels(input: {
     .sort((left, right) => left - right)
 }
 
+function monsterCoreSpellAreaTargets(input: {
+  map: BattleMap
+  actorToken: Token
+  spell: Dnd5eSrdSpellDefinition
+  cells: readonly GridCell[]
+  effectOrigin: { x: number; y: number }
+  effectOriginElevationFeet: number
+  effectAim: { x: number; y: number }
+  effectAimElevationFeet: number
+}): readonly Token[] {
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  return tokensInCells(input.map, input.map.tokens, [...input.cells]).filter((candidate) => {
+    if (
+      candidate.type === 'obstacle' ||
+      (candidate.id === input.actorToken.id && !input.spell.areaIncludesSelf)
+    ) return false
+    const opposed = areOpposedCombatTokens(input.actorToken, candidate)
+    if (input.spell.target === 'hostile' && !opposed) return false
+    if (input.spell.target === 'ally' && opposed) return false
+    if (!dnd5eInstantAoeAffectsTokenVertically({
+      spellId: input.spell.id,
+      area: input.spell.area!,
+      map: input.map,
+      geometry,
+      sourceToken: input.actorToken,
+      targetToken: candidate,
+      effectOrigin: input.effectOrigin,
+      effectOriginElevationFeet: input.effectOriginElevationFeet,
+      effectAim: input.effectAim,
+      effectAimElevationFeet: input.effectAimElevationFeet,
+    })) return false
+    return !mapGeometryLineOfEffectBlocked({
+      geometry,
+      from: input.effectOrigin,
+      to: candidate,
+      fromElevationFeet: input.effectOriginElevationFeet,
+      toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
+    })
+  })
+}
+
+/**
+ * Builds the exact target declaration used by the authoritative monster-spell
+ * transaction. The DM preview calls this helper so a manual cast cannot drift
+ * from the Headless vertical-area, relation or line-of-effect rules.
+ */
+export function dnd5eMonsterCoreSpellAreaTargetIds(input: {
+  map: BattleMap
+  actorTokenId: string
+  spellId: string
+  areaTargetCell: GridCell
+  areaTargetOrientation?: 0 | 1 | 2 | 3
+  areaTargetElevationFeet?: number
+}): readonly string[] | undefined {
+  const actorToken = input.map.tokens.find((token) =>
+    token.id === input.actorTokenId && token.type === 'enemy')
+  const spell = getDnd5eSrdCombatSpell(input.spellId)
+  if (!actorToken || !spell?.area) return undefined
+  const casterCell = tokenAnchorCellFromPixel(
+    actorToken.x,
+    actorToken.y,
+    actorToken,
+    input.map,
+  )
+  const targetCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
+    ? casterCell
+    : input.areaTargetCell
+  if (!canPlaceAoe(spell.area, casterCell, targetCell)) return undefined
+  const orientFrom = aoeOrientFromCell(spell.area, casterCell, targetCell, {
+    rectRotation: input.areaTargetOrientation,
+  })
+  const cells = cellsForAoe(spell.area, orientFrom, targetCell)
+  const effectAim = {
+    x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
+    y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
+  }
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const effectAimElevationFeet = input.areaTargetElevationFeet ??
+    mapGeometryTerrainElevationAtPoint(geometry, effectAim)
+  const effectOrigin = spell.area.origin === 'point' ? effectAim : actorToken
+  const effectOriginElevationFeet = spell.area.origin === 'point'
+    ? effectAimElevationFeet
+    : mapGeometryTokenElevation(geometry, actorToken)
+  if (spell.effect === 'teleport' || spell.effect === 'persistent-area') return []
+  return monsterCoreSpellAreaTargets({
+    map: input.map,
+    actorToken,
+    spell,
+    cells,
+    effectOrigin,
+    effectOriginElevationFeet,
+    effectAim,
+    effectAimElevationFeet,
+  }).map((target) => target.id)
+}
+
 export function prepareDnd5eMonsterCoreSpell(input: {
   combatId: string
   round?: number
@@ -333,30 +429,15 @@ export function prepareDnd5eMonsterCoreSpell(input: {
             toElevationFeet: effectOriginElevation,
           }))
     ) return { ok: false, reason: 'line-of-effect-blocked' }
-    const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cells).filter((candidate) => {
-      if (candidate.type === 'obstacle' || (candidate.id === actorToken.id && !spell.areaIncludesSelf)) return false
-      const opposed = areOpposedCombatTokens(actorToken, candidate)
-      if (spell.target === 'hostile' && !opposed) return false
-      if (spell.target === 'ally' && opposed) return false
-      if (!dnd5eInstantAoeAffectsTokenVertically({
-        spellId: spell.id,
-        area: spell.area!,
-        map: input.map,
-        geometry,
-        sourceToken: actorToken,
-        targetToken: candidate,
-        effectOrigin,
-        effectOriginElevationFeet: effectOriginElevation,
-        effectAim,
-        effectAimElevationFeet: effectAimElevation,
-      })) return false
-      return !mapGeometryLineOfEffectBlocked({
-        geometry,
-        from: effectOrigin,
-        to: candidate,
-        fromElevationFeet: effectOriginElevation,
-        toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
-      })
+    const authoritativeTargets = monsterCoreSpellAreaTargets({
+      map: input.map,
+      actorToken,
+      spell,
+      cells,
+      effectOrigin,
+      effectOriginElevationFeet: effectOriginElevation,
+      effectAim,
+      effectAimElevationFeet: effectAimElevation,
     })
     if (
       (!['teleport', 'persistent-area'].includes(spell.effect) && authoritativeTargets.length < 1) ||

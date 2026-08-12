@@ -183,7 +183,7 @@ export default function SpellbookPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="法术书"
         description="D&D 5e 2014 · SRD 5.1 法术目录、角色选法术资料与房间自定义法术。"

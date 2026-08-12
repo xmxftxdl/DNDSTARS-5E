@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
 import { getDnd5eSrdMonster } from './monsters'
+import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import {
   createDnd5eMonsterInstanceOverride,
   dnd5eMonsterOverrideTokenPatch,
@@ -18,13 +19,14 @@ describe('DM monster instance overrides', () => {
     })
 
     expect(override).toMatchObject({
-      id: 'room-monster:dm-override:token-encounter-goblin-1',
+      id: 'room-monster:dm-override-token-encounter-goblin-1',
       slug: 'dm-override-token-encounter-goblin-1',
       source: 'DM 自定义',
       abilities: goblin.abilities,
       actions: goblin.actions,
       traits: goblin.traits,
     })
+    expect(parseDnd5eMonsterStatBlock(override)).toMatchObject({ ok: true })
     expect(isDnd5eMonsterInstanceOverride(override.id)).toBe(true)
     expect(createDnd5eMonsterInstanceOverride({
       monster: override,
@@ -40,6 +42,30 @@ describe('DM monster instance overrides', () => {
       tokenId: 'map-a-anchor',
       scope: 'same-template',
     }).id)
+  })
+
+  it('repairs legacy override ids and removes unsupported token-id characters', () => {
+    const goblin = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const repaired = createDnd5eMonsterInstanceOverride({
+      monster: {
+        ...goblin,
+        id: 'room-monster:dm-override:token-old_token',
+        slug: 'dm-override-token-old_token',
+        source: 'DM 自定义',
+      },
+      tokenId: 'ignored',
+      scope: 'instance',
+    })
+    expect(repaired.id).toBe('room-monster:dm-override-token-old-token')
+    expect(parseDnd5eMonsterStatBlock(repaired)).toMatchObject({ ok: true })
+
+    const created = createDnd5eMonsterInstanceOverride({
+      monster: goblin,
+      tokenId: 'map_token:1',
+      scope: 'instance',
+    })
+    expect(created.id).toBe('room-monster:dm-override-token-map-token-1')
+    expect(parseDnd5eMonsterStatBlock(created)).toMatchObject({ ok: true })
   })
 
   it('selects either the current instance or every same-template enemy on the map', () => {

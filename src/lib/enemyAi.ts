@@ -68,6 +68,7 @@ export interface EnemyTurnResult {
    */
   attackTargetTokenIds?: readonly string[]
   actionIndex?: number
+  monsterResourceKind?: 'action' | 'bonus-action'
   /** Internal Host orchestration for one committed occurrence of a Multiattack. */
   multiattackStep?: {
     mode: 'start' | 'continue'
@@ -267,11 +268,44 @@ export function buildSelectedEnemyAttack(
   target: Token,
   actionIndex: number,
   attackTargetTokenIds?: readonly string[],
+  resourceKind: 'action' | 'bonus-action' = 'action',
 ): EnemyTurnResult | undefined {
-  const action = enemy.poolId ? getEnemyStatBlock(enemy.poolId)?.actions[actionIndex] : undefined
+  const stats = enemy.poolId ? getEnemyStatBlock(enemy.poolId) : undefined
+  const action = resourceKind === 'bonus-action'
+    ? stats?.bonusActions?.[actionIndex]
+    : stats?.actions[actionIndex]
   const occurrenceTargetTokenIds = attackTargetTokenIds?.length
     ? [...attackTargetTokenIds]
     : [target.id]
+  if (resourceKind === 'bonus-action' && enemy.poolId) {
+    const monster =
+      getDnd5eSrdMonster(enemy.poolId) ??
+      getDnd5eSrdMonsterBySlug(enemy.poolId)
+    const resource = monster?.bonusActions?.[actionIndex]
+    if (!resource?.referencedActionId) return undefined
+    const referencedIndex = monster?.actions.findIndex((candidate) =>
+      candidate.id === resource.referencedActionId) ?? -1
+    const referenced = referencedIndex >= 0 ? stats?.actions[referencedIndex] : undefined
+    if (
+      referencedIndex < 0 || !referenced?.damageDice ||
+      (referenced.kind !== 'melee' && referenced.kind !== 'ranged') ||
+      resource.automation !== 'headless'
+    ) return undefined
+    return {
+      ...buildEnemyAttack(
+        enemy,
+        target,
+        false,
+        undefined,
+        referenced.kind,
+        referencedIndex,
+      ),
+      actionIndex,
+      monsterResourceKind: 'bonus-action',
+      attackTargetTokenIds: occurrenceTargetTokenIds,
+      message: `${enemy.label} 使用附赠动作${resource.name}攻击 ${target.label}。`,
+    }
+  }
   if (
     action?.kind === 'multiattack' &&
     action.automation === 'headless' &&
@@ -333,6 +367,7 @@ export function buildSelectedEnemyAttack(
       targetTokenId: target.id,
       attackTargetTokenIds: occurrenceTargetTokenIds,
       actionIndex,
+      monsterResourceKind: 'action',
       message: `${enemy.label} 使用${action.name}攻击 ${target.label}。`,
     }
     const targetCharacterId = resolveTokenCharacterId(target)
@@ -347,6 +382,7 @@ export function buildSelectedEnemyAttack(
   return {
     ...buildEnemyAttack(enemy, target, false, undefined, action.kind, actionIndex),
     attackTargetTokenIds: occurrenceTargetTokenIds,
+    monsterResourceKind: 'action',
   }
 }
 

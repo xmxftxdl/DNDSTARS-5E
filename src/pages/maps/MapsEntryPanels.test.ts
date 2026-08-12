@@ -22,9 +22,19 @@ describe('地图入口面板', () => {
   })
 
   it('只有 DM 空地图面板显示上传入口', () => {
-    const dmHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, { isDm: true, onUpload: vi.fn() }))
-    const playerHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, { isDm: false, onUpload: vi.fn() }))
-    expect(dmHtml).toContain('选择图片上传')
-    expect(playerHtml).not.toContain('选择图片上传')
+    const dmHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, {
+      isDm: true,
+      onUpload: vi.fn(),
+      onImportUvtt: vi.fn(),
+    }))
+    const playerHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, {
+      isDm: false,
+      onUpload: vi.fn(),
+      onImportUvtt: vi.fn(),
+    }))
+    expect(dmHtml).toContain('上传地图图片')
+    expect(dmHtml).toContain('导入 UVTT')
+    expect(playerHtml).not.toContain('上传地图图片')
+    expect(playerHtml).not.toContain('导入 UVTT')
   })
 })

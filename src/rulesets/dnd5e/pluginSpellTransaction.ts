@@ -43,6 +43,7 @@ import { dnd5eWearingUnproficientArmor } from './equipment'
 import { resolveDnd5eDamageDefenses } from './damageDefenses'
 import { dnd5eLimitedMagicImmunityNegatesSpell } from './monsterGenericAbilities'
 import {
+  dnd5eHeldSpellcastingFocusMatches,
   dnd5eSpellComponentCheck,
   dnd5eSpellComponentsAvailable,
   type Dnd5eSpellComponentCheck,
@@ -50,6 +51,7 @@ import {
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import { dnd5ePluginSpellArea, dnd5ePluginSpellTargetCapacity } from './pluginSpellTargeting'
 import { dnd5eTrackableDefinitionIdV1 } from './activities/dnd5eActivityIdentity'
+import { evaluateDnd5eWorkshopDamageFormula, normalizeDnd5eWorkshopFormulaClassLevels } from './workshopDamageFormula'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -114,6 +116,9 @@ export interface PreparedDnd5ePluginSpellCast {
   saveAutomaticallyFails: boolean
   targetArmorClass: number
   damageDice: { count: number; sides: number; bonus: number }
+  overchannel: boolean
+  overchannelSelfDamageDiceCount: number
+  sculptedTargetIds: readonly string[]
   concentrationRounds?: number
   upcastDurationRounds: number
   transaction: CombatTransaction
@@ -125,6 +130,7 @@ export interface Dnd5ePluginSpellResolutionRolls {
   savingThrowD20?: number
   savingThrowD20Second?: number
   damageRolls?: number[]
+  overchannelSelfDamageRolls?: number[]
   targetRolls?: Array<{
     attackD20?: number
     attackD20Second?: number
@@ -211,6 +217,12 @@ export function prepareDnd5ePluginSpellCast(input: {
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
   if (!classDefinition?.spellcasting || castingClassLevel < 1) {
     return { ok: false, reason: 'spellcasting-class-unavailable' }
+  }
+  if (payload.itemInstanceId != null || (
+    payload.focusItemInstanceId != null &&
+    !dnd5eHeldSpellcastingFocusMatches(actor, payload.focusItemInstanceId, castingClassId)
+  )) {
+    return { ok: false, reason: 'component-unavailable' }
   }
   if (enforceSpellcastingPrerequisites && actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18)) {
     return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
@@ -307,6 +319,35 @@ export function prepareDnd5ePluginSpellCast(input: {
   }
   const targetToken = targetTokens[0]
   if (!targetToken) return { ok: false, reason: 'invalid-target' }
+  const contextualWizard = castingClassId === 'wizard' &&
+    actor.dnd5eClassChoices?.classes?.wizard?.subclass === 'evocation'
+  const overchannel = payload.overchannel === true
+  const canOverchannel = contextualWizard && castingClassLevel >= 14 &&
+    spell.school === 'evocation' && spell.level >= 1 && spell.level <= 5 &&
+    slotLevel >= spell.level && slotLevel <= 5 && spell.mechanics.damage != null
+  if (overchannel && !canOverchannel) return { ok: false, reason: 'invalid-action' }
+  if (
+    payload.empowered === true || payload.draconicResistance === true ||
+    payload.repellingBlast === true || payload.metamagic != null
+  ) return { ok: false, reason: 'invalid-action' }
+  const suppliedSculptedTargetIds = payload.sculptedTargetIds ?? []
+  const sculptedTargetIds = [...new Set(suppliedSculptedTargetIds)]
+  const canSculpt = contextualWizard && castingClassLevel >= 2 &&
+    spell.school === 'evocation' && area != null &&
+    spell.mechanics.resolution === 'saving-throw'
+  if (
+    sculptedTargetIds.length !== suppliedSculptedTargetIds.length ||
+    (!canSculpt && sculptedTargetIds.length > 0) ||
+    sculptedTargetIds.length > spell.level + 1 ||
+    sculptedTargetIds.some((targetId) =>
+      targetId === actorToken.id || !targetTokens.some((token) => token.id === targetId),
+    )
+  ) return { ok: false, reason: 'invalid-target' }
+  const sculptedTargetIdSet = new Set(sculptedTargetIds)
+  const overchannelUses = Math.max(0, Math.floor(actor.dnd5eCombatState?.overchannelUsesSinceLongRest ?? 0))
+  const overchannelSelfDamageDiceCount = overchannel && overchannelUses > 0
+    ? (overchannelUses + 1) * slotLevel
+    : 0
 
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.action.combatId ?? `map-${input.map.id}`,
@@ -343,11 +384,25 @@ export function prepareDnd5ePluginSpellCast(input: {
   const castingModifier = damage?.addSpellcastingModifier
     ? rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
     : 0
+  let workshopDamageModifier: number
+  try {
+    workshopDamageModifier = evaluateDnd5eWorkshopDamageFormula(damage?.dice.modifierFormula, {
+      level: actor.level,
+      proficiencyBonus: rules.proficiencyBonus(actor.level),
+      abilities: actor.abilities,
+      classLevels: normalizeDnd5eWorkshopFormulaClassLevels(actor.dnd5eClassLevels),
+      currentHp: actor.currentHp,
+      maxHp: actor.maxHp,
+      spellcastingAbilityModifier: rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability]),
+    })
+  } catch {
+    return { ok: false, reason: 'invalid-dice' }
+  }
   const spellSaveDc = 8 + rules.proficiencyBonus(actor.level) +
     rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
   const saveAbility = spell.mechanics.savingThrow?.ability
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const targets: PreparedDnd5ePluginSpellTarget[] = targetTokens.map((token, index) => {
+  const affectedTargets: PreparedDnd5ePluginSpellTarget[] = targetTokens.map((token, index) => {
     const targetCombatant = snapshot.state.combatants[token.id]!
     const directedPairKey = dnd5eDirectedCombatantPairKey(actorToken.id, token.id)
     const distanceFeet = tokenFootprintDistanceCells(actorToken, token, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
@@ -384,7 +439,8 @@ export function prepareDnd5ePluginSpellCast(input: {
       armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, token.id),
     }
   })
-  const firstTarget = targets[0]
+  const targets = affectedTargets.filter((target) => !sculptedTargetIdSet.has(target.token.id))
+  const firstTarget = targets[0] ?? affectedTargets[0]
   const concentrationRounds = spell.duration.concentration
     ? Math.min(14_400, spellDurationRounds(spell) + upcast.durationRounds)
     : undefined
@@ -420,8 +476,11 @@ export function prepareDnd5ePluginSpellCast(input: {
       damageDice: {
         count: Math.max(0, (damage?.dice.count ?? 0) + cantripScaling.damageDice + upcast.damageDice),
         sides: damage?.dice.sides ?? 2,
-        bonus: (damage?.dice.bonus ?? 0) + cantripScaling.flatDamage + upcast.flatDamage + castingModifier,
+        bonus: (damage?.dice.bonus ?? 0) + workshopDamageModifier + cantripScaling.flatDamage + upcast.flatDamage + castingModifier,
       },
+      overchannel,
+      overchannelSelfDamageDiceCount,
+      sculptedTargetIds,
       concentrationRounds,
       upcastDurationRounds: upcast.durationRounds,
       transaction: createCombatTransaction({
@@ -457,7 +516,17 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   let transaction = prepared.transaction
   const sourceCombatant = prepared.state.combatants[prepared.actorToken.id]
   const sharedAreaDamage = !!prepared.area && mechanics.resolution !== 'spell-attack'
-  const sharedDamageValues = supplied.damageRolls ?? []
+  const suppliedOverchannelSelfDamageRolls = supplied.overchannelSelfDamageRolls ?? []
+  if (
+    suppliedOverchannelSelfDamageRolls.length !== prepared.overchannelSelfDamageDiceCount ||
+    suppliedOverchannelSelfDamageRolls.some((value) => !validDie(value, 12))
+  ) return invalidDice(prepared, transaction, now)
+  const sharedDamageValues = prepared.overchannel && sharedAreaDamage && mechanics.damage
+    ? Array.from({ length: prepared.damageDice.count }, () => prepared.damageDice.sides)
+    : supplied.damageRolls ?? []
+  if (prepared.overchannel && (supplied.damageRolls?.length ?? 0) > 0) {
+    return invalidDice(prepared, transaction, now)
+  }
   if (sharedAreaDamage && mechanics.damage && (
     sharedDamageValues.length !== prepared.damageDice.count ||
     sharedDamageValues.some((value) => !validDie(value, prepared.damageDice.sides))
@@ -507,7 +576,14 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     const shouldDealDamage = !!mechanics.damage && (mechanics.resolution !== 'spell-attack' || attackHit)
     if (shouldDealDamage) {
       const count = prepared.damageDice.count * (critical ? 2 : 1)
-      const values = sharedAreaDamage ? sharedDamageValues : targetSupplied.damageRolls ?? []
+      const values = sharedAreaDamage
+        ? sharedDamageValues
+        : prepared.overchannel
+          ? Array.from({ length: count }, () => prepared.damageDice.sides)
+          : targetSupplied.damageRolls ?? []
+      if (prepared.overchannel && !sharedAreaDamage && (targetSupplied.damageRolls?.length ?? 0) > 0) {
+        return invalidDice(prepared, transaction, now)
+      }
       if (values.length !== count || values.some((value) => !validDie(value, prepared.damageDice.sides))) {
         return invalidDice(prepared, transaction, now)
       }
@@ -581,6 +657,10 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     castingTime: prepared.castingTime,
     effects,
     concentrationRounds: prepared.concentrationRounds,
+    spellSchool: prepared.spell.school,
+    sculptedTargetIds: prepared.sculptedTargetIds,
+    overchannel: prepared.overchannel,
+    overchannelSelfDamageRolls: suppliedOverchannelSelfDamageRolls,
   }, input.airborneFallDamageRollsByCombatantId, { transaction, now })
   transaction = result.transaction ?? (result.ok
     ? commitCombatTransaction(transaction, now)

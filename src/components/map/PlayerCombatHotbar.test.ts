@@ -93,7 +93,7 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('/assets/icons/fighter-action-surge-feature-action.png')
   })
 
-  it('renders a spell-only hotbar during exploration', () => {
+  it('renders the complete hotbar during exploration and locks basic combat actions', () => {
     const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
       character: character(),
       mode: 'exploration',
@@ -105,9 +105,11 @@ describe('PlayerCombatHotbar', () => {
 
     expect(html).toContain('data-mode="exploration"')
     expect(html).toContain('data-testid="combat-hotbar-spells"')
-    expect(html).not.toContain('data-testid="combat-hotbar-features"')
-    expect(html).not.toContain('data-testid="combat-hotbar-items"')
-    expect(html).not.toContain('data-testid="combat-hotbar-basics"')
+    expect(html).toContain('data-testid="combat-hotbar-features"')
+    expect(html).toContain('data-testid="combat-hotbar-items"')
+    expect(html).toContain('data-testid="combat-hotbar-basics"')
+    expect(html).toMatch(/data-action-id="system:move"[^>]*aria-disabled="true"/)
+    expect(html).toContain('基础动作只能在战斗中、轮到自己时使用。')
   })
 
   it('keeps an active grapple escape command visible in the default hotbar', () => {

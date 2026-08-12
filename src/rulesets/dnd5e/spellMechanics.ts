@@ -4,6 +4,10 @@ import {
   DND5E_STANDARD_CONDITION_IDS,
   type Dnd5eStandardConditionId,
 } from './conditions'
+import {
+  validateDnd5eWorkshopDamageFormulaV1,
+  type Dnd5eWorkshopDamageFormulaV1,
+} from './workshopDamageFormula'
 
 export type Dnd5eSpellResolutionKind = 'spell-attack' | 'saving-throw' | 'automatic' | 'dm-adjudication'
 export type Dnd5eSpellConditionTrigger = 'on-hit' | 'on-failed-save' | 'always'
@@ -54,7 +58,7 @@ export interface Dnd5eSpellMechanicsDefinition {
     onSuccess: 'none' | 'half' | 'full'
   }
   damage?: {
-    dice: { count: number; sides: number; bonus: number }
+    dice: { count: number; sides: number; bonus: number; modifierFormula?: Dnd5eWorkshopDamageFormulaV1 }
     type: Dnd5eDamageType
     addSpellcastingModifier?: boolean
     /** `true` preserves the legacy 5/11/17 multiplier; new content uses an explicit threshold table. */
@@ -197,6 +201,13 @@ export function parseDnd5eSpellMechanics(
       const count = boundedInteger(diceInput.count, `${label}.damage.dice.count`, problems, 0, 100)
       const sides = boundedInteger(diceInput.sides, `${label}.damage.dice.sides`, problems, 2, 1_000)
       const bonus = boundedInteger(diceInput.bonus, `${label}.damage.dice.bonus`, problems, -1_000_000, 1_000_000)
+      const modifierFormula = diceInput.modifierFormula as Dnd5eWorkshopDamageFormulaV1 | undefined
+      if (modifierFormula) {
+        problems.push(...validateDnd5eWorkshopDamageFormulaV1(
+          modifierFormula,
+          `${label}.damage.dice.modifierFormula`,
+        ))
+      }
       const damageType = typeof value.damage.type === 'string' && DAMAGE_TYPES.has(value.damage.type)
         ? value.damage.type as Dnd5eDamageType
         : undefined
@@ -234,7 +245,13 @@ export function parseDnd5eSpellMechanics(
         }
       }
       if (damageType) damage = {
-        dice: { count, sides, bonus }, type: damageType,
+        dice: {
+          count,
+          sides,
+          bonus,
+          ...(modifierFormula ? { modifierFormula: structuredClone(modifierFormula) } : {}),
+        },
+        type: damageType,
         ...(addSpellcastingModifier ? { addSpellcastingModifier: true } : {}),
         ...(cantripScaling ? { cantripScaling } : {}),
       }

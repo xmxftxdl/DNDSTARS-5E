@@ -58,6 +58,7 @@ export function buildSpellTargetingSubmission(
   const targetTokenIds = [...new Set(input.selectedTargetIds)]
   return {
     spellId: targeting.spellId,
+    focusItemInstanceId: targeting.focusItemInstanceId,
     itemInstanceId: targeting.itemInstanceId,
     itemUseActionId: targeting.itemUseActionId,
     castingClassId: targeting.castingClassId,

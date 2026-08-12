@@ -1,5 +1,6 @@
 import {
   createCombatInterrupt,
+  isCombatInterruptExpired,
   type CombatInterruptContribution,
   type SharedCombatInterruptQueueState,
 } from './combatInterruptQueue'
@@ -59,6 +60,7 @@ function rollConfirmationGenerationKey(
  */
 export function currentD20RollConfirmations(
   queue: Pick<SharedCombatInterruptQueueState, 'interrupts'>,
+  now?: number,
 ): CombatInterruptByKind<'roll-confirmation'>[] {
   const latestByKey = new Map<string, CombatInterruptByKind<'roll-confirmation'>>()
   for (const interrupt of queue.interrupts) {
@@ -72,16 +74,19 @@ export function currentD20RollConfirmations(
     ) latestByKey.set(key, interrupt)
   }
   return [...latestByKey.values()]
-    .filter((interrupt) => interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm')
+    .filter((interrupt) =>
+      (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm') &&
+      (now == null || !isCombatInterruptExpired(interrupt, now)))
     .sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))
 }
 
 export function findCurrentD20RollConfirmation(
   queue: Pick<SharedCombatInterruptQueueState, 'interrupts'>,
   prototype: CombatInterruptByKind<'roll-confirmation'>,
+  now?: number,
 ): CombatInterruptByKind<'roll-confirmation'> | undefined {
   const key = rollConfirmationGenerationKey(prototype)
-  return currentD20RollConfirmations(queue)
+  return currentD20RollConfirmations(queue, now)
     .find((interrupt) => rollConfirmationGenerationKey(interrupt) === key)
 }
 

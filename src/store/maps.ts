@@ -78,6 +78,10 @@ import {
 } from '../lib/tokenMovementAnimation'
 import { campaignLightIsActive, type CampaignLightSourceKind } from '../lib/campaignTime'
 import type { EnemyPlayerVisibleDetail } from '../lib/enemyPlayerVisibleDetail'
+import {
+  normalizeDnd5eTokenStatusMarkers,
+  type Dnd5eTokenStatusMarker,
+} from '../rulesets/dnd5e/tokenStatusMarkers'
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -763,6 +767,11 @@ export interface Token {
   showHpOnToken?: boolean
   /** 玩家端点击时是否显示怪物详情（DM 始终显示；默认对玩家可见） */
   showDetailOnToken?: boolean
+  /**
+   * Presentation-only map annotations. They never grant a condition, modifier,
+   * action, or other Headless rule by themselves.
+   */
+  dnd5eTokenStatusMarkers?: Dnd5eTokenStatusMarker[]
   /** DM 明确公开的房间怪物详情快照；不包含工坊目录或内联美术。 */
   playerVisibleEnemyDetail?: EnemyPlayerVisibleDetail
   /** 来自怪物池的模板 id */
@@ -817,6 +826,22 @@ export interface Token {
       ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
       dc: number
       condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious' | 'disease'
+      chargeFollowUp?: {
+        actionId: string
+        referencedActionId: string
+        requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+        turnKey: string
+      }
+    }
+    monsterTriggeredBonusAction?: {
+      schemaVersion: 1
+      combatId: string
+      round: number
+      turnKey: string
+      actionId: string
+      referencedActionId: string
+      targetId: string
+      requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
@@ -870,6 +895,11 @@ export interface Token {
     }>
     pendingMonsterMechanicTriggers?: Record<string, Dnd5eMonsterMechanicTriggerSnapshot>
     monsterMechanicTriggerSequence?: number
+    monsterMechanicMovementTurnKey?: string
+    monsterMechanicMovementFeet?: number
+    monsterMechanicMovementOrigin?: { x: number; y: number }
+    monsterMechanicMovementLast?: { x: number; y: number }
+    monsterMechanicMovementStraight?: boolean
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
     utilityProjectionAttackAdvantage?: {
@@ -1094,7 +1124,7 @@ export interface Dnd5ePluginArea {
 }
 
 /** 地图存档 V17：规范化可选、受限的持久区域垂直快照。 */
-export const MAPS_PERSIST_VERSION = 18
+export const MAPS_PERSIST_VERSION = 19
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -1227,6 +1257,7 @@ function normalizeToken(raw: unknown): Token {
     visualVariantId: typeof t.visualVariantId === 'string' && /^[a-z0-9_-]{1,80}$/i.test(t.visualVariantId)
       ? t.visualVariantId
       : undefined,
+    dnd5eTokenStatusMarkers: normalizeDnd5eTokenStatusMarkers(t.dnd5eTokenStatusMarkers),
     size: creatureSize ? creatureSizeToTokenSize(creatureSize) : rawSize,
     type,
     dnd5eSide: t.dnd5eSide === 'player' || t.dnd5eSide === 'enemy'

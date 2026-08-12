@@ -162,4 +162,28 @@ describe('D&D 5e monster workshop ability templates', () => {
     expect(built.actions[0].rule?.kind).toBe('area-saving-throw')
   })
 
+  it('exposes carried shared-space relations as searchable composable templates', () => {
+    const template = DND5E_MONSTER_ABILITY_TEMPLATES.find((candidate) =>
+      candidate.section === 'action' && candidate.ruleKind === 'source-linked-engulf')
+    expect(template).toBeDefined()
+    expect(template?.mechanicTags).toEqual(expect.arrayContaining([
+      '共享空间', '吞没', '携带', '逃脱', '持续伤害',
+    ]))
+    expect(template?.searchText).toContain('共享空间')
+
+    const initial = createDnd5eCustomMonsterDraft()
+    initial.actions = []
+    const applied = applyDnd5eMonsterAbilityTemplate(initial, template!.id)
+    const built = buildDnd5eCustomMonster(applied.draft)
+    const imported = built.actions.find((action) =>
+      action.id === applied.addedActionIds[0])
+    expect(imported?.automation).toBe('headless')
+    expect(imported?.rule?.kind).toBe('source-linked-engulf')
+    if (imported?.rule?.kind === 'source-linked-engulf') {
+      expect(imported.rule.effect.relation.movement).toBe('carry-target')
+      expect(imported.rule.effect.escapeDc).toBeGreaterThan(0)
+      expect(imported.rule.effect.periodicDamage).toBeDefined()
+    }
+  })
+
 })

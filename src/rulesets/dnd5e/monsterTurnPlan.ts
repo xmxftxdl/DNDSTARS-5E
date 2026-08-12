@@ -68,6 +68,8 @@ export interface Dnd5eMonsterTurnPlan {
     areaTargetOrientation?: 0 | 1 | 2 | 3
     areaTargetElevationFeet?: number
     saveAbility: AbilityKey
+    /** Each affected target chooses one; omitted for ordinary fixed saves. */
+    saveAbilityChoices?: readonly AbilityKey[]
     saveDc: number
     damage?: {
       diceCount: number

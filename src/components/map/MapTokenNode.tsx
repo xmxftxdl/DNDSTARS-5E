@@ -29,6 +29,11 @@ import { usePrefersReducedMotion, useStatusAnimation, useTokenBadgeImage } from 
 import type { BattleMap, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
 import type { SpellStatusTokenMark, StandardConditionTokenMark } from './mapCanvasContracts'
+import type { Dnd5eTokenStatusMarker } from '../../rulesets/dnd5e/tokenStatusMarkers'
+import {
+  dnd5eTokenStatusMarkerStyle,
+  dnd5eTokenStatusMarkerTooltip,
+} from './dnd5eTokenStatusMarkerPresentation'
 
 const TOKEN_MOVE_DURATION = TOKEN_MOVE_DURATION_S
 const TOKEN_DRAG_THRESHOLD_PX = 4
@@ -235,6 +240,57 @@ function Dnd5eStandardConditionBadge({
           listening={!!onClick || !!onTooltipChange}
         />
       )}
+    </Group>
+  )
+}
+
+function Dnd5eTokenStatusMarkerBadge({
+  radius,
+  gridIndex,
+  marker,
+  onTooltipChange,
+}: {
+  radius: number
+  gridIndex: number
+  marker: Dnd5eTokenStatusMarker
+  onTooltipChange?: TokenStatusTooltipChange
+}) {
+  const size = rightBadgeSize(radius)
+  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
+  const style = dnd5eTokenStatusMarkerStyle(marker.statusId)
+  const tooltip = dnd5eTokenStatusMarkerTooltip(marker)
+  return (
+    <Group
+      x={x}
+      y={y}
+      name={`token-status-marker token-status-marker-${marker.statusId}`}
+      listening={!!onTooltipChange}
+      onMouseEnter={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
+      onMouseMove={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
+      onMouseLeave={() => onTooltipChange?.()}
+    >
+      <Circle
+        radius={size / 2}
+        fill={style.fill}
+        stroke={style.stroke}
+        strokeWidth={tokenLineWidth(radius, 1.5)}
+        shadowBlur={4 * tokenScale(radius)}
+        shadowColor={style.stroke}
+        listening={!!onTooltipChange}
+      />
+      <Text
+        text={style.glyph}
+        width={size}
+        height={size}
+        offsetX={size / 2}
+        offsetY={size / 2}
+        fontSize={Math.max(7, size * 0.5)}
+        fontStyle="bold"
+        fill={style.text}
+        align="center"
+        verticalAlign="middle"
+        listening={!!onTooltipChange}
+      />
     </Group>
   )
 }
@@ -664,6 +720,7 @@ export function TokenNode({
   hp,
   showHpBar = true,
   standardConditions = [],
+  derivedTokenStatusMarkers = [],
   standardConditionMarks = [],
   shillelaghActive = false,
   spellStatusMarks = [],
@@ -695,6 +752,8 @@ export function TokenNode({
   hp?: { hp: number; max: number; temp?: number }
   showHpBar?: boolean
   standardConditions?: readonly Dnd5eStandardConditionId[]
+  /** Presentation badges projected from authoritative non-standard ActiveEffects. */
+  derivedTokenStatusMarkers?: readonly Dnd5eTokenStatusMarker[]
   standardConditionMarks?: readonly StandardConditionTokenMark[]
   shillelaghActive?: boolean
   spellStatusMarks?: readonly SpellStatusTokenMark[]
@@ -725,6 +784,15 @@ export function TokenNode({
   const tokenImage = loadedTokenImage?.key === tokenImageKey ? loadedTokenImage.image : undefined
   const concentrationTokenImage = useTokenBadgeImage(
     concentrationMark ? DND5E_CONCENTRATION_TOKEN_IMAGE_SRC : undefined,
+  )
+  const tokenStatusMarkers = [...(token.dnd5eTokenStatusMarkers ?? []), ...derivedTokenStatusMarkers]
+    .filter((marker) => marker.statusId !== 'concentrating' || !concentrationMark)
+    .filter((marker, index, markers) => (
+      markers.findIndex((candidate) => candidate.statusId === marker.statusId) === index
+    ))
+  const tokenStatusMarkerIds = new Set(tokenStatusMarkers.map((marker) => marker.statusId))
+  const visibleStandardConditions = standardConditions.filter(
+    (condition) => !tokenStatusMarkerIds.has(condition),
   )
   const movementAnimation = token.movementAnimation
   const latestPositionRef = useRef({ x: token.x, y: token.y })
@@ -1065,7 +1133,16 @@ export function TokenNode({
                 onTooltipChange={onStatusTooltipChange}
               />
             ))}
-            {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
+            {tokenStatusMarkers.map((marker) => (
+              <Dnd5eTokenStatusMarkerBadge
+                key={`token-status-marker:${marker.id}`}
+                radius={radius}
+                gridIndex={grid++}
+                marker={marker}
+                onTooltipChange={onStatusTooltipChange}
+              />
+            ))}
+            {(visibleStandardConditions.length > 4 ? visibleStandardConditions.slice(0, 3) : visibleStandardConditions)
               .map((condition) => (
                 <Dnd5eStandardConditionBadge
                   key={`dnd5e-condition:${condition}`}
@@ -1078,13 +1155,13 @@ export function TokenNode({
                   onTooltipChange={onStatusTooltipChange}
                 />
               ))}
-            {standardConditions.length > 4 && (
+            {visibleStandardConditions.length > 4 && (
               <Dnd5eStandardConditionBadge
                 radius={radius}
                 gridIndex={grid++}
-                overflowCount={standardConditions.length - 3}
+                overflowCount={visibleStandardConditions.length - 3}
                 onClick={() => onStandardConditionClick?.()}
-                tooltip={overflowConditionTokenTooltip(standardConditions.slice(3))}
+                tooltip={overflowConditionTokenTooltip(visibleStandardConditions.slice(3))}
                 onTooltipChange={onStatusTooltipChange}
               />
             )}
@@ -1384,7 +1461,16 @@ export function TokenNode({
                 />
               )
             })()}
-            {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
+            {tokenStatusMarkers.map((marker) => (
+              <Dnd5eTokenStatusMarkerBadge
+                key={`token-status-marker:${marker.id}`}
+                radius={radius}
+                gridIndex={grid++}
+                marker={marker}
+                onTooltipChange={onStatusTooltipChange}
+              />
+            ))}
+            {(visibleStandardConditions.length > 4 ? visibleStandardConditions.slice(0, 3) : visibleStandardConditions)
               .map((condition) => (
                 <Dnd5eStandardConditionBadge
                   key={`dnd5e-condition:${condition}`}
@@ -1397,13 +1483,13 @@ export function TokenNode({
                   onTooltipChange={onStatusTooltipChange}
                 />
               ))}
-            {standardConditions.length > 4 && (
+            {visibleStandardConditions.length > 4 && (
               <Dnd5eStandardConditionBadge
                 radius={radius}
                 gridIndex={grid++}
-                overflowCount={standardConditions.length - 3}
+                overflowCount={visibleStandardConditions.length - 3}
                 onClick={() => onStandardConditionClick?.()}
-                tooltip={overflowConditionTokenTooltip(standardConditions.slice(3))}
+                tooltip={overflowConditionTokenTooltip(visibleStandardConditions.slice(3))}
                 onTooltipChange={onStatusTooltipChange}
               />
             )}

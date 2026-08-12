@@ -159,7 +159,7 @@ export default function ActiveRulesExtensionsPage() {
   }, [host, recordSignature, revision])
 
   return (
-    <div className="mx-auto max-w-6xl" data-testid="active-rules-extensions-page">
+    <div className="mx-auto w-full max-w-[1800px]" data-testid="active-rules-extensions-page">
       <PageHeader
         title="规则与扩展"
         description="这里只显示当前设备和当前房间已经实际激活的规则。市场商品、未启用版本和工坊草稿不会出现在运行清单中。"

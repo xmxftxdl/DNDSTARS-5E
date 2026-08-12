@@ -6,6 +6,7 @@ import type {
 } from '../../../types/inventory'
 import { DND5E_DAMAGE_TYPES } from '../damageTypes'
 import { getDnd5eSrdCombatSpell } from '../spells'
+import { validateDnd5eWorkshopDamageFormulaV1 } from '../workshopDamageFormula'
 
 type ItemHeadlessDeclaration = Pick<
   Dnd5eInventoryItemTemplate,
@@ -160,6 +161,7 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
         !['attacks-with-this-weapon', 'weapon-attacks'].includes(effect.appliesTo) ||
         !finiteInteger(effect.damage.count, 1, 40) || !finiteInteger(effect.damage.sides, 2, 100) ||
         !finiteInteger(effect.damage.bonus, -1_000, 1_000) ||
+        (effect.damage.modifierFormula != null && validateDnd5eWorkshopDamageFormulaV1(effect.damage.modifierFormula).length > 0) ||
         (effect.damageType !== 'inherit' && !(DND5E_DAMAGE_TYPES as readonly string[]).includes(effect.damageType)) ||
         (effect.doubleDiceOnCritical != null && typeof effect.doubleDiceOnCritical !== 'boolean') ||
         (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean') ||

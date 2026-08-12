@@ -23,6 +23,7 @@ export interface Dnd5eMonsterAbilityTemplate {
   sourceMonsterName: string
   sourceMonsterEnglishName: string
   ruleKind: string
+  mechanicTags: readonly string[]
   dependencyCount: number
   searchText: string
   sourceIndex: number
@@ -104,14 +105,29 @@ function actionRuleKind(action: Dnd5eMonsterAction): string {
   return action.kind
 }
 
+function ruleMechanicTags(ruleKind: string): readonly string[] {
+  if (ruleKind === 'source-linked-engulf') {
+    return ['共享空间', '吞没', '携带', '逃脱', '持续伤害']
+  }
+  if (ruleKind === 'source-linked-reel') return ['关系目标', '拖拽', '强制移动']
+  if (ruleKind === 'throw-linked-target') return ['关系目标', '投掷', '碰撞伤害', '强制移动']
+  if (ruleKind === 'area-saving-throw') return ['范围豁免', '范围伤害']
+  if (ruleKind === 'charge-damage') return ['移动后命中', '直线移动', '追加伤害']
+  if (ruleKind.startsWith('weapon:source-linked-condition')) {
+    return ['擒抱', '附着', '吞咽', '关系目标']
+  }
+  return []
+}
+
 function templateSearchText(
   monster: Dnd5eMonsterStatBlock,
   section: Dnd5eMonsterAbilityTemplateSection,
   name: string,
   description: string,
   ruleKind: string,
+  mechanicTags: readonly string[] = ruleMechanicTags(ruleKind),
 ): string {
-  return [name, description, ruleKind, section, monster.name, monster.englishName, monster.id]
+  return [name, description, ruleKind, ...mechanicTags, section, monster.name, monster.englishName, monster.id]
     .join(' ')
     .toLocaleLowerCase('zh-CN')
 }
@@ -124,6 +140,7 @@ export function buildDnd5eMonsterAbilityTemplateCatalog(
     monster.traits.forEach((trait, sourceIndex) => {
       if (trait.automation !== 'headless' || !trait.rule) return
       const ruleKind = trait.rule.kind
+      const mechanicTags = ruleMechanicTags(ruleKind)
       templates.push({
         id: `${monster.id}:trait:${sourceIndex}:${slugPart(trait.name)}`,
         section: 'trait',
@@ -133,6 +150,7 @@ export function buildDnd5eMonsterAbilityTemplateCatalog(
         sourceMonsterName: monster.name,
         sourceMonsterEnglishName: monster.englishName,
         ruleKind,
+        mechanicTags,
         dependencyCount: dependencyClosure(monster, trait).length,
         searchText: templateSearchText(monster, 'trait', trait.name, trait.description, ruleKind),
         sourceIndex,
@@ -141,6 +159,7 @@ export function buildDnd5eMonsterAbilityTemplateCatalog(
     for (const entry of actionEntries(monster)) {
       if (dnd5eMonsterActionAutomation(entry.action) !== 'headless') continue
       const ruleKind = actionRuleKind(entry.action)
+      const mechanicTags = ruleMechanicTags(ruleKind)
       templates.push({
         id: `${monster.id}:${entry.section}:${entry.sourceIndex}:${slugPart(entry.action.id)}`,
         section: entry.section,
@@ -150,6 +169,7 @@ export function buildDnd5eMonsterAbilityTemplateCatalog(
         sourceMonsterName: monster.name,
         sourceMonsterEnglishName: monster.englishName,
         ruleKind,
+        mechanicTags,
         dependencyCount: dependencyClosure(monster, entry.action).length,
         searchText: templateSearchText(monster, entry.section, entry.action.name, entry.action.description, ruleKind),
         sourceIndex: entry.sourceIndex,

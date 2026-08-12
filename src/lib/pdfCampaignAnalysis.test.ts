@@ -110,6 +110,11 @@ function outputForSchema(page: number, schema: unknown): PdfCampaignChunkAnalysi
       timelineOrder: 10,
       timelineKind: 'history',
       tags: ['主线'],
+      causedBy: [],
+      causalExplanation: '',
+      branchCondition: '',
+      branchPerson: '',
+      branchPersonState: 'unspecified',
       citations: [{ documentName: '冒险.pdf', page }],
     }]
   }
@@ -173,7 +178,10 @@ describe('PDF 战役分析', () => {
     expect(synthesisProperties.relationships.maxItems).toBeGreaterThan(0)
     expect(synthesisProperties.scenes.maxItems).toBe(0)
     expect(synthesisProperties.timelineEvents.maxItems).toBeUndefined()
-    expect(synthesisProperties.timelineEvents.items?.required).toEqual(expect.arrayContaining(['time', 'timelineOrder', 'timelineKind', 'tags']))
+    expect(synthesisProperties.timelineEvents.items?.required).toEqual(expect.arrayContaining([
+      'time', 'timelineOrder', 'timelineKind', 'tags',
+      'causedBy', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState',
+    ]))
     expect(estimatePdfAnalysisWorkload(8, 'deep').recommendation).toBe('local-ready')
     expect(estimatePdfAnalysisWorkload(20, 'deep').recommendation).toBe('prefer-quick')
     expect(estimatePdfAnalysisWorkload(40, 'quick').recommendation).toBe('prefer-cloud')
@@ -874,6 +882,11 @@ describe('PDF 战役分析', () => {
           timelineOrder: (index + 1) * 10,
           timelineKind: 'current',
           tags: ['主线'],
+          causedBy: index === 0 ? [] : [`关键事件 ${index}`],
+          causalExplanation: index === 0 ? '' : '前一关键事件直接开启当前阶段。',
+          branchCondition: '',
+          branchPerson: '',
+          branchPersonState: 'unspecified',
           citations: [{ documentName: '冒险.pdf', page: 1 }],
         }))
       }

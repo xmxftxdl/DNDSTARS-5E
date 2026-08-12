@@ -34,6 +34,7 @@ import {
   type CombatPresentationSavingThrowAbility,
 } from '../../lib/combatPresentation'
 import { preloadBrowserImage } from '../../lib/browserImageCache'
+import type { Dnd5eTokenStatusMarker } from '../../rulesets/dnd5e/tokenStatusMarkers'
 import MapMeasureLine from './MapMeasureLine'
 import { rectFromPoints, type AoeHighlight, type DeleteSelectionRect, type MapProjectile, type SpellStatusTokenMark, type StandardConditionTokenMark } from './mapCanvasContracts'
 export type { AoeHighlight, DeleteSelectionRect, MapProjectile, SpellStatusTokenMark, StandardConditionTokenMark } from './mapCanvasContracts'
@@ -111,6 +112,7 @@ import {
   mapCanvasAoeGridCell,
   mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
+  mapCanvasGeometryRightButtonPanShouldStart,
   mapCanvasStageCanPan,
   mapCanvasTokenClickAction,
 } from './mapCanvasInteraction'
@@ -173,6 +175,8 @@ interface MapCanvasProps {
   onAoeCancel?: () => void
   /** 由 5e Headless 快照得出的标准状态，显示在 Token 右上角。 */
   dnd5eConditionsByToken?: Record<string, readonly Dnd5eStandardConditionId[]>
+  /** Non-standard status badges projected from authoritative ActiveEffects. */
+  dnd5eTokenStatusMarkersByToken?: Record<string, readonly Dnd5eTokenStatusMarker[]>
   standardConditionTokenMarks?: StandardConditionTokenMark[]
   onDnd5eConditionClick?: (tokenId: string, condition?: Dnd5eStandardConditionId) => void
   onDnd5ePluginAreaVisibilityToggle?: (areaId: string) => void
@@ -321,6 +325,7 @@ export default function MapCanvas({
   onAoeConfirm,
   onAoeCancel,
   dnd5eConditionsByToken = {},
+  dnd5eTokenStatusMarkersByToken = {},
   standardConditionTokenMarks = [],
   onDnd5eConditionClick,
   onDnd5ePluginAreaVisibilityToggle,
@@ -512,6 +517,8 @@ export default function MapCanvas({
     clientY: number
     viewX: number
     viewY: number
+    pointerId: number
+    button: 0 | 2
   } | null>(null)
   const [geometryViewportPanActive, setGeometryViewportPanActive] = useState(false)
   const tabletopDragStartRef = useRef<MapTabletopPoint | null>(null)
@@ -1817,7 +1824,7 @@ export default function MapCanvas({
     return <Group key={key} listening={false}>{shape}<Text x={labelX} y={labelY - 18 * inv} text={label} fill={draft ? '#fde68a' : '#a5f3fc'} fontSize={12 * inv} listening={false} /></Group>
   }
 
-  const stageCanPan = !geometryDragActive && !geometryViewportPanActive && mapCanvasStageCanPan({
+  const stagePanAllowedByTools = mapCanvasStageCanPan({
     tabletopTool,
     measureMode,
     moveSelectMode,
@@ -1831,6 +1838,7 @@ export default function MapCanvas({
     geometrySearchMode,
     sceneEditMode: sceneEditMode || scenePointPlacementMode,
   })
+  const stageCanPan = !geometryDragActive && !geometryViewportPanActive && stagePanAllowedByTools
   const savingThrowToken = savingThrowTokenId
     ? map.tokens.find((candidate) => candidate.id === savingThrowTokenId)
     : undefined
@@ -1894,6 +1902,30 @@ export default function MapCanvas({
     <div
       ref={containerRef}
       onPointerDownCapture={(event) => {
+        if (mapCanvasGeometryRightButtonPanShouldStart({
+          button: event.button,
+          geometryEditMode,
+        })) {
+          event.preventDefault()
+          event.stopPropagation()
+          cancelPendingGeometryClickCommits()
+          geometryDragStartRef.current = null
+          setGeometryDraft(null)
+          setGeometryDragActive(false)
+          stageRef.current?.stopDrag()
+          stageRef.current?.draggable(false)
+          geometryViewportPanStartRef.current = {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            viewX: view.x,
+            viewY: view.y,
+            pointerId: event.pointerId,
+            button: 2,
+          }
+          setGeometryViewportPanActive(true)
+          event.currentTarget.setPointerCapture(event.pointerId)
+          return
+        }
         if (
           event.button !== 0 ||
           !geometryEditMode ||
@@ -1918,6 +1950,8 @@ export default function MapCanvas({
           clientY: event.clientY,
           viewX: view.x,
           viewY: view.y,
+          pointerId: event.pointerId,
+          button: 0,
         }
         setGeometryViewportPanActive(true)
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -1925,26 +1959,52 @@ export default function MapCanvas({
       onPointerMoveCapture={(event) => {
         const start = geometryViewportPanStartRef.current
         if (!start) return
-        setView((current) => ({
-          ...current,
-          x: start.viewX + event.clientX - start.clientX,
-          y: start.viewY + event.clientY - start.clientY,
-        }))
+        event.preventDefault()
+        event.stopPropagation()
+        const nextX = start.viewX + event.clientX - start.clientX
+        const nextY = start.viewY + event.clientY - start.clientY
+        const stage = stageRef.current
+        if (stage) {
+          // Match the normal Konva stage drag: move the viewport imperatively
+          // during the gesture, then commit React state once on release.
+          stage.position({ x: nextX, y: nextY })
+          stage.batchDraw()
+          if (savingThrowToken) syncSavingThrowMarkerPosition()
+        } else {
+          setView((current) => ({ ...current, x: nextX, y: nextY }))
+        }
       }}
       onPointerUpCapture={(event) => {
-        if (!geometryViewportPanStartRef.current) return
+        const start = geometryViewportPanStartRef.current
+        if (!start || start.pointerId !== event.pointerId) return
+        if (start.button === 2) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
         geometryViewportPanStartRef.current = null
         setGeometryViewportPanActive(false)
-        stageRef.current?.draggable(true)
+        const stage = stageRef.current
+        if (stage) {
+          setView((current) => ({ ...current, x: stage.x(), y: stage.y() }))
+          stage.draggable(stagePanAllowedByTools)
+        }
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
       }}
-      onPointerCancelCapture={() => {
-        if (!geometryViewportPanStartRef.current) return
+      onPointerCancelCapture={(event) => {
+        const start = geometryViewportPanStartRef.current
+        if (!start || start.pointerId !== event.pointerId) return
         geometryViewportPanStartRef.current = null
         setGeometryViewportPanActive(false)
-        stageRef.current?.draggable(true)
+        const stage = stageRef.current
+        if (stage) {
+          setView((current) => ({ ...current, x: stage.x(), y: stage.y() }))
+          stage.draggable(stagePanAllowedByTools)
+        }
+      }}
+      onContextMenuCapture={(event) => {
+        if (geometryEditMode) event.preventDefault()
       }}
       data-testid="map-canvas"
       data-vision-source-count={visionSourceTokenIds.length}
@@ -1992,7 +2052,9 @@ export default function MapCanvas({
       data-stage-can-pan={stageCanPan ? 'true' : 'false'}
       data-ping-enabled={pingEnabled ? 'true' : 'false'}
       className={`relative h-full w-full overflow-hidden rounded-2xl ${
-        tabletopTool !== 'none'
+        geometryViewportPanActive
+          ? 'cursor-grabbing'
+        : tabletopTool !== 'none'
           ? 'cursor-crosshair'
         : gridAdjustMode
           ? 'cursor-move'
@@ -2056,6 +2118,7 @@ export default function MapCanvas({
             return
           }
           if (geometryEditMode) {
+            if (geometryViewportPanStartRef.current?.button === 2) return
             geometryDragStartRef.current = null
             geometryViewportPanStartRef.current = null
             setGeometryDragActive(false)
@@ -2689,6 +2752,7 @@ export default function MapCanvas({
                   (isDM || !!t.characterId || t.showHpOnToken !== false)
                 }
                 standardConditions={dnd5eConditionsByToken[t.id]}
+                derivedTokenStatusMarkers={dnd5eTokenStatusMarkersByToken[t.id]}
                 standardConditionMarks={standardConditionTokenMarks.filter((mark) => mark.tokenId === t.id)}
                 shillelaghActive={shillelaghTokenIds.includes(t.id)}
                 spellStatusMarks={spellStatusTokenMarks.filter((mark) => mark.tokenId === t.id)}

@@ -55,7 +55,7 @@ export default function Dnd5eMonsterAbilityTemplateLibrary({
         <div>
           <h2 className="text-lg font-semibold text-slate-50">Headless 怪物能力模板库</h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-400">
-            从已验证的怪物图鉴复制完整规则。复杂动作会连同依赖动作、多重攻击顺序和使用次数一起复制，之后只影响当前怪物。
+            从已验证的怪物图鉴复制完整规则。共享空间、吞没、携带、逃脱、持续伤害等复杂结构会被完整保留；依赖动作、多重攻击顺序和使用次数也会一起复制。
           </p>
         </div>
         <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="关闭能力模板库">
@@ -70,7 +70,7 @@ export default function Dnd5eMonsterAbilityTemplateLibrary({
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索能力、规则类型或来源怪物，例如：吞咽、魔法抗性、roar"
+            placeholder="搜索能力、机制或来源怪物，例如：共享空间、吞没、魔法抗性"
             className="w-full rounded-xl border border-white/10 bg-black/25 py-2.5 pl-10 pr-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-violet-400/50"
           />
         </div>
@@ -108,6 +108,15 @@ export default function Dnd5eMonsterAbilityTemplateLibrary({
                     {' · '}{template.ruleKind}
                     {template.dependencyCount > 0 ? ` · 自动带入 ${template.dependencyCount} 个依赖动作` : ''}
                   </p>
+                  {template.mechanicTags.length > 0 ? (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {template.mechanicTags.map((tag) => (
+                        <span key={tag} className="rounded-full border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-0.5 text-[9px] text-cyan-200/80">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <button type="button" onClick={() => onAdd(template)} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-500/20 px-2.5 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/30">
                   <Plus className="h-3.5 w-3.5" /> 加入

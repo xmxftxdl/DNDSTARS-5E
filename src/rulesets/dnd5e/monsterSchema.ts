@@ -6,6 +6,8 @@ import { DND5E_DAMAGE_TYPES } from './damageTypes'
 import { DND5E_STANDARD_CONDITION_IDS } from './conditions'
 import { isDnd5eConditionalDamageDefense } from './damageDefenses'
 import { dnd5eMonsterMultiattackChildIsCompositeSupported } from './monsterCompositeMultiattack'
+import { validateDnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
+import { DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS } from './tokenStatusMarkers'
 
 export interface Dnd5eMonsterSchemaIssue {
   monsterId: string
@@ -32,7 +34,8 @@ const ATTACK_MODES = new Set(['melee', 'ranged', 'melee-or-ranged'])
 const TARGET_PRIORITIES = new Set(['nearest', 'lowest-current-hp', 'lowest-hp-percentage', 'lowest-armor-class', 'highest-threat'])
 const MECHANIC_LIMITS = new Set(['once-per-turn', 'once-per-combat', 'unlimited'])
 const MECHANIC_EVENTS = new Set([
-  'turn-start', 'turn-end', 'after-hit', 'after-miss', 'when-hit', 'after-dealt-damage', 'after-damaged',
+  'turn-start', 'turn-end', 'before-damaged', 'after-hit', 'after-move-hit', 'after-miss', 'when-hit',
+  'target-killed', 'after-dealt-damage', 'after-damaged',
   'saving-throw-magic', 'saving-throw-physical', 'movement', 'phase-transition',
 ])
 const MECHANIC_AUTOMATION = new Set(['full', 'partial', 'manual'])
@@ -40,6 +43,7 @@ const MECHANIC_TARGETS = new Set(['self', 'trigger-target', 'damage-source', 'se
 const MECHANIC_SUBJECTS = new Set(['self', 'ally-within', 'hostile-within'])
 const STANDARD_CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 const ID_PATTERN = /^(?:srd-5\.1|room-monster):[a-z0-9][a-z0-9-]{0,95}$/
+const TOKEN_STATUS_MARKER_IDS = new Set<string>(DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS)
 const DICE_PATTERN = /^\d+d\d+(?:\s*[+\-−]\s*\d+)?$/i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,6 +68,8 @@ function validateDamage(raw: unknown): boolean {
     finiteInteger(raw.count, 0, 1_000) &&
     finiteInteger(raw.sides, 2, 1_000_000) &&
     finiteInteger(raw.bonus, -1_000_000, 1_000_000) &&
+    (raw.workshopFixedBonus == null || finiteInteger(raw.workshopFixedBonus, -1_000_000, 1_000_000)) &&
+    (raw.modifierFormula == null || validateDnd5eWorkshopDamageFormulaV1(raw.modifierFormula).length === 0) &&
     typeof raw.type === 'string' && DAMAGE_TYPE_VALUES.has(raw.type)
 }
 
@@ -1108,6 +1114,9 @@ function areaTargetingIsValid(raw: unknown): boolean {
 
 function areaSavingThrowEffectIsValid(raw: unknown): boolean {
   if (!isRecord(raw)) return false
+  const targetAbilityChoices = Array.isArray(raw.targetAbilityChoices)
+    ? raw.targetAbilityChoices
+    : undefined
   const additionalDamage = Array.isArray(raw.additionalDamage)
     ? raw.additionalDamage
     : undefined
@@ -1122,6 +1131,29 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       key === 'direction' || key === 'maximumDistanceFeet') &&
     forcedMovement.direction === 'away-from-source' &&
     finiteInteger(forcedMovement.maximumDistanceFeet, 1, 1_000)
+  )
+  const successfulSaveMovement = raw.forcedMovementOnSuccessfulSave
+  const successfulSaveMovementIsValid = successfulSaveMovement == null || (
+    isRecord(successfulSaveMovement) &&
+    Object.keys(successfulSaveMovement).every((key) =>
+      key === 'direction' ||
+      key === 'maximumDistanceFeet' ||
+      key === 'conditionWhenNoDestination') &&
+    successfulSaveMovement.direction === 'target-choice' &&
+    finiteInteger(successfulSaveMovement.maximumDistanceFeet, 1, 1_000) &&
+    successfulSaveMovement.conditionWhenNoDestination === 'prone'
+  )
+  const actorLanding = raw.actorLanding
+  const actorLandingIsValid = actorLanding == null || (
+    isRecord(actorLanding) &&
+    Object.keys(actorLanding).every((key) =>
+      key === 'kind' || key === 'minimumDistanceFeet' || key === 'traversalMode') &&
+    actorLanding.kind === 'jump-into-occupied-space' &&
+    finiteInteger(actorLanding.minimumDistanceFeet, 1, 1_000) &&
+    (
+      actorLanding.traversalMode === 'long-jump-running' ||
+      actorLanding.traversalMode === 'long-jump-standing'
+    )
   )
   const activeEffect = raw.activeEffectOnFailedSave
   const activeEffectIsValid = activeEffect == null || (
@@ -1225,6 +1257,17 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
       )
     ) &&
     ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+    (
+      targetAbilityChoices == null ||
+      (
+        targetAbilityChoices.length >= 2 &&
+        targetAbilityChoices.length <= ABILITY_KEYS.length &&
+        new Set(targetAbilityChoices).size === targetAbilityChoices.length &&
+        targetAbilityChoices.every((ability) =>
+          ABILITY_KEYS.includes(ability as typeof ABILITY_KEYS[number])) &&
+        targetAbilityChoices.includes(raw.ability)
+      )
+    ) &&
     finiteInteger(raw.dc, 1, 100) &&
     (raw.magical == null || typeof raw.magical === 'boolean') &&
     (
@@ -1261,11 +1304,15 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
           )
     ) &&
     forcedMovementIsValid &&
+    successfulSaveMovementIsValid &&
+    actorLandingIsValid &&
+    !(raw.forcedMovementOnFailedSave != null && raw.forcedMovementOnSuccessfulSave != null) &&
     activeEffectIsValid &&
     !(
       raw.damage == null &&
       raw.conditionOnFailedSave == null &&
       raw.forcedMovementOnFailedSave == null &&
+      raw.forcedMovementOnSuccessfulSave == null &&
       raw.activeEffectOnFailedSave == null
     ) &&
     (raw.frightfulPresenceImmunityRounds == null ||
@@ -2190,9 +2237,53 @@ function traitShapeIsValid(raw: unknown): boolean {
       raw.rule.reactionRefresh === 'every-turn-start'
   }
   if (raw.rule.kind === 'charge-damage') {
-    return finiteInteger(raw.rule.minimumStraightMovementFeet, 5, 10_000) &&
+    const savingThrow = raw.rule.savingThrowOnHit
+    const forcedMovement = raw.rule.forcedMovementOnHit
+    const bonusActionFollowUp = raw.rule.bonusActionFollowUp
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' || key === 'minimumStraightMovementFeet' || key === 'actionId' ||
+      key === 'extraDamage' || key === 'savingThrowOnHit' ||
+      key === 'forcedMovementOnHit' || key === 'bonusActionFollowUp') &&
+      finiteInteger(raw.rule.minimumStraightMovementFeet, 5, 10_000) &&
       requiredText(raw.rule.actionId, 120) &&
-      validateDamage(raw.rule.extraDamage)
+      (raw.rule.extraDamage == null || validateDamage(raw.rule.extraDamage)) &&
+      (savingThrow == null || (
+        isRecord(savingThrow) &&
+        Object.keys(savingThrow).every((key) =>
+          key === 'ability' || key === 'dc' || key === 'conditionOnFailedSave') &&
+        ABILITY_KEYS.includes(savingThrow.ability as typeof ABILITY_KEYS[number]) &&
+        finiteInteger(savingThrow.dc, 1, 100) &&
+        STANDARD_CONDITIONS.has(String(savingThrow.conditionOnFailedSave))
+      )) &&
+      (forcedMovement == null || (
+        isRecord(forcedMovement) &&
+        Object.keys(forcedMovement).every((key) =>
+          key === 'ability' || key === 'dc' || key === 'direction' ||
+          key === 'maximumDistanceFeet' || key === 'targetMaxSizeRank' ||
+          key === 'conditionOnFailedSave') &&
+        ABILITY_KEYS.includes(forcedMovement.ability as typeof ABILITY_KEYS[number]) &&
+        finiteInteger(forcedMovement.dc, 1, 100) &&
+        (forcedMovement.direction === 'away-from-source' ||
+          forcedMovement.direction === 'toward-source') &&
+        finiteInteger(forcedMovement.maximumDistanceFeet, 5, 10_000) &&
+        (forcedMovement.targetMaxSizeRank == null ||
+          finiteInteger(forcedMovement.targetMaxSizeRank, 0, 5)) &&
+        (forcedMovement.conditionOnFailedSave == null ||
+          STANDARD_CONDITIONS.has(String(forcedMovement.conditionOnFailedSave)))
+      )) &&
+      (bonusActionFollowUp == null || (
+        isRecord(bonusActionFollowUp) &&
+        Object.keys(bonusActionFollowUp).every((key) =>
+          key === 'actionId' || key === 'referencedActionId' ||
+          key === 'requiredTargetCondition') &&
+        requiredText(bonusActionFollowUp.actionId, 120) &&
+        requiredText(bonusActionFollowUp.referencedActionId, 120) &&
+        STANDARD_CONDITIONS.has(String(bonusActionFollowUp.requiredTargetCondition))
+      )) &&
+      (
+        raw.rule.extraDamage != null || savingThrow != null ||
+        forcedMovement != null || bonusActionFollowUp != null
+      )
   }
   if (raw.rule.kind === 'magic-resistance') {
     return raw.rule.savingThrowAdvantageAgainstMagic === true
@@ -2324,6 +2415,13 @@ function mechanicDiceIsValid(raw: unknown): boolean {
     finiteInteger(raw.bonus, -1_000_000, 1_000_000)
 }
 
+function mechanicDurationV2IsValid(raw: unknown): boolean {
+  if (!isRecord(raw) || !['permanent', 'until-target-turn-start', 'until-source-turn-start', 'rounds'].includes(String(raw.kind))) {
+    return false
+  }
+  return raw.kind !== 'rounds' || finiteInteger(raw.rounds, 1, 10_000)
+}
+
 function mechanicEffectV2IsValid(raw: unknown): boolean {
   if (!isRecord(raw) || !requiredText(raw.id, 96) || !/^[a-z][a-z0-9-]*$/.test(String(raw.id)) || typeof raw.kind !== 'string') return false
   if (raw.kind === 'healing' || raw.kind === 'temporary-hit-points') {
@@ -2333,11 +2431,18 @@ function mechanicEffectV2IsValid(raw: unknown): boolean {
     return MECHANIC_TARGETS.has(String(raw.target)) && mechanicDiceIsValid(raw.dice) &&
       (DAMAGE_TYPE_VALUES.has(String(raw.damageType)) || raw.damageType === 'inherit-trigger')
   }
+  if (raw.kind === 'damage-replacement') {
+    return MECHANIC_TARGETS.has(String(raw.target)) &&
+      ['negate', 'halve', 'reduce-by', 'set-to', 'convert-to-healing'].includes(String(raw.operation)) &&
+      (
+        raw.operation === 'reduce-by' || raw.operation === 'set-to'
+          ? finiteInteger(raw.amount, 0, 1_000_000)
+          : raw.amount == null
+      )
+  }
   if (raw.kind === 'standard-condition') {
-    const duration = isRecord(raw.duration) ? raw.duration : null
-    return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition)) && !!duration &&
-      ['permanent', 'until-target-turn-start', 'until-source-turn-start', 'rounds'].includes(String(duration.kind)) &&
-      (duration.kind !== 'rounds' || finiteInteger(duration.rounds, 1, 10_000))
+    return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition)) &&
+      mechanicDurationV2IsValid(raw.duration)
   }
   if (raw.kind === 'remove-standard-condition') {
     return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition))
@@ -2364,6 +2469,22 @@ function mechanicEffectV2IsValid(raw: unknown): boolean {
       (raw.economy == null || ['none', 'reaction'].includes(String(raw.economy))) &&
       validateDamage(raw.damage)
   }
+  if (raw.kind === 'action-grant') {
+    return MECHANIC_TARGETS.has(String(raw.target)) &&
+      ['action', 'bonus-action', 'reaction'].includes(String(raw.resource))
+  }
+  if (raw.kind === 'equipment-modifier') {
+    const equipment = String(raw.equipment)
+    const operation = String(raw.operation)
+    return MECHANIC_TARGETS.has(String(raw.target)) &&
+      ['armor', 'main-weapon'].includes(equipment) &&
+      ['armor-class-bonus', 'magic-weapon-bonus'].includes(operation) &&
+      ((equipment === 'armor' && operation === 'armor-class-bonus') ||
+        (equipment === 'main-weapon' && operation === 'magic-weapon-bonus')) &&
+      finiteInteger(raw.bonus, operation === 'magic-weapon-bonus' ? 1 : -20, operation === 'magic-weapon-bonus' ? 3 : 20) &&
+      (raw.equipmentId == null || requiredText(raw.equipmentId, 96)) &&
+      mechanicDurationV2IsValid(raw.duration)
+  }
   return false
 }
 
@@ -2379,11 +2500,30 @@ function mechanicShapeIsValid(raw: unknown): boolean {
     if ((trigger.subject ?? 'self') === 'self') {
       if (trigger.radiusFeet != null) return false
     } else if (!finiteInteger(trigger.radiusFeet, 5, 100_000)) return false
-    if (trigger.event === 'movement') {
+    if (trigger.event === 'movement' || trigger.event === 'after-move-hit') {
       if (!isRecord(trigger.movement) ||
         !['at-least', 'at-most'].includes(String(trigger.movement.comparison)) ||
         !finiteInteger(trigger.movement.feet, 0, 100_000)) return false
     } else if (trigger.movement != null) return false
+    const attackEvents = new Set(['after-hit', 'after-move-hit', 'after-miss', 'when-hit'])
+    if (trigger.attackMode != null && (
+      !attackEvents.has(String(trigger.event)) ||
+      !['any', 'melee', 'ranged', 'spell', 'unarmed'].includes(String(trigger.attackMode))
+    )) return false
+    const damageEvents = new Set(['before-damaged', 'after-damaged', 'after-dealt-damage'])
+    if (trigger.damageTypes != null && (
+      !damageEvents.has(String(trigger.event)) ||
+      !Array.isArray(trigger.damageTypes) || trigger.damageTypes.length < 1 ||
+      trigger.damageTypes.length > DAMAGE_TYPE_VALUES.size ||
+      trigger.damageTypes.some((type) => !DAMAGE_TYPE_VALUES.has(String(type))) ||
+      new Set(trigger.damageTypes.map(String)).size !== trigger.damageTypes.length
+    )) return false
+    const savingThrowEvent = trigger.event === 'saving-throw-magic' || trigger.event === 'saving-throw-physical'
+    if (trigger.savingThrowTiming != null && (!savingThrowEvent || !['before', 'after'].includes(String(trigger.savingThrowTiming)))) return false
+    if (trigger.savingThrowOutcome != null && (
+      !savingThrowEvent || (trigger.savingThrowTiming ?? 'before') !== 'after' ||
+      !['any', 'success', 'failure'].includes(String(trigger.savingThrowOutcome))
+    )) return false
     for (const threshold of ['hpPercentageAtOrBelow', 'hpPercentageAtOrAbove'] as const) {
       if (predicates[threshold] != null && (!Number.isFinite(predicates[threshold]) || Number(predicates[threshold]) < 0 || Number(predicates[threshold]) > 100)) return false
     }
@@ -2393,8 +2533,25 @@ function mechanicShapeIsValid(raw: unknown): boolean {
     if (!Array.isArray(raw.effects) || raw.effects.length < 1 || raw.effects.length > 16 ||
       raw.effects.some((effect) => !mechanicEffectV2IsValid(effect))) return false
     if (
+      savingThrowEvent && (trigger.savingThrowTiming ?? 'before') === 'before' &&
+      raw.effects.some((effect) =>
+        !isRecord(effect) || effect.kind !== 'roll-modifier' || effect.roll !== 'saving-throw')
+    ) return false
+    if (
       (trigger.subject ?? 'self') === 'self' &&
       raw.effects.some((effect) => isRecord(effect) && effect.target === 'selected-subject')
+    ) return false
+    if (
+      trigger.event === 'before-damaged' &&
+      raw.effects.some((effect) => !isRecord(effect) || effect.kind !== 'damage-replacement')
+    ) return false
+    if (
+      trigger.event === 'before-damaged' &&
+      raw.effects.some((effect) => isRecord(effect) && !['self', 'selected-subject'].includes(String(effect.target)))
+    ) return false
+    if (
+      trigger.event !== 'before-damaged' &&
+      raw.effects.some((effect) => isRecord(effect) && effect.kind === 'damage-replacement')
     ) return false
     const effectIds = raw.effects.map((effect) => String((effect as Record<string, unknown>).id))
     return new Set(effectIds).size === effectIds.length
@@ -2628,6 +2785,17 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   }
   if (raw.conditionImmunities != null && (!Array.isArray(raw.conditionImmunities) || raw.conditionImmunities.some((entry) => !requiredText(entry, 120)))) {
     issues.push(issue(monsterId, '状态免疫数据无效'))
+  }
+  if (raw.tokenStatusMarkerGrants != null && (
+    !Array.isArray(raw.tokenStatusMarkerGrants) ||
+    raw.tokenStatusMarkerGrants.length > 32 ||
+    raw.tokenStatusMarkerGrants.some((grant) =>
+      !isRecord(grant) ||
+      Object.keys(grant).some((key) => key !== 'statusId' && key !== 'target') ||
+      !TOKEN_STATUS_MARKER_IDS.has(String(grant.statusId)) ||
+      (grant.target !== 'self' && grant.target !== 'other'))
+  )) {
+    issues.push(issue(monsterId, 'Token 状态标记能力数据无效'))
   }
   if (raw.capabilities != null) {
     const capabilities = isRecord(raw.capabilities) ? raw.capabilities : null

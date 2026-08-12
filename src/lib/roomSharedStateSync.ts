@@ -60,24 +60,25 @@ export function startRoomSharedStateSync(): () => void {
     console.error('[room-state] initial hydration failed', error)
   })
 
-  const subscriptionOptions = { immediate: false }
-  const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps, subscriptionOptions)
-  const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters, subscriptionOptions)
-  const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook, subscriptionOptions)
-  const stopCustomMonsters = subscribeSharedResourceInvalidation(SHARED_CUSTOM_MONSTERS_RESOURCE, loadSharedCustomMonsters, subscriptionOptions)
-  const stopFog = subscribeSharedResourceInvalidation(MAP_FOG_RESOURCE, loadSharedFog, subscriptionOptions)
+  const hotSubscriptionOptions = { immediate: false }
+  const coldSubscriptionOptions = { immediate: false, recoveryMs: 60_000 }
+  const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps, hotSubscriptionOptions)
+  const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters, hotSubscriptionOptions)
+  const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook, coldSubscriptionOptions)
+  const stopCustomMonsters = subscribeSharedResourceInvalidation(SHARED_CUSTOM_MONSTERS_RESOURCE, loadSharedCustomMonsters, coldSubscriptionOptions)
+  const stopFog = subscribeSharedResourceInvalidation(MAP_FOG_RESOURCE, loadSharedFog, hotSubscriptionOptions)
   const stopMapGeometry = subscribeSharedResourceInvalidation(MAP_GEOMETRY_RESOURCE, async () => {
     await loadSharedMapGeometry()
     await loadSharedMaps()
-  }, subscriptionOptions)
-  const stopMapExploration = subscribeSharedResourceInvalidation(MAP_EXPLORATION_RESOURCE, loadSharedMapExploration, subscriptionOptions)
-  const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics, subscriptionOptions)
-  const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat, subscriptionOptions)
-  const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal, subscriptionOptions)
-  const stopCampaignTime = subscribeSharedResourceInvalidation(CAMPAIGN_TIME_RESOURCE, loadSharedCampaignTime, subscriptionOptions)
-  const stopSceneOrchestration = subscribeSharedResourceInvalidation(SCENE_ORCHESTRATION_RESOURCE, loadSharedSceneOrchestration, subscriptionOptions)
-  const stopSceneAudioLibrary = subscribeSharedResourceInvalidation(SCENE_AUDIO_LIBRARY_RESOURCE, loadSharedSceneAudioLibrary, subscriptionOptions)
-  const stopSceneAudioPlayback = subscribeSharedResourceInvalidation(SCENE_AUDIO_PLAYBACK_RESOURCE, loadSharedSceneAudioPlayback, subscriptionOptions)
+  }, hotSubscriptionOptions)
+  const stopMapExploration = subscribeSharedResourceInvalidation(MAP_EXPLORATION_RESOURCE, loadSharedMapExploration, hotSubscriptionOptions)
+  const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics, coldSubscriptionOptions)
+  const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat, hotSubscriptionOptions)
+  const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal, coldSubscriptionOptions)
+  const stopCampaignTime = subscribeSharedResourceInvalidation(CAMPAIGN_TIME_RESOURCE, loadSharedCampaignTime, hotSubscriptionOptions)
+  const stopSceneOrchestration = subscribeSharedResourceInvalidation(SCENE_ORCHESTRATION_RESOURCE, loadSharedSceneOrchestration, hotSubscriptionOptions)
+  const stopSceneAudioLibrary = subscribeSharedResourceInvalidation(SCENE_AUDIO_LIBRARY_RESOURCE, loadSharedSceneAudioLibrary, coldSubscriptionOptions)
+  const stopSceneAudioPlayback = subscribeSharedResourceInvalidation(SCENE_AUDIO_PLAYBACK_RESOURCE, loadSharedSceneAudioPlayback, hotSubscriptionOptions)
 
   return () => {
     stopMaps()

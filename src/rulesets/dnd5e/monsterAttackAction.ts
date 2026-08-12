@@ -20,6 +20,7 @@ import {
   dnd5eRageAllyProtectionDisadvantage,
   dnd5eRageAllyMeleeAdvantage,
   dnd5eMonsterTargetEligibilityAllows,
+  dnd5eMonsterAttackTraitMovementContext,
   dnd5eTranquilityWardCheck,
   reconcileDnd5eSourceLinkedRelations,
   previewDnd5ePostD20AdjustedAttack,
@@ -105,6 +106,8 @@ export interface PreparedDnd5eMonsterAttack {
   actorToken: Token
   targetToken: Token
   monster: Dnd5eMonsterStatBlock
+  resourceKind: 'action' | 'bonus-action'
+  resourceAction: Dnd5eMonsterAction
   action: Dnd5eMonsterAction
   attacks: readonly {
     id: string
@@ -203,6 +206,7 @@ export function prepareDnd5eMonsterAttack(input: {
   /** Exact target for each concrete runtime occurrence; one entry is legacy. */
   targetTokenIds?: readonly string[]
   actionIndex?: number
+  resourceKind?: 'action' | 'bonus-action'
   multiattackContinuation?: {
     schemaVersion: 1
     parentActionId: string
@@ -254,9 +258,21 @@ export function prepareDnd5eMonsterAttack(input: {
   snapshot.state.initiativeIndex = actorIndex
   reconcileDnd5eSourceLinkedRelations(snapshot.state)
 
-  const indexedAction = monster.actions[input.actionIndex ?? 0]
-    ?? monster.actions.find((action) => action.kind === 'weapon-attack')
-  if (!indexedAction) return { ok: false, reason: 'invalid-action' }
+  const resourceKind = input.resourceKind ?? 'action'
+  const resourceActions = resourceKind === 'bonus-action'
+    ? monster.bonusActions ?? []
+    : monster.actions
+  const indexedResourceAction = resourceActions[input.actionIndex ?? 0]
+    ?? (resourceKind === 'action'
+      ? monster.actions.find((action) => action.kind === 'weapon-attack')
+      : undefined)
+  const indexedAction = indexedResourceAction?.referencedActionId
+    ? monster.actions.find((action) =>
+        action.id === indexedResourceAction.referencedActionId)
+    : indexedResourceAction
+  if (!indexedResourceAction || !indexedAction) {
+    return { ok: false, reason: 'invalid-action' }
+  }
   if (input.multiattackContinuation) {
     const receipt =
       actorCombatant.classState.monsterMultiattackContinuation
@@ -287,7 +303,7 @@ export function prepareDnd5eMonsterAttack(input: {
     leftSizeRank: dnd5eEffectiveSizeRank(actorCombatant),
     rightSizeRank: dnd5eEffectiveSizeRank(target),
   })
-  const multiattack = !input.multiattackContinuation &&
+  const multiattack = resourceKind === 'action' && !input.multiattackContinuation &&
     indexedAction.kind === 'weapon-attack'
     ? monster.actions.find((action) => {
         if (
@@ -353,7 +369,11 @@ export function prepareDnd5eMonsterAttack(input: {
       })
     : undefined
   const action = multiattack ?? indexedAction
+  const resourceAction = multiattack ?? indexedResourceAction
   if (dnd5eMonsterActionAutomation(action) !== 'headless') return { ok: false, reason: 'invalid-action' }
+  if (dnd5eMonsterActionAutomation(resourceAction) !== 'headless') {
+    return { ok: false, reason: 'invalid-action' }
+  }
   if (
     input.randomRepeatRoll != null &&
     (
@@ -505,6 +525,11 @@ export function prepareDnd5eMonsterAttack(input: {
           actorToken.id,
           targetToken.id,
           action,
+        ) && dnd5eMonsterTargetEligibilityAllows(
+          snapshot.state,
+          actorToken.id,
+          targetToken.id,
+          resourceAction,
         )
       ? [{ sequenceIndex: 0, actionId: action.id, targetId: targetToken.id }]
       : undefined
@@ -630,6 +655,12 @@ export function prepareDnd5eMonsterAttack(input: {
       usedTurnKeys: actorCombatant.classState.declarativeUsedTurnKeys,
       actorRecklessActive:
         actorCombatant.classState.recklessAttackTurnKey === actorTurnKey,
+      ...dnd5eMonsterAttackTraitMovementContext(
+        snapshot.state,
+        actorCombatant,
+        occurrenceTarget,
+        entry.id,
+      ),
     } satisfies Dnd5eMonsterAttackTraitContext
   })
   attacks = attacks.map((entry, attackIndex) => ({
@@ -682,6 +713,12 @@ export function prepareDnd5eMonsterAttack(input: {
       usedTurnKeys: actorCombatant.classState.declarativeUsedTurnKeys,
       actorRecklessActive:
         actorCombatant.classState.recklessAttackTurnKey === actorTurnKey,
+      ...dnd5eMonsterAttackTraitMovementContext(
+        snapshot.state,
+        actorCombatant,
+        fallbackTargetState,
+        attacks[0]?.id ?? action.id,
+      ),
     }
   if (attacks.some(({ attack, targetToken: attackTargetToken }) => {
     const occurrenceTarget = snapshot.state.combatants[attackTargetToken.id]
@@ -914,6 +951,8 @@ export function prepareDnd5eMonsterAttack(input: {
       actorToken,
       targetToken,
       monster,
+      resourceKind,
+      resourceAction,
       action,
       attacks: preparedAttacks,
       targetOccurrences,
@@ -1090,9 +1129,11 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
           steps: input.compositeSteps ?? [],
         }
       : {
-          type: 'monster-action',
+          type: prepared.resourceKind === 'bonus-action'
+            ? 'monster-bonus-action'
+            : 'monster-action',
           actorId: prepared.actorToken.id,
-          actionId: prepared.action.id,
+          actionId: prepared.resourceAction.id,
           randomRepeatRoll: prepared.randomRepeatRoll,
           settleAttackCount: input.settleAttackCount,
           multiattackContinuation: input.multiattackContinuation,

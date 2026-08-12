@@ -4,15 +4,17 @@ import type { Dnd5eMonsterStatBlock } from './monsters'
 
 export type Dnd5eMonsterOverrideScope = 'instance' | 'same-template'
 
-const OVERRIDE_PREFIX = 'room-monster:dm-override:'
+const OVERRIDE_PREFIX = 'room-monster:dm-override-'
+const LEGACY_OVERRIDE_PREFIX = 'room-monster:dm-override:'
 
 function safeOverrideKey(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+  const normalized = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
   return (normalized || 'monster').slice(0, 80)
 }
 
 export function isDnd5eMonsterInstanceOverride(monsterId: string | undefined): boolean {
-  return monsterId?.startsWith(OVERRIDE_PREFIX) === true
+  return monsterId?.startsWith(OVERRIDE_PREFIX) === true ||
+    monsterId?.startsWith(LEGACY_OVERRIDE_PREFIX) === true
 }
 
 export function createDnd5eMonsterInstanceOverride(input: {
@@ -20,7 +22,16 @@ export function createDnd5eMonsterInstanceOverride(input: {
   tokenId: string
   scope: Dnd5eMonsterOverrideScope
 }): Dnd5eMonsterStatBlock {
-  if (isDnd5eMonsterInstanceOverride(input.monster.id)) return structuredClone(input.monster)
+  if (input.monster.id.startsWith(OVERRIDE_PREFIX)) return structuredClone(input.monster)
+  if (input.monster.id.startsWith(LEGACY_OVERRIDE_PREFIX)) {
+    const key = safeOverrideKey(input.monster.id.slice(LEGACY_OVERRIDE_PREFIX.length))
+    return {
+      ...structuredClone(input.monster),
+      id: `${OVERRIDE_PREFIX}${key}`,
+      slug: `dm-override-${key}`,
+      source: 'DM 自定义',
+    }
+  }
   const identity = input.scope === 'instance'
     ? `token-${input.tokenId}`
     : `template-${input.monster.id}-anchor-${input.tokenId}`

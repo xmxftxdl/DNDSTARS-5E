@@ -38,11 +38,14 @@ import {
 } from './persistentAreaTypes'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 import { validateDnd5eActivityDefinitionV1 } from './activities/dnd5eActivityValidation'
+import type { Dnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
+import { validateDnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
 
 export interface Dnd5eCustomHeadlessDiceFormula {
   count: number
   sides: number
   modifier?: number
+  modifierFormula?: Dnd5eWorkshopDamageFormulaV1
 }
 
 export type Dnd5eCustomHeadlessEffectDraft =
@@ -354,6 +357,12 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
           !Number.isInteger(effect.dice.sides) || effect.dice.sides < 2 || effect.dice.sides > 100 ||
           !Number.isInteger(effect.dice.modifier ?? 0) || Math.abs(effect.dice.modifier ?? 0) > 1_000_000
         ) errors.push(`${effectLabel}的骰子公式无效。`)
+        if (effect.dice.modifierFormula) {
+          errors.push(...validateDnd5eWorkshopDamageFormulaV1(
+            effect.dice.modifierFormula,
+            `${effectLabel}的动态调整值`,
+          ))
+        }
       }
       if (effect.kind === 'damage' && !(DND5E_DAMAGE_TYPES as readonly string[]).includes(effect.damageType)) {
         errors.push(`${effectLabel}的伤害类型无效。`)

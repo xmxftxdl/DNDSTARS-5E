@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PdfCampaignAnalysisV2 } from '../../lib/pdfCampaignAnalysisV2'
 import DmSessionPrepDashboard from './DmSessionPrepDashboard'
 import { calculateDmPrepReadiness } from './dmSessionPrepDashboardModel'
+import { createDefaultCampaignPrepPlan } from './dmSessionPrepPlanModel'
 
 const analysis = {
   schemaVersion: 2,
@@ -21,15 +22,29 @@ describe('DmSessionPrepDashboard', () => {
   it('把分析结果变成本次备团摘要和快捷入口', () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <DmSessionPrepDashboard analysis={analysis} campaignBasePath="/campaign/test" onOpenReview={vi.fn()} />
+        <DmSessionPrepDashboard
+          analysis={analysis}
+          campaignBasePath="/campaign/test"
+          plan={createDefaultCampaignPrepPlan(analysis)}
+          onPlanChange={vi.fn()}
+          onSave={vi.fn()}
+          onOpenReview={vi.fn()}
+          onOpenStory={vi.fn()}
+        />
       </MemoryRouter>,
     )
 
     expect(html).toContain('本次备团')
     expect(html).toContain('白鹿小教堂')
-    expect(html).toContain('艾莉诺拉')
-    expect(html).toContain('伪信')
+    expect(html).toContain('本场剧情脉络')
+    expect(html).toContain('抵达教堂')
+    expect(html).toContain('关联人物')
+    expect(html).toContain('关联线索')
+    expect(html).not.toContain('<h3 class="text-sm font-semibold text-slate-100">关键人物</h3>')
+    expect(html).not.toContain('<h3 class="text-sm font-semibold text-slate-100">关键线索</h3>')
     expect(html).toContain('内容工坊')
+    expect(html).toContain('保存本次备团')
+    expect(html).toContain('开团前检查')
   })
 
   it('根据结构化资料计算备团就绪度', () => {

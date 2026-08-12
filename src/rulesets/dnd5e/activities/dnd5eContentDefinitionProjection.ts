@@ -12,6 +12,7 @@ import type { Dnd5eAdvancementDefinitionV1 } from './dnd5eAdvancementContracts'
 import { dnd5eContentPackageActivityProjectionV1 } from './dnd5eContentPackageActivityProjection'
 import type { Dnd5eEffectDefinitionV1, Dnd5eEffectModifierV1 } from './dnd5eEffectContracts'
 import type { Dnd5eFormulaV1 } from './dnd5eFormula'
+import { dnd5eWorkshopDamageFormulaAsFormulaV1, type Dnd5eWorkshopDamageFormulaV1 } from '../workshopDamageFormula'
 
 const CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 
@@ -54,9 +55,13 @@ function permanentEffect(
   }
 }
 
-function diceFormula(id: string, dice: { count: number; sides: number; bonus: number }): Dnd5eFormulaV1 {
+function diceFormula(id: string, dice: { count: number; sides: number; bonus: number; modifierFormula?: Dnd5eWorkshopDamageFormulaV1 }): Dnd5eFormulaV1 {
   const rolled: Dnd5eFormulaV1 = { kind: 'dice', rollId: id, count: dice.count, sides: dice.sides }
-  return dice.bonus === 0 ? rolled : { kind: 'add', values: [rolled, { kind: 'constant', value: dice.bonus }] }
+  const values: Dnd5eFormulaV1[] = [rolled]
+  if (dice.bonus !== 0) values.push({ kind: 'constant', value: dice.bonus })
+  const dynamicModifier = dnd5eWorkshopDamageFormulaAsFormulaV1(dice.modifierFormula)
+  if (dynamicModifier) values.push(dynamicModifier)
+  return values.length === 1 ? rolled : { kind: 'add', values }
 }
 
 function featurePassiveEffects(

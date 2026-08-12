@@ -74,6 +74,15 @@ export interface PdfSceneRecordV1 extends PdfNamedRecordV1 {
   gameTimeWorldMinute?: number
   timelineKind?: PdfTimelineKindV1
   tags?: string[]
+  /** Exact names of the immediate prerequisite/cause events in the synthesized timeline. */
+  causedBy?: string[]
+  /** Short explanation of why the prerequisite leads to this event. */
+  causalExplanation?: string
+  /** Empty for an unconditional edge; otherwise the explicit branch predicate. */
+  branchCondition?: string
+  /** Full canonical person name when the branch depends on whether a person lives or dies. */
+  branchPerson?: string
+  branchPersonState?: 'dead' | 'alive' | 'unspecified'
 }
 
 export interface PdfEncounterRecordV1 extends PdfNamedRecordV1 {
@@ -417,7 +426,12 @@ function sceneRecordIsValid(entry: unknown): entry is PdfSceneRecordV1 {
     (field(entry, 'timelineOrder') === undefined || (Number.isSafeInteger(field(entry, 'timelineOrder')) && Number(field(entry, 'timelineOrder')) >= 0)) &&
     (field(entry, 'gameTimeWorldMinute') === undefined || (Number.isSafeInteger(field(entry, 'gameTimeWorldMinute')) && Number(field(entry, 'gameTimeWorldMinute')) >= 0)) &&
     (field(entry, 'timelineKind') === undefined || ['history', 'current', 'deadline', 'conditional'].includes(String(field(entry, 'timelineKind')))) &&
-    (field(entry, 'tags') === undefined || stringsAreValid(field(entry, 'tags'), 8))
+    (field(entry, 'tags') === undefined || stringsAreValid(field(entry, 'tags'), 8)) &&
+    (field(entry, 'causedBy') === undefined || stringsAreValid(field(entry, 'causedBy'), 8)) &&
+    (field(entry, 'causalExplanation') === undefined || (typeof field(entry, 'causalExplanation') === 'string' && String(field(entry, 'causalExplanation')).length <= 600)) &&
+    (field(entry, 'branchCondition') === undefined || (typeof field(entry, 'branchCondition') === 'string' && String(field(entry, 'branchCondition')).length <= 600)) &&
+    (field(entry, 'branchPerson') === undefined || (typeof field(entry, 'branchPerson') === 'string' && String(field(entry, 'branchPerson')).length <= 300)) &&
+    (field(entry, 'branchPersonState') === undefined || ['dead', 'alive', 'unspecified'].includes(String(field(entry, 'branchPersonState'))))
 }
 
 export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCampaignChunkAnalysisV1 {
@@ -581,7 +595,7 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'description', 'aliases', 'location', 'npcs', 'monsters', 'time', 'timelineOrder', 'timelineKind', 'tags', 'citations'],
+        required: ['name', 'description', 'aliases', 'location', 'npcs', 'monsters', 'time', 'timelineOrder', 'timelineKind', 'tags', 'causedBy', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState', 'citations'],
         properties: {
           ...NAMED_RECORD_PROPERTIES,
           location: { type: 'string', maxLength: 120 },
@@ -591,6 +605,11 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
           timelineOrder: { type: 'integer', minimum: 0, maximum: 10_000 },
           timelineKind: { type: 'string', enum: ['history', 'current', 'deadline', 'conditional'] },
           tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 40 } },
+          causedBy: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 120 } },
+          causalExplanation: { type: 'string', maxLength: 300 },
+          branchCondition: { type: 'string', maxLength: 300 },
+          branchPerson: { type: 'string', maxLength: 120 },
+          branchPersonState: { type: 'string', enum: ['dead', 'alive', 'unspecified'] },
         },
       },
     },
@@ -1161,6 +1180,8 @@ const PDF_ANALYSIS_SYSTEM_PROMPT = [
   '人物 description 应概括背景、当前身份、经历和剧情作用；role 只写简洁身份，motivation 写其主动追求，personality 写可观察性格，避免把同一句泛化描述复制到多个字段。',
   'scenes 是可运行场景，不是最终时间线。只有全书综合阶段可以填写 timelineEvents；其他阶段必须返回空数组。',
   'timelineEvents 的 time 使用原文明确时间或相对锚点；timelineKind 区分 history、current、deadline、conditional；timelineOrder 表达全书剧情先后。不得把 PDF 页码当作剧情时间。',
+  '全书综合阶段必须直接推理剧情因果图：timelineEvents.causedBy 只列出会直接导致或允许当前事件发生的前置事件正式名称，不得因为时间上相邻就建立因果；causalExplanation 说明原因如何产生结果。',
+  '分支事件使用 branchCondition 写明可判定条件；若条件明确是人物死亡或存活，同时填写 branchPerson 的完整正式姓名和 branchPersonState。无分支条件时使用空字符串与 unspecified。',
   '原文没有时间依据时 time 填“时间未注明”，不得自行发明日期；条件分支必须标记 conditional，不能当作已经发生的事实。',
   '严格区分 NPC 与怪物导入候选：社交、剧情或服务型非玩家角色归为 npc；出现体型＋生物类型＋阵营式数据、属性块、战斗动作、法术战斗能力或召唤战斗单位的生物归为 monster，即使它拥有专名。',
   '只有原文提供的结构化数据足以直接完成 Host 校验与权威结算时，automation 才能标记 full；缺少属性块、动作数值或规则细节时必须标记 partial 或 manual。',
@@ -1251,11 +1272,19 @@ function synthesisTimelineMetadataIsComplete(
 ): boolean {
   const events = synthesis.timelineEvents ?? []
   if (events.length === 0) return mergedDraft.scenes.length === 0
+  const timelineName = (value: string) => value.normalize('NFKC').trim().toLocaleLowerCase('zh-CN').replace(/[\s·•・—_:：，。、“”‘’（）()【】[\]-]+/g, '')
+  const eventNames = new Set(events.map((event) => timelineName(event.name)))
   return events.every((scene) => (
     typeof scene.time === 'string' && scene.time.trim().length > 0 &&
     Number.isSafeInteger(scene.timelineOrder) &&
     typeof scene.timelineKind === 'string' &&
-    Array.isArray(scene.tags)
+    Array.isArray(scene.tags) &&
+    Array.isArray(scene.causedBy) &&
+    scene.causedBy.every((name) => timelineName(name) !== timelineName(scene.name) && eventNames.has(timelineName(name))) &&
+    typeof scene.causalExplanation === 'string' &&
+    typeof scene.branchCondition === 'string' &&
+    typeof scene.branchPerson === 'string' &&
+    ['dead', 'alive', 'unspecified'].includes(scene.branchPersonState ?? '')
   ))
 }
 
@@ -1270,6 +1299,7 @@ async function executePdfAnalysisPass(input: {
   describeInvalidOutput?: (value: unknown) => string
   sourcePages?: readonly PdfSourcePageV2[]
   onRetry?: (maxOutputTokens: number, retryNumber: number, reason: 'truncated' | 'schema' | 'non-json') => void
+  executionId?: string
 }): Promise<PdfCampaignChunkAnalysisV1> {
   const baseOutputTokens = PDF_PASS_OUTPUT_TOKENS[input.pass]
   const provider = input.registry.descriptors().find(({ id }) => id === input.selection.providerId)
@@ -1303,12 +1333,18 @@ async function executePdfAnalysisPass(input: {
     const outputSchema: JsonSchemaV1 = attempt > 0 && retryReason === 'truncated'
       ? compactPdfAnalysisRetrySchema(baseOutputSchema)
       : baseOutputSchema
+    const requestIdentity = new TextEncoder().encode([
+      input.executionId ?? crypto.randomUUID(), input.pass, input.chunk.id, String(attempt),
+    ].join('\u0000'))
+    const requestDigest = await crypto.subtle.digest('SHA-256', requestIdentity)
+    const requestJobId = `pdf-analysis-${[...new Uint8Array(requestDigest)]
+      .map((byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 48)}`
     const result: AiProviderExecutionResult<PdfCampaignChunkAnalysisV1> = await executeStructuredAiTask<PdfCampaignChunkAnalysisV1>({
       registry: input.registry,
       selection: input.selection,
       request: {
         schemaVersion: 1,
-        jobId: `pdf-analysis-${crypto.randomUUID()}`,
+        jobId: requestJobId,
         task: input.task ?? 'pdf-extraction',
         systemPrompt: PDF_ANALYSIS_SYSTEM_PROMPT,
         userPrompt: attempt === 0
@@ -1416,6 +1452,7 @@ export async function analyzeExtractedPdfDocuments(input: {
   cachedSynthesis?: PdfCampaignChunkAnalysisV1 | null
   onPassCompleted?: (key: string, analysis: PdfCampaignChunkAnalysisV1) => void | Promise<void>
   onSynthesisCompleted?: (analysis: PdfCampaignChunkAnalysisV1) => void | Promise<void>
+  executionId?: string
 }): Promise<PdfCampaignAnalysisV1> {
   const { documents } = input
   const depth = input.depth ?? 'quick'
@@ -1479,6 +1516,7 @@ export async function analyzeExtractedPdfDocuments(input: {
         selection: extractionSelection,
         chunk,
         pass,
+        executionId: input.executionId,
         sourcePages,
         userPrompt: pass === 'quick' ? quickAnalysisPrompt() : deepFocusPrompt(pass),
         validateOutput: (value): value is PdfCampaignChunkAnalysisV1 => (
@@ -1536,12 +1574,16 @@ export async function analyzeExtractedPdfDocuments(input: {
             chunk: synthesisChunk,
             task: 'campaign-analysis',
             pass: 'synthesis',
+            executionId: input.executionId,
             sourcePages,
             userPrompt: [
               '这是已经通过第一阶段引用校验的全书提取草稿。',
               '请进行跨章节综合：说明核心冲突、反派计划、证据因果链、玩家选择如何改变结局，以及下一场真正需要准备的事项。',
               'relationships 应补齐跨章节关系网：人物之间，以及人物与势力、人物与地点、势力与地点之间，分别保留亲属、雇佣、同盟、敌对、控制、调查、知情、隶属和关键活动联系，不要只保留少数主线关系。',
               'timelineEvents 应重建为去重后的全书关键事件表；数量必须由原文中可辨认的独立重大事件自然决定，不设固定目标或上限。scenes 必须为空，原始可运行场景由 Host 另行保留。',
+              '不要把 timelineEvents 做成单一路径。请直接输出因果图数据：每个事件的 causedBy 只能引用本次 timelineEvents 中另一个事件的完整 name，而且只写直接原因、必要前提或真正开启该事件的选择；单纯先后相邻不算因果。没有前置原因的根事件使用空数组。',
+              'causalExplanation 要简洁说明“为什么前置事件会导致当前事件”。互斥结果、可选路线和失败后果必须成为从共同原因分出的不同事件，并在 branchCondition 中写明条件。',
+              '如果条件是某个人物死亡或存活，branchPerson 使用人物目录中的完整正式姓名，branchPersonState 使用 dead 或 alive；其他条件使用 unspecified。无条件边的 branchCondition 和 branchPerson 使用空字符串。',
               '不要为了凑数量拆分事件，也不要为了压缩数量合并具有不同时间锚点、因果结果或互斥分支的事件。通常每个明确幕／阶段保留一至两个真正改变剧情状态的事件即可，但原文明确列出的历史起因、期限和结局分支必须保留。',
               '优先使用原文中的“真正发生了什么”“事件顺序”“时间表”“幕／章流程”等明确顺序；再使用直接因果关系补齐顺序。PDF 页码只能作为证据，绝不是剧情时间。',
               'timelineOrder 从 10 开始按 10 递增；time 必须保留原文中最准确的时间或相对锚点，例如“数年前”“故事开始前”“当日”“伏击后”“三日后（若玩家选择）”。',

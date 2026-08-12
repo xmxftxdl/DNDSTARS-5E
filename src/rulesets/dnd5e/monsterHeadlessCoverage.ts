@@ -171,10 +171,10 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
   schemaVersion: 1,
   monsterCount: 334,
   actions: {
-    total: 1067,
-    headlessMinimum: 1015,
+    total: 1078,
+    headlessMinimum: 1027,
     dmAdjudicationMaximum: 0,
-    unstructuredMaximum: 37,
+    unstructuredMaximum: 36,
     nonCombatExact: 15,
     blockedByChildMaximum: 0,
     invalidMaximum: 0,
@@ -193,9 +193,9 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
   },
   traits: {
     total: 551,
-    headlessWithRuleMinimum: 146,
+    headlessWithRuleMinimum: 169,
     headlessWithoutRuleMaximum: 0,
-    dmAdjudicationMaximum: 405,
+    dmAdjudicationMaximum: 382,
   },
 } as const
 

@@ -25,7 +25,7 @@ export default function AccountAppShell({
   return (
     <div className="min-h-screen w-screen overflow-y-auto bg-slate-950">
       <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+        <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex items-center justify-between gap-5">
             <Link to="/app" className="flex items-center gap-3">
               <span className="glow-arcane flex h-10 w-10 items-center justify-center">
@@ -99,7 +99,7 @@ export default function AccountAppShell({
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-5 py-8 lg:px-8">
+      <main className="mx-auto w-full max-w-[1800px] px-5 py-8 lg:px-8">
         {children}
       </main>
     </div>

@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as sharedServerCore from '../../scripts/shared-server-core.mjs'
 import { parseCombatPresentationEvent } from './combatPresentation'
 import {
+  buildDnd5eCustomMonster,
+  createDnd5eCustomMonsterDraft,
+} from '../rulesets/dnd5e/customMonsterWorkshop'
+import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
   COMBAT_PRESENTATION_PROJECTILE_SPELL_IDS,
   COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS,
@@ -3017,6 +3021,23 @@ describe('combat interrupt atomic mutation', () => {
       status: 409,
       error: 'roll-confirmation-value-conflict',
     })
+  })
+
+  it('validates scoped custom-monster Token marker grants at the server boundary', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.tokenStatusMarkerGrants = [{ statusId: 'fire-averse', target: 'self' }]
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(validateSharedStateShape('custom-monsters', {
+      schemaVersion: 1,
+      monsters: [monster],
+    })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('custom-monsters', {
+      schemaVersion: 1,
+      monsters: [{
+        ...monster,
+        tokenStatusMarkerGrants: [{ statusId: 'fire-averse', target: 'everyone' }],
+      }],
+    })).toMatchObject({ ok: false, reason: 'invalid-custom-monster' })
   })
 
   it('enforces three-result and must-use-latest policies on the authoritative response', () => {

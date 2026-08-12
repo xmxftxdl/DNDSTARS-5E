@@ -21,6 +21,76 @@ describe('D&D 5e custom monster workshop', () => {
     expect(dnd5eMonsterActionAutomation(monster.actions[0])).toBe('headless')
   })
 
+  it('stores stable skill ids while presenting canonical Chinese skill names', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.skills = [
+      { id: 'skill-perception', key: 'perception', name: 'Perception', bonus: 5 },
+      { id: 'skill-stealth', key: 'stealth', name: 'stealth', bonus: 7 },
+      { id: 'skill-stealth-duplicate', key: 'stealth', name: 'Stealth', bonus: 99 },
+    ]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(monster.skills).toEqual([
+      { key: 'perception', name: '察觉', bonus: 5 },
+      { key: 'stealth', name: '隐匿', bonus: 7 },
+    ])
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).skills).toEqual([
+      expect.objectContaining({ key: 'perception', name: '察觉', bonus: 5 }),
+      expect.objectContaining({ key: 'stealth', name: '隐匿', bonus: 7 }),
+    ])
+  })
+
+  it('repairs legacy or malformed ids when an existing monster is edited', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.id = 'room-monster:dm-override:token_old'
+    draft.slug = 'dm-override-token_old'
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(monster).toMatchObject({
+      id: 'room-monster:dm-override-token-old',
+      slug: 'dm-override-token-old',
+      source: 'DM 自定义',
+    })
+    expect(parseDnd5eMonsterStatBlock(monster)).toMatchObject({ ok: true })
+  })
+
+  it('round-trips scoped tactical Token marker grants', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.tokenStatusMarkerGrants = [
+      { statusId: 'fire-averse', target: 'self' },
+      { statusId: 'marked', target: 'other' },
+    ]
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(monster.tokenStatusMarkerGrants).toEqual(draft.tokenStatusMarkerGrants)
+    expect(parseDnd5eMonsterStatBlock(monster)).toMatchObject({ ok: true })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).tokenStatusMarkerGrants)
+      .toEqual(draft.tokenStatusMarkerGrants)
+    expect(parseDnd5eMonsterStatBlock({
+      ...monster,
+      tokenStatusMarkerGrants: [{ statusId: 'fire-averse', target: 'everyone' }],
+    })).toMatchObject({ ok: false })
+  })
+
+  it('compiles monster proficiency and ability modifiers without losing the editable formula', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.actions[0].damageModifierFormula = {
+      schemaVersion: 1,
+      terms: [{ kind: 'proficiency-bonus' }, { kind: 'ability-modifier', ability: 'str' }],
+    }
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(monster.actions[0].attack?.damage[0]).toMatchObject({
+      count: 1,
+      sides: 6,
+      bonus: 4,
+      workshopFixedBonus: 1,
+      modifierFormula: draft.actions[0].damageModifierFormula,
+    })
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    const restored = dnd5eCustomMonsterDraftFromStatBlock(monster)
+    expect(restored.actions[0].damageDice).toBe('1d6+1')
+    expect(restored.actions[0].damageModifierFormula).toEqual(draft.actions[0].damageModifierFormula)
+  })
+
   it('repairs an already-saved action that was split before "+6，伤害："', () => {
     const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
     const savedWithSplitAction = {
@@ -110,6 +180,37 @@ describe('D&D 5e custom monster workshop', () => {
       areaSizeFeet: 15,
       areaDamageType: 'fire',
     })
+  })
+
+  it('round-trips a target-selected saving throw ability for Headless area actions', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    const action = createDnd5eCustomMonsterActionDraft()
+    action.id = 'choose-your-save'
+    action.name = '选择豁免'
+    action.description = '范围内目标选择力量或敏捷豁免。'
+    action.kind = 'area-saving-throw'
+    action.areaDamageType = 'bludgeoning'
+    action.areaSaveAbility = 'str'
+    action.areaSaveAbilityChoices = ['str', 'dex']
+    draft.actions = [action]
+
+    expect(validateDnd5eCustomMonsterAreaActionDraft(action)).toEqual([])
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(monster.actions[0].rule).toMatchObject({
+      kind: 'area-saving-throw',
+      ability: 'str',
+      targetAbilityChoices: ['str', 'dex'],
+    })
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).actions[0]).toMatchObject({
+      areaSaveAbility: 'str',
+      areaSaveAbilityChoices: ['str', 'dex'],
+    })
+
+    action.areaSaveAbilityChoices = ['dex']
+    expect(validateDnd5eCustomMonsterAreaActionDraft(action)).toContain(
+      '目标自选豁免必须包含至少两个不重复属性，并包含默认属性',
+    )
   })
 
   it('does not offer an area-action conversion for a passive damage mechanism', () => {
@@ -283,7 +384,7 @@ describe('D&D 5e custom monster workshop', () => {
       }),
       expect.objectContaining({
         name: '袭掠',
-        automation: 'dm-adjudication',
+        automation: 'headless',
         rule: expect.objectContaining({
           kind: 'charge-damage',
           minimumStraightMovementFeet: 20,
@@ -842,5 +943,86 @@ describe('D&D 5e custom monster workshop', () => {
       attackDamageMode: 'fixed',
       attackFixedDamage: 9,
     })
+  })
+
+  it('round-trips combat trigger filters and deterministic state-changing effects', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [
+      {
+        ...createDnd5eCustomMonsterMechanicDraft(),
+        id: 'fire-shell',
+        name: '火焰甲壳',
+        trigger: 'before-damaged',
+        triggerDamageTypes: ['fire'],
+        effectKind: 'damage-replacement',
+        effectTarget: 'self',
+        damageReplacementOperation: 'reduce-by',
+        damageReplacementAmount: 5,
+        hpPercentageAtOrBelow: undefined,
+      },
+      {
+        ...createDnd5eCustomMonsterMechanicDraft(),
+        id: 'mobile-assault',
+        name: '机动突袭',
+        trigger: 'after-move-hit',
+        triggerAttackMode: 'melee',
+        movementComparison: 'at-least',
+        movementFeet: 20,
+        effectKind: 'action-grant',
+        effectTarget: 'self',
+        actionGrantResource: 'bonus-action',
+        hpPercentageAtOrBelow: undefined,
+      },
+      {
+        ...createDnd5eCustomMonsterMechanicDraft(),
+        id: 'save-ward',
+        name: '豁免护甲',
+        trigger: 'saving-throw-magic',
+        savingThrowTiming: 'after',
+        savingThrowOutcome: 'success',
+        effectKind: 'equipment-modifier',
+        effectTarget: 'self',
+        equipmentModifierEquipment: 'armor',
+        equipmentModifierOperation: 'armor-class-bonus',
+        equipmentModifierBonus: 2,
+        durationKind: 'rounds',
+        durationRounds: 2,
+        hpPercentageAtOrBelow: undefined,
+      },
+    ]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.headlessMechanics).toMatchObject([
+      {
+        trigger: { event: 'before-damaged', damageTypes: ['fire'] },
+        effects: [{ kind: 'damage-replacement', target: 'self', operation: 'reduce-by', amount: 5 }],
+      },
+      {
+        trigger: { event: 'after-move-hit', attackMode: 'melee', movement: { comparison: 'at-least', feet: 20 } },
+        effects: [{ kind: 'action-grant', target: 'self', resource: 'bonus-action' }],
+      },
+      {
+        trigger: { event: 'saving-throw-magic', savingThrowTiming: 'after', savingThrowOutcome: 'success' },
+        effects: [{
+          kind: 'equipment-modifier', target: 'self', equipment: 'armor',
+          operation: 'armor-class-bonus', bonus: 2, duration: { kind: 'rounds', rounds: 2 },
+        }],
+      },
+    ])
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics).toMatchObject([
+      {
+        triggerDamageTypes: ['fire'], effectKind: 'damage-replacement',
+        damageReplacementOperation: 'reduce-by', damageReplacementAmount: 5,
+      },
+      {
+        triggerAttackMode: 'melee', movementFeet: 20,
+        effectKind: 'action-grant', actionGrantResource: 'bonus-action',
+      },
+      {
+        savingThrowTiming: 'after', savingThrowOutcome: 'success',
+        effectKind: 'equipment-modifier', equipmentModifierBonus: 2, durationRounds: 2,
+      },
+    ])
   })
 })

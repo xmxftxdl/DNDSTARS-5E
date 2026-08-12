@@ -335,6 +335,13 @@ describe('D&D 5e monster action schema', () => {
     expectInvalid('adult-bronze-dragon', 'repulsion-breath', (variant) => {
       ;(variant.forcedMovementOnFailedSave as Record<string, unknown>).unexpected = true
     })
+    expectInvalid('adult-bronze-dragon', 'repulsion-breath', (variant) => {
+      variant.targetAbilityChoices = ['str', 'str']
+    })
+    expectInvalid('adult-bronze-dragon', 'repulsion-breath', (variant) => {
+      variant.targetAbilityChoices = ['str', 'dex']
+      variant.ability = 'con'
+    })
     expectInvalid('adult-copper-dragon', 'slowing-breath', (variant) => {
       const effect = variant.activeEffectOnFailedSave as Record<string, unknown>
       ;(effect.modifiers as Record<string, unknown>).speedMultiplier = 0

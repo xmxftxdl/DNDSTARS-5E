@@ -8,6 +8,33 @@ import {
   buildSelectedEnemyAttack,
   type EnemyTurnResult,
 } from './enemyAi'
+import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
+
+export type Dnd5eManualMonsterMovementKind =
+  | 'move'
+  | 'dash'
+  | 'disengage'
+  | 'nimble-disengage'
+  | 'running-jump'
+  | 'standing-jump'
+
+export interface Dnd5eManualMonsterMovementIntent {
+  kind: Dnd5eManualMonsterMovementKind
+  traversalMode: Dnd5eTraversalMode
+}
+
+export function dnd5eManualMonsterMovementIntent(
+  kind: Dnd5eManualMonsterMovementKind,
+): Dnd5eManualMonsterMovementIntent {
+  return {
+    kind,
+    traversalMode: kind === 'running-jump'
+      ? 'long-jump-running'
+      : kind === 'standing-jump'
+        ? 'long-jump-standing'
+        : 'walk',
+  }
+}
 
 export interface Dnd5eManualMonsterMultiattackContinuation {
   schemaVersion: 1

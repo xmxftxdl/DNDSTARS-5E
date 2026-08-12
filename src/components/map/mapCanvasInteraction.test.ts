@@ -3,6 +3,7 @@ import {
   mapCanvasAoeGridCell,
   mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
+  mapCanvasGeometryRightButtonPanShouldStart,
   mapCanvasStageCanPan,
   mapCanvasTokenClickAction,
 } from './mapCanvasInteraction'
@@ -45,6 +46,21 @@ describe('map canvas viewport panning', () => {
     expect(mapCanvasGeometryDrawShouldStart('window', true)).toBe(true)
     expect(mapCanvasGeometryDrawShouldStart('wall', false)).toBe(true)
     expect(mapCanvasGeometryDrawShouldStart('difficult-terrain', false)).toBe(true)
+  })
+
+  it('temporarily pans with the right button in every geometry tool', () => {
+    expect(mapCanvasGeometryRightButtonPanShouldStart({
+      button: 2,
+      geometryEditMode: true,
+    })).toBe(true)
+    expect(mapCanvasGeometryRightButtonPanShouldStart({
+      button: 0,
+      geometryEditMode: true,
+    })).toBe(false)
+    expect(mapCanvasGeometryRightButtonPanShouldStart({
+      button: 2,
+      geometryEditMode: false,
+    })).toBe(false)
   })
 })
 

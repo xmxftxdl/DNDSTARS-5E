@@ -34,6 +34,7 @@ import {
   type Dnd5ePersistentAreaTriggerDeclaration,
   type Dnd5ePersistentAreaTriggerTiming,
   type Dnd5ePersistentAreaVisualPreset,
+  type Dnd5eWorkshopDamageFormulaV1,
   type Dnd5ePluginEffectDuration,
   type DeclarativeSubclassDefinitionV1,
   type DeclarativeClassDefinitionV1,
@@ -71,6 +72,7 @@ import {
 import AiImageGenerationButton from '../AiImageGenerationButton'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import { dnd5eSpellActionIcon, type Dnd5eActionIconSpec } from '../../lib/dnd5eActionIcons'
+import Dnd5eDamageFormulaEditor from './Dnd5eDamageFormulaEditor'
 
 interface RaceDraft {
   id: string
@@ -149,6 +151,7 @@ interface PersistentAreaTriggerEditorDraft {
   damageCount: number
   damageSides: number
   damageModifier: number
+  damageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   damageType: Dnd5eDamageType
   conditionEnabled: boolean
   condition: keyof typeof DND5E_STANDARD_CONDITIONS
@@ -202,6 +205,7 @@ interface HeadlessEffectEditorDraft {
   damageCount: number
   damageSides: number
   damageModifier: number
+  damageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   damageType: Dnd5eDamageType
   healingEnabled: boolean
   healingCount: number
@@ -302,6 +306,7 @@ interface ItemDraft {
   onHitBonusDamageCount: number
   onHitBonusDamageSides: number
   onHitBonusDamageBonus: number
+  onHitBonusDamageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   onHitBonusDamageType: 'inherit' | Dnd5eDamageType
   onHitBonusDamageOncePerTurn: boolean
   onHitBonusDamageTargetCreatureTypes: string
@@ -855,6 +860,7 @@ function importedHeadlessEffectDraft(
       damageCount: trigger.damage?.count ?? 1,
       damageSides: trigger.damage?.sides ?? 6,
       damageModifier: trigger.damage?.modifier ?? 0,
+      damageModifierFormula: trigger.damage?.modifierFormula,
       damageType: trigger.damage?.type ?? 'force',
       conditionEnabled: !!trigger.condition,
       condition: trigger.condition?.condition ?? 'prone',
@@ -875,6 +881,7 @@ function importedHeadlessEffectDraft(
     damageCount: damage?.dice.count ?? fallback.damageCount,
     damageSides: damage?.dice.sides ?? fallback.damageSides,
     damageModifier: damage?.dice.modifier ?? 0,
+    damageModifierFormula: damage?.dice.modifierFormula,
     damageType: damage?.damageType ?? fallback.damageType,
     healingEnabled: !!healing,
     healingCount: healing?.dice.count ?? fallback.healingCount,
@@ -1045,6 +1052,7 @@ function importedSpellDraft(
     damageCount: damage?.dice.count ?? linkedDamage?.dice.count ?? 1,
     damageSides: damage?.dice.sides ?? linkedDamage?.dice.sides ?? 6,
     damageModifier: damage?.dice.bonus ?? linkedDamage?.dice.modifier ?? 0,
+    damageModifierFormula: damage?.dice.modifierFormula ?? linkedDamage?.dice.modifierFormula,
     damageType: damage?.type ?? linkedDamage?.damageType ?? 'force',
     conditionEnabled: !!(condition || linkedCondition),
     condition: condition?.condition ?? linkedCondition?.condition ?? 'prone',
@@ -1164,6 +1172,7 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
     onHitBonusDamageCount: bonusDamage?.damage.count ?? draft.onHitBonusDamageCount,
     onHitBonusDamageSides: bonusDamage?.damage.sides ?? draft.onHitBonusDamageSides,
     onHitBonusDamageBonus: bonusDamage?.damage.bonus ?? draft.onHitBonusDamageBonus,
+    onHitBonusDamageModifierFormula: bonusDamage?.damage.modifierFormula,
     onHitBonusDamageType: bonusDamage?.damageType ?? draft.onHitBonusDamageType,
     onHitBonusDamageOncePerTurn: bonusDamage?.oncePerTurn === true,
     onHitBonusDamageTargetCreatureTypes: bonusDamage?.targetCreatureTypes?.join('，') ?? '',
@@ -1407,6 +1416,7 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
                   count: trigger.damageCount,
                   sides: trigger.damageSides,
                   modifier: trigger.damageModifier,
+                  ...(trigger.damageModifierFormula ? { modifierFormula: trigger.damageModifierFormula } : {}),
                   type: trigger.damageType,
                 },
               } : {}),
@@ -1512,6 +1522,7 @@ function toHeadlessActionDraftFromEditor(id: string, name: string, headless: Hea
       count: headless.damageCount,
       sides: headless.damageSides,
       modifier: headless.damageModifier,
+      ...(headless.damageModifierFormula ? { modifierFormula: headless.damageModifierFormula } : {}),
     },
     damageType: headless.damageType,
   })
@@ -1613,7 +1624,12 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
         ...(spell.resolution === 'saving-throw' ? { savingThrow: { ability: spell.saveAbility, onSuccess: spell.saveOnSuccess } } : {}),
         ...(spell.headless.damageEnabled ? {
           damage: {
-            dice: { count: spell.headless.damageCount, sides: spell.headless.damageSides, bonus: spell.headless.damageModifier },
+            dice: {
+              count: spell.headless.damageCount,
+              sides: spell.headless.damageSides,
+              bonus: spell.headless.damageModifier,
+              ...(spell.headless.damageModifierFormula ? { modifierFormula: spell.headless.damageModifierFormula } : {}),
+            },
             type: spell.headless.damageType,
             ...(spell.level === 0 && spell.cantripScaling ? {
               cantripScaling: {
@@ -1706,6 +1722,9 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
         count: item.onHitBonusDamageCount,
         sides: item.onHitBonusDamageSides,
         bonus: item.onHitBonusDamageBonus,
+        ...(item.onHitBonusDamageModifierFormula
+          ? { modifierFormula: item.onHitBonusDamageModifierFormula }
+          : {}),
       },
       damageType: item.onHitBonusDamageType,
       doubleDiceOnCritical: true,
@@ -3159,7 +3178,17 @@ export default function Dnd5eCustomPluginBuilder({
                     <Toggle label="上述效果消耗共享充能" value={item.headlessEffectsUseCharges || item.attackRerollEnabled} onChange={(headlessEffectsUseCharges) => patchItem(index, { headlessEffectsUseCharges })} />
                   </div>
                   {(item.attackRerollEnabled || item.headlessEffectsUseCharges) && <div className="mt-3 grid gap-3 sm:grid-cols-2"><BuilderNumber label="最大充能" value={item.attackRerollCharges} min={1} max={1000000} onChange={(attackRerollCharges) => patchItem(index, { attackRerollCharges })} /><BuilderSelect label="充能恢复时点" value={item.attackRerollResetOn} options={[["none", "不自动恢复"], ["short-rest", "短休"], ["long-rest", "长休"], ["dawn", "黎明（由战役日历推进）"]]} onChange={(attackRerollResetOn) => patchItem(index, { attackRerollResetOn: attackRerollResetOn as ItemDraft['attackRerollResetOn'] })} /></div>}
-                  {item.onHitBonusDamageEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3 xl:grid-cols-6"><BuilderNumber label="额外伤害骰数量" value={item.onHitBonusDamageCount} min={1} max={40} onChange={(onHitBonusDamageCount) => patchItem(index, { onHitBonusDamageCount })} /><BuilderNumber label="骰子面数" value={item.onHitBonusDamageSides} min={2} max={100} onChange={(onHitBonusDamageSides) => patchItem(index, { onHitBonusDamageSides })} /><BuilderNumber label="固定加值" value={item.onHitBonusDamageBonus} min={-1000} max={1000} onChange={(onHitBonusDamageBonus) => patchItem(index, { onHitBonusDamageBonus })} /><BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} /><BuilderInput label="限定目标生物类型（逗号分隔）" value={item.onHitBonusDamageTargetCreatureTypes} onChange={(onHitBonusDamageTargetCreatureTypes) => patchItem(index, { onHitBonusDamageTargetCreatureTypes })} /><Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} /></div>}
+                  {item.onHitBonusDamageEnabled && <div className="mt-3 space-y-3 rounded-xl border border-white/8 bg-black/15 p-3">
+                    <Dnd5eDamageFormulaEditor
+                      value={{ count: item.onHitBonusDamageCount, sides: item.onHitBonusDamageSides, fixedModifier: item.onHitBonusDamageBonus, modifierFormula: item.onHitBonusDamageModifierFormula }}
+                      onChange={(formula) => patchItem(index, { onHitBonusDamageCount: formula.count, onHitBonusDamageSides: formula.sides, onHitBonusDamageBonus: formula.fixedModifier, onHitBonusDamageModifierFormula: formula.modifierFormula })}
+                    />
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} />
+                      <BuilderInput label="限定目标生物类型（逗号分隔）" value={item.onHitBonusDamageTargetCreatureTypes} onChange={(onHitBonusDamageTargetCreatureTypes) => patchItem(index, { onHitBonusDamageTargetCreatureTypes })} />
+                      <Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} />
+                    </div>
+                  </div>}
                   {item.damageReductionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2 xl:grid-cols-5">
                     <BuilderSelect label="减伤方式" value={item.damageReductionMode} options={[["dice", "骰式减伤"], ["fixed", "固定减伤"]]} onChange={(damageReductionMode) => patchItem(index, { damageReductionMode: damageReductionMode as ItemDraft['damageReductionMode'] })} />
                     {item.damageReductionMode === 'fixed'
@@ -3578,10 +3607,11 @@ function HeadlessEffectEditor({
                       <div className="mt-3 grid gap-3 xl:grid-cols-2">
                         <fieldset className={`rounded-lg border p-3 ${trigger.damageEnabled ? 'border-rose-300/15 bg-rose-500/[0.025]' : 'border-white/8 bg-black/10'}`}>
                           <legend className="px-1"><Toggle label="触发伤害" value={trigger.damageEnabled} onChange={(damageEnabled) => patchPersistentAreaTrigger(index, { damageEnabled })} /></legend>
-                          {trigger.damageEnabled && <div className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                            <BuilderNumber label="骰子数量" value={trigger.damageCount} min={1} max={40} onChange={(damageCount) => patchPersistentAreaTrigger(index, { damageCount })} />
-                            <BuilderNumber label="骰面" value={trigger.damageSides} min={2} max={100} onChange={(damageSides) => patchPersistentAreaTrigger(index, { damageSides })} />
-                            <BuilderNumber label="调整值" value={trigger.damageModifier} min={-1000} max={1000} onChange={(damageModifier) => patchPersistentAreaTrigger(index, { damageModifier })} />
+                          {trigger.damageEnabled && <div className="mt-2 space-y-3">
+                            <Dnd5eDamageFormulaEditor
+                              value={{ count: trigger.damageCount, sides: trigger.damageSides, fixedModifier: trigger.damageModifier, modifierFormula: trigger.damageModifierFormula }}
+                              onChange={(formula) => patchPersistentAreaTrigger(index, { damageCount: formula.count, damageSides: formula.sides, damageModifier: formula.fixedModifier, damageModifierFormula: formula.modifierFormula })}
+                            />
                             <BuilderSelect label="伤害类型" value={trigger.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patchPersistentAreaTrigger(index, { damageType: damageType as Dnd5eDamageType })} />
                           </div>}
                         </fieldset>
@@ -3623,10 +3653,11 @@ function HeadlessEffectEditor({
         <div className="grid gap-3 xl:grid-cols-3">
           <fieldset className={`rounded-xl border p-3 ${value.damageEnabled ? 'border-rose-400/25 bg-rose-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
             <legend className="px-1"><Toggle label="伤害" value={value.damageEnabled} onChange={(damageEnabled) => patch({ damageEnabled })} /></legend>
-            {value.damageEnabled && <div className="mt-2 grid grid-cols-2 gap-3">
-              <BuilderNumber label="骰子数量" value={value.damageCount} min={1} max={12} onChange={(damageCount) => patch({ damageCount })} />
-              <BuilderNumber label="骰面" value={value.damageSides} min={2} max={100} onChange={(damageSides) => patch({ damageSides })} />
-              <BuilderNumber label="固定调整值" value={value.damageModifier} min={-1000000} max={1000000} onChange={(damageModifier) => patch({ damageModifier })} />
+            {value.damageEnabled && <div className="mt-2 space-y-3">
+              <Dnd5eDamageFormulaEditor
+                value={{ count: value.damageCount, sides: value.damageSides, fixedModifier: value.damageModifier, modifierFormula: value.damageModifierFormula }}
+                onChange={(formula) => patch({ damageCount: formula.count, damageSides: formula.sides, damageModifier: formula.fixedModifier, damageModifierFormula: formula.modifierFormula })}
+              />
               <BuilderSelect label="伤害类型" value={value.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patch({ damageType: damageType as Dnd5eDamageType })} />
             </div>}
           </fieldset>

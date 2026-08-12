@@ -545,4 +545,196 @@ describe('custom monster authoritative trigger snapshots', () => {
     }))
     expect(saved.events.some((event) => event.type === 'monster-mechanic-trigger-pending')).toBe(false)
   })
+
+  it('replaces only matching incoming damage before hit points are changed', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '火焰甲壳兽'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'fire-shell',
+      name: '火焰甲壳',
+      trigger: 'before-damaged',
+      triggerDamageTypes: ['fire'],
+      effectKind: 'damage-replacement',
+      effectTarget: 'self',
+      damageReplacementOperation: 'reduce-by',
+      damageReplacementAmount: 5,
+      hpPercentageAtOrBelow: undefined,
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const hero = combatant('hero', 'player', 20)
+    const shell = combatant('shell', 'dm', 10, { statBlockId: monster.id })
+    const state = startDnd5eHeadlessCombat('combat', [hero, shell])
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'attack',
+      actorId: hero.id,
+      targetId: shell.id,
+      attackModifier: 8,
+      d20: 18,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [6], type: 'fire' },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[shell.id].currentHp).toBe(29)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-mechanic-v2-triggered',
+      actorId: shell.id,
+      mechanicId: 'fire-shell',
+      trigger: 'before-damaged',
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied', targetId: shell.id, amount: 1, damageTypes: ['fire'],
+    }))
+  })
+
+  it('tracks voluntary movement for a melee move-then-hit trigger and grants a bonus action', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '突袭兽'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'mobile-assault',
+      name: '机动突袭',
+      trigger: 'after-move-hit',
+      triggerAttackMode: 'melee',
+      movementComparison: 'at-least',
+      movementFeet: 20,
+      effectKind: 'action-grant',
+      effectTarget: 'self',
+      actionGrantResource: 'bonus-action',
+      hpPercentageAtOrBelow: undefined,
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const attacker = combatant('attacker', 'dm', 20, { statBlockId: monster.id })
+    const hero = combatant('hero', 'player', 10, { position: { x: 4, y: 0 } })
+    const state = startDnd5eHeadlessCombat('combat', [attacker, hero])
+
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: attacker.id, to: { x: 3, y: 0 }, distance: 20,
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) return
+    moved.state.combatants[attacker.id].turn.bonusActionAvailable = false
+    const attacked = resolveDnd5eHeadlessAction(moved.state, {
+      type: 'monster-action',
+      actorId: attacker.id,
+      actionId: monster.actions[0].id,
+      rolls: [{ targetId: hero.id, d20: 18, damageRolls: [[3]] }],
+    })
+    expect(attacked.ok).toBe(true)
+    if (!attacked.ok) return
+    const pending = attacked.events.find((event) =>
+      event.type === 'monster-mechanic-trigger-pending' && event.snapshot.mechanicId === 'mobile-assault')
+    expect(pending).toMatchObject({
+      snapshot: { event: 'after-move-hit', attackMode: 'melee', movementDistanceFeet: 20 },
+    })
+    if (!pending || pending.type !== 'monster-mechanic-trigger-pending') return
+    const resolved = resolveDnd5eHeadlessAction(attacked.state, {
+      type: 'resolve-monster-mechanic-trigger',
+      actorId: attacker.id,
+      snapshotId: pending.snapshot.id,
+      roll: { actorId: attacker.id, mechanicId: 'mobile-assault', effectRolls: [] },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[attacker.id].turn.bonusActionAvailable).toBe(true)
+  })
+
+  it('filters post-save outcomes and applies an equipment modifier after a successful save', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '豁免守卫'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'successful-save-ward',
+      name: '成功豁免护甲',
+      trigger: 'saving-throw-physical',
+      savingThrowTiming: 'after',
+      savingThrowOutcome: 'success',
+      effectKind: 'equipment-modifier',
+      effectTarget: 'self',
+      equipmentModifierEquipment: 'armor',
+      equipmentModifierOperation: 'armor-class-bonus',
+      equipmentModifierBonus: 2,
+      durationKind: 'rounds',
+      durationRounds: 2,
+      hpPercentageAtOrBelow: undefined,
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const hero = combatant('hero', 'player', 20)
+    const guard = combatant('guard', 'dm', 10, {
+      statBlockId: monster.id,
+      classState: {
+        monsterOnHitSavePending: {
+          sourceId: hero.id, actionId: 'physical-save', ability: 'con', dc: 12, condition: 'stunned',
+        },
+      },
+    })
+    const state = startDnd5eHeadlessCombat('combat', [hero, guard])
+    const saved = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-on-hit-save', actorId: guard.id, sourceId: hero.id,
+      actionId: 'physical-save', d20: 18,
+    })
+    expect(saved.ok).toBe(true)
+    if (!saved.ok) return
+    const pending = saved.events.find((event) =>
+      event.type === 'monster-mechanic-trigger-pending' && event.snapshot.mechanicId === 'successful-save-ward')
+    expect(pending).toMatchObject({ snapshot: { savingThrowKind: 'physical', savingThrowSuccess: true } })
+    if (!pending || pending.type !== 'monster-mechanic-trigger-pending') return
+    const resolved = resolveDnd5eHeadlessAction(saved.state, {
+      type: 'resolve-monster-mechanic-trigger', actorId: guard.id, snapshotId: pending.snapshot.id,
+      roll: { actorId: guard.id, mechanicId: 'successful-save-ward', effectRolls: [] },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[guard.id].classState.activeEffects).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        definitionId: expect.stringContaining('successful-save-ward'),
+        modifiers: expect.objectContaining({ armorClassBonus: 2 }),
+      }),
+    ]))
+  })
+
+  it('emits a kill trigger from the final authoritative damage event and grants another action', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '收割者'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'kill-action',
+      name: '乘胜追击',
+      trigger: 'target-killed',
+      effectKind: 'action-grant',
+      effectTarget: 'self',
+      actionGrantResource: 'action',
+      hpPercentageAtOrBelow: undefined,
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const reaper = combatant('reaper', 'dm', 20, { statBlockId: monster.id })
+    const hero = combatant('hero', 'player', 10, { currentHp: 3, maxHp: 30 })
+    const state = startDnd5eHeadlessCombat('combat', [reaper, hero])
+    const attacked = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action', actorId: reaper.id, actionId: monster.actions[0].id,
+      rolls: [{ targetId: hero.id, d20: 18, damageRolls: [[3]] }],
+    })
+    expect(attacked.ok).toBe(true)
+    if (!attacked.ok) return
+    expect(attacked.state.combatants[hero.id].currentHp).toBe(0)
+    expect(attacked.state.combatants[reaper.id].turn.actionAvailable).toBe(false)
+    const pending = attacked.events.find((event) =>
+      event.type === 'monster-mechanic-trigger-pending' && event.snapshot.mechanicId === 'kill-action')
+    expect(pending).toMatchObject({
+      snapshot: { event: 'target-killed', subjectId: reaper.id, triggerTargetId: hero.id },
+    })
+    if (!pending || pending.type !== 'monster-mechanic-trigger-pending') return
+    const resolved = resolveDnd5eHeadlessAction(attacked.state, {
+      type: 'resolve-monster-mechanic-trigger', actorId: reaper.id, snapshotId: pending.snapshot.id,
+      roll: { actorId: reaper.id, mechanicId: 'kill-action', effectRolls: [] },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[reaper.id].turn.actionAvailable).toBe(true)
+  })
 })

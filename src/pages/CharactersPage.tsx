@@ -195,7 +195,7 @@ export default function CharactersPage() {
   }, [isDM, selectedId, select, visibleList])
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="角色"
         description={isDM ? '查看本房间玩家与他们创建的角色。' : '创建、导入并编辑你自己的角色卡。'}

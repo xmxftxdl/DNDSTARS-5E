@@ -148,6 +148,11 @@ export interface PdfSceneRecordV2 extends PdfNamedRecordV2 {
   gameTimeWorldMinute?: number
   timelineKind?: PdfTimelineKindV1
   tags?: string[]
+  causedBy?: string[]
+  causalExplanation?: string
+  branchCondition?: string
+  branchPerson?: string
+  branchPersonState?: 'dead' | 'alive' | 'unspecified'
 }
 
 export interface PdfEncounterRecordV2 extends PdfNamedRecordV2 {

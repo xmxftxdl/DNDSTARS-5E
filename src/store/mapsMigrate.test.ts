@@ -107,6 +107,29 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.dnd5eSide).toBeUndefined()
   })
 
+  it('normalizes presentation-only Token status markers without creating combat conditions', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: 'Map', width: 100, height: 100,
+        tokens: [{
+          id: 'monster', type: 'enemy',
+          dnd5eTokenStatusMarkers: [
+            { schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm' },
+            { schemaVersion: 1, id: 'dm:burning-copy', statusId: 'burning', source: 'dm' },
+            { schemaVersion: 1, id: '../unsafe', statusId: 'marked', source: 'dm' },
+            { schemaVersion: 1, id: 'dm:script', statusId: 'javascript', source: 'dm' },
+          ],
+        }],
+      }],
+    })
+
+    const token = result.maps[0].tokens[0]
+    expect(token.dnd5eTokenStatusMarkers).toEqual([
+      { schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm', label: undefined },
+    ])
+    expect(token.dnd5eCombatState?.conditions).toBeUndefined()
+  })
+
   it('keeps safe room portrait references and drops unsafe token-crop references', () => {
     const result = migrateMapsState({
       maps: [{

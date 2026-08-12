@@ -10,4 +10,14 @@ describe('room shared-state sync topology', () => {
     expect(mapsInvalidationSubscriptions(roomSharedStateSyncSource)).toHaveLength(1)
     expect(mapsInvalidationSubscriptions(mapsPageSource)).toHaveLength(0)
   })
+
+  it('uses a slower recovery cadence for low-frequency room resources', () => {
+    expect(roomSharedStateSyncSource).toContain('const coldSubscriptionOptions = { immediate: false, recoveryMs: 60_000 }')
+    expect(roomSharedStateSyncSource).toContain(
+      'subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook, coldSubscriptionOptions)',
+    )
+    expect(roomSharedStateSyncSource).toContain(
+      'subscribeSharedResourceInvalidation(SCENE_AUDIO_LIBRARY_RESOURCE, loadSharedSceneAudioLibrary, coldSubscriptionOptions)',
+    )
+  })
 })

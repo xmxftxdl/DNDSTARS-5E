@@ -3,6 +3,7 @@ import {
   configuredApiBases,
   defaultSharedApiCandidates,
   loadSharedResource,
+  resetSharedResourceReadCacheForTests,
   saveSharedResourcesAtomically,
   saveSharedResourceWithResult,
   sharedEventApiCandidates,
@@ -26,8 +27,41 @@ function localStorageDouble() {
 // bases (file-backed, idempotent), while EVENTS go to a single canonical base (one SSE backlog).
 describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology)', () => {
   afterEach(() => {
+    resetSharedResourceReadCacheForTests()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
+  })
+
+  it('coalesces concurrent reads for the same resource into one network request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ updatedAt: 1 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await Promise.all([
+      loadSharedResource('maps'),
+      loadSharedResource('maps'),
+      loadSharedResource('maps'),
+    ])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps cold resources in memory but continues to reload combat-hot resources', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ spells: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loadSharedResource('spellbook')
+    await loadSharedResource('spellbook')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await loadSharedResource('maps')
+    await loadSharedResource('maps')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('configuredApiBases dedups, trims, and drops empty entries (order preserved)', () => {

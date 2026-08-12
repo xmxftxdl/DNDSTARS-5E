@@ -88,6 +88,7 @@ import { dnd5eEffectiveSpellcastingSource, dnd5eEffectiveSpellcastingSources } f
 import { dnd5eSpellSavePressureApplies } from './martialSpellSynergy'
 import {
   dnd5eCoreSpellComponentRequirements,
+  dnd5eHeldSpellcastingFocusMatches,
   dnd5eSpellComponentCheck,
   dnd5eSpellComponentsAvailable,
 } from './spellComponents'
@@ -150,6 +151,7 @@ export interface PreparedDnd5eSpellCast {
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actor: Character
+  focusItemInstanceId?: string
   itemSpellSource?: {
     instanceId: string
     useActionId?: string
@@ -512,6 +514,9 @@ export function prepareDnd5eSpellCast(input: {
     ((spell.saveAbility != null || spell.unwillingSaveAbility != null) && itemSpellEffect.spellSaveDc == null && itemSpellEffect.useCharacterSpellcasting !== true) ||
     payload.castingClassId != null || payload.racialInnate === true || sustainedAttack != null
   )) return { ok: false, reason: 'item-spell-unavailable' }
+  if (payload.itemInstanceId != null && payload.focusItemInstanceId != null) {
+    return { ok: false, reason: 'invalid-action' }
+  }
   const itemSpellCosts: Dnd5eInventoryActivityCost[] = itemUse
     ? [
         ...(itemUse.consumeQuantity > 0
@@ -556,6 +561,13 @@ export function prepareDnd5eSpellCast(input: {
     : undefined
   if (!itemSpellSource && !racialGrant && !castingClassId) {
     return { ok: false, reason: 'spell-not-known-or-prepared' }
+  }
+  const focusItemInstanceId = payload.focusItemInstanceId
+  if (focusItemInstanceId != null && (
+    itemSpellSource != null || racialGrant != null || sustainedAttack != null ||
+    !dnd5eHeldSpellcastingFocusMatches(actor, focusItemInstanceId, castingClassId)
+  )) {
+    return { ok: false, reason: 'component-unavailable' }
   }
   const castingSource = castingClassId
     ? dnd5eEffectiveSpellcastingSource(actor, castingClassId)
@@ -1771,6 +1783,7 @@ export function prepareDnd5eSpellCast(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
+      focusItemInstanceId,
       itemSpellSource,
       castingClassId,
       castingClassLevel,

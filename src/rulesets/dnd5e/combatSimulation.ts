@@ -4,7 +4,11 @@ import type { BattleMap, Token } from '../../store/maps'
 import { CREATURE_SIZES } from '../../lib/monsterTypes'
 import { isMovementLocked } from '../../lib/combatStatus'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
-import { tokenFootprintCells, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import {
+  tokenCenterForAnchorCell,
+  tokenFootprintCells,
+  tokenFootprintDistanceCells,
+} from '../../lib/gridCombat'
 import {
   mapGeometryCoverBetween,
   mapGeometryLineOfSightBlocked,
@@ -150,6 +154,7 @@ import {
   previewDnd5eTurnStartBoundary,
   dnd5eHitIsAutomaticCritical,
   dnd5eTargetArmorClassForAttack,
+  dnd5eMonsterAttackTraitMovementContext,
   previewDnd5eUnsupportedAirborneFalls,
   resolveDnd5eHeadlessAction,
   replaceDnd5eCombatantActiveEffects,
@@ -3574,13 +3579,23 @@ function executeHeadlessMonsterAreaAction(input: {
   const hpBefore = new Map(targets.map((target) => [target.id, target.hp]))
   const targetSavingThrows = targets.map((target) => {
     const combatant = holder.state.combatants[target.id]!
-    const mode = dnd5eSavingThrowMode(combatant, rule.ability, {
+    const ability = rule.targetAbilityChoices?.length
+      ? [...rule.targetAbilityChoices].sort((left, right) => {
+          const bonusFor = (candidate: AbilityKey) =>
+            (combatant.savingThrowBonuses[candidate] ??
+              Math.floor((combatant.abilities[candidate] - 10) / 2)) +
+            dnd5eActiveSavingThrowBonus(combatant.classState.activeEffects, candidate)
+          return bonusFor(right) - bonusFor(left) || left.localeCompare(right)
+        })[0]
+      : rule.ability
+    const mode = dnd5eSavingThrowMode(combatant, ability, {
       effectVisible: true,
       sourceCreatureType: actorCombatant.creatureType,
       sourceIsSpell: false,
     })
     return {
       targetId: target.id,
+      ability,
       d20: random.die(20),
       d20Second: mode === 'normal' ? undefined : random.die(20),
       blessRoll: dnd5eCombatantHasConcentrationEffect(holder.state, target.id, 'bless')
@@ -3591,10 +3606,39 @@ function executeHeadlessMonsterAreaAction(input: {
         : undefined,
     }
   })
-  const damageRolls = rule.damage
-    ? Array.from({ length: rule.damage.count }, () => random.die(rule.damage!.sides))
-    : []
-  const forcedMovements = rule.forcedMovementOnFailedSave
+  const damageRolls = [
+    ...(rule.damage ? [rule.damage] : []),
+    ...(rule.additionalDamage ?? []),
+  ].flatMap((component) =>
+    Array.from({ length: component.count }, () => random.die(component.sides)))
+  const forcedMovementRule =
+    rule.forcedMovementOnFailedSave ?? rule.forcedMovementOnSuccessfulSave
+  const actorMovement = rule.actorLanding && input.battlefield
+    ? (() => {
+        const mapToken = input.battlefield.map.tokens.find((token) => token.id === actor.id)
+        if (!mapToken) return undefined
+        const to = tokenCenterForAnchorCell(areaAction.areaTargetCell, mapToken, input.battlefield.map)
+        const gridSize = Math.max(1, input.battlefield.map.gridSize)
+        const feetPerCell = Math.max(1, input.battlefield.map.feetPerCell ?? 5)
+        const distanceFeet = Math.max(
+          Math.abs(to.x - actorCombatant.position.x),
+          Math.abs(to.y - actorCombatant.position.y),
+        ) / gridSize * feetPerCell
+        const toElevationFeet = mapGeometryTerrainElevationAtPoint(input.battlefield.geometry, to)
+        return {
+          to,
+          distanceFeet,
+          movementCostFeet: distanceFeet + Math.max(
+            0,
+            toElevationFeet - (actorCombatant.elevationFeet ?? 0),
+          ),
+          traversalMode: rule.actorLanding.traversalMode,
+          toElevationFeet,
+          toGroundElevationFeet: toElevationFeet,
+        }
+      })()
+    : undefined
+  const forcedMovements = forcedMovementRule
     ? (() => {
         if (!input.battlefield) return undefined
         const map = {
@@ -3613,14 +3657,17 @@ function executeHeadlessMonsterAreaAction(input: {
         }
         const actorToken = map.tokens.find((token) => token.id === actor.id)
         if (!actorToken) return undefined
+        const movementSource = actorMovement
+          ? { ...actorToken, ...actorMovement.to }
+          : actorToken
         return targets.flatMap((target): Dnd5eSpellForcedMovement[] => {
           const targetToken = map.tokens.find((token) => token.id === target.id)
           if (!targetToken) return []
           const push = dnd5eForcedPushDestination(
             map,
-            actorToken,
+            movementSource,
             targetToken,
-            rule.forcedMovementOnFailedSave!.maximumDistanceFeet,
+            forcedMovementRule.maximumDistanceFeet,
           )
           const fall = dnd5eForcedMovementFall({
             geometry: input.battlefield!.geometry,
@@ -3645,7 +3692,7 @@ function executeHeadlessMonsterAreaAction(input: {
         })
       })()
     : undefined
-  if (rule.forcedMovementOnFailedSave && forcedMovements?.length !== targets.length) {
+  if (forcedMovementRule && forcedMovements?.length !== targets.length) {
     return { handled: false, hits: 0, damage: 0, transactions: 0 }
   }
   const result = resolveSimulationHeadlessAction(holder.state, {
@@ -3659,6 +3706,7 @@ function executeHeadlessMonsterAreaAction(input: {
       targetSavingThrows,
       damageRolls,
       forcedMovements,
+      actorMovement,
     },
   }, random, {
     transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:area:${areaAction.actionId}`,
@@ -4235,6 +4283,7 @@ function executeHeadlessWeaponAction(input: {
         input.battlefield,
       )
       return [{
+        actionId,
         sequenceIndex,
         target: occurrenceTarget,
         distanceFeet,
@@ -4276,6 +4325,12 @@ function executeHeadlessWeaponAction(input: {
         usedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
         actorRecklessActive:
           combatant.classState.recklessAttackTurnKey === turnKey,
+        ...dnd5eMonsterAttackTraitMovementContext(
+          holder.state,
+          combatant,
+          targetCombatant,
+          occurrence.actionId,
+        ),
       }
       : undefined
   })

@@ -148,7 +148,12 @@ export interface Dnd5eOnHitBonusDamageEffect extends Dnd5eInventoryHeadlessEffec
   kind: 'on-hit-bonus-damage'
   trigger: 'after-attack-hit'
   appliesTo: 'attacks-with-this-weapon' | 'weapon-attacks'
-  damage: { count: number; sides: number; bonus: number }
+  damage: {
+    count: number
+    sides: number
+    bonus: number
+    modifierFormula?: import('../rulesets/dnd5e/workshopDamageFormula').Dnd5eWorkshopDamageFormulaV1
+  }
   damageType: 'inherit' | Dnd5eDamageType
   /** Damage dice are doubled on a critical hit unless explicitly disabled. */
   doubleDiceOnCritical?: boolean

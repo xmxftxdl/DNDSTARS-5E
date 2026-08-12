@@ -2,6 +2,10 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { GridCell } from '../../lib/gridCombat'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
+import {
+  validateDnd5eWorkshopDamageFormulaV1,
+  type Dnd5eWorkshopDamageFormulaV1,
+} from './workshopDamageFormula'
 
 export const DND5E_DECLARATIVE_LABEL_MAX_LENGTH = 120
 export const DND5E_DECLARATIVE_DURATION_MAX_ROUNDS = 14_400
@@ -97,6 +101,7 @@ export interface Dnd5ePersistentAreaDamageDeclaration {
   count: number
   sides: number
   modifier?: number
+  modifierFormula?: import('./workshopDamageFormula').Dnd5eWorkshopDamageFormulaV1
   type: Dnd5eDamageType
 }
 
@@ -288,13 +293,16 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
   ) return undefined
 
   const rawDamage = record(trigger.damage)
+  const modifierFormula = rawDamage?.modifierFormula as Dnd5eWorkshopDamageFormulaV1 | undefined
   const damage = rawDamage && integer(rawDamage.count, 1, 40) && integer(rawDamage.sides, 2, 100) &&
     integer(rawDamage.modifier ?? 0, -1_000, 1_000) &&
+    (!modifierFormula || validateDnd5eWorkshopDamageFormulaV1(modifierFormula).length === 0) &&
     (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawDamage.type)
     ? {
         count: rawDamage.count,
         sides: rawDamage.sides,
         modifier: Number(rawDamage.modifier ?? 0),
+        ...(modifierFormula ? { modifierFormula: structuredClone(modifierFormula) } : {}),
         type: rawDamage.type as Dnd5eDamageType,
       }
     : undefined

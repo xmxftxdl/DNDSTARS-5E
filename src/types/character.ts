@@ -265,6 +265,22 @@ export interface Character {
       ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
       dc: number
       condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious' | 'disease'
+      chargeFollowUp?: {
+        actionId: string
+        referencedActionId: string
+        requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+        turnKey: string
+      }
+    }
+    monsterTriggeredBonusAction?: {
+      schemaVersion: 1
+      combatId: string
+      round: number
+      turnKey: string
+      actionId: string
+      referencedActionId: string
+      targetId: string
+      requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */

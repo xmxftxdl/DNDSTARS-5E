@@ -841,7 +841,15 @@ export function planDnd5eMapResultApplication(input: {
               ? { ...combatant.classState.undeadFortitudePending }
               : undefined,
             monsterOnHitSavePending: combatant.classState.monsterOnHitSavePending
-              ? { ...combatant.classState.monsterOnHitSavePending }
+              ? {
+                  ...combatant.classState.monsterOnHitSavePending,
+                  chargeFollowUp: combatant.classState.monsterOnHitSavePending.chargeFollowUp
+                    ? { ...combatant.classState.monsterOnHitSavePending.chargeFollowUp }
+                    : undefined,
+                }
+              : undefined,
+            monsterTriggeredBonusAction: combatant.classState.monsterTriggeredBonusAction
+              ? { ...combatant.classState.monsterTriggeredBonusAction }
               : undefined,
             activeEffectDamageSavePendingIds: combatant.classState.activeEffectDamageSavePendingIds
               ? [...combatant.classState.activeEffectDamageSavePendingIds]
@@ -891,6 +899,11 @@ export function planDnd5eMapResultApplication(input: {
             monsterMechanicRollModifiers: combatant.classState.monsterMechanicRollModifiers,
             pendingMonsterMechanicTriggers: combatant.classState.pendingMonsterMechanicTriggers,
             monsterMechanicTriggerSequence: combatant.classState.monsterMechanicTriggerSequence,
+            monsterMechanicMovementTurnKey: combatant.classState.monsterMechanicMovementTurnKey,
+            monsterMechanicMovementFeet: combatant.classState.monsterMechanicMovementFeet,
+            monsterMechanicMovementOrigin: combatant.classState.monsterMechanicMovementOrigin,
+            monsterMechanicMovementLast: combatant.classState.monsterMechanicMovementLast,
+            monsterMechanicMovementStraight: combatant.classState.monsterMechanicMovementStraight,
             concentrationSpellId: combatant.classState.concentrationSpellId,
             concentrationSpellLevel: combatant.classState.concentrationSpellLevel,
             concentrationTargetIds: combatant.classState.concentrationTargetIds,

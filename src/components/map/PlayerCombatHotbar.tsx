@@ -563,7 +563,7 @@ export default function PlayerCombatHotbar({
             : resource?.current === 0 ? `${resource.label}已经耗尽。` : undefined,
       }]
     })
-    return buildDnd5eCombatActionDescriptors({
+    const built = buildDnd5eCombatActionDescriptors({
       canAct,
       pending,
       actionRemaining,
@@ -575,12 +575,38 @@ export default function PlayerCombatHotbar({
       features: featureSources,
       items: itemSources,
     })
+    if (!exploration) return built
+    return built.map((entry) => {
+      if (entry.sourceKind === 'item') return {
+        ...entry,
+        enabled: true,
+        disabledReason: undefined,
+        command: { kind: 'open-panel' as const, panel: 'inventory' as const, focusId: entry.command.kind === 'use-item' ? entry.command.instanceId : undefined },
+      }
+      if (
+        entry.sourceKind === 'feature' &&
+        entry.command.kind !== 'open-panel' &&
+        entry.command.kind !== 'toggle-spell-modifier'
+      ) return {
+        ...entry,
+        enabled: true,
+        disabledReason: undefined,
+        command: { kind: 'open-panel' as const, panel: 'features' as const, focusId: entry.id },
+      }
+      if (entry.sourceKind !== 'system' && entry.sourceKind !== 'weapon') return entry
+      return {
+        ...entry,
+        enabled: false,
+        disabledReason: '基础动作只能在战斗中、轮到自己时使用。',
+      }
+    })
   }, [
     actionRemaining,
     armedSpellModifiers,
     bonusActionRemaining,
     canAct,
     character,
+    exploration,
     grappleEscapes,
     importedSpells,
     inventory,
@@ -872,6 +898,7 @@ export default function PlayerCombatHotbar({
       onFocus={(event) => showTooltip(entry, event.currentTarget)}
       onBlur={() => hideTooltip(entry.id)}
       aria-label={entry.label}
+      aria-disabled={!entry.enabled}
       title={entry.command.kind === 'cast-spell'
         ? [
             entry.label,
@@ -880,7 +907,7 @@ export default function PlayerCombatHotbar({
               : `${pinnedSpellSlotLevel === 0 ? '戏法' : `${pinnedSpellSlotLevel}环`}（已固定）`,
             damagePreview?.summary,
           ].filter(Boolean).join('\n')
-        : undefined}
+        : entry.disabledReason}
       data-spell-slot-level={entry.command.kind === 'cast-spell'
         ? pinnedSpellSlotLevel ?? entry.command.slotLevel
         : undefined}
@@ -1050,9 +1077,9 @@ export default function PlayerCombatHotbar({
       data-action-remaining={actionRemaining}
       data-bonus-action-remaining={bonusActionRemaining}
       data-movement-remaining={movementRemaining}
-      className={`pointer-events-auto w-full overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl ${exploration ? 'max-w-[760px]' : 'max-w-[1320px]'}`}
+      className="pointer-events-auto w-full max-w-[1320px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
     >
-      <div className={`grid gap-1.5 ${exploration ? 'min-w-[460px] grid-cols-[82px_minmax(330px,1fr)]' : 'min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px]'}`}>
+      <div className="grid min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px] gap-1.5">
         <aside className="flex flex-col items-center justify-between rounded-lg border border-amber-100/10 bg-black/25 p-1.5">
           <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)]">
             {portrait
@@ -1116,7 +1143,6 @@ export default function PlayerCombatHotbar({
           </div>
         </div>
 
-        {!exploration ? (
         <div data-testid="combat-hotbar-features" className="rounded-lg border border-emerald-300/15 bg-emerald-950/10 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-emerald-100/80">
             <Sparkles className="h-3 w-3" />职业特性
@@ -1132,9 +1158,7 @@ export default function PlayerCombatHotbar({
             <button type="button" onClick={() => setFeaturePage(Math.min(featurePageCount - 1, activeFeaturePage + 1))} disabled={activeFeaturePage >= featurePageCount - 1} aria-label="下一页职业特性" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronRight className="h-3.5 w-3.5" /></button>
           </div>
         </div>
-        ) : null}
 
-        {!exploration ? (
         <div data-testid="combat-hotbar-items" className="rounded-lg border border-amber-300/15 bg-amber-950/10 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-amber-100/80">
             <PackageOpen className="h-3 w-3" />道具
@@ -1159,9 +1183,7 @@ export default function PlayerCombatHotbar({
             </button>
           </div>
         </div>
-        ) : null}
 
-        {!exploration ? (
         <div data-testid="combat-hotbar-basics" className="rounded-lg border border-slate-200/15 bg-slate-900/30 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-300">
             <Swords className="h-3 w-3" />基础动作
@@ -1171,7 +1193,6 @@ export default function PlayerCombatHotbar({
             {grouped.basics.map(actionButton)}
           </div>
         </div>
-        ) : null}
       </div>
     </section>
     {backpackOpen && typeof document !== 'undefined' ? createPortal(

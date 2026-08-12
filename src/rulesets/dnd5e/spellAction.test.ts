@@ -31,6 +31,7 @@ import { applyDnd5eLongRestBenefits } from './campaignTimeRules'
 import { createDnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from './items'
+import { resolveDnd5eSpellModifierIntents } from './spellModifierIntents'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -3533,6 +3534,97 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.result.events.some((event) =>
       event.type === 'saving-throw-resolved' && event.targetId === allyToken.id,
     )).toBe(false)
+  })
+
+  it('retains Sculpt Spells and Overchannel when a Wizard class cast uses a held arcane focus', () => {
+    const baseWizard = character('focus-wizard', '法师', {
+      level: 14,
+      maxHp: 60,
+      currentHp: 60,
+      dnd5eClassLevels: { wizard: 14 },
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            subclass: 'evocation',
+            selections: { 'spell-prepared': ['fireball'] },
+          },
+        },
+      },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 3 } },
+    })
+    const granted = applyDnd5eInventoryMutation([baseWizard], {
+      type: 'grant',
+      characterId: baseWizard.id,
+      templateId: 'srd-5.1:item:arcane-focus',
+      quantity: 1,
+    })
+    expect(granted.ok).toBe(true)
+    const focus = normalizeDnd5eInventory(granted.characters[0]).entries.find(
+      (entry) => entry.templateId === 'srd-5.1:item:arcane-focus',
+    )
+    expect(focus).toBeDefined()
+    if (!focus) return
+    const equipped = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'equip',
+      characterId: baseWizard.id,
+      instanceId: focus.instanceId,
+      slot: 'offHand',
+    })
+    expect(equipped.ok).toBe(true)
+    const wizard = equipped.characters[0]
+    const options = resolveDnd5eSpellModifierIntents({
+      character: wizard,
+      castingClassId: 'wizard',
+      spellId: 'fireball',
+      slotLevel: 3,
+      modifierIds: ['evocation-sculpt-spells', 'evocation-overchannel'],
+    })
+    expect(options).toMatchObject({
+      ok: true,
+      options: { sculptSpell: true, overchannel: true },
+    })
+    if (!options.ok) return
+
+    const ally = character('focus-ally', '战士')
+    const enemy = { ...token('focus-enemy', 'enemy', 125), hp: 100, maxHp: 100 }
+    const allyToken = token('focus-ally-token', 'player', 175, ally.id)
+    const input = fixture(wizard, 'fireball', 3, enemy, [ally])
+    input.map.tokens.push(allyToken)
+    input.initiativeOrder.push({ tokenId: allyToken.id, label: allyToken.label, emoji: '', color: '', roll: 5 })
+    input.action.dnd5eSpellCast = {
+      spellId: 'fireball',
+      focusItemInstanceId: focus.instanceId,
+      castingClassId: 'wizard',
+      slotLevel: 3,
+      targetTokenId: enemy.id,
+      targetTokenIds: [enemy.id, allyToken.id],
+      areaTargetCell: { col: 2, row: 0 },
+      overchannel: options.options.overchannel,
+      sculptedTargetIds: [allyToken.id],
+    }
+
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      castingClassId: 'wizard',
+      focusItemInstanceId: focus.instanceId,
+      itemSpellSource: undefined,
+      overchannel: true,
+      sculptedTargetIds: [allyToken.id],
+    })
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      targetSavingThrows: [{ targetId: enemy.id, d20: 1 }],
+      effectRolls: [],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(49)
+    expect(resolved.application?.characters.find((entry) => entry.id === ally.id)?.currentHp).toBe(30)
+    expect(resolved.application?.characters.find((entry) => entry.id === wizard.id)?.classResources?.['dnd5e-spell-slot-3'].current).toBe(0)
+
+    input.action.dnd5eSpellCast.focusItemInstanceId = 'forged-or-unheld-focus'
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'component-unavailable' })
   })
 
   it('rejects forged Sculpt Spells choices in both the map bridge and Headless authority', () => {

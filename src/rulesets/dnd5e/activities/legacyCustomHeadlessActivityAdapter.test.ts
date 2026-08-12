@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Dnd5eCustomHeadlessActionDraft } from '../customRulesPlugin'
 import { compileDnd5eActivityHeadlessAction } from './dnd5eActivityHeadlessCompiler'
 import { dnd5eActivityFromCustomHeadlessAction } from './legacyCustomHeadlessActivityAdapter'
+import { evaluateDnd5eFormulaV1 } from './dnd5eFormula'
 
 describe('V2 custom Headless Activity compatibility adapter', () => {
   it('preserves stable roll ids and converts every supported effect', () => {
@@ -30,5 +31,35 @@ describe('V2 custom Headless Activity compatibility adapter', () => {
     })
     expect(activity.requirements).toEqual([{ kind: 'choice', choiceId: 'interrupt', optionId: 'accept' }])
   })
-})
 
+  it('compiles workshop dynamic modifiers into the shared Activity formula', () => {
+    const activity = dnd5eActivityFromCustomHeadlessAction({
+      id: 'trained-strike',
+      label: '熟练猛击',
+      effects: [{
+        kind: 'damage',
+        damageType: 'bludgeoning',
+        dice: {
+          count: 1,
+          sides: 6,
+          modifier: 1,
+          modifierFormula: {
+            schemaVersion: 1,
+            terms: [{ kind: 'proficiency-bonus' }, { kind: 'ability-modifier', ability: 'str' }],
+          },
+        },
+      }],
+    })
+    const operation = activity.outcomes[0].operations[0]
+    expect(operation.kind).toBe('damage')
+    if (operation.kind !== 'damage') throw new Error('expected damage operation')
+    expect(evaluateDnd5eFormulaV1(operation.amount, {
+      actor: {
+        level: 5,
+        proficiencyBonus: 3,
+        abilities: { str: 18, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      },
+      rolls: { 'effect-0': { values: [4] } },
+    })).toBe(12)
+  })
+})

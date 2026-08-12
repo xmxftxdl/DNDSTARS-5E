@@ -76,6 +76,14 @@ export interface Dnd5eSpellModifierResolutionV1 {
   resourceCosts: Readonly<Record<string, number>>
 }
 
+export interface Dnd5ePluginSpellModifierCompatibilityV1 {
+  level: number
+  school: 'abjuration' | 'conjuration' | 'divination' | 'enchantment' | 'evocation' | 'illusion' | 'necromancy' | 'transmutation'
+  castingTime: 'action' | 'bonus-action' | 'reaction' | 'special'
+  hasDamage: boolean
+  areaSavingThrow: boolean
+}
+
 const definitions: readonly Dnd5eSpellModifierIntentDefinitionV1[] = [
   {
     schemaVersion: 1,
@@ -309,6 +317,7 @@ export function resolveDnd5eSpellModifierIntents(input: {
   spellId: string
   slotLevel: number
   modifierIds: readonly Dnd5eSpellModifierIntentId[]
+  pluginSpell?: Dnd5ePluginSpellModifierCompatibilityV1
 }): Dnd5eSpellModifierResolutionV1 {
   const reasons: string[] = []
   const labels: string[] = []
@@ -317,7 +326,7 @@ export function resolveDnd5eSpellModifierIntents(input: {
   const uniqueIds = [...new Set(input.modifierIds)]
   if (uniqueIds.length !== input.modifierIds.length) reasons.push('施法修正不能重复激活。')
   const spell = getDnd5eSrdCombatSpell(input.spellId)
-  if (!spell && uniqueIds.length > 0) {
+  if (!spell && !input.pluginSpell && uniqueIds.length > 0) {
     return {
       ok: false,
       options,
@@ -327,7 +336,9 @@ export function resolveDnd5eSpellModifierIntents(input: {
       resourceCosts,
     }
   }
-  if (!spell) return { ok: true, options, requiresTargetConfiguration: false, reasons, labels, resourceCosts }
+  if (!spell && !input.pluginSpell) {
+    return { ok: true, options, requiresTargetConfiguration: false, reasons, labels, resourceCosts }
+  }
 
   const owned = new Map(dnd5eAvailableSpellModifierIntents(input.character).map((entry) => [entry.definition.id, entry]))
   const exclusiveGroups = new Set<string>()
@@ -359,11 +370,16 @@ export function resolveDnd5eSpellModifierIntents(input: {
     const operation = definition.operation
     if (operation.kind === 'sculpt-spell') {
       const classLevel = dnd5eCharacterClassLevel(input.character, input.castingClassId)
-      const compatible = dnd5eCanSculptSpell({
+      const contextualCaster = {
         classId: input.castingClassId,
         subclassId: input.character.dnd5eClassChoices?.classes?.[input.castingClassId]?.subclass,
         level: classLevel,
-      }, spell)
+      }
+      const compatible = spell
+        ? dnd5eCanSculptSpell(contextualCaster, spell)
+        : contextualCaster.classId === 'wizard' && contextualCaster.subclassId === 'evocation' &&
+          contextualCaster.level >= 2 && input.pluginSpell?.school === 'evocation' &&
+          input.pluginSpell.areaSavingThrow
       if (!compatible) reasons.push(`${definition.label}只适用于合资格的塑能范围豁免法术。`)
       else {
         options.sculptSpell = true
@@ -373,22 +389,32 @@ export function resolveDnd5eSpellModifierIntents(input: {
     }
     if (operation.kind === 'overchannel') {
       const classLevel = dnd5eCharacterClassLevel(input.character, input.castingClassId)
-      const compatible = dnd5eCanOverchannelSpell({
+      const contextualCaster = {
         classId: input.castingClassId,
         subclassId: input.character.dnd5eClassChoices?.classes?.[input.castingClassId]?.subclass,
         level: classLevel,
-      }, spell, input.slotLevel)
+      }
+      const compatible = spell
+        ? dnd5eCanOverchannelSpell(contextualCaster, spell, input.slotLevel)
+        : contextualCaster.classId === 'wizard' && contextualCaster.subclassId === 'evocation' &&
+          contextualCaster.level >= 14 && input.pluginSpell?.school === 'evocation' &&
+          input.pluginSpell.hasDamage && input.pluginSpell.level >= 1 &&
+          input.pluginSpell.level <= 5 && input.slotLevel >= input.pluginSpell.level && input.slotLevel <= 5
       if (!compatible) reasons.push(`${definition.label}只适用于以 1–5 环施放的合资格法师塑能伤害法术。`)
       else options.overchannel = true
       continue
     }
     if (operation.kind === 'repelling-blast') {
-      if (input.castingClassId !== 'warlock' || spell.id !== 'eldritch-blast') {
+      if (!spell || input.castingClassId !== 'warlock' || spell.id !== 'eldritch-blast') {
         reasons.push(`${definition.label}只能用于以邪术师施法来源施放的魔能爆。`)
       } else options.repellingBlast = true
       continue
     }
     if (operation.kind === 'draconic-elemental-resistance') {
+      if (!spell) {
+        reasons.push(`${definition.label}尚未声明与该工坊法术兼容。`)
+        continue
+      }
       const classSelections = input.character.dnd5eClassChoices?.classes?.[input.castingClassId]?.selections ?? {}
       const damageType = dnd5eDraconicElementalResistanceType({
         classId: input.castingClassId,
@@ -399,6 +425,10 @@ export function resolveDnd5eSpellModifierIntents(input: {
       if (!damageType) reasons.push(`${definition.label}只适用于与所选龙族先祖关联伤害类型相同的术士法术。`)
       else options.draconicResistance = true
     } else {
+      if (!spell) {
+        reasons.push(`${definition.label}尚未声明与该工坊法术兼容。`)
+        continue
+      }
       const metamagic = compatibleMetamagic(definition, spell, input.slotLevel)
       if (input.castingClassId !== 'sorcerer') {
         reasons.push(`${definition.label}当前只能用于由术士施法来源提交的法术。`)
@@ -432,7 +462,7 @@ export function resolveDnd5eSpellModifierIntents(input: {
 
   const effectiveEconomy = options.metamagic?.kind === 'quickened'
     ? 'bonus-action'
-    : spell.castingTime
+    : spell?.castingTime ?? input.pluginSpell?.castingTime
   return {
     ok: reasons.length === 0,
     options,

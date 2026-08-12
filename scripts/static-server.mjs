@@ -15,6 +15,7 @@ import {
 import { ServerObservability } from './server-observability.mjs'
 import { loadArtAssetPack, serveArtAsset } from './art-asset-server.mjs'
 import { createSharedServerContext } from './shared-server-context.mjs'
+import { staticCacheControl } from './static-cache-policy.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -274,7 +275,7 @@ const server = http.createServer(async (req, res) => {
 
   const filePath = await findStaticFile(requestPath)
   const contentType = mimeTypes.get(path.extname(filePath).toLowerCase()) ?? 'application/octet-stream'
-  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' })
+  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': staticCacheControl(filePath) })
   if (req.method === 'HEAD') {
     res.end()
     return

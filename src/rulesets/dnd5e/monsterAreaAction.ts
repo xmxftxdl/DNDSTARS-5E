@@ -1,10 +1,14 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   DND_FEET_PER_CELL,
+  mapCellExtent,
   tokenAnchorCellFromPixel,
+  tokenCenterForAnchorCell,
   tokenFootprintDistanceCells,
+  tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
+import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import {
@@ -48,6 +52,7 @@ import {
   dnd5eInstantAoeAffectsTokenVertically,
   dnd5eTokenToPointDistanceFeet,
 } from './verticalCombatGeometry'
+import { dnd5eTraversalMovementCost } from './traversal'
 
 export type Dnd5eMonsterAreaActionRejectReason =
   | 'invalid-actor'
@@ -70,6 +75,7 @@ export interface PreparedDnd5eMonsterAreaAction {
   areaTargetCell: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaTargetElevationFeet?: number
+  actorMovement?: Dnd5eMonsterAreaActionResolutionV1['actorMovement']
 }
 
 export interface Dnd5eMonsterAreaForcedMovementPlan extends Dnd5eSpellForcedMovement {
@@ -78,6 +84,10 @@ export interface Dnd5eMonsterAreaForcedMovementPlan extends Dnd5eSpellForcedMove
   landingGroundElevationFeet: number
   groundedAtSource: boolean
   fallDistanceFeet: number
+}
+
+export interface Dnd5eMonsterAreaExitOption extends Dnd5eMonsterAreaForcedMovementPlan {
+  cell: GridCell
 }
 
 function isBanishedMonsterAreaCreature(
@@ -160,6 +170,101 @@ export function dnd5eMonsterAreaForcedMovementPlans(
       fallDistanceFeet: fall.fallDistanceFeet,
     }
   })
+}
+
+/**
+ * Legal player-selected exits after a successful save against an overlapping
+ * monster landing. Geometry, walls, occupied cells and vertical falls are all
+ * derived by the Host; the client only returns one stable cell choice.
+ */
+export function dnd5eMonsterAreaSuccessfulSaveExitOptions(input: {
+  prepared: PreparedDnd5eMonsterAreaAction
+  targetId: string
+  reservedDestinations?: readonly { x: number; y: number }[]
+}): readonly Dnd5eMonsterAreaExitOption[] {
+  const { prepared } = input
+  const rule = prepared.variant.forcedMovementOnSuccessfulSave
+  const landing = prepared.actorMovement
+  const target = prepared.targetTokens.find((candidate) => candidate.id === input.targetId)
+  if (!rule || !landing || !target) return []
+  const feetPerCell = Math.max(1, prepared.map.feetPerCell ?? DND_FEET_PER_CELL)
+  const maximumCells = Math.max(1, Math.floor(rule.maximumDistanceFeet / feetPerCell))
+  const targetAnchor = tokenAnchorCellFromPixel(target.x, target.y, target, prepared.map)
+  const actorLandingCells = new Set(
+    tokenOccupiedCellsAt(prepared.actorToken, prepared.map, landing.to)
+      .map((cell) => `${cell.col},${cell.row}`),
+  )
+  const { cols, rows } = mapCellExtent(prepared.map)
+  const geometry = mapGeometryRuntimeForMap(prepared.map.id)
+  const reserved = input.reservedDestinations ?? []
+  const pathfindingMap: BattleMap = {
+    ...prepared.map,
+    tokens: prepared.map.tokens.filter((candidate) =>
+      candidate.id !== prepared.actorToken.id && candidate.id !== target.id),
+  }
+  const options: Dnd5eMonsterAreaExitOption[] = []
+  for (let rowDelta = -maximumCells; rowDelta <= maximumCells; rowDelta += 1) {
+    for (let colDelta = -maximumCells; colDelta <= maximumCells; colDelta += 1) {
+      const cellDistance = Math.max(Math.abs(colDelta), Math.abs(rowDelta))
+      if (cellDistance < 1 || cellDistance * feetPerCell > rule.maximumDistanceFeet) continue
+      const cell = { col: targetAnchor.col + colDelta, row: targetAnchor.row + rowDelta }
+      const to = tokenCenterForAnchorCell(cell, target, prepared.map)
+      const occupiedCells = tokenOccupiedCellsAt(target, prepared.map, to)
+      if (
+        occupiedCells.some((occupied) =>
+          occupied.col < 0 || occupied.row < 0 || occupied.col >= cols || occupied.row >= rows) ||
+        occupiedCells.some((occupied) => actorLandingCells.has(`${occupied.col},${occupied.row}`)) ||
+        reserved.some((position) => position.x === to.x && position.y === to.y)
+      ) continue
+      const occupiedByAnotherToken = pathfindingMap.tokens.some((candidate) => {
+        if (candidate.type === 'obstacle' || isPresentMonsterAreaCreature(candidate, prepared.characters)) {
+          const candidateCells = new Set(
+            tokenOccupiedCellsAt(candidate, prepared.map, candidate)
+              .map((occupied) => `${occupied.col},${occupied.row}`),
+          )
+          return occupiedCells.some((occupied) => candidateCells.has(`${occupied.col},${occupied.row}`))
+        }
+        return false
+      })
+      if (occupiedByAnotherToken) continue
+      const targetElevationFeet = mapGeometryTokenElevation(geometry, target)
+      const path = findMapGeometryPath({
+        geometry,
+        map: pathfindingMap,
+        token: target,
+        to,
+        allowOpenUnlockedDoors: false,
+        canFly: false,
+        targetElevationFeet,
+      })
+      if (!path || path.doorsToOpen.length > 0 || path.distanceFeet > rule.maximumDistanceFeet + 1e-4) {
+        continue
+      }
+      const fall = dnd5eForcedMovementFall({
+        geometry,
+        target,
+        targetCombatant: prepared.state.combatants[target.id],
+        to,
+      })
+      options.push({
+        targetId: target.id,
+        cell,
+        to,
+        distanceFeet: path.distanceFeet,
+        toElevationFeet: fall.toElevationFeet,
+        toGroundElevationFeet: fall.landingGroundElevationFeet,
+        sourceElevationFeet: fall.sourceElevationFeet,
+        sourceGroundElevationFeet: fall.sourceGroundElevationFeet,
+        landingGroundElevationFeet: fall.landingGroundElevationFeet,
+        groundedAtSource: fall.groundedAtSource,
+        fallDistanceFeet: fall.fallDistanceFeet,
+      })
+    }
+  }
+  return options.sort((left, right) =>
+    left.fallDistanceFeet - right.fallDistanceFeet ||
+    left.cell.row - right.cell.row ||
+    left.cell.col - right.cell.col)
 }
 
 function applyTurnEconomy(
@@ -294,6 +399,72 @@ export function prepareDnd5eMonsterAreaAction(input: {
       return { ok: false, reason: 'invalid-target' }
     }
   }
+  let actorMovement: Dnd5eMonsterAreaActionResolutionV1['actorMovement']
+  let landingTargets: Token[] | undefined
+  if (variant.actorLanding) {
+    const landingPosition = tokenCenterForAnchorCell(targetCell, actorToken, input.map)
+    const landingCells = tokenOccupiedCellsAt(actorToken, input.map, landingPosition)
+    const landingCellKeys = new Set(landingCells.map((cell) => `${cell.col},${cell.row}`))
+    const actorFootprintIsInsideMap = landingCells.every((cell) =>
+      cell.col >= 0 && cell.row >= 0 && cell.col < columns && cell.row < rows)
+    if (!actorFootprintIsInsideMap) return { ok: false, reason: 'invalid-target' }
+    const allLandingCreatures = input.map.tokens.filter((candidate) =>
+      candidate.id !== actorToken.id &&
+      candidate.type !== 'obstacle' &&
+      isPresentMonsterAreaCreature(candidate, input.characters) &&
+      tokenOccupiedCellsAt(candidate, input.map, candidate).some((cell) =>
+        landingCellKeys.has(`${cell.col},${cell.row}`)))
+    landingTargets = allLandingCreatures.filter((candidate) =>
+      variant.target === 'all-creatures-except-self' || areOpposedCombatTokens(actorToken, candidate))
+    if (
+      landingTargets.length === 0 ||
+      landingTargets.length !== allLandingCreatures.length
+    ) return { ok: false, reason: 'invalid-target' }
+    const pathfindingMap: BattleMap = {
+      ...input.map,
+      tokens: input.map.tokens.filter((candidate) =>
+        candidate.id !== actorToken.id &&
+        !allLandingCreatures.some((target) => target.id === candidate.id)),
+    }
+    const landingElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, landingPosition)
+    const path = findMapGeometryPath({
+      geometry,
+      map: pathfindingMap,
+      token: actorToken,
+      to: landingPosition,
+      allowOpenUnlockedDoors: false,
+      canFly: false,
+      targetElevationFeet: landingElevationFeet,
+    })
+    if (
+      !path ||
+      path.doorsToOpen.length > 0 ||
+      path.distanceFeet < variant.actorLanding.minimumDistanceFeet
+    ) return { ok: false, reason: 'invalid-target' }
+    const traversal = dnd5eTraversalMovementCost({
+      distanceFeet: path.distanceFeet,
+      baseMovementCostFeet: path.movementCostFeet,
+      elevationGainFeet: Math.max(
+        0,
+        landingElevationFeet - mapGeometryTokenElevation(geometry, actorToken),
+      ),
+      mode: variant.actorLanding.traversalMode,
+      profile: {
+        strengthScore: monster.abilities.str,
+        strengthModifier: Math.floor((monster.abilities.str - 10) / 2),
+        walkSpeed: monster.speed.walk,
+      },
+    })
+    if (!traversal.ok) return { ok: false, reason: 'invalid-target' }
+    actorMovement = {
+      to: landingPosition,
+      distanceFeet: path.distanceFeet,
+      movementCostFeet: traversal.movementCostFeet,
+      traversalMode: variant.actorLanding.traversalMode,
+      toElevationFeet: landingElevationFeet,
+      toGroundElevationFeet: landingElevationFeet,
+    }
+  }
   if (
     variant.area.origin === 'point' && mapGeometryLineOfEffectBlocked({
       geometry,
@@ -304,31 +475,37 @@ export function prepareDnd5eMonsterAreaAction(input: {
     })
   ) return { ok: false, reason: 'line-of-effect-blocked' }
 
-  const eligibleTargets = tokensInCells(input.map, input.map.tokens, cellsForAoe(variant.area, orientFrom, targetCell))
+  const eligibleTargets = (landingTargets ??
+    tokensInCells(input.map, input.map.tokens, cellsForAoe(variant.area, orientFrom, targetCell)))
     .filter((candidate) =>
       candidate.type !== 'obstacle' && candidate.id !== actorToken.id &&
       isPresentMonsterAreaCreature(candidate, input.characters) &&
       (variant.target === 'all-creatures-except-self' ||
         areOpposedCombatTokens(actorToken, candidate)) &&
-      dnd5eInstantAoeAffectsTokenVertically({
-        spellId: `monster:${action.id}`,
-        area: variant.area,
-        map: input.map,
-        geometry,
-        sourceToken: actorToken,
-        targetToken: candidate,
-        effectOrigin,
-        effectOriginElevationFeet: effectOriginElevation,
-        effectAim,
-        effectAimElevationFeet: effectAimElevation,
-      }) &&
-      !mapGeometryLineOfEffectBlocked({
-        geometry,
-        from: effectOrigin,
-        to: candidate,
-        fromElevationFeet: effectOriginElevation,
-        toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
-      }))
+      (
+        variant.actorLanding != null ||
+        (
+          dnd5eInstantAoeAffectsTokenVertically({
+            spellId: `monster:${action.id}`,
+            area: variant.area,
+            map: input.map,
+            geometry,
+            sourceToken: actorToken,
+            targetToken: candidate,
+            effectOrigin,
+            effectOriginElevationFeet: effectOriginElevation,
+            effectAim,
+            effectAimElevationFeet: effectAimElevation,
+          }) &&
+          !mapGeometryLineOfEffectBlocked({
+            geometry,
+            from: effectOrigin,
+            to: candidate,
+            fromElevationFeet: effectOriginElevation,
+            toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
+          })
+        )
+      ))
   const supplied = [...input.targetTokenIds].sort()
   const eligible = eligibleTargets.map((target) => target.id).sort()
   const usesBoundedSelection = variant.minimumTargets != null || variant.maximumTargets != null
@@ -390,6 +567,11 @@ export function prepareDnd5eMonsterAreaAction(input: {
     applyTurnEconomy(snapshot.state, tokenId, economy)
   }
   applyTurnEconomy(snapshot.state, actorToken.id, input.turnEconomy)
+  if (
+    actorMovement &&
+    actorMovement.movementCostFeet >
+      (snapshot.state.combatants[actorToken.id]?.turn.movementRemaining ?? 0)
+  ) return { ok: false, reason: 'resource-unavailable' }
   if (!monsterActionResourceAvailable(snapshot.state, actorToken.id, action)) {
     return { ok: false, reason: 'resource-unavailable' }
   }
@@ -416,6 +598,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
       areaTargetCell: targetCell,
       areaTargetOrientation: input.areaTargetOrientation,
       areaTargetElevationFeet: input.areaTargetElevationFeet,
+      actorMovement,
     },
   }
 }
@@ -439,6 +622,7 @@ export function resolvePreparedDnd5eMonsterAreaAction(input: {
       schemaVersion: 1,
       variantId: prepared.variant.id === 'default' ? undefined : prepared.variant.id,
       targetIds: prepared.targetTokens.map((target) => target.id),
+      actorMovement: prepared.actorMovement,
     },
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
   } as const

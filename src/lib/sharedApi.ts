@@ -22,6 +22,23 @@ export const SHARED_STATE_CLIENT_MAX_BYTES = 8 * 1024 * 1024
 const sharedResourceRevisions = new Map<string, number>()
 const sharedResourceWriteChains = new Map<string, Promise<unknown>>()
 
+const COLD_SHARED_RESOURCE_CACHE_TTL_MS = 60_000
+const coldSharedResources = new Set([
+  'spellbook',
+  'custom-monsters',
+  'combat-statistics',
+  'room-journal',
+  'scene-audio-library',
+])
+const sharedResourceReadCache = new Map<string, {
+  name: string
+  expiresAt: number
+  value: unknown
+}>()
+const sharedResourceReadRequests = new Map<string, Promise<unknown | null>>()
+const sharedResourceReadGenerations = new Map<string, number>()
+let sharedResourceReadEpoch = 0
+
 export type SharedResourceSaveResult =
   | { status: 'saved'; revision?: number }
   | { status: 'skipped'; reason: 'spectator' | 'forbidden' }
@@ -87,6 +104,39 @@ function sharedResourceRevisionKey(name: string): string {
     (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim() ||
     '__lobby__'
   return `${room}:${name}`
+}
+
+function sharedResourceReadKey(name: string): string {
+  const session = getRoomSession()
+  const room = session?.roomId ||
+    (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim() ||
+    '__lobby__'
+  const member = session?.memberId ?? '__anonymous__'
+  return `${room}:${member}:${name}`
+}
+
+export function sharedResourceReadCacheTtlMs(name: string): number {
+  return coldSharedResources.has(name) ? COLD_SHARED_RESOURCE_CACHE_TTL_MS : 0
+}
+
+function invalidateSharedResourceReadCache(name?: string): void {
+  for (const [key, entry] of sharedResourceReadCache) {
+    if (!name || entry.name === name) sharedResourceReadCache.delete(key)
+  }
+  if (!name) {
+    sharedResourceReadEpoch += 1
+    sharedResourceReadRequests.clear()
+    return
+  }
+  sharedResourceReadGenerations.set(name, (sharedResourceReadGenerations.get(name) ?? 0) + 1)
+  for (const [key] of sharedResourceReadRequests) {
+    if (key.endsWith(`:${name}`)) sharedResourceReadRequests.delete(key)
+  }
+}
+
+export function resetSharedResourceReadCacheForTests(): void {
+  invalidateSharedResourceReadCache()
+  sharedResourceReadGenerations.clear()
 }
 
 function rememberSharedResourceRevisionWatermark(name: string, revision: number): void {
@@ -262,19 +312,50 @@ async function requestJson<T>(path: string, init?: RequestInit, resourceName?: s
   return null
 }
 
-export async function loadSharedResource<T>(name: string): Promise<T | null> {
-  const value = await requestJson<unknown>(`/state/${name}`, undefined, name)
-  if (value == null) return null
-  const validation = validateAndMigrateSharedResource(name, value)
-  if (validation.status === 'invalid') {
-    reportSharedIntegrityIssue({ resource: name, reason: validation.reasons.join('；'), value })
-    return null
+export function loadSharedResource<T>(name: string): Promise<T | null> {
+  const key = sharedResourceReadKey(name)
+  const ttlMs = sharedResourceReadCacheTtlMs(name)
+  const requestEpoch = sharedResourceReadEpoch
+  const requestGeneration = sharedResourceReadGenerations.get(name) ?? 0
+  const cached = sharedResourceReadCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.value as T)
   }
-  if (validation.status === 'migrated') {
-    console.warn(`[共享状态迁移:${name}] ${validation.reasons.join('；')}`)
-  }
-  clearSharedIntegrityIssues(name)
-  return validation.value as T
+  if (cached) sharedResourceReadCache.delete(key)
+
+  const activeRequest = sharedResourceReadRequests.get(key)
+  if (activeRequest) return activeRequest as Promise<T | null>
+
+  const request = (async (): Promise<T | null> => {
+    const value = await requestJson<unknown>(`/state/${name}`, undefined, name)
+    if (value == null) return null
+    const validation = validateAndMigrateSharedResource(name, value)
+    if (validation.status === 'invalid') {
+      reportSharedIntegrityIssue({ resource: name, reason: validation.reasons.join('；'), value })
+      return null
+    }
+    if (validation.status === 'migrated') {
+      console.warn(`[共享状态迁移:${name}] ${validation.reasons.join('；')}`)
+    }
+    clearSharedIntegrityIssues(name)
+    const normalized = validation.value as T
+    if (
+      ttlMs > 0 &&
+      sharedResourceReadEpoch === requestEpoch &&
+      (sharedResourceReadGenerations.get(name) ?? 0) === requestGeneration
+    ) {
+      sharedResourceReadCache.set(key, {
+        name,
+        expiresAt: Date.now() + ttlMs,
+        value: normalized,
+      })
+    }
+    return normalized
+  })()
+  sharedResourceReadRequests.set(key, request)
+  return request.finally(() => {
+    if (sharedResourceReadRequests.get(key) === request) sharedResourceReadRequests.delete(key)
+  })
 }
 
 export const SHARED_STATE_CHANGED_CHANNEL = 'shared-state-changed'
@@ -360,6 +441,7 @@ async function performSharedResourceSave<T>(
         // Otherwise an already-queued HP/healing snapshot could reuse the new
         // revision with old data and overwrite the authoritative result.
         recordSharedConflict(name, expectedRevision, revision)
+        invalidateSharedResourceReadCache(name)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
         return { status: 'conflict', expectedRevision, currentRevision: revision }
@@ -373,6 +455,7 @@ async function performSharedResourceSave<T>(
         return { status: 'too-large' }
       }
       if (!response.ok) continue
+      invalidateSharedResourceReadCache(name)
       const body = await response.json().catch(() => ({})) as { revision?: number }
       const revision = Number.isInteger(body.revision) ? Number(body.revision) : currentRevision
       if (Number.isInteger(revision) && revision >= 0) {
@@ -501,6 +584,7 @@ async function performSharedResourcesAtomicSave(
       // winning snapshot. This makes queued stale full-state writes fail
       // closed instead of authorizing them with the winner's revision.
       recordSharedConflict(conflict.name, normalized.find((write) => write.name === conflict.name)?.expectedRevision ?? 0, conflict.currentRevision)
+      invalidateSharedResourceReadCache(conflict.name)
       const event = {
         id: `conflict:${conflict.name}:${Date.now()}`,
         name: conflict.name,
@@ -512,6 +596,7 @@ async function performSharedResourcesAtomicSave(
   }
   const revisions = body.revisions ?? {}
   for (const [name, revision] of Object.entries(revisions)) {
+    invalidateSharedResourceReadCache(name)
     rememberSharedResourceRevisionWatermark(name, revision)
     recordSharedWrite(name, revision)
   }
@@ -706,11 +791,13 @@ async function performClearSharedResource(name: string): Promise<void> {
         // A delete conflict needs the same read-before-retry barrier as a save;
         // knowing only the newer revision must not authorize a stale retry.
         recordSharedConflict(name, expectedRevision, revision)
+        invalidateSharedResourceReadCache(name)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
         return
       }
       if (!response.ok) continue
+      invalidateSharedResourceReadCache(name)
       const body = await response.json().catch(() => ({})) as { revision?: number }
       const revision = Number.isInteger(body.revision) ? Number(body.revision) : currentRevision
       if (Number.isInteger(revision) && revision >= 0) {
@@ -797,6 +884,7 @@ let sharedEventReconnectTimer: ReturnType<typeof globalThis.setTimeout> | null =
 const SHARED_EVENT_RECONNECT_DELAY_MS = 250
 
 function requestFullSharedRecovery(): void {
+  invalidateSharedResourceReadCache()
   const event: SharedStateChangedEvent = {
     id: `event-gap:${Date.now()}`,
     name: '*',
@@ -875,6 +963,7 @@ function subscribeSharedStateChanged(listener: (event: SharedStateChangedEvent) 
     stopSharedStateChangedSource = subscribeSharedEvent<SharedStateChangedEvent>(
       SHARED_STATE_CHANGED_CHANNEL,
       (event) => {
+        invalidateSharedResourceReadCache(event?.name === '*' ? undefined : event?.name)
         for (const current of [...sharedStateChangedListeners]) current(event)
       },
     )
@@ -981,6 +1070,7 @@ export async function mutateSharedRoomResource<T>(
         lastError = body?.error || `共享服务返回 ${response.status}`
         continue
       }
+      invalidateSharedResourceReadCache(resourceName)
       rememberSharedResourceRevision(resourceName, body, response)
       return body
     } catch (error) {

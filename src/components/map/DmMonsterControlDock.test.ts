@@ -45,6 +45,27 @@ const owlbearContinuation: Token = {
   },
 }
 
+const mage: Token = {
+  id: 'mage-token',
+  label: '法师',
+  x: 0,
+  y: 0,
+  color: '#ef4444',
+  emoji: '🧙',
+  size: 1,
+  type: 'enemy',
+  poolId: 'srd-5.1:mage',
+  hp: 40,
+  maxHp: 40,
+  dnd5eCombatState: {
+    monsterSpellSlots: {
+      1: { current: 2, max: 4 },
+      2: { current: 1, max: 3 },
+      3: { current: 1, max: 3 },
+    },
+  },
+}
+
 describe('DmMonsterControlDock', () => {
   it('shows the encounter monster and its complete structured capability groups', () => {
     const markup = renderToStaticMarkup(createElement(DmMonsterControlDock, {
@@ -64,6 +85,7 @@ describe('DmMonsterControlDock', () => {
       onRequestTakeover: () => {},
       onResumeAutomation: () => {},
       onSelectAction: () => {},
+      onSelectMovement: () => {},
       onEndTurn: () => {},
       initialExpanded: true,
     }))
@@ -73,8 +95,13 @@ describe('DmMonsterControlDock', () => {
     expect(markup).toContain('动作')
     expect(markup).toContain('选择目标')
     expect(markup).toContain('恢复 AI')
-    expect(markup).toContain('点击当前怪物显示移动范围，再点击地图格移动')
+    expect(markup).toContain('先选择移动方式，再点击地图落点')
     expect(markup).toContain('剩余 25/30 尺')
+    expect(markup).toContain('移动')
+    expect(markup).toContain('疾走')
+    expect(markup).toContain('撤离')
+    expect(markup).toContain('助跑跳')
+    expect(markup).toContain('立定跳')
   })
 
   it('explains that a requested pause waits for settlement', () => {
@@ -134,5 +161,72 @@ describe('DmMonsterControlDock', () => {
     )?.[0]
     expect(continuationButton).toBeDefined()
     expect(continuationButton).not.toMatch(/\sdisabled(?:=|\s|>)/)
+  })
+
+  it('lists authoritative monster spells with their live resources for DM takeover', () => {
+    const markup = renderToStaticMarkup(createElement(DmMonsterControlDock, {
+      monsters: [mage],
+      currentTokenId: mage.id,
+      control: {
+        schemaVersion: 1,
+        mode: 'manual',
+        pauseRequested: false,
+        controlledTokenId: mage.id,
+        updatedAt: 1,
+      },
+      settlementMode: 'automatic',
+      actionUsed: false,
+      bonusActionUsed: false,
+      onRequestTakeover: () => {},
+      onResumeAutomation: () => {},
+      onSelectAction: () => {},
+      onSelectSpell: () => {},
+      onEndTurn: () => {},
+      initialExpanded: true,
+    }))
+
+    expect(markup).toContain('法术')
+    expect(markup).toContain('火球术')
+    expect(markup).toContain('3 环 1/3')
+    expect(markup).toContain('范围选点')
+    const fireballButton = markup.match(
+      /<button[^>]*data-testid="manual-monster-spell-fireball-3"[^>]*>/,
+    )?.[0]
+    expect(fireballButton).toBeDefined()
+    expect(fireballButton).not.toMatch(/\sdisabled(?:=|\s|>)/)
+  })
+
+  it('locks bonus-action and action spells against their own turn resources', () => {
+    const markup = renderToStaticMarkup(createElement(DmMonsterControlDock, {
+      monsters: [mage],
+      currentTokenId: mage.id,
+      control: {
+        schemaVersion: 1,
+        mode: 'manual',
+        pauseRequested: false,
+        controlledTokenId: mage.id,
+        updatedAt: 1,
+      },
+      settlementMode: 'automatic',
+      actionUsed: false,
+      bonusActionUsed: true,
+      onRequestTakeover: () => {},
+      onResumeAutomation: () => {},
+      onSelectAction: () => {},
+      onSelectSpell: () => {},
+      onEndTurn: () => {},
+      initialExpanded: true,
+    }))
+
+    const fireballButton = markup.match(
+      /<button[^>]*data-testid="manual-monster-spell-fireball-3"[^>]*>/,
+    )?.[0]
+    const mistyStepButton = markup.match(
+      /<button[^>]*data-testid="manual-monster-spell-misty-step-2"[^>]*>/,
+    )?.[0]
+    expect(fireballButton).toBeDefined()
+    expect(fireballButton).not.toMatch(/\sdisabled(?:=|\s|>)/)
+    expect(mistyStepButton).toBeDefined()
+    expect(mistyStepButton).toMatch(/\sdisabled(?:=|\s|>)/)
   })
 })

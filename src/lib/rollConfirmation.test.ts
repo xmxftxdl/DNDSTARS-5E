@@ -36,6 +36,22 @@ describe('d20 roll confirmation', () => {
       .toEqual(latest)
   })
 
+  it('does not present an expired public confirmation as an active reconnect prompt', () => {
+    const expired = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', combatId: 'combat-1', rollId: 'expired-roll', label: '法术攻击',
+      targetName: '红龙', originalValue: 8, rollerCharacterId: 'wizard', now: 100,
+      eligibleModifiers: [{
+        characterId: 'wizard', featureId: 'inspiration', featureLabel: '激励',
+        modifierKind: 'choice-reroll', rerollScope: 'self-roll',
+        resourceCosts: [{ resourceKey: 'inspiration', amount: 1 }],
+      }],
+    })
+
+    expect(currentD20RollConfirmations({ interrupts: [expired] }, expired.expiresAt)).toEqual([])
+    expect(findCurrentD20RollConfirmation({ interrupts: [expired] }, expired, expired.expiresAt)).toBeUndefined()
+    expect(currentD20RollConfirmations({ interrupts: [expired] }, expired.expiresAt! - 1)).toEqual([expired])
+  })
+
   it('opens a DM-owned after-roll transaction and keeps the original result by default', () => {
     const interrupt = createD20RollConfirmationInterrupt({
       mapId: 'map-1', combatId: 'combat-1', rollId: 'roll-1', label: '长剑攻击',

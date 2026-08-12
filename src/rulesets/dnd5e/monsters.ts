@@ -5,6 +5,7 @@ import reviewedMonsterTranslations from './generated/srdMonsterTranslationsZh.re
 import { getDnd5eRoomMonster } from './roomMonsterCatalog'
 import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eStandardConditionId } from './conditions'
+import type { Dnd5eTokenStatusMarkerGrantDeclaration } from './tokenStatusMarkers'
 import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
 import type {
   Dnd5eActiveEffectEscapeCheck,
@@ -63,9 +64,12 @@ export interface Dnd5eMonsterMechanicTriggerV1 {
 export type Dnd5eMonsterMechanicTriggerEventV2 =
   | 'turn-start'
   | 'turn-end'
+  | 'before-damaged'
   | 'after-hit'
+  | 'after-move-hit'
   | 'after-miss'
   | 'when-hit'
+  | 'target-killed'
   | 'after-dealt-damage'
   | 'after-damaged'
   | 'saving-throw-magic'
@@ -80,6 +84,16 @@ export type Dnd5eMonsterMechanicEffectTargetV2 =
   | 'trigger-target'
   | 'damage-source'
   | 'selected-subject'
+
+export type Dnd5eMonsterMechanicAttackModeV2 =
+  | 'any'
+  | 'melee'
+  | 'ranged'
+  | 'spell'
+  | 'unarmed'
+
+export type Dnd5eMonsterMechanicSavingThrowTimingV2 = 'before' | 'after'
+export type Dnd5eMonsterMechanicSavingThrowOutcomeV2 = 'any' | 'success' | 'failure'
 
 export type Dnd5eMonsterMechanicDurationV2 =
   | { kind: 'permanent' }
@@ -107,6 +121,14 @@ export type Dnd5eMonsterMechanicEffectV2 =
       dice: { count: number; sides: number; bonus: number }
       /** 固定类型，或从触发本机制的权威伤害事件继承其首个伤害类型。 */
       damageType: Dnd5eDamageType | 'inherit-trigger'
+    }
+  | {
+      /** Deterministic pre-damage replacement; no client-authored dice are accepted. */
+      id: string
+      kind: 'damage-replacement'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      operation: 'negate' | 'halve' | 'reduce-by' | 'set-to' | 'convert-to-healing'
+      amount?: number
     }
   | {
       id: string
@@ -155,6 +177,23 @@ export type Dnd5eMonsterMechanicEffectV2 =
       economy?: 'none' | 'reaction'
       damage: Dnd5eMonsterDamage
     }
+  | {
+      id: string
+      kind: 'action-grant'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      resource: 'action' | 'bonus-action' | 'reaction'
+    }
+  | {
+      id: string
+      kind: 'equipment-modifier'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      equipment: 'armor' | 'main-weapon'
+      operation: 'armor-class-bonus' | 'magic-weapon-bonus'
+      bonus: number
+      /** Stable equipment id for self-authored weapon effects; targets otherwise use their main weapon. */
+      equipmentId?: string
+      duration: Dnd5eMonsterMechanicDurationV2
+    }
 
 export interface Dnd5eMonsterMechanicTriggerV2 {
   schemaVersion: 2
@@ -165,6 +204,13 @@ export interface Dnd5eMonsterMechanicTriggerV2 {
     subject?: Dnd5eMonsterMechanicSubjectV2
     radiusFeet?: number
     movement?: { comparison: 'at-least' | 'at-most'; feet: number }
+    /** Optional attack-delivery filter for hit/miss trigger windows. */
+    attackMode?: Dnd5eMonsterMechanicAttackModeV2
+    /** Match when at least one authoritative damage component has this type. */
+    damageTypes?: readonly Dnd5eDamageType[]
+    /** Save modifiers normally run before the roll; other effects normally run after it. */
+    savingThrowTiming?: Dnd5eMonsterMechanicSavingThrowTimingV2
+    savingThrowOutcome?: Dnd5eMonsterMechanicSavingThrowOutcomeV2
   }
   predicates: {
     hpPercentageAtOrBelow?: number
@@ -191,6 +237,10 @@ export interface Dnd5eMonsterDamage {
   count: number
   sides: number
   bonus: number
+  /** Workshop source formula; the saved stat block also stores its compiled bonus. */
+  modifierFormula?: import('./workshopDamageFormula').Dnd5eWorkshopDamageFormulaV1
+  /** Fixed component before the workshop formula was compiled. */
+  workshopFixedBonus?: number
   type: Dnd5eDamageType
 }
 
@@ -537,6 +587,14 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   requiresTargetCanSeeSource?: boolean
   /** Every submitted target must be able to hear the acting monster. */
   requiresTargetCanHearSource?: boolean
+  /**
+   * Some monster abilities let each affected creature choose which saving
+   * throw to make (for example, the bulette's Strength-or-Dexterity save).
+   * `ability` remains the deterministic/default choice for old clients,
+   * simulations and timeout recovery; an authoritative target submission may
+   * select any unique ability listed here.
+   */
+  targetAbilityChoices?: readonly AbilityKey[]
   /** Omit for pure control effects such as Frightful Presence. */
   damage?: Dnd5eMonsterDamage
   /** Additional damage types resolved from the same saving throw and dice payload. */
@@ -548,6 +606,27 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   forcedMovementOnFailedSave?: {
     direction: 'away-from-source'
     maximumDistanceFeet: number
+  }
+  /**
+   * A successful target chooses the unoccupied space it is moved into. This is
+   * intentionally separate from ordinary source-directed pushes: the map Host
+   * must offer the affected player the legal destinations and sign the chosen
+   * one before Headless commits the result.
+   */
+  forcedMovementOnSuccessfulSave?: {
+    direction: 'target-choice'
+    maximumDistanceFeet: number
+    conditionWhenNoDestination: 'prone'
+  }
+  /**
+   * The action itself moves the monster into the placed area's footprint. It is
+   * used for actions such as Deadly Leap, whose landing may temporarily share
+   * creature space until those creatures resolve their saves.
+   */
+  actorLanding?: {
+    kind: 'jump-into-occupied-space'
+    minimumDistanceFeet: number
+    traversalMode: 'long-jump-running' | 'long-jump-standing'
   }
   activeEffectOnFailedSave?: {
     id: string
@@ -1000,7 +1079,32 @@ export interface Dnd5eMonsterTrait {
     kind: 'charge-damage'
     minimumStraightMovementFeet: number
     actionId: string
-    extraDamage: Dnd5eMonsterDamage
+    extraDamage?: Dnd5eMonsterDamage
+    /** Optional rider resolved only when the same qualified charge attack hits. */
+    savingThrowOnHit?: {
+      ability: AbilityKey
+      dc: number
+      conditionOnFailedSave: Dnd5eStandardConditionId
+    }
+    /**
+     * Optional movement rider resolved by the existing authoritative on-hit
+     * forced-movement pipeline. This keeps charge displacement, prone and
+     * cliff falls consistent with every other forced movement source.
+     */
+    forcedMovementOnHit?: {
+      ability: AbilityKey
+      dc: number
+      direction: 'away-from-source' | 'toward-source'
+      maximumDistanceFeet: number
+      targetMaxSizeRank?: number
+      conditionOnFailedSave?: Dnd5eStandardConditionId
+    }
+    /** A one-shot bonus-action weapon attack granted against the same target. */
+    bonusActionFollowUp?: {
+      actionId: string
+      referencedActionId: string
+      requiredTargetCondition: Dnd5eStandardConditionId
+    }
   } | {
     kind: 'magic-resistance'
     savingThrowAdvantageAgainstMagic: true
@@ -1254,6 +1358,8 @@ export interface Dnd5eMonsterStatBlock {
     text: string
   }[]
   conditionImmunities?: readonly string[]
+  /** Presentation badge capabilities exposed to the encounter-scoped DM marker picker. */
+  tokenStatusMarkerGrants?: readonly Dnd5eTokenStatusMarkerGrantDeclaration[]
   senses: readonly { name: string; distanceFeet?: number }[]
   passivePerception: number
   languages: readonly string[]
@@ -2601,6 +2707,61 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
           dc: 13,
           damage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'acid' },
           damageOnSuccessfulSave: 'half',
+        },
+      } : action),
+    }
+  }
+
+  if (monster.slug === 'bulette') {
+    return {
+      ...monster,
+      actions: monster.actions.map((action) => action.id === 'deadly-leap' ? {
+        ...action,
+        automation: 'headless',
+        rule: {
+          kind: 'area-saving-throw',
+          area: {
+            shape: 'circle',
+            origin: 'point',
+            radiusFeet: 0,
+            // The actor's jump profile, not spell-like range, is the final
+            // authority. Keep placement broad enough for large-token anchors.
+            placeRangeFeet: 40,
+          },
+          target: 'all-creatures-except-self',
+          ability: 'str',
+          targetAbilityChoices: ['str', 'dex'],
+          dc: 16,
+          damage: {
+            average: 14,
+            count: 3,
+            sides: 6,
+            bonus: 4,
+            type: 'bludgeoning',
+          },
+          additionalDamage: [{
+            average: 14,
+            count: 3,
+            sides: 6,
+            bonus: 4,
+            type: 'slashing',
+          }],
+          damageOnSuccessfulSave: 'half',
+          conditionOnFailedSave: {
+            condition: 'prone',
+            durationRounds: 14_400,
+            repeatSaveAtEndOfTargetTurn: false,
+          },
+          forcedMovementOnSuccessfulSave: {
+            direction: 'target-choice',
+            maximumDistanceFeet: 5,
+            conditionWhenNoDestination: 'prone',
+          },
+          actorLanding: {
+            kind: 'jump-into-occupied-space',
+            minimumDistanceFeet: 15,
+            traversalMode: 'long-jump-running',
+          },
         },
       } : action),
     }
@@ -5059,6 +5220,167 @@ const CATALOG_SURPRISE_ATTACK_TRAITS = {
       sides: 6,
       bonus: 0,
       type: 'inherit-primary',
+    },
+  },
+} as const
+
+/**
+ * SRD charge traits whose complete rules can be represented without a
+ * geometry-dependent forced-movement branch. The Host derives the movement
+ * proof from committed move transactions; clients only supply dice.
+ */
+const CATALOG_CHARGE_DAMAGE_TRAITS = {
+  boar: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'tusk',
+    extraDamage: { average: 3, count: 1, sides: 6, bonus: 0, type: 'slashing' },
+    savingThrowOnHit: { ability: 'str', dc: 11, conditionOnFailedSave: 'prone' },
+  },
+  centaur: {
+    traitIndex: 0, minimumStraightMovementFeet: 30, actionId: 'pike',
+    extraDamage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'piercing' },
+  },
+  elk: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'ram',
+    extraDamage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'bludgeoning' },
+    savingThrowOnHit: { ability: 'str', dc: 13, conditionOnFailedSave: 'prone' },
+  },
+  'giant-boar': {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'tusk',
+    extraDamage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'slashing' },
+    savingThrowOnHit: { ability: 'str', dc: 13, conditionOnFailedSave: 'prone' },
+  },
+  'giant-elk': {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'ram',
+    extraDamage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'bludgeoning' },
+    savingThrowOnHit: { ability: 'str', dc: 14, conditionOnFailedSave: 'prone' },
+  },
+  'giant-goat': {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'ram',
+    extraDamage: { average: 5, count: 2, sides: 4, bonus: 0, type: 'bludgeoning' },
+    savingThrowOnHit: { ability: 'str', dc: 13, conditionOnFailedSave: 'prone' },
+  },
+  'giant-sea-horse': {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'ram',
+    extraDamage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'bludgeoning' },
+    savingThrowOnHit: { ability: 'str', dc: 11, conditionOnFailedSave: 'prone' },
+  },
+  goat: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'ram',
+    extraDamage: { average: 2, count: 1, sides: 4, bonus: 0, type: 'bludgeoning' },
+    savingThrowOnHit: { ability: 'str', dc: 10, conditionOnFailedSave: 'prone' },
+  },
+  rhinoceros: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'gore',
+    extraDamage: { average: 9, count: 2, sides: 8, bonus: 0, type: 'bludgeoning' },
+    savingThrowOnHit: { ability: 'str', dc: 15, conditionOnFailedSave: 'prone' },
+  },
+  unicorn: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'horn',
+    extraDamage: { average: 9, count: 2, sides: 8, bonus: 0, type: 'piercing' },
+    savingThrowOnHit: { ability: 'str', dc: 15, conditionOnFailedSave: 'prone' },
+  },
+  minotaur: {
+    traitIndex: 0, minimumStraightMovementFeet: 10, actionId: 'gore',
+    extraDamage: { average: 9, count: 2, sides: 8, bonus: 0, type: 'piercing' },
+    forcedMovementOnHit: {
+      ability: 'str', dc: 14, direction: 'away-from-source',
+      maximumDistanceFeet: 10, conditionOnFailedSave: 'prone',
+    },
+  },
+  'minotaur-skeleton': {
+    traitIndex: 0, minimumStraightMovementFeet: 10, actionId: 'gore',
+    extraDamage: { average: 9, count: 2, sides: 8, bonus: 0, type: 'piercing' },
+    forcedMovementOnHit: {
+      ability: 'str', dc: 14, direction: 'away-from-source',
+      maximumDistanceFeet: 10, conditionOnFailedSave: 'prone',
+    },
+  },
+  lion: {
+    traitIndex: 2, minimumStraightMovementFeet: 20, actionId: 'claw',
+    savingThrowOnHit: { ability: 'str', dc: 13, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'pounce-bite-bonus-action', referencedActionId: 'bite',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  panther: {
+    traitIndex: 1, minimumStraightMovementFeet: 20, actionId: 'claw',
+    savingThrowOnHit: { ability: 'str', dc: 12, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'pounce-bite-bonus-action', referencedActionId: 'bite',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  'saber-toothed-tiger': {
+    traitIndex: 1, minimumStraightMovementFeet: 20, actionId: 'claw',
+    savingThrowOnHit: { ability: 'str', dc: 14, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'pounce-bite-bonus-action', referencedActionId: 'bite',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  tiger: {
+    traitIndex: 1, minimumStraightMovementFeet: 20, actionId: 'claw',
+    savingThrowOnHit: { ability: 'str', dc: 13, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'pounce-bite-bonus-action', referencedActionId: 'bite',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  'weretiger-hybrid': {
+    traitIndex: 2, minimumStraightMovementFeet: 15, actionId: 'claw',
+    savingThrowOnHit: { ability: 'str', dc: 14, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'pounce-bite-bonus-action', referencedActionId: 'bite',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  'weretiger-tiger': {
+    traitIndex: 2, minimumStraightMovementFeet: 15, actionId: 'claw',
+    savingThrowOnHit: { ability: 'str', dc: 14, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'pounce-bite-bonus-action', referencedActionId: 'bite',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  elephant: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'gore',
+    savingThrowOnHit: { ability: 'str', dc: 12, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'trampling-stomp-bonus-action', referencedActionId: 'stomp',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  gorgon: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'gore',
+    savingThrowOnHit: { ability: 'str', dc: 16, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'trampling-hooves-bonus-action', referencedActionId: 'hooves',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  mammoth: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'gore',
+    savingThrowOnHit: { ability: 'str', dc: 18, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'trampling-stomp-bonus-action', referencedActionId: 'stomp',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  triceratops: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'gore',
+    savingThrowOnHit: { ability: 'str', dc: 13, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'trampling-stomp-bonus-action', referencedActionId: 'stomp',
+      requiredTargetCondition: 'prone',
+    },
+  },
+  warhorse: {
+    traitIndex: 0, minimumStraightMovementFeet: 20, actionId: 'hooves',
+    savingThrowOnHit: { ability: 'str', dc: 14, conditionOnFailedSave: 'prone' },
+    bonusActionFollowUp: {
+      actionId: 'trampling-hooves-bonus-action', referencedActionId: 'hooves',
+      requiredTargetCondition: 'prone',
     },
   },
 } as const
@@ -7919,6 +8241,32 @@ function applyCatalogMonsterTraitRules(
         }
       }
     }
+    const chargeDamage = CATALOG_CHARGE_DAMAGE_TRAITS[
+      monster.slug as keyof typeof CATALOG_CHARGE_DAMAGE_TRAITS
+    ]
+    if (chargeDamage?.traitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'charge-damage' as const,
+          minimumStraightMovementFeet: chargeDamage.minimumStraightMovementFeet,
+          actionId: chargeDamage.actionId,
+          ...('extraDamage' in chargeDamage
+            ? { extraDamage: chargeDamage.extraDamage }
+            : {}),
+          ...('savingThrowOnHit' in chargeDamage
+            ? { savingThrowOnHit: chargeDamage.savingThrowOnHit }
+            : {}),
+          ...('forcedMovementOnHit' in chargeDamage
+            ? { forcedMovementOnHit: chargeDamage.forcedMovementOnHit }
+            : {}),
+          ...('bonusActionFollowUp' in chargeDamage
+            ? { bonusActionFollowUp: chargeDamage.bonusActionFollowUp }
+            : {}),
+        },
+      }
+    }
     const flybyTraitIndex = CATALOG_FLYBY_TRAIT_INDEX[
       monster.slug as keyof typeof CATALOG_FLYBY_TRAIT_INDEX
     ]
@@ -8217,7 +8565,38 @@ function applyCatalogMonsterTraitRules(
     }
     return trait
   })
-  return { ...monster, traits }
+  const chargeFollowUpBonusActions = traits.flatMap((trait) => {
+    const followUp = trait.rule?.kind === 'charge-damage'
+      ? trait.rule.bonusActionFollowUp
+      : undefined
+    if (!followUp) return []
+    const referenced = monster.actions.find((action) =>
+      action.id === followUp.referencedActionId &&
+      action.kind === 'weapon-attack' &&
+      action.attack != null)
+    if (!referenced) return []
+    return [{
+      id: followUp.actionId,
+      name: `${trait.name}：${referenced.name}`,
+      description: `本回合触发${trait.name}并使同一目标处于${followUp.requiredTargetCondition}后，可用附赠动作发动${referenced.name}。`,
+      kind: 'weapon-attack' as const,
+      economy: 'bonus-action' as const,
+      automation: 'headless' as const,
+      referencedActionId: referenced.id,
+      targetEligibility: {
+        kind: 'any-of' as const,
+        predicates: [{
+          kind: 'standard-condition' as const,
+          condition: followUp.requiredTargetCondition,
+        }],
+      },
+    }]
+  })
+  return {
+    ...monster,
+    traits,
+    bonusActions: [...(monster.bonusActions ?? []), ...chargeFollowUpBonusActions],
+  }
 }
 
 export const DND5E_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] =

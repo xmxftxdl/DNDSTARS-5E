@@ -12,6 +12,7 @@ import type {
 /** Browser targeting draft. It contains no authoritative combat result. */
 export interface Dnd5eSpellTargetingSession {
   characterId: string
+  focusItemInstanceId?: string
   itemInstanceId?: string
   itemUseActionId?: string
   castingClassId?: Dnd5eClassId

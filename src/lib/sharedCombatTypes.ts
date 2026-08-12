@@ -185,6 +185,12 @@ export interface Dnd5eSpellMetamagicPayload {
 export interface Dnd5eSpellCastPayload {
   spellId: string
   /**
+   * Held component focus used by a character/class cast. This is not an item
+   * spell source: the Host revalidates the held focus while retaining the
+   * caster's class features, spell slots and spellcasting ability.
+   */
+  focusItemInstanceId?: string
+  /**
    * Inventory spell source selected by the player. All spell facts, costs and
    * ownership are resolved again by the DM Host; no client-supplied item
    * statistics are accepted.

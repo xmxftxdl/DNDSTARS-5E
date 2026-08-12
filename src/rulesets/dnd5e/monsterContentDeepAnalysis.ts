@@ -252,6 +252,7 @@ export function normalizeDnd5eMonsterDraftContent(
   return {
     draft: {
       ...draft,
+      tokenStatusMarkerGrants: draft.tokenStatusMarkerGrants ?? [],
       actions,
       equipment: draft.equipment.map((item) => ({
         ...item,

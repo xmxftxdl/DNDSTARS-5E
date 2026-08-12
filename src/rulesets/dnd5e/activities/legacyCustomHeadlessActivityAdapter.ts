@@ -7,15 +7,18 @@ import type { Dnd5ePluginEffectDuration } from '../persistentAreaTypes'
 import type { Dnd5eActivityDefinitionV1, Dnd5eActivityOperationV1 } from './dnd5eActivityContracts'
 import type { Dnd5eEffectDurationV1 } from './dnd5eEffectContracts'
 import type { Dnd5eFormulaV1 } from './dnd5eFormula'
+import { dnd5eWorkshopDamageFormulaAsFormulaV1 } from '../workshopDamageFormula'
 
 function diceFormula(
   rollId: string,
   dice: Dnd5eCustomHeadlessDiceFormula,
 ): Dnd5eFormulaV1 {
   const rolled: Dnd5eFormulaV1 = { kind: 'dice', rollId, count: dice.count, sides: dice.sides }
-  return dice.modifier
-    ? { kind: 'add', values: [rolled, { kind: 'constant', value: dice.modifier }] }
-    : rolled
+  const values: Dnd5eFormulaV1[] = [rolled]
+  if (dice.modifier) values.push({ kind: 'constant', value: dice.modifier })
+  const dynamicModifier = dnd5eWorkshopDamageFormulaAsFormulaV1(dice.modifierFormula)
+  if (dynamicModifier) values.push(dynamicModifier)
+  return values.length === 1 ? rolled : { kind: 'add', values }
 }
 
 function effectDuration(duration: Dnd5ePluginEffectDuration): Dnd5eEffectDurationV1 {

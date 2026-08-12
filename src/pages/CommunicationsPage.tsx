@@ -172,7 +172,7 @@ export default function CommunicationsPage() {
   if (!session) return null
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="通讯与日志"
         description="房间语音、文字聊天、秘密纸条、讲义、战役记录与队伍共享手记。"

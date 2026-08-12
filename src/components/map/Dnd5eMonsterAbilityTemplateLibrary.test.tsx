@@ -13,6 +13,7 @@ const TEMPLATE: Dnd5eMonsterAbilityTemplate = {
   sourceMonsterName: '测试魔物',
   sourceMonsterEnglishName: 'Test Monster',
   ruleKind: 'magic-resistance',
+  mechanicTags: ['魔法抗性'],
   dependencyCount: 0,
   searchText: '魔法抗性 magic-resistance 测试魔物 test monster',
   sourceIndex: 0,

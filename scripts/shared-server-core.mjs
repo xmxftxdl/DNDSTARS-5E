@@ -1,6 +1,4 @@
-// 共享服务端硬化核心：原子写锁 / 鉴权 / size cap / backlog cap / 图片配额 /
-// safeName 防碰撞 / API-404。两个服务端（vite-server.mjs + static-server.mjs）都从这里
-// import 同一份纯逻辑，避免双份漂移；纯函数集中在此以便 src/ 下的 vitest 直接 import .mjs。
+// DM 与玩家服务端共用的权威协议、鉴权和原子持久化核心。
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import {
@@ -22,6 +20,7 @@ import {
 } from './tencent-verification-provider.mjs'
 import { openSqliteAccountStore } from './account-storage-sqlite.mjs'
 import { openPostgresStorage } from './postgres-storage.mjs'
+import { applyCampaignPrepPlanPatch, normalizeCampaignPrepPlan } from './account-campaign-prep-plan.mjs'
 import {
   AI_JOB_LOCAL_LEASE_MS,
   AI_JOB_MAX_PER_CAMPAIGN,
@@ -2607,6 +2606,34 @@ function validTokenMovementAnimation(animation) {
     Number.isFinite(animation.issuedAt) && animation.issuedAt >= 0
 }
 
+const DND5E_TOKEN_STATUS_MARKER_IDS = new Set([
+  'blinded', 'charmed', 'deafened', 'frightened', 'grappled', 'incapacitated',
+  'invisible', 'paralyzed', 'petrified', 'poisoned', 'prone', 'restrained',
+  'stunned', 'unconscious', 'burning', 'bleeding', 'diseased', 'cursed',
+  'marked', 'concentrating', 'silenced', 'slowed', 'weakened', 'protected',
+  'exposed', 'hidden', 'fire-averse',
+])
+
+function validDnd5eTokenStatusMarkers(markers) {
+  if (markers == null) return true
+  if (!Array.isArray(markers) || markers.length > 64) return false
+  const ids = new Set()
+  const statusIds = new Set()
+  for (const marker of markers) {
+    if (
+      !plainObject(marker) || marker.schemaVersion !== 1 ||
+      typeof marker.id !== 'string' || !/^[a-z0-9][a-z0-9:_-]{0,159}$/i.test(marker.id) ||
+      !DND5E_TOKEN_STATUS_MARKER_IDS.has(marker.statusId) ||
+      !['dm', 'headless', 'workshop'].includes(marker.source) ||
+      (marker.label != null && (typeof marker.label !== 'string' || !marker.label.trim() || marker.label.length > 80)) ||
+      ids.has(marker.id) || statusIds.has(marker.statusId)
+    ) return false
+    ids.add(marker.id)
+    statusIds.add(marker.statusId)
+  }
+  return true
+}
+
 const ROOM_CHAT_MESSAGE_LIMIT = 500
 const ROOM_HANDOUT_LIMIT = 100
 const ROOM_JOURNAL_ENTRY_LIMIT = 200
@@ -3867,6 +3894,10 @@ function validateCustomMonsterState(value) {
   }
   const ids = new Set()
   const slugs = new Set()
+  const tacticalTokenStatusMarkerIds = new Set([
+    'burning', 'bleeding', 'diseased', 'cursed', 'marked', 'concentrating',
+    'silenced', 'slowed', 'weakened', 'protected', 'exposed', 'hidden', 'fire-averse',
+  ])
   for (const monster of value.monsters) {
     if (
       !plainObject(monster) || typeof monster.id !== 'string' ||
@@ -3885,6 +3916,15 @@ function validateCustomMonsterState(value) {
       ) ||
       !Array.isArray(monster.senses) || !Array.isArray(monster.languages) || !Array.isArray(monster.traits) ||
       !Array.isArray(monster.actions) || monster.actions.length > 128 ||
+      (monster.tokenStatusMarkerGrants != null && (
+        !Array.isArray(monster.tokenStatusMarkerGrants) ||
+        monster.tokenStatusMarkerGrants.length > 32 ||
+        monster.tokenStatusMarkerGrants.some((grant) =>
+          !plainObject(grant) ||
+          Object.keys(grant).some((key) => key !== 'statusId' && key !== 'target') ||
+          !tacticalTokenStatusMarkerIds.has(grant.statusId) ||
+          !['self', 'other'].includes(grant.target))
+      )) ||
       !plainObject(monster.challenge) || typeof monster.challenge.rating !== 'string' ||
       !Number.isSafeInteger(monster.challenge.xp) || monster.challenge.xp < 0
     ) return 'invalid-custom-monster'
@@ -4238,6 +4278,9 @@ function validateDnd5eResourceStates(name, value) {
         if (token.lightSource != null && !validTimedLightState(token.lightSource)) return 'invalid-token-light-source'
         if (token.movementAnimation != null && !validTokenMovementAnimation(token.movementAnimation)) {
           return 'invalid-token-movement-animation'
+        }
+        if (!validDnd5eTokenStatusMarkers(token.dnd5eTokenStatusMarkers)) {
+          return 'invalid-dnd5e-token-status-markers'
         }
         const reason = validateActiveEffectState(token.dnd5eCombatState, token.dnd5eCombatState?.conditions ?? [])
         if (reason) return reason
@@ -4986,6 +5029,7 @@ function redactUnseenToken(token) {
     maxHp: _maxHp,
     poolId: _poolId,
     dnd5eCombatState: _dnd5eCombatState,
+    dnd5eTokenStatusMarkers: _dnd5eTokenStatusMarkers,
     playerVisibleEnemyDetail: _playerVisibleEnemyDetail,
     obstacleKind: _obstacleKind,
     ...position
@@ -7820,6 +7864,7 @@ async function accountCampaignResponse(ctx, campaign) {
   const lastRoomId = normalizeLobbyRoomCode(campaign.lastRoomId)
   const room = lastRoomId.length === 6 ? await readLobbyRoomOptional(ctx, lastRoomId) : null
   const hostStatus = room ? roomHostPresence(room) : 'closed'
+  const prepPlan = normalizeCampaignPrepPlan(campaign.prepPlan, { persisted: true })
   return {
     schemaVersion: ACCOUNT_CAMPAIGN_SCHEMA_VERSION,
     campaignId: campaign.campaignId,
@@ -7832,6 +7877,7 @@ async function accountCampaignResponse(ctx, campaign) {
       : history.length,
     createdAt: campaign.createdAt,
     updatedAt: campaign.updatedAt,
+    ...(prepPlan ? { prepPlan } : {}),
     ...(room
       ? {
           latestRoom: {
@@ -9985,29 +10031,31 @@ async function handleAccountApi(req, res, parsed, ctx) {
     }
     if (req.method === 'PATCH') {
       const payload = await readJsonRequest(req)
-      const name = payload?.name == null ? currentCampaign.name : normalizedLabel(payload.name, 60)
-      const description = payload?.description == null
-        ? (currentCampaign.description ?? '')
-        : normalizeCampaignDescription(payload.description)
-      if (!name) throw new RoomProtocolError(400, 'invalid-campaign-name')
-      if (description == null) throw new RoomProtocolError(400, 'invalid-campaign-description')
+      const requestedName = payload?.name == null ? null : normalizedLabel(payload.name, 60)
+      const requestedDescription = payload?.description == null ? null : normalizeCampaignDescription(payload.description)
+      if (payload?.name != null && !requestedName) throw new RoomProtocolError(400, 'invalid-campaign-name')
+      if (payload?.description != null && requestedDescription == null) throw new RoomProtocolError(400, 'invalid-campaign-description')
       if (payload?.archived != null && typeof payload.archived !== 'boolean') {
         throw new RoomProtocolError(400, 'invalid-campaign-archive-state')
       }
       const now = Date.now()
       const next = await mutateAccount(ctx, account.accountId, (current) => {
         const campaigns = accountCampaigns(current)
-        if (!campaigns.some((campaign) => campaign.campaignId === campaignId)) {
+        const storedCampaign = campaigns.find((campaign) => campaign.campaignId === campaignId)
+        if (!storedCampaign) {
           throw new RoomProtocolError(404, 'account-campaign-not-found')
         }
+        const prepPlanResult = applyCampaignPrepPlanPatch(storedCampaign.prepPlan, payload, now)
+        if (!prepPlanResult.ok) throw new RoomProtocolError(prepPlanResult.status, prepPlanResult.error)
         return {
           ...current,
           campaigns: campaigns.map((campaign) => campaign.campaignId === campaignId
             ? {
                 ...campaign,
-                name,
-                description,
+                name: requestedName ?? campaign.name,
+                description: requestedDescription ?? campaign.description ?? '',
                 archived: payload?.archived ?? campaign.archived === true,
+                ...(prepPlanResult.value ? { prepPlan: prepPlanResult.value } : {}),
                 updatedAt: now,
               }
             : campaign),

@@ -202,7 +202,7 @@ export default function DmWorkshopPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl" data-testid="dm-custom-workshop-page">
+    <div className="mx-auto w-full max-w-[1800px]" data-testid="dm-custom-workshop-page">
       {publicationPlugin && (
         <MarketplacePublicationDialog
           plugin={publicationPlugin}

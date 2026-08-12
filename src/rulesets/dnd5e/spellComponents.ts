@@ -78,6 +78,53 @@ function equipmentCanBeSpellcastingFocus(
   return !!classId && equipment?.spellcastingFocusClassIds?.includes(classId) === true
 }
 
+export interface Dnd5eHeldSpellcastingFocus {
+  instanceId: string
+  templateId: string
+}
+
+function inventoryEntryIsHeldSpellcastingFocus(
+  candidate: NonNullable<Character['dnd5eInventory']>['entries'][number],
+  classId: Dnd5eClassId,
+): boolean {
+  return candidate.quantity > 0 &&
+    candidate.identified !== false &&
+    (candidate.item.magicItem?.attunement !== 'required' || candidate.attuned === true) &&
+    (candidate.equippedSlot === 'mainWeapon' || candidate.equippedSlot === 'offHand') &&
+    (
+      equipmentCanBeSpellcastingFocus(candidate.item.equipment, classId) ||
+      entryCanBeSpellcastingFocus(candidate.templateId, classId)
+    )
+}
+
+/**
+ * Returns the authoritative inventory focus currently held for a class cast.
+ *
+ * This is deliberately separate from an item's own spell-cast action. A held
+ * focus supplies components to the character's cast; it does not become the
+ * source of that spell and therefore must not suppress class spell modifiers.
+ */
+export function dnd5eHeldSpellcastingFocus(
+  actor: Pick<Character, 'dnd5eInventory'>,
+  classId?: Dnd5eClassId,
+): Dnd5eHeldSpellcastingFocus | undefined {
+  if (!classId) return undefined
+  const entry = actor.dnd5eInventory?.entries.find((candidate) =>
+    inventoryEntryIsHeldSpellcastingFocus(candidate, classId),
+  )
+  return entry ? { instanceId: entry.instanceId, templateId: entry.templateId } : undefined
+}
+
+export function dnd5eHeldSpellcastingFocusMatches(
+  actor: Pick<Character, 'dnd5eInventory'>,
+  instanceId: string | undefined,
+  classId?: Dnd5eClassId,
+): boolean {
+  return instanceId != null && classId != null && actor.dnd5eInventory?.entries.some((candidate) =>
+    candidate.instanceId === instanceId && inventoryEntryIsHeldSpellcastingFocus(candidate, classId),
+  ) === true
+}
+
 export function dnd5eSpellComponentCheck(
   actor: Pick<Character, 'conditions' | 'dnd5eInventory' | 'equipment'>,
   requirements: Dnd5eSpellComponentRequirements,
@@ -96,18 +143,10 @@ export function dnd5eSpellComponentCheck(
   const heldEquipment = [
     actor.equipment?.mainWeapon,
     actor.equipment?.offHand,
-    ...inventoryEntries.flatMap((entry) =>
-      entry.equippedSlot === 'mainWeapon' || entry.equippedSlot === 'offHand'
-        ? [entry.item.equipment]
-        : [],
-    ),
   ]
   const hasHeldFocus = heldEquipment.some((equipment) =>
     equipmentCanBeSpellcastingFocus(equipment, classId),
-  ) || inventoryEntries.some((entry) =>
-    (entry.equippedSlot === 'mainWeapon' || entry.equippedSlot === 'offHand') &&
-    entryCanBeSpellcastingFocus(entry.templateId, classId),
-  )
+  ) || dnd5eHeldSpellcastingFocus(actor, classId) != null
   const hasComponentPouch = inventoryEntries.some((entry) =>
     entryTemplateKey(entry.templateId) === 'component-pouch',
   )

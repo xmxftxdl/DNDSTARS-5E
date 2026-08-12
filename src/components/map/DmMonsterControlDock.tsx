@@ -3,8 +3,12 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
+  Footprints,
+  Gauge,
+  LogOut,
   Pause,
   Play,
+  Rabbit,
   Shield,
   Sparkles,
   Swords,
@@ -16,8 +20,11 @@ import { getImage } from '../../lib/imageStore'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import type { CombatSettlementMode } from '../../lib/combatSettlementMode'
 import type { Dnd5eMonsterControlStateV1 } from '../../lib/monsterControlState'
+import { dnd5eManualMonsterSpellOptions } from '../../lib/monsterManualSpell'
 import {
   dnd5eManualMonsterMultiattackContinuation,
+  type Dnd5eManualMonsterMovementIntent,
+  type Dnd5eManualMonsterMovementKind,
   type Dnd5eManualMonsterMultiattackContinuation,
 } from '../../lib/monsterManualControl'
 
@@ -98,6 +105,7 @@ function ActionList({
             (
               action.kind === 'melee' ||
               action.kind === 'ranged' ||
+              (action.kind === 'aoe' && action.actorLanding === true) ||
               action.kind === 'multiattack'
             )
           return (
@@ -126,7 +134,9 @@ function ActionList({
                   onClick={() => onSelectAction?.(actionIndex, action.name)}
                   className="mt-2 w-full rounded-lg bg-rose-500/20 px-2 py-1.5 text-[11px] font-semibold text-rose-100 hover:bg-rose-500/30 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {actionUsed ? '本回合动作已使用' : `选择目标 · ${action.name}`}
+                  {actionUsed
+                    ? '本回合动作已使用'
+                    : `${action.kind === 'aoe' ? '选择落点' : '选择目标'} · ${action.name}`}
                 </button>
               ) : null}
             </article>
@@ -143,13 +153,19 @@ export default function DmMonsterControlDock({
   control,
   settlementMode,
   actionUsed,
+  bonusActionUsed = false,
   actionPending = false,
   movementRemainingFeet,
   movementMaximumFeet,
+  movementIntent,
+  canNimbleEscape = false,
   onRequestTakeover,
   onResumeAutomation,
   onSelectAction,
+  onSelectSpell,
   onSelectContinuation,
+  onSelectMovement,
+  onCancelMovement,
   onEndTurn,
   initialExpanded = false,
 }: {
@@ -158,16 +174,36 @@ export default function DmMonsterControlDock({
   control: Dnd5eMonsterControlStateV1
   settlementMode: CombatSettlementMode
   actionUsed: boolean
+  bonusActionUsed?: boolean
   actionPending?: boolean
   movementRemainingFeet?: number
   movementMaximumFeet?: number
+  movementIntent?: Dnd5eManualMonsterMovementIntent
+  canNimbleEscape?: boolean
   onRequestTakeover: () => void
   onResumeAutomation: () => void
-  onSelectAction: (token: Token, actionIndex: number, actionName: string) => void
+  onSelectAction: (
+    token: Token,
+    actionIndex: number,
+    actionName: string,
+    resourceKind?: 'action' | 'bonus-action',
+  ) => void
+  onSelectSpell?: (
+    token: Token,
+    spellId: string,
+    spellName: string,
+    slotLevel: number,
+    castingTime: 'action' | 'bonus-action' | 'reaction',
+  ) => void
   onSelectContinuation?: (
     token: Token,
     continuation: Dnd5eManualMonsterMultiattackContinuation,
   ) => void
+  onSelectMovement?: (
+    token: Token,
+    kind: Dnd5eManualMonsterMovementKind,
+  ) => void
+  onCancelMovement?: () => void
   onEndTurn: () => void
   initialExpanded?: boolean
 }) {
@@ -184,12 +220,36 @@ export default function DmMonsterControlDock({
   const isCurrent = !!selectedToken && selectedToken.id === currentTokenId
   const isManual = control.mode === 'manual'
   const canAct = isManual && isCurrent
+  const spellOptions = selectedToken
+    ? dnd5eManualMonsterSpellOptions(selectedToken)
+    : []
   const multiattackContinuation = canAct
     ? dnd5eManualMonsterMultiattackContinuation(selectedToken)
     : undefined
   const maxHp = selectedToken?.maxHp ?? template?.maxHp ?? stats?.maxHp ?? 1
   const hp = selectedToken?.hp ?? maxHp
   const hpPercent = Math.max(0, Math.min(100, maxHp > 0 ? hp / maxHp * 100 : 0))
+  const movementAvailable = Math.max(0, movementRemainingFeet ?? 0) > 0
+  const movementOptions: Array<{
+    kind: Dnd5eManualMonsterMovementKind
+    label: string
+    title: string
+    disabled: boolean
+    icon: typeof Footprints
+  }> = [
+    { kind: 'move', label: '移动', title: '使用剩余移动力移动', disabled: !movementAvailable, icon: Footprints },
+    { kind: 'dash', label: '疾走', title: '消耗动作，增加等于速度的移动力', disabled: actionUsed, icon: Gauge },
+    { kind: 'disengage', label: '撤离', title: '消耗动作，本回合移动不触发借机攻击', disabled: actionUsed || !movementAvailable, icon: LogOut },
+    { kind: 'running-jump', label: '助跑跳', title: '按力量值限制助跑跳远距离', disabled: !movementAvailable, icon: Rabbit },
+    { kind: 'standing-jump', label: '立定跳', title: '按力量值一半限制立定跳远距离', disabled: !movementAvailable, icon: Rabbit },
+    ...(canNimbleEscape ? [{
+      kind: 'nimble-disengage' as const,
+      label: '灵巧撤离',
+      title: '消耗附赠动作撤离，仍可用动作攻击',
+      disabled: bonusActionUsed || !movementAvailable,
+      icon: LogOut,
+    }] : []),
+  ]
 
   if (monsters.length === 0) return null
 
@@ -314,18 +374,50 @@ export default function DmMonsterControlDock({
               </p>
             )}
             {canAct && movementRemainingFeet != null ? (
-              <div
+              <section
                 data-testid="manual-monster-movement-status"
-                className="flex items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100"
+                className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2.5 text-xs text-cyan-100"
               >
-                <span>点击当前怪物显示移动范围，再点击地图格移动</span>
-                <span className="shrink-0 font-bold tabular-nums">
-                  剩余 {Math.max(0, movementRemainingFeet)}/{Math.max(
-                    Math.max(0, movementRemainingFeet),
-                    movementMaximumFeet ?? movementRemainingFeet,
-                  )} 尺
-                </span>
-              </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>先选择移动方式，再点击地图落点；取消不会消耗动作。</span>
+                  <span className="shrink-0 font-bold tabular-nums">
+                    剩余 {Math.max(0, movementRemainingFeet)}/{Math.max(
+                      Math.max(0, movementRemainingFeet),
+                      movementMaximumFeet ?? movementRemainingFeet,
+                    )} 尺
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  {movementOptions.map((option) => {
+                    const Icon = option.icon
+                    const selected = movementIntent?.kind === option.kind
+                    return (
+                      <button
+                        key={option.kind}
+                        type="button"
+                        data-testid={`manual-monster-move-${option.kind}`}
+                        data-selected={selected || undefined}
+                        disabled={actionPending || option.disabled}
+                        title={option.title}
+                        onClick={() => {
+                          if (selected) onCancelMovement?.()
+                          else onSelectMovement?.(selectedToken, option.kind)
+                        }}
+                        className={[
+                          'flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition',
+                          selected
+                            ? 'border-cyan-200/70 bg-cyan-300/25 text-white shadow-[0_0_12px_rgba(34,211,238,.28)]'
+                            : 'border-white/10 bg-black/15 text-cyan-100 hover:bg-cyan-300/15',
+                          'disabled:cursor-not-allowed disabled:opacity-35',
+                        ].join(' ')}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
             ) : null}
 
             {multiattackContinuation ? (
@@ -444,20 +536,103 @@ export default function DmMonsterControlDock({
                   canAct={canAct}
                   actionUsed={actionUsed}
                   onSelectAction={(actionIndex, actionName) =>
-                    onSelectAction(selectedToken, actionIndex, actionName)}
+                    onSelectAction(selectedToken, actionIndex, actionName, 'action')}
                 />
 
                 {stats.spellcasting ? (
                   <section className="rounded-xl border border-sky-400/15 bg-sky-500/10 px-3 py-2">
                     <div className="flex items-start justify-between gap-2">
                       <h4 className="text-xs font-semibold text-sky-100">法术</h4>
-                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">DM 裁定/Headless 兼容</span>
+                      <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-sky-200">
+                        {spellOptions.filter((spell) => spell.automation === 'full').length} 项可结算
+                      </span>
                     </div>
                     <p className="mt-1 whitespace-pre-line text-[11px] leading-relaxed text-slate-400">{stats.spellcasting}</p>
+                    {spellOptions.length ? (
+                      <div className="mt-2 space-y-1.5">
+                        {spellOptions.map((spell) => {
+                          const economyUsed = spell.castingTime === 'bonus-action'
+                            ? bonusActionUsed
+                            : spell.castingTime === 'reaction'
+                              ? true
+                              : actionUsed
+                          const castingTimeLabel = spell.castingTime === 'bonus-action'
+                            ? '附赠动作'
+                            : spell.castingTime === 'reaction'
+                              ? '反应'
+                              : '动作'
+                          return (
+                            <article
+                              key={spell.spellId}
+                              className="rounded-lg border border-sky-300/10 bg-void-950/35 px-2.5 py-2"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-[11px] font-semibold text-sky-100">
+                                    {spell.spellName}
+                                  </p>
+                                  <p className="mt-0.5 text-[9px] text-slate-500">
+                                    {spell.level === 0 ? '戏法' : `${spell.level} 环`} · {castingTimeLabel} · {spell.rangeFeet} 尺
+                                    {spell.area ? ' · 范围选点' : ' · 选择目标'}
+                                  </p>
+                                </div>
+                                <span className={[
+                                  'shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold',
+                                  spell.automation === 'full'
+                                    ? 'bg-emerald-500/15 text-emerald-200'
+                                    : 'bg-amber-500/15 text-amber-200',
+                                ].join(' ')}>
+                                  {spell.automation === 'full' ? 'Headless' : 'DM 裁定'}
+                                </span>
+                              </div>
+                              {spell.automation === 'full' ? (
+                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                  {spell.availableSlotLevels.map((slotLevel) => (
+                                    <button
+                                      key={`${spell.spellId}:${slotLevel}`}
+                                      type="button"
+                                      data-testid={`manual-monster-spell-${spell.spellId}-${slotLevel}`}
+                                      disabled={!canAct || actionPending || economyUsed}
+                                      onClick={() => onSelectSpell?.(
+                                        selectedToken,
+                                        spell.spellId,
+                                        spell.spellName,
+                                        slotLevel,
+                                        spell.castingTime,
+                                      )}
+                                      className="rounded-md border border-sky-300/15 bg-sky-500/15 px-2 py-1 text-[10px] font-semibold text-sky-100 hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-35"
+                                    >
+                                      {spell.resourceLabels[String(slotLevel)] ?? `${slotLevel} 环`}
+                                    </button>
+                                  ))}
+                                  {spell.availableSlotLevels.length === 0 ? (
+                                    <span className="rounded-md bg-rose-500/10 px-2 py-1 text-[10px] font-semibold text-rose-200">
+                                      资源已耗尽
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <p className="mt-1.5 text-[10px] leading-relaxed text-amber-200/80">
+                                  {spell.compatibilityReason ?? '该法术仍需 DM 手动裁定。'}
+                                </p>
+                              )}
+                            </article>
+                          )
+                        })}
+                      </div>
+                    ) : null}
                   </section>
                 ) : null}
 
-                <ActionList title="附赠动作" actions={stats.bonusActions} tone="emerald" />
+                <ActionList
+                  title="附赠动作"
+                  actions={stats.bonusActions}
+                  tone="emerald"
+                  canAct={canAct}
+                  actionUsed={bonusActionUsed}
+                  onSelectAction={(actionIndex, actionName) =>
+                    onSelectAction(selectedToken, actionIndex, actionName, 'bonus-action')}
+                />
                 <ActionList title="反应" actions={stats.reactions} tone="cyan" />
                 <ActionList title="传奇动作" actions={stats.legendaryActions} tone="amber" />
                 <ActionList title="巢穴动作" actions={stats.lairActions} tone="fuchsia" />
