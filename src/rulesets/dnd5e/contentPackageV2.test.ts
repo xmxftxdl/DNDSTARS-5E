@@ -408,6 +408,28 @@ describe('D&D 5e content package V2', () => {
     }))
   })
 
+  it('reports backgrounds as partially automated because narrative and choice fields need confirmation', () => {
+    const source = packageValue()
+    source.content.backgrounds = [{
+      id: 'field-scholar',
+      name: 'Field Scholar',
+      description: 'Synthetic background.',
+      skillProficiencies: ['history', 'nature'],
+      toolProficiencies: ['cartographer-tools'],
+      languages: 1,
+      feature: { name: 'Research Contact', description: 'Synthetic narrative feature.' },
+    }]
+
+    expect(dnd5eContentPackageAutomationCoverageV2(source).entries).toContainEqual(
+      expect.objectContaining({
+        category: 'background',
+        id: 'field-scholar',
+        status: 'partial',
+        capability: expect.objectContaining({ level: 'assisted' }),
+      }),
+    )
+  })
+
   it('uses the migrated Activity capability instead of trusting a stale full declaration', () => {
     const source = packageValue()
     source.content.features = [{

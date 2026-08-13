@@ -353,7 +353,11 @@ export function dnd5eContentPackageAutomationCoverageV2(
   for (const race of value.content.races) {
     add('race', race.id, race.automation ?? 'full', race.automationReasons)
   }
-  for (const background of value.content.backgrounds) add('background', background.id, 'full')
+  for (const background of value.content.backgrounds) {
+    add('background', background.id, 'partial', [
+      '技能熟练可在建卡时应用；工具、语言选择与叙事背景特性仍需人物卡或 DM 流程确认',
+    ])
+  }
   for (const feature of value.content.features) {
     const projected = projectedAutomation('feature', feature.id)
     add('feature', feature.id, projected?.status ?? feature.automation, projected?.reasons)

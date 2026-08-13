@@ -8,6 +8,11 @@ import { isDnd5eConditionalDamageDefense } from './damageDefenses'
 import { dnd5eMonsterMultiattackChildIsCompositeSupported } from './monsterCompositeMultiattack'
 import { validateDnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
 import { DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS } from './tokenStatusMarkers'
+import {
+  normalizeDnd5ePersistentAreaLighting,
+  normalizeDnd5ePersistentAreaTriggerSnapshot,
+  normalizeDnd5ePersistentAreaVisual,
+} from './persistentAreaTypes'
 
 export interface Dnd5eMonsterSchemaIssue {
   monsterId: string
@@ -1548,6 +1553,8 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
           )
         )
       ) return false
+    } else if (action.rule.kind === 'persistent-area') {
+      if (!persistentAreaRuleIsValid(action.rule)) return false
     } else if (action.rule.kind === 'saving-throw-condition') {
       const requiredTargetCreatureTypes = Array.isArray(action.rule.requiredTargetCreatureTypes)
         ? action.rule.requiredTargetCreatureTypes
@@ -2413,6 +2420,61 @@ function traitShapeIsValid(raw: unknown): boolean {
 function mechanicDiceIsValid(raw: unknown): boolean {
   return isRecord(raw) && finiteInteger(raw.count, 1, 100) && finiteInteger(raw.sides, 2, 1_000) &&
     finiteInteger(raw.bonus, -1_000_000, 1_000_000)
+}
+
+function persistentAreaRuleIsValid(raw: Record<string, unknown>): boolean {
+  const allowedKeys = new Set([
+    'kind', 'area', 'durationRounds', 'expiresAtSourceNextTurnEnd',
+    'concentration', 'anchorMode', 'vertical', 'movement', 'relation',
+    'includeSelf', 'requiredEnvironment', 'movementCostMultiplier',
+    'lighting', 'obscuration', 'color', 'visual', 'triggers',
+  ])
+  const vertical = raw.vertical
+  const verticalIsValid = vertical == null || (
+    isRecord(vertical) && (
+      (vertical.mode === 'ground' && Object.keys(vertical).length === 1) ||
+      (vertical.mode === 'volume' &&
+        Object.keys(vertical).every((key) =>
+          key === 'mode' || key === 'heightFeet' || key === 'anchorOffsetFeet') &&
+        finiteInteger(vertical.heightFeet, 1, 10_000) &&
+        (vertical.anchorOffsetFeet == null ||
+          finiteInteger(vertical.anchorOffsetFeet, -1_000, 10_000)))
+    )
+  )
+  const movement = raw.movement
+  const movementIsValid = movement == null || (
+    isRecord(movement) &&
+    Object.keys(movement).every((key) => key === 'economy' || key === 'maximumFeet') &&
+    (movement.economy === 'action' || movement.economy === 'bonus-action') &&
+    finiteInteger(movement.maximumFeet, 1, 10_000)
+  )
+  return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
+    areaTargetingIsValid(raw.area) &&
+    finiteInteger(raw.durationRounds, 1, 1_000_000) &&
+    (raw.expiresAtSourceNextTurnEnd == null || typeof raw.expiresAtSourceNextTurnEnd === 'boolean') &&
+    typeof raw.concentration === 'boolean' &&
+    (raw.anchorMode === 'fixed' || raw.anchorMode === 'source-token') &&
+    verticalIsValid && movementIsValid &&
+    (raw.relation == null || raw.relation === 'any' || raw.relation === 'ally' || raw.relation === 'enemy') &&
+    (raw.includeSelf == null || typeof raw.includeSelf === 'boolean') &&
+    (raw.requiredEnvironment == null || raw.requiredEnvironment === 'underwater') &&
+    (raw.movementCostMultiplier == null || (
+      typeof raw.movementCostMultiplier === 'number' &&
+      Number.isFinite(raw.movementCostMultiplier) &&
+      raw.movementCostMultiplier >= 1 && raw.movementCostMultiplier <= 100
+    )) &&
+    (raw.lighting == null || normalizeDnd5ePersistentAreaLighting(raw.lighting) != null) &&
+    (raw.obscuration == null || (
+      isRecord(raw.obscuration) &&
+      Object.keys(raw.obscuration).every((key) => key === 'kind' || key === 'sourceCanSeeThrough') &&
+      (raw.obscuration.kind === 'light' || raw.obscuration.kind === 'heavy') &&
+      (raw.obscuration.sourceCanSeeThrough == null ||
+        typeof raw.obscuration.sourceCanSeeThrough === 'boolean')
+    )) &&
+    typeof raw.color === 'string' && /^#[0-9a-f]{6}$/i.test(raw.color) &&
+    normalizeDnd5ePersistentAreaVisual(raw.visual) != null &&
+    Array.isArray(raw.triggers) && raw.triggers.length <= 32 &&
+    raw.triggers.every((trigger) => normalizeDnd5ePersistentAreaTriggerSnapshot(trigger) != null)
 }
 
 function mechanicDurationV2IsValid(raw: unknown): boolean {

@@ -187,7 +187,10 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
   },
   spells: {
     occurrenceTotal: 313,
-    fullMinimum: 103,
+    // Produce Flame now models its held-flame lifecycle truthfully. The generic
+    // monster spell path cannot yet issue the later throw control, so that one
+    // occurrence is deliberately manual instead of being counted as full.
+    fullMinimum: 102,
     definedMinimum: 159,
     missingMaximum: 154,
   },

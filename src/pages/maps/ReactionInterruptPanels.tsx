@@ -7,9 +7,10 @@ import type {
   SharedShieldSpellPromptView,
   SharedUncannyDodgePromptView,
 } from '../../lib/combatInterruptPrompts'
+import { useInterruptCountdownNow } from './useInterruptCountdownNow'
 
 interface ReactionInterruptPanelsProps {
-  now: number
+  now?: number
   savingThrowRerollPrompt: SharedSavingThrowRerollPromptView | null
   protectionPrompt: SharedProtectionPromptView | null
   shieldSpellPrompt: SharedShieldSpellPromptView | null
@@ -42,8 +43,18 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
     onUncannyDodgeChoice: handleSharedUncannyDodgeChoice,
     onDeflectMissilesChoice: handleSharedDeflectMissilesChoice,
     onOpportunityAttackChoice: handleSharedOpportunityAttackChoice,
-    now: sharedDodgeNow,
+    now: fixedNow,
   } = props
+  const expiresAt = Math.max(
+    sharedSavingThrowRerollPrompt?.expiresAt ?? 0,
+    sharedProtectionPrompt?.expiresAt ?? 0,
+    sharedShieldSpellPrompt?.expiresAt ?? 0,
+    sharedCounterspellPrompt?.expiresAt ?? 0,
+    sharedUncannyDodgePrompt?.expiresAt ?? 0,
+    sharedDeflectMissilesPrompt?.expiresAt ?? 0,
+    sharedOpportunityAttackPrompt?.expiresAt ?? 0,
+  ) || undefined
+  const sharedDodgeNow = useInterruptCountdownNow(expiresAt, fixedNow)
 
   return (
     <>
@@ -329,4 +340,3 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
     </>
   )
 }
-

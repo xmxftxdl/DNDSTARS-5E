@@ -55,11 +55,13 @@ import {
   declarativeSubclassResourceDieSidesV1,
   validateDeclarativeSubclassAbilityV1,
   validateDeclarativeSubclassDefinitionV1,
+  validateDeclarativeSubclassSpellListsV1,
   type DeclarativeSubclassCombatHookV1,
   type DeclarativeCombatManeuverMechanicV1,
   type DeclarativeDiceFormulaV1,
   type DeclarativeSubclassAbilityV1,
   type DeclarativeSubclassDefinitionV1,
+  type DeclarativeSubclassSpellListV1,
   type DeclarativeValueFormulaV1,
 } from './declarativeSubclassAbility'
 import { dnd5ePluginImageAsset } from './pluginAssets'
@@ -347,6 +349,7 @@ export interface Dnd5ePluginSubclassDefinition {
   summary: string
   features: readonly Dnd5ePluginSubclassFeature[]
   choiceGroups?: readonly Dnd5ePluginSubclassChoiceGroup[]
+  spellLists?: readonly DeclarativeSubclassSpellListV1[]
 }
 
 export interface Dnd5ePluginFlexibleAbilityBonus {
@@ -1239,6 +1242,12 @@ export function registerDnd5eRulesPlugin(
       assertAcceptingContributions()
       const subclassId = namespacedId(id, definition.id)
       if (pluginSubclasses.has(subclassId)) throw new Error(`Plugin subclass already registered: ${subclassId}`)
+      if (definition.spellLists != null) {
+        validateDeclarativeSubclassSpellListsV1(
+          definition.spellLists,
+          `Plugin subclass ${subclassId}.spellLists`,
+        )
+      }
       if (
         !DND5E_CLASS_IDS.includes(definition.classId) ||
         typeof definition.name !== 'string' || !definition.name.trim() ||
@@ -1286,6 +1295,10 @@ export function registerDnd5eRulesPlugin(
         summary: definition.summary.trim(),
         features: [],
         choiceGroups,
+        spellLists: definition.spellLists?.map((list) => ({
+          ...list,
+          entries: list.entries.map((entry) => ({ ...entry, spellIds: [...entry.spellIds] })),
+        })),
         ownerPluginId: id,
         ownerPluginName: plugin.manifest.name,
         ownerPluginLicense: plugin.manifest.license,
@@ -1504,6 +1517,10 @@ export function registerDnd5eRulesPlugin(
           ...structuredClone(group),
           maxSelectionsByLevel: group.maxSelectionsByLevel?.map((step) => ({ ...step })),
           options: group.options.map((option) => ({ ...option })),
+        })),
+        spellLists: definition.spellLists?.map((list) => ({
+          ...list,
+          entries: list.entries.map((entry) => ({ ...entry, spellIds: [...entry.spellIds] })),
         })),
       })
       const registeredSubclass = pluginSubclasses.get(registeredSubclassId)
@@ -2034,6 +2051,10 @@ export function registeredDnd5ePluginSubclasses(classId?: Dnd5eClassId): readonl
         maxSelectionsByLevel: group.maxSelectionsByLevel?.map((step) => ({ ...step })),
         options: group.options.map((option) => ({ ...option })),
       })),
+      spellLists: subclass.spellLists?.map((list) => ({
+        ...list,
+        entries: list.entries.map((entry) => ({ ...entry, spellIds: [...entry.spellIds] })),
+      })),
       declarativeSpellcasting: subclass.declarativeSpellcasting
         ? structuredClone(subclass.declarativeSpellcasting)
         : undefined,
@@ -2046,6 +2067,25 @@ export function registeredDnd5ePluginSubclasses(classId?: Dnd5eClassId): readonl
 
 export function dnd5ePluginSubclassDefinition(subclassId: string): RegisteredDnd5ePluginSubclass | undefined {
   return registeredDnd5ePluginSubclasses().find((subclass) => subclass.id === subclassId)
+}
+
+export function dnd5ePluginSubclassSpellIds(
+  subclassId: string | undefined,
+  classLevel: number,
+  mode?: DeclarativeSubclassSpellListV1['mode'],
+): readonly string[] {
+  if (!subclassId || classLevel < 1) return []
+  const subclass = dnd5ePluginSubclassDefinition(subclassId)
+  return [...new Set((subclass?.spellLists ?? [])
+    .filter((list) => !mode || list.mode === mode)
+    .flatMap((list) => list.entries
+      .filter((entry) => entry.classLevel <= classLevel)
+      .flatMap((entry) => entry.spellIds))
+    .map((spellId) => {
+      if (pluginSpells.has(spellId)) return spellId
+      const ownedSpellId = `${subclass!.ownerPluginId}:${spellId}`
+      return pluginSpells.has(ownedSpellId) ? ownedSpellId : spellId
+    }))]
 }
 
 export function dnd5ePluginResourceDefinition(resourceId: string): RegisteredDnd5ePluginResource | undefined {

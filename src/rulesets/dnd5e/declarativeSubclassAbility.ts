@@ -481,6 +481,22 @@ export interface DeclarativeSubclassSpellcastingV1 {
   focus: string
 }
 
+/**
+ * Pure-data spell grants supplied by a subclass. `always-prepared` entries are
+ * added to the character without consuming a prepared/known selection;
+ * `expanded-list` entries become legal choices for that class. Spell IDs are
+ * resolved only against the Host catalog, so local data cannot inject code.
+ */
+export interface DeclarativeSubclassSpellListV1 {
+  id: string
+  name: string
+  mode: 'always-prepared' | 'expanded-list'
+  entries: readonly {
+    classLevel: number
+    spellIds: readonly string[]
+  }[]
+}
+
 export type DeclarativeSubclassCombatHookTimingV1 =
   | 'before-attack-roll'
   | 'after-attack-roll'
@@ -533,6 +549,7 @@ export interface DeclarativeSubclassDefinitionV1 {
   resources?: readonly DeclarativeSubclassResourceV1[]
   choiceGroups?: readonly DeclarativeSubclassChoiceGroupV1[]
   spellcasting?: DeclarativeSubclassSpellcastingV1
+  spellLists?: readonly DeclarativeSubclassSpellListV1[]
   combatHooks?: readonly DeclarativeSubclassCombatHookV1[]
   abilities: readonly DeclarativeSubclassAbilityV1[]
 }
@@ -1353,11 +1370,45 @@ export function validateDeclarativeSubclassSpellcastingV1(
   assertText(value.focus, `${path}法器`, 160)
 }
 
+export function validateDeclarativeSubclassSpellListsV1(
+  value: unknown,
+  path = '子职法术表',
+): asserts value is readonly DeclarativeSubclassSpellListV1[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) throw new Error(`${path}无效`)
+  const listIds = new Set<string>()
+  for (const list of value) {
+    if (!record(list)) throw new Error(`${path}条目无效`)
+    assertKeys(list, ['id', 'name', 'mode', 'entries'], `${path}条目`)
+    assertId(list.id, `${path}条目`)
+    if (listIds.has(list.id)) throw new Error(`${path} ID 重复`)
+    listIds.add(list.id)
+    assertText(list.name, `${path}名称`, 160)
+    if (!['always-prepared', 'expanded-list'].includes(String(list.mode))) throw new Error(`${path}模式无效`)
+    if (!Array.isArray(list.entries) || list.entries.length < 1 || list.entries.length > 20) {
+      throw new Error(`${path}等级条目无效`)
+    }
+    let previousLevel = 0
+    for (const entry of list.entries) {
+      if (!record(entry)) throw new Error(`${path}等级条目无效`)
+      assertKeys(entry, ['classLevel', 'spellIds'], `${path}等级条目`)
+      if (!finiteInteger(entry.classLevel, 1, 20) || Number(entry.classLevel) <= previousLevel) {
+        throw new Error(`${path}等级必须严格递增`)
+      }
+      previousLevel = Number(entry.classLevel)
+      if (
+        !Array.isArray(entry.spellIds) || entry.spellIds.length < 1 || entry.spellIds.length > 16 ||
+        entry.spellIds.some((spellId) => typeof spellId !== 'string' || !ID.test(spellId)) ||
+        new Set(entry.spellIds).size !== entry.spellIds.length
+      ) throw new Error(`${path}法术 ID 列表无效`)
+    }
+  }
+}
+
 export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '子职'): asserts value is DeclarativeSubclassDefinitionV1 {
   if (!record(value)) throw new Error(`${path}无效`)
   assertKeys(value, [
     'schemaVersion', 'id', 'classId', 'name', 'summary',
-    'resources', 'choiceGroups', 'spellcasting', 'combatHooks', 'abilities',
+    'resources', 'choiceGroups', 'spellcasting', 'spellLists', 'combatHooks', 'abilities',
   ], path)
   if (value.schemaVersion !== 1) throw new Error(`${path} schemaVersion 不受支持`)
   assertId(value.id, path)
@@ -1417,6 +1468,7 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
     ]) ?? [],
   )
   if (value.spellcasting != null) validateDeclarativeSubclassSpellcastingV1(value.spellcasting, `${path}施法`)
+  if (value.spellLists != null) validateDeclarativeSubclassSpellListsV1(value.spellLists, `${path}法术表`)
   if (value.combatHooks != null) {
     if (!Array.isArray(value.combatHooks) || value.combatHooks.length > 128) throw new Error(`${path}战斗钩子列表无效`)
     const hookIds = new Set<string>()

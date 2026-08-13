@@ -77,6 +77,10 @@ export function listAvailableRegisteredDnd5eActivitiesV1(input: {
   const available: AvailableRegisteredDnd5eActivityV1[] = []
   for (const { value } of packages.values()) {
     for (const activity of value.activities) {
+      // These Activities are the unified catalog entry for mechanics already
+      // dispatched inside the authoritative attack/spell/turn transaction.
+      // Offering a second generic trigger window would settle them twice.
+      if (activity.authorityBinding?.execution === 'headless-event-engine') continue
       const invocation = resolveDnd5eActivityInvocationV1(activity)
       if (invocation.kind !== 'triggered') continue
       const confirmedBy = invocation.confirmation === 'automatic'

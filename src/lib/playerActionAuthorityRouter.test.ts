@@ -135,7 +135,7 @@ describe('player action authority router', () => {
     )).toEqual({ status: 'rejected', reason: 'stale-combat' })
   })
 
-  it.each(['dnd5e-spell-cast', 'dnd5e-adjudicated-spell'])(
+  it.each(['dnd5e-spell-cast', 'dnd5e-adjudicated-spell', 'dnd5e-persistent-area-move'])(
     'allows an owned %s request outside combat without weakening combat turns',
     (type) => {
       expect(preflightPlayerActionAuthority(
@@ -154,6 +154,23 @@ describe('player action authority router', () => {
       )).toEqual({ status: 'rejected', reason: 'stale-turn' })
     },
   )
+
+  it('rejects a map-position spell such as Dancing Lights outside its caster turn', () => {
+    const enemyToken = makeToken({
+      id: 'enemy-token',
+      type: 'enemy',
+      characterId: undefined,
+    })
+    const result = preflightPlayerActionAuthority(
+      makeAction({ type: 'dnd5e-spell-cast' }),
+      makeContext({
+        activeMap: makeMap([makeToken(), enemyToken]),
+        currentTokenId: enemyToken.id,
+      }),
+    )
+
+    expect(result).toEqual({ status: 'rejected', reason: 'stale-turn' })
+  })
 
   it('rejects actions that do not match the current initiative actor', () => {
     const result = preflightPlayerActionAuthority(

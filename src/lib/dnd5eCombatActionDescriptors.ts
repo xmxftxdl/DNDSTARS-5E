@@ -3,6 +3,7 @@ import { dnd5eSystemActionIcon } from './dnd5eActionIcons'
 import type {
   Dnd5eClassFeaturePayload,
   Dnd5eSpellMetamagicPayload,
+  Dnd5eSustainedSpellControlId,
   Dnd5eWeaponAttackOptions,
 } from './sharedCombatTypes'
 import type { Dnd5eSpellModifierIntentId } from '../rulesets/dnd5e/spellModifierIntents'
@@ -31,7 +32,7 @@ export type Dnd5eCombatSpellModifier = Dnd5eSpellModifierIntentId
 export type Dnd5eCombatActionCommand =
   | { kind: 'select-move' }
   | { kind: 'select-weapon-target'; options?: Dnd5eWeaponAttackOptions }
-  | { kind: 'basic-action'; action: 'dash' | 'hide' }
+  | { kind: 'basic-action'; action: 'dash' | 'hide'; sourceSpellId?: 'expeditious-retreat' }
   | { kind: 'escape-grapple'; grapplerTokenId: string }
   | { kind: 'dodge' }
   | { kind: 'disengage' }
@@ -41,6 +42,8 @@ export type Dnd5eCombatActionCommand =
       castingClassId: string
       slotLevel: number
       options?: Dnd5eCombatSpellOptions
+      sustainedEffectAttack?: Dnd5eSustainedSpellControlId
+      sustainedEffectAreaId?: string
     }
   | { kind: 'toggle-spell-modifier'; modifier: Dnd5eCombatSpellModifier }
   | { kind: 'use-fighter-feature'; feature: 'second-wind' | 'action-surge' }
@@ -330,14 +333,15 @@ export function reconcileDnd5eCombatHotbarPreference(
   descriptors: readonly Dnd5eCombatActionDescriptorV1[],
 ): Dnd5eCombatHotbarPreferenceV1 {
   const availableIds = new Set(descriptors.map((entry) => entry.id))
-  // Escape and active persistent-area controls are transient responses, not
+  // Escape and active persistent/sustained spell controls are transient responses, not
   // user-customizable shortcuts. Keep them visible ahead of persisted actions
   // so an old localStorage order cannot hide the currently legal interaction.
   const priorityIds = descriptors
     .map((entry) => entry.id)
     .filter((id) =>
       id.startsWith('system:escape-grapple:') ||
-      id.startsWith('feature:persistent-area-move:'),
+      id.startsWith('feature:persistent-area-move:') ||
+      id.startsWith('feature:sustained-spell:'),
     )
   const priorityIdSet = new Set(priorityIds)
   const saved = preference?.actionIds.filter((id, index, values) =>

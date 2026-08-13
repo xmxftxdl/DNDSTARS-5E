@@ -118,13 +118,12 @@ export function measureSnapsToGrid(map: BattleMap): boolean {
   return map.snapMonstersToGrid !== false
 }
 
-/** 拖放后是否吸附到格心 */
+/** 拖放后是否吸附到格心；地图吸附开关对玩家、敌人和 NPC 一致生效。 */
 export function shouldSnapTokenOnDrop(token: Token, map: BattleMap): boolean {
-  if (token.type === 'player') return true
-  if (token.type === 'enemy' || token.type === 'npc') {
+  if (token.type === 'player' || token.type === 'enemy' || token.type === 'npc') {
     return map.snapMonstersToGrid !== false
   }
-  return true
+  return map.snapMonstersToGrid !== false
 }
 
 export function resolveTokenDropPosition(

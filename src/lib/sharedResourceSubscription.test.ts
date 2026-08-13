@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  loadSharedResource,
+  resetSharedResourceReadCacheForTests,
   SHARED_STATE_CHANGED_CHANNEL,
   subscribeSharedResourceInvalidation,
 } from './sharedApi'
@@ -58,8 +60,10 @@ class FakeVisibilityDocument {
 }
 
 async function flushAsync(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
+  // A refresh can traverse fetch -> Response.json -> the serialized pending
+  // rerun before it settles. Drain the complete microtask chain so a failed
+  // assertion cannot strand the shared singleton and cascade into later tests.
+  for (let index = 0; index < 8; index += 1) await Promise.resolve()
 }
 
 describe('shared resource invalidation', () => {
@@ -67,7 +71,36 @@ describe('shared resource invalidation', () => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
     FakeEventSource.instances = []
+    resetSharedResourceReadCacheForTests()
     resetSharedSyncHealthForTests()
+  })
+
+  it('invalidates a cold resource cache before its SSE refresh runs', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ spells: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const refresh = vi.fn(async () => {
+      await loadSharedResource('spellbook')
+    })
+    const stop = subscribeSharedResourceInvalidation('spellbook', refresh)
+    await flushAsync()
+
+    await loadSharedResource('spellbook')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    FakeEventSource.instances[0].emit({
+      channel: SHARED_STATE_CHANGED_CHANNEL,
+      payload: { id: 'spellbook:2', name: 'spellbook', updatedAt: 2 },
+      sequence: 1,
+      streamId: 'stream-a',
+    })
+    await flushAsync()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    stop()
   })
 
   it('refreshes immediately, on matching SSE events, and on the recovery interval', async () => {

@@ -101,7 +101,7 @@ describe('map Token drag policy', () => {
     })).toBe(false)
   })
 
-  it('skips local collision for DM placement and keeps player movement validated', () => {
+  it('defers DM placement and player path validation to their authority owners', () => {
     expect(shouldValidateMapTokenMoveLocally({
       isDm: true,
       token: { id: 'active-monster', type: 'enemy' },
@@ -116,7 +116,7 @@ describe('map Token drag policy', () => {
       isDm: false,
       token: { id: 'hero-token', type: 'player' },
       authoritativeMovementTokenIds: [],
-    })).toBe(true)
+    })).toBe(false)
   })
 
   it('holds the dragged position until authority catches up or rejects it', () => {

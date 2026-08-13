@@ -58,6 +58,13 @@ export interface Dnd5eMonsterTurnPlan {
         actionId: string
         actionName: string
       }
+    | {
+        kind: 'persistent-area'
+        actionId: string
+        actionName: string
+        destinationCell: GridCell
+        destinationElevationFeet: number
+      }
   areaAction?: {
     actionId: string
     variantId?: string

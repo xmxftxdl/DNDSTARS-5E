@@ -4887,7 +4887,17 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
   const carriedLightRangeFeet = viewer.lightSource?.enabled === true
     ? Math.max(0, Number(viewer.lightSource.brightRadiusFeet) || 0) + Math.max(0, Number(viewer.lightSource.dimRadiusFeet) || 0)
     : 0
+  // Darkness filters unlit targets below; it does not cap the ray distance to
+  // a distant illuminated target. Dynamic line of sight therefore reaches the
+  // map boundary in every ambient-light mode.
+  const ambientSightRangeFeet = !lightingEnabled || geometry?.vision?.enabled !== true
+    ? 0
+    : Math.hypot(
+        Math.max(1, Number(map.width) || 1),
+        Math.max(1, Number(map.height) || 1),
+      ) / gridSize * feetPerCell
   const rangeFeet = Math.max(
+    ambientSightRangeFeet,
     profile.normalRangeFeet,
     profile.darkvisionRangeFeet,
     profile.darknessSightRangeFeet,
@@ -10816,6 +10826,11 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           },
         }
       })
+      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
+        id: `room-rules:plugin-activate:${pluginId}:${now}`,
+        name: 'room-rules',
+        updatedAt: now,
+      })
       writeJson(res, 200, roomRulesResponse(result.room, result.member))
       return true
     }
@@ -10959,6 +10974,11 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           },
         }
       })
+      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
+        id: `room-rules:plugin-install:${pluginId}:${now}`,
+        name: 'room-rules',
+        updatedAt: now,
+      })
       writeJson(res, 200, roomRulesResponse(result.room, result.member))
       return true
     }
@@ -11000,6 +11020,11 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         }
       })
       await removeRoomEphemeralPluginStorage(result.ephemeralStoragePaths ?? [])
+      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
+        id: `room-rules:plugin-remove:${pluginId}:${now}`,
+        name: 'room-rules',
+        updatedAt: now,
+      })
       writeJson(res, 200, roomRulesResponse(result.room, result.member))
       return true
     }
@@ -11152,6 +11177,11 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           updatedAt: now,
         },
       }
+    })
+    if (req.method === 'PUT') publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
+      id: `room-rules:update:${result.room.rulesRevision}:${result.room.rulesUpdatedAt}`,
+      name: 'room-rules',
+      updatedAt: result.room.rulesUpdatedAt,
     })
     writeJson(res, 200, roomRulesResponse(result.room, result.member))
     return true

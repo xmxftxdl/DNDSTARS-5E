@@ -76,6 +76,28 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
+  it('rejects actively submitted reaction spells so only their trigger window can cast them', () => {
+    const wizard = character('reaction-wizard', '法师', {
+      dnd5eClassLevels: { wizard: 5 },
+      dnd5eClassChoices: {
+        classes: { wizard: { selections: { 'spell-prepared': ['shield'] } } },
+      },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 4 } },
+    })
+    const input = fixture(wizard, 'shield', 1, token('enemy', 'enemy', 125))
+    input.action.dnd5eSpellCast = {
+      spellId: 'shield',
+      castingClassId: 'wizard',
+      slotLevel: 1,
+      targetTokenId: input.action.actorTokenId,
+    }
+
+    expect(prepareDnd5eSpellCast(input)).toEqual({
+      ok: false,
+      reason: 'spell-reaction-only',
+    })
+  })
+
   it('prepares and spends a racial innate spell without a casting class or class slot', () => {
     const pluginId = 'local.test.innate-spell-race'
     const dispose = registerDnd5eRulesPlugin({
@@ -2864,7 +2886,10 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepareDnd5eSpellCast(fixture(shaped, 'produce-flame', 0, enemy))).toEqual({
       ok: false, reason: 'wild-shape-spellcasting-unavailable',
     })
-    expect(prepareDnd5eSpellCast(fixture({ ...shaped, level: 18 }, 'produce-flame', 0, enemy)).ok).toBe(true)
+    const beastSpellsInput = fixture({ ...shaped, level: 18 }, 'produce-flame', 0, enemy)
+    beastSpellsInput.action.targetTokenId = 'druid-token'
+    beastSpellsInput.action.dnd5eSpellCast!.targetTokenId = 'druid-token'
+    expect(prepareDnd5eSpellCast(beastSpellsInput).ok).toBe(true)
   })
 
   it('separates Bard Magical Secrets from ordinary spells known and casts an off-list secret through Headless', () => {

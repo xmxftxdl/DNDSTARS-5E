@@ -108,7 +108,9 @@ export function preflightPlayerActionAuthority(
   }
 
   const explorationSpell =
-    action.type === 'dnd5e-spell-cast' || action.type === 'dnd5e-adjudicated-spell'
+    action.type === 'dnd5e-spell-cast' ||
+    action.type === 'dnd5e-adjudicated-spell' ||
+    action.type === 'dnd5e-persistent-area-move'
   if (explorationSpell && !context.combatActive) {
     // Exploration spell requests must be authored without a combat identity.
     // This prevents a delayed request from a previous initiative from being

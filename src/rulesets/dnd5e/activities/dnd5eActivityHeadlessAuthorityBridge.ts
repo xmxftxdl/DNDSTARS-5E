@@ -1,5 +1,6 @@
 import {
   commitDnd5eActivityExecution,
+  resolveDnd5eHeadlessAction,
   type Dnd5eActivityAuthorityCommitResult,
   type Dnd5eHeadlessCombatState,
 } from '../headlessCombatEngine'
@@ -79,6 +80,39 @@ export function resolveAndCommitDnd5eActivityCommand(
 ): Dnd5eActivityHeadlessAuthorityBridgeResult {
   const resolution = resolveDnd5eActivityCommand(authority)
   if (!resolution.ok) return { phase: 'resolve', result: resolution }
+  const activity = getRegisteredDnd5eActivity(authority.command.packageId, authority.command.activityId)
+  const nativeBinding = activity?.authorityBinding
+  if (nativeBinding?.execution === 'headless-event-engine') {
+    return {
+      phase: 'resolve',
+      result: {
+        ok: false,
+        reason: 'invalid-command',
+        details: ['This Activity is settled by the authoritative combat event that opened it.'],
+      },
+    }
+  }
+  if (nativeBinding?.execution === 'plugin-headless-action') {
+    const targetId = authority.command.targetIds[0] ?? authority.command.actorId
+    const result = resolveDnd5eHeadlessAction(source, {
+      type: 'plugin',
+      pluginId: authority.command.packageId,
+      actionId: nativeBinding.actionId!,
+      transactionId: authority.command.commandId,
+      featureId: `${authority.command.packageId}:${nativeBinding.subclassId}.${nativeBinding.abilityId}`,
+      actorId: authority.command.actorId,
+      targetId,
+      targetIds: [...authority.command.targetIds],
+      distanceFeet: authority.distanceFeetByTargetId?.[targetId],
+      rolls: Object.fromEntries(Object.entries(authority.authoritativeRolls).map(([id, roll]) => [id, {
+        values: [...roll.values],
+        modifier: 0,
+        total: roll.values.reduce((total, value) => total + value, 0),
+      }])),
+      interruptChoiceId: authority.command.choices?.interrupt ?? (authority.dmApproved ? 'dm-apply' : undefined),
+    })
+    return { phase: 'commit', result }
+  }
   const applicableItemConsumptions = resolution.consumptions.filter(
     (consumption): consumption is Dnd5eResolvedItemChargeConsumption =>
       isResolvedItemChargeConsumption(consumption) &&
@@ -95,7 +129,6 @@ export function resolveAndCommitDnd5eActivityCommand(
     }
     const inventory = normalizeDnd5eInventory(authority.inventoryOwner)
     const entry = inventory.entries.find((candidate) => candidate.instanceId === inventoryInstanceId)
-    const activity = getRegisteredDnd5eActivity(authority.command.packageId, authority.command.activityId)
     if (!entry || activity?.legacySource?.kind !== 'item' || activity.legacySource.id !== entry.templateId) {
       return { phase: 'inventory', result: { ok: false, reason: 'inventory-item-mismatch' } }
     }
@@ -131,7 +164,6 @@ export function resolveAndCommitDnd5eActivityCommand(
         consumptions: resolution.consumptions.filter((consumption) => consumption.kind !== 'item-charge'),
       }
     : resolution
-  const activity = getRegisteredDnd5eActivity(authority.command.packageId, authority.command.activityId)
   const sourceKind = activity?.legacySource?.kind === 'spell'
     ? 'spell' as const
     : activity?.legacySource?.kind === 'item'

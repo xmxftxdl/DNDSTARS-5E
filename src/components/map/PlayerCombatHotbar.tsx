@@ -23,6 +23,7 @@ import {
   dnd5eSpellbookEntriesWithPlugins,
   dnd5eSpellbookEntryCastingTime,
   dnd5eSpellbookEntryDescription,
+  dnd5eActiveSustainedSpellControl,
   getDnd5eSrdCombatSpell,
   normalizeDnd5eInventory,
   registeredDnd5ePluginSpells,
@@ -108,6 +109,17 @@ interface PlayerCombatHotbarProps {
     maximumFeet: number
     coreSpellId?: string
   }[]
+  sustainedAreaControls?: readonly {
+    areaId: string
+    spellId: string
+    castingClassId: string
+    slotLevel: number
+    controlId: import('../../lib/sharedCombatTypes').Dnd5eSustainedSpellControlId
+    label: string
+    economy: 'action' | 'bonus-action'
+    targeting: 'area' | 'creature'
+  }[]
+  hunterMarkTransferAvailable?: boolean
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
   onCommand: (command: Dnd5eCombatActionCommand, descriptor: Dnd5eCombatActionDescriptorV1) => void
@@ -195,6 +207,8 @@ export default function PlayerCombatHotbar({
   activeActionId,
   grappleEscapes = [],
   movablePersistentAreas = [],
+  sustainedAreaControls = [],
+  hunterMarkTransferAvailable = false,
   selectedSpellSlotLevels,
   onSelectedSpellSlotLevelChange,
   onCommand,
@@ -223,6 +237,8 @@ export default function PlayerCombatHotbar({
   const descriptors = useMemo(() => {
     const spellbookById = new Map(dnd5eSpellbookEntriesWithPlugins(importedSpells, registeredDnd5ePluginSpells()).map((spell) => [spell.id, spell]))
     const spellSources: Dnd5eCombatActionSpellSource[] = []
+    const sustainedControlSources: Dnd5eCombatActionFeatureSource[] = []
+    const sustainedControlKeys = new Set<string>()
     for (const source of dnd5eEffectiveSpellcastingSources(character)) {
       const definition = source.definition
       if (!definition.spellcasting) continue
@@ -300,6 +316,45 @@ export default function PlayerCombatHotbar({
               ? '该法术的施法时间不适用于战斗动作。'
               : '没有可用于施放该法术的法术位。',
         })
+        const sustainedControl = combat
+          ? dnd5eActiveSustainedSpellControl(character, combat)
+          : undefined
+        if (sustainedControl && combat) {
+          const sustainedControlKey = `${combat.id}:${sustainedControl.id}`
+          if (sustainedControlKeys.has(sustainedControlKey)) continue
+          sustainedControlKeys.add(sustainedControlKey)
+          sustainedControlSources.push({
+            id: `sustained-spell:${combat.id}:${sustainedControl.id}`,
+            label: sustainedControl.label,
+            description: sustainedControl.description,
+            icon: dnd5eSpellActionIcon({
+              id: combat.id,
+              name: combat.name,
+              englishName: combat.englishName,
+              level: combat.level,
+              school: combat.school,
+              effect: combat.effect,
+              damageType: combat.damageType,
+              castingClassId: definition.id,
+              iconAssetId: entry.iconAssetId,
+            }),
+            economy: sustainedControl.economy,
+            targeting: sustainedControl.targeting,
+            command: sustainedControl.id === 'expeditious-retreat'
+              ? {
+                  kind: 'basic-action',
+                  action: 'dash',
+                  sourceSpellId: 'expeditious-retreat',
+                }
+              : {
+                  kind: 'cast-spell',
+                  spellId: combat.id,
+                  castingClassId: definition.id,
+                  slotLevel: sustainedControl.slotLevel,
+                  sustainedEffectAttack: sustainedControl.id,
+                },
+          })
+        }
       }
     }
     const featureSources: Dnd5eCombatActionFeatureSource[] = spellModifierIntents.map(({
@@ -371,6 +426,34 @@ export default function PlayerCombatHotbar({
         command: { kind: 'use-fighter-feature', feature: 'action-surge' },
       })
     }
+    featureSources.unshift(...sustainedControlSources)
+    if (hunterMarkTransferAvailable) {
+      featureSources.unshift({
+        id: 'sustained-spell:hunters-mark-transfer',
+        label: '转移猎人印记',
+        description: '附赠动作 · 原目标降至 0 生命后，打开目标列表选择新的猎物；不消耗法术位。',
+        icon: dnd5eSpellActionIcon({ id: 'hunters-mark', name: '猎人印记' }),
+        economy: 'bonus-action',
+        targeting: 'configure',
+        command: { kind: 'open-panel', panel: 'features', focusId: 'ranger-move-hunters-mark' },
+      })
+    }
+    featureSources.unshift(...sustainedAreaControls.map((control) => ({
+      id: `sustained-spell:${control.areaId}:${control.controlId}`,
+      label: control.label,
+      description: `${control.economy === 'bonus-action' ? '附赠动作' : '动作'} · 操控地图上的现有法术实体，不消耗法术位。`,
+      icon: dnd5eSpellActionIcon({ id: control.spellId, name: control.label }),
+      economy: control.economy,
+      targeting: control.targeting,
+      command: {
+        kind: 'cast-spell' as const,
+        spellId: control.spellId,
+        castingClassId: control.castingClassId,
+        slotLevel: control.slotLevel,
+        sustainedEffectAttack: control.controlId,
+        sustainedEffectAreaId: control.areaId,
+      },
+    })))
     featureSources.unshift(...movablePersistentAreas.map((area) => ({
       id: `persistent-area-move:${area.id}`,
       label: `移动${area.label}`,
@@ -576,7 +659,9 @@ export default function PlayerCombatHotbar({
       items: itemSources,
     })
     if (!exploration) return built
-    return built.map((entry) => {
+    return built.filter((entry) =>
+      entry.id !== 'feature:sustained-spell:expeditious-retreat:expeditious-retreat'
+    ).map((entry) => {
       if (entry.sourceKind === 'item') return {
         ...entry,
         enabled: true,
@@ -585,6 +670,7 @@ export default function PlayerCombatHotbar({
       }
       if (
         entry.sourceKind === 'feature' &&
+        !entry.id.startsWith('feature:sustained-spell:') &&
         entry.command.kind !== 'open-panel' &&
         entry.command.kind !== 'toggle-spell-modifier'
       ) return {
@@ -610,11 +696,13 @@ export default function PlayerCombatHotbar({
     grappleEscapes,
     importedSpells,
     inventory,
+    hunterMarkTransferAvailable,
     movablePersistentAreas,
     movementRemaining,
     pending,
     primaryClassId,
     spellModifierIntents,
+    sustainedAreaControls,
     turnEconomy.action.max,
     turnEconomy.turnKey,
   ])

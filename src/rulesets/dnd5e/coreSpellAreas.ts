@@ -92,6 +92,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
+    movement: { economy: 'bonus-action', maximumFeet: 60 },
     relation: 'any',
     includeSelf: true,
     lighting: { kind: 'light', brightRadiusFeet: 0, dimRadiusFeet: 10, color: '#a5f3fc', spellLevel: 0 },
@@ -850,6 +851,7 @@ export function moveDnd5eCoreSpellArea(input: {
   areaId: string
   sourceTokenId: string
   targetCell: GridCell
+  targetCells?: readonly GridCell[]
 }): {
   ok: true
   map: BattleMap
@@ -858,22 +860,46 @@ export function moveDnd5eCoreSpellArea(input: {
   impactTargetId?: string
 } | { ok: false; reason: string } {
   const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === input.areaId)
-  if (!area || area.sourceKind !== 'core-spell' || !area.movement) return { ok: false, reason: 'area-not-movable' }
+  const declaredMovement = area?.coreSpellId
+    ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
+    : undefined
+  const movement = area?.movement ?? declaredMovement
+  if (!area || area.sourceKind !== 'core-spell' || !movement) return { ok: false, reason: 'area-not-movable' }
   if (area.sourceTokenId !== input.sourceTokenId) return { ok: false, reason: 'invalid-source' }
   const previous = area.anchorCell ?? area.cells[0]
-  const cells = Math.max(Math.abs(input.targetCell.col - previous.col), Math.abs(input.targetCell.row - previous.row))
-  const distanceFeet = cells * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-  if (distanceFeet > area.movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
+  const previousLightingAnchors = area.lightingAnchorCells?.length
+    ? area.lightingAnchorCells
+    : area.coreSpellId === 'dancing-lights' ? area.cells : undefined
+  const dancingLightTargets = area.coreSpellId === 'dancing-lights' && input.targetCells?.length
+    ? input.targetCells.map((cell) => ({ ...cell }))
+    : undefined
+  if (
+    input.targetCells?.length &&
+    (area.coreSpellId !== 'dancing-lights' || !previousLightingAnchors?.length ||
+      input.targetCells.length !== previousLightingAnchors.length)
+  ) return { ok: false, reason: 'invalid-target' }
+  const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+  const destinationPairs = dancingLightTargets && previousLightingAnchors
+    ? dancingLightTargets.map((target, index) => ({ previous: previousLightingAnchors[index], target }))
+    : [{ previous, target: input.targetCell }]
+  const distanceFeet = Math.max(...destinationPairs.map(({ previous: origin, target }) =>
+    Math.max(Math.abs(target.col - origin.col), Math.abs(target.row - origin.row)) * feetPerCell
+  ))
+  if (distanceFeet > movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
   const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
   const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
-  if (
-    !Number.isInteger(input.targetCell.col) ||
-    !Number.isInteger(input.targetCell.row) ||
-    input.targetCell.col < 0 ||
-    input.targetCell.row < 0 ||
-    input.targetCell.col >= columns ||
-    input.targetCell.row >= rows
-  ) return { ok: false, reason: 'invalid-target' }
+  const requestedTargets = dancingLightTargets ?? [input.targetCell]
+  if (requestedTargets.some((target) =>
+    !Number.isInteger(target.col) ||
+    !Number.isInteger(target.row) ||
+    target.col < 0 ||
+    target.row < 0 ||
+    target.col >= columns ||
+    target.row >= rows
+  )) return { ok: false, reason: 'invalid-target' }
+  if (new Set(requestedTargets.map((cell) => `${cell.col}:${cell.row}`)).size !== requestedTargets.length) {
+    return { ok: false, reason: 'invalid-target' }
+  }
   let resolvedTargetCell = { ...input.targetCell }
   let impactTargetId: string | undefined
   const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
@@ -928,12 +954,48 @@ export function moveDnd5eCoreSpellArea(input: {
       resolvedTargetCell = nextCell
     }
   }
-  const nextArea = {
+  const nextArea: Dnd5ePluginArea = {
     ...area,
-    cells: shiftedCells(area, resolvedTargetCell, input.map),
-    anchorCell: { ...resolvedTargetCell },
+    movement: { ...movement },
+    cells: dancingLightTargets
+      ? dancingLightTargets.map((cell) => ({ ...cell }))
+      : shiftedCells(area, resolvedTargetCell, input.map),
+    anchorCell: dancingLightTargets ? { ...dancingLightTargets[0] } : { ...resolvedTargetCell },
+    lightingAnchorCells: dancingLightTargets
+      ? dancingLightTargets.map((cell) => ({ ...cell }))
+      : area.lightingAnchorCells?.map((cell) => ({
+          col: cell.col + resolvedTargetCell.col - previous.col,
+          row: cell.row + resolvedTargetCell.row - previous.row,
+        })),
   }
   if (nextArea.cells.length < 1) return { ok: false, reason: 'invalid-target' }
+  if (nextArea.lightingAnchorCells?.some((cell) =>
+    cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows
+  )) return { ok: false, reason: 'invalid-target' }
+  if (area.coreSpellId === 'dancing-lights') {
+    const sourceToken = input.map.tokens.find((token) => token.id === area.sourceTokenId)
+    if (!sourceToken || !nextArea.lightingAnchorCells?.length) {
+      return { ok: false, reason: 'invalid-source' }
+    }
+    const sourceCell = tokenAnchorCellFromPixel(
+      sourceToken.x,
+      sourceToken.y,
+      sourceToken,
+      input.map,
+    )
+    if (nextArea.lightingAnchorCells.some((cell) =>
+      Math.max(Math.abs(cell.col - sourceCell.col), Math.abs(cell.row - sourceCell.row)) * feetPerCell > 120
+    )) return { ok: false, reason: 'target-out-of-range' }
+    if (
+      nextArea.lightingAnchorCells.length > 1 &&
+      nextArea.lightingAnchorCells.some((cell, index, lights) =>
+        !lights.some((other, otherIndex) =>
+          index !== otherIndex &&
+          Math.max(Math.abs(cell.col - other.col), Math.abs(cell.row - other.row)) * feetPerCell <= 20
+        )
+      )
+    ) return { ok: false, reason: 'invalid-target' }
+  }
   const anchorPosition = anchorToken
     ? tokenCenterForAnchorCell(resolvedTargetCell, anchorToken, input.map)
     : undefined

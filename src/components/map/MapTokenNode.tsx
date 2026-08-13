@@ -929,6 +929,14 @@ export function TokenNode({
     node.position(animated ?? latestPositionRef.current)
   }, [movementAnimation])
 
+  useLayoutEffect(() => {
+    if (!instantPosition) return
+    const node = groupRef.current
+    if (!node) return
+    cancelPositionAnimation()
+    node.position({ x: token.x, y: token.y })
+  }, [cancelPositionAnimation, instantPosition, token.x, token.y])
+
   useEffect(() => {
     const node = groupRef.current
     if (!node) return

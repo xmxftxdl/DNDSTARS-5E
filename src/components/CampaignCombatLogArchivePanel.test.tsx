@@ -46,4 +46,33 @@ describe('CampaignCombatLogArchivePanel', () => {
     expect(html).toContain('还没有已归档的战斗记录')
     expect(html).toContain('战斗结束后')
   })
+
+  it('shows at most the five most recent archived combats', () => {
+    const sessions = Array.from({ length: 7 }, (_, index) => archiveCombatStatisticsLog(
+      createCombatStatisticsSession({
+        combatId: `combat-${index + 1}`,
+        mapId: `map-${index + 1}`,
+        now: index + 1,
+      }),
+      {
+        combatId: `combat-${index + 1}`,
+        mapId: `map-${index + 1}`,
+        mapName: `Archive ${index + 1}`,
+        endedAt: index + 1,
+        lastRound: 1,
+        entries: [{ id: 1, round: 1, text: 'Entry', kind: 'system', time: '10:00' }],
+      },
+    ))
+
+    const html = renderToStaticMarkup(createElement(CampaignCombatLogArchiveView, {
+      sessions,
+      hydrated: true,
+      maps: [],
+    }))
+
+    expect(html).toContain('Archive 7')
+    expect(html).toContain('Archive 3')
+    expect(html).not.toContain('Archive 2')
+    expect(html).not.toContain('Archive 1')
+  })
 })

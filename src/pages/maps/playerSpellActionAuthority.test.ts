@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { resolvePlayerSpellActionSubmission } from './playerSpellActionAuthority'
+import {
+  playerSpellTargetingMatchesAuthority,
+  resolvePlayerSpellActionSubmission,
+} from './playerSpellActionAuthority'
 
 const hero = { id: 'hero', currentHp: 10 } as Character
 const other = { id: 'other', currentHp: 10 } as Character
@@ -54,5 +57,41 @@ describe('resolvePlayerSpellActionSubmission', () => {
     expect(resolvePlayerSpellActionSubmission(input({ authorityReady: false }))).toBeUndefined()
     expect(resolvePlayerSpellActionSubmission(input({ combatActiveSnapshot: true }))).toBeUndefined()
     expect(resolvePlayerSpellActionSubmission(input({ combatFlowPaused: true }))).toBeUndefined()
+  })
+})
+
+describe('playerSpellTargetingMatchesAuthority', () => {
+  it('keeps owned spell targeting outside combat', () => {
+    expect(playerSpellTargetingMatchesAuthority({
+      combatActive: false,
+      targetingCharacterId: hero.id,
+      playerCharacterId: hero.id,
+    })).toBe(true)
+  })
+
+  it('keeps targeting only for the owned live initiative actor in combat', () => {
+    expect(playerSpellTargetingMatchesAuthority({
+      combatActive: true,
+      targetingCharacterId: hero.id,
+      playerCharacterId: hero.id,
+      turnCharacterId: hero.id,
+      currentInitiativeToken: heroToken,
+    })).toBe(true)
+
+    expect(playerSpellTargetingMatchesAuthority({
+      combatActive: true,
+      targetingCharacterId: hero.id,
+      playerCharacterId: hero.id,
+      turnCharacterId: other.id,
+      currentInitiativeToken: { ...heroToken, type: 'enemy', characterId: undefined },
+    })).toBe(false)
+
+    expect(playerSpellTargetingMatchesAuthority({
+      combatActive: true,
+      targetingCharacterId: other.id,
+      playerCharacterId: hero.id,
+      turnCharacterId: other.id,
+      currentInitiativeToken: { ...heroToken, characterId: other.id },
+    })).toBe(false)
   })
 })

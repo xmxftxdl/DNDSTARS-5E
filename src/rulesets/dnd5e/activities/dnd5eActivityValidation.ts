@@ -370,6 +370,41 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       .includes(activity.legacySource.kind) ||
     !validId(activity.legacySource.id)
   )) errors.push('activity.legacySource is invalid')
+  if (activity.authorityBinding) {
+    const binding = activity.authorityBinding
+    const mechanicKinds = new Set([
+      'combat-maneuver',
+      'martial-spell-synergy',
+      'rage-feature',
+      'opening-attack',
+      'hidden-spell-save-disadvantage',
+      'utility-projection-control',
+      'utility-projection-attack-advantage',
+      'next-d20-advantage',
+      'post-d20-adjustment',
+      'd20-choice-reroll',
+      'post-spell-random-table',
+      'post-spell-random-table-choice',
+      'spell-damage-max-die-bonus',
+    ])
+    const expectedSourceId = `${binding.subclassId}:${binding.abilityId}`
+    const expectedActionId = `decl.${binding.subclassId}.${binding.abilityId}`
+    if (
+      binding.kind !== 'declarative-subclass-mechanic' ||
+      !validId(binding.subclassId) || !validId(binding.abilityId) ||
+      !mechanicKinds.has(binding.mechanicKind) ||
+      !['plugin-headless-action', 'headless-event-engine'].includes(binding.execution)
+    ) errors.push('activity.authorityBinding is invalid')
+    if (activity.legacySource?.kind !== 'subclass-ability' || activity.legacySource.id !== expectedSourceId) {
+      errors.push('activity.authorityBinding does not match legacySource')
+    }
+    if (binding.execution === 'plugin-headless-action' && binding.actionId !== expectedActionId) {
+      errors.push('activity.authorityBinding actionId is invalid')
+    }
+    if (binding.execution === 'headless-event-engine' && binding.actionId != null) {
+      errors.push('event-owned activity.authorityBinding cannot declare actionId')
+    }
+  }
   validateInvocation(activity.invocation, errors)
   validateActivation(activity.activation, errors)
   validateTarget(activity.target, errors)
@@ -397,7 +432,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
     if (outcome.when.kind === 'check' && !checkIds.has(outcome.when.checkId)) {
       errors.push(`${label}.when references an unknown check`)
     }
-    if (!outcome.operations.length) errors.push(`${label}.operations is empty`)
+    if (!outcome.operations.length && !activity.authorityBinding) errors.push(`${label}.operations is empty`)
     outcome.operations.forEach((operation, operationIndex) => {
       const operationLabel = `${label}.operations[${operationIndex}]`
       validateOperation(operation, operationLabel, errors)

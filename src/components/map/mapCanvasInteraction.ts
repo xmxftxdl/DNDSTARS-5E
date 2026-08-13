@@ -1,5 +1,5 @@
 import type { FogTool } from '../../lib/fogOfWar'
-import type { GridCell } from '../../lib/gridCombat'
+import { clampGridSize, type GridCell } from '../../lib/gridCombat'
 import type { MapGeometryTool } from '../../lib/mapGeometry'
 import type { MapTabletopTool } from '../../lib/mapTabletop'
 
@@ -70,6 +70,45 @@ export function mapCanvasGeometryRightButtonPanShouldStart(input: {
   geometryEditMode: boolean
 }): boolean {
   return input.geometryEditMode && input.button === 2
+}
+
+/** Grid calibration re-snaps authoritative Token coordinates on every step. */
+export function mapCanvasTokenUsesInstantPosition(input: {
+  gridAdjustMode: boolean
+  gridSizePreview: boolean
+  hasDragPreview: boolean
+}): boolean {
+  return input.gridAdjustMode || input.gridSizePreview || input.hasDragPreview
+}
+
+/**
+ * Wheel events can arrive faster than React can echo the controlled map prop.
+ * Always accumulate them from the imperative interaction value instead of the
+ * last rendered value, otherwise several notches collapse into one and appear
+ * to bounce backwards.
+ */
+export function mapCanvasGridSizeAfterWheel(input: {
+  currentGridSize: number
+  mapWidth: number
+  deltaY: number
+  shiftKey: boolean
+}): number {
+  const step = input.shiftKey ? 3 : 1
+  const delta = input.deltaY > 0 ? -step : step
+  return clampGridSize(input.currentGridSize + delta, { width: input.mapWidth })
+}
+
+/** Grid calibration hotkeys must not steal arrows from native form controls. */
+export function mapCanvasGridHotkeyUsesEditableTarget(target: EventTarget | null): boolean {
+  const candidate = target as {
+    tagName?: string
+    isContentEditable?: boolean
+  } | null
+  const tagName = candidate?.tagName?.toLowerCase()
+  return candidate?.isContentEditable === true ||
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    tagName === 'select'
 }
 
 export function mapCanvasStageCanPan(input: {

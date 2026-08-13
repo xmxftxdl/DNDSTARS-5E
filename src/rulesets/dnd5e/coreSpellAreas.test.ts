@@ -294,6 +294,79 @@ describe('core spell persistent area declarations', () => {
     })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
   })
 
+  it('moves Dancing Lights origins independently and preserves their formation rules', () => {
+    const dancingLights = getDnd5eCoreSpellAreaDeclaration('dancing-lights')
+    expect(dancingLights).toBeDefined()
+    if (!dancingLights) return
+    const base = { ...map(), width: 1_500 }
+    const origins = [
+      { col: 2, row: 1 },
+      { col: 3, row: 1 },
+      { col: 4, row: 1 },
+      { col: 5, row: 1 },
+    ]
+    const area = createDnd5eCoreSpellArea({
+      declaration: dancingLights,
+      actionId: 'cast-dancing-lights',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 0,
+      sourceSaveDc: 13,
+      round: 1,
+      cells: origins,
+      anchorCell: origins[0],
+      lightingAnchorCells: origins,
+    })
+    const placed = { ...base, dnd5ePluginAreas: [{ ...area, movement: undefined }] }
+    const destinations = [
+      { col: 2, row: 2 },
+      { col: 3, row: 2 },
+      { col: 4, row: 2 },
+      { col: 5, row: 2 },
+    ]
+    const moved = moveDnd5eCoreSpellArea({
+      map: placed,
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: destinations[0],
+      targetCells: destinations,
+    })
+    expect(moved).toMatchObject({
+      ok: true,
+      distanceFeet: 5,
+      area: {
+        anchorCell: destinations[0],
+        cells: destinations,
+        lightingAnchorCells: destinations,
+        movement: { economy: 'bonus-action', maximumFeet: 60 },
+      },
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: { ...base, dnd5ePluginAreas: [area] },
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 2, row: 2 },
+      targetCells: [
+        { col: 2, row: 2 },
+        { col: 3, row: 2 },
+        { col: 4, row: 2 },
+        { col: 10, row: 2 },
+      ],
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(moveDnd5eCoreSpellArea({
+      map: { ...base, dnd5ePluginAreas: [area] },
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 15, row: 1 },
+      targetCells: [
+        { col: 15, row: 1 },
+        { col: 16, row: 1 },
+        { col: 17, row: 1 },
+        { col: 18, row: 1 },
+      ],
+    })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
+  })
+
   it('rebases a movable fixed volume on the destination terrain surface', () => {
     const base = map()
     const moonbeam = getDnd5eCoreSpellAreaDeclaration('moonbeam')

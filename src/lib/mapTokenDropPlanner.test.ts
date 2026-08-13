@@ -113,4 +113,18 @@ describe('map Token drop planner', () => {
       position: { x: 125, y: 25 },
     })
   })
+
+  it('keeps a player free-positioned when map snapping is disabled', () => {
+    const actor = token()
+    expect(planMapTokenDrop({
+      token: actor,
+      map: { ...map([actor]), snapMonstersToGrid: false },
+      x: 132,
+      y: 37,
+      validateMovementLocally: false,
+    })).toMatchObject({
+      status: 'allowed',
+      position: { x: 132, y: 37 },
+    })
+  })
 })

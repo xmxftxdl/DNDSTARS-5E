@@ -3,7 +3,6 @@ import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arr
 import Konva from 'konva'
 import { getImage } from '../../lib/imageStore'
 import {
-  clampGridSize,
   DEFAULT_GRID_COLOR,
   DEFAULT_GRID_OPACITY,
   gridStrokeRgba,
@@ -113,7 +112,10 @@ import {
   mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
   mapCanvasGeometryRightButtonPanShouldStart,
+  mapCanvasGridHotkeyUsesEditableTarget,
+  mapCanvasGridSizeAfterWheel,
   mapCanvasStageCanPan,
+  mapCanvasTokenUsesInstantPosition,
   mapCanvasTokenClickAction,
 } from './mapCanvasInteraction'
 
@@ -441,6 +443,8 @@ export default function MapCanvas({
   // whole canvas on every frame. Keep its latest coordinate outside React so
   // an async commit cannot release detached layers using a stale render.
   const tokenDragVisualPositionsRef = useRef<Record<string, Point>>({})
+  const pendingTokenVisionPreviewRef = useRef<Record<string, Point>>({})
+  const tokenVisionPreviewFrameRef = useRef<number | null>(null)
   const tokenVisualNodesRef = useRef(new Map<string, Set<TokenVisualNodeLike>>())
   const tokenBorderFlowLayerRef = useRef<Konva.Layer>(null)
   const tokenBorderFlowAnimationEntriesRef = useRef(
@@ -520,6 +524,11 @@ export default function MapCanvas({
     pointerId: number
     button: 0 | 2
   } | null>(null)
+  const gridSizeInteractionRef = useRef(map.gridSize)
+  const gridOffsetInteractionRef = useRef({
+    x: map.gridOffsetX,
+    y: map.gridOffsetY,
+  })
   const [geometryViewportPanActive, setGeometryViewportPanActive] = useState(false)
   const tabletopDragStartRef = useRef<MapTabletopPoint | null>(null)
   const [tabletopDraft, setTabletopDraft] = useState<{
@@ -530,6 +539,12 @@ export default function MapCanvas({
   const [tabletopNow, setTabletopNow] = useState(() => Date.now())
   const appliedFocusIdRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
+
+  useEffect(() => () => {
+    if (tokenVisionPreviewFrameRef.current != null) {
+      window.cancelAnimationFrame(tokenVisionPreviewFrameRef.current)
+    }
+  }, [])
 
   const handleTokenStatusTooltipChange = useCallback<TokenStatusTooltipChange>((tooltip) => {
     if (!tooltip) {
@@ -753,6 +768,9 @@ export default function MapCanvas({
     }
     return token
   }
+  const visibilityMap = Object.keys(dragPreviewPositions).length > 0
+    ? { ...map, tokens: map.tokens.map(displayToken) }
+    : map
 
   const canDragToken = (token: Token): boolean =>
     canDragMapToken({
@@ -804,6 +822,24 @@ export default function MapCanvas({
       effectTokenDragPositionsRef.current[token.id] = { x, y }
       syncEffectTokenAreaOverlayPosition(token.id, x, y)
     }
+    if (visionSourceTokenIds.includes(token.id)) {
+      pendingTokenVisionPreviewRef.current[token.id] = { x, y }
+      if (tokenVisionPreviewFrameRef.current == null) {
+        tokenVisionPreviewFrameRef.current = window.requestAnimationFrame(() => {
+          tokenVisionPreviewFrameRef.current = null
+          const previews = pendingTokenVisionPreviewRef.current
+          pendingTokenVisionPreviewRef.current = {}
+          if (Object.keys(previews).length === 0) return
+          setTokenDragVisualState((current) => ({
+            ...current,
+            previews: {
+              ...current.previews,
+              ...previews,
+            },
+          }))
+        })
+      }
+    }
   }
 
   const releaseTokenDragPreview = useCallback((tokenId: string, finalPosition?: Point) => {
@@ -821,6 +857,14 @@ export default function MapCanvas({
       setTokenVisualPositionLocked(tokenId, false)
     }
     delete tokenDragVisualPositionsRef.current[tokenId]
+    delete pendingTokenVisionPreviewRef.current[tokenId]
+    if (
+      tokenVisionPreviewFrameRef.current != null &&
+      Object.keys(pendingTokenVisionPreviewRef.current).length === 0
+    ) {
+      window.cancelAnimationFrame(tokenVisionPreviewFrameRef.current)
+      tokenVisionPreviewFrameRef.current = null
+    }
     delete effectTokenDragPositionsRef.current[tokenId]
     setTokenDragVisualState((current) => {
       if (!current.previews[tokenId]) return current
@@ -1032,9 +1076,10 @@ export default function MapCanvas({
   useEffect(() => {
     if (!gridAdjustMode || !onGridOffsetChange) return
     const onKey = (e: KeyboardEvent) => {
+      if (mapCanvasGridHotkeyUsesEditableTarget(e.target)) return
       const step = e.shiftKey ? 5 : 1
-      let ox = map.gridOffsetX
-      let oy = map.gridOffsetY
+      let ox = gridOffsetInteractionRef.current.x
+      let oy = gridOffsetInteractionRef.current.y
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         ox -= step
@@ -1052,11 +1097,20 @@ export default function MapCanvas({
       } else {
         return
       }
+      gridOffsetInteractionRef.current = { x: ox, y: oy }
       onGridOffsetChange(ox, oy)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [gridAdjustMode, map.gridOffsetX, map.gridOffsetY, onGridOffsetChange])
+
+  useLayoutEffect(() => {
+    gridSizeInteractionRef.current = map.gridSize
+    gridOffsetInteractionRef.current = {
+      x: map.gridOffsetX,
+      y: map.gridOffsetY,
+    }
+  }, [map.gridOffsetX, map.gridOffsetY, map.gridSize])
 
   // Grid alignment: drag offset with global mouse-up listener.
   useEffect(() => {
@@ -1677,9 +1731,14 @@ export default function MapCanvas({
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     if (gridAdjustMode && onGridSizeChange) {
       e.evt.preventDefault()
-      const step = e.evt.shiftKey ? 3 : 1
-      const delta = e.evt.deltaY > 0 ? -step : step
-      onGridSizeChange(clampGridSize(map.gridSize + delta, map))
+      const nextGridSize = mapCanvasGridSizeAfterWheel({
+        currentGridSize: gridSizeInteractionRef.current,
+        mapWidth: map.width,
+        deltaY: e.evt.deltaY,
+        shiftKey: e.evt.shiftKey,
+      })
+      gridSizeInteractionRef.current = nextGridSize
+      onGridSizeChange(nextGridSize)
       return
     }
     e.evt.preventDefault()
@@ -2241,8 +2300,8 @@ export default function MapCanvas({
             gridDragRef.current = {
               startX: p.x,
               startY: p.y,
-              origOx: map.gridOffsetX,
-              origOy: map.gridOffsetY,
+              origOx: gridOffsetInteractionRef.current.x,
+              origOy: gridOffsetInteractionRef.current.y,
             }
             return
           }
@@ -2275,10 +2334,12 @@ export default function MapCanvas({
             const p = relativePoint(e.target.getStage())
             if (!p) return
             const d = gridDragRef.current
-            onGridOffsetChange(
-              Math.round(d.origOx + (p.x - d.startX)),
-              Math.round(d.origOy + (p.y - d.startY)),
-            )
+            const nextOffset = {
+              x: Math.round(d.origOx + (p.x - d.startX)),
+              y: Math.round(d.origOy + (p.y - d.startY)),
+            }
+            gridOffsetInteractionRef.current = nextOffset
+            onGridOffsetChange(nextOffset.x, nextOffset.y)
             return
           }
           if (measureMode && pending) {
@@ -2572,7 +2633,11 @@ export default function MapCanvas({
                 ) === 'consume-area-click') return
                 onSelectToken(t.id)
               }}
-              instantPosition={!!dragPreviewPositions[t.id]}
+              instantPosition={mapCanvasTokenUsesInstantPosition({
+                gridAdjustMode,
+                gridSizePreview,
+                hasDragPreview: !!dragPreviewPositions[t.id],
+              })}
               registerPositionNode={registerTokenVisualNode}
               onDragStart={(x, y) => beginTokenDrag(t, x, y)}
               onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
@@ -2724,7 +2789,11 @@ export default function MapCanvas({
                   if (deleteSelectMode) return
                   onSelectToken(t.id)
                 }}
-                instantPosition={!!dragPreviewPositions[t.id]}
+                instantPosition={mapCanvasTokenUsesInstantPosition({
+                  gridAdjustMode,
+                  gridSizePreview,
+                  hasDragPreview: !!dragPreviewPositions[t.id],
+                })}
                 registerPositionNode={registerTokenVisualNode}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
                 onDragCancel={() => cancelTokenDrag(t.id)}
@@ -2768,7 +2837,11 @@ export default function MapCanvas({
                   if (deleteSelectMode) return
                   onSelectToken(t.id)
                 }}
-                instantPosition={!!dragPreviewPositions[t.id]}
+                instantPosition={mapCanvasTokenUsesInstantPosition({
+                  gridAdjustMode,
+                  gridSizePreview,
+                  hasDragPreview: !!dragPreviewPositions[t.id],
+                })}
                 registerPositionNode={registerTokenVisualNode}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
                 onDragCancel={() => cancelTokenDrag(t.id)}
@@ -2828,7 +2901,7 @@ export default function MapCanvas({
           </Group>
         </Layer>
         <Layer name="map-world-overlay-layer">
-          <LightingLayer map={map} geometry={geometry} worldMinute={worldMinute} isDM={isDM} visionSourceTokenIds={visionSourceTokenIds} />
+          <LightingLayer map={visibilityMap} geometry={geometry} worldMinute={worldMinute} isDM={isDM} visionSourceTokenIds={visionSourceTokenIds} />
         {isDM && (
           <MapGeometryDiagnosticsLayer
             diagnostics={geometryDiagnostics}
@@ -2855,23 +2928,6 @@ export default function MapCanvas({
             onPointsChange={isDM ? onGeometryEntityPointsChange : undefined}
           />
           )}
-        {(!isDM || geometryPreviewAsPlayer || fogPreviewAsPlayer) && <PlayerVisibilityLayer
-          map={map}
-          geometry={geometry}
-          fog={fog}
-          sourceTokenIds={visionSourceTokenIds}
-          exploredPolygons={exploredVisionPolygons}
-          worldMinute={worldMinute}
-        />}
-        {isDM && !geometryPreviewAsPlayer && !fogPreviewAsPlayer && <FogOfWarLayer
-          map={map}
-          fog={fog}
-          isDM
-          previewAsPlayer={false}
-          draft={fogDraft}
-          polygonPoints={fogPolygonPoints}
-          inv={inv}
-        />}
         <Group listening={false}>
           {visibleProjectiles.map((projectile) => (
             <CombatProjectileEffect
@@ -2886,6 +2942,29 @@ export default function MapCanvas({
             />
           ))}
         </Group>
+        </Layer>
+        <Layer name="map-visibility-mask-layer" listening={false}>
+          {(!isDM || geometryPreviewAsPlayer || fogPreviewAsPlayer) && (
+            <PlayerVisibilityLayer
+              map={visibilityMap}
+              geometry={geometry}
+              fog={fog}
+              sourceTokenIds={visionSourceTokenIds}
+              exploredPolygons={exploredVisionPolygons}
+              worldMinute={worldMinute}
+            />
+          )}
+          {isDM && !geometryPreviewAsPlayer && !fogPreviewAsPlayer && (
+            <FogOfWarLayer
+              map={map}
+              fog={fog}
+              isDM
+              previewAsPlayer={false}
+              draft={fogDraft}
+              polygonPoints={fogPolygonPoints}
+              inv={inv}
+            />
+          )}
         </Layer>
       </Stage> : null}
       {tokenStatusTooltip ? (

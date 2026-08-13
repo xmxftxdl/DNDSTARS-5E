@@ -61,6 +61,7 @@ export function prepareDnd5ePersistentAreaTrigger(input: {
     effectVisible: true,
     sourceCreatureType: source.creatureType,
     sourceIsSpell: !!coreSpell,
+    sourceIsMagical: input.candidate.trigger.savingThrow?.magical === true,
   } as const
   const skipSaveCondition = input.candidate.trigger.skipSaveWhenSourceConditionActive
   const hasSourceCondition = skipSaveCondition

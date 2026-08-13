@@ -165,7 +165,8 @@ export function prepareDnd5ePlayerBasicAction(input: {
   }
   const replacesAttack = payload.kind === 'grapple' || payload.kind === 'shove'
   const freeAction = payload.kind === 'release-grapple'
-  const spendsBonusAction = payload.kind === 'other-bonus-action'
+  const spendsBonusAction = payload.kind === 'other-bonus-action' ||
+    (payload.kind === 'dash' && payload.sourceSpellId === 'expeditious-retreat')
   const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
   const attacksAllowed = attacksPerAction * Math.max(1, input.turnEconomy.action.max)
   const attackNumber = replacesAttack ? input.turnEconomy.attacksUsed + 1 : undefined
@@ -189,6 +190,15 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const actorIndex = snapshot.state.initiativeOrder.indexOf(token.id)
   const combatant = snapshot.state.combatants[token.id]
   if (actorIndex < 0 || !combatant) return { ok: false, reason: 'combatant-missing' }
+  if (payload.kind === 'dash' && payload.sourceSpellId === 'expeditious-retreat' && (
+    actor.dnd5eCombatState?.concentrationSpellId !== 'expeditious-retreat' ||
+    !actor.dnd5eCombatState?.activeEffects?.some((effect) =>
+      effect.source.kind === 'spell' &&
+      effect.source.rulesId === 'expeditious-retreat' &&
+      effect.definitionId === 'srd-5.1:spell:expeditious-retreat' &&
+      effect.duration.type === 'concentration'
+    )
+  )) return { ok: false, reason: 'invalid-action' }
   const targetCombatant = targetTokenId ? snapshot.state.combatants[targetTokenId] : undefined
   const selectedGrapple = payload.kind === 'escape-grapple' && targetCombatant
     ? dnd5eEscapableGrapples(combatant.classState.activeEffects).find((grapple) =>
@@ -311,7 +321,9 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   const payload = prepared.payload
   let action: Dnd5eAction
   switch (payload.kind) {
-    case 'dash': action = { type: 'dash', actorId: prepared.actorTokenId }; break
+    case 'dash': action = {
+      type: 'dash', actorId: prepared.actorTokenId, sourceSpellId: payload.sourceSpellId,
+    }; break
     case 'hide': action = {
       type: 'hide',
       actorId: prepared.actorTokenId,

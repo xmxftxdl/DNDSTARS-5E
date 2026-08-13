@@ -8,8 +8,10 @@ import {
   tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe } from '../../lib/skillTargeting'
 import {
   mapGeometryCanSeeToken,
+  mapGeometryLineOfEffectBlocked,
   mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
@@ -37,6 +39,9 @@ import {
   type Dnd5eMonsterAction,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
+import { createDnd5eMonsterPersistentArea } from './monsterPersistentAreas'
+import { resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
+import { dnd5eTokenToPointDistanceFeet } from './verticalCombatGeometry'
 
 export type Dnd5eMonsterSpecialActionRejectReason =
   | 'invalid-actor'
@@ -59,6 +64,7 @@ export interface PreparedDnd5eMonsterSpecialAction {
   action: Dnd5eMonsterAction
   legendary: boolean
   teleportDestination?: Dnd5eSpellTeleportDestination
+  persistentArea?: NonNullable<BattleMap['dnd5ePluginAreas']>[number]
 }
 
 function applyTurnEconomy(
@@ -127,7 +133,9 @@ export function prepareDnd5eMonsterSpecialAction(input: {
     !action ||
     action.kind !== 'other' ||
     dnd5eMonsterActionAutomation(action) !== 'headless' ||
-    (action.rule?.kind !== 'teleport' && action.rule?.kind !== 'invisibility')
+    action.rule?.kind !== 'teleport' &&
+    action.rule?.kind !== 'invisibility' &&
+    action.rule?.kind !== 'persistent-area'
   ) return { ok: false, reason: 'invalid-action' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -145,6 +153,7 @@ export function prepareDnd5eMonsterSpecialAction(input: {
   }
 
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
+  let persistentArea: PreparedDnd5eMonsterSpecialAction['persistentArea']
   if (action.rule.kind === 'teleport') {
     const cell = input.destinationCell
     const columns = Math.max(
@@ -220,6 +229,86 @@ export function prepareDnd5eMonsterSpecialAction(input: {
       toElevationFeet: destinationElevationFeet,
       toGroundElevationFeet: mapGeometryTerrainElevationAtPoint(geometry, to),
     }
+  } else if (action.rule.kind === 'persistent-area') {
+    const geometry = mapGeometryRuntimeForMap(input.map.id)
+    if (
+      action.rule.requiredEnvironment != null &&
+      geometry?.environment !== action.rule.requiredEnvironment
+    ) return { ok: false, reason: 'invalid-destination' }
+    const sourceCell = tokenAnchorCellFromPixel(
+      actorToken.x,
+      actorToken.y,
+      actorToken,
+      input.map,
+    )
+    const anchorCell = action.rule.area.origin === 'self'
+      ? sourceCell
+      : input.destinationCell
+    if (!anchorCell || !Number.isInteger(anchorCell.col) || !Number.isInteger(anchorCell.row)) {
+      return { ok: false, reason: 'invalid-destination' }
+    }
+    const columns = Math.max(
+      1,
+      Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)),
+    )
+    const rows = Math.max(
+      1,
+      Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)),
+    )
+    if (
+      anchorCell.col < 0 || anchorCell.row < 0 ||
+      anchorCell.col >= columns || anchorCell.row >= rows ||
+      !canPlaceAoe(action.rule.area, sourceCell, anchorCell)
+    ) return { ok: false, reason: 'destination-out-of-range' }
+    const anchorPoint = tokenCenterForAnchorCell(anchorCell, { size: 1 }, input.map)
+    const baseElevationFeet = input.destinationElevationFeet ?? (
+      action.rule.area.origin === 'self'
+        ? mapGeometryTokenElevation(geometry, actorToken)
+        : mapGeometryTerrainElevationAtPoint(geometry, anchorPoint)
+    )
+    if (!Number.isFinite(baseElevationFeet) || baseElevationFeet < -1_000 || baseElevationFeet > 10_000) {
+      return { ok: false, reason: 'invalid-destination' }
+    }
+    if (action.rule.area.origin === 'point') {
+      const placeRangeFeet = action.rule.area.shape === 'circle' || action.rule.area.shape === 'rect'
+        ? action.rule.area.placeRangeFeet
+        : undefined
+      if (
+        placeRangeFeet != null &&
+        dnd5eTokenToPointDistanceFeet({
+          geometry,
+          token: actorToken,
+          pointElevationFeet: baseElevationFeet,
+          horizontalDistanceFeet: Math.max(
+            Math.abs(anchorCell.col - sourceCell.col),
+            Math.abs(anchorCell.row - sourceCell.row),
+          ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL),
+        }) > placeRangeFeet + 1e-4
+      ) return { ok: false, reason: 'destination-out-of-range' }
+      if (mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: actorToken,
+        to: anchorPoint,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
+        toElevationFeet: baseElevationFeet,
+      })) return { ok: false, reason: 'destination-blocked' }
+    }
+    const orientFrom = aoeOrientFromCell(action.rule.area, sourceCell, anchorCell)
+    const cells = cellsForAoe(action.rule.area, orientFrom, anchorCell).filter((cell) =>
+      cell.col >= 0 && cell.row >= 0 && cell.col < columns && cell.row < rows)
+    if (cells.length < 1) return { ok: false, reason: 'invalid-destination' }
+    persistentArea = createDnd5eMonsterPersistentArea({
+      combatId: snapshot.state.combatId,
+      round: snapshot.state.round,
+      sourceToken: actorToken,
+      monster,
+      action: action as Dnd5eMonsterAction & {
+        rule: Extract<NonNullable<Dnd5eMonsterAction['rule']>, { kind: 'persistent-area' }>
+      },
+      cells,
+      anchorCell,
+      baseElevationFeet,
+    })
   } else if (input.destinationCell != null || input.destinationElevationFeet != null) {
     return { ok: false, reason: 'invalid-destination' }
   }
@@ -236,6 +325,7 @@ export function prepareDnd5eMonsterSpecialAction(input: {
       action,
       legendary,
       teleportDestination,
+      persistentArea,
     },
   }
 }
@@ -260,13 +350,29 @@ export function resolvePreparedDnd5eMonsterSpecialAction(input: {
   } as const
   const preview = previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
   const result = resolveDnd5eHeadlessAction(prepared.state, action)
+  let applicationMap = prepared.map
+  if (result.ok && prepared.persistentArea) {
+    const featureId = prepared.persistentArea.featureId
+    const retained = (prepared.map.dnd5ePluginAreas ?? []).filter((candidate) =>
+      !(
+        candidate.sourceTokenId === prepared.actorToken.id &&
+        (candidate.featureId === featureId || candidate.concentrationId != null)
+      ))
+    applicationMap = {
+      ...prepared.map,
+      dnd5ePluginAreas: resolveDnd5eCoreSpellLightingConflicts(
+        retained,
+        prepared.persistentArea,
+      ).areas,
+    }
+  }
   return {
     result,
     airborneFalls: preview.ok ? preview.falls : undefined,
     application: result.ok
       ? planDnd5eMapResultApplication({
           state: result.state,
-          map: prepared.map,
+          map: applicationMap,
           characters: prepared.characters,
           characterIdByCombatantId: prepared.characterIdByCombatantId,
           events: [...result.events],

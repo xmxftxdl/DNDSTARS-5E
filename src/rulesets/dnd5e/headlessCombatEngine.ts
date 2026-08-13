@@ -1,6 +1,6 @@
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import { isMovementLocked } from '../../lib/combatStatus'
-import type { Dnd5eAbilityCheckPayload, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
+import type { Dnd5eAbilityCheckPayload, Dnd5eSpellMetamagicPayload, Dnd5eSustainedSpellControlId } from '../../lib/sharedCombatTypes'
 import type { Dnd5eInventoryHeadlessEffectSnapshot } from '../../types/inventory'
 import {
   resolveDnd5ePluginFeatureDamageReduction,
@@ -27,6 +27,7 @@ import {
   dnd5eDeclarativeResourceKey,
   dnd5ePluginHeadlessActionDefinition,
   dnd5ePluginResourceDefinition,
+  dnd5ePluginSubclassSpellIds,
   registeredDnd5ePluginFeatures,
   dnd5eDeclarativeAttackIntentDefinition,
   dnd5eDeclarativeAttackIntentRollPlan,
@@ -2190,7 +2191,7 @@ export type Dnd5eAction = (
   | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; movementCostIncludesDrag?: boolean; standFromProne?: boolean; carefulMovement?: boolean; traversalMode?: Dnd5eTraversalMode; toElevationFeet?: number; toGroundElevationFeet?: number; fallingDamageRolls?: readonly number[]; fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>> }
   | { type: 'move-persistent-area'; actorId: string; areaId: string; economy: 'action' | 'bonusAction' }
   | { type: 'item-area-trigger'; actorId: string; areaId: string; areaKind: 'ball-bearings' | 'caltrops' | 'hunting-trap'; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; damageRolls?: readonly number[] }
-  | { type: 'dash'; actorId: string }
+  | { type: 'dash'; actorId: string; sourceSpellId?: 'expeditious-retreat' }
   | { type: 'hide'; actorId: string; d20: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number }
   | { type: 'help'; actorId: string; targetId: string; helpKind: 'ability-check' | 'attack' }
   | { type: 'ready'; actorId: string; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetId?: string }
@@ -2244,7 +2245,7 @@ export type Dnd5eAction = (
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; racialInnate?: boolean; targetId: string; targetIds?: readonly string[]; blindTargetMiss?: boolean; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; enlargeReduceChoice?: 'enlarge' | 'reduce'; enhanceAbilityChoice?: 'bear-endurance' | 'bull-strength' | 'cat-grace' | 'eagle-splendor' | 'fox-cunning' | 'owl-wisdom'; sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'; sustainedEffectAreaId?: string; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
+  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; racialInnate?: boolean; targetId: string; targetIds?: readonly string[]; blindTargetMiss?: boolean; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; enlargeReduceChoice?: 'enlarge' | 'reduce'; enhanceAbilityChoice?: 'bear-endurance' | 'bull-strength' | 'cat-grace' | 'eagle-splendor' | 'fox-cunning' | 'owl-wisdom'; sustainedEffectAttack?: Dnd5eSustainedSpellControlId; sustainedEffectAreaId?: string; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
   | { type: 'hellish-rebuke'; actorId: string; targetId: string; racialInnate?: boolean; slotLevel: number; triggerDamageAmount: number; savingThrowD20: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; effectRolls: readonly number[] }
   | { type: 'dragonborn-breath'; actorId: string; resolution: Dnd5eMonsterAreaActionResolutionV1 }
   | { type: 'adjudicated-spell'; actorId: string; castingClassId?: Dnd5eClassId; spellId: string; spellName: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action'; effects: readonly Dnd5eAdjudicatedSpellEffect[]; concentrationRounds?: number; spellSchool?: 'abjuration' | 'conjuration' | 'divination' | 'enchantment' | 'evocation' | 'illusion' | 'necromancy' | 'transmutation'; sculptedTargetIds?: readonly string[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[] }
@@ -3320,6 +3321,9 @@ export function applyDnd5eStandardConditionEffect(
   })
   if (mutation.status === 'rejected-immune') return false
   commitDnd5eActiveEffects(target, mutation.effects)
+  if (input.modifiers?.preventReactions) {
+    target.turn = { ...target.turn, reactionAvailable: false }
+  }
   const persistedEffect = mutation.effects.find(
     (effect) => effect.stackingKey === incoming.stackingKey,
   )
@@ -11488,11 +11492,20 @@ function resolveSpellCast(
           selections['magical-secrets']?.includes(spell.id) ||
           selections['lore-additional-magical-secrets']?.includes(spell.id)
         )
-        return (spell.classes.includes(source.spellListClassId) || bardMagicalSecret) && (selections[selectionKey]?.includes(spell.id) ||
+        const subclassSpell = dnd5ePluginSubclassSpellIds(
+          actor.subclassIds?.[classId],
+          dnd5eCombatantClassLevel(actor, classId),
+        ).includes(spell.id)
+        return (spell.classes.includes(source.spellListClassId) || bardMagicalSecret || subclassSpell) && (selections[selectionKey]?.includes(spell.id) ||
           (classId === 'wizard' && (
             selections['spell-mastery-1']?.includes(spell.id) || selections['spell-mastery-2']?.includes(spell.id) || selections['signature-spells']?.includes(spell.id)
           )) ||
-          (classId === 'warlock' && selections[`mystic-arcanum-${spell.level}`]?.includes(spell.id)) || bardMagicalSecret)
+          (classId === 'warlock' && selections[`mystic-arcanum-${spell.level}`]?.includes(spell.id)) || bardMagicalSecret ||
+          dnd5ePluginSubclassSpellIds(
+            actor.subclassIds?.[classId],
+            dnd5eCombatantClassLevel(actor, classId),
+            'always-prepared',
+          ).includes(spell.id))
       })
     : undefined
   const spellcastingClassId = spellcastingSource?.classId
@@ -11648,7 +11661,9 @@ function resolveSpellCast(
         effect.source.rulesId === spell.id &&
         effect.definitionId === `srd-5.1:spell:${spell.id}` &&
         (sustainedAttack.origin === 'caster' || sustainedAttack.origin === 'persistent-area'
-          ? effect.duration.type === 'concentration' && effect.duration.sourceActorId === actor.id
+          ? spell.concentration
+            ? effect.duration.type === 'concentration' && effect.duration.sourceActorId === actor.id
+            : effect.duration.type !== 'concentration'
           : effect.duration.type === 'rounds' && effect.stackingKey === sustainedEffectAreaId),
       )
     : undefined
@@ -11658,7 +11673,8 @@ function resolveSpellCast(
       !sustainedEffect || !Number.isInteger(sustainedEffect.potency) ||
       sustainedEffect.potency !== action.slotLevel ||
       action.slotLevel < spell.level || action.slotLevel > 9 ||
-      ((sustainedAttack.origin === 'caster' || sustainedAttack.origin === 'persistent-area') &&
+      (spell.concentration &&
+        (sustainedAttack.origin === 'caster' || sustainedAttack.origin === 'persistent-area') &&
         actor.classState.concentrationSpellId !== spell.id) ||
       (!sustainedSavingThrow && action.targetIds != null && (
         action.targetIds.length !== 1 || action.targetId !== action.targetIds[0]
@@ -11679,7 +11695,9 @@ function resolveSpellCast(
       action.healingAllocations?.length || action.dispelMagicChecks?.length ||
       action.additionalEffectRolls?.length || action.delayedEffectRolls?.length ||
       action.sculptedTargetIds?.length || action.projectileTargetIds?.length ||
-      action.targetAttacks?.length
+      action.targetAttacks?.length ||
+      (sustainedAttack.lockToConcentrationTarget &&
+        !actor.classState.concentrationTargetIds?.includes(action.targetId))
     ))
   ) return fail(state, events, 'invalid-class-feature')
   if (
@@ -12085,6 +12103,45 @@ function resolveSpellCast(
         [action.spellDamageMaxDieBonus.featureId]: turnKey,
       }
     }
+    if (
+      !sustainedAttack &&
+      spell.sustainedAttack?.origin === 'caster' &&
+      spell.effect !== 'active-effect'
+    ) {
+      if (spell.concentration && actor.classState.concentrationSpellId !== spell.id) {
+        beginDnd5eConcentration(
+          state,
+          actor,
+          spell.id,
+          requestedTargetIds,
+          concentrationDurationRounds,
+          events,
+          action.slotLevel,
+        )
+      }
+      applyDnd5eMechanicalStatusEffect(actor, actor, {
+        definitionId: `srd-5.1:spell:${spell.id}`,
+        rulesId: spell.id,
+        label: `${spell.name}：可使用后续动作`,
+        duration: spell.concentration
+          ? {
+              type: 'concentration',
+              sourceActorId: actor.id,
+              concentrationId: spell.id,
+              remainingRounds: concentrationDurationRounds,
+            }
+          : {
+              type: 'rounds',
+              remainingRounds: Math.max(1, spell.effectDurationRounds ?? 1),
+              tickOn: 'target-turn-end',
+            },
+        appliedTurnKey: turnKey,
+        spellLevel: action.slotLevel,
+        potency: action.slotLevel,
+        stackingPolicy: 'replace',
+        stackingKey: `sustained-spell:${spell.id}`,
+      }, events)
+    }
     if (!sustainedAttack && spell.sustainedAttack?.origin === 'persistent-area') {
       if (actor.classState.concentrationSpellId !== spell.id) {
         beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events, action.slotLevel)
@@ -12153,6 +12210,19 @@ function resolveSpellCast(
         })
         applyDamage(actor, backlash.total, false, events, actor, state, ['force'])
       }
+    }
+    if (sustainedAttack?.endsAfterUse && sustainedEffect) {
+      commitDnd5eActiveEffects(
+        actor,
+        reconciledDnd5eActiveEffects(actor).filter((effect) => effect.id !== sustainedEffect.id),
+      )
+      events.push({
+        type: 'active-effect-removed',
+        targetId: actor.id,
+        effectId: sustainedEffect.id,
+        definitionId: sustainedEffect.definitionId,
+        reason: 'consumed',
+      })
     }
     return { ok: true, state, events }
   }
@@ -12726,6 +12796,8 @@ function resolveSpellCast(
             'owl-wisdom': '强化属性：枭之睿',
           } as const)[action.enhanceAbilityChoice ?? 'bear-endurance'],
           'flame-blade': '火焰刀：可用动作进行近战法术攻击',
+          'expeditious-retreat': '脚底抹油：可用附赠动作疾走',
+          'produce-flame': '燃火术：可用动作投掷手中火焰',
           shillelagh: '橡棍术：短棒或长棍的伤害骰变为d8，并可使用施法属性攻击',
           'magic-weapon': `魔化武器：命中与伤害+${action.slotLevel >= 6 ? 3 : action.slotLevel >= 4 ? 2 : 1}`,
           sanctuary: '庇护术：成为攻击或有害法术目标前，攻击者须通过感知豁免',
@@ -12792,7 +12864,9 @@ function resolveSpellCast(
           conditionImmunities: spell.appliedEffect === 'heroism' ? ['frightened'] : undefined,
           potency: spell.appliedEffect === 'heroism'
             ? Math.max(0, rules.abilityModifier(actor.abilities[spellcasting.ability]))
-            : spell.appliedEffect === 'flame-blade'
+            : spell.appliedEffect === 'flame-blade' ||
+              spell.appliedEffect === 'expeditious-retreat' ||
+              spell.appliedEffect === 'produce-flame'
               ? action.slotLevel
               : spell.appliedEffect === 'sanctuary'
                 ? action.spellSaveDc ??
@@ -12936,7 +13010,7 @@ function resolveSpellCast(
     (action.higherSlotDamageType != null && !higherSlotDamageChoices.includes(action.higherSlotDamageType))
   ) return fail(state, events, 'invalid-class-feature')
   const damageDiceCounts = sustainedAttack || spell.sustainedAttack?.immediateAttack
-    ? [dnd5eSustainedSpellAttackDiceCount(spell, action.slotLevel)]
+    ? [dnd5eSustainedSpellAttackDiceCount(spell, action.slotLevel, actor.level)]
     : dnd5eSpellDamageDiceCounts(
         spell,
         actor.level,
@@ -13393,6 +13467,21 @@ function resolveSpellCast(
         condition: 'blinded',
         duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
         repeatSave: { ability: 'con', dc, timing: 'target-turn-end', onSuccess: 'remove' },
+      }, events)
+      return
+    }
+    if (spell.onFailedSaveEffect === 'sunbeam-blindness') {
+      applyDnd5eStandardConditionEffect(affectedTarget, actor, {
+        id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:blinded`, actor.id, affectedTarget.id),
+        rulesId: spell.id,
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
+        condition: 'blinded',
+        duration: {
+          type: 'until-turn-boundary',
+          boundary: 'source-turn-start',
+          appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        },
       }, events)
       return
     }
@@ -13956,7 +14045,7 @@ function resolveSpellCast(
           if (spell.id === 'blight' && isPlantTarget(affectedTarget!)) {
             saveMode = dnd5eHeightenedSavingThrowMode(saveMode, true)
           }
-          if (spell.id === 'sunburst' && dnd5eSunburstSavingThrowDisadvantage(affectedTarget!)) {
+          if ((spell.id === 'sunburst' || spell.id === 'sunbeam') && dnd5eSunburstSavingThrowDisadvantage(affectedTarget!)) {
             saveMode = imposeDnd5eDisadvantage(saveMode)
           }
           saveMode = consumeDnd5eSpellSavePressure(actor, affectedTarget!, saveMode, events)
@@ -14071,7 +14160,7 @@ function resolveSpellCast(
       if (spell.id === 'blight' && isPlantTarget(target)) {
         saveMode = dnd5eHeightenedSavingThrowMode(saveMode, true)
       }
-      if (spell.id === 'sunburst' && dnd5eSunburstSavingThrowDisadvantage(target)) {
+      if ((spell.id === 'sunburst' || spell.id === 'sunbeam') && dnd5eSunburstSavingThrowDisadvantage(target)) {
         saveMode = imposeDnd5eDisadvantage(saveMode)
       }
       saveMode = consumeDnd5eSpellSavePressure(actor, target, saveMode, events)
@@ -14590,11 +14679,23 @@ function resolveSpellCast(
         events,
       )
       if (finalDamage == null) return fail(state, events, 'invalid-class-feature')
+      const hitPointsBeforeDamage = target.currentHp
       applySpellDamage(
         target,
         adjustDamageForTarget(target, finalDamage, spell.damageType, spellDamageSource),
         critical,
       )
+      const healingFraction = (sustainedAttack ?? (
+        spell.sustainedAttack?.immediateAttack ? spell.sustainedAttack : undefined
+      ))?.healingFraction
+      if (healingFraction && hitPointsBeforeDamage > target.currentHp) {
+        applyHealing(
+          actor,
+          Math.floor((hitPointsBeforeDamage - target.currentHp) * healingFraction),
+          events,
+          true,
+        )
+      }
       queueDelayedSpellDamage(target)
       triggerHurlThroughHell({
         state,
@@ -18767,6 +18868,13 @@ function resolveMonsterSpecialAction(
     if (monsterSpecialActionHasUnexpectedInput(action)) {
       return fail(state, events, 'invalid-dice')
     }
+  } else if (rule.kind === 'persistent-area') {
+    if (
+      monsterSpecialActionHasUnexpectedInput(action) ||
+      (rule.requiredEnvironment != null && state.environment !== rule.requiredEnvironment)
+    ) {
+      return fail(state, events, rule.requiredEnvironment ? 'invalid-target' : 'invalid-dice')
+    }
   } else if (rule.kind === 'saving-throw-condition') {
     const distanceFeet = target ? dnd5eAttackDistanceFeet(state, actor.id, target.id) : Number.POSITIVE_INFINITY
     const immunity = dnd5eMonsterActionImmunityRule(definition)
@@ -19044,6 +19152,27 @@ function resolveMonsterSpecialAction(
       actionId: definition.id,
       legendary,
       success: applied,
+    })
+    return { ok: true, state, events }
+  }
+
+  if (rule.kind === 'persistent-area') {
+    if (rule.concentration) {
+      beginDnd5eConcentration(
+        state,
+        actor,
+        `monster:${monster.id}:${definition.id}`,
+        [],
+        rule.durationRounds,
+        events,
+      )
+    }
+    events.push({
+      type: 'monster-special-action-resolved',
+      actorId: actor.id,
+      actionId: definition.id,
+      legendary,
+      success: true,
     })
     return { ok: true, state, events }
   }
@@ -24105,6 +24234,7 @@ export function resolveDnd5ePersistentAreaTrigger(
       effectVisible: true,
       sourceCreatureType: actor.creatureType,
       sourceIsSpell: !!coreSpell,
+      sourceIsMagical: savingThrow.magical === true,
     })
     const mode = savingThrow.shapechangerDisadvantage && target.shapechanger
       ? imposeDnd5eDisadvantage(baseMode)
@@ -24260,7 +24390,9 @@ export function resolveDnd5ePersistentAreaTrigger(
           }
         : undefined,
       escapeCheck: condition.escapeCheck,
+      modifiers: condition.modifiers,
       sourceKind: coreSpell ? 'spell' : 'plugin',
+      magical: savingThrow?.magical === true,
     }, events)
     if (applied) {
       conditionApplied = condition.condition
@@ -26895,10 +27027,22 @@ function resolveDnd5eHeadlessActionInternal(
     return { ok: true, state, events }
   }
   if (action.type === 'dash') {
-    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    const expeditiousRetreat = action.sourceSpellId === 'expeditious-retreat'
+    if (expeditiousRetreat && (
+      actor.classState.concentrationSpellId !== 'expeditious-retreat' ||
+      !reconciledDnd5eActiveEffects(actor).some((effect) =>
+        effect.source.kind === 'spell' &&
+        effect.source.actorId === actor.id &&
+        effect.source.rulesId === 'expeditious-retreat' &&
+        effect.definitionId === 'srd-5.1:spell:expeditious-retreat' &&
+        effect.duration.type === 'concentration'
+      )
+    )) return fail(state, events, 'invalid-class-feature')
+    const resource: TurnResource = expeditiousRetreat ? 'bonusAction' : 'action'
+    if (!spend(actor, resource)) return fail(state, events, 'action-unavailable')
     const grantedMovement = dnd5eEffectiveSpeed(actor)
     actor.turn = { ...actor.turn, movementRemaining: actor.turn.movementRemaining + grantedMovement }
-    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource })
     events.push({ type: 'movement-granted', actorId: actor.id, amount: grantedMovement })
     return { ok: true, state, events }
   }

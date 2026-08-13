@@ -4,52 +4,82 @@ import { useMapExplorationStore } from '../../store/mapExploration'
 import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useMapStore } from '../../store/maps'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
+import { useShallow } from 'zustand/react/shallow'
+import type { BattleMap } from '../../store/maps'
+
+export function selectMapsPageActiveMap(state: {
+  maps: readonly BattleMap[]
+  selectedId: string | null
+}): BattleMap | null {
+  return state.maps.find((entry) => entry.id === state.selectedId) ?? state.maps[0] ?? null
+}
 
 /**
  * Read-only React projection of the stores needed by the map orchestrator.
  * Imperative authority writes remain behind their application coordinators.
  */
 export function useMapsPageStoreProjection() {
+  const map = useMapStore(useShallow((state) => ({
+    activeMap: selectMapsPageActiveMap(state),
+    addMap: state.addMap,
+    updateMap: state.updateMap,
+    removeMap: state.removeMap,
+    addToken: state.addToken,
+    addEnemyFromPool: state.addEnemyFromPool,
+    addEncounterFromPool: state.addEncounterFromPool,
+    addCharacterToken: state.addCharacterToken,
+    updateToken: state.updateToken,
+    applyAuthorityTokenUpdate: state.applyAuthorityTokenUpdate,
+    applyAuthorityMapUpdate: state.applyAuthorityMapUpdate,
+    removeToken: state.removeToken,
+  })))
+  const activeMapId = map.activeMap?.id
+  const fog = useFogStore(useShallow((state) => ({
+    activeFogMap: state.maps.find((entry) => entry.mapId === activeMapId),
+    activeFogRedoCount: state.redoByMap[activeMapId ?? '']?.length ?? 0,
+    fillFog: state.fill,
+    clearFog: state.clear,
+    addFogShape: state.addShape,
+    undoFog: state.undo,
+    redoFog: state.redo,
+    setFogStyle: state.setStyle,
+  })))
+  const geometry = useMapGeometryStore(useShallow((state) => ({
+    activeGeometryMap: state.maps.find((entry) => entry.mapId === activeMapId),
+    selectedGeometryEntityId: state.selectedEntityId,
+    selectGeometryEntity: state.selectEntity,
+    addGeometryEntity: state.addEntity,
+    removeGeometryEntity: state.removeEntity,
+    applyAuthorityGeometryDoorState: state.applyAuthorityDoorState,
+    applyAuthorityGeometryEntityUpdate: state.applyAuthorityEntityUpdate,
+    setGeometryEntityPoints: state.setEntityPoints,
+    replaceGeometryMap: state.replaceMap,
+  })))
+  const exploration = useMapExplorationStore(useShallow((state) => ({
+    activeExplorationMap: state.maps.find((entry) => entry.mapId === activeMapId),
+    recordMapExploration: state.record,
+  })))
+  const combatStatistics = useCombatStatisticsStore(useShallow((state) => ({
+    startCombatStatistics: state.startCombat,
+    recordCombatStatistics: state.record,
+    settleCombatExperience: state.settleExperience,
+    archiveCombatLog: state.archiveCombatLog,
+  })))
+  const activeMapScenes = useSceneOrchestrationStore(useShallow((state) =>
+    state.shared.scenes.filter((entry) => entry.mapId === activeMapId),
+  ))
+  const sceneActions = useSceneOrchestrationStore(useShallow((state) => ({
+    setSceneTriggerRegion: state.setTriggerRegion,
+    setSceneInteractionPointPosition: state.setInteractionPointPosition,
+  })))
+
   return {
-    maps: useMapStore((state) => state.maps),
-    selectedId: useMapStore((state) => state.selectedId),
-    select: useMapStore((state) => state.select),
-    addMap: useMapStore((state) => state.addMap),
-    updateMap: useMapStore((state) => state.updateMap),
-    removeMap: useMapStore((state) => state.removeMap),
-    addToken: useMapStore((state) => state.addToken),
-    addEnemyFromPool: useMapStore((state) => state.addEnemyFromPool),
-    addEncounterFromPool: useMapStore((state) => state.addEncounterFromPool),
-    addCharacterToken: useMapStore((state) => state.addCharacterToken),
-    updateToken: useMapStore((state) => state.updateToken),
-    applyAuthorityTokenUpdate: useMapStore((state) => state.applyAuthorityTokenUpdate),
-    applyAuthorityMapUpdate: useMapStore((state) => state.applyAuthorityMapUpdate),
-    removeToken: useMapStore((state) => state.removeToken),
-    fogMaps: useFogStore((state) => state.maps),
-    fogRedoByMap: useFogStore((state) => state.redoByMap),
-    fillFog: useFogStore((state) => state.fill),
-    clearFog: useFogStore((state) => state.clear),
-    addFogShape: useFogStore((state) => state.addShape),
-    undoFog: useFogStore((state) => state.undo),
-    redoFog: useFogStore((state) => state.redo),
-    setFogStyle: useFogStore((state) => state.setStyle),
-    geometryMaps: useMapGeometryStore((state) => state.maps),
-    selectedGeometryEntityId: useMapGeometryStore((state) => state.selectedEntityId),
-    selectGeometryEntity: useMapGeometryStore((state) => state.selectEntity),
-    addGeometryEntity: useMapGeometryStore((state) => state.addEntity),
-    removeGeometryEntity: useMapGeometryStore((state) => state.removeEntity),
-    applyAuthorityGeometryDoorState: useMapGeometryStore((state) => state.applyAuthorityDoorState),
-    applyAuthorityGeometryEntityUpdate: useMapGeometryStore((state) => state.applyAuthorityEntityUpdate),
-    setGeometryEntityPoints: useMapGeometryStore((state) => state.setEntityPoints),
-    replaceGeometryMap: useMapGeometryStore((state) => state.replaceMap),
-    explorationMaps: useMapExplorationStore((state) => state.maps),
-    recordMapExploration: useMapExplorationStore((state) => state.record),
-    startCombatStatistics: useCombatStatisticsStore((state) => state.startCombat),
-    recordCombatStatistics: useCombatStatisticsStore((state) => state.record),
-    settleCombatExperience: useCombatStatisticsStore((state) => state.settleExperience),
-    archiveCombatLog: useCombatStatisticsStore((state) => state.archiveCombatLog),
-    sceneOrchestration: useSceneOrchestrationStore((state) => state.shared),
-    setSceneTriggerRegion: useSceneOrchestrationStore((state) => state.setTriggerRegion),
-    setSceneInteractionPointPosition: useSceneOrchestrationStore((state) => state.setInteractionPointPosition),
+    ...map,
+    ...fog,
+    ...geometry,
+    ...exploration,
+    ...combatStatistics,
+    activeMapScenes,
+    ...sceneActions,
   }
 }

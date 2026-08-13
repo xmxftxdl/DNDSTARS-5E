@@ -510,6 +510,89 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
   }
 }
 
+/**
+ * Local workshop drafts predate several structured combat fields. Treat local
+ * storage as untrusted versioned input and hydrate every collection before a
+ * component or compiler is allowed to call array helpers on it.
+ */
+export function restoreDnd5eCustomMonsterDraft(
+  value: Partial<Dnd5eCustomMonsterDraft> | null | undefined,
+): Dnd5eCustomMonsterDraft {
+  const fallback = createDnd5eCustomMonsterDraft()
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    ...fallback,
+    ...source,
+    abilities: source.abilities && typeof source.abilities === 'object'
+      ? { ...fallback.abilities, ...source.abilities }
+      : fallback.abilities,
+    savingThrows: source.savingThrows && typeof source.savingThrows === 'object'
+      ? { ...source.savingThrows }
+      : {},
+    skills: Array.isArray(source.skills) ? source.skills.map((entry) => ({ ...entry })) : [],
+    senses: Array.isArray(source.senses) ? source.senses.map((entry) => ({ ...entry })) : [],
+    damageVulnerabilities: Array.isArray(source.damageVulnerabilities)
+      ? [...source.damageVulnerabilities]
+      : [],
+    damageResistances: Array.isArray(source.damageResistances)
+      ? [...source.damageResistances]
+      : [],
+    damageImmunities: Array.isArray(source.damageImmunities)
+      ? [...source.damageImmunities]
+      : [],
+    conditionImmunities: Array.isArray(source.conditionImmunities)
+      ? [...source.conditionImmunities]
+      : [],
+    tokenStatusMarkerGrants: Array.isArray(source.tokenStatusMarkerGrants)
+      ? source.tokenStatusMarkerGrants.map((entry) => ({ ...entry }))
+      : [],
+    equipment: Array.isArray(source.equipment)
+      ? source.equipment.map((entry) => ({ ...entry }))
+      : [],
+    spellSlots: source.spellSlots && typeof source.spellSlots === 'object'
+      ? { ...source.spellSlots }
+      : {},
+    spells: Array.isArray(source.spells) ? source.spells.map((entry) => ({ ...entry })) : [],
+    headlessMechanics: Array.isArray(source.headlessMechanics)
+      ? source.headlessMechanics.map((entry) => ({
+          ...createDnd5eCustomMonsterMechanicDraft(),
+          ...entry,
+          triggerDamageTypes: Array.isArray(entry.triggerDamageTypes)
+            ? [...entry.triggerDamageTypes]
+            : [],
+          preservedEffects: Array.isArray(entry.preservedEffects)
+            ? entry.preservedEffects.map((effect) => ({ ...effect }))
+            : undefined,
+        }))
+      : [],
+    traits: Array.isArray(source.traits)
+      ? source.traits.map((entry) => ({
+          ...createDnd5eCustomMonsterTraitDraft(),
+          ...entry,
+          damageTypes: Array.isArray(entry.damageTypes) ? [...entry.damageTypes] : [],
+          targetBonusConditions: Array.isArray(entry.targetBonusConditions)
+            ? [...entry.targetBonusConditions]
+            : [],
+        }))
+      : [],
+    actions: Array.isArray(source.actions)
+      ? source.actions.map((entry) => ({
+          ...createDnd5eCustomMonsterActionDraft(),
+          ...entry,
+          additionalDamage: Array.isArray(entry.additionalDamage)
+            ? entry.additionalDamage.map((damage) => ({ ...damage }))
+            : [],
+          criticalExtraDamage: Array.isArray(entry.criticalExtraDamage)
+            ? entry.criticalExtraDamage.map((damage) => ({ ...damage }))
+            : [],
+          areaSaveAbilityChoices: Array.isArray(entry.areaSaveAbilityChoices)
+            ? [...entry.areaSaveAbilityChoices]
+            : [],
+        }))
+      : [createDnd5eCustomMonsterActionDraft()],
+  }
+}
+
 function parseDice(value: string): { count: number; sides: number; bonus: number } {
   const match = value.replace(/\s+/g, '').match(/^(\d+)d(\d+)(?:([+-])(\d+))?$/i)
   if (!match) throw new Error(`伤害骰格式无效：${value}`)

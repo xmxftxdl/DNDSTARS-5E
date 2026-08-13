@@ -109,6 +109,51 @@ describe('D&D 5e player map movement', () => {
     expect(prepared.prepared.path.at(-1)).toEqual({ x: 25, y: 5 })
   })
 
+  it('preserves a free exploration destination when map snapping is disabled', () => {
+    const prepared = prepareDnd5eExplorationMove({
+      action: {
+        ...action,
+        combatId: undefined,
+        targetPosition: { x: 27, y: 7 },
+      },
+      map: { ...map, snapMonstersToGrid: false },
+      characters: [character()],
+    })
+
+    expect(prepared).toMatchObject({
+      ok: true,
+      prepared: {
+        to: { x: 27, y: 7 },
+      },
+    })
+    if (!prepared.ok) return
+    expect(prepared.prepared.path.at(-1)).toEqual({ x: 27, y: 7 })
+  })
+
+  it('starts a later free move at the previously accepted arbitrary position', () => {
+    const freeMap: BattleMap = {
+      ...map,
+      snapMonstersToGrid: false,
+      tokens: map.tokens.map((token) => token.id === 'hero-token'
+        ? { ...token, x: 27, y: 7 }
+        : token),
+    }
+    const prepared = prepareDnd5eExplorationMove({
+      action: {
+        ...action,
+        combatId: undefined,
+        targetPosition: { x: 43, y: 18 },
+      },
+      map: freeMap,
+      characters: [character()],
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.path.at(0)).toEqual({ x: 27, y: 7 })
+    expect(prepared.prepared.path.at(-1)).toEqual({ x: 43, y: 18 })
+  })
+
   it('routes ground exploration around Grease but lets an airborne Token fly over it', () => {
     const blockers = [1, 2, 3, 4, 5].flatMap((col) => [1, 3].map((row) => ({
       id: `blocker-${col}-${row}`,

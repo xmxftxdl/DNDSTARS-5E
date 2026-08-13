@@ -6,6 +6,10 @@ import {
   prepareDnd5eSpellCast,
   resolvePreparedDnd5eSpellCast,
 } from '../rulesets/dnd5e/spellAction'
+import {
+  prepareDnd5eCoreSpellAreaMove,
+  resolvePreparedDnd5eCoreSpellAreaMove,
+} from '../rulesets/dnd5e/coreSpellAreaAction'
 import { createDnd5eTurnEconomyCounts } from '../rulesets/dnd5e/turnEconomy'
 import {
   dnd5eSpellAuthorityResolutionContext,
@@ -180,5 +184,154 @@ describe('dnd5eSpellResolutionInitiativeOrder', () => {
     })
     expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(21)
     expect(action.combatId).toBeUndefined()
+  })
+
+  it('resolves Dancing Lights outside combat when the caster is the only map combatant', () => {
+    const wizard: Character = {
+      id: 'solo-wizard',
+      name: 'Solo Wizard',
+      player: 'Player',
+      avatar: '',
+      accent: '',
+      race: 'Human',
+      charClass: 'Wizard',
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      level: 5,
+      background: '',
+      experience: 0,
+      reputation: 0,
+      abilities: { str: 10, dex: 14, con: 14, int: 16, wis: 12, cha: 10 },
+      savingThrows: [],
+      skills: [],
+      maxHp: 30,
+      currentHp: 30,
+      tempHp: 0,
+      hitDice: '5d6',
+      ac: 12,
+      speed: 30,
+      initiativeBonus: 2,
+      saveDC: 14,
+      passivePerception: 11,
+      inspiration: 0,
+      conditions: [],
+      notes: '',
+      dmNotes: '',
+      visibleToPlayers: true,
+      dnd5eClassLevels: { wizard: 5 },
+      dnd5eClassChoices: {
+        classes: { wizard: { selections: { 'spell-cantrips': ['dancing-lights'] } } },
+      },
+    }
+    const wizardToken = {
+      ...token('solo-wizard-token', 'player'),
+      characterId: wizard.id,
+      x: 25,
+      y: 25,
+    }
+    const explorationMap = { ...map(), tokens: [wizardToken] }
+    const action: SharedPlayerActionState = {
+      id: 'exploration-dancing-lights',
+      mapId: explorationMap.id,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'dnd5e-spell-cast',
+      actorTokenId: wizardToken.id,
+      characterId: wizard.id,
+      targetTokenId: wizardToken.id,
+      targetTokenIds: [],
+      dnd5eSpellCast: {
+        spellId: 'dancing-lights',
+        castingClassId: 'wizard',
+        slotLevel: 0,
+        targetTokenId: wizardToken.id,
+        targetTokenIds: [],
+        areaTargetCells: [
+          { col: 1, row: 0 },
+          { col: 2, row: 0 },
+          { col: 3, row: 0 },
+          { col: 4, row: 0 },
+        ],
+      },
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      updatedAt: 1,
+    }
+    const authority = dnd5eSpellAuthorityResolutionContext({
+      combatActive: false,
+      combatId: '',
+      map: explorationMap,
+      actorTokenId: wizardToken.id,
+      initiativeOrder: [],
+    })
+
+    expect(authority.exploration).toBe(true)
+    const prepared = prepareDnd5eSpellCast({
+      action,
+      map: explorationMap,
+      characters: [wizard],
+      initiativeOrder: authority.initiativeOrder,
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.state.active).toBe(true)
+
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      effectRolls: [],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.dnd5ePluginAreas?.[0]).toMatchObject({
+      coreSpellId: 'dancing-lights',
+      sourceTokenId: wizardToken.id,
+      lightingAnchorCells: action.dnd5eSpellCast?.areaTargetCells,
+      movement: { economy: 'bonus-action', maximumFeet: 60 },
+    })
+
+    const castApplication = resolved.application
+    const area = castApplication?.map.dnd5ePluginAreas?.[0]
+    expect(castApplication).toBeDefined()
+    expect(area).toBeDefined()
+    if (!castApplication || !area) return
+    const moveAction: SharedPlayerActionState = {
+      id: 'exploration-move-dancing-lights',
+      mapId: explorationMap.id,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'dnd5e-persistent-area-move',
+      actorTokenId: wizardToken.id,
+      characterId: wizard.id,
+      targetCell: { col: 2, row: 1 },
+      dnd5ePersistentAreaMove: {
+        areaId: area.id,
+        targetCell: { col: 2, row: 1 },
+        targetCells: [
+          { col: 2, row: 1 },
+          { col: 3, row: 2 },
+          { col: 4, row: 2 },
+          { col: 5, row: 1 },
+        ],
+      },
+      round: 1,
+      initiativeIndex: 0,
+      seq: 2,
+      updatedAt: 2,
+    }
+    const preparedMove = prepareDnd5eCoreSpellAreaMove({
+      action: moveAction,
+      map: castApplication.map,
+      characters: castApplication.characters,
+      initiativeOrder: authority.initiativeOrder,
+    })
+    expect(preparedMove.ok, preparedMove.ok ? undefined : preparedMove.reason).toBe(true)
+    if (!preparedMove.ok) return
+    const moved = resolvePreparedDnd5eCoreSpellAreaMove({ prepared: preparedMove.prepared })
+    expect(moved.result.ok, moved.result.ok ? undefined : moved.result.reason).toBe(true)
+    expect(moved.application?.map.dnd5ePluginAreas?.[0].lightingAnchorCells).toEqual([
+      { col: 2, row: 1 },
+      { col: 3, row: 2 },
+      { col: 4, row: 2 },
+      { col: 5, row: 1 },
+    ])
   })
 })

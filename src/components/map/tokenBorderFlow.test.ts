@@ -127,7 +127,7 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenForegroundLayer).toBeGreaterThan(borderFlowLayer)
     expect(tokenStatusContent).toBeGreaterThan(tokenForegroundLayer)
     expect(interactionOverlayContent).toBeGreaterThan(tokenStatusContent)
-    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(5)
+    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(6)
     expect(tokenNodeSource).toContain('const hasPresentationBorder = !!borderColor && !defeated')
     expect(tokenNodeSource).toContain('const bodyStrokeWidth = hasPresentationBorder ? 0 : baseStrokeW')
     expect(tokenNodeSource).toContain('const portraitClipInset = hasPresentationBorder ? 0')
@@ -136,6 +136,22 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenNodeSource).not.toContain("standardConditions.includes('poisoned')")
     expect(tokenNodeSource).not.toContain('<StunGlow')
     expect(tokenNodeSource).not.toContain('<PoisonCloud')
+  })
+
+  it('isolates player fog compositing from world lighting', () => {
+    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const worldOverlayLayer = canvasSource.indexOf('name="map-world-overlay-layer"')
+    const visibilityMaskLayer = canvasSource.indexOf('name="map-visibility-mask-layer"')
+    const worldOverlaySource = canvasSource.slice(worldOverlayLayer, visibilityMaskLayer)
+    const visibilityMaskSource = canvasSource.slice(visibilityMaskLayer, canvasSource.indexOf('</Stage>'))
+
+    expect(worldOverlayLayer).toBeGreaterThan(-1)
+    expect(visibilityMaskLayer).toBeGreaterThan(worldOverlayLayer)
+    expect(worldOverlaySource).toContain('<LightingLayer')
+    expect(worldOverlaySource).not.toContain('<PlayerVisibilityLayer')
+    expect(worldOverlaySource).not.toContain('<FogOfWarLayer')
+    expect(visibilityMaskSource).toContain('<PlayerVisibilityLayer')
+    expect(visibilityMaskSource).toContain('<FogOfWarLayer')
   })
 
   it('does not accidentally throttle a requested 60 fps animation to 30 fps', () => {

@@ -46,6 +46,9 @@ export function dnd5eActivityHeadlessCompatibility(
   activity: Dnd5eActivityDefinitionV1,
 ): Dnd5eActivityHeadlessCompatibility {
   const reasons = [...validateDnd5eActivityDefinitionV1(activity)]
+  if (activity.authorityBinding) {
+    reasons.push(`Activity delegates to native authority: ${activity.authorityBinding.execution}`)
+  }
   if (activity.checks?.length) reasons.push('the plugin Headless adapter delegates attack/save checks to the owning Host transaction')
   if (activity.consumption?.length) reasons.push('the plugin Headless adapter delegates consumption to the owning Host transaction')
   for (const outcome of activity.outcomes) {

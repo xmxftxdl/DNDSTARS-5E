@@ -152,6 +152,30 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('>30<')
   })
 
+  it('将权威地图实体的后续攻击显示为不消耗法术位的快捷动作', () => {
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: character(),
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      sustainedAreaControls: [{
+        areaId: 'spiritual-weapon-area',
+        spellId: 'spiritual-weapon',
+        castingClassId: 'cleric',
+        slotLevel: 4,
+        controlId: 'spiritual-weapon',
+        label: '移动并攻击：灵体武器',
+        economy: 'bonus-action',
+        targeting: 'creature',
+      }],
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toContain('aria-label="移动并攻击：灵体武器"')
+    expect(html).toContain('data-action-id="feature:sustained-spell:spiritual-weapon-area:spiritual-weapon"')
+    expect(html).toContain('4环（默认）')
+  })
+
   it('在法术栏位上方显示剩余法术位', () => {
     const wizard: Character = {
       ...character(),

@@ -382,7 +382,8 @@ describe('SRD monster Parry in Headless combat', () => {
     for (const spell of DND5E_SRD_COMBAT_SPELLS.filter(
       (candidate) =>
         candidate.sustainedAttack &&
-        candidate.sustainedAttack.resolution !== 'saving-throw' &&
+        (candidate.sustainedAttack.resolution == null ||
+          candidate.sustainedAttack.resolution === 'spell-attack') &&
         candidate.sustainedAttack.id !== 'call-lightning',
     )) {
       expect(

@@ -9,7 +9,7 @@ import {
   tokenOccupiedCellsAt,
 } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
-import type { Dnd5eSpellMetamagicPayload, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
+import type { Dnd5eSpellMetamagicPayload, Dnd5eSustainedSpellControlId, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, resolveAoeDimensions, tokensInCells } from '../../lib/skillTargeting'
@@ -228,7 +228,7 @@ export interface PreparedDnd5eSpellCast {
   areaDurationRounds?: number
   teleportDestination?: Dnd5eSpellTeleportDestination
   /** 当前事务是在使用既有持续法术效果，而不是再次施法。 */
-  sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  sustainedEffectAttack?: Dnd5eSustainedSpellControlId
   sustainedEffectAreaId?: string
 }
 
@@ -450,7 +450,9 @@ export function prepareDnd5eSpellCast(input: {
         effect.source.rulesId === spell.id &&
         effect.definitionId === `srd-5.1:spell:${spell.id}` &&
         (sustainedAttack.origin === 'caster' || sustainedAttack.origin === 'persistent-area'
-          ? effect.duration.type === 'concentration' && effect.duration.sourceActorId === actorToken.id
+          ? spell.concentration
+            ? effect.duration.type === 'concentration' && effect.duration.sourceActorId === actorToken.id
+            : effect.duration.type !== 'concentration'
           : effect.duration.type === 'rounds' && effect.stackingKey === sustainedEffectAreaId),
       )
     : undefined
@@ -675,7 +677,7 @@ export function prepareDnd5eSpellCast(input: {
     payload.metamagic || payload.higherSlotDamageType || payload.conditionChoice ||
     payload.effectDamageType || payload.enlargeReduceChoice || payload.enhanceAbilityChoice ||
     payload.healingAllocations?.length ||
-    (sustainedAttack.origin === 'caster' && payload.areaTargetCell) ||
+    (sustainedAttack.origin === 'caster' && !spell.area && payload.areaTargetCell) ||
     payload.areaTargetOrientation != null || payload.wallOfFireShape != null ||
     payload.areaTargetRadiusFeet != null || payload.areaTargetWidthFeet != null ||
     payload.areaTargetHeightFeet != null || payload.areaTargetLengthFeet != null ||
@@ -995,6 +997,16 @@ export function prepareDnd5eSpellCast(input: {
     if (uniqueAreaKeys.size !== submittedAreaCells.length) {
       return { ok: false, reason: 'spell-area-target-required' }
     }
+    if (spell.id === 'dancing-lights' && submittedAreaCells.length > 1) {
+      const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      const everyLightHasNeighbor = submittedAreaCells.every((cell, index) =>
+        submittedAreaCells.some((other, otherIndex) =>
+          index !== otherIndex &&
+          Math.max(Math.abs(cell.col - other.col), Math.abs(cell.row - other.row)) * feetPerCell <= 20
+        ),
+      )
+      if (!everyLightHasNeighbor) return { ok: false, reason: 'invalid-target' }
+    }
     if (payload.areaTargetOrientation != null) {
       return { ok: false, reason: 'spell-area-orientation-invalid' }
     }
@@ -1291,6 +1303,10 @@ export function prepareDnd5eSpellCast(input: {
   }
   for (let targetIndex = 0; targetIndex < validTargetTokens.length; targetIndex += 1) {
     const target = validTargetTokens[targetIndex]
+    if (
+      sustainedAttack?.lockToConcentrationTarget &&
+      !actor.dnd5eCombatState?.concentrationTargetIds?.includes(target.id)
+    ) return { ok: false, reason: 'invalid-target' }
     const opposed = areOpposedCombatTokens(actorToken, target)
     if (
       (sustainedAttack && sustainedAttack.relation !== 'any' && !opposed) ||
@@ -1415,6 +1431,12 @@ export function prepareDnd5eSpellCast(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
+  // Exploration spell transactions intentionally reuse the Headless combat
+  // resolver for one authoritative rules path. A map with only the caster has
+  // one combatant, so startDnd5eHeadlessCombat marks that synthetic snapshot as
+  // inactive. Keep only combat-less spell snapshots resolvable; live-combat
+  // requests still require their real combat id and remain turn-gated.
+  if (!input.action.combatId?.trim()) snapshot.state.active = true
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   const targetCombatant = snapshot.state.combatants[targetToken.id]
@@ -1547,7 +1569,7 @@ export function prepareDnd5eSpellCast(input: {
   const spellSaveDc = itemSpellEffect?.spellSaveDc ??
     8 + rules.proficiencyBonus(actor.level) + abilityModifier
   const baseDamageDiceCounts = sustainedAttack || spell.sustainedAttack?.immediateAttack
-    ? [dnd5eSustainedSpellAttackDiceCount(spell, slotLevel)]
+    ? [dnd5eSustainedSpellAttackDiceCount(spell, slotLevel, actor.level)]
     : dnd5eSpellDamageDiceCounts(
         spell,
         actor.level,

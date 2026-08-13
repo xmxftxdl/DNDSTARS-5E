@@ -23,6 +23,28 @@ export interface DefaultSculptedSpellTargetsInput {
 }
 
 /**
+ * Multi-origin spells must remain in targeting mode after their first legal
+ * point. Their minimum count only enables the explicit confirm button; it must
+ * never be interpreted as permission to submit immediately.
+ */
+export function shouldAutoSubmitSpellAreaSelection(
+  targeting: Pick<
+    Dnd5eSpellTargetingSession,
+    'autoSubmitOnAreaSelection' | 'areaTargetCount' | 'minimumAreaTargetCount'
+  >,
+  selectedAreaCount: number,
+): boolean {
+  const maximum = Math.max(1, Math.floor(targeting.areaTargetCount ?? 1))
+  const minimum = Math.max(
+    1,
+    Math.min(maximum, Math.floor(targeting.minimumAreaTargetCount ?? maximum)),
+  )
+  return targeting.autoSubmitOnAreaSelection === true &&
+    maximum === 1 &&
+    selectedAreaCount >= minimum
+}
+
+/**
  * Keeps still-valid manual choices and, when Sculpt Spells was armed, fills the
  * remaining allowance with affected allies. The player can still remove an
  * automatic choice or replace it with any other affected creature before the

@@ -64,6 +64,30 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  it('invalidates a cold read after an authoritative local write', async () => {
+    const resource = 'spellbook'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ spells: [], updatedAt: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 2 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '2' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ spells: [], updatedAt: 2 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '2' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loadSharedResource(resource)
+    await saveSharedResourceWithResult(resource, { spells: [], updatedAt: 2 })
+    await loadSharedResource(resource)
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('configuredApiBases dedups, trims, and drops empty entries (order preserved)', () => {
     vi.stubEnv('VITE_SHARED_API_BASES', ' a/api , b/api ,a/api,, b/api ')
     expect(configuredApiBases()).toEqual(['a/api', 'b/api'])

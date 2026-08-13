@@ -372,7 +372,7 @@ export default function App() {
       <Suspense fallback={null}>
         {!isSpectator && <RoomHandoutNotification />}
         <CampaignTimeSystem
-          key={`${roomSession?.roomId ?? 'local'}:${roomSession?.memberId ?? endpointMode}`}
+          key={`campaign-time:${roomSession?.roomId ?? 'local'}:${roomSession?.memberId ?? endpointMode}`}
           isDm={endpointMode !== 'player'}
         />
         <SceneAudioPlaybackSystem />
@@ -385,7 +385,7 @@ export default function App() {
         )}
         {roomSession && (
           <VoiceRoomSystem
-            key={`${roomSession.roomId}:${roomSession.memberId}`}
+            key={`voice-room:${roomSession.roomId}:${roomSession.memberId}`}
           />
         )}
       </Suspense>

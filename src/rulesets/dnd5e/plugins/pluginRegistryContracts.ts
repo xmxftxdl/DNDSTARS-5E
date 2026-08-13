@@ -3,6 +3,7 @@ import type {
   DeclarativeSubclassAbilityV1,
   DeclarativeSubclassCombatHookV1,
   DeclarativeSubclassResourceDieV1,
+  DeclarativeSubclassSpellListV1,
   DeclarativeSubclassSpellcastingV1,
   DeclarativeValueFormulaV1,
 } from '../declarativeSubclassAbility'
@@ -48,6 +49,7 @@ export interface RegisteredDnd5ePluginSubclass
   id: string
   features: readonly (Dnd5ePluginSubclassFeature & { id: string; featureId: string })[]
   declarativeSpellcasting?: DeclarativeSubclassSpellcastingV1
+  spellLists?: readonly DeclarativeSubclassSpellListV1[]
   declarativeCombatHooks?: readonly DeclarativeSubclassCombatHookV1[]
 }
 

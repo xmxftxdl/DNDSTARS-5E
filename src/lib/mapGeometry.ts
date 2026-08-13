@@ -1442,6 +1442,56 @@ export function mapGeometryLineOfSightBlocked(input: {
   }) != null
 }
 
+/**
+ * Dynamic vision always traces ordinary line of sight to the map boundary.
+ * Illumination and special-sense checks decide what can actually be seen along
+ * those rays; darkness must not impose an arbitrary maximum distance on a
+ * distant light source.
+ */
+function mapGeometryAmbientSightRangeFeet(
+  map: Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'feetPerCell'>,
+  geometry?: MapGeometryState,
+): number {
+  if (geometry?.vision.enabled !== true) return 0
+  const gridSize = Math.max(1, map.gridSize)
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  return Math.hypot(Math.max(1, map.width), Math.max(1, map.height)) / gridSize * feetPerCell
+}
+
+function tokenIntersectsPersistentArea(
+  map: BattleMap,
+  geometry: MapGeometryState | undefined,
+  token: Token,
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number],
+): boolean {
+  const col = Math.floor((token.x - map.gridOffsetX) / Math.max(1, map.gridSize))
+  const row = Math.floor((token.y - map.gridOffsetY) / Math.max(1, map.gridSize))
+  if (!area.cells.some((cell) => cell.col === col && cell.row === row)) return false
+  if (area.vertical?.mode !== 'volume') return true
+  const tokenBase = mapGeometryTokenElevation(geometry, token)
+  const tokenTop = tokenBase + Math.max(0.1, mapGeometryEntityBodyHeightFeet(token) ?? 5)
+  const areaBase = area.vertical.baseElevationFeet
+  const areaTop = areaBase + area.vertical.heightFeet
+  return tokenTop > areaBase + 1e-4 && tokenBase < areaTop - 1e-4
+}
+
+function persistentHeavyObscurationBlocksSight(input: {
+  map: BattleMap
+  geometry?: MapGeometryState
+  viewer: Token
+  target: Token
+  distanceFeet: number
+  blindsightRangeFeet: number
+}): boolean {
+  return (input.map.dnd5ePluginAreas ?? []).some((area) => {
+    if (area.obscuration?.kind !== 'heavy') return false
+    if (area.obscuration.sourceCanSeeThrough && area.sourceTokenId === input.viewer.id) return false
+    const endpointInside = tokenIntersectsPersistentArea(input.map, input.geometry, input.viewer, area) ||
+      tokenIntersectsPersistentArea(input.map, input.geometry, input.target, area)
+    return endpointInside && input.distanceFeet > input.blindsightRangeFeet
+  })
+}
+
 export function mapGeometryCanSeeToken(input: {
   geometry?: MapGeometryState
   map: BattleMap
@@ -1466,6 +1516,7 @@ export function mapGeometryCanSeeToken(input: {
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
   const rangeFeet = Math.max(
+    mapGeometryAmbientSightRangeFeet(input.map, geometry),
     profile.normalRangeFeet,
     profile.darkvisionRangeFeet,
     profile.darknessSightRangeFeet,
@@ -1491,6 +1542,14 @@ export function mapGeometryCanSeeToken(input: {
     worldMinute: input.worldMinute,
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
+  if (persistentHeavyObscurationBlocksSight({
+    map: input.map,
+    geometry,
+    viewer: input.viewer,
+    target: input.target,
+    distanceFeet,
+    blindsightRangeFeet: profile.blindsightRangeFeet,
+  })) return false
   if (illumination === 'magical-darkness') {
     if (distanceFeet > Math.max(
       profile.magicalDarknessSightRangeFeet,
@@ -1865,11 +1924,13 @@ export function mapGeometryVisibilityPolygon(input: {
   const lightRangeFeet = campaignLightIsActive(input.viewer.lightSource, input.worldMinute ?? 0)
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
-  // 地形遮罩使用正常视距；暗光、黑暗和场景光源在 LightingLayer 内表现。
+  // 明亮或微光环境中的普通视野延伸到地图边界；黑暗、特殊感官和场景
+  // 光源仍由 LightingLayer 与服务端可见性投影共同约束。
   // 服务端仍会单独过滤未被照亮的生物，因此不会因地形可见而泄露隐藏 Token。
   const rangeFeet = Number.isFinite(input.rangeOverrideFeet)
     ? Math.max(0, input.rangeOverrideFeet!)
     : Math.max(
+        mapGeometryAmbientSightRangeFeet(input.map, geometry),
         profile.normalRangeFeet,
         profile.darkvisionRangeFeet,
         profile.darknessSightRangeFeet,

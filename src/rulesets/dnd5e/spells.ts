@@ -1,5 +1,5 @@
 import type { AbilityKey } from '../../lib/dnd'
-import type { Dnd5eMetamagicId } from '../../lib/sharedCombatTypes'
+import type { Dnd5eMetamagicId, Dnd5eSustainedSpellControlId } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { D20RollMode } from '../contracts'
@@ -14,6 +14,7 @@ import {
   dnd5eEffectiveSpellcastingSources,
   dnd5eEffectiveSpellSelections,
 } from './subclassSpellcasting'
+import { dnd5ePluginSubclassSpellIds } from './pluginApi'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
@@ -56,11 +57,16 @@ export interface Dnd5eSpellDamageComponentDefinition {
   higherSlotChoice?: boolean
 }
 
+/**
+ * A follow-up control granted by an already cast spell.  The wire payload keeps
+ * the historical `sustainedEffectAttack` name for backwards compatibility,
+ * but movement, utility and repeated damage all derive from this declaration.
+ */
 export interface Dnd5eSustainedSpellAttackDefinition {
-  id: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  id: Dnd5eSustainedSpellControlId
   economy: 'action' | 'bonus-action'
   origin: 'caster' | 'effect-token' | 'persistent-area'
-  resolution?: 'spell-attack' | 'saving-throw'
+  resolution?: 'spell-attack' | 'saving-throw' | 'automatic-damage' | 'dash'
   /** Required for sustained spell attacks; Parry and close-threat rules depend on it. */
   spellAttackMode?: 'melee' | 'ranged'
   relation?: 'hostile' | 'any'
@@ -68,6 +74,14 @@ export interface Dnd5eSustainedSpellAttackDefinition {
   movementFeet?: number
   effectDurationRounds?: number
   immediateAttack?: boolean
+  /** Only the original concentration target may be selected again. */
+  lockToConcentrationTarget?: boolean
+  /** Restore this fraction of the actual hit-point damage dealt. */
+  healingFraction?: number
+  /** The source effect is consumed after this follow-up is resolved. */
+  endsAfterUse?: boolean
+  /** Cantrip follow-up damage scales at character levels 5, 11 and 17. */
+  cantripScaling?: boolean
   dice: {
     count: number
     sides: number
@@ -138,6 +152,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'vicious-mockery'
     | 'thunderwave-push'
     | 'sunburst-blindness'
+    | 'sunbeam-blindness'
     | 'blindness-deafness'
     | 'hideous-laughter'
     | 'charm-person'
@@ -168,6 +183,8 @@ export interface Dnd5eSrdSpellDefinition {
     | 'enlarge-reduce'
     | 'enhance-ability'
     | 'flame-blade'
+    | 'expeditious-retreat'
+    | 'produce-flame'
     | 'shillelagh'
     | 'magic-weapon'
     | 'sanctuary'
@@ -369,6 +386,60 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
       damageType: 'fire',
     },
     description: '以附赠动作在空手中唤出一把烈焰刀刃，持续至多10分钟并需要专注。法术持续期间，你可以用动作进行一次近战法术攻击，命中造成3d6火焰伤害。使用4环或更高环法术位施展时，法术位每比2环高两环，伤害增加1d6。',
+  },
+  {
+    id: 'expeditious-retreat', name: '脚底抹油', englishName: 'Expeditious Retreat', level: 1, school: '变化',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'bonus-action', rangeFeet: 0,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 1,
+    appliedEffect: 'expeditious-retreat',
+    sustainedAttack: {
+      id: 'expeditious-retreat', economy: 'bonus-action', origin: 'caster',
+      resolution: 'dash', relation: 'any', rangeFeet: 0,
+      dice: { count: 0, sides: 4 }, damageType: 'force',
+    },
+    description: '施法时以及法术结束前你的每个回合中，你都可以用附赠动作执行疾走。需要专注，持续至多10分钟。',
+  },
+  {
+    id: 'heat-metal', name: '灼热金属', englishName: 'Heat Metal', level: 2, school: '变化',
+    classes: ['bard', 'druid'], castingTime: 'action', rangeFeet: 60,
+    target: 'hostile', effect: 'automatic-damage', requiresVisibleTarget: true,
+    dice: { count: 2, sides: 8, bonus: 0, perHigherSlot: 1 }, damageType: 'fire',
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
+    sustainedAttack: {
+      id: 'heat-metal', economy: 'bonus-action', origin: 'caster',
+      resolution: 'automatic-damage', rangeFeet: 60, lockToConcentrationTarget: true,
+      dice: { count: 2, sides: 8, additionalDieEverySlotLevels: 1 }, damageType: 'fire',
+    },
+    description: '使一件被制造的金属物体灼热。目标立即受到2d8火焰伤害；法术持续期间，你可以在之后的回合用附赠动作再次造成该伤害。当前地图结算将穿戴或持有该物体的生物锁定为原始目标；丢弃物体和接触物件的细节仍由DM裁定。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'vampiric-touch', name: '吸血鬼之触', englishName: 'Vampiric Touch', level: 3, school: '死灵',
+    classes: ['warlock', 'wizard'], castingTime: 'action', rangeFeet: 5,
+    target: 'hostile', effect: 'spell-attack', spellAttackMode: 'melee', allowsGuessedTargetCell: true,
+    dice: { count: 3, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'necrotic',
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
+    sustainedAttack: {
+      id: 'vampiric-touch', economy: 'action', origin: 'caster', resolution: 'spell-attack',
+      spellAttackMode: 'melee', rangeFeet: 5, immediateAttack: true, healingFraction: 0.5,
+      dice: { count: 3, sides: 6, additionalDieEverySlotLevels: 1 }, damageType: 'necrotic',
+    },
+    description: '施法时进行一次近战法术攻击；命中造成3d6黯蚀伤害，并恢复等于实际伤害一半的生命值。法术持续期间，你可以在每个回合再次用动作发动该攻击。每升一环伤害增加1d6。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'sunbeam', name: '阳炎射线', englishName: 'Sunbeam', level: 6, school: '塑能',
+    classes: ['druid', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0,
+    target: 'area', effect: 'saving-throw', saveAbility: 'con', damageOnSuccessfulSave: 'half',
+    dice: { count: 6, sides: 8, bonus: 0 }, damageType: 'radiant',
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: false,
+    area: { shape: 'line', origin: 'self', lengthFeet: 60, widthFeet: 5 },
+    onFailedSaveEffect: 'sunbeam-blindness',
+    sustainedAttack: {
+      id: 'sunbeam', economy: 'action', origin: 'caster', resolution: 'saving-throw',
+      relation: 'any', rangeFeet: 60, immediateAttack: true,
+      dice: { count: 6, sides: 8 }, damageType: 'radiant',
+    },
+    description: '一道60尺长、5尺宽的阳炎从你手中射出。线内生物进行体质豁免，失败受到6d8光耀伤害并目盲至你的下一回合开始，成功则只受一半伤害。法术持续期间，你可以在每个回合用动作创造一条新的射线。需要专注，持续至多1分钟。',
   },
   {
     id: 'spiritual-weapon', name: '灵体武器', englishName: 'Spiritual Weapon', level: 2, school: '塑能',
@@ -821,9 +892,15 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'produce-flame', name: '燃火术', englishName: 'Produce Flame', level: 0, school: '咒法',
-    classes: ['druid'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
-    dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'fire', cantripScaling: true,
-    description: '将火焰投向生物并进行一次远程法术攻击；命中造成火焰伤害。伤害骰在5、11、17级增加。',
+    classes: ['druid'], castingTime: 'action', rangeFeet: 0, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 8, bonus: 0 }, damageType: 'fire', maximumTargets: 1,
+    appliedEffect: 'produce-flame', effectDurationRounds: 100,
+    sustainedAttack: {
+      id: 'produce-flame', economy: 'action', origin: 'caster', resolution: 'spell-attack',
+      spellAttackMode: 'ranged', rangeFeet: 30, endsAfterUse: true, cantripScaling: true,
+      dice: { count: 1, sides: 8 }, damageType: 'fire',
+    },
+    description: '一团火焰出现在你的手中并提供光照，持续至多10分钟。效果持续期间，你可以用动作将火焰投向30尺内的生物，进行一次远程法术攻击；命中造成1d8火焰伤害，随后火焰熄灭。伤害骰在5、11、17级增加。',
   },
   {
     id: 'poison-spray', name: '毒气喷溅', englishName: 'Poison Spray', level: 0, school: '咒法',
@@ -1060,6 +1137,8 @@ export function dnd5eSpellAttackDelivery(
   if (sustainedAttack) {
     if (
       sustainedAttack.resolution === 'saving-throw' ||
+      sustainedAttack.resolution === 'automatic-damage' ||
+      sustainedAttack.resolution === 'dash' ||
       sustainedAttack.id === 'call-lightning'
     ) return undefined
     return sustainedAttack.spellAttackMode
@@ -1082,9 +1161,13 @@ export function dnd5eSpellDiceCount(spell: Dnd5eSrdSpellDefinition, casterLevel:
 export function dnd5eSustainedSpellAttackDiceCount(
   spell: Dnd5eSrdSpellDefinition,
   slotLevel: number,
+  casterLevel = 1,
 ): number {
   const attack = spell.sustainedAttack
   if (!attack) return 0
+  if (attack.cantripScaling && spell.level === 0) {
+    return attack.dice.count * dnd5eCantripDiceMultiplier(casterLevel)
+  }
   const interval = Math.max(1, Math.floor(attack.dice.additionalDieEverySlotLevels ?? 1))
   return attack.dice.count + Math.floor(Math.max(0, slotLevel - spell.level) / interval)
 }
@@ -1249,6 +1332,14 @@ export function dnd5eSelectedSpellIdsForClass(character: Character, classId: Dnd
         level: dnd5eCharacterClassLevel(character, 'bard'),
       }
     : character
+  const subclassId = classId === 'fighter'
+    ? character.dnd5eClassChoices?.fighter?.subclass
+    : character.dnd5eClassChoices?.classes?.[classId]?.subclass
+  const subclassSpells = dnd5ePluginSubclassSpellIds(
+    subclassId,
+    dnd5eCharacterClassLevel(character, classId),
+    'always-prepared',
+  )
   return [...new Set([
     ...(selections[source.cantripSelectionKey] ?? []),
     ...(selections[source.spellSelectionKey] ?? []),
@@ -1260,7 +1351,23 @@ export function dnd5eSelectedSpellIdsForClass(character: Character, classId: Dnd
     ...(selections?.['mystic-arcanum-8'] ?? []),
     ...(selections?.['mystic-arcanum-9'] ?? []),
     ...(classId === 'bard' ? dnd5eBardMagicalSecretSpellIds(classCharacter) : []),
+    ...subclassSpells,
   ])]
+}
+
+export function dnd5eSubclassSpellIdsForClass(
+  character: Character,
+  classId: Dnd5eClassId,
+  mode?: 'always-prepared' | 'expanded-list',
+): readonly string[] {
+  const subclassId = classId === 'fighter'
+    ? character.dnd5eClassChoices?.fighter?.subclass
+    : character.dnd5eClassChoices?.classes?.[classId]?.subclass
+  return dnd5ePluginSubclassSpellIds(
+    subclassId,
+    dnd5eCharacterClassLevel(character, classId),
+    mode,
+  )
 }
 
 /** All spells selected on every owned spellcasting class. */
@@ -1282,7 +1389,10 @@ export function dnd5eSpellcastingClassIdsForSpell(
   return dnd5eEffectiveSpellcastingSources(character).map((source) => source.classId).filter((classId) => {
     const source = dnd5eEffectiveSpellcastingSource(character, classId)
     if (!source || !dnd5eSelectedSpellIdsForClass(character, classId).includes(spellId)) return false
-    if (!allowedClasses || allowedClasses.includes(source.spellListClassId)) return true
+    if (
+      !allowedClasses || allowedClasses.includes(source.spellListClassId) ||
+      dnd5eSubclassSpellIdsForClass(character, classId).includes(spellId)
+    ) return true
     return classId === 'bard' && dnd5eBardMagicalSecretSpellIds({
       ...character,
       charClass: dnd5eClassDefinition('bard')!.name,
@@ -1514,14 +1624,16 @@ export function dnd5eFreeSpellCastSource(
 
 export function dnd5eAvailableCombatSpells(character: Character): readonly Dnd5eSrdSpellDefinition[] {
   const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id
-  const source = primaryClassId ? dnd5eEffectiveSpellcastingSource(character, primaryClassId) : undefined
+  if (!primaryClassId) return []
+  const source = dnd5eEffectiveSpellcastingSource(character, primaryClassId)
   if (!source) return []
   const progression = dnd5eClassProgression(source.definition)[Math.max(0, Math.min(19, source.classLevel - 1))]
   const highestLevel = source.definition.spellcasting?.kind === 'pact'
     ? dnd5ePactSlotLevel(source.classLevel)
     : progression.spellSlots.length
+  const subclassOptions = new Set(dnd5eSubclassSpellIdsForClass(character, primaryClassId))
   return DND5E_SRD_COMBAT_SPELLS.filter((spell) =>
-    spell.classes.includes(source.spellListClassId) &&
+    (spell.classes.includes(source.spellListClassId) || subclassOptions.has(spell.id)) &&
     (spell.level === 0 ? (progression.cantripsKnown ?? 0) > 0 : spell.level <= highestLevel),
   )
 }

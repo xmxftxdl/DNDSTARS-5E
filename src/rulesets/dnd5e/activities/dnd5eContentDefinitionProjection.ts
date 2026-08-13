@@ -250,7 +250,9 @@ export function dnd5eContentDefinitionsFromPackageV2(
       category: 'skill', choices: background.skillProficiencies, count: background.skillProficiencies.length,
     }] : []
     definitions.push(definition(value, 'background', background.id, background.name, background,
-      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus('full'), {
+      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus('partial', [
+        '技能熟练可在建卡时应用；工具、语言选择与叙事背景特性仍需人物卡或 DM 流程确认',
+      ]), {
         description: background.description, activities, advancements,
       }))
   }

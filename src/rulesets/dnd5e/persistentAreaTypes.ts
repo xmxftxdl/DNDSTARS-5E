@@ -83,6 +83,12 @@ export type Dnd5ePersistentAreaTriggerTiming =
 export type Dnd5ePersistentAreaSourceKind = 'plugin-feature' | 'core-spell'
 export type Dnd5ePersistentAreaAnchorMode = 'fixed' | 'source-token' | 'effect-token'
 
+export interface Dnd5ePersistentAreaObscuration {
+  kind: 'light' | 'heavy'
+  /** Some monster-created clouds explicitly exempt their source from obscuration. */
+  sourceCanSeeThrough?: boolean
+}
+
 export type Dnd5ePersistentAreaVerticalSnapshot =
   | { mode: 'ground' }
   | {
@@ -109,6 +115,8 @@ export interface Dnd5ePersistentAreaSaveDeclaration {
   ability: AbilityKey
   dc: number | 'source-save-dc'
   onSuccess: 'none' | 'half'
+  /** The saving throw is against a magical effect, so Magic Resistance applies. */
+  magical?: boolean
   /** 核心规则扩展：变形生物进行此豁免时具有劣势。 */
   shapechangerDisadvantage?: boolean
   /** 核心规则扩展：变形生物豁免失败时恢复原形。 */
@@ -118,6 +126,11 @@ export interface Dnd5ePersistentAreaSaveDeclaration {
 export interface Dnd5ePersistentAreaConditionDeclaration {
   condition: Dnd5eStandardConditionId
   duration: Dnd5ePluginEffectDuration
+  /** Extra bounded mechanics carried by the same authoritative condition instance. */
+  modifiers?: Pick<
+    import('./activeEffects').Dnd5eActiveEffectModifiers,
+    'actionOrBonusActionOnly' | 'preventReactions'
+  >
   escapeCheck?: {
     ability: AbilityKey
     alternativeAbility?: AbilityKey
@@ -309,17 +322,35 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
 
   const rawSave = record(trigger.savingThrow)
   const savingThrow = rawSave && ABILITIES.includes(rawSave.ability as AbilityKey) &&
-    integer(rawSave.dc, 1, 40) && (rawSave.onSuccess === 'none' || rawSave.onSuccess === 'half')
+    integer(rawSave.dc, 1, 40) &&
+    (rawSave.magical == null || typeof rawSave.magical === 'boolean') &&
+    (rawSave.onSuccess === 'none' || rawSave.onSuccess === 'half')
     ? {
         ability: rawSave.ability as AbilityKey,
         dc: rawSave.dc,
         onSuccess: rawSave.onSuccess as 'none' | 'half',
+        magical: rawSave.magical === true,
         shapechangerDisadvantage: rawSave.shapechangerDisadvantage === true,
         revertShapechangerOnFailure: rawSave.revertShapechangerOnFailure === true,
       }
     : undefined
 
   const rawCondition = record(trigger.condition)
+  const rawConditionModifiers = record(rawCondition?.modifiers)
+  const conditionModifiers = rawConditionModifiers &&
+    Object.keys(rawConditionModifiers).every((key) =>
+      key === 'actionOrBonusActionOnly' || key === 'preventReactions') &&
+    (rawConditionModifiers.actionOrBonusActionOnly == null ||
+      typeof rawConditionModifiers.actionOrBonusActionOnly === 'boolean') &&
+    (rawConditionModifiers.preventReactions == null ||
+      typeof rawConditionModifiers.preventReactions === 'boolean')
+    ? {
+        actionOrBonusActionOnly: rawConditionModifiers.actionOrBonusActionOnly as boolean | undefined,
+        preventReactions: rawConditionModifiers.preventReactions as boolean | undefined,
+      }
+    : rawCondition?.modifiers == null
+      ? undefined
+      : null
   const rawDuration = record(rawCondition?.duration)
   const duration = rawDuration && EXPIRATIONS.includes(rawDuration.expiresAt as Dnd5ePluginEffectDuration['expiresAt']) &&
     (rawDuration.remainingRounds == null || integer(rawDuration.remainingRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS)) &&
@@ -352,11 +383,12 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
   const condition = rawCondition && duration &&
     (DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(rawCondition.condition) &&
     (duration.expiresAt !== 'target-turn-end-save' || (!!duration.saveAbility && !!duration.saveDc)) &&
-    escapeCheck !== null
+    escapeCheck !== null && conditionModifiers !== null
     ? {
         condition: rawCondition.condition as Dnd5eStandardConditionId,
         duration,
         escapeCheck,
+        modifiers: conditionModifiers,
       }
     : undefined
 
@@ -425,6 +457,7 @@ export function normalizeDnd5ePersistentAreaTriggerDeclaration(
           ability: normalized.savingThrow.ability,
           dc: rawSave.dc === 'source-save-dc' ? 'source-save-dc' : normalized.savingThrow.dc,
           onSuccess: normalized.savingThrow.onSuccess,
+          magical: normalized.savingThrow.magical,
           shapechangerDisadvantage: normalized.savingThrow.shapechangerDisadvantage,
           revertShapechangerOnFailure: normalized.savingThrow.revertShapechangerOnFailure,
         }

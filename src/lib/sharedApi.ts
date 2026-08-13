@@ -112,7 +112,8 @@ function sharedResourceReadKey(name: string): string {
     (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim() ||
     '__lobby__'
   const member = session?.memberId ?? '__anonymous__'
-  return `${room}:${member}:${name}`
+  const role = session?.role ?? '__anonymous__'
+  return `${room}:${member}:${role}:${name}`
 }
 
 export function sharedResourceReadCacheTtlMs(name: string): number {

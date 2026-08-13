@@ -8,9 +8,10 @@ import type {
   SharedStandAgainstTidePromptView,
   SharedStrokeOfLuckPromptView,
 } from '../../lib/combatInterruptPrompts'
+import { useInterruptCountdownNow } from './useInterruptCountdownNow'
 
 interface ClassFeatureInterruptPanelsProps {
-  now: number
+  now?: number
   pluginChoicePrompt: SharedPluginChoicePromptView | null
   bardicInspirationPrompt: SharedBardicInspirationPromptView | null
   cuttingWordsPrompt: SharedCuttingWordsPromptView | null
@@ -47,8 +48,18 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
     setEmpoweredSpellSelection: setSharedEmpoweredSpellSelection,
     onEmpoweredSpellChoice: handleSharedEmpoweredSpellChoice,
     onStandAgainstTideChoice: handleSharedStandAgainstTideChoice,
-    now: sharedDodgeNow,
+    now: fixedNow,
   } = props
+  const expiresAt = Math.max(
+    sharedPluginChoicePrompt?.expiresAt ?? 0,
+    sharedBardicInspirationPrompt?.expiresAt ?? 0,
+    sharedCuttingWordsPrompt?.expiresAt ?? 0,
+    sharedDarkOnesOwnLuckPrompt?.expiresAt ?? 0,
+    sharedStrokeOfLuckPrompt?.expiresAt ?? 0,
+    sharedEmpoweredSpellPrompt?.expiresAt ?? 0,
+    sharedStandAgainstTidePrompt?.expiresAt ?? 0,
+  ) || undefined
+  const sharedDodgeNow = useInterruptCountdownNow(expiresAt, fixedNow)
 
   return (
     <>

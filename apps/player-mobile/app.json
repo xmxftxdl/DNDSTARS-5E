@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "星痕玩家端",
+    "slug": "astral-trace-player",
+    "scheme": "astraltrace",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "plugins": [
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
+    ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#070711"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.astraltrace.vtt.player",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Astral Trace 使用麦克风连接房间语音。",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#070711"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "mobileProtocolVersion": 1
+    }
+  }
+}

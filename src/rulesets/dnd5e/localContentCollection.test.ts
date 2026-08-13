@@ -8,7 +8,16 @@ import {
   compileDnd5eLocalContentCollection,
   prepareDnd5eLocalContentJson,
 } from './localContentCollection'
-import { parseDnd5eContentPackageV2 } from './contentPackageV2'
+import {
+  dnd5eRulesPluginFromContentPackageV2,
+  parseDnd5eContentPackageV2,
+} from './contentPackageV2'
+import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
+import {
+  dnd5ePluginSpellDefinition,
+  dnd5ePluginSubclassSpellIds,
+  registerDnd5eRulesPlugin,
+} from './pluginApi'
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -269,6 +278,30 @@ describe('本地房间内容合集', () => {
           expect.objectContaining({ id: 'totem-warrior-2014' }),
         ]),
       })
+      const projection = dnd5eContentPackageActivityProjectionV1(parsed!)
+      const subclassEntries = projection.entries.filter((entry) => entry.sourceKind === 'subclass-ability')
+      expect({
+        total: subclassEntries.length,
+        adapted: subclassEntries.filter((entry) => entry.mode === 'adapted').length,
+        dmAdjudication: subclassEntries.filter((entry) => entry.mode === 'dm-adjudication').length,
+        legacyFallback: subclassEntries.filter((entry) => entry.mode === 'legacy-fallback').length,
+      }).toEqual({ total: 154, adapted: 38, dmAdjudication: 116, legacyFallback: 0 })
+      expect(projection.activities.filter((activity) =>
+        activity.legacySource?.kind === 'subclass-ability' && activity.authorityBinding,
+      )).toHaveLength(39)
+      expect(parsed?.content.spells).toHaveLength(8)
+      const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(parsed!))
+      try {
+        expect(dnd5ePluginSubclassSpellIds(
+          'local.doco.phb-2014-room:nature-domain-2014',
+          7,
+          'always-prepared',
+        )).toContain('local.doco.phb-2014-room:grasping-vine')
+        expect(dnd5ePluginSpellDefinition('local.doco.phb-2014-room:grasping-vine'))
+          .toMatchObject({ name: '抓握藤蔓', automation: { mode: 'reference-only' } })
+      } finally {
+        dispose()
+      }
     },
   )
 

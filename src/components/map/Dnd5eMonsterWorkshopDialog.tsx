@@ -9,6 +9,7 @@ import {
   createDnd5eCustomMonsterAreaActionDraftFromTrait,
   createDnd5eCustomMonsterMechanicDraft,
   createDnd5eCustomMonsterTraitDraft,
+  restoreDnd5eCustomMonsterDraft,
   createDnd5eCustomMonsterDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
   validateDnd5eCustomMonsterAreaActionDraft,
@@ -296,7 +297,7 @@ function readMonsterWorkshopDraft(storageKey: string): SavedMonsterWorkshopDraft
     if (!parsed || parsed.schemaVersion !== 1 || !parsed.draft || typeof parsed.draft !== 'object') return null
     return {
       schemaVersion: 1,
-      draft: parsed.draft as Dnd5eCustomMonsterDraft,
+      draft: restoreDnd5eCustomMonsterDraft(parsed.draft as Partial<Dnd5eCustomMonsterDraft>),
       selectedId: typeof parsed.selectedId === 'string' ? parsed.selectedId : null,
       aiReview: parsed.aiReview,
       updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),

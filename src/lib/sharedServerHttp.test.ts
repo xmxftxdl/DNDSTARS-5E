@@ -2455,6 +2455,14 @@ describe('P2 — 房间规则包原子升级', () => {
     const initialState = await initialStateResponse.json() as { rulesRevision: number; installed: boolean; hasState: boolean }
     expect(initialState).toMatchObject({ rulesRevision: 1, installed: false, hasState: false })
 
+    const ruleEventStream = await fetch(
+      `${offServer.base}/api/events/_all?room=${created.roomId}`,
+      { headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken } },
+    )
+    const ruleEventReader = ruleEventStream.body?.getReader()
+    expect(ruleEventReader).toBeDefined()
+    expect(new TextDecoder().decode((await ruleEventReader!.read()).value)).toContain('event: ready')
+
     const activateV1 = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}/activate`,
       {
@@ -2481,6 +2489,15 @@ describe('P2 — 房间规则包原子升级', () => {
       revision: 2,
       requiredPlugins: [{ id: pluginId, version: '1.0.0', integrity: v1.integrity, stateSchemaVersion: 1 }],
     })
+    const ruleChanged = await Promise.race([
+      ruleEventReader!.read(),
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error('room-rules-event-timeout')),
+        2_000,
+      ).unref()),
+    ])
+    expect(new TextDecoder().decode(ruleChanged.value)).toContain('"name":"room-rules"')
+    await ruleEventReader!.cancel()
 
     const v2Bytes = Buffer.from('export default atomicV2')
     const v2 = await stage('2.0.0', 2, v2Bytes)

@@ -4,7 +4,10 @@ import {
   mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
   mapCanvasGeometryRightButtonPanShouldStart,
+  mapCanvasGridHotkeyUsesEditableTarget,
+  mapCanvasGridSizeAfterWheel,
   mapCanvasStageCanPan,
+  mapCanvasTokenUsesInstantPosition,
   mapCanvasTokenClickAction,
 } from './mapCanvasInteraction'
 
@@ -61,6 +64,50 @@ describe('map canvas viewport panning', () => {
       button: 2,
       geometryEditMode: false,
     })).toBe(false)
+  })
+
+  it('keeps every Token layer on the same frame while calibrating the grid', () => {
+    expect(mapCanvasTokenUsesInstantPosition({
+      gridAdjustMode: true,
+      gridSizePreview: false,
+      hasDragPreview: false,
+    })).toBe(true)
+    expect(mapCanvasTokenUsesInstantPosition({
+      gridAdjustMode: false,
+      gridSizePreview: true,
+      hasDragPreview: false,
+    })).toBe(true)
+    expect(mapCanvasTokenUsesInstantPosition({
+      gridAdjustMode: false,
+      gridSizePreview: false,
+      hasDragPreview: false,
+    })).toBe(false)
+  })
+
+  it('accumulates rapid wheel grid-size changes from the live interaction value', () => {
+    let gridSize = 38
+    for (let index = 0; index < 4; index += 1) {
+      gridSize = mapCanvasGridSizeAfterWheel({
+        currentGridSize: gridSize,
+        mapWidth: 1024,
+        deltaY: -100,
+        shiftKey: false,
+      })
+    }
+    expect(gridSize).toBe(42)
+    expect(mapCanvasGridSizeAfterWheel({
+      currentGridSize: gridSize,
+      mapWidth: 1024,
+      deltaY: 100,
+      shiftKey: true,
+    })).toBe(39)
+  })
+
+  it('does not let grid hotkeys intercept editable controls', () => {
+    expect(mapCanvasGridHotkeyUsesEditableTarget({ tagName: 'INPUT' } as unknown as EventTarget)).toBe(true)
+    expect(mapCanvasGridHotkeyUsesEditableTarget({ tagName: 'textarea' } as unknown as EventTarget)).toBe(true)
+    expect(mapCanvasGridHotkeyUsesEditableTarget({ isContentEditable: true } as unknown as EventTarget)).toBe(true)
+    expect(mapCanvasGridHotkeyUsesEditableTarget({ tagName: 'canvas' } as unknown as EventTarget)).toBe(false)
   })
 })
 

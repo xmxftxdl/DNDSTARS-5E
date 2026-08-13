@@ -54,6 +54,7 @@ import {
   type Dnd5ePersistentAreaAnchorMode,
   type Dnd5ePersistentAreaMovementDeclaration,
   type Dnd5ePersistentAreaLighting,
+  type Dnd5ePersistentAreaObscuration,
   type Dnd5ePersistentAreaSourceKind,
   type Dnd5ePersistentAreaVisual,
   type Dnd5ePersistentAreaTriggerReceipt,
@@ -1047,7 +1048,7 @@ export interface BattleMap {
   gridOpacity?: number
   /** 显示地图格子的 X/Y 坐标轴 */
   showCoordinates?: boolean
-  /** 勾选后敌人/NPC 拖放时吸附到格心 */
+  /** 勾选后玩家、敌人和 NPC 拖放时吸附到格心。 */
   snapMonstersToGrid?: boolean
   /** 由 D&D 5e Headless 物品事务创建的持久地图区域。 */
   dnd5eItemAreas?: Dnd5eItemArea[]
@@ -1108,6 +1109,8 @@ export interface Dnd5ePluginArea {
   hiddenFromPlayers?: boolean
   /** 与权威视线判定共享的声明式光照/魔法黑暗。 */
   lighting?: Dnd5ePersistentAreaLighting
+  /** Non-light visibility volume, such as smoke, gas or underwater ink. */
+  obscuration?: Dnd5ePersistentAreaObscuration
   /** Optional independent light origins for one multi-point spell area. */
   lightingAnchorCells?: Array<{ col: number; row: number }>
   visual?: Dnd5ePersistentAreaVisual
@@ -1504,6 +1507,15 @@ function normalizeMap(raw: unknown): BattleMap {
             : undefined,
           hiddenFromPlayers: area.hiddenFromPlayers === true,
           lighting,
+          obscuration: area.obscuration &&
+            (area.obscuration.kind === 'light' || area.obscuration.kind === 'heavy') &&
+            (area.obscuration.sourceCanSeeThrough == null ||
+              typeof area.obscuration.sourceCanSeeThrough === 'boolean')
+            ? {
+                kind: area.obscuration.kind,
+                sourceCanSeeThrough: area.obscuration.sourceCanSeeThrough === true,
+              }
+            : undefined,
           lightingAnchorCells: Array.isArray(area.lightingAnchorCells)
             ? area.lightingAnchorCells.flatMap((cell) => Number.isInteger(cell?.col) && Number.isInteger(cell?.row)
               ? [{ col: Number(cell.col), row: Number(cell.row) }]

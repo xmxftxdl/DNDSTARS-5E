@@ -4,6 +4,7 @@ import {
   buildSpellTargetingSubmission,
   defaultSculptedSpellTargetIds,
   selectSpellModifierMode,
+  shouldAutoSubmitSpellAreaSelection,
 } from './SpellTargetingCoordinator'
 
 const targeting: Dnd5eSpellTargetingSession = {
@@ -80,6 +81,21 @@ describe('SpellTargetingCoordinator', () => {
     expect(payload.areaTargetCell).toEqual(areaTargetCells[0])
     expect(payload.areaTargetCells).toEqual(areaTargetCells)
     expect(payload.areaTargetCells).not.toBe(areaTargetCells)
+  })
+
+  it('never auto-submits Dancing Lights after only its first legal light point', () => {
+    const dancingLights = {
+      autoSubmitOnAreaSelection: true,
+      areaTargetCount: 4,
+      minimumAreaTargetCount: 1,
+    }
+    expect(shouldAutoSubmitSpellAreaSelection(dancingLights, 1)).toBe(false)
+    expect(shouldAutoSubmitSpellAreaSelection(dancingLights, 4)).toBe(false)
+    expect(shouldAutoSubmitSpellAreaSelection({
+      autoSubmitOnAreaSelection: true,
+      areaTargetCount: 1,
+      minimumAreaTargetCount: 1,
+    }, 1)).toBe(true)
   })
 
   it('keeps modifier modes mutually exclusive', () => {

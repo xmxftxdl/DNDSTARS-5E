@@ -19,7 +19,7 @@ export const PLAYER_ACTION_COMBAT_BANNER_ROUTES = {
   'dnd5e-spell-cast': 'spell',
   'dnd5e-persistent-area-move': 'action',
   'dnd5e-adjudicated-spell': 'spell',
-  'dnd5e-map-interaction': 'action',
+  'dnd5e-map-interaction': 'none',
   'move-token': 'none',
   disengage: 'action',
   dodge: 'action',
@@ -69,11 +69,9 @@ export function playerActionCombatBannerName(action: SharedPlayerActionState): s
   if (action.type === 'dnd5e-item-use') return '使用物品'
   if (action.type === 'dnd5e-ability-check') return '属性检定'
   if (action.type === 'dnd5e-persistent-area-move') return '操控持续法术'
-  if (action.type === 'dnd5e-map-interaction') return '场景互动'
   if (action.type === 'dnd5e-basic-action') {
     const kind = action.dnd5eBasicAction?.kind
     return kind ? BASIC_ACTION_LABELS[kind] : '基础动作'
   }
   return '动作'
 }
-

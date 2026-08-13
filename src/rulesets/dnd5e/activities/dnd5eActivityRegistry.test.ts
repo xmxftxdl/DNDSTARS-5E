@@ -3,6 +3,7 @@ import { automationCapabilityFromLegacyStatus } from '../../../domain/automation
 import {
   clearDnd5eActivityRegistryForTests,
   getRegisteredDnd5eActivity,
+  listAvailableRegisteredDnd5eActivitiesV1,
   listRegisteredDnd5eActivityPackages,
   registerDnd5eActivityPackage,
 } from './dnd5eActivityRegistry'
@@ -36,5 +37,38 @@ describe('Dnd5e Activity registry', () => {
     registerDnd5eActivityPackage({ packageId: 'test.package', packageVersion: '1.0.0', activities: [activity] })
     expect(() => registerDnd5eActivityPackage({ packageId: 'test.package', packageVersion: '1.0.1', activities: [activity] }))
       .toThrow(/already registered/)
+  })
+
+  it('does not open a duplicate generic window for event-engine-owned Activities', () => {
+    registerDnd5eActivityPackage({
+      packageId: 'test.event-native',
+      packageVersion: '1.0.0',
+      activities: [{
+        schemaVersion: 1,
+        id: 'subclass-ability:test-subclass:test-ability',
+        name: 'Event-owned ability',
+        activation: { kind: 'passive', timing: 'after-attack-hit' },
+        invocation: { kind: 'triggered', event: 'attack-hit', confirmation: 'actor-choice', retention: 'single-event' },
+        target: { kind: 'creature', relation: 'enemy', count: 1, includeSelf: false },
+        outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [] }],
+        automation: automationCapabilityFromLegacyStatus('full'),
+        authorityBinding: {
+          kind: 'declarative-subclass-mechanic',
+          subclassId: 'test-subclass',
+          abilityId: 'test-ability',
+          mechanicKind: 'combat-maneuver',
+          execution: 'headless-event-engine',
+        },
+        legacySource: { kind: 'subclass-ability', id: 'test-subclass:test-ability' },
+      }],
+    })
+    expect(listAvailableRegisteredDnd5eActivitiesV1({
+      actorId: 'actor', targetIds: ['target'],
+      triggerContext: {
+        eventId: 'attack-event-1', event: 'attack-hit',
+        source: { kind: 'attack', mode: 'melee', result: 'hit' },
+        eligibleActorIds: ['actor'], eligibleTargetIds: ['target'],
+      },
+    })).toEqual([])
   })
 })

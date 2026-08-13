@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { useCharacterStore } from '../../store/characters'
 import { useSpellbookStore } from '../../store/spellbook'
 import SpellSlotResourceEditor from '../character/SpellSlotResourceEditor'
-import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
+import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload, Dnd5eSustainedSpellControlId } from '../../lib/sharedCombatTypes'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import { dnd5eCombatSpellActionId } from '../../lib/dnd5eCombatActionDescriptors'
 import { dnd5eCombatSpellDamagePreview } from './combatSpellDamagePresentation'
 
 import { getClassResource } from '../../lib/classResources'
-import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_RACIAL_RESOURCE_KEYS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eEffectiveSpellcastingSources, dnd5eEffectiveSpellSelections, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eRacialRulesForCharacter, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
+import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_RACIAL_RESOURCE_KEYS, dnd5eActiveSustainedSpellControl, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eEffectiveSpellcastingSources, dnd5eEffectiveSpellSelections, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eRacialRulesForCharacter, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
 
 const DAMAGE_TYPE_LABELS: Record<string, string> = {
   acid: '强酸', cold: '冷冻', fire: '火焰', lightning: '闪电', poison: '毒素',
@@ -80,7 +80,7 @@ interface MapSpellsPanelProps {
   targetingCanHeightened?: boolean
   targetingHeightenedSelected?: boolean
   targetingHeightenedSelecting?: boolean
-  targetingSustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  targetingSustainedEffectAttack?: Dnd5eSustainedSpellControlId
   movablePersistentAreas?: readonly {
     id: string
     label: string
@@ -110,7 +110,7 @@ interface MapSpellsPanelProps {
     spellId: string,
     slotLevel: number,
     castingClassId: Dnd5eClassId,
-    attackId: 'flame-blade',
+    attackId: Dnd5eSustainedSpellControlId,
   ) => void
   onUseSustainedAreaAttack?: (areaId: string) => void
   onActivatePersistentArea?: (areaId: string) => void
@@ -475,17 +475,8 @@ export default function MapSpellsPanel({
             const areaLabel = dnd5eSpellAreaLabel(spell)
             const automationReason = spellbookById.get(spell.id)?.automationReason
             const projectileUnit = spell.id === 'magic-missile' ? '枚飞弹' : '道射线'
-            const activeSustainedEffect = spell.sustainedAttack?.origin === 'caster'
-              ? c.dnd5eCombatState?.activeEffects?.find((effect) =>
-                  effect.source.kind === 'spell' &&
-                  effect.source.rulesId === spell.id &&
-                  effect.definitionId === `srd-5.1:spell:${spell.id}` &&
-                  effect.duration.type === 'concentration' &&
-                  Number.isInteger(effect.potency) &&
-                  effect.potency! >= spell.level,
-                )
-              : undefined
-            const sustainedAttackSlotLevel = activeSustainedEffect?.potency
+            const activeSustainedControl = dnd5eActiveSustainedSpellControl(c, spell)
+            const sustainedAttackSlotLevel = activeSustainedControl?.slotLevel
             return <div key={spell.id} className="rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div><div className="text-sm font-semibold text-violet-100">{spell.name}</div><div className="text-[10px] text-slate-500">{spell.englishName} · {spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.castingTime === 'bonus-action' ? '附赠动作' : spell.castingTime === 'reaction' ? '反应' : '动作'} · {effectiveRangeFeet}尺{spell.concentration ? ' · 专注' : ''}</div></div>
@@ -641,7 +632,7 @@ export default function MapSpellsPanel({
                   spell.id,
                   sustainedAttackSlotLevel,
                   definition.id,
-                  spell.sustainedAttack!.id as 'flame-blade',
+                  spell.sustainedAttack!.id,
                 )}
                 className={`mt-2 w-full rounded-lg border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
                   targetingSpellId === spell.id && targetingSustainedEffectAttack === spell.sustainedAttack.id
@@ -650,8 +641,8 @@ export default function MapSpellsPanel({
                 }`}
               >
                 {targetingSpellId === spell.id && targetingSustainedEffectAttack === spell.sustainedAttack.id
-                  ? `请选择 ${spell.sustainedAttack.rangeFeet} 尺内的攻击目标`
-                  : `使用动作：${spell.name}攻击（${sustainedAttackSlotLevel}环效果）`}
+                  ? spell.area ? '请在地图选择新的法术范围' : `请选择 ${spell.sustainedAttack.rangeFeet} 尺内的目标`
+                  : activeSustainedControl?.label ?? `使用${spell.name}后续动作`}
               </button> : null}
               {targetingSpellId === spell.id && (targetingMaximumTargets > 1 || !!spell.area) ? <>
                 {targetingAllowsDuplicateTargets ? <button

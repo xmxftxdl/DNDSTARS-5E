@@ -2049,14 +2049,14 @@ describe('map geometry player projection', () => {
     })
   })
 
-  it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {
+  it('sees distant scene lights through dynamic darkness but ignores ambient lighting with manual fog only', () => {
     const darkGeometry = {
       ...geometry,
       maps: geometry.maps.map((entry) => ({
         ...entry,
         walls: [],
         lights: [{
-          id: 'lamp', kind: 'light', label: 'Lamp', points: [{ x: 80, y: 20 }], enabled: true,
+          id: 'lamp', kind: 'light', label: 'Lamp', points: [{ x: 180, y: 20 }], enabled: true,
           brightRadiusFeet: 5, dimRadiusFeet: 5, color: '#ffffff', elevationFeet: 5, createdAt: 1,
         }],
         vision: { ...entry.vision, enabled: true, ambientLight: 'darkness', defaultRangeFeet: 60 },
@@ -2064,11 +2064,11 @@ describe('map geometry player projection', () => {
     }
     const maps = {
       maps: [{
-        id: 'map-1', width: 200, height: 120, gridSize: 10, feetPerCell: 5,
+        id: 'map-1', width: 400, height: 120, gridSize: 10, feetPerCell: 5,
         tokens: [
           { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
-          { id: 'lit', type: 'enemy', x: 80, y: 20 },
-          { id: 'unlit', type: 'enemy', x: 80, y: 80 },
+          { id: 'lit', type: 'enemy', x: 180, y: 20 },
+          { id: 'unlit', type: 'enemy', x: 180, y: 80 },
         ],
       }],
     }
@@ -2079,7 +2079,17 @@ describe('map geometry player projection', () => {
       ...darkGeometry,
       maps: darkGeometry.maps.map((entry) => ({ ...entry, vision: { ...entry.vision, enabled: false } })),
     }
-    expect(sharedServerCore.projectMapsForPlayer(maps, disabledGeometry, 'character-1', null, null, {
+    const nearbyMaps = {
+      maps: [{
+        ...maps.maps[0],
+        tokens: [
+          maps.maps[0].tokens[0],
+          { ...maps.maps[0].tokens[1], x: 80 },
+          { ...maps.maps[0].tokens[2], x: 80 },
+        ],
+      }],
+    }
+    expect(sharedServerCore.projectMapsForPlayer(nearbyMaps, disabledGeometry, 'character-1', null, null, {
       maps: [{ mapId: 'map-1', filled: true, shapes: [] }],
     }).maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'lit', 'unlit'])
   })
@@ -2172,7 +2182,7 @@ describe('map geometry player projection', () => {
       .toEqual(['hero'])
   })
 
-  it('shows revealed fog areas even when dynamic vision is enabled', () => {
+  it('shows revealed areas and unobstructed map-wide sight when bright dynamic vision is enabled', () => {
     const wallless = {
       ...geometry,
       maps: geometry.maps.map((map) => ({ ...map, walls: [], vision: { ...map.vision, sharePartyVision: true } })),
@@ -2193,7 +2203,7 @@ describe('map geometry player projection', () => {
       }],
     })
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
-      .toEqual(['hero', 'revealed-far'])
+      .toEqual(['hero', 'revealed-far', 'unseen-far'])
   })
 
   it('uses passive Perception to omit hidden tokens from the serialized player response', () => {

@@ -29,3 +29,25 @@ export function resolvePlayerSpellActionSubmission(input: {
   )
   return token ? { character: playerCharacter, token } : undefined
 }
+
+/**
+ * Target selection can outlive the click that opened it. Keep it only while
+ * the same owned character is still allowed to author the cast. In combat the
+ * live initiative Token is authoritative; outside combat the owned map Token
+ * remains sufficient.
+ */
+export function playerSpellTargetingMatchesAuthority(input: {
+  combatActive: boolean
+  targetingCharacterId: string
+  playerCharacterId?: string
+  turnCharacterId?: string
+  currentInitiativeToken?: Token
+}): boolean {
+  if (!input.playerCharacterId || input.targetingCharacterId !== input.playerCharacterId) {
+    return false
+  }
+  if (!input.combatActive) return true
+  return input.currentInitiativeToken?.type === 'player' &&
+    input.currentInitiativeToken.characterId === input.targetingCharacterId &&
+    input.turnCharacterId === input.targetingCharacterId
+}

@@ -137,7 +137,6 @@ const DND5E_PARTIAL_CORE_SPELL_REASONS: Readonly<Record<string, string>> = {
   'meteor-swarm': '四个不同落点、重叠目标去重、敏捷豁免及火焰/钝击伤害已自动化；物体伤害与点燃仍需 DM 裁定。',
   'lightning-bolt': '范围豁免、伤害与升环已自动化；点燃线内未被穿戴或携带的易燃物仍需 DM 裁定。',
   'cone-of-cold': '范围豁免、伤害与升环已自动化；被法术杀死的生物形成冰冻塑像仍需 DM 或地图层处理。',
-  'dancing-lights': '施法时分别放置 1 至 4 个光源及其照明已自动化；施法后的逐个移动与四光合并仍需要地图层或 DM 处理。',
   'minor-illusion': '幻象内容、交互方式与识破结果仍需要 DM 裁定。',
   thaumaturgy: '环境与叙事效果仍需要 DM 裁定。',
   'enlarge-reduce': '生物目标已自动化；物件目标仍需要 DM 裁定。',

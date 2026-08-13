@@ -293,6 +293,39 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(true)
   })
 
+  it('extends line of sight to the map boundary in every ambient light mode', () => {
+    const g = geometry()
+    g.walls = []
+    g.vision.defaultRangeFeet = 30
+    const wideMap = { ...map, width: 2_000, tokens: [] }
+    const viewer = token('viewer', 25, 250)
+    const target = token('far-target', 1_750, 250, { type: 'enemy' })
+
+    g.vision.ambientLight = 'bright'
+    expect(mapGeometryCanSeeToken({ geometry: g, map: wideMap, viewer, target })).toBe(true)
+    expect(Math.max(...mapGeometryVisibilityPolygon({ geometry: g, map: wideMap, viewer }).map((point) => point.x)))
+      .toBeCloseTo(wideMap.width, 3)
+
+    g.vision.ambientLight = 'dim'
+    expect(mapGeometryCanSeeToken({ geometry: g, map: wideMap, viewer, target })).toBe(true)
+
+    g.vision.ambientLight = 'darkness'
+    expect(mapGeometryCanSeeToken({ geometry: g, map: wideMap, viewer, target })).toBe(false)
+    expect(Math.max(...mapGeometryVisibilityPolygon({ geometry: g, map: wideMap, viewer }).map((point) => point.x)))
+      .toBeCloseTo(wideMap.width, 3)
+
+    const distantLitTarget = {
+      ...target,
+      lightSource: { enabled: true, brightRadiusFeet: 10, dimRadiusFeet: 10, color: '#fbbf24' },
+    }
+    expect(mapGeometryCanSeeToken({
+      geometry: g,
+      map: { ...wideMap, tokens: [viewer, distantLitTarget] },
+      viewer,
+      target: distantLitTarget,
+    })).toBe(true)
+  })
+
   it('stops timed token lights from illuminating after their campaign expiry', () => {
     const g = geometry()
     g.walls = []
@@ -311,7 +344,7 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target, worldMinute: 540 })).toBe(false)
   })
 
-  it('keeps the normal terrain envelope in darkness while creature visibility still requires light', () => {
+  it('keeps map-wide terrain line of sight in darkness while creature visibility still requires light', () => {
     const g = geometry()
     g.walls = []
     g.vision.ambientLight = 'darkness'
@@ -320,7 +353,7 @@ describe('map geometry', () => {
     const polygon = mapGeometryVisibilityPolygon({ geometry: g, map, viewer })
     expect(polygon.length).toBeGreaterThan(90)
     expect(Math.max(...polygon.map((point) => Math.hypot(point.x - viewer.x, point.y - viewer.y))))
-      .toBeLessThanOrEqual(100.001)
+      .toBeGreaterThan(300)
     expect(mapGeometryCanSeeToken({
       geometry: g,
       map: { ...map, tokens: [viewer] },

@@ -187,7 +187,7 @@ describe('legacy content Activity adapters', () => {
     }])
   })
 
-  it('projects generic subclass rolls/effects while flagging special mechanics', () => {
+  it('binds audited subclass mechanics to their native authority without a fake DM operation', () => {
     const ability: DeclarativeSubclassAbilityV1 = {
       schemaVersion: 1,
       id: 'measured-strike',
@@ -203,12 +203,22 @@ describe('legacy content Activity adapters', () => {
       mechanic: { kind: 'combat-maneuver', operation: 'push-on-hit', resourceId: 'focus', superiorityRollId: 'extra' },
       automation: 'full',
     }
-    const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability)
+    const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability, {
+      subclassId: 'measured-warrior',
+      compatibility: { effective: 'full', reasons: [] },
+    })
     expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
-    expect(activity.automation.level).toBe('assisted')
+    expect(activity.automation.level).toBe('full')
     expect(activity.invocation).toMatchObject({ kind: 'triggered', event: 'attack-hit', confirmation: 'actor-choice' })
     expect(activity.triggers?.[0]).toMatchObject({ event: 'attack-hit', decision: 'actor-choice' })
-    expect(activity.outcomes[0]?.operations).toContainEqual(expect.objectContaining({ kind: 'manual-adjudication' }))
+    expect(activity.authorityBinding).toEqual({
+      kind: 'declarative-subclass-mechanic',
+      subclassId: 'measured-warrior',
+      abilityId: 'measured-strike',
+      mechanicKind: 'combat-maneuver',
+      execution: 'headless-event-engine',
+    })
+    expect(activity.outcomes[0]?.operations).toEqual([])
   })
 
   it('projects multiattack as calls to ordinary monster Activities', () => {

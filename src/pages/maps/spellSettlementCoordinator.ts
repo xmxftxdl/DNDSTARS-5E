@@ -39,7 +39,7 @@ export function dnd5eSpellAuthorityResolutionContext(input: {
   turnEconomy?: Dnd5eTurnEconomyCounts
   turnEconomyByToken?: Dnd5eTurnEconomyByToken
 }) {
-  const exploration = !input.combatActive && input.combatId == null
+  const exploration = !input.combatActive && !input.combatId?.trim()
   return {
     exploration,
     initiativeOrder: dnd5eSpellResolutionInitiativeOrder({

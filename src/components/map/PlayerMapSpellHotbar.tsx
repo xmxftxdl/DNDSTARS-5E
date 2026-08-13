@@ -4,10 +4,10 @@ import type { PendingPlayerActionLock } from '../../lib/playerActionSync'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import { dnd5eEffectiveWalkingSpeed } from '../../rulesets/dnd5e/classes'
 import { createDnd5eTurnEconomyCounts } from '../../rulesets/dnd5e/turnEconomy'
-import { dnd5eUtilityProjectionMovementEconomy } from '../../rulesets/dnd5e/utilityProjection'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import PlayerCombatHotbar from './PlayerCombatHotbar'
+import { playerMapMovablePersistentAreas, playerMapSustainedAreaControls } from './playerMapPersistentAreas'
 
 interface PlayerMapSpellHotbarProps {
   isDM: boolean
@@ -56,23 +56,16 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
     playerCharacter: props.playerCharacter,
     characters: props.characters,
   })
-  const movablePersistentAreas = props.combatActive
-    ? (props.map.dnd5ePluginAreas ?? []).flatMap((area) =>
-        area.sourceKind === 'core-spell' &&
-        area.sourceCharacterId === character.id &&
-        area.movement
-          ? [{
-              id: area.id,
-              label: area.label,
-              economy: area.coreSpellId
-                ? dnd5eUtilityProjectionMovementEconomy(character, area.coreSpellId, area.movement.economy)
-                : area.movement.economy,
-              maximumFeet: area.movement.maximumFeet,
-              coreSpellId: area.coreSpellId,
-            }]
-          : [],
-      )
-    : []
+  const movablePersistentAreas = playerMapMovablePersistentAreas(props.map, character)
+  const sustainedAreaControls = playerMapSustainedAreaControls(props.map, character)
+  const hunterMarkTargetId = character.dnd5eCombatState?.huntersMarkTargetId
+  const hunterMarkTarget = hunterMarkTargetId
+    ? props.map.tokens.find((candidate) => candidate.id === hunterMarkTargetId)
+    : undefined
+  const hunterMarkTransferAvailable = !!hunterMarkTargetId &&
+    character.concentrating === true &&
+    character.dnd5eCombatState?.concentrationSpellId === 'hunters-mark' &&
+    (!hunterMarkTarget || (hunterMarkTarget.hp != null && hunterMarkTarget.hp <= 0))
 
   return (
     <div className="pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex justify-center">
@@ -86,6 +79,8 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
         activeActionId={props.activeActionId}
         grappleEscapes={props.combatActive ? props.grappleEscapes : []}
         movablePersistentAreas={movablePersistentAreas}
+        sustainedAreaControls={sustainedAreaControls}
+        hunterMarkTransferAvailable={hunterMarkTransferAvailable}
         selectedSpellSlotLevels={props.selectedSpellSlotLevels}
         onSelectedSpellSlotLevelChange={props.onSelectedSpellSlotLevelChange}
         onCommand={props.onCommand}

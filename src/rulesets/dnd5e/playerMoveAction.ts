@@ -3,6 +3,7 @@ import { isMovementLocked } from '../../lib/combatStatus'
 import {
   resolveFreeDropCell,
   resolveTokenDropPosition,
+  shouldSnapTokenOnDrop,
   snapTokenToGridCenter,
 } from '../../lib/gridCombat'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
@@ -10,6 +11,8 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   mapGeometryRuntimeForMap,
+  mapGeometryMovementBlocked,
+  mapGeometryPlacementBlocked,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
@@ -119,13 +122,16 @@ export function prepareDnd5eExplorationMove(input: {
   ) return { ok: false, reason: 'invalid-actor' }
   if (isMovementLocked(actor.conditions)) return { ok: false, reason: 'movement-locked' }
 
-  const snapped = resolveTokenDropPosition(
+  const resolvedDrop = resolveTokenDropPosition(
     action.targetPosition.x,
     action.targetPosition.y,
     actorToken,
     input.map,
   )
-  const to = resolveFreeDropCell(snapped.x, snapped.y, actorToken.id, input.map)
+  const snapsToGrid = shouldSnapTokenOnDrop(actorToken, input.map)
+  const to = snapsToGrid
+    ? resolveFreeDropCell(resolvedDrop.x, resolvedDrop.y, actorToken.id, input.map)
+    : resolvedDrop
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
   const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
@@ -151,6 +157,56 @@ export function prepareDnd5eExplorationMove(input: {
       dnd5ePersistentAreaSpeedCostMultiplierAt({ map: input.map, token, position }),
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
+  const pathPoints = [...path.points]
+  const pathElevationsFeet = [...path.elevationsFeet]
+  const pathStart = pathPoints[0]
+  if (!snapsToGrid && pathStart && Math.hypot(pathStart.x - actorToken.x, pathStart.y - actorToken.y) > 0.001) {
+    const pathStartElevationFeet = pathElevationsFeet[0] ?? fromElevationFeet
+    if (
+      Math.abs(pathStartElevationFeet - fromElevationFeet) > 10.001 ||
+      mapGeometryPlacementBlocked({
+        geometry,
+        map: input.map,
+        token: actorToken,
+        at: pathStart,
+        elevationFeet: pathStartElevationFeet,
+      }).blocked ||
+      mapGeometryMovementBlocked({
+        geometry,
+        map: input.map,
+        token: actorToken,
+        to: pathStart,
+        fromElevationFeet,
+        toElevationFeet: pathStartElevationFeet,
+      }).blocked
+    ) return { ok: false, reason: 'movement-blocked' }
+    pathPoints.unshift({ x: actorToken.x, y: actorToken.y })
+    pathElevationsFeet.unshift(fromElevationFeet)
+  }
+  const pathEnd = pathPoints.at(-1)
+  if (!snapsToGrid && pathEnd && Math.hypot(pathEnd.x - to.x, pathEnd.y - to.y) > 0.001) {
+    const pathEndElevationFeet = pathElevationsFeet.at(-1) ?? fromElevationFeet
+    if (
+      Math.abs(toElevationFeet - pathEndElevationFeet) > 10.001 ||
+      mapGeometryPlacementBlocked({
+        geometry,
+        map: input.map,
+        token: actorToken,
+        at: to,
+        elevationFeet: toElevationFeet,
+      }).blocked ||
+      mapGeometryMovementBlocked({
+        geometry,
+        map: input.map,
+        token: { ...actorToken, ...pathEnd, elevationFeet: pathEndElevationFeet },
+        to,
+        fromElevationFeet: pathEndElevationFeet,
+        toElevationFeet,
+      }).blocked
+    ) return { ok: false, reason: 'movement-blocked' }
+    pathPoints.push(to)
+    pathElevationsFeet.push(toElevationFeet)
+  }
 
   return {
     ok: true,
@@ -159,8 +215,8 @@ export function prepareDnd5eExplorationMove(input: {
       actorToken,
       to,
       toElevationFeet,
-      path: path.points,
-      pathElevationsFeet: path.elevationsFeet,
+      path: pathPoints,
+      pathElevationsFeet,
     },
   }
 }

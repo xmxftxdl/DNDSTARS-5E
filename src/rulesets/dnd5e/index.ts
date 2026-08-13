@@ -7,6 +7,7 @@ export { dnd5e2014Adapter }
 export * from './headlessCombatEngine'
 export * from './sharedCombat'
 export * from './spells'
+export * from './sustainedSpellControls'
 export * from './spellModifierIntents'
 export * from './spellAction'
 export * from './spellComponents'

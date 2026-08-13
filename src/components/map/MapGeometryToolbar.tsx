@@ -66,7 +66,8 @@ interface MapGeometryToolbarProps {
   }) => Promise<void>
 }
 
-const TOOL_LABELS: Record<Exclude<MapGeometryTool, 'select'>, string> = {
+const TOOL_LABELS: Record<MapGeometryTool, string> = {
+  select: '选择／编辑',
   wall: '墙',
   door: '门',
   window: '窗户',
@@ -255,7 +256,7 @@ export default function MapGeometryToolbar({
             onChange={(event) => onToolChange(event.target.value as MapGeometryTool)}
             aria-label="地图几何工具"
             className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-            title="按住并拖动绘制；门窗工具下从空白地图拖动仍可平移视角"
+            title="选择／编辑可选中并拖动现有墙体节点；其他工具用于绘制"
           >
             {Object.entries(TOOL_LABELS).map(([value, label]) => (
               <option key={value} value={value} disabled={terrainEditingLocked && value === 'elevation'}>{label}</option>

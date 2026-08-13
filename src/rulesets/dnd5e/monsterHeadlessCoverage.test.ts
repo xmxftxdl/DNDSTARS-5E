@@ -60,6 +60,12 @@ describe('D&D 5e monster Headless coverage audit', () => {
       .toBeGreaterThanOrEqual(ratchet.spells.definedMinimum)
     expect(spells.missing).toBeLessThanOrEqual(ratchet.spells.missingMaximum)
     expect(spells.compatibilityRate).toBe(spells.full / spells.total)
+    expect(report.spells.occurrences.find((row) =>
+      row.slug === 'druid' && row.spellId === 'produce-flame'
+    )).toMatchObject({
+      compatibility: 'manual',
+      reason: expect.stringContaining('持续'),
+    })
 
     expect(report.traits.summary.total).toBe(ratchet.traits.total)
     expect(report.traits.summary.headlessWithRule)

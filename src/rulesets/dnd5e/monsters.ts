@@ -5,6 +5,14 @@ import reviewedMonsterTranslations from './generated/srdMonsterTranslationsZh.re
 import { getDnd5eRoomMonster } from './roomMonsterCatalog'
 import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eStandardConditionId } from './conditions'
+import type {
+  Dnd5ePersistentAreaAnchorMode,
+  Dnd5ePersistentAreaLighting,
+  Dnd5ePersistentAreaMovementDeclaration,
+  Dnd5ePersistentAreaObscuration,
+  Dnd5ePersistentAreaTriggerSnapshot,
+  Dnd5ePersistentAreaVisual,
+} from './persistentAreaTypes'
 import type { Dnd5eTokenStatusMarkerGrantDeclaration } from './tokenStatusMarkers'
 import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
 import type {
@@ -766,6 +774,28 @@ export type Dnd5eMonsterSpecialActionRule =
       maximumDurationRounds?: number
       breakOn: readonly ('makes-attack' | 'casts-spell')[]
       breakOnMonsterAbilityIds?: readonly string[]
+    }
+  | {
+      /** A map-backed monster hazard whose settlement remains Host-authoritative. */
+      kind: 'persistent-area'
+      area: SkillAoeTargeting
+      durationRounds: number
+      expiresAtSourceNextTurnEnd?: boolean
+      concentration: boolean
+      anchorMode: Exclude<Dnd5ePersistentAreaAnchorMode, 'effect-token'>
+      vertical?:
+        | { mode: 'ground' }
+        | { mode: 'volume'; heightFeet: number; anchorOffsetFeet?: number }
+      movement?: Dnd5ePersistentAreaMovementDeclaration
+      relation?: 'any' | 'ally' | 'enemy'
+      includeSelf?: boolean
+      requiredEnvironment?: 'underwater'
+      movementCostMultiplier?: number
+      lighting?: Dnd5ePersistentAreaLighting
+      obscuration?: Dnd5ePersistentAreaObscuration
+      color: string
+      visual: Dnd5ePersistentAreaVisual
+      triggers: readonly Dnd5ePersistentAreaTriggerSnapshot[]
     }
   | {
       kind: 'saving-throw-condition'
@@ -5688,6 +5718,54 @@ const CATALOG_INVISIBILITY_RULES = {
  * can be expressed without parsing prose at runtime.
  */
 const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
+  darkmantle: {
+    'darkness-aura': {
+      kind: 'persistent-area',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 15 },
+      durationRounds: 100,
+      concentration: true,
+      anchorMode: 'source-token',
+      vertical: { mode: 'volume', heightFeet: 30, anchorOffsetFeet: -15 },
+      relation: 'any',
+      includeSelf: true,
+      lighting: {
+        kind: 'magical-darkness',
+        radiusFeet: 15,
+        spellLevel: 2,
+        suppressesMagicalLightThroughLevel: 2,
+      },
+      color: '#171329',
+      visual: { preset: 'darkness', intensity: 'strong' },
+      triggers: [],
+    },
+  },
+  dretch: {
+    'fetid-cloud': {
+      kind: 'persistent-area',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 10 },
+      durationRounds: 10,
+      concentration: false,
+      anchorMode: 'fixed',
+      vertical: { mode: 'volume', heightFeet: 20, anchorOffsetFeet: -5 },
+      relation: 'any',
+      includeSelf: true,
+      obscuration: { kind: 'light' },
+      color: '#65a30d',
+      visual: { preset: 'toxic-cloud', intensity: 'strong' },
+      triggers: [{
+        id: 'fetid-cloud-turn-start',
+        label: 'Fetid Cloud · turn start',
+        timing: 'turn-start',
+        oncePerTurn: true,
+        savingThrow: { ability: 'con', dc: 11, onSuccess: 'none' },
+        condition: {
+          condition: 'poisoned',
+          duration: { expiresAt: 'target-next-turn-start' },
+          modifiers: { actionOrBonusActionOnly: true, preventReactions: true },
+        },
+      }],
+    },
+  },
   androsphinx: {
     roar: {
       kind: 'area-saving-throw',
@@ -6058,6 +6136,29 @@ const CATALOG_STRUCTURED_SPECIAL_ACTIONS = {
 
 const CATALOG_STRUCTURED_LEGENDARY_SPECIAL_ACTIONS = {
   kraken: {
+    'ink-cloud-costs-3-actions': {
+      kind: 'persistent-area',
+      area: { shape: 'circle', origin: 'self', radiusFeet: 60 },
+      durationRounds: 2,
+      expiresAtSourceNextTurnEnd: true,
+      concentration: false,
+      anchorMode: 'fixed',
+      vertical: { mode: 'volume', heightFeet: 120, anchorOffsetFeet: -60 },
+      relation: 'any',
+      includeSelf: false,
+      requiredEnvironment: 'underwater',
+      obscuration: { kind: 'heavy', sourceCanSeeThrough: true },
+      color: '#172554',
+      visual: { preset: 'toxic-cloud', intensity: 'strong' },
+      triggers: [{
+        id: 'kraken-ink-cloud-turn-end',
+        label: 'Ink Cloud · turn end',
+        timing: 'turn-end',
+        oncePerTurn: true,
+        savingThrow: { ability: 'con', dc: 23, onSuccess: 'half' },
+        damage: { count: 3, sides: 10, modifier: 0, type: 'poison' },
+      }],
+    },
     'lightning-storm-costs-2-actions': {
       kind: 'area-saving-throw',
       area: { shape: 'circle', origin: 'self', radiusFeet: 120 },
@@ -6216,6 +6317,9 @@ const CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE = {
   vrock: {
     spores: { kind: 'recharge', dieSides: 6, minimum: 6 },
     'stunning-screech': { kind: 'recharge', dieSides: 6, minimum: 6 },
+  },
+  dretch: {
+    'fetid-cloud': { kind: 'per-day', max: 1 },
   },
 } as const satisfies Readonly<Record<
   string,

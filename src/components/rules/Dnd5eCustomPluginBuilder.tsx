@@ -73,6 +73,7 @@ import AiImageGenerationButton from '../AiImageGenerationButton'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import { dnd5eSpellActionIcon, type Dnd5eActionIconSpec } from '../../lib/dnd5eActionIcons'
 import Dnd5eDamageFormulaEditor from './Dnd5eDamageFormulaEditor'
+import { restoreArrayBackedBuilderMetadata } from './customPluginBuilderDraftMigration'
 
 interface RaceDraft {
   id: string
@@ -558,6 +559,18 @@ function newRace(index: number): RaceDraft {
   }
 }
 
+function restoreRaceDraft(value: Partial<RaceDraft>, index: number): RaceDraft {
+  const fallback = newRace(index + 1)
+  return {
+    ...fallback,
+    ...value,
+    abilityBonuses: value.abilityBonuses && typeof value.abilityBonuses === 'object'
+      ? { ...fallback.abilityBonuses, ...value.abilityBonuses }
+      : fallback.abilityBonuses,
+    flexibleExclude: Array.isArray(value.flexibleExclude) ? [...value.flexibleExclude] : [],
+  }
+}
+
 function newMethod(index: number): MethodDraft {
   return {
     id: `custom-method-${index}`,
@@ -580,6 +593,16 @@ function newBackground(index: number): BackgroundDraft {
     id: `custom-background-${index}`, name: `自定义背景 ${index}`, description: '',
     skillProficiencies: [], toolProficiencies: '', languages: 0,
     featureName: '', featureDescription: '',
+  }
+}
+
+function restoreBackgroundDraft(value: Partial<BackgroundDraft>, index: number): BackgroundDraft {
+  return {
+    ...newBackground(index + 1),
+    ...value,
+    skillProficiencies: Array.isArray(value.skillProficiencies)
+      ? [...value.skillProficiencies]
+      : [],
   }
 }
 
@@ -696,6 +719,12 @@ function restoreFeatDraft(value: Partial<FeatDraft>, index: number): FeatDraft {
     ...fallback,
     ...value,
     prerequisiteAbilities: { ...fallback.prerequisiteAbilities, ...value.prerequisiteAbilities },
+    d20ChoiceRerollRollKinds: Array.isArray(value.d20ChoiceRerollRollKinds)
+      ? [...value.d20ChoiceRerollRollKinds]
+      : fallback.d20ChoiceRerollRollKinds,
+    d20ChoiceRerollScopes: Array.isArray(value.d20ChoiceRerollScopes)
+      ? [...value.d20ChoiceRerollScopes]
+      : fallback.d20ChoiceRerollScopes,
     headless: restoreHeadlessEffectDraft(value.headless),
   }
 }
@@ -773,6 +802,7 @@ function restoreSpellDraft(value: Partial<SpellDraft>, index: number): SpellDraf
     ...fallback,
     ...value,
     ...inferredLegacyRange,
+    classes: Array.isArray(value.classes) ? [...value.classes] : fallback.classes,
     cantripScalingSteps: Array.isArray(value.cantripScalingSteps) && value.cantripScalingSteps.length > 0
       ? value.cantripScalingSteps.map((step) => ({ ...step }))
       : cantripScalingStepsFromDamage(sourceDamage),
@@ -1936,9 +1966,18 @@ export default function Dnd5eCustomPluginBuilder({
   const [restoredDraft] = useState(() => readSavedBuilderDraft(draftStorageKey))
   const [open, setOpen] = useState(alwaysExpanded)
   const [activeSection, setActiveSection] = useState<BuilderSection>('monsters')
-  const [metadata, setMetadata] = useState(() => ({ ...defaultMetadata, ...(restoredDraft?.metadata ?? {}) }))
-  const [races, setRaces] = useState<RaceDraft[]>(() => Array.isArray(restoredDraft?.races) ? restoredDraft.races : [])
-  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>(() => Array.isArray(restoredDraft?.backgrounds) ? restoredDraft.backgrounds : [])
+  const [metadata, setMetadata] = useState(() =>
+    restoreArrayBackedBuilderMetadata(
+      restoredDraft?.metadata,
+      defaultBuilderMetadata(defaultPublisher),
+      PLUGIN_CAPABILITIES,
+    ))
+  const [races, setRaces] = useState<RaceDraft[]>(() => Array.isArray(restoredDraft?.races)
+    ? restoredDraft.races.map((race, index) => restoreRaceDraft(race, index))
+    : [])
+  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>(() => Array.isArray(restoredDraft?.backgrounds)
+    ? restoredDraft.backgrounds.map((background, index) => restoreBackgroundDraft(background, index))
+    : [])
   const [features, setFeatures] = useState<FeatureDraft[]>(() => Array.isArray(restoredDraft?.features)
     ? restoredDraft.features.map((feature, index) => restoreFeatureDraft(feature, index))
     : [])
@@ -2283,9 +2322,15 @@ export default function Dnd5eCustomPluginBuilder({
       if (!saved.metadata || !Array.isArray(saved.races) || !Array.isArray(saved.methods)) {
         return setLocalError('本地草稿格式无效。')
       }
-      setMetadata((current) => ({ ...current, ...saved.metadata }))
-      setRaces(saved.races)
-      setBackgrounds(Array.isArray(saved.backgrounds) ? saved.backgrounds : [])
+      setMetadata(restoreArrayBackedBuilderMetadata(
+        saved.metadata,
+        defaultBuilderMetadata(defaultPublisher),
+        PLUGIN_CAPABILITIES,
+      ))
+      setRaces(saved.races.map((race, index) => restoreRaceDraft(race, index)))
+      setBackgrounds(Array.isArray(saved.backgrounds)
+        ? saved.backgrounds.map((background, index) => restoreBackgroundDraft(background, index))
+        : [])
       setFeatures(Array.isArray(saved.features)
         ? saved.features.map((feature, index) => restoreFeatureDraft(feature, index))
         : [])

@@ -182,6 +182,17 @@ export interface Dnd5eSpellMetamagicPayload {
   heightenedTargetId?: string
 }
 
+/** Stable identifiers for controls granted by an already active spell. */
+export type Dnd5eSustainedSpellControlId =
+  | 'flame-blade'
+  | 'spiritual-weapon'
+  | 'call-lightning'
+  | 'expeditious-retreat'
+  | 'heat-metal'
+  | 'vampiric-touch'
+  | 'sunbeam'
+  | 'produce-flame'
+
 export interface Dnd5eSpellCastPayload {
   spellId: string
   /**
@@ -267,7 +278,7 @@ export interface Dnd5eSpellCastPayload {
     | 'fox-cunning'
     | 'owl-wisdom'
   /** 使用一个仍在维持的核心法术效果；不会再次施法或消费新的法术位。 */
-  sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  sustainedEffectAttack?: Dnd5eSustainedSpellControlId
   /** 独立法术实体或固定持续区域授予后续动作时，指向 Host 已创建并同步的地图实体。 */
   sustainedEffectAreaId?: string
   /** 群体医疗术的逐目标治疗分配；总和不得超过法术的治疗池。 */
@@ -291,6 +302,12 @@ export interface Dnd5eAdjudicatedSpellPayload {
 export interface Dnd5ePersistentAreaMovePayload {
   areaId: string
   targetCell: GridCell
+  /**
+   * Multi-origin persistent spells (currently Dancing Lights) submit every
+   * independently moved origin in stable creation order. `targetCell` remains
+   * the first destination for backwards compatibility with older clients.
+   */
+  targetCells?: GridCell[]
 }
 
 export interface SharedCombatState {
@@ -322,7 +339,7 @@ export interface SharedCombatState {
 }
 
 export type Dnd5eBasicActionPayload =
-  | { kind: 'dash' }
+  | { kind: 'dash'; sourceSpellId?: 'expeditious-retreat' }
   | { kind: 'hide' }
   | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string }
   | { kind: 'ready'; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetTokenId?: string }

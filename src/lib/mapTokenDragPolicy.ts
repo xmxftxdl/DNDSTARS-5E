@@ -53,10 +53,10 @@ export function dmTokenPlacementBypassesMovementBlockers(input: {
 }
 
 /**
- * Most canvas drags use a cheap straight-line geometry check before mutating
- * the map. An authoritative Headless movement transaction must receive the
- * request first, because it owns pathfinding, movement resources, doors,
- * opportunity attacks and terrain hazards.
+ * DM placement bypasses movement blockers. Player movement also skips the
+ * canvas' cheap straight-line check because the room authority validates the
+ * complete path; rejecting the direct ray here would incorrectly reject a
+ * legal route that turns around a wall.
  */
 export function shouldValidateMapTokenMoveLocally(input: {
   isDm: boolean
@@ -64,6 +64,7 @@ export function shouldValidateMapTokenMoveLocally(input: {
   authoritativeMovementTokenIds?: readonly string[]
 }): boolean {
   if (dmTokenPlacementBypassesMovementBlockers(input)) return false
+  if (input.token.type === 'player') return false
   return input.authoritativeMovementTokenIds?.includes(input.token.id) !== true
 }
 

@@ -76,6 +76,9 @@ export const COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS = Object.freeze([
   'minor-illusion',
   'thaumaturgy',
   'shillelagh',
+  'expeditious-retreat',
+  'heat-metal',
+  'vampiric-touch',
 ])
 
 export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
@@ -111,6 +114,7 @@ export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
   cloudkill: Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   'wall-of-fire': Object.freeze({ shape: 'rect', widthFeet: 60, heightFeet: 5 }),
   'blade-barrier': Object.freeze({ shape: 'rect', widthFeet: 100, heightFeet: 5 }),
+  sunbeam: Object.freeze({ shape: 'line', lengthFeet: 60, widthFeet: 5 }),
 })
 
 const PROJECTILE_SPELL_IDS = new Set(COMBAT_PRESENTATION_PROJECTILE_SPELL_IDS)

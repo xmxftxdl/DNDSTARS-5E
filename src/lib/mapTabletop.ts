@@ -106,7 +106,14 @@ export function reduceMapTabletopState(
   const pings = current.pings.filter((ping) => ping.expiresAt > now)
   const annotations = current.annotations.filter((annotation) => annotation.expiresAt > now)
   const focus = current.focus?.expiresAt && current.focus.expiresAt > now ? current.focus : null
-  if (!event || event.expiresAt <= now) return { pings, annotations, focus }
+  if (!event || event.expiresAt <= now) {
+    if (
+      pings.length === current.pings.length
+      && annotations.length === current.annotations.length
+      && focus === current.focus
+    ) return current
+    return { pings, annotations, focus }
+  }
   if (event.type === 'ping') {
     return { pings: [...pings.filter((ping) => ping.id !== event.id), event].slice(-24), annotations, focus }
   }
@@ -119,6 +126,17 @@ export function reduceMapTabletopState(
     annotations: [...annotations.filter((annotation) => annotation.id !== event.id), event].slice(-120),
     focus,
   }
+}
+
+export function nextMapTabletopExpiration(state: MapTabletopState): number | undefined {
+  let next: number | undefined
+  const collect = (expiresAt: number) => {
+    if (next == null || expiresAt < next) next = expiresAt
+  }
+  state.pings.forEach((ping) => collect(ping.expiresAt))
+  state.annotations.forEach((annotation) => collect(annotation.expiresAt))
+  if (state.focus) collect(state.focus.expiresAt)
+  return next
 }
 
 export function mapTabletopForMap(state: MapTabletopState, mapId: string, now = Date.now()) {

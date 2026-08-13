@@ -26,4 +26,14 @@ describe('combat banner coverage', () => {
     } as SharedPlayerActionState
     expect(playerActionCombatBannerName(action)).toBe('starfall stance')
   })
+
+  it('does not publish a combat banner for scene interactions', () => {
+    const action = {
+      type: 'dnd5e-map-interaction',
+      dnd5eMapInteraction: {},
+    } as SharedPlayerActionState
+
+    expect(PLAYER_ACTION_COMBAT_BANNER_ROUTES['dnd5e-map-interaction']).toBe('none')
+    expect(playerActionCombatBannerName(action)).toBeNull()
+  })
 })

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_MAP_TABLETOP_STATE,
   mapTabletopForMap,
+  nextMapTabletopExpiration,
   parseMapTabletopEvent,
   reduceMapTabletopState,
 } from './mapTabletop'
@@ -48,5 +49,16 @@ describe('map tabletop events', () => {
       memberId: 'player-member', memberName: '玩家', role: 'player', createdAt: 1_000, expiresAt: 2_000,
     }, 1_500)
     expect(reduceMapTabletopState(withPing, null, 2_001).pings).toHaveLength(0)
+  })
+
+  it('keeps state identity before expiry and schedules the earliest real expiry', () => {
+    const withAnnotation = reduceMapTabletopState(EMPTY_MAP_TABLETOP_STATE, annotation, 2_000)
+    const withPing = reduceMapTabletopState(withAnnotation, {
+      type: 'ping', id: 'ping-event-2', mapId: 'map-a', point: { x: 1, y: 2 },
+      memberId: 'player-member', memberName: 'player', role: 'player', createdAt: 2_000, expiresAt: 5_000,
+    }, 2_000)
+
+    expect(nextMapTabletopExpiration(withPing)).toBe(5_000)
+    expect(reduceMapTabletopState(withPing, null, 4_999)).toBe(withPing)
   })
 })

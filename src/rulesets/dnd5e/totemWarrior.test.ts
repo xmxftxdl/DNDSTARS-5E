@@ -235,7 +235,7 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
 
   afterAll(() => unregister?.())
 
-  it('keeps all three totem choices independent and reports the closed mechanics as fully automated', () => {
+  it('keeps all three totem choices independent and reports narrative exploration mechanics honestly', () => {
     const hero = characterWithChoices()
     const available = dnd5ePluginFeaturesAvailableForCharacter(hero).map((feature) => feature.id)
     expect(available).toEqual(expect.arrayContaining([
@@ -248,10 +248,21 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('2014 Totem Warrior local Head
     expect(available).not.toContain(featureId('totem-spirit-bear'))
     expect(available).not.toContain(featureId('aspect-of-the-beast-eagle'))
     expect(available).not.toContain(featureId('totemic-attunement-eagle'))
-    expect(declarativeSubclassCompatibilityReportV1([definition()]).abilities).toSatisfy(
+    const compatibility = declarativeSubclassCompatibilityReportV1([definition()]).abilities
+    const manualIds = new Set([
+      'spirit-seeker',
+      'aspect-of-the-beast-eagle',
+      'aspect-of-the-beast-wolf',
+      'spirit-walker',
+    ])
+    expect(compatibility).toHaveLength(11)
+    expect(compatibility.filter((entry) => manualIds.has(entry.abilityId))).toSatisfy(
       (entries: readonly { effective: string; reasons: readonly string[] }[]) =>
-        entries.length === 11 &&
-        entries.every((entry) => entry.effective === 'full' && entry.reasons.length === 0),
+        entries.length === 4 && entries.every((entry) => entry.effective === 'manual' && entry.reasons.length > 0),
+    )
+    expect(compatibility.filter((entry) => !manualIds.has(entry.abilityId))).toSatisfy(
+      (entries: readonly { effective: string; reasons: readonly string[] }[]) =>
+        entries.length === 7 && entries.every((entry) => entry.effective === 'full' && entry.reasons.length === 0),
     )
     expect(dnd5eInventoryLoad(hero).carryingCapacityLb).toBe(480)
   })

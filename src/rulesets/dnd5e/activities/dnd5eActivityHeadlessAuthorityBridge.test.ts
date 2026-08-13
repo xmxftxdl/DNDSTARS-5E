@@ -3,9 +3,12 @@ import { automationCapabilityFromLegacyStatus } from '../../../domain/automation
 import { normalizeCharacter } from '../../../store/characters'
 import { createDnd5eCombatant, commitDnd5eActivityExecution, startDnd5eHeadlessCombat } from '../headlessCombatEngine'
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from '../items'
+import { registerDnd5eRulesPlugin } from '../pluginApi'
+import type { DeclarativeSubclassDefinitionV1 } from '../declarativeSubclassAbility'
 import type { Dnd5eActivityExecutionResult } from './dnd5eActivityExecutor'
 import { resolveAndCommitDnd5eActivityCommand } from './dnd5eActivityHeadlessAuthorityBridge'
 import { clearDnd5eActivityRegistryForTests, registerDnd5eActivityPackage } from './dnd5eActivityRegistry'
+import { dnd5eActivityFromDeclarativeSubclassAbility } from './legacyContentActivityAdapters'
 
 const abilities = { str: 10, dex: 12, con: 12, int: 16, wis: 10, cha: 10 } as const
 
@@ -187,6 +190,94 @@ describe('Activity Headless authority commit bridge', () => {
     if (replay.phase === 'commit' && replay.result.ok) {
       expect(replay.result.state.combatants.target.currentHp).toBe(25)
       expect(normalizeDnd5eInventory(replay.result.inventoryOwner!).entries[0].quantity).toBe(1)
+    }
+  })
+
+  it('routes an active native-mechanic Activity through its trusted Headless action', () => {
+    const packageId = 'test.activity-native'
+    const subclassId = 'fortune-bearer'
+    const abilityId = 'prepared-fortune'
+    const featureId = `${packageId}:${subclassId}.${abilityId}`
+    const resourceId = `${packageId}:decl-${subclassId}-${abilityId}-uses`
+    const definition: DeclarativeSubclassDefinitionV1 = {
+      schemaVersion: 1,
+      id: subclassId,
+      classId: 'sorcerer',
+      name: 'Fortune Bearer',
+      summary: 'Synthetic native Activity route.',
+      abilities: [{
+        schemaVersion: 1,
+        id: abilityId,
+        name: 'Prepared Fortune',
+        description: 'Arms advantage for one later d20 roll.',
+        level: 1,
+        trigger: { kind: 'active-use' },
+        targeting: { kind: 'self' },
+        mechanic: { kind: 'next-d20-advantage', rollKinds: ['attack', 'ability-check', 'saving-throw'] },
+        effects: [],
+        limits: { reset: 'long-rest', uses: { kind: 'fixed', value: 1 } },
+        automation: 'full',
+      }],
+    }
+    const disposePlugin = registerDnd5eRulesPlugin({
+      manifest: {
+        id: packageId, name: 'Native Activity Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0-1.0',
+      },
+      setup(api) { api.registerDeclarativeSubclass(definition) },
+    })
+    try {
+      const activity = dnd5eActivityFromDeclarativeSubclassAbility(definition.abilities[0]!, {
+        subclassId,
+        compatibility: { effective: 'full', reasons: [] },
+      })
+      registerDnd5eActivityPackage({ packageId, packageVersion: '1.0.0', activities: [activity] })
+      const actorCombatant = combatant('actor', 'player', 20)
+      Object.assign(actorCombatant, {
+        level: 6,
+        classId: 'sorcerer',
+        subclassId: `${packageId}:${subclassId}`,
+        classLevels: { sorcerer: 6 },
+        subclassIds: { sorcerer: `${packageId}:${subclassId}` },
+        pluginFeatureIds: [featureId],
+        classResources: { [resourceId]: { current: 1, max: 1 } },
+      })
+      const state = startDnd5eHeadlessCombat('activity-native-route', [
+        actorCombatant,
+        combatant('target', 'dm', 10),
+      ])
+      const actorSnapshot = {
+        id: 'actor', controller: 'players' as const, level: 6, proficiencyBonus: 3, abilities,
+        armorClass: 14, conditions: [], currentHp: 30, maxHp: 30,
+        classLevels: { sorcerer: 6 }, resources: { [resourceId]: { current: 1, maximum: 1 } },
+      }
+      const result = resolveAndCommitDnd5eActivityCommand(state, {
+        command: {
+          schemaVersion: 1,
+          commandId: 'native-activity-command-1',
+          actorId: 'actor',
+          packageId,
+          packageVersion: '1.0.0',
+          activityId: activity.id,
+          targetIds: ['actor'],
+          expectedRevision: 0,
+        },
+        currentRevision: 0,
+        actor: actorSnapshot,
+        targets: [actorSnapshot],
+        authoritativeRolls: {},
+        distanceFeetByTargetId: { actor: 0 },
+        confirmedBy: 'actor',
+      })
+      expect(result.phase).toBe('commit')
+      if (result.phase !== 'commit' || !result.result.ok) return
+      expect(result.result.state.combatants.actor.classResources[resourceId]?.current).toBe(0)
+      expect(result.result.state.combatants.actor.classState.nextD20Advantage).toMatchObject({
+        featureId,
+        rollKinds: ['attack', 'ability-check', 'saving-throw'],
+      })
+    } finally {
+      disposePlugin()
     }
   })
 })

@@ -3,6 +3,7 @@ import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eStandardConditionId } from '../conditions'
 import type { Dnd5eDamageType } from '../damageTypes'
 import type { Dnd5ePersistentAreaVisual } from '../persistentAreaTypes'
+import type { DeclarativeSubclassAbilityV1 } from '../declarativeSubclassAbility'
 import type {
   Dnd5eEffectDefinitionV1,
   Dnd5eEffectDurationV1,
@@ -253,6 +254,21 @@ export interface Dnd5eActivityScalingV1 {
   notes?: string
 }
 
+/**
+ * Binds one unified Activity to an audited Host primitive. The binding contains
+ * no executable content: ids and the closed mechanic discriminator are checked
+ * again by the authority before it delegates to the installed room plugin.
+ */
+export interface Dnd5eActivityAuthorityBindingV1 {
+  kind: 'declarative-subclass-mechanic'
+  subclassId: string
+  abilityId: string
+  mechanicKind: NonNullable<DeclarativeSubclassAbilityV1['mechanic']>['kind']
+  execution: 'plugin-headless-action' | 'headless-event-engine'
+  /** Present only when the ordinary trusted plugin action is the executor. */
+  actionId?: string
+}
+
 export interface Dnd5eActivityDefinitionV1 {
   schemaVersion: typeof DND5E_ACTIVITY_SCHEMA_VERSION
   id: string
@@ -269,6 +285,8 @@ export interface Dnd5eActivityDefinitionV1 {
   triggers?: readonly Dnd5eTriggerDefinitionV1[]
   scaling?: readonly Dnd5eActivityScalingV1[]
   automation: AutomationCapability
+  /** Host-owned execution route for closed mechanics that cannot be flattened into generic outcome operations. */
+  authorityBinding?: Dnd5eActivityAuthorityBindingV1
   /** Traceability only. Runtime execution never dispatches on this locator. */
   legacySource?: {
     kind: 'spell' | 'feature' | 'feat' | 'item' | 'class' | 'subclass' | 'subclass-ability' |

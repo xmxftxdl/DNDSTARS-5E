@@ -8,11 +8,49 @@ import {
   createDnd5eCustomMonsterMechanicDraft,
   createDnd5eCustomMonsterTraitDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
+  restoreDnd5eCustomMonsterDraft,
   validateDnd5eCustomMonsterAreaActionDraft,
 } from './customMonsterWorkshop'
 import { dnd5eMonsterActionAutomation, parseDnd5eMonsterStatBlock } from './monsterSchema'
 
 describe('D&D 5e custom monster workshop', () => {
+  it('hydrates legacy local drafts before rendering array-backed controls', () => {
+    const legacy = {
+      ...createDnd5eCustomMonsterDraft(),
+      damageResistances: undefined,
+      conditionImmunities: undefined,
+      tokenStatusMarkerGrants: undefined,
+      traits: [{
+        ...createDnd5eCustomMonsterTraitDraft(),
+        damageTypes: undefined,
+        targetBonusConditions: undefined,
+      }],
+      headlessMechanics: [{
+        ...createDnd5eCustomMonsterMechanicDraft(),
+        triggerDamageTypes: undefined,
+      }],
+      actions: [{
+        ...createDnd5eCustomMonsterActionDraft(),
+        additionalDamage: undefined,
+        criticalExtraDamage: undefined,
+        areaSaveAbilityChoices: undefined,
+      }],
+    } as unknown as Partial<ReturnType<typeof createDnd5eCustomMonsterDraft>>
+
+    const restored = restoreDnd5eCustomMonsterDraft(legacy)
+    expect(restored.damageResistances.includes('fire')).toBe(false)
+    expect(restored.conditionImmunities.includes('stunned')).toBe(false)
+    expect(restored.tokenStatusMarkerGrants).toEqual([])
+    expect(restored.traits[0].damageTypes).toEqual([])
+    expect(restored.traits[0].targetBonusConditions).toEqual([])
+    expect(restored.headlessMechanics[0].triggerDamageTypes).toEqual([])
+    expect(restored.actions[0]).toMatchObject({
+      additionalDamage: [],
+      criticalExtraDamage: [],
+      areaSaveAbilityChoices: [],
+    })
+  })
+
   it('builds a schema-valid room monster with a Headless weapon attack', () => {
     const monster = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
     expect(monster.id).toMatch(/^room-monster:/)
