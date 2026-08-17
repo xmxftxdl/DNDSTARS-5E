@@ -111,10 +111,10 @@ export interface Dnd5eMechanicOperationHandlerRegistrationV1 {
   ): readonly Dnd5eActivityCapabilityProposal[]
 }
 
-export interface Dnd5eMechanicOperationHandlerDescriptorV1 extends Omit<
+export type Dnd5eMechanicOperationHandlerDescriptorV1 = Omit<
   Dnd5eMechanicOperationHandlerRegistrationV1,
   'resolve'
-> {}
+>
 
 const handlers = new Map<Dnd5eMechanicHandlerComponentV1, Map<string, Dnd5eMechanicHandlerRegistrationV1>>()
 const operationHandlers = new Map<string, Dnd5eMechanicOperationHandlerRegistrationV1>()
@@ -192,7 +192,19 @@ export function registerDnd5eMechanicOperationHandlerV1(
 }
 
 export function listDnd5eMechanicOperationHandlersV1(): readonly Dnd5eMechanicOperationHandlerDescriptorV1[] {
-  return [...operationHandlers.values()].map(({ resolve: _resolve, ...descriptor }) => structuredClone(descriptor))
+  return [...operationHandlers.values()].map(operationHandlerDescriptor)
+}
+
+function operationHandlerDescriptor(
+  registration: Dnd5eMechanicOperationHandlerRegistrationV1,
+): Dnd5eMechanicOperationHandlerDescriptorV1 {
+  return structuredClone({
+    id: registration.id,
+    label: registration.label,
+    description: registration.description,
+    phases: registration.phases,
+    parameters: registration.parameters,
+  })
 }
 
 export function dnd5eMechanicOperationHandlerDescriptorV1(
@@ -200,8 +212,7 @@ export function dnd5eMechanicOperationHandlerDescriptorV1(
 ): Dnd5eMechanicOperationHandlerDescriptorV1 | undefined {
   const registration = operationHandlers.get(handlerId)
   if (!registration) return undefined
-  const { resolve: _resolve, ...descriptor } = registration
-  return structuredClone(descriptor)
+  return operationHandlerDescriptor(registration)
 }
 
 export function defaultDnd5eMechanicOperationParametersV1(
@@ -491,7 +502,8 @@ for (const kind of ['instantaneous', 'rounds', 'save-ends', 'concentration', 'pe
 for (const kind of [
   'armor-class', 'speed', 'attack-roll', 'attack-target-lock', 'ability-check', 'weapon-damage-roll', 'weapon-enchantment', 'weapon-damage-replacement', 'movement-boundary-save', 'saving-throw',
   'saving-throw-proficiency', 'damage-resistance', 'damage-immunity', 'damage-vulnerability',
-  'condition-immunity', 'prohibit-reaction', 'forced-flee-from-source',
+  'condition-immunity', 'character-capability', 'racial-saving-throw-advantage',
+  'prohibit-reaction', 'forced-flee-from-source',
   'maximum-attacks-per-turn', 'darkvision', 'flight-speed', 'see-invisible',
   'spell-save-disadvantage-aura', 'spell-action-as-bonus-action', 'attack-profile',
   'damage-reduction', 'on-hit-bonus-damage', 'attack-roll-reroll', 'death-prevention',

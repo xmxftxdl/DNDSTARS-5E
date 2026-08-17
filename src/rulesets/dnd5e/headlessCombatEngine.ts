@@ -76,6 +76,7 @@ import {
   type Dnd5eActivityBasicActionGrantV1,
 } from './activities/dnd5eActivityBasicActionGrant'
 import { getRegisteredDnd5eActivity } from './activities/dnd5eActivityRegistry'
+import { getDnd5eCoreSpellRuntimeDefinitionV1 } from './activities/dnd5eCoreSpellActivities'
 import { collectScaledDnd5eActivityFormulaRollDeclarationsV1 } from './activities/dnd5eActivityRollRecipe'
 import type { Dnd5ePersistentAreaSourceKind, Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
 import {
@@ -14383,7 +14384,7 @@ function resolveSpellCast(
   events: Dnd5eCombatEvent[],
 ): Dnd5eActionResult {
   const actor = state.combatants[action.actorId]
-  const spell = getDnd5eSrdCombatSpell(action.spellId)
+  const spell = getDnd5eCoreSpellRuntimeDefinitionV1(action.spellId)?.spell
   const metamagic = action.metamagic
   const sustainedEffectAttack = action.sustainedEffectAttack
   const sustainedAttack = sustainedEffectAttack && spell?.sustainedAttack?.id === sustainedEffectAttack

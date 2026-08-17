@@ -24,6 +24,7 @@ import {
   registeredDnd5ePluginFeats,
   registeredDnd5ePluginItems,
   registeredDnd5ePluginRaces,
+  dnd5ePluginFeatureRuntimeSourceV1,
 } from './pluginApi'
 import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
@@ -416,6 +417,51 @@ describe('D&D 5e content package V2', () => {
         limitations: ['Scene-dependent trait requires DM adjudication.'],
       }),
     }))
+  })
+
+  it('uses permanent unified Effects as the runtime authority for race and feat passives', () => {
+    const source = packageValue()
+    source.content.races[0] = {
+      ...source.content.races[0]!,
+      hitPointsPerLevelBonus: 1,
+      naturalOneReroll: true,
+      savingThrowAdvantages: { damageTypes: ['poison'], magicAbilities: ['int', 'wis', 'cha'] },
+    }
+    source.content.feats[0] = {
+      ...source.content.feats[0]!,
+      passiveEffects: [{
+        ...source.content.feats[0]!.passiveEffects![0]!,
+        deliveries: ['weapon-attack'],
+        magical: false,
+        requiresHeavyArmor: true,
+      }],
+    }
+    const definitions = dnd5eContentDefinitionsFromPackageV2(source)
+    const race = definitions.find((definition) => definition.kind === 'race')
+    expect(race?.effects?.flatMap((effect) => (effect as { modifiers?: readonly unknown[] }).modifiers ?? [])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'character-capability', capability: 'hitPointsPerLevelBonus', value: 1 }),
+        expect.objectContaining({ kind: 'character-capability', capability: 'naturalOneReroll', value: true }),
+        expect.objectContaining({ kind: 'racial-saving-throw-advantage', damageTypes: ['poison'] }),
+      ]),
+    )
+
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(source))
+    try {
+      expect(dnd5ePluginFeatureRuntimeSourceV1('com.example.content-v2:feat-steady')).toBe('unified-content')
+      expect(registeredDnd5ePluginRaces()[0]).toMatchObject({
+        hitPointsPerLevelBonus: 1,
+        naturalOneReroll: true,
+        savingThrowAdvantages: { damageTypes: ['poison'], magicAbilities: ['int', 'wis', 'cha'] },
+      })
+      expect(registeredDnd5ePluginFeats()[0]?.passiveEffects?.[0]).toMatchObject({
+        deliveries: ['weapon-attack'],
+        magical: false,
+        requiresHeavyArmor: true,
+      })
+    } finally {
+      dispose()
+    }
   })
 
   it('registers each monster action Activity exactly once', () => {

@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { AutomationCapability } from '../../domain/automation/automationCapability'
 import { listRegisteredContentDefinitionPackages } from '../../domain/content/contentDefinitionRegistry'
 import { listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
-import { registerDnd5eRulesPlugin, registeredDnd5ePluginBackgrounds } from './pluginApi'
+import {
+  dnd5ePluginFeatureDefinition,
+  registerDnd5eRulesPlugin,
+  registeredDnd5ePluginBackgrounds,
+} from './pluginApi'
 import {
   DND5E_UNIFIED_CONTENT_FORMAT,
   DND5E_UNIFIED_CONTENT_KINDS,
@@ -152,5 +156,50 @@ describe('D&D 5E unified content contract', () => {
     }
     expect(listRegisteredContentDefinitionPackages()).toEqual([])
     expect(listRegisteredDnd5eActivityPackages()).toEqual([])
+  })
+
+  it('accepts an effects-only feature and derives its runtime capability from the unified Effect', () => {
+    const base = unifiedBackgroundBundle()
+    const bundle: Dnd5eUnifiedContentBundleV1 = {
+      ...base,
+      definitions: [{
+        schemaVersion: 1,
+        id: 'always-ready',
+        namespace: base.manifest.id,
+        version: base.manifest.version,
+        kind: 'feature',
+        name: 'Always Ready',
+        payload: {
+          id: 'always-ready',
+          name: 'Always Ready',
+          summary: 'Synthetic permanent feature.',
+          description: 'Synthetic permanent feature.',
+          automation: 'full',
+        },
+        effects: [{
+          schemaVersion: 1,
+          id: 'always-ready.effect',
+          name: 'Always Ready',
+          duration: { kind: 'permanent' },
+          modifiers: [{
+            kind: 'character-capability',
+            capability: 'cannotBeSurprisedWhileConscious',
+            value: true,
+          }],
+          stacking: 'unique-by-source',
+        }],
+        automation: FULL_AUTOMATION,
+      }],
+    }
+    expect(validateDnd5eUnifiedContentBundleV1(bundle)).toEqual([])
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle))
+    try {
+      expect(dnd5ePluginFeatureDefinition('local.test-rules:always-ready')).toMatchObject({
+        automation: 'full',
+        staticModifiers: { cannotBeSurprisedWhileConscious: true },
+      })
+    } finally {
+      dispose()
+    }
   })
 })

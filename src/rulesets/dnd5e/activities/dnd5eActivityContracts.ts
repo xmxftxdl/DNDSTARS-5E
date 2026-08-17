@@ -473,17 +473,25 @@ export interface Dnd5eActivityScalingV1 {
 /**
  * Binds one unified Activity to an audited Host primitive. The binding contains
  * no executable content: ids and the closed mechanic discriminator are checked
- * again by the authority before it delegates to the installed room plugin.
+ * again by the authority before it delegates to a built-in or room-owned Host
+ * transaction.
  */
-export interface Dnd5eActivityAuthorityBindingV1 {
-  kind: 'declarative-subclass-mechanic'
-  subclassId: string
-  abilityId: string
-  mechanicKind: NonNullable<DeclarativeSubclassAbilityV1['mechanic']>['kind']
-  execution: 'plugin-headless-action' | 'headless-event-engine'
-  /** Present only when the ordinary trusted plugin action is the executor. */
-  actionId?: string
-}
+export type Dnd5eActivityAuthorityBindingV1 =
+  | {
+      kind: 'declarative-subclass-mechanic'
+      subclassId: string
+      abilityId: string
+      mechanicKind: NonNullable<DeclarativeSubclassAbilityV1['mechanic']>['kind']
+      execution: 'plugin-headless-action' | 'headless-event-engine'
+      /** Present only when the ordinary trusted plugin action is the executor. */
+      actionId?: string
+    }
+  | {
+      /** Native core spell Activity delegated to the audited Host spell transaction. */
+      kind: 'core-spell-transaction'
+      spellId: string
+      execution: 'headless-event-engine'
+    }
 
 export interface Dnd5eActivityDefinitionV1 {
   schemaVersion: typeof DND5E_ACTIVITY_SCHEMA_VERSION

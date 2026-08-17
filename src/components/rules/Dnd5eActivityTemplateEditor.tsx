@@ -4,6 +4,7 @@ import {
   DND5E_DAMAGE_TYPES,
   DND5E_STANDARD_CONDITIONS,
   DND5E_ACTIVITY_LIFECYCLE_EVENTS_V1,
+  DND5E_CHARACTER_CAPABILITY_IDS_V1,
   defaultDnd5eMechanicOperationParametersV1,
   dnd5eActivityAutomationAnalysisV1,
   dnd5eActivityWithDerivedAutomationV1,
@@ -28,6 +29,20 @@ import {
 
 const control = 'w-full rounded-xl border border-white/10 bg-void-900 px-3 py-2 text-xs text-slate-200 outline-none focus:border-arcane-400/50'
 const abilities = [['str', '力量'], ['dex', '敏捷'], ['con', '体质'], ['int', '智力'], ['wis', '感知'], ['cha', '魅力']] as const
+const numericCharacterCapabilities = new Set<string>([
+  'initiativeBonus', 'hitPointsPerLevelBonus', 'passivePerceptionBonus', 'passiveInvestigationBonus',
+  'minimumHitDieHealingConstitutionMultiplier', 'mediumArmorDexterityCapBonus',
+  'dualWieldMeleeArmorClassBonus', 'climbWithoutSpeedCostMultiplier', 'runningJumpMinimumApproachFeet',
+  'standFromProneMovementCostFeet', 'spellAttackRangeMultiplier', 'spellSavingThrowAdvantageWithinFeet',
+  'combatManeuverDieSidesOverride',
+])
+const listCharacterCapabilities = new Set<string>(['opportunityAttacksOnEnterReachWeaponIds'])
+
+function defaultCharacterCapabilityValue(capability: string): boolean | number | readonly string[] {
+  if (numericCharacterCapabilities.has(capability)) return 1
+  if (listCharacterCapabilities.has(capability)) return ['dnd5e-spear']
+  return true
+}
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange(value: string): void }) {
   return <label className="block text-xs"><span className="mb-1.5 block font-semibold text-slate-400">{label}</span><input className={control} value={value} onChange={(event) => onChange(event.target.value)} /></label>
@@ -233,6 +248,7 @@ const modifierOptions: readonly (readonly [Dnd5eEffectModifierV1['kind'], string
   ['weapon-enchantment', '武器附魔'], ['attack-profile', '攻击资料覆盖'], ['saving-throw', '豁免'],
   ['saving-throw-proficiency', '豁免熟练'], ['damage-resistance', '伤害抗性'], ['damage-immunity', '伤害免疫'],
   ['damage-vulnerability', '伤害易伤'], ['condition-immunity', '状态免疫'],
+  ['character-capability', '永久角色能力'], ['racial-saving-throw-advantage', '种族条件豁免优势'],
   ['maximum-attacks-per-turn', '攻击次数上限'], ['darkvision', '黑暗视觉'], ['flight-speed', '飞行速度'],
   ['spell-save-disadvantage-aura', '法术豁免劣势灵光'], ['spell-action-as-bonus-action', '动作法术改附赠动作'],
   ['see-invisible', '识破隐形'], ['prohibit-reaction', '禁止反应'], ['forced-flee-from-source', '强制远离来源'],
@@ -255,6 +271,8 @@ function newModifier(kind: Dnd5eEffectModifierV1['kind']): Dnd5eEffectModifierV1
   if (kind === 'damage-immunity') return { kind, damageType: 'fire' }
   if (kind === 'damage-vulnerability') return { kind, damageType: 'fire' }
   if (kind === 'condition-immunity') return { kind, condition: 'charmed' }
+  if (kind === 'character-capability') return { kind, capability: 'cannotBeSurprisedWhileConscious', value: true }
+  if (kind === 'racial-saving-throw-advantage') return { kind, conditions: ['charmed'] }
   if (kind === 'damage-reduction') return { kind, amount: { kind: 'constant', value: 1 } }
   if (kind === 'on-hit-bonus-damage') return { kind, amount: { kind: 'dice', rollId: 'on-hit-bonus-damage', count: 1, sides: 6 }, damageType: 'inherit-primary', appliesTo: 'all-weapon-attacks' }
   if (kind === 'attack-roll-reroll') return { kind, maximumDice: 1, appliesTo: 'all-weapon-attacks' }
@@ -289,7 +307,9 @@ function Modifier({ value, onChange, remove }: { value: Dnd5eEffectModifierV1; o
       {value.kind === 'saving-throw-proficiency' && <Select label="属性" value={value.ability} options={abilities} onChange={(ability) => patch({ ability })} />}
       {(value.kind === 'damage-resistance' || value.kind === 'damage-immunity' || value.kind === 'damage-vulnerability') && <Select label="伤害类型" value={damageType} options={DND5E_DAMAGE_TYPES.map((type) => [type, type] as const)} onChange={(next) => patch({ damageType: next })} />}
       {value.kind === 'condition-immunity' && <Select label="状态" value={value.condition} options={Object.entries(DND5E_STANDARD_CONDITIONS).map(([id, rule]) => [id, rule.label])} onChange={(condition) => patch({ condition })} />}
-      {value.kind === 'damage-reduction' && <><Formula label="减免值" id="modifier-damage-reduction" value={value.amount} onChange={(amount) => patch({ amount })} /><Input label="限定伤害类型（可留空）" value={csv(value.damageTypes)} onChange={(damageTypes) => patch({ damageTypes: csvIds(damageTypes).length ? csvIds(damageTypes) : undefined })} /></>}
+      {value.kind === 'character-capability' && <><Select label="能力" value={value.capability} options={DND5E_CHARACTER_CAPABILITY_IDS_V1.map((id) => [id, id] as const)} onChange={(capability) => patch({ capability, value: defaultCharacterCapabilityValue(capability) })} />{numericCharacterCapabilities.has(value.capability) ? <NumberInput label="数值" value={typeof value.value === 'number' ? value.value : 1} onChange={(next) => patch({ value: next })} /> : listCharacterCapabilities.has(value.capability) ? <Input label="ID 列表（逗号分隔）" value={csv(Array.isArray(value.value) ? value.value : [])} onChange={(next) => patch({ value: csvIds(next) })} /> : <Select label="启用" value={String(value.value === true)} options={[["true", "是"], ["false", "否"]]} onChange={(next) => patch({ value: next === 'true' })} />}</>}
+      {value.kind === 'racial-saving-throw-advantage' && <><Input label="关联状态（逗号分隔）" value={csv(value.conditions)} onChange={(next) => patch({ conditions: csvIds(next).length ? csvIds(next) : undefined })} /><Input label="关联伤害类型（逗号分隔）" value={csv(value.damageTypes)} onChange={(next) => patch({ damageTypes: csvIds(next).length ? csvIds(next) : undefined })} /><Input label="魔法豁免属性（逗号分隔）" value={csv(value.magicAbilities)} onChange={(next) => patch({ magicAbilities: csvIds(next).length ? csvIds(next) : undefined })} /></>}
+      {value.kind === 'damage-reduction' && <><Formula label="减免值" id="modifier-damage-reduction" value={value.amount} onChange={(amount) => patch({ amount })} /><Input label="限定伤害类型（可留空）" value={csv(value.damageTypes)} onChange={(damageTypes) => patch({ damageTypes: csvIds(damageTypes).length ? csvIds(damageTypes) : undefined })} /><Input label="来源方式（weapon-attack/spell/other）" value={csv(value.deliveries)} onChange={(next) => patch({ deliveries: csvIds(next).length ? csvIds(next) as typeof value.deliveries : undefined })} /><Select label="仅穿重甲" value={String(value.requiresHeavyArmor === true)} options={[["false", "否"], ["true", "是"]]} onChange={(next) => patch({ requiresHeavyArmor: next === 'true' || undefined })} /></>}
       {value.kind === 'on-hit-bonus-damage' && <><Formula label="伤害" id="modifier-on-hit" value={value.amount} onChange={(amount) => patch({ amount })} /><Select label="伤害类型" value={value.damageType} options={[["inherit-primary", "继承主伤害"], ...DND5E_DAMAGE_TYPES.map((type) => [type, type] as const)]} onChange={(next) => patch({ damageType: next })} /></>}
       {value.kind === 'attack-roll-reroll' && <Select label="适用" value={value.appliesTo} options={[["all-weapon-attacks", "所有武器攻击"], ["this-weapon", "绑定武器"]]} onChange={(appliesTo) => patch({ appliesTo })} />}
       {value.kind === 'death-prevention' && <><NumberInput label="保留生命值" value={value.hitPointsAfter} onChange={(hitPointsAfter) => patch({ hitPointsAfter })} /><Select label="阻止巨量伤害" value={String(value.preventsMassiveDamage === true)} options={[["false", "否"], ["true", "是"]]} onChange={(next) => patch({ preventsMassiveDamage: next === 'true' })} /></>}

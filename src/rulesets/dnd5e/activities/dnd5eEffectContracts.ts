@@ -6,6 +6,57 @@ import type { Dnd5eFormulaV1 } from './dnd5eFormula'
 
 export const DND5E_EFFECT_SCHEMA_VERSION = 1 as const
 
+/**
+ * Closed character-snapshot capabilities used by permanent content Effects.
+ *
+ * These identifiers deliberately mirror the audited Host snapshot fields. A
+ * content package may choose one of them and provide data, but it cannot add a
+ * new executable capability or a callback. Temporary combat Effects do not
+ * consume this modifier; it is projected while a character is built.
+ */
+export const DND5E_CHARACTER_CAPABILITY_IDS_V1 = Object.freeze([
+  'initiativeBonus',
+  'hitPointsPerLevelBonus',
+  'passivePerceptionBonus',
+  'passiveInvestigationBonus',
+  'minimumHitDieHealingConstitutionMultiplier',
+  'cannotBeSurprisedWhileConscious',
+  'unseenAttackersDoNotGainAdvantage',
+  'ignoreLongRangeRangedWeaponDisadvantage',
+  'ignoreNearbyHostileRangedAttackDisadvantage',
+  'ignoreLoadingWeaponProperty',
+  'allowNonLightTwoWeaponFighting',
+  'ignoreRangedWeaponCoverBonus',
+  'mediumArmorDexterityCapBonus',
+  'ignoreMediumArmorStealthDisadvantage',
+  'dualWieldMeleeArmorClassBonus',
+  'mountedMeleeAdvantageAgainstSmallerUnmounted',
+  'redirectMountedCreatureAttacksToRider',
+  'grantMountedCreatureDexterityEvasion',
+  'preventOpportunityAttacksFromMeleeAttackTargets',
+  'opportunityAttacksIgnoreDisengage',
+  'opportunityAttackHitStopsMovement',
+  'opportunityAttacksOnEnterReachWeaponIds',
+  'ignoreDifficultTerrainWhileDashing',
+  'climbWithoutSpeedCostMultiplier',
+  'runningJumpMinimumApproachFeet',
+  'standFromProneMovementCostFeet',
+  'spellAttackRangeMultiplier',
+  'ignoreSpellAttackCoverBonus',
+  'spellSavingThrowAdvantageWithinFeet',
+  'imposeConcentrationCheckDisadvantageOnDamage',
+  'meleeWeaponDamageRerollOncePerTurn',
+  'shieldDexteritySaveBonusWhenSoleTarget',
+  'shieldSuccessfulDexteritySaveNegatesDamage',
+  'combatManeuverDieSidesOverride',
+  'opportunityAttackSpellReplacement',
+  'ignoreOccupiedHandsForSomaticComponents',
+  'retainHiddenOnRangedWeaponMiss',
+  'naturalOneReroll',
+] as const)
+
+export type Dnd5eCharacterCapabilityIdV1 = typeof DND5E_CHARACTER_CAPABILITY_IDS_V1[number]
+
 export type Dnd5eEffectDurationV1 =
   | { kind: 'instantaneous' }
   | { kind: 'rounds'; rounds: number; expiresAt: 'source-turn-start' | 'source-turn-end' | 'target-turn-start' | 'target-turn-end' }
@@ -70,6 +121,19 @@ export type Dnd5eEffectModifierV1 =
   | { kind: 'damage-immunity'; damageType: Dnd5eDamageType }
   | { kind: 'damage-vulnerability'; damageType: Dnd5eDamageType }
   | { kind: 'condition-immunity'; condition: Dnd5eStandardConditionId }
+  /** Permanent, allowlisted projection into the immutable character snapshot. */
+  | {
+      kind: 'character-capability'
+      capability: Dnd5eCharacterCapabilityIdV1
+      value: boolean | number | readonly string[]
+    }
+  /** Contextual racial save advantage that cannot be represented by an unconditional save modifier. */
+  | {
+      kind: 'racial-saving-throw-advantage'
+      conditions?: readonly string[]
+      damageTypes?: readonly Dnd5eDamageType[]
+      magicAbilities?: readonly AbilityKey[]
+    }
   | { kind: 'prohibit-reaction' }
   | { kind: 'forced-flee-from-source' }
   | { kind: 'maximum-attacks-per-turn'; value: number }
@@ -88,6 +152,9 @@ export type Dnd5eEffectModifierV1 =
       minimumIncomingDamage?: number
       maximumCurrentHitPointPercent?: number
       oncePerTurn?: boolean
+      deliveries?: readonly ('weapon-attack' | 'spell' | 'other')[]
+      magical?: boolean
+      requiresHeavyArmor?: boolean
       resourceId?: string
       resourceCost?: number
     }

@@ -18,6 +18,7 @@ export interface RegisteredContentExecutableContribution {
 }
 
 const packages = new Map<string, { token: symbol; value: RegisteredContentPackage }>()
+let registryRevision = 0
 
 export function registerContentDefinitionPackage(value: RegisteredContentPackage): { dispose(): void } {
   if (packages.has(value.packageId)) throw new Error(`Content Definition package is already registered: ${value.packageId}`)
@@ -52,9 +53,10 @@ export function registerContentDefinitionPackage(value: RegisteredContentPackage
   }
   const token = Symbol(value.packageId)
   packages.set(value.packageId, { token, value: structuredClone(value) })
+  registryRevision += 1
   return {
     dispose() {
-      if (packages.get(value.packageId)?.token === token) packages.delete(value.packageId)
+      if (packages.get(value.packageId)?.token === token && packages.delete(value.packageId)) registryRevision += 1
     },
   }
 }
@@ -71,7 +73,9 @@ export function registerContentDefinitionPackage(value: RegisteredContentPackage
  * last-writer-wins operation.
  */
 export function unregisterContentDefinitionPackage(packageId: string): boolean {
-  return packages.delete(packageId)
+  const removed = packages.delete(packageId)
+  if (removed) registryRevision += 1
+  return removed
 }
 
 export function getRegisteredContentActivity<T extends RegisteredContentExecutableContribution = RegisteredContentExecutableContribution>(
@@ -104,6 +108,12 @@ export function listRegisteredContentDefinitionPackages(): readonly RegisteredCo
   return [...packages.values()].map(({ value }) => structuredClone(value))
 }
 
+/** Monotonic identity for read-through indexes; no mutable registry state is exposed. */
+export function contentDefinitionRegistryRevision(): number {
+  return registryRevision
+}
+
 export function clearContentDefinitionRegistryForTests(): void {
+  if (packages.size > 0) registryRevision += 1
   packages.clear()
 }

@@ -65,7 +65,7 @@ import {
   type Dnd5eMountedAttackRedirectUse,
 } from './headlessCombatEngine'
 import { applyDnd5eAttackCoverOverride, createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAreaAtSlot, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellAttackDelivery, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAreaAtSlot, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellAttackDelivery, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, type Dnd5eSrdSpellDefinition } from './spells'
 import { normalizeDnd5eActiveEffects } from './activeEffects'
 import { dnd5eWearingUnproficientArmor } from './equipment'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
@@ -88,6 +88,8 @@ import {
   type MapGeometryState,
 } from '../../lib/mapGeometry'
 import { createDnd5eCoreSpellArea, dnd5eWallOfFireDamagingSideCells, getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
+import { getDnd5eCoreSpellRuntimeDefinitionV1 } from './activities/dnd5eCoreSpellActivities'
+import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 import { dnd5eWallOfFireCells, dnd5eWallOfFireDamageCells, normalizeWallOfFireAngle, type Dnd5eWallOfFireGeometry } from './wallOfFireGeometry'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eEffectiveSpellcastingSource, dnd5eEffectiveSpellcastingSources, dnd5eSpellSchoolIdFromLabel } from './subclassSpellcasting'
@@ -184,6 +186,8 @@ export interface PreparedDnd5eSpellCast {
   blindTargetMiss: boolean
   projectileTargetIds?: readonly string[]
   spell: Dnd5eSrdSpellDefinition
+  /** Unified Content definition selected by the Host for this transaction. */
+  activity: Dnd5eActivityDefinitionV1
   slotLevel: number
   diceCount: number
   damageDiceCounts: readonly number[]
@@ -417,7 +421,8 @@ export function prepareDnd5eSpellCast(input: {
   if (input.action.type !== 'dnd5e-spell-cast' || !payload) return { ok: false, reason: 'invalid-action' }
   const actor = input.characters.find((character) => character.id === input.action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
-  const spell = getDnd5eSrdCombatSpell(payload.spellId)
+  const runtimeDefinition = getDnd5eCoreSpellRuntimeDefinitionV1(payload.spellId)
+  const spell = runtimeDefinition?.spell
   const enforceSpellcastingPrerequisites =
     input.effectiveRules?.houseRules.spellcastingPrerequisitesEnabled !== false
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
@@ -1972,6 +1977,7 @@ export function prepareDnd5eSpellCast(input: {
       blindTargetMiss,
       projectileTargetIds,
       spell,
+      activity: runtimeDefinition!.activity,
       slotLevel,
       diceCount: damageDiceCounts[0],
       damageDiceCounts,

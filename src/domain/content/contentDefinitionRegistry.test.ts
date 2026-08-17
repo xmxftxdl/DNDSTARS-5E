@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   clearContentDefinitionRegistryForTests,
+  contentDefinitionRegistryRevision,
   listRegisteredContentDefinitionPackages,
   registerContentDefinitionPackage,
   unregisterContentDefinitionPackage,
@@ -33,9 +34,13 @@ describe('content definition registry lifecycle', () => {
         },
       }],
     }
+    const before = contentDefinitionRegistryRevision()
     registerContentDefinitionPackage(value)
+    expect(contentDefinitionRegistryRevision()).toBeGreaterThan(before)
 
+    const registered = contentDefinitionRegistryRevision()
     expect(unregisterContentDefinitionPackage(value.packageId)).toBe(true)
+    expect(contentDefinitionRegistryRevision()).toBeGreaterThan(registered)
     expect(listRegisteredContentDefinitionPackages()).toEqual([])
     expect(() => registerContentDefinitionPackage(value)).not.toThrow()
   })

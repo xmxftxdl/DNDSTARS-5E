@@ -18,6 +18,7 @@ import {
   dnd5ePluginBackgroundDefinition,
   dnd5ePluginSubclassSpellIds,
   dnd5ePluginFeatureDefinition,
+  dnd5ePluginFeatureRuntimeSourceV1,
   dnd5ePluginFeatDefinition,
   dnd5ePluginItemDefinition,
   registerDnd5eRulesPlugin,
@@ -460,6 +461,16 @@ describe('本地房间内容合集', () => {
       expect(parsed?.content.abilityGenerationMethods).toEqual([])
       const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(parsed!))
       try {
+        for (const subclass of parsed!.content.subclasses) {
+          for (const ability of subclass.abilities) {
+            expect(
+              dnd5ePluginFeatureRuntimeSourceV1(
+                `local.doco.phb-2014-room:${subclass.id}.${ability.id}`,
+              ),
+              `${subclass.id}:${ability.id}`,
+            ).toBe('unified-content')
+          }
+        }
         expect(dnd5ePluginBackgroundDefinition('local.doco.phb-2014-room:soldier')).toMatchObject({
           toolProficiencies: ['陆上载具'],
           toolProficiencyChoices: [expect.objectContaining({ id: 'gaming-set', count: 1 })],

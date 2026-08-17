@@ -8,6 +8,24 @@ const localRoot = resolve(repositoryRoot, 'local-content/phb-2014')
 const collectionPath = resolve(localRoot, 'collection.json')
 const jsonOutputPath = resolve(localRoot, 'unified-activity-migration-inventory.json')
 const markdownOutputPath = resolve(localRoot, 'UNIFIED-ACTIVITY-MIGRATION.md')
+const definitionProjectionPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/activities/dnd5eContentDefinitionProjection.ts')
+const permanentEffectRuntimePath = resolve(repositoryRoot, 'src/rulesets/dnd5e/activities/dnd5ePermanentContentEffects.ts')
+const pluginContentCatalogPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/plugins/pluginContentCatalog.ts')
+const localCollectionTestPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/localContentCollection.test.ts')
+
+const definitionProjectionSource = readFileSync(definitionProjectionPath, 'utf8')
+const permanentEffectRuntimeSource = readFileSync(permanentEffectRuntimePath, 'utf8')
+const pluginContentCatalogSource = readFileSync(pluginContentCatalogPath, 'utf8')
+const localCollectionTestSource = readFileSync(localCollectionTestPath, 'utf8')
+const unifiedDeclarativeRuntime =
+  definitionProjectionSource.includes('subclass-ability:') &&
+  pluginContentCatalogSource.includes("return unifiedFeatureDefinition(feature) ? 'unified-content' : 'legacy-adapter'") &&
+  localCollectionTestSource.includes("toBe('unified-content')")
+const unifiedPermanentEffectRuntime =
+  definitionProjectionSource.includes("kind: 'character-capability'") &&
+  definitionProjectionSource.includes("kind: 'racial-saving-throw-advantage'") &&
+  permanentEffectRuntimeSource.includes('dnd5ePermanentContentEffectProjectionV1') &&
+  pluginContentCatalogSource.includes('permanentProjection(definition)')
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -89,6 +107,18 @@ function abilityHasDeterministicPayload(ability) {
 }
 
 function classifyDeclarativeAbility(ability) {
+  if (declaredAutomation(ability.automation) === 'manual') return {
+    status: 'KEEP-DM-REFERENCE',
+    migrationNeeded: false,
+    target: 'Keep as build/reference or DM-adjudicated content; do not create an executable runtime obligation.',
+  }
+  if (unifiedDeclarativeRuntime && declaredAutomation(ability.automation) !== 'manual') return {
+    status: ability.mechanic ? 'DONE-UNIFIED-HOST-ACTIVITY' : 'DONE-UNIFIED-ACTIVITY-ADAPTER',
+    migrationNeeded: false,
+    target: ability.mechanic
+      ? 'Converted at the V2 loading boundary; runtime authority is the Unified Activity plus its allowlisted Host transaction.'
+      : 'Converted at the V2 loading boundary into Unified Activity operations/effects; runtime source is the Unified Registry.',
+  }
   if (ability.mechanic) return {
     status: 'P1-DECLARATIVE-MECHANIC',
     migrationNeeded: true,
@@ -98,11 +128,6 @@ function classifyDeclarativeAbility(ability) {
     status: 'P1-DECLARATIVE-DATA',
     migrationNeeded: true,
     target: 'Convert deterministic cost, targeting, checks, operations and effects to native Activity/Effect data.',
-  }
-  if (declaredAutomation(ability.automation) === 'manual') return {
-    status: 'KEEP-DM-REFERENCE',
-    migrationNeeded: false,
-    target: 'Keep as build/reference or DM-adjudicated content; do not create an empty Activity.',
   }
   return {
     status: 'P2-DECLARATIVE-PASSIVE',
@@ -161,6 +186,19 @@ function classifyFeatureLike(entry, kind, activityIndex) {
   if (value.declarativeAbility) legacyParts.push('declarativeAbility')
   if (hasValues(value.staticModifiers)) legacyParts.push('staticModifiers')
   if (hasValues(value.passiveEffects)) legacyParts.push('passiveEffects')
+  if (
+    legacyParts.length === 0 && native.status === 'REVIEW-NO-NATIVE-ACTIVITY' &&
+    hasValues(value.advancements)
+  ) return {
+    id: value.id,
+    file: entry.file,
+    declaredAutomation: declaredAutomation(value.automation),
+    legacyParts,
+    linkedActivityIds: [],
+    status: 'DONE-ADVANCEMENT',
+    migrationNeeded: false,
+    target: 'The deterministic clauses are character-building selections/grants and remain in the unified Advancement protocol.',
+  }
   if (legacyParts.length === 0 || native.status === 'P0-LEGACY-AUTHORITY') return {
     id: value.id,
     file: entry.file,
@@ -170,6 +208,26 @@ function classifyFeatureLike(entry, kind, activityIndex) {
     status: native.status,
     migrationNeeded: native.migrationNeeded,
     target: native.target,
+  }
+  if (unifiedPermanentEffectRuntime && !value.declarativeAbility) return {
+    id: value.id,
+    file: entry.file,
+    declaredAutomation: declaredAutomation(value.automation),
+    legacyParts,
+    linkedActivityIds: native.activities.map((activity) => activity.id),
+    status: 'DONE-UNIFIED-PERMANENT-EFFECT',
+    migrationNeeded: false,
+    target: 'Legacy static/passive fields are converted once at load; character and Headless snapshots read the resulting Unified Effects.',
+  }
+  if (unifiedDeclarativeRuntime && value.declarativeAbility) return {
+    id: value.id,
+    file: entry.file,
+    declaredAutomation: declaredAutomation(value.automation),
+    legacyParts,
+    linkedActivityIds: native.activities.map((activity) => activity.id),
+    status: 'DONE-UNIFIED-HOST-ACTIVITY',
+    migrationNeeded: false,
+    target: 'Legacy declarative data is converted at load and runtime authority is resolved from its Unified Content definition.',
   }
   return {
     id: value.id,
@@ -241,6 +299,9 @@ function typescriptArrayObjectEntries(path, variableName) {
 function hostSpellInventory() {
   const catalogPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/spellCatalog.ts')
   const combatPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/spells.ts')
+  const activityPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/activities/dnd5eCoreSpellActivities.ts')
+  const spellActionPath = resolve(repositoryRoot, 'src/rulesets/dnd5e/spellAction.ts')
+  const enginePath = resolve(repositoryRoot, 'src/rulesets/dnd5e/headlessCombatEngine.ts')
   const catalogSource = readFileSync(catalogPath, 'utf8')
   const catalogBlock = catalogSource.match(/const RAW_SRD_5_1_SPELL_CATALOG = `([\s\S]*?)`/u)?.[1]
   if (!catalogBlock) throw new Error('Unable to read RAW_SRD_5_1_SPELL_CATALOG')
@@ -258,6 +319,13 @@ function hostSpellInventory() {
   if (uncataloguedCombatIds.length) {
     throw new Error(`SRD combat spells are absent from the catalog: ${uncataloguedCombatIds.join(', ')}`)
   }
+  const activitySource = readFileSync(activityPath, 'utf8')
+  const spellActionSource = readFileSync(spellActionPath, 'utf8')
+  const engineSource = readFileSync(enginePath, 'utf8')
+  const unifiedRuntime = activitySource.includes("kind: 'core-spell-transaction'") &&
+    activitySource.includes('DND5E_SRD_COMBAT_SPELLS.map') &&
+    spellActionSource.includes('getDnd5eCoreSpellRuntimeDefinitionV1(payload.spellId)') &&
+    engineSource.includes('getDnd5eCoreSpellRuntimeDefinitionV1(action.spellId)')
   return catalogIds.map((id) => {
     const combat = combatById.get(id)
     return combat ? {
@@ -265,9 +333,11 @@ function hostSpellInventory() {
       file: localPath(combatPath),
       legacySchema: 'Dnd5eSrdSpellDefinition',
       effect: combat.effect,
-      status: 'P1-HOST-ADAPTER-SPELL',
-      migrationNeeded: true,
-      target: 'Move the source definition to native Activity/Effect data, then retire its spell adapter/special branch.',
+      status: unifiedRuntime ? 'DONE-CORE-UNIFIED-SPELL' : 'P1-HOST-ADAPTER-SPELL',
+      migrationNeeded: !unifiedRuntime,
+      target: unifiedRuntime
+        ? 'Registered as a core-spell-transaction Activity; both map preparation and Headless execution resolve it from Unified Content Registry.'
+        : 'Move the source definition to native Activity/Effect data, then retire its spell adapter/special branch.',
     } : {
       id,
       file: localPath(catalogPath),
@@ -314,26 +384,46 @@ const featEntries = loadCollectionEntries(collection, 'feats')
   .map((entry) => classifyFeatureLike(entry, 'feat', activityIndex))
   .sort((left, right) => left.id.localeCompare(right.id))
 
+const loadedRaceEntries = loadCollectionEntries(collection, 'races')
+const raceGrantedFeatureIds = new Set(loadedRaceEntries.flatMap((entry) => asArray(entry.value.grantedFeatureIds)))
 const racialFeatureEntries = loadCollectionEntries(collection, 'features')
-  .map((entry) => classifyFeatureLike(entry, 'feature', activityIndex))
+  .map((entry) => {
+    const classified = classifyFeatureLike(entry, 'feature', activityIndex)
+    if (
+      classified.status === 'REVIEW-NO-NATIVE-ACTIVITY' && raceGrantedFeatureIds.has(entry.value.id) &&
+      !hasValues(entry.value.action) && !hasValues(entry.value.declarativeAbility) &&
+      !hasValues(entry.value.staticModifiers) && !hasValues(entry.value.passiveEffects)
+    ) return {
+      ...classified,
+      status: 'KEEP-RACE-GRANT-METADATA',
+      migrationNeeded: false,
+      target: 'Display/grant metadata only; executable innate spell or reroll authority is owned by the parent race projection.',
+    }
+    return classified
+  })
   .sort((left, right) => left.id.localeCompare(right.id))
 
-const raceEntries = loadCollectionEntries(collection, 'races').map((entry) => {
+const raceEntries = loadedRaceEntries.map((entry) => {
   const value = entry.value
   const legacyParts = [
     ...(hasValues(value.staticModifiers) ? ['staticModifiers'] : []),
     ...(hasValues(value.savingThrowAdvantages) ? ['savingThrowAdvantages'] : []),
     ...(value.hitPointsPerLevelBonus != null ? ['hitPointsPerLevelBonus'] : []),
+    ...(value.naturalOneReroll === true ? ['naturalOneReroll'] : []),
   ]
   return {
     id: value.id,
     file: entry.file,
     declaredAutomation: declaredAutomation(value.automation),
     legacyParts,
-    status: legacyParts.length ? 'P2-LEGACY-PASSIVE-FIELDS' : 'KEEP-BUILD-DATA',
-    migrationNeeded: legacyParts.length > 0,
+    status: legacyParts.length
+      ? unifiedPermanentEffectRuntime ? 'DONE-UNIFIED-PERMANENT-EFFECT' : 'P2-LEGACY-PASSIVE-FIELDS'
+      : 'KEEP-BUILD-DATA',
+    migrationNeeded: legacyParts.length > 0 && !unifiedPermanentEffectRuntime,
     target: legacyParts.length
-      ? 'Project deterministic race passives into native Effects; keep ancestry/build grants as build data.'
+      ? unifiedPermanentEffectRuntime
+        ? 'Race passives are converted once into permanent Unified Effects; build grants remain Advancement/payload data.'
+        : 'Project deterministic race passives into native Effects; keep ancestry/build grants as build data.'
       : 'No combat-runtime migration required.',
   }
 }).sort((left, right) => left.id.localeCompare(right.id))
@@ -434,7 +524,7 @@ ${markdownTable(['状态', '数量'], Object.entries(statusCounts))}
 
 ## Host SRD 法术源数据
 
-这里的 \`P1-HOST-ADAPTER-SPELL\` 当前可以通过加载适配器运行，但源数据仍属于旧法术 Schema，因此是架构迁移项，不等于当前无法使用。
+\`DONE-CORE-UNIFIED-SPELL\` 表示地图准备与 Headless 核心结算都先从 Unified Content Registry 取得权威 Activity/法术 payload；\`P1-HOST-ADAPTER-SPELL\` 才表示仍绕过统一注册表。
 
 ${markdownTable(
   ['ID', '状态', '旧效果类型', '动作'],

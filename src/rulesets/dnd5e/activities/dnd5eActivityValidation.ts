@@ -13,6 +13,7 @@ import type {
   Dnd5eActivityTargetV1,
 } from './dnd5eActivityContracts'
 import {
+  DND5E_CHARACTER_CAPABILITY_IDS_V1,
   DND5E_TRIGGER_EVENT_IDS_V1,
   type Dnd5eEffectDefinitionV1,
   type Dnd5eEffectDurationV1,
@@ -40,6 +41,15 @@ const SPELL_SCHOOLS = new Set<Dnd5eSpellbookSchoolId>([
   'abjuration', 'conjuration', 'divination', 'enchantment',
   'evocation', 'illusion', 'necromancy', 'transmutation',
 ])
+const CHARACTER_CAPABILITIES = new Set<string>(DND5E_CHARACTER_CAPABILITY_IDS_V1)
+const NUMERIC_CHARACTER_CAPABILITIES = new Set<string>([
+  'initiativeBonus', 'hitPointsPerLevelBonus', 'passivePerceptionBonus', 'passiveInvestigationBonus',
+  'minimumHitDieHealingConstitutionMultiplier', 'mediumArmorDexterityCapBonus',
+  'dualWieldMeleeArmorClassBonus', 'climbWithoutSpeedCostMultiplier', 'runningJumpMinimumApproachFeet',
+  'standFromProneMovementCostFeet', 'spellAttackRangeMultiplier', 'spellSavingThrowAdvantageWithinFeet',
+  'combatManeuverDieSidesOverride',
+])
+const STRING_LIST_CHARACTER_CAPABILITIES = new Set<string>(['opportunityAttacksOnEnterReachWeaponIds'])
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
@@ -509,6 +519,31 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     if (modifier.kind === 'condition-immunity' && !CONDITIONS.has(modifier.condition)) {
       errors.push(`${modifierLabel}.condition is invalid`)
     }
+    if (modifier.kind === 'character-capability') {
+      const expectsNumber = NUMERIC_CHARACTER_CAPABILITIES.has(modifier.capability)
+      const expectsList = STRING_LIST_CHARACTER_CAPABILITIES.has(modifier.capability)
+      const validValue = expectsNumber
+        ? finiteNumber(modifier.value, 0, 1_000_000)
+        : expectsList
+          ? Array.isArray(modifier.value) && modifier.value.length > 0 && modifier.value.length <= 128 &&
+            modifier.value.every((entry) => validId(entry))
+          : typeof modifier.value === 'boolean'
+      if (
+        effect.duration.kind !== 'permanent' || !CHARACTER_CAPABILITIES.has(modifier.capability) || !validValue
+      ) errors.push(`${modifierLabel} character-capability is invalid`)
+    }
+    if (modifier.kind === 'racial-saving-throw-advantage') {
+      const conditions = modifier.conditions ?? []
+      const damageTypes = modifier.damageTypes ?? []
+      const magicAbilities = modifier.magicAbilities ?? []
+      if (
+        effect.duration.kind !== 'permanent' ||
+        conditions.length + damageTypes.length + magicAbilities.length === 0 ||
+        conditions.length > 32 || conditions.some((condition) => typeof condition !== 'string' || !condition.trim() || condition.length > 120) ||
+        damageTypes.some((damageType) => !DAMAGE_TYPES.has(damageType)) ||
+        magicAbilities.some((ability) => !ABILITIES.has(ability))
+      ) errors.push(`${modifierLabel} racial-saving-throw-advantage is invalid`)
+    }
     if (modifier.kind === 'maximum-attacks-per-turn' && !finiteInteger(modifier.value, 0, 1_000)) {
       errors.push(`${modifierLabel}.value is invalid`)
     }
@@ -539,6 +574,13 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
       if (modifier.damageTypes?.some((damageType) => !DAMAGE_TYPES.has(damageType))) errors.push(`${modifierLabel}.damageTypes is invalid`)
       if (modifier.minimumIncomingDamage != null && !finiteInteger(modifier.minimumIncomingDamage, 1, 1_000_000)) errors.push(`${modifierLabel}.minimumIncomingDamage is invalid`)
       if (modifier.maximumCurrentHitPointPercent != null && !finiteInteger(modifier.maximumCurrentHitPointPercent, 1, 100)) errors.push(`${modifierLabel}.maximumCurrentHitPointPercent is invalid`)
+      if (modifier.deliveries != null && (
+        modifier.deliveries.length < 1 || modifier.deliveries.length > 3 ||
+        new Set(modifier.deliveries).size !== modifier.deliveries.length ||
+        modifier.deliveries.some((delivery) => !['weapon-attack', 'spell', 'other'].includes(delivery))
+      )) errors.push(`${modifierLabel}.deliveries is invalid`)
+      if (modifier.magical != null && typeof modifier.magical !== 'boolean') errors.push(`${modifierLabel}.magical is invalid`)
+      if (modifier.requiresHeavyArmor != null && typeof modifier.requiresHeavyArmor !== 'boolean') errors.push(`${modifierLabel}.requiresHeavyArmor is invalid`)
     }
     if (modifier.kind === 'on-hit-bonus-damage') {
       if (modifier.damageType !== 'inherit-primary' && !DAMAGE_TYPES.has(modifier.damageType)) errors.push(`${modifierLabel}.damageType is invalid`)
@@ -924,7 +966,13 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
   )) errors.push('activity.legacySource is invalid')
   if (activity.authorityBinding) {
     const binding = activity.authorityBinding
-    const mechanicKinds = new Set([
+    if (binding.kind === 'core-spell-transaction') {
+      if (
+        binding.execution !== 'headless-event-engine' || !validId(binding.spellId) ||
+        activity.legacySource?.kind !== 'spell' || activity.legacySource.id !== binding.spellId
+      ) errors.push('activity.authorityBinding is invalid')
+    } else {
+      const mechanicKinds = new Set([
       'combat-maneuver',
       'martial-spell-synergy',
       'rage-feature',
@@ -968,23 +1016,23 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       'creature-form-control',
       'bonus-weapon-attack',
       'turn-start-saving-throw-aura',
-    ])
-    const expectedSourceId = `${binding.subclassId}:${binding.abilityId}`
-    const expectedActionId = `decl.${binding.subclassId}.${binding.abilityId}`
-    if (
-      binding.kind !== 'declarative-subclass-mechanic' ||
-      !validId(binding.subclassId) || !validId(binding.abilityId) ||
-      !mechanicKinds.has(binding.mechanicKind) ||
-      !['plugin-headless-action', 'headless-event-engine'].includes(binding.execution)
-    ) errors.push('activity.authorityBinding is invalid')
-    if (activity.legacySource?.kind !== 'subclass-ability' || activity.legacySource.id !== expectedSourceId) {
-      errors.push('activity.authorityBinding does not match legacySource')
-    }
-    if (binding.execution === 'plugin-headless-action' && binding.actionId !== expectedActionId) {
-      errors.push('activity.authorityBinding actionId is invalid')
-    }
-    if (binding.execution === 'headless-event-engine' && binding.actionId != null) {
-      errors.push('event-owned activity.authorityBinding cannot declare actionId')
+      ])
+      const expectedSourceId = `${binding.subclassId}:${binding.abilityId}`
+      const expectedActionId = `decl.${binding.subclassId}.${binding.abilityId}`
+      if (
+        !validId(binding.subclassId) || !validId(binding.abilityId) ||
+        !mechanicKinds.has(binding.mechanicKind) ||
+        !['plugin-headless-action', 'headless-event-engine'].includes(binding.execution)
+      ) errors.push('activity.authorityBinding is invalid')
+      if (activity.legacySource?.kind !== 'subclass-ability' || activity.legacySource.id !== expectedSourceId) {
+        errors.push('activity.authorityBinding does not match legacySource')
+      }
+      if (binding.execution === 'plugin-headless-action' && binding.actionId !== expectedActionId) {
+        errors.push('activity.authorityBinding actionId is invalid')
+      }
+      if (binding.execution === 'headless-event-engine' && binding.actionId != null) {
+        errors.push('event-owned activity.authorityBinding cannot declare actionId')
+      }
     }
   }
   validateInvocation(activity.invocation, errors)

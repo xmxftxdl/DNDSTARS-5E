@@ -159,7 +159,7 @@ function legacyFeaturePayload(
   definition: Dnd5eUnifiedContentDefinitionV1<'feature'>,
 ): Dnd5eAuthorableFeatureDefinitionV1 {
   const payload = structuredClone(definition.payload)
-  if (definition.activities?.length && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
+  if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
   }
@@ -170,7 +170,7 @@ function legacyFeatPayload(
   definition: Dnd5eUnifiedContentDefinitionV1<'feat'>,
 ): Dnd5eAuthorableFeatDefinitionV1 {
   const payload = structuredClone(definition.payload)
-  if (definition.activities?.length && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
+  if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
   }

@@ -6,9 +6,11 @@ import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from '../classLev
 import type { Dnd5eClassId } from '../classes'
 import {
   declarativeSubclassResourceDieSidesV1,
+  type DeclarativeSubclassAbilityV1,
   type DeclarativeSubclassSpellListV1,
 } from '../declarativeSubclassAbility'
 import type {
+  Dnd5ePluginAutomationLevel,
   Dnd5ePluginFeatureAction,
   Dnd5ePluginStaticCombatModifiers,
   Dnd5ePluginSubclassChoiceGroup,
@@ -34,6 +36,13 @@ import {
 } from '../characterCapabilities'
 import { declarativeClassGrantedFeatureIdsV1 } from '../declarativeClass'
 import { dnd5eCharacterBuildProficienciesV1 } from '../buildChoices'
+import {
+  contentDefinitionRegistryRevision,
+  listRegisteredContentDefinitionPackages,
+  type RegisteredContentDefinition,
+} from '../../../domain/content/contentDefinitionRegistry'
+import type { Dnd5eEffectDefinitionV1 } from '../activities/dnd5eEffectContracts'
+import { dnd5ePermanentContentEffectProjectionV1 } from '../activities/dnd5ePermanentContentEffects'
 
 const {
   features: pluginFeatures,
@@ -46,6 +55,21 @@ const {
   items: pluginItems,
   monsters: pluginMonsters,
 } = dnd5ePluginRegistryStore
+
+let cachedContentDefinitionRevision = -1
+let cachedDefinitionsByPackage = new Map<string, readonly RegisteredContentDefinition[]>()
+
+function unifiedDefinitionsForPackage(packageId: string): readonly RegisteredContentDefinition[] {
+  const revision = contentDefinitionRegistryRevision()
+  if (revision !== cachedContentDefinitionRevision) {
+    cachedDefinitionsByPackage = new Map(listRegisteredContentDefinitionPackages().map((entry) => [
+      entry.packageId,
+      entry.definitions,
+    ]))
+    cachedContentDefinitionRevision = revision
+  }
+  return cachedDefinitionsByPackage.get(packageId) ?? []
+}
 
 function clonePluginFeatureAction(
   action: Dnd5ePluginFeatureAction | undefined,
@@ -64,16 +88,119 @@ function cloneRegisteredStaticModifiers(
   } : undefined
 }
 
+function localOwnedId(ownerPluginId: string, id: string | undefined): string | undefined {
+  if (!id) return undefined
+  const prefix = `${ownerPluginId}:`
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id
+}
+
+function payloadRecord(definition: RegisteredContentDefinition | undefined): Record<string, unknown> | undefined {
+  const payload = definition?.payload
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : undefined
+}
+
+function unifiedOwnedDefinition(
+  ownerPluginId: string,
+  kinds: readonly RegisteredContentDefinition['kind'][],
+  id: string | undefined,
+): RegisteredContentDefinition | undefined {
+  const localId = localOwnedId(ownerPluginId, id)
+  if (!localId) return undefined
+  return unifiedDefinitionsForPackage(ownerPluginId).find((definition) => {
+    if (!kinds.includes(definition.kind)) return false
+    const payloadId = payloadRecord(definition)?.id
+    return typeof payloadId === 'string' && localOwnedId(ownerPluginId, payloadId) === localId
+  })
+}
+
+function permanentProjection(definition: RegisteredContentDefinition | undefined) {
+  return dnd5ePermanentContentEffectProjectionV1(
+    definition?.effects as readonly Dnd5eEffectDefinitionV1[] | undefined,
+  )
+}
+
+function unifiedLegacyAutomation(
+  definition: RegisteredContentDefinition | undefined,
+  fallback: Dnd5ePluginAutomationLevel | undefined,
+): Dnd5ePluginAutomationLevel | undefined {
+  const declared = payloadRecord(definition)?.automation
+  if (declared === 'full' || declared === 'partial' || declared === 'manual') return declared
+  if (!definition?.activities?.length && !definition?.effects?.length) return fallback
+  if (definition.automation.level === 'full') return 'full'
+  if (definition.automation.level === 'assisted') return 'partial'
+  return 'manual'
+}
+
+function unifiedFeatureDefinition(
+  feature: RegisteredDnd5ePluginFeature,
+): RegisteredContentDefinition | undefined {
+  if (feature.sourceFeatId) {
+    const feat = unifiedOwnedDefinition(feature.ownerPluginId, ['feat'], feature.sourceFeatId)
+    if (feat) return feat
+  } else if (!feature.sourceSubclassId) {
+    const direct = unifiedOwnedDefinition(feature.ownerPluginId, ['feature'], feature.id)
+    if (direct) return direct
+  }
+  const definitions = unifiedDefinitionsForPackage(feature.ownerPluginId)
+  const sourceKind = feature.sourceFeatId
+    ? 'feat' as const
+    : feature.sourceSubclassId
+      ? 'subclass-ability' as const
+      : 'feature' as const
+  const sourceId = sourceKind === 'subclass-ability'
+    ? `${localOwnedId(feature.ownerPluginId, feature.sourceSubclassId)}:${feature.declarativeAbility?.id ?? localOwnedId(feature.ownerPluginId, feature.id)}`
+    : localOwnedId(feature.ownerPluginId, feature.sourceFeatId ?? feature.id)
+  return definitions.find((definition) =>
+    (definition.kind === 'feature' || definition.kind === 'feat') &&
+    definition.activities?.some((candidate) => {
+      const activity = candidate as { legacySource?: { kind?: string; id?: string } }
+      return activity.legacySource?.kind === sourceKind && activity.legacySource.id === sourceId
+    }))
+}
+
+/** Reports whether executable feature data comes from Unified Content or a frozen Legacy adapter. */
+export function dnd5ePluginFeatureRuntimeSourceV1(
+  featureId: string,
+): 'unified-content' | 'legacy-adapter' | undefined {
+  const feature = pluginFeatures.get(featureId)
+  if (!feature) return undefined
+  return unifiedFeatureDefinition(feature) ? 'unified-content' : 'legacy-adapter'
+}
+
+function cloneRegisteredFeature(feature: RegisteredDnd5ePluginFeature): RegisteredDnd5ePluginFeature {
+  const definition = unifiedFeatureDefinition(feature)
+  const payload = payloadRecord(definition)
+  const projected = permanentProjection(definition)
+  const payloadAbility = payload?.declarativeAbility ?? (
+    feature.sourceSubclassId && payload?.trigger ? payload : undefined
+  )
+  const payloadAction = payload?.action
+  return {
+    ...feature,
+    automation: unifiedLegacyAutomation(definition, feature.automation) ?? feature.automation,
+    action: clonePluginFeatureAction(
+      payloadAction && typeof payloadAction === 'object'
+        ? payloadAction as Dnd5ePluginFeatureAction
+        : feature.action,
+    ),
+    declarativeAbility: payloadAbility && typeof payloadAbility === 'object'
+      ? structuredClone(payloadAbility as DeclarativeSubclassAbilityV1)
+      : feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
+    automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+    staticModifiers: cloneRegisteredStaticModifiers(
+      definition ? projected.staticModifiers : feature.staticModifiers,
+    ),
+    passiveEffects: definition
+      ? projected.passiveEffects?.map((effect) => structuredClone(effect))
+      : feature.passiveEffects?.map((effect) => structuredClone(effect)),
+  }
+}
+
 export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginFeature[] {
   return [...pluginFeatures.values()]
-    .map((feature) => ({
-      ...feature,
-      action: clonePluginFeatureAction(feature.action),
-      declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
-      automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
-      staticModifiers: cloneRegisteredStaticModifiers(feature.staticModifiers),
-      passiveEffects: feature.passiveEffects?.map((effect) => structuredClone(effect)),
-    }))
+    .map(cloneRegisteredFeature)
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
 
@@ -218,25 +345,16 @@ export function dnd5ePluginFeatResourceDefinitions(character: Character): readon
 
 export function registeredDnd5ePluginRaces(): readonly RegisteredDnd5ePluginRace[] {
   return [...pluginRaces.values()]
-    .map((race) => ({
-      ...race,
-      abilityBonuses: { ...race.abilityBonuses },
-      flexibleAbilityBonus: race.flexibleAbilityBonus ? {
-        ...race.flexibleAbilityBonus,
-        ...(race.flexibleAbilityBonus.exclude ? { exclude: [...race.flexibleAbilityBonus.exclude] } : {}),
-      } : undefined,
-      skillProficiencies: race.skillProficiencies ? [...race.skillProficiencies] : undefined,
-      languages: race.languages ? [...race.languages] : undefined,
-      traits: race.traits?.map((trait) => ({ ...trait })),
-      staticModifiers: cloneRegisteredStaticModifiers(race.staticModifiers),
-    }))
+    .map(cloneRegisteredRace)
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
 
-export function dnd5ePluginRaceDefinition(idOrName: string): RegisteredDnd5ePluginRace | undefined {
-  const race = pluginRaces.get(idOrName) ?? [...pluginRaces.values()].find((candidate) => candidate.name === idOrName)
-  return race ? {
+function cloneRegisteredRace(race: RegisteredDnd5ePluginRace): RegisteredDnd5ePluginRace {
+  const definition = unifiedOwnedDefinition(race.ownerPluginId, ['race'], race.id)
+  const projected = permanentProjection(definition)
+  return {
     ...race,
+    automation: unifiedLegacyAutomation(definition, race.automation),
     abilityBonuses: { ...race.abilityBonuses },
     flexibleAbilityBonus: race.flexibleAbilityBonus ? {
       ...race.flexibleAbilityBonus,
@@ -245,13 +363,28 @@ export function dnd5ePluginRaceDefinition(idOrName: string): RegisteredDnd5ePlug
     skillProficiencies: race.skillProficiencies ? [...race.skillProficiencies] : undefined,
     languages: race.languages ? [...race.languages] : undefined,
     traits: race.traits?.map((trait) => ({ ...trait })),
-    staticModifiers: cloneRegisteredStaticModifiers(race.staticModifiers),
-  } : undefined
+    staticModifiers: cloneRegisteredStaticModifiers(definition ? projected.staticModifiers : race.staticModifiers),
+    hitPointsPerLevelBonus: definition
+      ? projected.staticModifiers?.hitPointsPerLevelBonus
+      : race.hitPointsPerLevelBonus,
+    naturalOneReroll: definition ? projected.naturalOneReroll : race.naturalOneReroll,
+    savingThrowAdvantages: definition
+      ? projected.racialSavingThrowAdvantages
+      : race.savingThrowAdvantages ? structuredClone(race.savingThrowAdvantages) : undefined,
+  }
+}
+
+export function dnd5ePluginRaceDefinition(idOrName: string): RegisteredDnd5ePluginRace | undefined {
+  const race = pluginRaces.get(idOrName) ?? [...pluginRaces.values()].find((candidate) => candidate.name === idOrName)
+  return race ? cloneRegisteredRace(race) : undefined
 }
 
 function cloneRegisteredFeat(feat: RegisteredDnd5ePluginFeat): RegisteredDnd5ePluginFeat {
+  const definition = unifiedOwnedDefinition(feat.ownerPluginId, ['feat'], feat.id)
+  const projected = permanentProjection(definition)
   return {
     ...feat,
+    automation: unifiedLegacyAutomation(definition, feat.automation) ?? feat.automation,
     prerequisite: feat.prerequisite ? {
       ...feat.prerequisite,
       abilityScores: feat.prerequisite.abilityScores ? { ...feat.prerequisite.abilityScores } : undefined,
@@ -262,8 +395,10 @@ function cloneRegisteredFeat(feat: RegisteredDnd5ePluginFeat): RegisteredDnd5ePl
         : undefined,
     } : undefined,
     action: clonePluginFeatureAction(feat.action),
-    staticModifiers: cloneRegisteredStaticModifiers(feat.staticModifiers),
-    passiveEffects: feat.passiveEffects?.map((effect) => structuredClone(effect)),
+    staticModifiers: cloneRegisteredStaticModifiers(definition ? projected.staticModifiers : feat.staticModifiers),
+    passiveEffects: definition
+      ? projected.passiveEffects?.map((effect) => structuredClone(effect))
+      : feat.passiveEffects?.map((effect) => structuredClone(effect)),
     resources: feat.resources?.map((resource) => ({ ...resource })),
     advancements: feat.advancements?.map((advancement) => structuredClone(advancement)),
   }
@@ -284,7 +419,7 @@ export function dnd5ePluginFeatAvailableForCharacter(
   feat: RegisteredDnd5ePluginFeat,
   character: Character,
 ): boolean {
-  const feature = pluginFeatures.get(feat.featureId)
+  const feature = dnd5ePluginFeatureDefinition(feat.featureId)
   return !!feature && dnd5ePluginFeatureAvailableForCharacter(feature, character)
 }
 
@@ -437,14 +572,7 @@ export function dnd5ePluginAbilityGenerationMethod(
 
 export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5ePluginFeature | undefined {
   const feature = pluginFeatures.get(featureId)
-  return feature ? {
-    ...feature,
-    action: clonePluginFeatureAction(feature.action),
-    declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
-    automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
-    staticModifiers: cloneRegisteredStaticModifiers(feature.staticModifiers),
-    passiveEffects: feature.passiveEffects?.map((effect) => structuredClone(effect)),
-  } : undefined
+  return feature ? cloneRegisteredFeature(feature) : undefined
 }
 
 export function dnd5ePluginFeatureAvailableForCharacter(
@@ -480,7 +608,7 @@ export function dnd5ePluginFeatureAvailableForCharacter(
 }
 
 export function dnd5eCharacterHasPluginFeature(character: Character, featureId: string): boolean {
-  const feature = pluginFeatures.get(featureId)
+  const feature = dnd5ePluginFeatureDefinition(featureId)
   if (!feature || !dnd5ePluginFeatureAvailableForCharacter(feature, character)) return false
   if (feature.grantedBySubclass === true) return true
   if (feature.grantedByFeat === true) {
@@ -498,7 +626,7 @@ export function dnd5ePluginBooleanStaticModifierForCharacter(
   character: Character,
   key: 'allowNonLightTwoWeaponFighting' | 'ignoreOccupiedHandsForSomaticComponents',
 ): boolean {
-  return [...pluginFeatures.values()].some((feature) =>
+  return registeredDnd5ePluginFeatures().some((feature) =>
     feature.automation !== 'manual' && feature.staticModifiers?.[key] === true &&
     dnd5eCharacterHasPluginFeature(character, feature.id)
   )
