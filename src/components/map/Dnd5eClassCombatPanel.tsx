@@ -4,10 +4,14 @@ import { classResourceDefinitions, getClassResource } from '../../lib/classResou
 import type { Dnd5eClassFeaturePayload, Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import {
   dnd5eArmorClass,
-  dnd5eAttacksPerAttackAction,
+  dnd5eEffectiveAttacksPerAttackAction,
   dnd5eClassDefinitionForCharacter,
   dnd5eEscapableGrapples,
   dnd5eKnownWildShapeForms,
+  dnd5ePluginCreatureFormBypassesKnownForCharacter,
+  dnd5ePluginCreatureFormEligibleForCharacter,
+  dnd5ePluginCreatureFormRuleForCharacter,
+  dnd5ePluginCreatureFormControlForCharacter,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eWalkingSpeed,
   dnd5eWeaponAttackProfile,
@@ -109,7 +113,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
   const hunterMultiattackAvailable = !!profile && turnEconomy.action.current > 0 &&
     ((hunterMultiattack === 'volley' && profile.mode === 'ranged') ||
       (hunterMultiattack === 'whirlwind-attack' && profile.mode === 'melee'))
-  const attacksPerAction = dnd5eAttacksPerAttackAction(storedCharacter)
+  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(storedCharacter)
   const attackLimit = attacksPerAction * Math.max(1, turnEconomy.action.max)
   const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
   const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (turnEconomy.action.current > 0 || canContinueAttackAction)
@@ -157,7 +161,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
             <Stat label="武器" value={profile.weaponName} />
             <Stat label="命中" value={`${profile.attackModifier >= 0 ? '+' : ''}${profile.attackModifier}`} />
             <Stat label="伤害" value={`${profile.damage.count}d${profile.damage.sides}${profile.damage.bonus >= 0 ? '+' : ''}${profile.damage.bonus}`} />
-            <Stat label="攻击次数" value={`${dnd5eAttacksPerAttackAction(storedCharacter)} 次／动作`} />
+            <Stat label="攻击次数" value={`${dnd5eEffectiveAttacksPerAttackAction(storedCharacter)} 次／动作`} />
           </div>
         ) : <p className="mt-4 text-sm text-rose-300">没有装备可用的 5e 武器。</p>}
         {definition?.id === 'paladin' && character.level >= 2 && profile?.mode === 'melee' ? <label className="mt-4 block text-xs text-slate-400">
@@ -285,9 +289,15 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
       />
 
       <Dnd5eBasicActionsPanel
-        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction)}
+        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction || (
+          turnEconomy.bonusAction.current > 0 &&
+          Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
+            .some((grant) => grant.appliedTurnKey === turnEconomy.turnKey)
+        ))}
         pending={pending}
         targets={featureTargets}
+        basicActionGrants={Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
+          .filter((grant) => grant.appliedTurnKey === turnEconomy.turnKey)}
         grappleEscapes={dnd5eEscapableGrapples(character.dnd5eCombatState?.activeEffects).map((grapple) => ({
           grapplerTokenId: grapple.grapplerId,
           dc: grapple.dc,
@@ -327,6 +337,7 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
   const [draconicPresenceMode, setDraconicPresenceMode] = useState<'awe' | 'fear'>('fear')
   const [enterFrenzy, setEnterFrenzy] = useState(false)
   const [selectedWildShapeFormId, setSelectedWildShapeFormId] = useState('')
+  const [creatureFormHealingSlotLevel, setCreatureFormHealingSlotLevel] = useState(1)
   const [primevalAwarenessSlotLevel, setPrimevalAwarenessSlotLevel] = useState<0 | 1 | 2 | 3 | 4 | 5>(0)
   const [firstOpenHandTechnique, setFirstOpenHandTechnique] = useState<'none' | 'prone' | 'push' | 'no-reactions'>('none')
   const [secondOpenHandTechnique, setSecondOpenHandTechnique] = useState<'none' | 'prone' | 'push' | 'no-reactions'>('none')
@@ -561,11 +572,26 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
     </div>
   } else if (definition.id === 'druid') {
     const uses = resource('dnd5e-wild-shape')
-    const knownForms = dnd5eKnownWildShapeForms(character)
+    const knownForms = dnd5eKnownWildShapeForms(
+      character,
+      undefined,
+      (form) => dnd5ePluginCreatureFormEligibleForCharacter(character, form),
+      (form) => dnd5ePluginCreatureFormBypassesKnownForCharacter(character, form),
+    )
     const selectedForm = knownForms.find((form) => form.id === selectedWildShapeFormId) ?? knownForms[0]
+    const selectedFormRule = selectedForm ? dnd5ePluginCreatureFormRuleForCharacter(character, selectedForm) : undefined
+    const formControl = dnd5ePluginCreatureFormControlForCharacter(character)
+    const selectedFormEconomy = selectedFormRule?.activationEconomy ?? formControl?.activationEconomy ?? 'action'
+    const selectedFormResourceCost = selectedFormRule?.resourceCost ?? 1
     const activeForm = character.dnd5eCombatState?.wildShapeFormId
       ? getDnd5eSrdMonster(character.dnd5eCombatState.wildShapeFormId)
       : undefined
+    const inFormHealing = formControl?.inFormHealing
+    const healingSlotLevels = Array.from({ length: inFormHealing?.maximumResourceLevel ?? 9 }, (_, index) => index + 1)
+      .filter((level) => (getClassResource(character, `dnd5e-spell-slot-${level}`)?.current ?? 0) > 0)
+    const selectedHealingSlotLevel = healingSlotLevels.includes(creatureFormHealingSlotLevel)
+      ? creatureFormHealingSlotLevel
+      : healingSlotLevels[0]
     controls = activeForm ? <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
       <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/[0.05] p-3 text-xs text-slate-300">
         <strong className="text-emerald-200">当前形态：{activeForm.name}</strong>
@@ -580,6 +606,29 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
         disabled={disabled || !bonusAvailable}
         onClick={() => onFeature({ feature: 'druid-end-wild-shape' })}
       />
+      {inFormHealing ? <div className="grid gap-2 rounded-lg border border-cyan-400/15 bg-cyan-500/[0.04] p-3 sm:col-span-2 sm:grid-cols-[1fr_auto]">
+        <label className="block text-[11px] text-slate-500">消耗法术位治疗形态
+          <select
+            value={selectedHealingSlotLevel ?? ''}
+            onChange={(event) => setCreatureFormHealingSlotLevel(Number(event.target.value))}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-200"
+          >
+            {healingSlotLevels.length === 0 ? <option value="">没有可用法术位</option> : null}
+            {healingSlotLevels.map((level) => <option key={level} value={level}>{level} 环 · {inFormHealing.dicePerResourceLevel.count * level}d{inFormHealing.dicePerResourceLevel.sides}</option>)}
+          </select>
+        </label>
+        <FeatureButton
+          compact
+          label="恢复形态生命"
+          detail={`${inFormHealing.economy === 'bonusAction' ? '附赠动作' : '动作'} · Host 掷治疗骰`}
+          disabled={disabled || !selectedHealingSlotLevel ||
+            (inFormHealing.economy === 'bonusAction' ? !bonusAvailable : !actionAvailable) ||
+            character.currentHp >= character.maxHp}
+          onClick={() => selectedHealingSlotLevel && onFeature({
+            feature: 'druid-creature-form-heal', slotLevel: selectedHealingSlotLevel,
+          })}
+        />
+      </div> : null}
     </div> : <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
       <label className="block text-[11px] text-slate-500">已知野兽形态
         <select
@@ -594,8 +643,8 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
       <FeatureButton
         compact
         label="荒野变形"
-        detail={character.level >= 20 ? '动作；大德鲁伊：不限次数' : `动作；剩余 ${uses?.current ?? 0}/${uses?.max ?? 2} 次`}
-        disabled={disabled || !actionAvailable || character.level < 2 || !selectedForm || (character.level < 20 && (uses?.current ?? 0) < 1)}
+        detail={`${selectedFormEconomy === 'bonusAction' ? '附赠动作' : '动作'}；${character.level >= 20 ? '大德鲁伊：不限次数' : `消耗 ${selectedFormResourceCost} 次，剩余 ${uses?.current ?? 0}/${uses?.max ?? 2} 次`}`}
+        disabled={disabled || (selectedFormEconomy === 'bonusAction' ? !bonusAvailable : !actionAvailable) || character.level < 2 || !selectedForm || (character.level < 20 && (uses?.current ?? 0) < selectedFormResourceCost)}
         onClick={() => selectedForm && onFeature({ feature: 'druid-wild-shape', formId: selectedForm.id })}
       />
     </div>

@@ -287,6 +287,7 @@ export function prepareDnd5eMonsterSpecialAction(input: {
       ) return { ok: false, reason: 'destination-out-of-range' }
       if (mapGeometryLineOfEffectBlocked({
         geometry,
+        map: input.map,
         from: actorToken,
         to: anchorPoint,
         fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),

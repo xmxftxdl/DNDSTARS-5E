@@ -999,6 +999,9 @@ export default function DmPrepAssistantPage() {
                             : 'Astral Trace 云端任务队列'}
                       </span>
                     </div>
+                    <p className="mt-1.5 text-[10px] text-amber-200">
+                      预计 {pdfWorkload.estimatedCredits.toLocaleString()} 积分（约 ¥{pdfWorkload.estimatedCny.toFixed(2)}），执行前预留 {pdfWorkload.reservedCredits.toLocaleString()} 积分；完成后按实际 Token 结算并退还差额。
+                    </p>
                     <p className={`mt-1.5 text-[10px] leading-4 ${localWorkloadRecommendation === 'prefer-cloud'
                       ? 'text-amber-200'
                       : 'text-slate-500'}`}

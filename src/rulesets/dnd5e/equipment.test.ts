@@ -281,6 +281,38 @@ describe('D&D 5e 2014 fighter equipment', () => {
     }))?.damage.bonus).toBe(3)
   })
 
+  it('allows non-light one-handed melee weapons through the generic two-weapon capability', () => {
+    const pluginId = 'local.test.non-light-two-weapon'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Non-light two-weapon test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'dual-wielder', name: 'Dual Wielder', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'full', staticModifiers: { allowNonLightTwoWeaponFighting: true },
+        })
+      },
+    })
+    try {
+      const mainWeapon = structuredClone(DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!)
+      const offHand = { ...structuredClone(mainWeapon), id: 'test-offhand-longsword', slot: 'offHand' as const }
+      const ordinary = fighter({ equipment: { mainWeapon, offHand } })
+      expect(dnd5eOffHandWeaponAttackProfile(ordinary)).toBeUndefined()
+      expect(dnd5eOffHandWeaponAttackProfile(fighter({
+        equipment: { mainWeapon, offHand },
+        dnd5eFeatIds: [`${pluginId}:dual-wielder`],
+      }))).toMatchObject({
+        weaponId: 'test-offhand-longsword',
+        mode: 'melee',
+        damage: { sides: 8, bonus: 0 },
+      })
+    } finally {
+      dispose()
+    }
+  })
+
   it('uses the versatile die and enables Great Weapon Fighting only while wielded in two hands', () => {
     const twoHanded = fighter({
       equipment: { mainWeapon: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon },

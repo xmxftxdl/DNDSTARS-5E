@@ -9,7 +9,7 @@ export function RestRecoveryModal({ advance, onDismiss, onOpenCharacter }: {
 }) {
   if (!advance) return null
   const shortRest = advance.kind === 'short-rest'
-  return <Modal transparent animationType="fade" visible statusBarTranslucent onRequestClose={onDismiss}>
+  return <Modal transparent animationType="fade" visible statusBarTranslucent supportedOrientations={['landscape-left', 'landscape-right']} onRequestClose={onDismiss}>
     <View style={styles.backdrop}>
       <View style={styles.dialog}>
         <Text style={styles.eyebrow}>{shortRest ? '短休完成' : '长休完成'}</Text>

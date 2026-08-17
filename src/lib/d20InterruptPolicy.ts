@@ -10,6 +10,9 @@ export interface D20EnemyModifierOption {
   modifierKind?: 'replace-d20' | 'adjust-d20' | 'choice-reroll'
   sourceTokenId?: string
   dieSides?: number
+  fixedAmount?: number
+  /** Closed Host-owned values accepted by a stored-result replacement feature. */
+  replacementValues?: readonly number[]
   direction?: 'add' | 'subtract'
   rerollScope?: 'self-roll' | 'attack-against-self'
   /** One extra die creates a two-result choice; two create a three-result choice. */
@@ -66,6 +69,8 @@ export function shouldOpenD20RollConfirmation(input: {
   }
   if (input.outcome === 'failure') {
     return modifiers.some((entry) =>
+      (entry.modifierKind ?? 'replace-d20') === 'replace-d20' &&
+        (entry.replacementValues?.length ?? 0) > 0 ||
       entry.modifierKind === 'adjust-d20' && entry.direction === 'add')
   }
   return false

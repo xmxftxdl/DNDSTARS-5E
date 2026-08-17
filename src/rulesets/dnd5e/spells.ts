@@ -15,6 +15,7 @@ import {
   dnd5eEffectiveSpellSelections,
 } from './subclassSpellcasting'
 import { dnd5ePluginSubclassSpellIds } from './pluginApi'
+import { dnd5eCharacterBuildSpellGrantsV1 } from './buildChoices'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
@@ -114,6 +115,17 @@ export interface Dnd5eSrdSpellDefinition {
   damageOnSuccessfulSave?: 'none' | 'half'
   dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
   damageType?: Dnd5eDamageType
+  /** The spell's damage cannot leave the target below this current HP value. */
+  minimumHitPointsAfterDamage?: number
+  /**
+   * Closed, data-only consequence shared by spells that reduce maximum HP by
+   * the damage actually taken on a failed save.
+   */
+  hitPointMaximumReductionOnFailedSave?: {
+    durationRounds: number
+    minimumMaximumHitPoints: number
+    recovery: 'greater-restoration-or-other-magic'
+  }
   /** 与主伤害骰池同时结算的其他伤害类型；一次伤害事件内分别应用抗性/易伤。 */
   additionalDamageComponents?: readonly Dnd5eSpellDamageComponentDefinition[]
   /** 主伤害骰池是否可承接“每升一环”的伤害类型选择。 */
@@ -138,6 +150,8 @@ export interface Dnd5eSrdSpellDefinition {
   secondaryTargetsWithinFeetOfFirst?: number
   /** 地图选区模板；尺寸属于法术效果，placeRangeFeet 仅限制模板原点。 */
   area?: SkillAoeTargeting
+  /** Circle radius gained for each slot level above the spell's base level. */
+  areaRadiusFeetPerHigherSlot?: number
   /** Number of distinct area origins that must be selected for one cast. */
   areaTargetCount?: number
   /** Minimum distinct origins for spells whose declared count is a maximum. */
@@ -457,6 +471,90 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
       damageType: 'force',
     },
     description: '以附赠动作在射程内创造一把漂浮的灵体武器，持续1分钟。施法时可对武器5尺内的一个生物进行近战法术攻击，命中造成1d8＋施法属性调整值的力场伤害。此后每个你的回合中，可以用附赠动作让武器移动至多20尺，并再次攻击武器5尺内的一个生物。使用4环或更高环法术位施展时，法术位每比2环高两环，伤害增加1d8。',
+  },
+  {
+    id: 'fog-cloud', name: '云雾术', englishName: 'Fog Cloud', level: 1, school: '咒法',
+    classes: ['druid', 'ranger', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 600, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 120 },
+    areaRadiusFeetPerHigherSlot: 20,
+    description: '在射程内一点创造重度遮蔽的雾气区域，持续至多1小时并需要专注。升环会扩大区域；由场景风力造成的提前驱散交给DM裁定。',
+  },
+  {
+    id: 'web', name: '蛛网术', englishName: 'Web', level: 2, school: '咒法',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 600, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
+    description: '在射程内创造20尺立方蛛网区域，持续至多1小时并需要专注。区域轻度遮蔽且属于困难地形；进入或在其中开始回合的生物进行敏捷豁免，失败被束缚，并可用动作进行力量检定挣脱。蛛网支撑与燃烧由DM裁定。',
+  },
+  {
+    id: 'silence', name: '沉默术', englishName: 'Silence', level: 2, school: '幻术',
+    classes: ['bard', 'cleric', 'ranger'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 120 },
+    description: '在射程内创造20尺半径的无声区域，持续至多10分钟并需要专注。完全位于其中的生物无法使用言语成分并免疫雷鸣伤害；耳聋对叙事与感知的影响仍由DM处理。',
+  },
+  {
+    id: 'sleet-storm', name: '雪雨暴', englishName: 'Sleet Storm', level: 3, school: '咒法',
+    classes: ['druid', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 150,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 40, placeRangeFeet: 150 },
+    description: '创造半径40尺、高20尺的重度遮蔽冻雨区域，持续至多1分钟并需要专注。地面为困难地形；进入或在其中开始回合的生物敏捷豁免失败则倒地。暴露火焰及额外专注检定保留给DM。',
+  },
+  {
+    id: 'stinking-cloud', name: '臭云术', englishName: 'Stinking Cloud', level: 3, school: '咒法',
+    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 90,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 90 },
+    description: '创造20尺半径的重度遮蔽恶臭云雾，持续至多1分钟并需要专注。在其中开始回合的生物进行体质豁免，失败则失去本回合动作。无需呼吸及场景风力仍由DM裁定。',
+  },
+  {
+    id: 'wind-wall', name: '风墙术', englishName: 'Wind Wall', level: 3, school: '塑能',
+    classes: ['druid', 'ranger'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', saveAbility: 'str', damageOnSuccessfulSave: 'half',
+    dice: { count: 3, sides: 8, bonus: 0 }, damageType: 'bludgeoning',
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 50, minimumWidthFeet: 5, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
+    description: '创造最长50尺、高15尺的风墙，持续至多1分钟并需要专注。风墙出现时范围内生物进行力量豁免，失败受到3d8钝击伤害，成功减半。任意曲线路径、飞行物和气体互动保留给DM。',
+  },
+  {
+    id: 'wall-of-force', name: '力场墙', englishName: 'Wall of Force', level: 5, school: '塑能',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
+    description: '创造由至多十块墙板构成的不可穿越力场，持续至多10分钟并需要专注。Headless 使用可旋转直墙近似并阻挡移动与效应线；穹顶、球体、推向哪侧及解离术互动由DM处理。',
+  },
+  {
+    id: 'wall-of-stone', name: '石墙术', englishName: 'Wall of Stone', level: 5, school: '塑能',
+    classes: ['druid', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
+    description: '创造由墙板构成的石墙，持续至多10分钟并需要专注。Headless 使用可旋转直墙阻挡移动、视线与效应线；墙板生命、复杂造型、围困反应和永久化由DM处理。',
+  },
+  {
+    id: 'wall-of-ice', name: '冰墙术', englishName: 'Wall of Ice', level: 6, school: '塑能',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', saveAbility: 'dex', damageOnSuccessfulSave: 'half',
+    dice: { count: 10, sides: 6, bonus: 0, perHigherSlot: 2 }, damageType: 'cold',
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
+    description: '创造冰墙并对墙体出现位置的生物造成10d6冷冻伤害，敏捷豁免成功减半；每升一环初始伤害增加2d6。Headless 直墙阻挡移动、视线与效应线；墙段生命、火焰易伤及破坏后的寒气由DM处理。',
+  },
+  {
+    id: 'wall-of-thorns', name: '棘墙术', englishName: 'Wall of Thorns', level: 6, school: '咒法',
+    classes: ['druid'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', saveAbility: 'dex', damageOnSuccessfulSave: 'half',
+    dice: { count: 7, sides: 8, bonus: 0, perHigherSlot: 1 }, damageType: 'piercing',
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 60, minimumWidthFeet: 5, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
+    description: '创造最长60尺的棘墙，持续至多10分钟并需要专注。出现时范围内生物敏捷豁免并承受7d8穿刺伤害；进入或在其中结束回合则承受7d8挥砍伤害。墙内移动成本为四倍，每升一环伤害增加1d8。环形墙由DM处理。',
   },
   {
     id: 'grease', name: '油腻术', englishName: 'Grease', level: 1, school: '咒法',
@@ -830,6 +928,19 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '目标恢复70点生命，并结束影响它的目盲、耳聋和疾病。每升一环额外恢复10点生命。对构装生物和亡灵无效。',
   },
   {
+    id: 'harm', name: '重伤术', englishName: 'Harm', level: 6, school: '死灵',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw',
+    saveAbility: 'con', requiresVisibleTarget: true,
+    dice: { count: 14, sides: 6, bonus: 0 }, damageType: 'necrotic', damageOnSuccessfulSave: 'half',
+    minimumHitPointsAfterDamage: 1,
+    hitPointMaximumReductionOnFailedSave: {
+      durationRounds: 600,
+      minimumMaximumHitPoints: 1,
+      recovery: 'greater-restoration-or-other-magic',
+    },
+    description: '目标进行体质豁免；失败受到14d6黯蚀伤害，并按实际承受的伤害降低生命上限1小时；成功时伤害减半且不降低生命上限。此法术不能令目标低于1点当前生命或生命上限。',
+  },
+  {
     id: 'power-word-stun', name: '律令震慑', englishName: 'Power Word Stun', level: 8, school: '附魔',
     classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'power-word-stun', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, hitPointThreshold: 150,
@@ -1130,6 +1241,19 @@ export function getDnd5eSrdCombatSpell(id: string): Dnd5eSrdSpellDefinition | un
   return spellsById.get(id)
 }
 
+export function dnd5eSpellAreaAtSlot(
+  spell: Pick<Dnd5eSrdSpellDefinition, 'level' | 'area' | 'areaRadiusFeetPerHigherSlot'>,
+  slotLevel: number,
+): SkillAoeTargeting | undefined {
+  if (!spell.area) return undefined
+  if (spell.area.shape !== 'circle' || !spell.areaRadiusFeetPerHigherSlot) return { ...spell.area }
+  return {
+    ...spell.area,
+    radiusFeet: spell.area.radiusFeet +
+      Math.max(0, Math.floor(slotLevel) - spell.level) * spell.areaRadiusFeetPerHigherSlot,
+  }
+}
+
 export function dnd5eSpellAttackDelivery(
   spell: Dnd5eSrdSpellDefinition,
   sustainedAttack?: Dnd5eSustainedSpellAttackDefinition,
@@ -1372,8 +1496,11 @@ export function dnd5eSubclassSpellIdsForClass(
 
 /** All spells selected on every owned spellcasting class. */
 export function dnd5eSelectedSpellIds(character: Character): readonly string[] {
-  return [...new Set((Object.keys(normalizeDnd5eClassLevels(character)) as Dnd5eClassId[])
-    .flatMap((classId) => dnd5eSelectedSpellIdsForClass(character, classId)))]
+  return [...new Set([
+    ...(Object.keys(normalizeDnd5eClassLevels(character)) as Dnd5eClassId[])
+      .flatMap((classId) => dnd5eSelectedSpellIdsForClass(character, classId)),
+    ...dnd5eCharacterBuildSpellGrantsV1(character).map((grant) => grant.spellId),
+  ])]
 }
 
 /**
@@ -1386,9 +1513,12 @@ export function dnd5eSpellcastingClassIdsForSpell(
   spellId: string,
   allowedClasses?: readonly Dnd5eClassId[],
 ): readonly Dnd5eClassId[] {
+  const buildGrant = dnd5eCharacterBuildSpellGrantsV1(character)
+    .find((grant) => grant.spellId === spellId)
   return dnd5eEffectiveSpellcastingSources(character).map((source) => source.classId).filter((classId) => {
     const source = dnd5eEffectiveSpellcastingSource(character, classId)
-    if (!source || !dnd5eSelectedSpellIdsForClass(character, classId).includes(spellId)) return false
+    if (!source || (!buildGrant && !dnd5eSelectedSpellIdsForClass(character, classId).includes(spellId))) return false
+    if (buildGrant) return true
     if (
       !allowedClasses || allowedClasses.includes(source.spellListClassId) ||
       dnd5eSubclassSpellIdsForClass(character, classId).includes(spellId)

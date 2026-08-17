@@ -23,12 +23,15 @@ function featurePresentation(input: {
   featureLabel: string
   modifierKind?: 'replace-d20' | 'adjust-d20' | 'choice-reroll'
   dieSides?: number
+  fixedAmount?: number
   direction?: 'add' | 'subtract'
   additionalDice?: 1 | 2
 }) {
   if (input.modifierKind === 'adjust-d20') return {
-    kind: '奖励骰',
-    hint: `投掷 d${input.dieSides ?? '?'}，${input.direction === 'subtract' ? '从本次结果中减去' : '加入本次结果'}`,
+    kind: input.fixedAmount != null ? '固定修正' : '奖励骰',
+    hint: input.fixedAmount != null
+      ? `固定 ${input.direction === 'subtract' ? '-' : '+'}${input.fixedAmount}`
+      : `投掷 d${input.dieSides ?? '?'}，${input.direction === 'subtract' ? '从本次结果中减去' : '加入本次结果'}`,
     classes: 'border-amber-300/35 bg-amber-500/10 text-amber-100',
   }
   if (input.modifierKind === 'choice-reroll') return {
@@ -65,6 +68,7 @@ export default function D20RollConfirmationOverlay({
   const [timedOutInterruptId, setTimedOutInterruptId] = useState('')
   const timeoutHandledRef = useRef('')
   const selectedFeature = ownEligibleFeatures.find((entry) => entry.featureId === selectedFeatureId) ?? ownEligibleFeatures[0]
+  const storedReplacementValues = selectedFeature?.replacementValues ?? []
   const rollOptions = ownContribution?.kind === 'choice-reroll' &&
     interrupt.payload.rollOptions?.contributionId === ownContribution.id
     ? interrupt.payload.rollOptions.values : undefined
@@ -76,6 +80,13 @@ export default function D20RollConfirmationOverlay({
     remainingMs / Math.max(1, deadline - interrupt.createdAt) * 100))
   const parsedOverride = Number(dmOverrideValue)
   const overrideValid = Number.isInteger(parsedOverride) && parsedOverride >= 1 && parsedOverride <= 20
+
+  useEffect(() => {
+    if (storedReplacementValues.length < 1) return
+    if (!storedReplacementValues.includes(Number(replacementValue))) {
+      setReplacementValue(String(storedReplacementValues[0]))
+    }
+  }, [replacementValue, selectedFeature?.featureId, storedReplacementValues])
 
   useEffect(() => {
     if (deadline == null) return
@@ -215,9 +226,24 @@ export default function D20RollConfirmationOverlay({
               </div>
               {selectedFeature?.modifierKind !== 'adjust-d20' && selectedFeature?.modifierKind !== 'choice-reroll' && (
                 <label className="block space-y-1"><span className="text-xs text-slate-400">替换点数</span>
-                  <input type="number" min={1} max={20} value={replacementValue}
-                    onChange={(event) => setReplacementValue(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60" />
+                  {storedReplacementValues.length > 0 ? (
+                    <div className="grid grid-cols-4 gap-2" data-testid="d20-stored-replacement-values">
+                      {storedReplacementValues.map((value, index) => (
+                        <button key={`${index}:${value}`} type="button"
+                          onClick={() => setReplacementValue(String(value))}
+                          data-testid={`d20-stored-replacement-${index}`}
+                          className={`rounded-xl border px-2 py-2.5 text-xl font-black tabular-nums ${Number(replacementValue) === value
+                            ? 'border-sky-200/60 bg-sky-400/25 text-sky-50 ring-2 ring-sky-200/20'
+                            : 'border-sky-300/20 bg-sky-500/10 text-sky-100'}`}>
+                          {value}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <input type="number" min={1} max={20} value={replacementValue}
+                      onChange={(event) => setReplacementValue(event.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-400/60" />
+                  )}
                 </label>
               )}
               <div className="grid grid-cols-2 gap-2">

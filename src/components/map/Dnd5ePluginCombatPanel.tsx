@@ -56,6 +56,7 @@ export default function Dnd5ePluginCombatPanel({
   armedAttackIntentFeatureIds: ReadonlySet<string>
   onAction: (request: {
     targetTokenId?: string
+    targetTokenIds?: string[]
     payload: Dnd5ePluginActionPayload
   }) => void
   onBeginAreaTargeting: (request: {
@@ -71,7 +72,10 @@ export default function Dnd5ePluginCombatPanel({
     dnd5eRulesPluginRegistrySnapshot,
   )
   const [targetsByFeature, setTargetsByFeature] = useState<Record<string, string>>({})
+  const [multipleTargetsByFeature, setMultipleTargetsByFeature] = useState<Record<string, string[]>>({})
   const [secondaryTargetsByFeature, setSecondaryTargetsByFeature] = useState<Record<string, string>>({})
+  const [activityChoicesByFeature, setActivityChoicesByFeature] = useState<Record<string, Record<string, string>>>({})
+  const [modifierByFeature, setModifierByFeature] = useState<Record<string, string>>({})
   const roomRules = useSyncExternalStore(
     subscribeRoomRules,
     getRoomRulesSnapshot,
@@ -170,6 +174,20 @@ export default function Dnd5ePluginCombatPanel({
         {features.map((feature) => {
           const featureAction = feature.action!
           const targeting = featureAction.targeting
+          const featureDamageTypes = new Set((feature.declarativeAbility?.rolls ?? []).flatMap((roll) =>
+            roll.kind === 'damage' && roll.damageType !== 'parent-weapon' ? [roll.damageType] : [],
+          ))
+          const compatibleDamageMaximizers = attackIntents.filter(({ feature: modifier }) => {
+            const mechanic = modifier.declarativeAbility?.mechanic
+            return mechanic?.kind === 'damage-roll-maximization' &&
+              mechanic.deliveries.includes('feature') &&
+              dnd5ePluginFeatureAvailableForCharacter(modifier, character) &&
+              mechanic.damageTypes.some((damageType) => featureDamageTypes.has(damageType))
+          })
+          const selectedModifierId = compatibleDamageMaximizers.some(({ feature: modifier }) =>
+            modifier.id === modifierByFeature[feature.id])
+            ? modifierByFeature[feature.id]
+            : ''
           const combatManeuverOperation = dnd5eDeclarativeCombatManeuverDefinition(feature.id)
             ?.mechanic.operation
           const isAllyReactionAttack = combatManeuverOperation === 'ally-reaction-attack'
@@ -201,10 +219,16 @@ export default function Dnd5ePluginCombatPanel({
                   Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
                 return targeting.rangeFeet == null || distanceFeet <= targeting.rangeFeet
               })
+          const selectedMultipleTargetIds = targeting.kind === 'multiple-creatures'
+            ? (multipleTargetsByFeature[feature.id] ?? []).filter((targetId) =>
+                targetOptions.some((token) => token.id === targetId))
+            : []
           const selectedTargetId = targeting.kind === 'self'
             ? actorToken.id
             : targeting.kind === 'area'
               ? '__area__'
+              : targeting.kind === 'multiple-creatures'
+                ? selectedMultipleTargetIds[0] ?? ''
               : targetsByFeature[feature.id] ?? targetOptions[0]?.id ?? ''
           const selectedTargetToken = map.tokens.find((token) => token.id === selectedTargetId)
           const reactionAttackEnemyOptions = isAllyReactionAttack && selectedTargetToken
@@ -221,6 +245,7 @@ export default function Dnd5ePluginCombatPanel({
           const roomReady = !hasRoomSession || roomRules?.member.ready === true
           const disabled = pending || !canAct || !roomReady || !allowedForRoom ||
             !economyAvailable(featureAction.economy, turnEconomy) || !selectedTargetId ||
+            (targeting.kind === 'multiple-creatures' && selectedMultipleTargetIds.length < 1) ||
             (isAllyReactionAttack && !selectedReactionAttackEnemyId)
           return (
             <article key={feature.id} className="rounded-lg border border-white/8 bg-black/15 p-3">
@@ -274,6 +299,36 @@ export default function Dnd5ePluginCombatPanel({
                   </select>
                 </label>
               )}
+              {targeting.kind === 'multiple-creatures' && (
+                <fieldset className="mt-3 rounded-lg border border-white/8 bg-black/10 p-2">
+                  <legend className="px-1 text-[11px] font-semibold text-slate-500">
+                    选择目标（最多 {targeting.maximumTargets} 个）
+                  </legend>
+                  <div className="mt-1 max-h-40 space-y-1 overflow-y-auto pr-1">
+                    {targetOptions.length === 0 && <p className="px-2 py-1 text-xs text-slate-500">没有符合条件的目标</p>}
+                    {targetOptions.map((token) => {
+                      const selected = selectedMultipleTargetIds.includes(token.id)
+                      const atLimit = !selected && selectedMultipleTargetIds.length >= targeting.maximumTargets
+                      const distanceFeet = tokenFootprintDistanceCells(actorToken, token, map) *
+                        Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+                      return <label key={token.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-300 hover:bg-white/5">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={atLimit}
+                          onChange={() => setMultipleTargetsByFeature((current) => ({
+                            ...current,
+                            [feature.id]: selected
+                              ? selectedMultipleTargetIds.filter((id) => id !== token.id)
+                              : [...selectedMultipleTargetIds, token.id],
+                          }))}
+                        />
+                        <span>{token.label} · {distanceFeet}尺</span>
+                      </label>
+                    })}
+                  </div>
+                </fieldset>
+              )}
               {isAllyReactionAttack && (
                 <label className="mt-3 block">
                   <span className="mb-1 block text-[11px] font-semibold text-slate-500">被攻击目标</span>
@@ -293,6 +348,50 @@ export default function Dnd5ePluginCombatPanel({
                   </select>
                 </label>
               )}
+              {(feature.declarativeAbility?.choices ?? []).map((choice) => {
+                const selected = activityChoicesByFeature[feature.id]?.[choice.id] ??
+                  choice.defaultOptionId ?? choice.options[0]?.id ?? ''
+                return <label key={choice.id} className="mt-3 block">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-500">{choice.label}</span>
+                  <select
+                    data-testid={`dnd5e-plugin-choice-${feature.id}-${choice.id}`}
+                    value={selected}
+                    onChange={(event) => setActivityChoicesByFeature((current) => ({
+                      ...current,
+                      [feature.id]: { ...current[feature.id], [choice.id]: event.target.value },
+                    }))}
+                    className="w-full rounded-lg border border-white/10 bg-void-950/80 px-2 py-1.5 text-xs text-slate-200"
+                  >
+                    {choice.options.map((option) => (
+                      <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              })}
+              {compatibleDamageMaximizers.length > 0 && (
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-500">
+                    本次伤害修饰（可选）
+                  </span>
+                  <select
+                    data-testid={`dnd5e-plugin-modifier-${feature.id}`}
+                    value={selectedModifierId}
+                    onChange={(event) => setModifierByFeature((current) => ({
+                      ...current,
+                      [feature.id]: event.target.value,
+                    }))}
+                    className="w-full rounded-lg border border-white/10 bg-void-950/80 px-2 py-1.5 text-xs text-slate-200"
+                  >
+                    <option value="">正常掷伤害骰</option>
+                    {compatibleDamageMaximizers.map(({ feature: modifier }) => (
+                      <option key={modifier.id} value={modifier.id}>{modifier.name} · 伤害骰取最大值</option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-[10px] leading-4 text-slate-500">
+                    Host 会重新校验伤害类型、来源和资源，并在同一事务内消耗次数。
+                  </span>
+                </label>
+              )}
               <button
                 data-testid={`dnd5e-plugin-action-${feature.id}`}
                 type="button"
@@ -304,11 +403,21 @@ export default function Dnd5ePluginCombatPanel({
                   }
                   onAction({
                     targetTokenId: selectedTargetId,
+                    targetTokenIds: targeting.kind === 'multiple-creatures'
+                      ? selectedMultipleTargetIds
+                      : undefined,
                     payload: {
                       featureId: feature.id,
-                      payload: isAllyReactionAttack
-                        ? { enemyTargetId: selectedReactionAttackEnemyId }
-                        : undefined,
+                      modifierFeatureIds: selectedModifierId ? [selectedModifierId] : undefined,
+                      payload: {
+                        ...(isAllyReactionAttack ? { enemyTargetId: selectedReactionAttackEnemyId } : {}),
+                        ...((feature.declarativeAbility?.choices?.length ?? 0) > 0 ? {
+                          activityChoices: Object.fromEntries(feature.declarativeAbility!.choices!.map((choice) => [
+                            choice.id,
+                            activityChoicesByFeature[feature.id]?.[choice.id] ?? choice.defaultOptionId ?? choice.options[0]?.id ?? '',
+                          ])),
+                        } : {}),
+                      },
                     },
                   })
                 }}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { dnd5eActivityRequiredPhases, validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
+import { dnd5eActivityAutomationAnalysisV1 } from '../plugins/pluginMechanicsRegistry'
 
 function damageActivity(): Dnd5eActivityDefinitionV1 {
   return {
@@ -38,7 +39,7 @@ describe('D&D 5e Activity validation', () => {
     ]))
   })
 
-  it('rejects dangling checks, arbitrary ids and false full-automation claims', () => {
+  it('rejects dangling checks and arbitrary ids while deriving automation independently of legacy claims', () => {
     const activity = damageActivity()
     const invalid: Dnd5eActivityDefinitionV1 = {
       ...activity,
@@ -55,8 +56,11 @@ describe('D&D 5e Activity validation', () => {
     expect(validateDnd5eActivityDefinitionV1(invalid)).toEqual(expect.arrayContaining([
       'activity.id is invalid',
       'activity.outcomes[0].when references an unknown check',
-      'full automation cannot contain manual adjudication operations',
     ]))
+    expect(dnd5eActivityAutomationAnalysisV1(invalid).capability).toMatchObject({
+      level: 'assisted',
+      limitations: expect.arrayContaining(['Activity 包含显式 DM 裁定 operation。']),
+    })
   })
 
   it('rejects runtime-only unknown activation, trigger, target and operation values', () => {
@@ -73,5 +77,27 @@ describe('D&D 5e Activity validation', () => {
       'activity.target.kind is invalid',
       'activity.outcomes[0].operations[0].kind is invalid',
     ]))
+  })
+
+  it('validates source-turn maintenance links and rejects arbitrary effect ids', () => {
+    const valid: Dnd5eActivityDefinitionV1 = {
+      ...damageActivity(),
+      effects: [{
+        schemaVersion: 1,
+        id: 'maintained-charm',
+        name: '维持中的魅惑',
+        duration: { kind: 'rounds', rounds: 10, expiresAt: 'target-turn-end' },
+        sourceLink: { sourceRequiresEffectAtSourceTurnEnd: 'maintained-this-turn' },
+        stacking: 'refresh-duration',
+      }],
+    }
+    expect(validateDnd5eActivityDefinitionV1(valid)).toEqual([])
+    expect(validateDnd5eActivityDefinitionV1({
+      ...valid,
+      effects: [{
+        ...valid.effects![0]!,
+        sourceLink: { sourceRequiresEffectAtSourceTurnEnd: 'Bad Effect ID' },
+      }],
+    })).toContain('activity.effects[0].sourceLink.sourceRequiresEffectAtSourceTurnEnd is invalid')
   })
 })

@@ -2,7 +2,7 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
-import { imposeDnd5eRollDisadvantage } from './rollMode'
+import { resolveDnd5eRollMode } from './rollMode'
 import {
   dnd5eCombatantHasConcentrationEffect,
   resolveDnd5ePersistentAreaTrigger,
@@ -75,12 +75,23 @@ export function prepareDnd5ePersistentAreaTrigger(input: {
     ? {
         ability: input.candidate.trigger.savingThrow.ability,
         dc: input.candidate.trigger.savingThrow.dc,
-        mode: input.candidate.trigger.savingThrow.shapechangerDisadvantage && target.shapechanger
-          ? imposeDnd5eRollDisadvantage(
-              dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, saveContext),
-              'moonbeam-shapechanger',
-            ).mode
-          : dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, saveContext),
+        mode: resolveDnd5eRollMode({
+          requestedMode: dnd5eSavingThrowMode(
+            target,
+            input.candidate.trigger.savingThrow.ability,
+            saveContext,
+          ),
+          advantage: [{
+            active: input.candidate.trigger.savingThrow.advantageIfTargetHasSwimSpeed === true &&
+              (target.movementSpeeds?.swim ?? 0) > 0,
+            reason: 'persistent-area-swim-speed',
+          }],
+          disadvantage: [{
+            active: input.candidate.trigger.savingThrow.shapechangerDisadvantage === true &&
+              target.shapechanger === true,
+            reason: 'moonbeam-shapechanger',
+          }],
+        }).mode,
         blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bless'),
         baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bane'),
       }

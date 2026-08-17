@@ -13,6 +13,7 @@ export interface Dnd5eFormulaActorSnapshot {
   spellAttackBonus?: number
   spellSaveDc?: number
   spellcastingAbilityModifier?: number
+  speed?: number
 }
 
 export type Dnd5eFormulaReferenceV1 =
@@ -30,6 +31,8 @@ export type Dnd5eFormulaReferenceV1 =
   | { kind: 'target-ability-modifier'; ability: AbilityKey }
   | { kind: 'target-current-hp' }
   | { kind: 'target-max-hp' }
+  | { kind: 'actor-speed' }
+  | { kind: 'target-speed' }
   | { kind: 'cast-level' }
   | { kind: 'slot-delta'; baseLevel: number }
   | { kind: 'resource'; subject: 'actor' | 'target'; resourceId: string; field: 'current' | 'maximum' }
@@ -53,6 +56,8 @@ export interface Dnd5eFormulaEvaluationContext {
   rolls: Readonly<Record<string, Dnd5eFormulaRollResult>>
   /** Critical-hit or other Host-owned dice multiplication by stable roll id. */
   diceMultiplierByRollId?: Readonly<Record<string, number>>
+  /** Audited die-floor transforms, such as Elemental Adept's 1 -> 2 rule. */
+  minimumDieValueByRollId?: Readonly<Record<string, number>>
 }
 
 export interface Dnd5eFormulaRollDeclaration {
@@ -111,7 +116,8 @@ function validateReference(reference: unknown, label: string, errors: string[]):
   if (![
     'actor-level', 'actor-proficiency-bonus', 'actor-current-hp', 'actor-max-hp',
     'actor-spell-attack-bonus', 'actor-spell-save-dc', 'actor-spellcasting-ability-modifier',
-    'target-level', 'target-proficiency-bonus', 'target-current-hp', 'target-max-hp', 'cast-level',
+    'target-level', 'target-proficiency-bonus', 'target-current-hp', 'target-max-hp',
+    'actor-speed', 'target-speed', 'cast-level',
   ].includes(reference.kind)) errors.push(`${label}.kind is invalid`)
 }
 
@@ -222,6 +228,10 @@ function referenceValue(
   }
   if (reference.kind === 'actor-current-hp') return actorReferenceValue(context.actor, 'currentHp', reference.kind)
   if (reference.kind === 'actor-max-hp') return actorReferenceValue(context.actor, 'maxHp', reference.kind)
+  if (reference.kind === 'actor-speed') {
+    if (!Number.isFinite(context.actor.speed)) throw new Dnd5eFormulaEvaluationError('actor speed is unavailable')
+    return context.actor.speed!
+  }
   if (reference.kind === 'target-level') return actorReferenceValue(context.target, 'level', reference.kind)
   if (reference.kind === 'target-proficiency-bonus') {
     return actorReferenceValue(context.target, 'proficiencyBonus', reference.kind)
@@ -232,6 +242,10 @@ function referenceValue(
   }
   if (reference.kind === 'target-current-hp') return actorReferenceValue(context.target, 'currentHp', reference.kind)
   if (reference.kind === 'target-max-hp') return actorReferenceValue(context.target, 'maxHp', reference.kind)
+  if (reference.kind === 'target-speed') {
+    if (!Number.isFinite(context.target?.speed)) throw new Dnd5eFormulaEvaluationError('target speed is unavailable')
+    return context.target!.speed!
+  }
   if (reference.kind === 'cast-level') {
     if (!finiteInteger(context.castLevel, 0, 9)) throw new Dnd5eFormulaEvaluationError('cast level is unavailable')
     return context.castLevel
@@ -261,7 +275,11 @@ export function evaluateDnd5eFormulaV1(
       !roll || roll.values.length !== requiredCount ||
       roll.values.some((value) => !finiteInteger(value, 1, formula.sides))
     ) throw new Dnd5eFormulaEvaluationError(`invalid dice result: ${formula.rollId}`)
-    return roll.values.reduce((total, value) => total + value, 0)
+    const minimum = context.minimumDieValueByRollId?.[formula.rollId] ?? 1
+    if (!finiteInteger(minimum, 1, formula.sides)) {
+      throw new Dnd5eFormulaEvaluationError(`invalid minimum die value: ${formula.rollId}`)
+    }
+    return roll.values.reduce((total, value) => total + Math.max(minimum, value), 0)
   }
   if (formula.kind === 'add') {
     return formula.values.reduce((total, value) => total + evaluateDnd5eFormulaV1(value, context), 0)

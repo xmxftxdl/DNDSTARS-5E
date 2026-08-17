@@ -45,12 +45,14 @@ export type OpportunityAttackInterruptPayload = Record<string, unknown> & {
   targetName: string
   attackerTokenId: string
   targetTokenId: string
-  trigger?: 'movement' | 'berserker-retaliation' | 'hunter-giant-killer'
+  trigger?: 'movement' | 'berserker-retaliation' | 'hunter-giant-killer' | 'declarative-reaction-weapon-attack'
+  featureName?: string
 }
 export type OpportunityAttackInterruptResponse = Record<string, unknown> & { useOpportunityAttack: boolean }
 
 export type ProtectionInterruptPayload = Record<string, unknown> & {
   protectorName: string
+  featureName?: string
   attackerName: string
   targetName: string
   attackName: string
@@ -113,7 +115,7 @@ export type LegendaryResistanceInterruptPayload = Record<string, unknown> & {
 }
 export type LegendaryResistanceInterruptResponse = Record<string, unknown> & { useLegendaryResistance: boolean }
 
-export type BardicInspirationRollType = '攻击检定' | '豁免' | '属性检定'
+export type BardicInspirationRollType = '攻击检定' | '豁免' | '属性检定' | '武器伤害' | '护甲等级'
 export type BardicInspirationInterruptPayload = Record<string, unknown> & {
   targetName: string
   dieSides: number
@@ -198,6 +200,21 @@ export type PluginChoiceInterruptPayload = Record<string, unknown> & {
 }
 export type PluginChoiceInterruptResponse = Record<string, unknown> & { optionId: string }
 
+/**
+ * Reserved, data-only handshake used by assisted Activities and declarative
+ * workshop features.  Requiring the DM audience and both fail-closed options
+ * prevents an arbitrary plugin choice from pausing the authoritative combat
+ * flow or being mistaken for an adjudication receipt.
+ */
+export function isAssistedDmBoundaryChoice(input: {
+  audience: PluginChoiceInterruptPayload['audience']
+  options: readonly { id: string; label?: string; description?: string }[]
+}): boolean {
+  if (input.audience !== 'dm') return false
+  const optionIds = new Set(input.options.map((option) => option.id))
+  return optionIds.has('dm-apply') && optionIds.has('dm-cancel')
+}
+
 export type DmAdjudicationOperation = 'damage' | 'healing' | 'temporary-hit-points'
 
 export interface DmAdjudicationEffect extends Record<string, unknown> {
@@ -210,7 +227,7 @@ export interface DmAdjudicationEffect extends Record<string, unknown> {
 }
 
 export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
-  contextKind?: 'spell' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action' | 'post-spell-random-table'
+  contextKind?: 'spell' | 'activity-boundary' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action' | 'post-spell-random-table'
   actionId: string
   casterName: string
   spellId: string
@@ -269,6 +286,8 @@ export type RollConfirmationInterruptPayload = Record<string, unknown> & {
     modifierKind?: 'replace-d20' | 'adjust-d20' | 'choice-reroll'
     sourceTokenId?: string
     dieSides?: number
+    fixedAmount?: number
+    replacementValues?: number[]
     direction?: 'add' | 'subtract'
     rerollScope?: 'self-roll' | 'attack-against-self'
     additionalDice?: 1 | 2

@@ -25,16 +25,13 @@ describe('地图入口面板', () => {
     const dmHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, {
       isDm: true,
       onUpload: vi.fn(),
-      onImportUvtt: vi.fn(),
     }))
     const playerHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, {
       isDm: false,
       onUpload: vi.fn(),
-      onImportUvtt: vi.fn(),
     }))
-    expect(dmHtml).toContain('上传地图图片')
-    expect(dmHtml).toContain('导入 UVTT')
-    expect(playerHtml).not.toContain('上传地图图片')
-    expect(playerHtml).not.toContain('导入 UVTT')
+    expect(dmHtml).toContain('选择地图 / UVTT')
+    expect(dmHtml).toContain('UVTT 会自动恢复底图、网格、墙体、门和光源')
+    expect(playerHtml).not.toContain('选择地图 / UVTT')
   })
 })

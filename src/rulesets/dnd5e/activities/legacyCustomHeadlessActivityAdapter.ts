@@ -51,24 +51,35 @@ export function dnd5eActivityFromCustomHeadlessAction(
     if (effect.kind === 'damage') return {
       id,
       kind: 'damage',
-      target: 'all-targets',
+      target: 'target',
       amount: diceFormula(id, effect.dice),
       damageType: effect.damageType,
     }
     if (effect.kind === 'healing') return {
       id,
       kind: 'healing',
-      target: 'all-targets',
+      target: 'target',
       amount: diceFormula(id, effect.dice),
     }
     return {
       id,
       kind: 'apply-standard-condition',
-      target: 'all-targets',
+      target: 'target',
       condition: effect.condition,
       duration: effectDuration(effect.duration),
     }
   })
+  const savingThrow = definition.savingThrow
+  const successOperations: Dnd5eActivityOperationV1[] = savingThrow?.onSuccess === 'half'
+    ? operations.flatMap((operation) => operation.kind === 'damage' ? [{
+        ...operation,
+        id: `${operation.id}-half`,
+        amount: {
+          kind: 'floor' as const,
+          value: { kind: 'multiply' as const, values: [operation.amount, { kind: 'constant' as const, value: 0.5 }] },
+        },
+      }] : [])
+    : []
   return {
     schemaVersion: 1,
     id: definition.id,
@@ -79,7 +90,25 @@ export function dnd5eActivityFromCustomHeadlessAction(
     requirements: definition.requiredInterruptOptionId
       ? [{ kind: 'choice', choiceId: 'interrupt', optionId: definition.requiredInterruptOptionId }]
       : undefined,
-    outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations }],
+    checks: savingThrow ? [{
+      id: 'target-save',
+      kind: 'saving-throw',
+      rollId: 'target-save-d20',
+      ability: savingThrow.ability,
+      dc: savingThrow.dc === 'source-save-dc'
+        ? { kind: 'reference', reference: { kind: 'actor-spell-save-dc' } }
+        : { kind: 'constant', value: savingThrow.dc },
+      rollMode: 'normal',
+      scope: 'per-target',
+    }] : undefined,
+    outcomes: savingThrow ? [
+      { id: 'failed-save', when: { kind: 'check', checkId: 'target-save', result: 'failure' }, operations },
+      ...(successOperations.length > 0 ? [{
+        id: 'successful-save',
+        when: { kind: 'check' as const, checkId: 'target-save', result: 'success' as const },
+        operations: successOperations,
+      }] : []),
+    ] : [{ id: 'resolve', when: { kind: 'always' }, operations }],
     automation: automationCapabilityFromLegacyStatus('full'),
     legacySource: { kind: 'custom-headless-action', id: definition.id },
   }

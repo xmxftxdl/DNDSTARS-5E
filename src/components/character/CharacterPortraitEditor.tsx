@@ -15,6 +15,7 @@ interface CharacterPortraitEditorProps {
   tokenPortrait?: string
   promptContext?: string
   editable?: boolean
+  usePlayerAi?: boolean
   onChange: (portrait?: string) => void
   onInitiativePortraitChange: (initiativePortrait?: string) => void
   onTokenPortraitChange: (tokenPortrait?: string) => void
@@ -29,6 +30,7 @@ export default function CharacterPortraitEditor({
   tokenPortrait,
   promptContext,
   editable = true,
+  usePlayerAi = false,
   onChange,
   onInitiativePortraitChange,
   onTokenPortraitChange,
@@ -201,6 +203,7 @@ export default function CharacterPortraitEditor({
                 <RotateCcw className="h-4 w-4" />跟随完整立绘
               </button>
               <AiImageGenerationButton
+                {...(usePlayerAi ? { playerTask: 'character-portrait' as const } : {})}
                 label="AI 生成完整立绘"
                 title="AI 生成角色立绘"
                 disabled={busy}

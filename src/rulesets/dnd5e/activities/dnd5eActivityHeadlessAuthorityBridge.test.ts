@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import { normalizeCharacter } from '../../../store/characters'
-import { createDnd5eCombatant, commitDnd5eActivityExecution, startDnd5eHeadlessCombat } from '../headlessCombatEngine'
+import { createDnd5eCombatant, commitDnd5eActivityExecution, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from '../headlessCombatEngine'
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from '../items'
 import { registerDnd5eRulesPlugin } from '../pluginApi'
 import type { DeclarativeSubclassDefinitionV1 } from '../declarativeSubclassAbility'
@@ -58,6 +58,86 @@ describe('Activity Headless authority commit bridge', () => {
     expect(result.activityHandoffs?.persistentAreas).toHaveLength(1)
     expect(result.areaInstance).toMatchObject({ shape: 'circle', x: 10, y: 20, radiusFeet: 10 })
     expect(result.state.combatants.actor.classState.concentrationSpellId).toBe('activity:spell:test-fire-zone')
+  })
+
+  it('links repeat-save effects to the same authoritative concentration', () => {
+    const actor = combatant('actor', 'player', 20)
+    const target = combatant('target', 'dm', 10)
+    const state = startDnd5eHeadlessCombat('activity-repeat-save-concentration', [actor, target])
+    const resolution: Extract<Dnd5eActivityExecutionResult, { ok: true }> = {
+      ok: true, status: 'resolved', checks: [], consumptions: [],
+      proposals: [{
+        kind: 'apply-effect', operationId: 'apply', targetId: 'target',
+        effectId: 'charm', name: 'Charm', concentration: true,
+        duration: { kind: 'save-ends', maximumRounds: 10, timing: 'target-turn-end', ability: 'wis', dc: 14 },
+        conditions: ['charmed'], modifierGroups: [], stacking: 'replace',
+      }],
+    }
+    const committed = commitDnd5eActivityExecution(state, {
+      actorId: 'actor', activityId: 'spell:concentrated-charm', castLevel: 2,
+      targetIds: ['target'], resolution, source: { kind: 'spell', id: 'concentrated-charm' },
+    })
+    expect(committed.ok).toBe(true)
+    if (!committed.ok) return
+    expect(committed.state.combatants.actor.classState.concentrationSpellId)
+      .toBe('activity:spell:concentrated-charm')
+    expect(committed.state.combatants.target.conditions).toContain('charmed')
+    expect(committed.state.combatants.target.classState.activeEffects?.[0]).toMatchObject({
+      duration: { type: 'concentration', remainingRounds: 10 },
+      repeatSave: { ability: 'wis', dc: 14, timing: 'target-turn-end' },
+    })
+
+    const ended = resolveDnd5eHeadlessAction(committed.state, {
+      type: 'concentration-save', actorId: 'actor', d20: 1, dc: 10,
+    })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    expect(ended.state.combatants.target.conditions).not.toContain('charmed')
+  })
+
+  it('ends a source-linked concentration effect when its turn maintenance receipt is missing', () => {
+    const state = startDnd5eHeadlessCombat('activity-source-maintenance', [
+      combatant('actor', 'player', 20), combatant('target', 'dm', 10),
+    ])
+    const resolution: Extract<Dnd5eActivityExecutionResult, { ok: true }> = {
+      ok: true, status: 'resolved', checks: [], consumptions: [],
+      proposals: [
+        {
+          kind: 'apply-effect', operationId: 'apply-link', targetId: 'target',
+          effectId: 'linked-charm', name: 'Linked Charm', concentration: true,
+          duration: { kind: 'concentration', maximumRounds: 10 }, conditions: ['charmed'],
+          modifierGroups: [], stacking: 'replace',
+          sourceLink: { sourceRequiresEffectAtSourceTurnEnd: 'maintained-this-turn' },
+        },
+        {
+          kind: 'apply-effect', operationId: 'initial-maintenance', targetId: 'actor',
+          effectId: 'maintained-this-turn', name: 'Maintained', concentration: false,
+          duration: { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-start' },
+          conditions: [], modifierGroups: [], stacking: 'refresh-duration',
+        },
+      ],
+    }
+    const committed = commitDnd5eActivityExecution(state, {
+      actorId: 'actor', activityId: 'spell:maintained-link', castLevel: 2,
+      targetIds: ['target'], resolution, source: { kind: 'spell', id: 'maintained-link' },
+    })
+    expect(committed.ok).toBe(true)
+    if (!committed.ok) return
+
+    const firstEnd = resolveDnd5eHeadlessAction(committed.state, { type: 'end-turn', actorId: 'actor' })
+    expect(firstEnd.ok).toBe(true)
+    if (!firstEnd.ok) return
+    expect(firstEnd.state.combatants.target.conditions).toContain('charmed')
+    const targetEnd = resolveDnd5eHeadlessAction(firstEnd.state, { type: 'end-turn', actorId: 'target' })
+    expect(targetEnd.ok).toBe(true)
+    if (!targetEnd.ok) return
+    expect(targetEnd.state.combatants.actor.classState.activeEffects?.some((effect) =>
+      effect.definitionId.includes(':maintained-this-turn')) ?? false).toBe(false)
+    const missingMaintenance = resolveDnd5eHeadlessAction(targetEnd.state, { type: 'end-turn', actorId: 'actor' })
+    expect(missingMaintenance.ok).toBe(true)
+    if (!missingMaintenance.ok) return
+    expect(missingMaintenance.state.combatants.target.conditions).not.toContain('charmed')
+    expect(missingMaintenance.state.combatants.actor.concentrating).toBe(false)
   })
 
   it('does not partially mutate the source when a cost is unavailable', () => {

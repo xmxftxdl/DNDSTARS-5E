@@ -22,6 +22,7 @@ import {
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCounterspellReaction,
+  type Dnd5eSpellInterceptionReaction,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterCoreSpellResolutionV1,
   type Dnd5eSpellTeleportDestination,
@@ -40,12 +41,15 @@ import {
 } from './monsters'
 import {
   dnd5eCharmPersonEligibleCreatureType,
+  dnd5eSpellAreaAtSlot,
   dnd5eSpellAttackDelivery,
   dnd5eSpellDiceCount,
   dnd5eSpellMaximumTargets,
   getDnd5eSrdCombatSpell,
   type Dnd5eSrdSpellDefinition,
 } from './spells'
+import { dnd5eCoreSpellComponentRequirements } from './spellComponents'
+import { dnd5ePersistentAreaOccupantModifiersAt } from './persistentAreaGeometry'
 import {
   mapGeometryCanSeeToken,
   mapGeometryLineOfEffectBlocked,
@@ -78,6 +82,7 @@ export type Dnd5eMonsterCoreSpellRejectReason =
   | 'invalid-stat-block'
   | 'invalid-spell'
   | 'manual-spell'
+  | 'verbal-component-unavailable'
   | 'target-out-of-range'
   | 'line-of-effect-blocked'
   | 'resource-unavailable'
@@ -193,6 +198,7 @@ function monsterCoreSpellAreaTargets(input: {
     })) return false
     return !mapGeometryLineOfEffectBlocked({
       geometry,
+      map: input.map,
       from: input.effectOrigin,
       to: candidate,
       fromElevationFeet: input.effectOriginElevationFeet,
@@ -210,6 +216,7 @@ export function dnd5eMonsterCoreSpellAreaTargetIds(input: {
   map: BattleMap
   actorTokenId: string
   spellId: string
+  slotLevel?: number
   areaTargetCell: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaTargetElevationFeet?: number
@@ -218,20 +225,22 @@ export function dnd5eMonsterCoreSpellAreaTargetIds(input: {
     token.id === input.actorTokenId && token.type === 'enemy')
   const spell = getDnd5eSrdCombatSpell(input.spellId)
   if (!actorToken || !spell?.area) return undefined
+  const spellArea = dnd5eSpellAreaAtSlot(spell, input.slotLevel ?? spell.level)
+  if (!spellArea) return undefined
   const casterCell = tokenAnchorCellFromPixel(
     actorToken.x,
     actorToken.y,
     actorToken,
     input.map,
   )
-  const targetCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
+  const targetCell = spellArea.shape === 'circle' && spellArea.origin === 'self'
     ? casterCell
     : input.areaTargetCell
-  if (!canPlaceAoe(spell.area, casterCell, targetCell)) return undefined
-  const orientFrom = aoeOrientFromCell(spell.area, casterCell, targetCell, {
+  if (!canPlaceAoe(spellArea, casterCell, targetCell)) return undefined
+  const orientFrom = aoeOrientFromCell(spellArea, casterCell, targetCell, {
     rectRotation: input.areaTargetOrientation,
   })
-  const cells = cellsForAoe(spell.area, orientFrom, targetCell)
+  const cells = cellsForAoe(spellArea, orientFrom, targetCell)
   const effectAim = {
     x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
     y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
@@ -239,8 +248,8 @@ export function dnd5eMonsterCoreSpellAreaTargetIds(input: {
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const effectAimElevationFeet = input.areaTargetElevationFeet ??
     mapGeometryTerrainElevationAtPoint(geometry, effectAim)
-  const effectOrigin = spell.area.origin === 'point' ? effectAim : actorToken
-  const effectOriginElevationFeet = spell.area.origin === 'point'
+  const effectOrigin = spellArea.origin === 'point' ? effectAim : actorToken
+  const effectOriginElevationFeet = spellArea.origin === 'point'
     ? effectAimElevationFeet
     : mapGeometryTokenElevation(geometry, actorToken)
   if (spell.effect === 'teleport' || spell.effect === 'persistent-area') return []
@@ -288,6 +297,15 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   if (dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full') {
     return { ok: false, reason: 'manual-spell' }
   }
+  const occupantModifiers = dnd5ePersistentAreaOccupantModifiersAt({
+    map: input.map,
+    token: actorToken,
+    position: actorToken,
+  })
+  if (
+    occupantModifiers.preventsVerbalComponents &&
+    dnd5eCoreSpellComponentRequirements(spell.id).verbal
+  ) return { ok: false, reason: 'verbal-component-unavailable' }
   if (
     !Number.isInteger(input.slotLevel) ||
     input.slotLevel < listedSpell.level ||
@@ -305,9 +323,10 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   let preparedAreaTargetCell: GridCell | undefined
   let preparedAreaCells: readonly GridCell[] | undefined
   let preparedAreaBaseElevationFeet: number | undefined
-  if (spell.area) {
+  const spellArea = dnd5eSpellAreaAtSlot(spell, input.slotLevel)
+  if (spellArea) {
     const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
-    const targetCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
+    const targetCell = spellArea.shape === 'circle' && spellArea.origin === 'self'
       ? casterCell
       : input.areaTargetCell
     const columns = Math.max(
@@ -326,10 +345,10 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       targetCell.row < 0 ||
       targetCell.col >= columns ||
       targetCell.row >= rows ||
-      !canPlaceAoe(spell.area, casterCell, targetCell) ||
+      !canPlaceAoe(spellArea, casterCell, targetCell) ||
       (input.areaTargetOrientation != null && (
-        spell.area.shape !== 'rect' ||
-        !spell.area.rotatable ||
+        spellArea.shape !== 'rect' ||
+        !spellArea.rotatable ||
         !Number.isInteger(input.areaTargetOrientation) ||
         input.areaTargetOrientation < 0 ||
         input.areaTargetOrientation > 3
@@ -337,15 +356,15 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     ) {
       return { ok: false, reason: 'invalid-target' }
     }
-    const orientFrom = aoeOrientFromCell(spell.area, casterCell, targetCell, {
+    const orientFrom = aoeOrientFromCell(spellArea, casterCell, targetCell, {
       rectRotation: input.areaTargetOrientation,
     })
-    const cells = cellsForAoe(spell.area, orientFrom, targetCell)
+    const cells = cellsForAoe(spellArea, orientFrom, targetCell)
     const effectAim = {
       x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
       y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
     }
-    const effectOrigin = spell.area.origin === 'point' ? effectAim : actorToken
+    const effectOrigin = spellArea.origin === 'point' ? effectAim : actorToken
     if (
       input.areaTargetElevationFeet != null &&
       (!Number.isFinite(input.areaTargetElevationFeet) ||
@@ -354,13 +373,13 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     ) return { ok: false, reason: 'invalid-target' }
     const effectAimElevation = input.areaTargetElevationFeet ??
       mapGeometryTerrainElevationAtPoint(geometry, effectAim)
-    const effectOriginElevation = spell.area.origin === 'point'
+    const effectOriginElevation = spellArea.origin === 'point'
       ? effectAimElevation
       : mapGeometryTokenElevation(geometry, actorToken)
     preparedAreaTargetCell = targetCell
     preparedAreaCells = cells
     preparedAreaBaseElevationFeet = effectAimElevation
-    if (spell.area.origin === 'point') {
+    if (spellArea.origin === 'point') {
       const areaPointToken = {
         ...actorToken,
         id: `${actorToken.id}:monster-spell-area-placement`,
@@ -380,12 +399,12 @@ export function prepareDnd5eMonsterCoreSpell(input: {
         token: actorToken,
         pointElevationFeet: effectOriginElevation,
         horizontalDistanceFeet: horizontalPlacementDistanceFeet,
-      }) > (spell.area.placeRangeFeet ?? spell.rangeFeet) + 1e-4) {
+      }) > (spellArea.placeRangeFeet ?? spell.rangeFeet) + 1e-4) {
         return { ok: false, reason: 'target-out-of-range' }
       }
     }
     if (
-      spell.area.origin === 'point' &&
+      spellArea.origin === 'point' &&
       (spell.effect === 'teleport'
         ? (() => {
             const destination = tokenCenterForAnchorCell(targetCell, actorToken, input.map)
@@ -423,6 +442,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
           })()
         : mapGeometryLineOfEffectBlocked({
             geometry,
+            map: input.map,
             from: actorToken,
             to: effectOrigin,
             fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
@@ -580,6 +600,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
   prepared: PreparedDnd5eMonsterCoreSpell
   resolution: Omit<Dnd5eMonsterCoreSpellResolutionV1, 'schemaVersion' | 'targetIds'>
   counterspellReaction?: Dnd5eCounterspellReaction
+  spellInterceptionReaction?: Dnd5eSpellInterceptionReaction
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
 }): {
   result: Dnd5eActionResult
@@ -640,6 +661,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
     spellId: prepared.spell.id,
     slotLevel: prepared.slotLevel,
     counterspellReaction: input.counterspellReaction,
+    spellInterceptionReaction: input.spellInterceptionReaction,
     resolution: {
       ...input.resolution,
       schemaVersion: 1,

@@ -17,6 +17,8 @@
     "dev:mobile-demo": "node scripts/mobile-demo-server.mjs",
     "dev:mobile": "npm --prefix apps/player-mobile start",
     "local-ai-bridge": "node scripts/local-ai-bridge.mjs",
+    "local-ai:configure": "node scripts/configure-local-ai.mjs",
+    "local-voice:configure": "node scripts/configure-local-voice.mjs",
     "local-ocr": "python scripts/rapidocr-server.py",
     "serve:dm": "node scripts/static-server.mjs --host 127.0.0.1 --port 5273 --root dist --art-asset-root public",
     "serve:player": "node scripts/static-server.mjs --host 127.0.0.1 --port 5274 --root dist --art-asset-root public",
@@ -53,6 +55,7 @@
   "dependencies": {
     "@3d-dice/dice-box-threejs": "^0.0.12",
     "@tailwindcss/vite": "^4.3.0",
+    "fflate": "^0.8.3",
     "konva": "^10.3.0",
     "livekit-client": "^2.21.0",
     "livekit-server-sdk": "^2.17.0",

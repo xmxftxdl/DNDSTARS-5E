@@ -7,10 +7,10 @@ export interface ReadyTile extends TileKey {
   localUri: string
 }
 
-const QUALITY_BUDGETS: Record<MobileRenderQuality, { prefetchRings: number; gpuBytes: number }> = {
-  lite: { prefetchRings: 0, gpuBytes: 64 * 1024 * 1024 },
-  standard: { prefetchRings: 1, gpuBytes: 128 * 1024 * 1024 },
-  high: { prefetchRings: 2, gpuBytes: 192 * 1024 * 1024 },
+const QUALITY_BUDGETS: Record<MobileRenderQuality, { prefetchRings: number; gpuBytes: number; diskBytes: number }> = {
+  lite: { prefetchRings: 0, gpuBytes: 48 * 1024 * 1024, diskBytes: 48 * 1024 * 1024 },
+  standard: { prefetchRings: 1, gpuBytes: 96 * 1024 * 1024, diskBytes: 96 * 1024 * 1024 },
+  high: { prefetchRings: 2, gpuBytes: 160 * 1024 * 1024, diskBytes: 160 * 1024 * 1024 },
 }
 
 export function useTileScheduler(
@@ -24,11 +24,15 @@ export function useTileScheduler(
   const [scheduledCamera, setScheduledCamera] = useState(camera)
   const [loading, setLoading] = useState(0)
   const [failures, setFailures] = useState(0)
-  const cacheRef = useRef<{ assetHash: string; cache: TileDiskCache } | null>(null)
-  if (!cacheRef.current || cacheRef.current.assetHash !== manifest.assetHash) {
-    cacheRef.current = { assetHash: manifest.assetHash, cache: new TileDiskCache(manifest.assetHash) }
-  }
   const budget = QUALITY_BUDGETS[quality]
+  const cacheRef = useRef<{ assetHash: string; diskBytes: number; cache: TileDiskCache } | null>(null)
+  if (!cacheRef.current || cacheRef.current.assetHash !== manifest.assetHash || cacheRef.current.diskBytes !== budget.diskBytes) {
+    cacheRef.current = {
+      assetHash: manifest.assetHash,
+      diskBytes: budget.diskBytes,
+      cache: new TileDiskCache(manifest.assetHash, budget.diskBytes),
+    }
+  }
   useEffect(() => {
     const timer = setTimeout(() => setScheduledCamera(camera), 120)
     return () => clearTimeout(timer)

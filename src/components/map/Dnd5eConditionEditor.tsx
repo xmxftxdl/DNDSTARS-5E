@@ -12,6 +12,7 @@ import {
 import {
   applyDnd5eActiveEffect,
   createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
   dnd5eActiveEffectRemainingLabel,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
@@ -22,7 +23,13 @@ import {
   type Dnd5eActiveEffectInstance,
   type Dnd5eActiveEffectStackingPolicy,
 } from '../../rulesets/dnd5e/activeEffects'
+import {
+  dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition,
+  type Dnd5eMonsterRuntimeStatusId,
+  type Dnd5eTokenStatusMarkerOption,
+} from '../../rulesets/dnd5e/tokenStatusMarkers'
 import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
+import { dnd5eTokenStatusMarkerStyle } from './dnd5eTokenStatusMarkerPresentation'
 
 const ABILITY_OPTIONS: readonly { value: AbilityKey; label: string }[] = [
   { value: 'str', label: '力量' },
@@ -42,14 +49,15 @@ const BREAK_OPTIONS: readonly { value: Dnd5eActiveEffectBreakTrigger; label: str
   { value: 'moves', label: '发生移动' },
 ]
 
-function normalizedConditionLabels(conditions: readonly string[]): Array<{ key: string; label: string; glyph: string }> {
+function normalizedConditionLabels(conditions: readonly string[]): Array<{ key: string; label: string; glyph: string; icon?: string }> {
   const seen = new Set<string>()
   return conditions.flatMap((value) => {
     const standard = dnd5eStandardConditionId(value)
     const key = standard ? `standard:${standard}` : `extension:${value}`
     if (seen.has(key)) return []
     seen.add(key)
-    return [{ key, label: dnd5eConditionLabel(value), glyph: standard ? DND5E_CONDITION_MARKERS[standard].glyph : '•' }]
+    const marker = standard ? DND5E_CONDITION_MARKERS[standard] : undefined
+    return [{ key, label: dnd5eConditionLabel(value), glyph: marker?.glyph ?? '•', icon: marker?.icon }]
   })
 }
 
@@ -75,7 +83,9 @@ export function Dnd5eConditionTags({
             onClick={onClick ? () => onClick(condition.key.replace(/^standard:/, '')) : undefined}
             className="inline-flex items-center gap-1 rounded-full border border-violet-300/20 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-100 hover:border-violet-300/40"
           >
-            <span aria-hidden="true" className="text-violet-300">{condition.glyph}</span>
+            {condition.icon
+              ? <img src={condition.icon} alt="" aria-hidden="true" className="h-3.5 w-3.5" />
+              : <span aria-hidden="true" className="text-violet-300">{condition.glyph}</span>}
             {condition.label}
           </Tag>
         )
@@ -90,7 +100,7 @@ export interface Dnd5eConditionSourceOption {
 }
 
 export interface Dnd5eRuntimeStatusOption {
-  id: string
+  id: Dnd5eMonsterRuntimeStatusId
   label: string
   description: string
   glyph: string
@@ -102,6 +112,7 @@ export default function Dnd5eConditionEditor({
   targetId = 'unknown-target',
   sourceOptions = [],
   conditionImmunities = [],
+  tacticalStatusOptions = [],
   runtimeStatuses = [],
   onRuntimeStatusChange,
   onChange,
@@ -111,8 +122,9 @@ export default function Dnd5eConditionEditor({
   targetId?: string
   sourceOptions?: readonly Dnd5eConditionSourceOption[]
   conditionImmunities?: readonly string[]
+  tacticalStatusOptions?: readonly Dnd5eTokenStatusMarkerOption[]
   runtimeStatuses?: readonly Dnd5eRuntimeStatusOption[]
-  onRuntimeStatusChange?: (statusId: string, active: boolean) => void
+  onRuntimeStatusChange?: (statusId: Dnd5eMonsterRuntimeStatusId, active: boolean) => void
   onChange: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
 }) {
   const effects = useMemo(() => normalizeDnd5eActiveEffects(activeEffects), [activeEffects])
@@ -120,6 +132,13 @@ export default function Dnd5eConditionEditor({
   const immunities = new Set(conditionImmunities.flatMap((value) => {
     const condition = dnd5eStandardConditionId(value)
     return condition ? [condition] : []
+  }))
+  const availableTacticalStatuses = tacticalStatusOptions.filter((option) =>
+    option.kind === 'participant-grant' && option.applications.includes('active-effect'))
+  const activeTacticalStatusIds = new Set<string>(effects.flatMap((effect) => {
+    const statusId = dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.legacyCondition) ??
+      dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label)
+    return statusId ? [statusId] : []
   }))
   const [sourceActorId, setSourceActorId] = useState('')
   const [sourceLabel, setSourceLabel] = useState('DM 裁定')
@@ -247,7 +266,9 @@ export default function Dnd5eConditionEditor({
                 className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                 style={{ backgroundColor: marker.fill, color: marker.text, boxShadow: `inset 0 0 0 1px ${marker.stroke}` }}
               >
-                {marker.glyph}
+                {marker.icon
+                  ? <img src={marker.icon} alt="" className="h-3 w-3" />
+                  : marker.glyph}
               </span>
               <span className="truncate">{label}</span>
               {immune && <ShieldCheck className="ml-auto h-3 w-3 shrink-0 text-emerald-300" aria-label="免疫" />}
@@ -255,6 +276,75 @@ export default function Dnd5eConditionEditor({
           )
         })}
       </div>
+
+      {availableTacticalStatuses.length > 0 ? (
+        <div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-500/[0.04] p-2">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-sky-200/80">遭遇可触发状态</p>
+          <p className="mb-2 text-[10px] leading-4 text-slate-500">
+            来自本次遭遇怪物的结构化特质与动作。这里创建的是可追踪来源和持续时间的 ActiveEffect；具体数值规则仍由对应 Headless 特质负责。
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {availableTacticalStatuses.map((option) => {
+              const statusId = option.definition.id
+              const selected = activeTacticalStatusIds.has(statusId)
+              const style = dnd5eTokenStatusMarkerStyle(statusId)
+              return (
+                <button
+                  key={statusId}
+                  type="button"
+                  data-testid={`dnd5e-tactical-status-toggle-${statusId}`}
+                  aria-pressed={selected}
+                  title={`${selected ? '移除' : '触发'}${option.definition.label}；来源：${option.sourceLabels.join('、') || '当前遭遇'}`}
+                  onClick={() => {
+                    if (selected) {
+                      commit(effects.filter((effect) => {
+                        const projected = dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.legacyCondition) ??
+                          dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label)
+                        return projected !== statusId
+                      }))
+                      return
+                    }
+                    const incoming = createDnd5eMechanicalEffect({
+                      id: `dm:${targetId}:status:${statusId}:${Date.now()}`,
+                      definitionId: `dm:tactical-status:${statusId}`,
+                      label: option.definition.label,
+                      kind: 'mark',
+                      legacyCondition: statusId,
+                      targetId,
+                      source: {
+                        kind: 'dm',
+                        actorId: sourceActorId || option.sourceTokenIds[0] || undefined,
+                        actorName: sourceOptions.find((entry) => entry.id === sourceActorId)?.label ?? option.sourceLabels[0],
+                        label: sourceLabel.trim() || option.sourceLabels[0] || 'DM 裁定',
+                      },
+                      duration: configuredDuration(),
+                      breakOn,
+                      stackingPolicy,
+                    })
+                    commit(applyDnd5eActiveEffect({ effects, incoming }).effects)
+                  }}
+                  className={[
+                    'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors',
+                    selected
+                      ? 'border-sky-300/55 bg-sky-500/25 font-semibold text-sky-50'
+                      : 'border-white/8 bg-void-950/35 text-slate-400 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                    style={{ backgroundColor: style.fill, color: style.text, boxShadow: `inset 0 0 0 1px ${style.stroke}` }}
+                  >
+                    {style.icon ? <img src={style.icon} alt="" className="h-3 w-3" /> : style.glyph}
+                  </span>
+                  {option.definition.label}
+                  {selected ? <Trash2 className="h-3 w-3 text-sky-200/70" aria-hidden="true" /> : null}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <details className="mt-3 rounded-lg border border-white/8 bg-void-950/30 p-2" open>
         <summary className="cursor-pointer text-[11px] font-semibold text-slate-300">新状态生命周期配置</summary>

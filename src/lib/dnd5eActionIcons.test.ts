@@ -7,6 +7,7 @@ import { registerDnd5ePluginImageAsset } from '../rulesets/dnd5e/pluginAssets'
 import {
   DND5E_CLASS_ICON_PALETTES,
   dnd5eClassFeatureActionIcon,
+  dnd5eInventorySemanticIcon,
   dnd5eItemActionIcon,
   dnd5eSpellActionIcon,
 } from './dnd5eActionIcons'
@@ -55,7 +56,21 @@ describe('D&D 5e combat action icon registry', () => {
     expect(new Set(specs.map((spec) => spec.key)).size).toBe(DND5E_SRD_ITEM_TEMPLATES.length)
   })
 
-  it('为绘制魔法物品绑定前景资源与稀有度背景', () => {
+  it('classifies every core weapon and armor into a concrete semantic SVG family', () => {
+    const equipment = DND5E_SRD_ITEM_TEMPLATES.filter((item) =>
+      item.id.startsWith('srd-5.1:equipment:'),
+    )
+    const semanticIcons = equipment.map((item) => dnd5eInventorySemanticIcon(item))
+
+    expect(semanticIcons).not.toContain('generic')
+    expect(new Set(semanticIcons)).toEqual(new Set([
+      'sword', 'dagger', 'club', 'staff', 'hammer', 'sickle', 'spear', 'polearm',
+      'trident', 'flail', 'bow', 'crossbow', 'sling', 'dart', 'whip', 'blowgun',
+      'net', 'axe', 'shield', 'light-armor', 'medium-armor', 'heavy-armor',
+    ]))
+  })
+
+  it('保留旧原画资源但让内置魔法物品优先使用语义图标与稀有度背景', () => {
     const adamantineArmor = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:adamantine-armor')
     const amuletOfHealth = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:amulet-of-health')
     expect(adamantineArmor).toBeDefined()
@@ -63,11 +78,15 @@ describe('D&D 5e combat action icon registry', () => {
     expect(dnd5eItemActionIcon(adamantineArmor!)).toMatchObject({
       asset: '/assets/icons/adamantine-armor-item-action.png',
       assetMode: 'foreground',
+      inventoryIconId: 'armor',
+      preferSemanticGlyph: true,
       rarityBackdropId: 'uncommon',
       background: '#237A4A',
     })
     expect(dnd5eItemActionIcon(amuletOfHealth!)).toMatchObject({
       asset: '/assets/icons/amulet-of-health-item-action.png',
+      inventoryIconId: 'magic-wondrous',
+      preferSemanticGlyph: true,
       rarityBackdropId: 'rare',
       background: '#2563A8',
     })
@@ -148,6 +167,30 @@ describe('D&D 5e combat action icon registry', () => {
         assetTreatment: 'transparent-foreground',
         classBackdropId: 'wizard',
         background: '#3B82F6',
+      })
+    } finally {
+      registered.dispose()
+    }
+  })
+
+  it('lets a plugin-supplied item image explicitly override the semantic SVG', () => {
+    const registered = registerDnd5ePluginImageAsset('test-item-icon', {
+      id: 'moonblade',
+      mediaType: 'image/png',
+      dataBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    })
+    try {
+      expect(dnd5eItemActionIcon({
+        id: 'custom:moonblade',
+        name: '月刃',
+        category: 'equipment',
+        icon: 'weapon',
+        iconAssetId: registered.id,
+      })).toMatchObject({
+        inventoryIconId: 'sword',
+        preferSemanticGlyph: false,
+        assetMode: 'foreground',
+        assetTreatment: 'transparent-foreground',
       })
     } finally {
       registered.dispose()

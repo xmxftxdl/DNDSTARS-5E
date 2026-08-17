@@ -29,6 +29,7 @@ import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eConte
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
 import { listRegisteredContentDefinitionPackages } from '../../domain/content/contentDefinitionRegistry'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -86,6 +87,15 @@ function packageValue(): Dnd5eContentPackageV2 {
           initiativeBonus: 2,
           speedBonusFeet: 5,
           savingThrowBonus: 1,
+          passivePerceptionBonus: 5,
+          cannotBeSurprisedWhileConscious: true,
+          unseenAttackersDoNotGainAdvantage: true,
+          ignoreLongRangeRangedWeaponDisadvantage: true,
+          ignoreNearbyHostileRangedAttackDisadvantage: true,
+          ignoreRangedWeaponCoverBonus: true,
+          preventOpportunityAttacksFromMeleeAttackTargets: true,
+          spellAttackRangeMultiplier: 2,
+          ignoreSpellAttackCoverBonus: true,
           damageImmunities: ['poison'],
         },
         passiveEffects: [{
@@ -408,6 +418,25 @@ describe('D&D 5e content package V2', () => {
     }))
   })
 
+  it('registers each monster action Activity exactly once', () => {
+    const source = packageValue()
+    source.content.monsters = [buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())]
+
+    const definitions = dnd5eContentDefinitionsFromPackageV2(source)
+    const monster = definitions.find((definition) => definition.kind === 'monster')
+    const monsterActions = definitions.filter((definition) => definition.kind === 'monster-action')
+    const actionIds = definitions.flatMap((definition) => definition.activities ?? [])
+      .flatMap((activity) => activity && typeof activity === 'object' && 'id' in activity &&
+        typeof activity.id === 'string' ? [activity.id] : [])
+
+    expect(monster?.activities ?? []).toEqual([])
+    expect(monsterActions.length).toBeGreaterThan(0)
+    expect(new Set(actionIds).size).toBe(actionIds.length)
+
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(source))
+    dispose()
+  })
+
   it('reports backgrounds as partially automated because narrative and choice fields need confirmation', () => {
     const source = packageValue()
     source.content.backgrounds = [{
@@ -517,7 +546,16 @@ describe('D&D 5e content package V2', () => {
         armorClass: 13,
         speed: 35,
         initiative: 13,
+        passivePerception: 15,
         darkvisionRangeFeet: 60,
+        cannotBeSurprisedWhileConscious: true,
+        unseenAttackersDoNotGainAdvantage: true,
+        ignoreLongRangeRangedWeaponDisadvantage: true,
+        ignoreNearbyHostileRangedAttackDisadvantage: true,
+        ignoreRangedWeaponCoverBonus: true,
+        preventOpportunityAttacksFromMeleeAttackTargets: true,
+        spellAttackRangeMultiplier: 2,
+        ignoreSpellAttackCoverBonus: true,
       })
       expect(combatant.skillProficiencies).toContain('perception')
       expect(combatant.damageResistances).toContain('fire')

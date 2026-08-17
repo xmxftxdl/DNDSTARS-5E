@@ -8,14 +8,14 @@ import type { Dnd5eSustainedSpellControlId } from '../../lib/sharedCombatTypes'
 import { dnd5eUtilityProjectionMovementEconomy } from '../../rulesets/dnd5e/utilityProjection'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { dnd5ePluginFeatureDefinition } from '../../rulesets/dnd5e/pluginApi'
 
 export function playerMapMovablePersistentAreas(map: BattleMap, character: Character) {
   return (map.dnd5ePluginAreas ?? []).flatMap((area) => {
     const movement = area.movement ?? (area.coreSpellId
       ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
       : undefined)
-    return area.sourceKind === 'core-spell' &&
-      area.sourceCharacterId === character.id &&
+    return area.sourceCharacterId === character.id &&
       movement
         ? [{
             id: area.id,
@@ -27,6 +27,46 @@ export function playerMapMovablePersistentAreas(map: BattleMap, character: Chara
             coreSpellId: area.coreSpellId,
           }]
         : []
+  })
+}
+
+export interface PlayerMapGrantedActivityControl {
+  areaId: string
+  featureId: string
+  activityId: string
+  label: string
+  economy: 'action' | 'bonus-action' | 'reaction' | 'none'
+  targeting: 'self' | 'creature' | 'area'
+}
+
+/** Projects active controls from the Host-owned area instead of character ownership. */
+export function playerMapGrantedActivityControls(
+  map: BattleMap,
+  character: Character,
+): readonly PlayerMapGrantedActivityControl[] {
+  return (map.dnd5ePluginAreas ?? []).flatMap((area) => {
+    if (area.sourceCharacterId !== character.id) return []
+    return (area.grantedActivities ?? []).flatMap((grant) => {
+      const featureId = `${area.pluginId}:area-control.${grant.activityId}`
+      const feature = dnd5ePluginFeatureDefinition(featureId)
+      const action = feature?.action
+      if (!action || action.id !== grant.activityId) return []
+      return [{
+        areaId: area.id,
+        featureId,
+        activityId: grant.activityId,
+        label: grant.label ?? action.label,
+        economy: grant.activateOnCreate === true &&
+          !area.grantedActivityUseReceipts?.includes(grant.activityId)
+          ? 'none' as const
+          : action.economy === 'bonusAction' ? 'bonus-action' : action.economy,
+        targeting: action.targeting.kind === 'self'
+          ? 'self' as const
+          : action.targeting.kind === 'area'
+            ? 'area' as const
+            : 'creature' as const,
+      }]
+    })
   })
 }
 

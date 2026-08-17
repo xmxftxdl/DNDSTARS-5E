@@ -666,7 +666,7 @@ export const DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED:
     "sourcePage": 237
   },
   "ring-of-swimming": {
-    "rulesText": "佩戴此戒指时，你获得 40 尺游泳速度。",
+    "rulesText": "佩戴此戒指时，你获得 40 尺游泳速度，可以使用该速度在水中移动；摘下戒指后，此游泳速度立即失效。",
     "sourcePage": 238
   },
   "ring-of-telekinesis": {

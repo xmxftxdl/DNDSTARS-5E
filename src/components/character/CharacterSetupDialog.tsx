@@ -107,6 +107,9 @@ export interface CharacterSetupResult extends SetupIdentity {
   dnd5eRaceId?: string
   dnd5eBackgroundId?: string
   backgroundSkillProficiencies?: string[]
+  backgroundToolProficiencies?: string[]
+  backgroundLanguages?: string[]
+  backgroundVariantId?: string
   classSkillProficiencies: string[]
   racialSkillProficiencies?: string[]
   racialFeatIds?: string[]
@@ -157,6 +160,11 @@ const METHOD_OPTIONS: Array<{
 ]
 
 const ABILITY_KEYS = ABILITIES.map((ability) => ability.key)
+
+const DND5E_BACKGROUND_LANGUAGE_OPTIONS = [
+  '通用语', '矮人语', '精灵语', '巨人语', '侏儒语', '地精语', '半身人语', '兽人语',
+  '深渊语', '天界语', '龙语', '地底通用语', '炼狱语', '原初语', '木族语', '深潜语',
+] as const
 
 function emptyAbilities(value = 0): Abilities {
   return { str: value, dex: value, con: value, int: value, wis: value, cha: value }
@@ -338,7 +346,9 @@ function StartingEquipmentFields({
                   <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">{choice.label}</span>
                   <select
                     aria-label={`${group.label}-${choice.label}`}
-                    value={normalized.equipmentIds[key] ?? choice.defaultEquipmentId}
+                    value={normalized.equipmentIds[key] ?? ('equipmentIds' in choice
+                      ? choice.defaultEquipmentId
+                      : choice.defaultTemplateId)}
                     onChange={(event) => onChange({
                       ...normalized,
                       equipmentIds: { ...normalized.equipmentIds, [key]: event.target.value },
@@ -429,6 +439,9 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const [subclassId, setSubclassId] = useState('')
   const [initialSelections, setInitialSelections] = useState<Record<string, string[]>>({})
   const [initialSpellSelections, setInitialSpellSelections] = useState<Dnd5eAdvancementSpellSelectionsV1>()
+  const [backgroundToolSelections, setBackgroundToolSelections] = useState<Record<string, string[]>>({})
+  const [backgroundLanguages, setBackgroundLanguages] = useState<string[]>([])
+  const [backgroundVariantId, setBackgroundVariantId] = useState('')
   const [startingEquipment, setStartingEquipment] = useState<Dnd5eStartingEquipmentSelection>(() =>
     defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan('战士', '自定义背景')),
   )
@@ -481,6 +494,22 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       ].filter((value): value is string => !!value))
       if (!prerequisite.raceIds.some((raceId) => identities.has(raceId))) return false
     }
+    if (prerequisite?.armorProficiencies?.length) {
+      const declared = definition?.armorProficiencies ?? ''
+      const granted = new Set<'light' | 'medium' | 'heavy' | 'shield'>(selectedPluginRace?.armorProficiencies ?? [])
+      if (declared.includes('所有护甲')) ['light', 'medium', 'heavy'].forEach((id) => granted.add(id as 'light' | 'medium' | 'heavy'))
+      if (declared.includes('轻甲')) granted.add('light')
+      if (declared.includes('中甲')) granted.add('medium')
+      if (declared.includes('重甲')) granted.add('heavy')
+      if (declared.includes('盾牌')) granted.add('shield')
+      if (prerequisite.armorProficiencies.some((id) => !granted.has(id))) return false
+    }
+    if (prerequisite?.spellcasting != null) {
+      const classCanCastAtLevelOne = definition?.spellcasting != null &&
+        (definition.features.find((feature) => feature.id === 'spellcasting')?.level ?? 1) <= 1
+      const raceCanCastAtLevelOne = selectedPluginRace?.innateSpells?.some((grant) => grant.minimumLevel <= 1) === true
+      if ((classCanCastAtLevelOne || raceCanCastAtLevelOne) !== prerequisite.spellcasting) return false
+    }
     return true
   })
   const classSkillOptions = definition?.skillProficiencies === 'any'
@@ -489,6 +518,13 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const backgroundSkillProficiencies = pluginBackground
     ? [...pluginBackground.skillProficiencies]
     : coreBackgroundSkills(identity.background)
+  const backgroundToolProficiencies = pluginBackground
+    ? [...new Set([
+        ...(pluginBackground.toolProficiencies ?? []),
+        ...(pluginBackground.toolProficiencyChoices ?? []).flatMap((choice) =>
+          backgroundToolSelections[choice.id] ?? []),
+      ])]
+    : []
   const availableProficiencyKeys = new Set([
     ...classSkillProficiencies,
     ...backgroundSkillProficiencies,
@@ -576,6 +612,12 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const racialChoicesComplete =
     racialSkillProficiencies.length === racialSkillChoiceCount &&
     racialFeatIds.length === racialFeatChoiceCount
+  const backgroundChoicesComplete = !pluginBackground || (
+    (pluginBackground.toolProficiencyChoices ?? []).every((choice) =>
+      (backgroundToolSelections[choice.id] ?? []).length === choice.count) &&
+    backgroundLanguages.length === (pluginBackground.languages ?? 0) &&
+    (!(pluginBackground.variants?.length) || !!backgroundVariantId)
+  )
   const classChoicesComplete =
     !!definition &&
     classSkillProficiencies.length === definition.skillChoiceCount &&
@@ -608,6 +650,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     }
     if (patch.background) {
       setInitialSelections({})
+      setBackgroundToolSelections({})
+      setBackgroundLanguages([])
+      const nextBackground = dnd5ePluginBackgroundDefinition(next.background)
+      setBackgroundVariantId(nextBackground?.variants?.[0]?.id ?? '')
       setStartingEquipment(defaultDnd5eStartingEquipmentSelection(
         dnd5eStartingEquipmentPlan(next.charClass, next.background),
       ))
@@ -683,7 +729,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   }
 
   const complete = () => {
-    if (!definition || !name.trim() || !classChoicesComplete || !racialChoicesComplete || !racialBonusChoicesComplete) return
+    if (!definition || !name.trim() || !classChoicesComplete || !racialChoicesComplete ||
+      !racialBonusChoicesComplete || !backgroundChoicesComplete) return
     const resolvedRace = dnd5ePluginRaceDefinition(identity.race)
     const resolvedBackground = dnd5ePluginBackgroundDefinition(identity.background)
     const initialClassChoices: Character['dnd5eClassChoices'] = definition.id === 'fighter'
@@ -729,6 +776,9 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       ...(resolvedRace ? { dnd5eRaceId: resolvedRace.id } : {}),
       ...(resolvedBackground ? { dnd5eBackgroundId: resolvedBackground.id } : {}),
       backgroundSkillProficiencies,
+      ...(backgroundToolProficiencies.length ? { backgroundToolProficiencies } : {}),
+      ...(backgroundLanguages.length ? { backgroundLanguages: [...backgroundLanguages] } : {}),
+      ...(backgroundVariantId ? { backgroundVariantId } : {}),
       classSkillProficiencies: [...classSkillProficiencies],
       ...(racialSkillProficiencies.length ? { racialSkillProficiencies: [...racialSkillProficiencies] } : {}),
       ...(racialFeatIds.length ? { racialFeatIds: [...racialFeatIds] } : {}),
@@ -962,6 +1012,99 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
 
           {stage === 'level-one' && definition && (
             <div className="space-y-5">
+              {pluginBackground && (
+                <section className="rounded-2xl border border-emerald-300/15 bg-emerald-500/[0.04] p-4">
+                  <h3 className="text-sm font-semibold text-emerald-100">{pluginBackground.name}背景选择</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    固定技能：{pluginBackground.skillProficiencies.map(optionSkillName).join('、') || '无'}
+                    {(pluginBackground.toolProficiencies?.length ?? 0) > 0
+                      ? ` · 固定工具：${pluginBackground.toolProficiencies!.join('、')}`
+                      : ''}
+                  </p>
+                  {(pluginBackground.toolProficiencyChoices ?? []).map((choice) => {
+                    const selected = backgroundToolSelections[choice.id] ?? []
+                    return (
+                      <div key={choice.id} className="mt-4">
+                        <p className="text-xs font-semibold text-slate-300">
+                          {choice.label}（选择 {choice.count} 项，已选 {selected.length}）
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {choice.options.map((tool) => (
+                            <button
+                              key={tool}
+                              type="button"
+                              aria-pressed={selected.includes(tool)}
+                              onClick={() => toggleLimited(selected, tool, choice.count, (next) =>
+                                setBackgroundToolSelections((current) => ({ ...current, [choice.id]: next })))}
+                              className={`rounded-lg border px-2.5 py-1.5 text-xs ${
+                                selected.includes(tool)
+                                  ? 'border-emerald-300/40 bg-emerald-400/15 text-emerald-100'
+                                  : 'border-white/8 text-slate-500'
+                              }`}
+                            >
+                              {tool}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {(pluginBackground.languages ?? 0) > 0 && (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold text-slate-300">
+                        额外语言（选择 {pluginBackground.languages} 项，已选 {backgroundLanguages.length}）
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {DND5E_BACKGROUND_LANGUAGE_OPTIONS.map((language) => (
+                          <button
+                            key={language}
+                            type="button"
+                            aria-pressed={backgroundLanguages.includes(language)}
+                            onClick={() => toggleLimited(
+                              backgroundLanguages,
+                              language,
+                              pluginBackground.languages ?? 0,
+                              setBackgroundLanguages,
+                            )}
+                            className={`rounded-lg border px-2.5 py-1.5 text-xs ${
+                              backgroundLanguages.includes(language)
+                                ? 'border-emerald-300/40 bg-emerald-400/15 text-emerald-100'
+                                : 'border-white/8 text-slate-500'
+                            }`}
+                          >
+                            {language}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {(pluginBackground.variants?.length ?? 0) > 0 && (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold text-slate-300">背景变体</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {pluginBackground.variants!.map((variant) => (
+                          <button
+                            key={variant.id}
+                            type="button"
+                            aria-pressed={backgroundVariantId === variant.id}
+                            onClick={() => setBackgroundVariantId(variant.id)}
+                            className={`rounded-xl border p-3 text-left text-xs ${
+                              backgroundVariantId === variant.id
+                                ? 'border-emerald-300/40 bg-emerald-400/10 text-emerald-100'
+                                : 'border-white/8 text-slate-400'
+                            }`}
+                          >
+                            <span className="font-semibold">{variant.name}</span>
+                            {variant.feature && (
+                              <span className="mt-1 block text-[11px] text-slate-500">特性：{variant.feature.name}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
               <section className="rounded-2xl border border-white/8 bg-black/15 p-4">
                 <h3 className="text-sm font-semibold text-slate-100">{definition.name}职业技能</h3>
                 <p className="mt-1 text-xs text-slate-500">选择 {definition.skillChoiceCount} 项（已选 {classSkillProficiencies.length}）。</p>
@@ -1292,7 +1435,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
             </button>
           )}
           {stage === 'level-one' && (
-            <button type="button" disabled={!classChoicesComplete || !racialChoicesComplete || !racialBonusChoicesComplete} onClick={() => setStage('equipment')} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
+            <button type="button" disabled={!classChoicesComplete || !racialChoicesComplete || !racialBonusChoicesComplete || !backgroundChoicesComplete} onClick={() => setStage('equipment')} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
               选择起始装备 <ArrowRight className="h-4 w-4" />
             </button>
           )}

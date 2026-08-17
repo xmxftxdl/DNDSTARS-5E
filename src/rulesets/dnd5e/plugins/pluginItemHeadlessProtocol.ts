@@ -105,6 +105,11 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
         (use.effect.spellAttackBonus != null && !finiteInteger(use.effect.spellAttackBonus, -20, 30)) ||
         (use.effect.useCharacterSpellcasting != null && typeof use.effect.useCharacterSpellcasting !== 'boolean') ||
         (use.effect.requiresComponents != null && typeof use.effect.requiresComponents !== 'boolean') ||
+        (use.effect.spellcastingClassIds != null && (
+          !Array.isArray(use.effect.spellcastingClassIds) || use.effect.spellcastingClassIds.length < 1 ||
+          use.effect.spellcastingClassIds.length > 20 ||
+          use.effect.spellcastingClassIds.some((classId) => !validId(classId))
+        )) ||
         (use.effect.targeting != null && !['spell-default', 'self-only'].includes(use.effect.targeting)) ||
         use.targeting != null
       ) throw new Error(`Invalid plugin item spell cast: ${itemId}`)

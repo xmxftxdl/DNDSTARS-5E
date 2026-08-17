@@ -57,6 +57,7 @@ describe('D&D 5e 2014 multiclassing', () => {
 
   it('keeps the class spell-slot table when only one class grants Spellcasting', () => {
     expect(dnd5eMulticlassSpellSlots(character({
+      charClass: '圣武士',
       level: 5,
       dnd5eClassLevels: { paladin: 5 },
     }))).toEqual([4, 2])

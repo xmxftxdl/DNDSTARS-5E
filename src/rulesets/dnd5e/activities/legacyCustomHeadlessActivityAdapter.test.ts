@@ -62,4 +62,41 @@ describe('V2 custom Headless Activity compatibility adapter', () => {
       rolls: { 'effect-0': { values: [4] } },
     })).toBe(12)
   })
+
+  it('compiles per-target saving throws and half damage without applying conditions on success', () => {
+    const activity = dnd5eActivityFromCustomHeadlessAction({
+      id: 'thunder-wave',
+      label: '雷鸣波',
+      savingThrow: { ability: 'con', dc: 14, onSuccess: 'half' },
+      effects: [
+        { kind: 'damage', dice: { count: 2, sides: 6 }, damageType: 'thunder' },
+        { kind: 'condition', condition: 'prone', duration: { expiresAt: 'target-turn-end', remainingRounds: 1 } },
+      ],
+    })
+    const compiled = compileDnd5eActivityHeadlessAction(activity)
+    expect(compiled.perTargetRolls).toEqual([
+      expect.objectContaining({ id: 'target-save-d20', count: 1, sides: 20 }),
+    ])
+    expect(activity.outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'failed-save', operations: expect.arrayContaining([
+        expect.objectContaining({ kind: 'apply-standard-condition' }),
+      ]) }),
+      expect.objectContaining({ id: 'successful-save', operations: [
+        expect.objectContaining({ kind: 'damage' }),
+      ] }),
+    ]))
+  })
+
+  it('binds workshop source save DC to the authoritative actor snapshot', () => {
+    const activity = dnd5eActivityFromCustomHeadlessAction({
+      id: 'source-save',
+      label: 'Source Save',
+      savingThrow: { ability: 'wis', dc: 'source-save-dc', onSuccess: 'none' },
+      effects: [{ kind: 'damage', dice: { count: 1, sides: 4 }, damageType: 'psychic' }],
+    })
+    expect(activity.checks?.[0]).toMatchObject({
+      kind: 'saving-throw',
+      dc: { kind: 'reference', reference: { kind: 'actor-spell-save-dc' } },
+    })
+  })
 })

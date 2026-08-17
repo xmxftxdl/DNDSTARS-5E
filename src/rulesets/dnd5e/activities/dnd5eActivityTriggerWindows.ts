@@ -13,6 +13,9 @@ import {
   type AvailableRegisteredDnd5eActivityV1,
 } from './dnd5eActivityRegistry'
 import { dnd5eTrackableDefinitionIdV1 } from './dnd5eActivityIdentity'
+import { getDnd5eSrdCombatSpell } from '../spells'
+import { dnd5eSpellSchoolIdFromLabel } from '../subclassSpellcasting'
+import { dnd5ePluginSpellDefinition } from '../pluginApi'
 
 export interface Dnd5eActivityTriggerWindowV1 {
   eventIndex: number
@@ -51,27 +54,51 @@ function context(
   }
 }
 
+function attackEventSource(
+  event: Extract<Dnd5eCombatEvent, { type: 'attack-resolved' }>,
+  targetDroppedToZero = false,
+): Extract<Dnd5eActivityTriggerContextV1['source'], { kind: 'attack' }> {
+  const attackLocalId = event.weaponBaseId ?? event.weaponId ?? event.attackMode ?? 'unarmed'
+  return {
+    kind: 'attack',
+    ...(event.opportunityAttack ? { id: 'opportunity-attack' } : {}),
+    definitionId: dnd5eTrackableDefinitionIdV1({
+      namespace: (event.weaponBaseId ?? event.weaponId)?.startsWith('srd-5.1:') ? 'srd-5.1' : 'core',
+      kind: 'attack',
+      localId: attackLocalId,
+    }),
+    mode: event.attackMode ?? (event.weaponId ? 'melee' : 'unarmed'),
+    result: event.critical ? 'critical-hit' : event.hit ? 'hit' : 'miss',
+    damageType: event.damageType,
+    ...(event.weaponId ? { weaponId: event.weaponId, ...(event.opportunityAttack ? {} : { id: event.weaponId }) } : {}),
+    ...(event.weaponProperties?.length ? { weaponProperties: [...event.weaponProperties] } : {}),
+    ...(event.proficient != null ? { proficient: event.proficient } : {}),
+    ...(event.attackOrigin ? { origin: event.attackOrigin } : {}),
+    ...(event.handsUsed ? { handsUsed: event.handsUsed } : {}),
+    ...(targetDroppedToZero ? { targetDroppedToZero: true } : {}),
+  }
+}
+
 /** Converts legacy/built-in combat events into canonical Activity windows. */
 export function dnd5eActivityTriggerContextsFromCombatEventV1(
   state: Dnd5eHeadlessCombatState,
   event: Dnd5eCombatEvent,
   eventIndex: number,
   eventBatchId: string,
+  eventBatch?: readonly Dnd5eCombatEvent[],
 ): readonly Dnd5eActivityTriggerContextV1[] {
+  if (event.type === 'turn-started') return [context(
+    state, eventIndex, eventBatchId, 'turn-start', event.actorId, [event.actorId],
+    {
+      kind: 'combat', id: 'turn-start',
+      definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'core', kind: 'action', localId: 'turn-start' }),
+    },
+  )]
   if (event.type === 'attack-resolved') {
-    const attackLocalId = event.weaponId ?? event.attackMode ?? 'unarmed'
-    const source = {
-      kind: 'attack' as const,
-      definitionId: dnd5eTrackableDefinitionIdV1({
-        namespace: event.weaponId?.startsWith('srd-5.1:') ? 'srd-5.1' : 'core',
-        kind: 'attack',
-        localId: attackLocalId,
-      }),
-      mode: event.attackMode ?? (event.weaponId ? 'melee' as const : 'unarmed' as const),
-      result: event.critical ? 'critical-hit' as const : event.hit ? 'hit' as const : 'miss' as const,
-      ...(event.weaponId ? { weaponId: event.weaponId, id: event.weaponId } : {}),
-      ...(event.weaponProperties?.length ? { weaponProperties: [...event.weaponProperties] } : {}),
-    }
+    const targetDroppedToZero = eventBatch?.slice(eventIndex + 1).some((candidate) =>
+      candidate.type === 'hit-points-reduced-to-zero' && candidate.sourceId === event.actorId &&
+      candidate.targetId === event.targetId) === true
+    const source = attackEventSource(event, targetDroppedToZero)
     return [
       context(state, eventIndex, eventBatchId, 'attack-resolved', event.actorId, [event.targetId], source),
       context(state, eventIndex, eventBatchId, event.hit ? 'attack-hit' : 'attack-missed', event.actorId, [event.targetId], source),
@@ -87,10 +114,15 @@ export function dnd5eActivityTriggerContextsFromCombatEventV1(
     ]
   }
   if (event.type === 'spell-cast') {
+    const school = dnd5ePluginSpellDefinition(event.spellId)?.school ??
+      (getDnd5eSrdCombatSpell(event.spellId)?.school
+        ? dnd5eSpellSchoolIdFromLabel(getDnd5eSrdCombatSpell(event.spellId)!.school)
+        : undefined)
     const source = {
       kind: 'spell' as const,
       id: event.spellId,
       level: event.slotLevel,
+      ...(school ? { school } : {}),
       definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'srd-5.1', kind: 'spell', localId: event.spellId }),
     }
     return [
@@ -98,6 +130,51 @@ export function dnd5eActivityTriggerContextsFromCombatEventV1(
       context(state, eventIndex, eventBatchId, 'spell-resolved', event.actorId, [event.targetId], source),
     ]
   }
+  if (event.type === 'damage-applied' && event.amount > 0) {
+    const actorId = event.targetId
+    const targetIds = event.sourceId ? [event.sourceId] : [event.targetId]
+    const damage = {
+      amount: event.amount,
+      temporaryHitPointsBefore: event.temporaryHpBefore,
+      temporaryHitPointsAfter: event.temporaryHpAfter,
+      ...(event.damageTypes?.length ? { damageTypes: [...event.damageTypes] } : {}),
+    }
+    const sourceAttack = event.sourceId
+      ? eventBatch?.slice(0, eventIndex).reverse().find((candidate): candidate is Extract<Dnd5eCombatEvent, { type: 'attack-resolved' }> =>
+          candidate.type === 'attack-resolved' && candidate.actorId === event.sourceId &&
+          candidate.targetId === event.targetId && candidate.hit)
+      : undefined
+    return [context(
+      state, eventIndex, eventBatchId, 'after-damage', actorId, targetIds,
+      sourceAttack ? { ...attackEventSource(sourceAttack), damage } : {
+        kind: 'combat',
+        id: 'damage-taken',
+        damage,
+        definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'core', kind: 'action', localId: 'damage-taken' }),
+      },
+    )]
+  }
+  if (event.type === 'saving-throw-resolved') return [context(
+    state, eventIndex, eventBatchId, 'after-save', event.targetId, [event.targetId],
+    {
+      kind: 'combat', id: `saving-throw:${event.ability}`,
+      definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'core', kind: 'action', localId: `saving-throw:${event.ability}` }),
+    },
+  )]
+  if (event.type === 'condition-attempted') return [context(
+    state, eventIndex, eventBatchId, 'on-condition-attempted', event.targetId, [event.actorId],
+    {
+      kind: 'combat', id: `condition:${event.condition}`,
+      definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'core', kind: 'action', localId: `condition:${event.condition}` }),
+    },
+  )]
+  if (event.type === 'condition-applied') return [context(
+    state, eventIndex, eventBatchId, 'on-condition-applied', event.targetId, [event.actorId],
+    {
+      kind: 'combat', id: `condition:${event.condition}`,
+      definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'core', kind: 'action', localId: `condition:${event.condition}` }),
+    },
+  )]
   if (event.type === 'ability-check-resolved') return [context(
     state, eventIndex, eventBatchId, 'skill-used', event.actorId, [],
     {
@@ -109,13 +186,21 @@ export function dnd5eActivityTriggerContextsFromCombatEventV1(
     state, eventIndex, eventBatchId, 'movement-completed', event.actorId, [event.actorId],
     {
       kind: 'movement', id: 'move', distanceFeet: event.distance, completed: true,
+      straightLine: event.straightLine === true,
+      dashedThisTurn: state.combatants[event.actorId]?.classState.dashedTurnKey ===
+        `${state.combatId}:${state.round}:${state.initiativeSlotIds?.[state.initiativeIndex] ?? state.turnSlotId ?? event.actorId}`,
       definitionId: dnd5eTrackableDefinitionIdV1({ namespace: 'core', kind: 'movement', localId: 'move' }),
     },
   )]
-  if (event.type === 'hit-points-reduced-to-zero') return [context(
-    state, eventIndex, eventBatchId, 'creature-dropped-to-zero', event.sourceId, [event.targetId],
-    { kind: 'combat' },
-  )]
+  if (event.type === 'hit-points-reduced-to-zero') {
+    const sourceAttack = eventBatch?.slice(0, eventIndex).reverse().find((candidate): candidate is Extract<Dnd5eCombatEvent, { type: 'attack-resolved' }> =>
+      candidate.type === 'attack-resolved' && candidate.actorId === event.sourceId &&
+      candidate.targetId === event.targetId && candidate.hit)
+    return [context(
+      state, eventIndex, eventBatchId, 'creature-dropped-to-zero', event.sourceId, [event.targetId],
+      sourceAttack ? attackEventSource(sourceAttack) : { kind: 'combat' },
+    )]
+  }
   if (event.type === 'activity-resolved') {
     const triggerEvent = event.sourceKind === 'spell'
       ? 'spell-resolved' as const
@@ -132,8 +217,14 @@ export function dnd5eActivityTriggerContextsFromCombatEventV1(
       kind: definitionKind,
       localId: event.sourceId,
     })
+    const activitySpellSchool = event.sourceKind === 'spell'
+      ? dnd5ePluginSpellDefinition(event.sourceId)?.school ??
+        (getDnd5eSrdCombatSpell(event.sourceId)?.school
+          ? dnd5eSpellSchoolIdFromLabel(getDnd5eSrdCombatSpell(event.sourceId)!.school)
+          : undefined)
+      : undefined
     const source = event.sourceKind === 'spell'
-      ? { kind: 'spell' as const, id: event.sourceId, activityId: event.activityId, definitionId, level: event.castLevel ?? 0 }
+      ? { kind: 'spell' as const, id: event.sourceId, activityId: event.activityId, definitionId, level: event.castLevel ?? 0, ...(activitySpellSchool ? { school: activitySpellSchool } : {}) }
       : { kind: event.sourceKind as 'item' | 'feature' | 'action', id: event.sourceId, activityId: event.activityId, definitionId }
     return [context(
       state, eventIndex, eventBatchId, triggerEvent, event.actorId, event.targetIds, source,
@@ -152,7 +243,7 @@ export function listDnd5eActivityTriggerWindowsV1(input: {
 }): readonly Dnd5eActivityTriggerWindowV1[] {
   return input.events.flatMap((event, eventIndex) =>
     dnd5eActivityTriggerContextsFromCombatEventV1(
-      input.state, event, eventIndex, input.eventBatchId,
+      input.state, event, eventIndex, input.eventBatchId, input.events,
     ).flatMap((triggerContext) => {
       const actorId = triggerContext.eligibleActorIds[0]
       if (!actorId) return []

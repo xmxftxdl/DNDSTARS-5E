@@ -1,14 +1,14 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutChangeEvent,
   Image,
-  PanResponder,
   PixelRatio,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Canvas, Circle, Group, Line, Rect, Skia, vec } from '@shopify/react-native-skia'
 import type {
   CameraState,
@@ -22,30 +22,21 @@ import { clampCamera, screenToWorld } from './tileMath'
 import { SkiaTile } from './SkiaTile'
 import { SkiaMapImage } from './SkiaMapImage'
 import { useTileScheduler } from './useTileScheduler'
-
-interface GestureOrigin {
-  camera: CameraState
-  centerX: number
-  centerY: number
-  distance: number
-  startedAt: number
-}
-
-function touchMetrics(touches: readonly { pageX: number; pageY: number }[]) {
-  if (touches.length < 2) return { centerX: touches[0]?.pageX ?? 0, centerY: touches[0]?.pageY ?? 0, distance: 0 }
-  const [a, b] = touches
-  return {
-    centerX: (a.pageX + b.pageX) / 2,
-    centerY: (a.pageY + b.pageY) / 2,
-    distance: Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY),
-  }
-}
+import { cameraForPinch } from './gestureMath'
 
 function tokenAtScreenPoint(tokens: PlayerTokenView[], camera: CameraState, x: number, y: number) {
   return tokens
     .map((token) => ({ token, distance: Math.hypot(camera.x + token.x * camera.scale - x, camera.y + token.y * camera.scale - y) }))
     .filter(({ token, distance }) => distance <= Math.max(26, token.radius * camera.scale + 12))
     .sort((a, b) => a.distance - b.distance)[0]?.token ?? null
+}
+
+function colorWithAlpha(color: string, alpha: string, fallback: string) {
+  if (/^#[0-9a-f]{6}$/i.test(color)) return `${color}${alpha}`
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    return `#${color.slice(1).split('').map((part) => `${part}${part}`).join('')}${alpha}`
+  }
+  return fallback
 }
 
 export function MobileSkiaMap({
@@ -77,10 +68,13 @@ export function MobileSkiaMap({
   const [camera, setCamera] = useState<CameraState>(snapshot.cameraHint ?? { x: 0, y: 0, scale: 0.1 })
   const [selectedId, setSelectedId] = useState(snapshot.controlledTokens[0]?.id ?? '')
   const [message, setMessage] = useState('长按地图或点击“移动”后选择落点')
-  const origin = useRef<GestureOrigin | null>(null)
-  const moved = useRef(false)
+  const cameraRef = useRef(camera)
+  const panOrigin = useRef<CameraState>(camera)
+  const pinchOrigin = useRef<{ camera: CameraState; centerX: number; centerY: number }>({ camera, centerX: 0, centerY: 0 })
   const pixelRatio = quality === 'lite' ? 1 : quality === 'standard' ? Math.min(1.5, PixelRatio.get()) : Math.min(2, PixelRatio.get())
   const scheduler = useTileScheduler(snapshot.mapManifest, camera, viewport, pixelRatio, quality)
+
+  useEffect(() => { cameraRef.current = camera }, [camera])
 
   useEffect(() => {
     onCacheStats?.({ diskBytes: scheduler.diskBytes, gpuBytes: scheduler.estimatedGpuBytes })
@@ -90,50 +84,16 @@ export function MobileSkiaMap({
     setCamera((current) => clampCamera(current, viewport, snapshot.mapManifest))
   }, [snapshot.sceneId, snapshot.mapManifest.assetHash, viewport.width, viewport.height])
 
-  const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (event) => {
-      const metrics = touchMetrics(event.nativeEvent.touches)
-      origin.current = { camera, ...metrics, startedAt: Date.now() }
-      moved.current = false
-    },
-    onPanResponderMove: (event, gesture) => {
-      const initial = origin.current
-      if (!initial) return
-      const metrics = touchMetrics(event.nativeEvent.touches)
-      if (event.nativeEvent.touches.length >= 2 && initial.distance > 0) {
-        moved.current = true
-        const scale = Math.max(0.035, Math.min(1.8, initial.camera.scale * metrics.distance / initial.distance))
-        const world = screenToWorld(initial.camera, { x: initial.centerX, y: initial.centerY })
-        setCamera(clampCamera({
-          scale,
-          x: metrics.centerX - world.x * scale,
-          y: metrics.centerY - world.y * scale,
-        }, viewport, snapshot.mapManifest))
-        return
-      }
-      if (Math.abs(gesture.dx) + Math.abs(gesture.dy) > 5) moved.current = true
-      setCamera(clampCamera({
-        ...initial.camera,
-        x: initial.camera.x + gesture.dx,
-        y: initial.camera.y + gesture.dy,
-      }, viewport, snapshot.mapManifest))
-    },
-    onPanResponderRelease: (event, gesture) => {
-      const initial = origin.current
-      origin.current = null
-      if (!initial || moved.current || Date.now() - initial.startedAt > 320) return
-      const x = event.nativeEvent.locationX
-      const y = event.nativeEvent.locationY
-      const token = tokenAtScreenPoint(snapshot.visibleTokens, camera, x, y)
+  const handleMapTap = useCallback((x: number, y: number) => {
+      const activeCamera = cameraRef.current
+      const token = tokenAtScreenPoint(snapshot.visibleTokens, activeCamera, x, y)
       if (token && targeting === 'token') {
         onTargetToken?.(token)
         setMessage(`已选择目标：${token.name}`)
         return
       }
       if (targeting === 'area') {
-        const world = screenToWorld(camera, { x, y })
+        const world = screenToWorld(activeCamera, { x, y })
         onTargetPoint?.(world)
         setMessage('已选择区域落点')
         return
@@ -143,10 +103,10 @@ export function MobileSkiaMap({
         setMessage(token.controlled ? '已选择你的 Token' : `${token.name} · HP ${token.hp}/${token.maxHp}`)
         return
       }
-      const world = screenToWorld(camera, { x, y })
+      const world = screenToWorld(activeCamera, { x, y })
       const interaction = interactionPoints
         .map((point) => ({ point, distance: Math.hypot(point.x - world.x, point.y - world.y) }))
-        .filter(({ distance }) => distance <= Math.max(22 / camera.scale, (snapshot.mapManifest.grid?.sizeWorldUnits ?? 70) * .7))
+        .filter(({ distance }) => distance <= Math.max(22 / activeCamera.scale, (snapshot.mapManifest.grid?.sizeWorldUnits ?? 70) * .7))
         .sort((a, b) => a.distance - b.distance)[0]?.point
       if (interaction) {
         setMessage(`正在互动：${interaction.name}`)
@@ -163,8 +123,46 @@ export function MobileSkiaMap({
       void onMove(controlled.id, world.x, world.y)
         .then(() => setMessage('移动已由 Host 确认'))
         .catch((cause) => setMessage(`移动被拒绝：${cause instanceof Error ? cause.message : '未知原因'}`))
-    },
-  }), [camera, interactionPoints, moving, onInteract, onMove, onMovingChange, onTargetPoint, onTargetToken, selectedId, snapshot, targeting, viewport])
+  }, [interactionPoints, moving, onInteract, onMove, onMovingChange, onTargetPoint, onTargetToken, selectedId, snapshot, targeting])
+
+  const mapGesture = useMemo(() => {
+    const pan = Gesture.Pan()
+      .runOnJS(true)
+      .minDistance(6)
+      .maxPointers(1)
+      .onBegin(() => { panOrigin.current = cameraRef.current })
+      .onUpdate((event) => {
+        const initial = panOrigin.current
+        const next = clampCamera({
+          ...initial,
+          x: initial.x + event.translationX,
+          y: initial.y + event.translationY,
+        }, viewport, snapshot.mapManifest)
+        cameraRef.current = next
+        setCamera(next)
+      })
+    const pinch = Gesture.Pinch()
+      .runOnJS(true)
+      .onBegin((event) => {
+        pinchOrigin.current = { camera: cameraRef.current, centerX: event.focalX, centerY: event.focalY }
+      })
+      .onUpdate((event) => {
+        const initial = pinchOrigin.current
+        const next = clampCamera(cameraForPinch(
+          initial.camera,
+          { centerX: initial.centerX, centerY: initial.centerY, distance: 1 },
+          { centerX: event.focalX, centerY: event.focalY, distance: event.scale },
+        ), viewport, snapshot.mapManifest)
+        cameraRef.current = next
+        setCamera(next)
+      })
+    const tap = Gesture.Tap()
+      .runOnJS(true)
+      .maxDuration(320)
+      .maxDistance(8)
+      .onEnd((event, success) => { if (success) handleMapTap(event.x, event.y) })
+    return Gesture.Simultaneous(pinch, Gesture.Exclusive(pan, tap))
+  }, [handleMapTap, snapshot.mapManifest, viewport])
 
   const onLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout
@@ -185,6 +183,10 @@ export function MobileSkiaMap({
     return path
   }, [camera, snapshot.visibilityPolygons, snapshot.visionMaskEnabled])
   const gridSize = (snapshot.mapManifest.grid?.sizeWorldUnits ?? 300) * camera.scale
+  const gridWorldSize = snapshot.mapManifest.grid?.sizeWorldUnits ?? 300
+  const gridOffsetX = snapshot.mapManifest.grid?.offsetX ?? 0
+  const gridOffsetY = snapshot.mapManifest.grid?.offsetY ?? 0
+  const pixelsPerFoot = gridWorldSize * camera.scale / 5
   const gridLines = []
   if (gridSize >= 12) {
     const startX = ((camera.x % gridSize) + gridSize) % gridSize
@@ -194,12 +196,40 @@ export function MobileSkiaMap({
   }
 
   return (
-    <View style={styles.root} onLayout={onLayout} {...panResponder.panHandlers}>
+    <GestureDetector gesture={mapGesture}>
+    <View style={styles.root} onLayout={onLayout}>
       <Canvas style={StyleSheet.absoluteFill}>
         <Rect x={0} y={0} width={viewport.width} height={viewport.height} color="#111827" />
         {snapshot.mapManifest.delivery === 'single-image'
           ? <SkiaMapImage manifest={snapshot.mapManifest} camera={camera} />
           : scheduler.tiles.map((tile) => <SkiaTile key={`${tile.level}/${tile.x}/${tile.y}`} tile={tile} camera={camera} />)}
+        {(snapshot.lights ?? []).map((light) => {
+          const x = camera.x + light.x * camera.scale
+          const y = camera.y + light.y * camera.scale
+          return <Fragment key={`light:${light.id}`}>
+            <Circle cx={x} cy={y} r={Math.max(1, (light.brightRadiusFeet + light.dimRadiusFeet) * pixelsPerFoot)} color={colorWithAlpha(light.color, '18', '#ffd16618')} />
+            <Circle cx={x} cy={y} r={Math.max(1, light.brightRadiusFeet * pixelsPerFoot)} color={colorWithAlpha(light.color, '30', '#ffd16630')} />
+          </Fragment>
+        })}
+        {(snapshot.persistentAreas ?? []).flatMap((area) => area.cells.map((cell) => {
+          const x = camera.x + (gridOffsetX + cell.col * gridWorldSize) * camera.scale
+          const y = camera.y + (gridOffsetY + cell.row * gridWorldSize) * camera.scale
+          const darkness = area.lighting?.kind === 'magical-darkness'
+          return <Fragment key={`area:${area.id}:${cell.col}:${cell.row}`}>
+            <Rect x={x} y={y} width={gridSize} height={gridSize} color={darkness ? '#02030ad8' : colorWithAlpha(area.color, '3d', '#8b5cf63d')} />
+            <Rect x={x + 1} y={y + 1} width={Math.max(0, gridSize - 2)} height={Math.max(0, gridSize - 2)} color={area.color} style="stroke" strokeWidth={Math.max(1, Math.min(3, camera.scale * 5))} strokeJoin="round" />
+          </Fragment>
+        }))}
+        {(snapshot.terrainElevations ?? []).map((terrain) => terrain.points.map((point, index, points) => {
+          const next = points[(index + 1) % points.length]
+          return <Line
+            key={`terrain:${terrain.id}:${index}`}
+            p1={vec(camera.x + point.x * camera.scale, camera.y + point.y * camera.scale)}
+            p2={vec(camera.x + next.x * camera.scale, camera.y + next.y * camera.scale)}
+            color={terrain.magicalDarkness ? '#312e81' : terrain.elevationFeet >= 0 ? '#fbbf24' : '#38bdf8'}
+            strokeWidth={Math.max(1.5, 3 * camera.scale)}
+          />
+        }))}
         {gridLines}
         {snapshot.opaqueSegments.filter((segment) => !segment.open).map((segment) => (
           <Line
@@ -228,7 +258,7 @@ export function MobileSkiaMap({
         {!targeting && interactionPoints.map((point) => {
           const x = camera.x + point.x * camera.scale
           const y = camera.y + point.y * camera.scale
-          return <Fragment key={`interaction:${point.id}`}><Circle cx={x} cy={y} r={13} color="#071827e8" /><Circle cx={x} cy={y} r={10} color={colors.warning} /><Circle cx={x} cy={y} r={4} color="#fff4c4" /></Fragment>
+          return <Fragment key={`interaction:${point.id}`}><Circle cx={x} cy={y} r={13} color="#071827e8" /><Circle cx={x} cy={y} r={10} color="#fbbf24" /><Circle cx={x} cy={y} r={4} color="#fff4c4" /></Fragment>
         })}
         {snapshot.visibleTokens.map((token) => {
           const x = camera.x + token.x * camera.scale
@@ -239,44 +269,31 @@ export function MobileSkiaMap({
           return (
             <Fragment key={token.id}>
               {activeTurn && <Circle cx={x} cy={y} r={radius + 11} color="#f7c94888" />}
-              {selected && <Circle cx={x} cy={y} r={radius + 7} color={token.controlled ? colors.primary : colors.warning} />}
-              <Circle cx={x} cy={y} r={radius + 3} color={token.friendly ? colors.teal : colors.danger} />
-              <Circle cx={x} cy={y} r={radius} color={token.portraitColor} />
+              {selected && <Circle cx={x} cy={y} r={radius + 7} color={token.controlled ? '#8b5cf6' : '#fbbf24'} />}
+              <Circle cx={x} cy={y} r={radius + 3} color={token.friendly ? '#2dd4bf' : '#fb7185'} />
+              <Circle cx={x} cy={y} r={radius} color={token.portraitSource || token.avatar ? '#11131d' : token.portraitColor} />
               <Rect x={x - radius} y={y + radius + 4} width={radius * 2} height={3} color="#261f34" />
-              <Rect x={x - radius} y={y + radius + 4} width={radius * 2 * token.hp / token.maxHp} height={3} color={colors.success} />
+              <Rect x={x - radius} y={y + radius + 4} width={radius * 2 * token.hp / token.maxHp} height={3} color="#34d399" />
             </Fragment>
           )
         })}
       </Canvas>
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         {snapshot.visibleTokens.map((token) => {
-          if (!token.portraitSource) return null
           const x = camera.x + token.x * camera.scale
           const y = camera.y + token.y * camera.scale
           const radius = Math.max(7, token.radius * camera.scale)
           const inset = Math.min(3, radius / 3)
-          return <Image
+          return <MapTokenPortrait
             key={`portrait:${token.id}`}
-            source={token.portraitSource}
-            resizeMode="cover"
-            style={[
-              styles.mapPortrait,
-              {
-                left: x - radius + inset,
-                top: y - radius + inset,
-                width: Math.max(4, (radius - inset) * 2),
-                height: Math.max(4, (radius - inset) * 2),
-                borderRadius: Math.max(2, radius - inset),
-              },
-            ]}
+            token={token}
+            left={x - radius + inset}
+            top={y - radius + inset}
+            diameter={Math.max(4, (radius - inset) * 2)}
           />
         })}
       </View>
-      <View pointerEvents="none" style={styles.mapHud}>
-        <View style={styles.badge}><Text style={styles.badgeText}>{snapshot.mapManifest.worldWidth} × {snapshot.mapManifest.worldHeight}</Text></View>
-        <View style={styles.badge}><Text style={styles.badgeText}>{quality.toUpperCase()} · {snapshot.mapManifest.delivery === 'single-image' ? '单图投影' : `${scheduler.tiles.length} 纹理`}</Text></View>
-        {targeting && <View style={[styles.badge, styles.targetBadge]}><Text style={styles.targetText}>{targeting === 'area' ? '选择区域落点' : '选择生物目标'}</Text></View>}
-      </View>
+      {targeting && <View pointerEvents="none" style={styles.mapHud}><View style={[styles.badge, styles.targetBadge]}><Text style={styles.targetText}>{targeting === 'area' ? '选择区域落点' : '选择生物目标'}</Text></View></View>}
       <View pointerEvents="none" style={styles.message}><Text numberOfLines={1} style={styles.messageText}>{message}</Text></View>
       {selected && (
         <View pointerEvents="none" style={styles.tokenCard}>
@@ -304,7 +321,19 @@ export function MobileSkiaMap({
         }}
       ><Text style={styles.recenterText}>◎</Text></Pressable>
     </View>
+    </GestureDetector>
   )
+}
+
+function MapTokenPortrait({ token, left, top, diameter }: { token: PlayerTokenView; left: number; top: number; diameter: number }) {
+  const [failedUri, setFailedUri] = useState('')
+  const source = token.portraitSource
+  const showImage = !!source?.uri && failedUri !== source.uri
+  return <View style={[styles.mapPortrait, { left, top, width: diameter, height: diameter, borderRadius: diameter / 2 }]}>
+    {showImage
+      ? <Image source={source} resizeMode="cover" style={styles.mapPortraitImage} onError={() => setFailedUri(source.uri)} />
+      : <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.mapPortraitFallback, { fontSize: Math.max(8, Math.min(24, diameter * 0.55)) }]}>{token.avatar || token.name.slice(0, 1) || '·'}</Text>}
+  </View>
 }
 
 const styles = StyleSheet.create({
@@ -316,12 +345,14 @@ const styles = StyleSheet.create({
   targetText: { color: colors.warning, fontSize: 10, fontWeight: '900' },
   message: { position: 'absolute', left: 50, right: 50, bottom: 94, alignItems: 'center' },
   messageText: { color: colors.text, fontSize: 11, backgroundColor: '#070711dd', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  tokenCard: { position: 'absolute', left: 12, right: 12, bottom: 16, minHeight: 64, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: '#11111dee', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  mapPortrait: { position: 'absolute' },
+  tokenCard: { position: 'absolute', left: 76, right: 12, bottom: 16, minHeight: 64, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: '#11111dee', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  mapPortrait: { position: 'absolute', overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#11131d' },
+  mapPortraitImage: { width: '100%', height: '100%' },
+  mapPortraitFallback: { color: '#f4f1ff', width: '86%', textAlign: 'center', fontWeight: '900' },
   tokenPortrait: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: colors.text },
   tokenDot: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: colors.text },
   tokenName: { color: colors.text, fontSize: 15, fontWeight: '800' },
   tokenMeta: { color: colors.muted, fontSize: 12, marginTop: 3 },
-  recenter: { position: 'absolute', right: 14, top: 52, width: 42, height: 42, borderRadius: 21, backgroundColor: '#11111dee', borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  recenter: { position: 'absolute', right: 14, top: 12, width: 42, height: 42, borderRadius: 21, backgroundColor: '#11111dee', borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   recenterText: { color: colors.teal, fontSize: 24, fontWeight: '800' },
 })

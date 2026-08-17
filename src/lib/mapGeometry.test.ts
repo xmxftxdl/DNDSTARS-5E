@@ -62,6 +62,67 @@ describe('map geometry', () => {
     })).toBe(false)
   })
 
+  it('treats persistent wall declarations as authoritative movement, vision and effect-line blockers', () => {
+    const viewer = token('viewer', 25, 25)
+    const target = token('target', 125, 25, { type: 'enemy' })
+    const wallMap: BattleMap = {
+      ...map,
+      tokens: [viewer, target],
+      dnd5ePluginAreas: [{
+        id: 'force-wall', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:wall-of-stone',
+        sourceKind: 'core-spell', coreSpellId: 'wall-of-stone', label: '石墙术', color: '#78716c',
+        sourceCharacterId: 'caster', sourceTokenId: viewer.id,
+        cells: [{ col: 1, row: 0 }], anchorCell: { col: 1, row: 0 }, anchorMode: 'fixed',
+        createdRound: 1, expiresAfterRound: 100,
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 },
+        blocking: { movement: true, vision: true, lineOfEffect: true },
+      }],
+    }
+    expect(mapGeometryMovementBlocked({ map: wallMap, token: viewer, to: target }))
+      .toMatchObject({ blocked: true, entityId: 'force-wall' })
+    expect(mapGeometryCoverBetween(undefined, viewer, target, wallMap))
+      .toMatchObject({ cover: 'total', blocksLineOfEffect: true, sourceEntityId: 'force-wall' })
+    expect(mapGeometryCanSeeToken({ map: wallMap, viewer, target, forceEnabled: true })).toBe(false)
+    const visibility = mapGeometryVisibilityPolygon({ map: wallMap, viewer, forceEnabled: true })
+    const forwardPoints = visibility.filter((point) => Math.abs(point.y - viewer.y) < 1)
+    expect(Math.max(...forwardPoints.map((point) => point.x))).toBeLessThanOrEqual(50.001)
+    expect(mapGeometryMovementBlocked({
+      map: wallMap,
+      token: { ...viewer, elevationFeet: 15 },
+      to: { x: target.x, y: target.y },
+      fromElevationFeet: 15,
+      toElevationFeet: 15,
+    }).blocked).toBe(false)
+  })
+
+  it('blocks ordinary sight through a heavy-obscuration persistent area, including when both endpoints are outside', () => {
+    const viewer = token('viewer', 25, 25)
+    const target = token('target', 125, 25, { type: 'enemy' })
+    const fogMap: BattleMap = {
+      ...map,
+      tokens: [viewer, target],
+      dnd5ePluginAreas: [{
+        id: 'fog', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:fog-cloud',
+        sourceKind: 'core-spell', coreSpellId: 'fog-cloud', label: '云雾术', color: '#94a3b8',
+        sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+        cells: [{ col: 1, row: 0 }], anchorCell: { col: 1, row: 0 }, anchorMode: 'fixed',
+        createdRound: 1, expiresAfterRound: 600,
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 40 },
+        obscuration: { kind: 'heavy' },
+      }],
+    }
+    expect(mapGeometryCanSeeToken({ map: fogMap, viewer, target, forceEnabled: true })).toBe(false)
+    const visibility = mapGeometryVisibilityPolygon({ map: fogMap, viewer, forceEnabled: true })
+    expect(Math.max(...visibility.filter((point) => Math.abs(point.y - viewer.y) < 1).map((point) => point.x)))
+      .toBeLessThanOrEqual(50.001)
+    expect(mapGeometryCanSeeToken({
+      map: fogMap,
+      viewer: { ...viewer, blindsightRangeFeet: 30 },
+      target,
+      forceEnabled: true,
+    })).toBe(true)
+  })
+
   it('keeps elevated authoritative targets visible even when the ground-plane mask stops at a wall', () => {
     const g = geometry()
     const viewer = token('viewer', 50, 50)

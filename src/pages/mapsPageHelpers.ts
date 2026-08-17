@@ -25,15 +25,35 @@ export function placeableRoomCharacters(
 }
 
 export function rollInitiative(token: Token, character?: Character): number {
+  return resolveInitiativeCalculation(token, character).total
+}
+
+function resolveInitiativeCalculation(token: Token, character?: Character): {
+  total: number
+  calculation: NonNullable<InitiativeEntry['initiativeCalculation']>
+} {
   if (character) {
     const mode = dnd5eAbilityCheckMode(character, { initiative: true })
     const rollCount = mode === 'normal' ? 1 : 2
     const rolls = Array.from({ length: rollCount }, () => 1 + Math.floor(Math.random() * 20))
-    return resolveDnd5eInitiative({ character, rolls }).roll.total
+    const resolved = resolveDnd5eInitiative({ character, rolls }).roll
+    return {
+      total: resolved.total,
+      calculation: {
+        rolls,
+        d20: resolved.d20,
+        modifier: resolved.modifier,
+        mode: resolved.mode,
+      },
+    }
   }
   const d20 = 1 + Math.floor(Math.random() * 20)
   const monster = token.poolId ? getEnemyStatBlock(token.poolId) : undefined
-  return d20 + abilityMod(monster?.abilities.dex ?? 10)
+  const modifier = abilityMod(monster?.abilities.dex ?? 10)
+  return {
+    total: d20 + modifier,
+    calculation: { rolls: [d20], d20, modifier, mode: 'normal' },
+  }
 }
 
 /**
@@ -63,7 +83,8 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
     .filter((token) => token.type !== 'obstacle')
     .map((token) => {
       const ch = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
-      const roll = rollInitiative(token, ch)
+      const initiative = resolveInitiativeCalculation(token, ch)
+      const roll = initiative.total
       const normal: InitiativeEntry = {
         slotId: `${token.id}:normal`,
         tokenId: token.id,
@@ -74,6 +95,7 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         color: token.color,
         accent: ch?.accent,
         roll,
+        initiativeCalculation: initiative.calculation,
       }
       const surprised = ch?.dnd5eCombatState?.surprisedCombatId != null &&
         ch.dnd5eCombatState.surpriseResolvedCombatId !== ch.dnd5eCombatState.surprisedCombatId
@@ -90,6 +112,29 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
     })
     .flat()
     .sort((a, b) => b.roll - a.roll)
+}
+
+export function initiativeResultLogDetails(order: readonly InitiativeEntry[]): string[] {
+  return order.map((entry, index) => {
+    const calculation = entry.initiativeCalculation
+    if (!calculation) {
+      return `${index + 1}. ${entry.label}：先攻 ${entry.roll}${
+        entry.turnKind === 'thief-reflexes' ? '（盗贼反射·首轮额外回合）' : ''
+      }`
+    }
+    const modifier = calculation.modifier >= 0
+      ? `+${calculation.modifier}`
+      : String(calculation.modifier)
+    const d20 = calculation.mode === 'normal'
+      ? `d20 ${calculation.d20}`
+      : `d20（${calculation.rolls.join('、')}，${
+        calculation.mode === 'advantage' ? '优势取高' : '劣势取低'
+      } ${calculation.d20}）`
+    const base = `${d20} + 先攻调整值（${modifier}）`
+    return entry.turnKind === 'thief-reflexes'
+      ? `${index + 1}. ${entry.label}：${base} - 盗贼反射 10 = ${entry.roll}（首轮额外回合）`
+      : `${index + 1}. ${entry.label}：${base} = ${entry.roll}`
+  })
 }
 
 export function initiativeOrderForRound(

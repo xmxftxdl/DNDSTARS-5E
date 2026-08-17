@@ -221,9 +221,28 @@ export function projectCustomMonstersForRoomMember(
 ): Record<string, unknown> & { monsters: Array<Record<string, unknown>> }
 export function projectSceneOrchestrationForPlayer(value: unknown): {
   schemaVersion: 1
-  scenes: []
+  scenes: Array<Record<string, unknown>>
   runtime: { paused: false; pendingRuns: []; receipts: []; history: [] }
   updatedAt: number
+}
+export function applyPlayerCharacterCommand(
+  currentState: Record<string, any>,
+  rawCommand: Record<string, any>,
+  member: Record<string, any>,
+  options?: {
+    roomId?: string
+    now?: number
+    rollDie?: (sides: number) => number
+  },
+): any
+export function sendExpoPushMessages(
+  messages: readonly Record<string, unknown>[],
+  fetchImpl?: typeof fetch,
+): Promise<{ sent: number; tickets: Array<Record<string, unknown>> }>
+export function projectDnd5eShopsForPlayer(value: unknown): Record<string, unknown> & {
+  shops: Array<Record<string, unknown>>
+  transactions: []
+  purchaseReceipts: []
 }
 export function mutateCampaignTimeState(
   current: unknown,
@@ -344,6 +363,18 @@ export function normalizeLobbyRoomCode(value: unknown): string
 export function roomHostIsOnline(room: unknown, now?: number): boolean
 export function roomHostPresence(room: unknown, now?: number): 'online' | 'grace' | 'offline' | 'closed'
 export function roomPlayerPresence(player: unknown, now?: number): 'online' | 'temporarily-offline' | 'left' | 'removed'
+export interface RoomMemberCharacterAssignment {
+  revision: number
+  enforced: boolean
+  characterId: string | null
+  characterName: string | null
+}
+export function roomMemberCharacterAssignment(member: unknown): RoomMemberCharacterAssignment
+export function mutateRoomPlayerCharacterAssignment(
+  room: Record<string, unknown>,
+  input: { targetMemberId: string; characterId?: string | null; characterName?: string | null },
+  now?: number,
+): { ok: boolean; status?: number; error?: string; assignment?: RoomMemberCharacterAssignment; next?: Record<string, unknown> }
 export function normalizeAccountRecoveryCode(value: unknown): { accountId: string; secret: string; formatted: string } | null
 export function normalizeAccountUsername(value: unknown): { value: string; key: string } | null
 export function normalizeAccountEmail(value: unknown): string | null

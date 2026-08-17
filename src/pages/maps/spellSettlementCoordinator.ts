@@ -76,6 +76,7 @@ export interface AreaSpellPresentationSettlement {
   radiusFeet?: number
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
+  areaAngleDegrees?: number
 }
 
 export interface GuidancePresentationSettlement {
@@ -303,6 +304,7 @@ export function areaSpellPresentationForSettlement(input: {
   mapId: string
   actorTokenId: string
   areaAnchorCell?: { col: number; row: number }
+  areaTargetOrientation?: 0 | 1 | 2 | 3
   wallOfFireGeometry?: {
     shape: 'line' | 'ring'
     angleDegrees: number
@@ -327,6 +329,11 @@ export function areaSpellPresentationForSettlement(input: {
     spellId: input.spellId,
     targetCell: { ...input.areaAnchorCell },
     ...area,
+    ...((input.spellId === 'wind-wall' || input.spellId === 'wall-of-force' ||
+      input.spellId === 'wall-of-stone' || input.spellId === 'wall-of-ice' ||
+      input.spellId === 'wall-of-thorns') && input.areaTargetOrientation != null ? {
+      areaAngleDegrees: input.areaTargetOrientation * 90,
+    } : {}),
     ...((input.spellId === 'wall-of-fire' || input.spellId === 'blade-barrier') && input.wallOfFireGeometry ? {
       wallOfFireShape: input.wallOfFireGeometry.shape,
       wallOfFireAngleDegrees: input.wallOfFireGeometry.angleDegrees,

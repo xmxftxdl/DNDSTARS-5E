@@ -1,5 +1,6 @@
 import type {
   MobileAccountSession,
+  MobileAccountCharacterRecord,
   MobileCampaignSummary,
   MobileMoveIntent,
   MobilePlayerSession,
@@ -8,6 +9,7 @@ import type {
   PlayerSceneDeltaBatch,
   PlayerSceneSnapshot,
 } from '../../../../packages/mobile-protocol/src'
+import { mobileFetch, mobileIdempotencyKey, mobileJsonRequest, type MobileRequestPolicy } from './mobileHttp'
 
 const PROTOCOL_VERSION = '5'
 
@@ -66,11 +68,8 @@ function roomUrl(credentials: MobileCredentials, path: string): string {
   return `${apiBase(credentials.serverUrl)}${path}${separator}room=${encodeURIComponent(credentials.room.roomId)}`
 }
 
-async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init)
-  const body = await response.json().catch(() => ({})) as { error?: string }
-  if (!response.ok) throw new Error(body.error || `http-${response.status}`)
-  return body as T
+async function jsonRequest<T>(url: string, init?: RequestInit, policy?: MobileRequestPolicy): Promise<T> {
+  return mobileJsonRequest<T>(url, init, policy)
 }
 
 export async function loginMobileAccount(serverUrl: string, identifier: string, password: string, clientId: string) {
@@ -157,11 +156,80 @@ export async function changeMobileAccountPassword(
   })
 }
 
+export async function deleteMobileAccount(
+  serverUrl: string,
+  account: MobileAccountSession,
+  currentPassword: string,
+) {
+  await jsonRequest(`${apiBase(serverUrl)}/accounts/me`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json', ...accountHeaders(account) },
+    body: JSON.stringify({ currentPassword, confirmation: 'DELETE' }),
+  }, {
+    timeoutMs: 25_000,
+  })
+}
+
+export async function registerMobilePushSubscription(
+  serverUrl: string,
+  account: MobileAccountSession,
+  input: { deviceId: string; token: string; platform: 'ios' | 'android' },
+) {
+  await jsonRequest(`${apiBase(serverUrl)}/accounts/me/push-subscriptions`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...accountHeaders(account) },
+    body: JSON.stringify(input),
+  }, { timeoutMs: 20_000 })
+}
+
+export async function unregisterMobilePushSubscription(
+  serverUrl: string,
+  account: MobileAccountSession,
+  deviceId: string,
+) {
+  await jsonRequest(`${apiBase(serverUrl)}/accounts/me/push-subscriptions`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json', ...accountHeaders(account) },
+    body: JSON.stringify({ deviceId }),
+  }, { timeoutMs: 20_000 })
+}
+
 export async function fetchMobileCampaigns(serverUrl: string, account: MobileAccountSession) {
   const body = await jsonRequest<{ campaigns: MobileCampaignSummary[] }>(`${apiBase(serverUrl)}/accounts/me/campaigns`, {
     headers: accountHeaders(account),
   })
   return body.campaigns ?? []
+}
+
+export async function fetchMobileAccountCharacters(serverUrl: string, account: MobileAccountSession) {
+  const body = await jsonRequest<{ characters: MobileAccountCharacterRecord[] }>(`${apiBase(serverUrl)}/accounts/me/characters`, {
+    headers: accountHeaders(account),
+  })
+  return Array.isArray(body.characters) ? body.characters : []
+}
+
+export async function saveMobileAccountCharacter(
+  serverUrl: string,
+  account: MobileAccountSession,
+  record: {
+    id: string
+    name: string
+    updatedAt: number
+    character: Record<string, unknown>
+    compatibility: {
+      rulesetId: 'dnd5e-2014-srd-5.1'
+      characterSchemaVersion: number
+      minimumGameProtocolVersion: number
+      lastSavedGameProtocolVersion: number
+      requiredPlugins: Array<{ id: string; version: string; integrity: string; stateSchemaVersion: number }>
+    }
+  },
+) {
+  return jsonRequest(`${apiBase(serverUrl)}/accounts/me/characters/${encodeURIComponent(record.id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...accountHeaders(account) },
+    body: JSON.stringify(record),
+  })
 }
 
 export async function fetchRoomPreview(serverUrl: string, roomId: string, account?: MobileAccountSession | null) {
@@ -269,7 +337,7 @@ export interface MobileResourceSnapshot<T> {
 }
 
 export async function fetchRoomResourceSnapshot<T>(credentials: MobileCredentials, name: string): Promise<MobileResourceSnapshot<T>> {
-  const response = await fetch(roomUrl(credentials, `/state/${encodeURIComponent(name)}`), {
+  const response = await mobileFetch(roomUrl(credentials, `/state/${encodeURIComponent(name)}`), {
     cache: 'no-store',
     headers: roomHeaders(credentials),
   })
@@ -288,7 +356,7 @@ export async function downloadMobileRoomPlugin(
   credentials: MobileCredentials,
   requirement: MobileRoomRules['requiredPlugins'][number],
 ): Promise<unknown> {
-  const response = await fetch(roomUrl(
+  const response = await mobileFetch(roomUrl(
     credentials,
     `/rooms/${encodeURIComponent(credentials.room.roomId)}/plugins/${encodeURIComponent(requirement.id)}`,
   ), { cache: 'no-store', headers: roomHeaders(credentials) })
@@ -309,7 +377,7 @@ export async function saveRoomResourceSnapshot<T>(
   value: T,
   expectedRevision: number,
 ): Promise<{ revision: number }> {
-  const response = await fetch(roomUrl(credentials, `/state/${encodeURIComponent(name)}`), {
+  const response = await mobileFetch(roomUrl(credentials, `/state/${encodeURIComponent(name)}`), {
     method: 'PUT',
     headers: {
       'content-type': 'application/json',
@@ -342,10 +410,32 @@ export async function publishRoomEvent(
 }
 
 export async function appendPlayerAction(credentials: MobileCredentials, action: Record<string, unknown>) {
+  const idempotencyKey = String(action.id || mobileIdempotencyKey('player-action'))
   return jsonRequest<{ revision?: number }>(roomUrl(credentials, '/state/player-action-requests/append'), {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...roomHeaders(credentials) },
+    headers: { 'content-type': 'application/json', 'X-Stars-Idempotency-Key': idempotencyKey, ...roomHeaders(credentials) },
     body: JSON.stringify({ action }),
+  })
+}
+
+export async function submitPlayerCharacterCommand(
+  credentials: MobileCredentials,
+  expectedRevision: number,
+  command: Record<string, unknown> & { commandId: string },
+) {
+  return jsonRequest<{
+    ok: true
+    replayed: boolean
+    revision: number
+    result: Record<string, unknown>
+  }>(roomUrl(credentials, '/state/characters/command'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...roomHeaders(credentials) },
+    body: JSON.stringify({ expectedRevision, command }),
+  }, {
+    idempotencyKey: command.commandId,
+    retries: 1,
+    timeoutMs: 25_000,
   })
 }
 

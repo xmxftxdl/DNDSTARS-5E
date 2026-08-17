@@ -12,6 +12,8 @@ import { registerDnd5eRulesPlugin } from './pluginApi'
 const PLUGIN_ID = 'com.example.outcome-adjustment'
 const SUBCLASS_ID = `${PLUGIN_ID}:outcome-shaper`
 const FEATURE_ID = `${SUBCLASS_ID}.shift-outcome`
+const FIXED_FEATURE_ID = `${SUBCLASS_ID}.guided-strike`
+const DEFENSIVE_FEATURE_ID = `${SUBCLASS_ID}.defensive-duelist`
 const RESOURCE_ID = 'test-fate-points'
 
 const definition: DeclarativeSubclassDefinitionV1 = {
@@ -42,6 +44,45 @@ const definition: DeclarativeSubclassDefinitionV1 = {
       rollKinds: ['attack', 'ability-check', 'saving-throw'],
       dieSides: 6,
       directions: ['add', 'subtract'],
+    },
+    effects: [],
+    automation: 'full',
+  }, {
+    schemaVersion: 1,
+    id: 'guided-strike',
+    name: 'Guided Strike',
+    description: 'Adds a fixed ten to the owner attack roll.',
+    level: 1,
+    trigger: { kind: 'after-d20-roll' },
+    cost: {
+      economy: 'none',
+      resources: [{ resourceId: RESOURCE_ID, amount: 1, scope: 'core' }],
+    },
+    targeting: {
+      kind: 'single-creature', relation: 'ally', rangeFeet: 0, includeSelf: true,
+    },
+    mechanic: {
+      kind: 'post-d20-adjustment', rollKinds: ['attack'], fixedAmount: 10, directions: ['add'],
+    },
+    effects: [],
+    automation: 'full',
+  }, {
+    schemaVersion: 1,
+    id: 'defensive-duelist',
+    name: 'Defensive Duelist',
+    description: 'Subtracts proficiency from a melee attack against the owner.',
+    level: 1,
+    trigger: { kind: 'after-d20-roll' },
+    cost: { economy: 'reaction' },
+    targeting: { kind: 'single-creature', relation: 'enemy' },
+    mechanic: {
+      kind: 'post-d20-adjustment',
+      rollKinds: ['attack'],
+      fixedAmountReference: 'source-proficiency-bonus',
+      directions: ['subtract'],
+      scope: 'attack-against-self',
+      attackModes: ['melee'],
+      sourceHeldWeapon: { properties: ['finesse'], proficient: true },
     },
     effects: [],
     automation: 'full',
@@ -79,13 +120,17 @@ function source(): Dnd5eCombatant {
     subclassId: SUBCLASS_ID,
     classLevels: { sorcerer: 1 },
     subclassIds: { sorcerer: SUBCLASS_ID },
-    pluginFeatureIds: [FEATURE_ID],
+    pluginFeatureIds: [FEATURE_ID, FIXED_FEATURE_ID, DEFENSIVE_FEATURE_ID],
     classResources: { [RESOURCE_ID]: { current: 1, max: 1 } },
   })
 }
 
 function adjustment(direction: 'add' | 'subtract', roll: number) {
   return { sourceId: 'source', featureId: FEATURE_ID, direction, roll } as const
+}
+
+function fixedAdjustment() {
+  return { sourceId: 'source', featureId: FIXED_FEATURE_ID, direction: 'add', roll: 10 } as const
 }
 
 function state(combatants: Dnd5eCombatant[], activeId: string) {
@@ -304,5 +349,92 @@ describe('generic post-d20 adjustment protocol', () => {
     expect(result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
     expect(result.state.combatants.source.turn.reactionAvailable).toBe(true)
     expect(result.state.combatants.source.classResources[RESOURCE_ID].current).toBe(1)
+  })
+
+  it('applies a fixed self adjustment without spending a reaction', () => {
+    const owner = source()
+    const target = combatant('target', 'dm', 10)
+    const result = resolveDnd5eHeadlessAction(
+      state([owner, target], owner.id),
+      {
+        type: 'attack', actorId: owner.id, targetId: target.id,
+        attackModifier: 0, d20: 5, spendAction: false,
+        postD20Adjustment: fixedAdjustment(),
+        damage: { count: 1, sides: 6, bonus: 0, rolls: [4] },
+      },
+    )
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.target.currentHp).toBe(26)
+    expect(result.state.combatants.source.turn.reactionAvailable).toBe(true)
+    expect(result.state.combatants.source.classResources[RESOURCE_ID].current).toBe(0)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: owner.id, d20: 5, total: 15, hit: true,
+    }))
+  })
+
+  it('uses source proficiency for a melee hit against a duelist holding a proficient finesse weapon', () => {
+    const defender = source()
+    defender.proficiencyBonus = 3
+    defender.activityEquipment = {
+      armorCategory: 'none', armorProficient: true, armorProficiencies: [], freeHands: 1,
+      mainHand: {
+        itemId: 'rapier', roles: ['weapon'], weaponMode: 'melee',
+        weaponProperties: ['finesse'], proficient: true,
+      },
+    }
+    const attacker = combatant('attacker', 'dm', 20)
+    const result = resolveDnd5eHeadlessAction(
+      state([attacker, defender], attacker.id),
+      {
+        type: 'attack', actorId: attacker.id, targetId: defender.id,
+        attackModifier: 5, d20: 10, spendAction: false,
+        postD20Adjustment: {
+          sourceId: defender.id,
+          featureId: DEFENSIVE_FEATURE_ID,
+          direction: 'subtract',
+          roll: 3,
+        },
+        damage: { count: 1, sides: 6, bonus: 0, rolls: [6] },
+      },
+    )
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.source.currentHp).toBe(30)
+    expect(result.state.combatants.source.turn.reactionAvailable).toBe(false)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: attacker.id, total: 12, hit: false,
+    }))
+  })
+
+  it('rejects Defensive Duelist when the held weapon is not finesse', () => {
+    const defender = source()
+    defender.activityEquipment = {
+      armorCategory: 'none', armorProficient: true, armorProficiencies: [], freeHands: 1,
+      mainHand: {
+        itemId: 'longsword', roles: ['weapon'], weaponMode: 'melee',
+        weaponProperties: [], proficient: true,
+      },
+    }
+    const attacker = combatant('attacker', 'dm', 20)
+    const result = resolveDnd5eHeadlessAction(
+      state([attacker, defender], attacker.id),
+      {
+        type: 'attack', actorId: attacker.id, targetId: defender.id,
+        attackModifier: 5, d20: 10, spendAction: false,
+        postD20Adjustment: {
+          sourceId: defender.id,
+          featureId: DEFENSIVE_FEATURE_ID,
+          direction: 'subtract',
+          roll: 2,
+        },
+        damage: { count: 1, sides: 6, bonus: 0, rolls: [6] },
+      },
+    )
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+    expect(result.state.combatants.source.turn.reactionAvailable).toBe(true)
   })
 })

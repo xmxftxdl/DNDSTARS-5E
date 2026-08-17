@@ -74,4 +74,56 @@ describe('scene orchestration runtime queue', () => {
     useSceneOrchestrationStore.getState().removeInteractionPoint(sceneId, pointId)
     expect(useSceneOrchestrationStore.getState().shared.scenes[0].interactionPoints).toEqual([])
   })
+
+  it('persists dragged entrance regions and teleport exit coordinates independently', () => {
+    const store = useSceneOrchestrationStore.getState()
+    const sceneId = store.ensureScene('map-1', 'Ground Floor')
+    const triggerId = useSceneOrchestrationStore.getState().shared.scenes[0].triggers[0].id
+    store.setTriggerRegion(sceneId, triggerId, {
+      kind: 'rect',
+      x: 120,
+      y: 160,
+      width: 90,
+      height: 60,
+    })
+    store.addAction(sceneId, triggerId, {
+      id: 'stairs-exit',
+      kind: 'teleport',
+      enabled: true,
+      targetMapId: 'map-2',
+      x: 40,
+      y: 50,
+      moveTriggeringToken: true,
+    })
+    useSceneOrchestrationStore.getState().updateAction(sceneId, triggerId, 'stairs-exit', {
+      x: 340,
+      y: 280,
+    })
+
+    expect(useSceneOrchestrationStore.getState().shared.scenes[0].triggers[0]).toMatchObject({
+      region: { kind: 'rect', x: 120, y: 160, width: 90, height: 60 },
+      actions: [{
+        id: 'stairs-exit',
+        kind: 'teleport',
+        targetMapId: 'map-2',
+        x: 340,
+        y: 280,
+      }],
+    })
+  })
+
+  it('stores a global audio preset separately from a map audio override', () => {
+    const store = useSceneOrchestrationStore.getState()
+    store.updateGlobalAudio({ assetId: 'global-track', autoPlay: true, volume: 0.45 })
+    const sceneId = store.ensureScene('map-1', 'Map')
+    useSceneOrchestrationStore.getState().updateScene(sceneId, {
+      backgroundAudioMode: 'override',
+      backgroundAudioId: 'map-track',
+      backgroundAudioAutoPlay: true,
+    })
+    expect(useSceneOrchestrationStore.getState().shared).toMatchObject({
+      globalAudio: { assetId: 'global-track', autoPlay: true, volume: 0.45 },
+      scenes: [{ backgroundAudioMode: 'override', backgroundAudioId: 'map-track', backgroundAudioAutoPlay: true }],
+    })
+  })
 })

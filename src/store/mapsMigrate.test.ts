@@ -119,6 +119,11 @@ describe('T10/AC3 — maps store version + migrate', () => {
             { schemaVersion: 1, id: '../unsafe', statusId: 'marked', source: 'dm' },
             { schemaVersion: 1, id: 'dm:script', statusId: 'javascript', source: 'dm' },
           ],
+          dnd5eSuppressedStatusMarkerIds: [
+            'monster-trait:monster:fire-averse:1',
+            'monster-trait:monster:fire-averse:1',
+            '../unsafe',
+          ],
         }],
       }],
     })
@@ -126,6 +131,9 @@ describe('T10/AC3 — maps store version + migrate', () => {
     const token = result.maps[0].tokens[0]
     expect(token.dnd5eTokenStatusMarkers).toEqual([
       { schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm', label: undefined },
+    ])
+    expect(token.dnd5eSuppressedStatusMarkerIds).toEqual([
+      'monster-trait:monster:fire-averse:1',
     ])
     expect(token.dnd5eCombatState?.conditions).toBeUndefined()
   })

@@ -13,7 +13,9 @@ import type {
   DeclarativeValueFormulaV1,
 } from '../declarativeSubclassAbility'
 import type { Dnd5eCombatant } from '../headlessCombatEngine'
+import type { Dnd5eActivityDefinitionV1 } from '../activities/dnd5eActivityContracts'
 import { dnd5eUtilityProjectionDistanceKey } from '../utilityProjectionState'
+import { dnd5eSavingThrowMode } from '../passiveDefenses'
 import type {
   Dnd5ePluginAutomationLevel,
   Dnd5ePluginEffectDuration,
@@ -53,6 +55,17 @@ function declarativeFormulaValue(
     formula.minimum ?? Number.NEGATIVE_INFINITY,
     Math.floor(value * (formula.multiplier ?? 1)),
   )
+}
+
+function declarativeSavingThrowDcValue(
+  formula: DeclarativeValueFormulaV1,
+  creature: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'abilities' | 'proficiencyBonus'>,
+  adapter: RulesetAdapter,
+): number {
+  if (formula.kind === 'ability-modifier') {
+    return 8 + creature.proficiencyBonus + declarativeFormulaValue(formula, creature, adapter)
+  }
+  return declarativeFormulaValue(formula, creature, adapter)
 }
 
 export function declarativeResourceMaximumByLevel(
@@ -100,6 +113,9 @@ export function declarativeResourceMaximumForCharacter(
 
 function declarativeDurationToCapability(
   duration: DeclarativeSubclassDurationV1,
+  actor?: Dnd5eCombatant,
+  adapter?: RulesetAdapter,
+  target?: Dnd5eCombatant,
 ): Dnd5ePluginEffectDuration | undefined {
   if (duration.kind === 'until-source-turn-start') return { expiresAt: 'source-next-turn-start' }
   if (duration.kind === 'until-target-turn-start') return { expiresAt: 'target-next-turn-start' }
@@ -107,29 +123,55 @@ function declarativeDurationToCapability(
     return { expiresAt: 'target-turn-end', remainingRounds: duration.rounds ?? 1 }
   }
   if (duration.kind === 'fixed-rounds') {
+    const saveDc = duration.repeatSave == null
+      ? undefined
+      : typeof duration.repeatSave.dc === 'number'
+        ? duration.repeatSave.dc
+        : actor && adapter
+          ? declarativeSavingThrowDcValue(duration.repeatSave.dc, actor, adapter)
+          : undefined
     return duration.repeatSave
       ? {
           expiresAt: 'target-turn-end-save',
           remainingRounds: duration.rounds,
-          saveAbility: duration.repeatSave.ability,
-          saveDc: duration.repeatSave.dc,
+          saveAbility: target
+            ? selectedSavingThrowAbility(target, duration.repeatSave.ability, duration.repeatSave.abilityOptions, adapter)
+            : duration.repeatSave.ability,
+          saveDc,
         }
       : { expiresAt: 'target-turn-end', remainingRounds: duration.rounds }
   }
   return undefined
 }
 
+function selectedSavingThrowAbility(
+  target: Dnd5eCombatant,
+  primary: import('../../../lib/dnd').AbilityKey,
+  options: readonly import('../../../lib/dnd').AbilityKey[] | undefined,
+  adapter?: RulesetAdapter,
+): import('../../../lib/dnd').AbilityKey {
+  const modifier = (ability: import('../../../lib/dnd').AbilityKey) => target.savingThrowBonuses[ability] ??
+    (adapter?.abilityModifier(target.abilities[ability]) ?? Math.floor((target.abilities[ability] - 10) / 2))
+  return (options?.length ? options : [primary]).reduce((best, candidate) =>
+    modifier(candidate) > modifier(best) ? candidate : best, primary)
+}
+
 export function declarativeTargeting(
   targeting: DeclarativeSubclassAbilityV1['targeting'],
 ): Dnd5ePluginTargeting {
   if (targeting.kind === 'self') return { kind: 'self' }
-  if (targeting.kind === 'single-creature' || targeting.kind === 'multiple-creatures') {
-    return {
-      kind: 'single-creature',
-      relation: targeting.relation,
-      rangeFeet: targeting.rangeFeet,
-      includeSelf: targeting.includeSelf,
-    }
+  if (targeting.kind === 'single-creature') return {
+    kind: 'single-creature',
+    relation: targeting.relation,
+    rangeFeet: targeting.rangeFeet,
+    includeSelf: targeting.includeSelf,
+  }
+  if (targeting.kind === 'multiple-creatures') return {
+    kind: 'multiple-creatures',
+    relation: targeting.relation,
+    rangeFeet: targeting.rangeFeet,
+    includeSelf: targeting.includeSelf,
+    maximumTargets: targeting.maximumTargets,
   }
   const common = {
     kind: 'area' as const,
@@ -205,6 +247,7 @@ export function createDeclarativeFeatureResolver(input: {
   featureId: string
   usesResourceId?: string
   automation: Dnd5ePluginAutomationLevel
+  activity?: Dnd5eActivityDefinitionV1
 }): Dnd5ePluginHeadlessActionDefinition['resolve'] {
   return (context) => {
     const { actor, action, state } = context
@@ -274,6 +317,20 @@ export function createDeclarativeFeatureResolver(input: {
     if (context.targets.some((target) => predicates?.targetLacksConditions?.some(
       (condition) => target.conditions.includes(condition),
     ))) return context.fail('invalid-target')
+    if (
+      predicates?.parentDamageTypes?.length &&
+      (!context.parentAttackDamageType || !predicates.parentDamageTypes.includes(context.parentAttackDamageType))
+    ) return context.fail('invalid-class-feature')
+    if (
+      predicates?.targetMaximumSizeRank != null &&
+      context.targets.some((target) => target.sizeRank > predicates.targetMaximumSizeRank!)
+    ) return context.fail('invalid-target')
+    if (predicates?.targetCreatureTypes?.length) {
+      const accepted = new Set(predicates.targetCreatureTypes.map((type) => type.trim().toLocaleLowerCase()))
+      if (context.targets.some((target) => !target.creatureType || !accepted.has(target.creatureType.trim().toLocaleLowerCase()))) {
+        return context.fail('invalid-target')
+      }
+    }
     if (predicates?.targetRelation) {
       for (const target of context.targets) {
         const allied = target.controller === actor.controller
@@ -293,6 +350,25 @@ export function createDeclarativeFeatureResolver(input: {
       if (!actor.classSelections[selectionKey]?.includes(requirement.optionId)) {
         return context.fail('invalid-class-feature')
       }
+    }
+    const payload = context.action.payload && typeof context.action.payload === 'object' && !Array.isArray(context.action.payload)
+      ? context.action.payload as Record<string, unknown>
+      : undefined
+    const submittedChoices = payload?.activityChoices && typeof payload.activityChoices === 'object' && !Array.isArray(payload.activityChoices)
+      ? payload.activityChoices as Record<string, unknown>
+      : undefined
+    const activityChoices: Record<string, string> = {}
+    const knownChoiceIds = new Set((ability.choices ?? []).map((choice) => choice.id))
+    if (Object.keys(submittedChoices ?? {}).some((choiceId) => !knownChoiceIds.has(choiceId))) {
+      return context.fail('invalid-plugin-action')
+    }
+    for (const choice of ability.choices ?? []) {
+      const submitted = submittedChoices?.[choice.id]
+      const selected = typeof submitted === 'string' ? submitted : choice.defaultOptionId
+      if (!selected || !choice.options.some((option) => option.id === selected)) {
+        return context.fail('invalid-plugin-action')
+      }
+      activityChoices[choice.id] = selected
     }
     const turnKey = `${state.combatId}:${state.round}:${state.turnSlotId ?? actor.id}`
     const oncePerTurn = predicates?.oncePerTurn === true || ability.limits?.oncePerTurn === true
@@ -314,6 +390,52 @@ export function createDeclarativeFeatureResolver(input: {
     if (ability.mechanic?.kind === 'next-d20-advantage' && actor.classState.nextD20Advantage != null) {
       return context.fail('invalid-plugin-action')
     }
+    let persistentCompanionMonsterId: string | undefined
+    let persistentCompanionProfile: Extract<
+      import('../activities/dnd5eActivityExecutor').Dnd5eActivityCapabilityProposal,
+      { kind: 'summon' }
+    > | undefined
+    if (ability.mechanic?.kind === 'persistent-companion') {
+      const selectionKey = `${input.subclassId}/${ability.mechanic.choiceGroupId}`
+      const selectedOptionId = actor.classSelections[selectionKey]?.[0]
+      persistentCompanionMonsterId = ability.mechanic.companions.find(
+        (companion) => companion.optionId === selectedOptionId,
+      )?.monsterId
+      if (!persistentCompanionMonsterId) return context.fail('invalid-class-feature')
+      const profile = ability.mechanic.combatProfile
+      const evaluate = (formula: DeclarativeValueFormulaV1 | undefined) => formula == null
+        ? undefined
+        : Math.max(0, Math.floor(declarativeFormulaValue(formula, actor, context.rules)))
+      const advancement = [...(profile?.advancements ?? [])]
+        .filter((entry) => (actor.classLevels?.[entry.classId] ??
+          (actor.classId === entry.classId ? actor.level : 0)) >= entry.minimumLevel)
+        .sort((left, right) => left.minimumLevel - right.minimumLevel)
+        .reduce<{
+          weaponAttacksMagical?: boolean
+          attacksPerAction?: number
+          shareSelfSpellsRangeFeet?: number
+        }>((resolved, entry) => ({
+          ...resolved,
+          ...(entry.weaponAttacksMagical == null ? {} : { weaponAttacksMagical: entry.weaponAttacksMagical }),
+          ...(entry.attacksPerAction == null ? {} : { attacksPerAction: entry.attacksPerAction }),
+          ...(entry.shareSelfSpellsRangeFeet == null ? {} : { shareSelfSpellsRangeFeet: entry.shareSelfSpellsRangeFeet }),
+        }), {})
+      persistentCompanionProfile = {
+        kind: 'summon', operationId: 'persistent-companion',
+        monsterId: persistentCompanionMonsterId, count: 1, timing: 'immediate',
+        durationRounds: 14_400, concentration: false, side: 'ally', persistent: true,
+        minimumMaximumHitPoints: evaluate(profile?.minimumMaximumHitPoints),
+        armorClassBonus: evaluate(profile?.armorClassBonus),
+        weaponAttackBonus: evaluate(profile?.weaponAttackBonus),
+        weaponDamageBonus: evaluate(profile?.weaponDamageBonus),
+        savingThrowBonus: evaluate(profile?.savingThrowBonus),
+        proficientSkillCheckBonus: evaluate(profile?.proficientSkillCheckBonus),
+        weaponAttacksMagical: advancement.weaponAttacksMagical ??
+          (profile?.weaponAttacksMagical === true ? true : undefined),
+        attacksPerAction: advancement.attacksPerAction ?? profile?.attacksPerAction,
+        shareSelfSpellsRangeFeet: advancement.shareSelfSpellsRangeFeet,
+      }
+    }
     const costs = [
       ...(ability.cost?.resources ?? []).map((cost) => ({
         resourceId: dnd5eDeclarativeResourceKey(input.pluginId, cost),
@@ -327,8 +449,53 @@ export function createDeclarativeFeatureResolver(input: {
       !actor.classResources[cost.resourceId] ||
       actor.classResources[cost.resourceId].current < cost.amount
     )) return context.fail('class-resource-unavailable')
-    const operationCount = costs.length + ability.effects.reduce((total, effect) => {
-      if (effect.kind === 'move') return total
+    const savingThrow = ability.rolls?.find((roll) => roll.kind === 'saving-throw')
+    const successfulSaveTargetIds = new Set<string>()
+    if (savingThrow) {
+      const dc = declarativeSavingThrowDcValue(savingThrow.dc, actor, context.rules)
+      if (!Number.isInteger(dc) || dc < 1 || dc > 40) return context.fail('invalid-plugin-action')
+      for (const target of context.targets) {
+        const saveAbility = selectedSavingThrowAbility(target, savingThrow.ability, savingThrow.abilityOptions, context.rules)
+        const supplied = context.rolls[`${savingThrow.id}-d20:${target.id}`]
+        const conditionalMode = target.creatureType && savingThrow.rollModeByCreatureType?.creatureTypes.some((type) =>
+          type.trim().toLocaleLowerCase() === target.creatureType!.trim().toLocaleLowerCase())
+          ? savingThrow.rollModeByCreatureType.mode
+          : undefined
+        const declaredMode = conditionalMode ?? savingThrow.rollMode ?? 'normal'
+        const mode = declaredMode === 'host-derived'
+          ? dnd5eSavingThrowMode(target, saveAbility)
+          : declaredMode
+        // The action manifest is declared before a concrete target is known.  A
+        // host-derived or creature-type-conditional save therefore reserves two
+        // d20 values for every target; normal-mode targets consume the first one.
+        const declaredDiceCount = savingThrow.rollMode === 'host-derived' || savingThrow.rollModeByCreatureType
+          ? 2
+          : mode === 'normal' ? 1 : 2
+        if (!supplied || supplied.values.length !== declaredDiceCount) return context.fail('invalid-dice')
+        const d20 = mode === 'advantage'
+          ? Math.max(...supplied.values)
+          : mode === 'disadvantage'
+            ? Math.min(...supplied.values)
+            : supplied.values[0]!
+        const modifier = target.savingThrowBonuses[saveAbility] ??
+          context.rules.abilityModifier(target.abilities[saveAbility])
+        const total = d20 + modifier
+        const success = total >= dc
+        if (success) successfulSaveTargetIds.add(target.id)
+        context.events.push({
+          type: 'saving-throw-resolved',
+          targetId: target.id,
+          ability: saveAbility,
+          d20,
+          modifier,
+          total,
+          dc,
+          success,
+        })
+      }
+    }
+    const operationCount = costs.length + (persistentCompanionMonsterId ? 1 : 0) + ability.effects.reduce((total, effect) => {
+      if (effect.kind === 'move') return total + declarativeEffectTargets(effect.target, context).length
       if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') return total + 1
       return total + ('target' in effect ? declarativeEffectTargets(effect.target, context).length : 0)
     }, 0)
@@ -354,7 +521,7 @@ export function createDeclarativeFeatureResolver(input: {
           !context.parentAttackDamageType
         ) return context.fail('invalid-plugin-action')
       }
-      if (effect.kind === 'standard-condition' && !declarativeDurationToCapability(effect.duration)) continue
+      if (effect.kind === 'standard-condition' && !declarativeDurationToCapability(effect.duration, actor, context.rules)) continue
       if (
         (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') &&
         declarativeFormulaValue(effect.amount, actor, context.rules) <= 0
@@ -369,8 +536,11 @@ export function createDeclarativeFeatureResolver(input: {
     for (const effect of ability.effects) {
       if (effect.kind === 'move') continue
       if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') {
+        if (effect.whenChoice && activityChoices[effect.whenChoice.choiceId] !== effect.whenChoice.optionId) continue
         const amount = declarativeFormulaValue(effect.amount, actor, context.rules)
-        const resourceId = namespacedDnd5ePluginId(input.pluginId, effect.resourceId)
+        const resourceId = effect.scope === 'core'
+          ? effect.resourceId
+          : namespacedDnd5ePluginId(input.pluginId, effect.resourceId)
         if (
           effect.kind === 'restore-resource' &&
           effect.whenEmpty === true &&
@@ -383,7 +553,15 @@ export function createDeclarativeFeatureResolver(input: {
         continue
       }
       if (!('target' in effect)) return context.fail('invalid-plugin-action')
+      if (effect.whenChoice && activityChoices[effect.whenChoice.choiceId] !== effect.whenChoice.optionId) continue
       for (const target of declarativeEffectTargets(effect.target, context)) {
+        const saved = successfulSaveTargetIds.has(target.id)
+        if (effect.when === 'save-success' && !saved) continue
+        if (effect.when === 'save-failure' && saved) continue
+        if (
+          effect.when == null && saved &&
+          !(effect.kind === 'damage' && savingThrow?.onSuccess === 'half')
+        ) continue
         if (effect.kind === 'damage' || effect.kind === 'healing') {
           const declaration = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
           if (!declaration || (declaration.kind !== 'damage' && declaration.kind !== 'healing')) {
@@ -405,7 +583,8 @@ export function createDeclarativeFeatureResolver(input: {
                 : declaration.damageType
             } else damageType = 'force'
             if (!damageType) return context.fail('invalid-plugin-action')
-            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier)), damageType)
+            const savingThrowMultiplier = saved && effect.when == null && savingThrow?.onSuccess === 'half' ? 0.5 : 1
+            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier * savingThrowMultiplier)), damageType)
           } else context.heal(target.id, Math.max(0, rolled))
         } else if (effect.kind === 'temporary-hit-points') {
           const roll = effect.rollId
@@ -423,8 +602,13 @@ export function createDeclarativeFeatureResolver(input: {
             : declarativeFormulaValue(effect.amount!, actor, context.rules)
           context.grantTemporaryHitPoints(target.id, Math.max(0, amount))
         } else if (effect.kind === 'standard-condition') {
-          const duration = declarativeDurationToCapability(effect.duration)
+          const duration = declarativeDurationToCapability(effect.duration, actor, context.rules, target)
           if (duration) context.applyStandardCondition(target.id, effect.condition, duration)
+        } else if (effect.kind === 'activity-effect') {
+          const definition = ability.activityEffects?.find((candidate) => candidate.id === effect.effectId)
+          if (!definition || !context.applyEffectDefinition(target.id, definition)) {
+            return context.fail('invalid-plugin-action')
+          }
         }
       }
     }
@@ -454,6 +638,26 @@ export function createDeclarativeFeatureResolver(input: {
         active: true,
       })
     }
+    if (ability.mechanic?.kind === 'marked-target' && primaryTarget) {
+      const roundsRemaining = ability.duration?.kind === 'fixed-rounds'
+        ? ability.duration.rounds
+        : 0
+      if (roundsRemaining < 1) return context.fail('invalid-plugin-action')
+      actor.classState.declarativeMarkedTargets = {
+        ...actor.classState.declarativeMarkedTargets,
+        [input.featureId]: {
+          targetId: primaryTarget.id,
+          roundsRemaining,
+        },
+      }
+      context.events.push({
+        type: 'class-state-changed',
+        actorId: actor.id,
+        targetId: primaryTarget.id,
+        stateKey: `marked-target:${input.featureId}`,
+        active: true,
+      })
+    }
     if (oncePerTurn) {
       actor.classState.declarativeUsedTurnKeys = {
         ...actor.classState.declarativeUsedTurnKeys,
@@ -471,6 +675,34 @@ export function createDeclarativeFeatureResolver(input: {
       trigger: ability.trigger.kind,
       targetIds: context.targets.map((target) => target.id),
     })
-    return context.succeed()
+    const succeeded = context.succeed()
+    if (!succeeded.ok) return succeeded
+    const movements = ability.effects.flatMap((effect, index) => effect.kind === 'move' &&
+      (!effect.whenChoice || activityChoices[effect.whenChoice.choiceId] === effect.whenChoice.optionId)
+      ? declarativeEffectTargets(effect.target, context).map((target) => ({
+          kind: 'move' as const,
+          operationId: `effect-${index}`,
+          targetId: target.id,
+          mode: effect.mode ?? 'push',
+          distanceFeet: effect.distanceFeet,
+          originIllumination: effect.originIllumination,
+          destinationIllumination: effect.destinationIllumination,
+          requiresLineOfSight: effect.requiresLineOfSight,
+          ignoresOpportunityAttacks: effect.ignoresOpportunityAttacks,
+        }))
+      : [])
+    const summons = persistentCompanionProfile ? [persistentCompanionProfile] : []
+    return (movements.length > 0 || summons.length > 0) && input.activity
+      ? {
+          ...succeeded,
+          activityDefinition: input.activity,
+          activityHandoffs: {
+            persistentAreas: [],
+            summons,
+            movements,
+            invocations: [],
+          },
+        }
+      : succeeded
   }
 }

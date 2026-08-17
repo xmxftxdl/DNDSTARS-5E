@@ -101,6 +101,52 @@ describe('房间语音 P0', () => {
   })
 })
 
+describe('玩家 AI 权限边界', () => {
+  it('只让持有有效房间凭证的玩家访问，并在服务器未配置时安全关闭', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '玩家 AI 鉴权测试',
+        displayName: 'AI DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'player-ai-dm-client',
+        activePlugins: [],
+      }),
+    })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as { roomId: string }
+    const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'AI 玩家',
+        clientId: 'player-ai-player-client',
+        requestedRole: 'player',
+        activePlugins: [],
+      }),
+    })
+    expect(joinedResponse.status).toBe(200)
+    const joined = await joinedResponse.json() as { member: { memberId: string; roomToken: string } }
+    const endpoint = `${offServer.base}/api/player-ai/capabilities?room=${created.roomId}`
+
+    expect((await fetch(endpoint)).status).toBe(403)
+    const configuredStatus = await fetch(endpoint, {
+      headers: {
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': joined.member.roomToken,
+      },
+    })
+    expect([200, 503]).toContain(configuredStatus.status)
+    const capability = await configuredStatus.json() as {
+      error?: string
+      tasks?: Record<string, unknown>
+    }
+    if (configuredStatus.status === 503) expect(capability).toEqual({ error: 'player-ai-unconfigured' })
+    else expect(Object.keys(capability.tasks ?? {}).sort()).toEqual(['characterExcel', 'characterPortrait'])
+  })
+})
+
 function putState(base: string, name: string, body: unknown, headers: Record<string, string> = {}) {
   return fetch(`${base}/api/state/${name}`, {
     method: 'PUT',
@@ -716,6 +762,7 @@ describe('地图几何的房间权限与安全投影', () => {
             dnd5eTokenStatusMarkers: [{
               schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm',
             }],
+            dnd5eSuppressedStatusMarkerIds: ['monster-trait:seen:fire-averse:1'],
           },
           { id: 'hidden', type: 'enemy', x: 90, y: 20 },
         ],
@@ -758,11 +805,17 @@ describe('地图几何的房间权限与安全投影', () => {
     const playerMapsResponse = await fetch(stateUrl('maps'), { headers: playerHeaders })
     expect(playerMapsResponse.status).toBe(200)
     const playerMaps = await playerMapsResponse.json() as {
-      maps: Array<{ tokens: Array<{ id: string; dnd5eTokenStatusMarkers?: unknown[] }> }>
+      maps: Array<{ tokens: Array<{
+        id: string
+        dnd5eTokenStatusMarkers?: unknown[]
+        dnd5eSuppressedStatusMarkerIds?: string[]
+      }> }>
     }
     expect(playerMaps.maps[0].tokens.map((token) => token.id)).toEqual(['hero', 'seen'])
     expect(playerMaps.maps[0].tokens.find((token) => token.id === 'seen')?.dnd5eTokenStatusMarkers)
       .toEqual([{ schemaVersion: 1, id: 'dm:burning', statusId: 'burning', source: 'dm' }])
+    expect(playerMaps.maps[0].tokens.find((token) => token.id === 'seen')?.dnd5eSuppressedStatusMarkerIds)
+      .toEqual(['monster-trait:seen:fire-averse:1'])
 
     const playerGeometryResponse = await fetch(stateUrl('map-geometry'), { headers: playerHeaders })
     expect(playerGeometryResponse.status).toBe(200)
@@ -916,9 +969,10 @@ describe('账号级战役与临时房间协议', () => {
         schemaVersion: 1,
         mode: 'running',
         events: [{
-          id: 'story-chapel', title: '调查白鹿小教堂', summary: '调查伪信。', details: '', timeLabel: '当日黄昏',
+          id: 'story-chapel', nodeKind: 'decision', title: '调查白鹿小教堂', summary: '调查伪信。', details: '', timeLabel: '当日黄昏',
           status: 'active', source: 'analysis-timeline', sourceEventIds: ['timeline-chapel'], sceneIds: ['scene-chapel'],
-          personIds: ['person-elinora'], clueIds: ['clue-forged-letter'], tags: ['白鹿小教堂'], graphPosition: { x: 420, y: 56 },
+          personIds: ['person-elinora'], clueIds: ['clue-forged-letter'], tags: ['白鹿小教堂'],
+          timelineOrder: 10, timelineKind: 'current', dmEditedFields: ['summary'], graphPosition: { x: 420, y: 56 },
         }, {
           id: 'story-survives', title: '艾莉诺拉继续调查', summary: '', details: '', timeLabel: '',
           status: 'planned', source: 'dm', sourceEventIds: [], sceneIds: [], personIds: ['person-elinora'], clueIds: [], tags: [], graphPosition: { x: 420, y: 318 },
@@ -926,9 +980,12 @@ describe('账号级战役与临时房间协议', () => {
         graphLinks: [{
           id: 'story-link-survives', fromEventId: 'story-chapel', toEventId: 'story-survives', label: '',
           condition: { kind: 'person-state', personId: 'person-elinora', state: 'alive' },
+          resolution: 'triggered',
           labelPosition: { x: 688, y: 248 },
         }],
         graphInitialized: true,
+        graphEditedByDm: true,
+        graphLinksClearedByDm: false,
         graphLayoutVersion: 4,
         timelineMarkers: [{ id: 'story-time-chapel', y: 224, label: '第 2 日 14:30', gameTimeWorldMinute: 2_310 }],
         personStates: [{ personId: 'person-elinora', status: 'active', note: '仍在调查', updatedBySessionId: 'session-chapel' }], clueStates: [], recaps: [],
@@ -2387,13 +2444,59 @@ describe('账号验证码注册与密码登录协议', () => {
       }),
     })
     expect(changedPasswordLogin.status).toBe(200)
-    expect(await changedPasswordLogin.json()).toMatchObject({
+    const changedPasswordSession = await changedPasswordLogin.json() as {
+      session: { accountId: string; sessionToken: string; displayName: string; avatar: string }
+    }
+    expect(changedPasswordSession).toMatchObject({
       session: {
         accountId: registered.session.accountId,
         displayName: '星痕主持人',
         avatar,
       },
     })
+
+    const registerPush = await fetch(`${offServer.base}/api/accounts/me/push-subscriptions`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': changedPasswordSession.session.sessionToken,
+      },
+      body: JSON.stringify({
+        deviceId: 'ios-test-device-1',
+        token: 'ExpoPushToken[abcdefghijklmnop123456]',
+        platform: 'ios',
+      }),
+    })
+    expect(registerPush.status).toBe(200)
+
+    const deleteWithoutConfirmation = await fetch(`${offServer.base}/api/accounts/me`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': changedPasswordSession.session.sessionToken,
+      },
+      body: JSON.stringify({ currentPassword: 'ChangedPassword42' }),
+    })
+    expect(deleteWithoutConfirmation.status).toBe(400)
+
+    const deleteAccount = await fetch(`${offServer.base}/api/accounts/me`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': changedPasswordSession.session.sessionToken,
+      },
+      body: JSON.stringify({ currentPassword: 'ChangedPassword42', confirmation: 'DELETE' }),
+    })
+    expect(deleteAccount.status).toBe(200)
+    expect(await deleteAccount.json()).toMatchObject({ deleted: true, accountId: registered.session.accountId })
+    expect((await fetch(`${offServer.base}/api/accounts/me`, {
+      headers: { 'X-Stars-Account-Token': changedPasswordSession.session.sessionToken },
+    })).status).toBe(401)
+    expect((await fetch(`${offServer.base}/api/accounts/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: '星痕玩家', password: 'ChangedPassword42', clientId: 'deleted-device' }),
+    })).status).toBe(401)
   }, 20_000)
 })
 

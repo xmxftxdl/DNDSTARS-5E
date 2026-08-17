@@ -152,7 +152,7 @@ export async function runCampaignPdfAnalysisJob(input: {
         taskKind: 'campaign-analysis',
         executionMode: 'local-runner',
         providerId: input.selection.providerId,
-        modelId: input.selection.modelId ?? '',
+        modelId: modelRouting.extraction.modelId,
         promptVersion: PDF_ANALYSIS_PROMPT_VERSION,
         idempotencyKey: `pdf-${crypto.randomUUID()}`,
         sourceAssets: sourceAssetsForFiles(input.files),

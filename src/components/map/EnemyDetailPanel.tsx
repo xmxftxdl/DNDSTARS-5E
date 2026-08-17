@@ -21,7 +21,11 @@ import {
 import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus, Wrench } from 'lucide-react'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import Dnd5eTokenStatusMarkerEditor from './Dnd5eTokenStatusMarkerEditor'
-import { dnd5eTokenStatusMarkerOptionsForTarget } from '../../rulesets/dnd5e/tokenStatusMarkers'
+import {
+  dnd5eMonsterRuntimeStatusCapabilities,
+  dnd5eTokenStatusMarkerOptionsForTarget,
+  type Dnd5eMonsterRuntimeStatusId,
+} from '../../rulesets/dnd5e/tokenStatusMarkers'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { generatedImageDataUrlToFile } from '../../lib/generatedImage'
@@ -111,6 +115,7 @@ export default function EnemyDetailPanel({
   canManageConditions = false,
   onConditionsChange,
   onMonsterBerserkChange,
+  onMonsterRuntimeStatusChange,
   conditionSourceOptions = [],
   canUseMonsterActions = false,
   monsterActionUsed = false,
@@ -136,7 +141,9 @@ export default function EnemyDetailPanel({
   removeToken?: (mapId: string, tokenId: string) => void
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
+  /** @deprecated Use onMonsterRuntimeStatusChange for all structured monster states. */
   onMonsterBerserkChange?: (active: boolean) => void
+  onMonsterRuntimeStatusChange?: (statusId: Dnd5eMonsterRuntimeStatusId, active: boolean) => void
   conditionSourceOptions?: readonly { id: string; label: string }[]
   canUseMonsterActions?: boolean
   monsterActionUsed?: boolean
@@ -182,9 +189,6 @@ export default function EnemyDetailPanel({
   const description = template?.description ?? token.playerVisibleEnemyDetail?.description
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
   const monsterCombatState = linked?.dnd5eCombatState ?? token.dnd5eCombatState
-  const supportsBerserk = monsterCombatState?.monsterBerserk === true ||
-    token.poolId?.endsWith(':flesh-golem') === true ||
-    stats?.traits.some((trait) => /狂暴|berserk/i.test(trait.name)) === true
   const authoritativeCurrentHp = linked?.currentHp ?? curHp
   const authoritativeMaxHp = linked?.maxHp ?? maxHp
   const [currentHpDraft, setCurrentHpDraft] = useState(String(authoritativeCurrentHp))
@@ -229,6 +233,14 @@ export default function EnemyDetailPanel({
   const canEdit = isDM && !!mapId && !!updateToken
   const standardConditions = linked?.conditions ?? token.dnd5eCombatState?.conditions ?? []
   const monsterDefinition = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
+  const monsterRuntimeStatuses = dnd5eMonsterRuntimeStatusCapabilities(monsterDefinition).map((status) => ({
+    ...status,
+    active: status.id === 'monster-berserk'
+      ? monsterCombatState?.monsterBerserk === true
+      : status.id === 'monster-damage-aversion'
+        ? monsterCombatState?.monsterDamageAversionActive === true
+        : (monsterCombatState?.monsterRegenerationSuppressedDamageTypes?.length ?? 0) > 0,
+  }))
   const defaultTargetPriority = monsterDefinition?.targetingPreference?.priority ?? 'nearest'
   const targetPriority = token.dnd5eTargetingPreference?.priority ?? defaultTargetPriority
   const hostileTargets = tokens.filter((candidate) =>
@@ -696,14 +708,10 @@ export default function EnemyDetailPanel({
               targetId={token.id}
               sourceOptions={conditionSourceOptions}
               conditionImmunities={stats?.conditionImmunities}
-              runtimeStatuses={supportsBerserk ? [{
-                id: 'monster-berserk',
-                label: '狂暴',
-                description: '按狂暴规则攻击最近的可见生物，直到规则效果或 DM 将其解除。',
-                glyph: '怒',
-                active: monsterCombatState?.monsterBerserk === true,
-              }] : []}
+              tacticalStatusOptions={tokenStatusMarkerOptions}
+              runtimeStatuses={monsterRuntimeStatuses}
               onRuntimeStatusChange={(statusId, active) => {
+                onMonsterRuntimeStatusChange?.(statusId, active)
                 if (statusId === 'monster-berserk') onMonsterBerserkChange?.(active)
               }}
               onChange={onConditionsChange}

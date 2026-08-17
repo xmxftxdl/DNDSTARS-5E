@@ -76,6 +76,68 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
+  it('uses an owned declarative projection as a Host-validated spell origin', () => {
+    const pluginId = 'local.test.spell-origin'
+    const subclassId = `${pluginId}:mirror-mage`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Spell origin fixture', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerDeclarativeSubclass({
+          schemaVersion: 1,
+          id: 'mirror-mage', classId: 'wizard', name: 'Mirror Mage', summary: 'Fixture.',
+          abilities: [{
+            schemaVersion: 1,
+            id: 'mirror-origin', name: 'Mirror Origin', description: 'Fixture.', level: 2,
+            trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+            mechanic: {
+              kind: 'persistent-projection', projectionId: 'mirror-origin', label: 'Mirror',
+              placementRangeFeet: 30, durationRounds: 10, concentration: true, spellOrigin: true,
+            },
+            effects: [], automation: 'full',
+          }],
+        })
+      },
+    })
+    try {
+      const wizard = character('projection-wizard', '法师', {
+        dnd5eClassLevels: { wizard: 5 },
+        dnd5eClassChoices: {
+          classes: {
+            wizard: {
+              subclass: subclassId,
+              selections: { 'spell-cantrips': ['fire-bolt'] },
+            },
+          },
+        },
+        classResources: { 'dnd5e-spell-slot-1': { current: 4, max: 4 } },
+      })
+      const enemy = token('projection-enemy', 'enemy', 1_525)
+      const input = fixture(wizard, 'fire-bolt', 0, enemy)
+      input.map.width = 2_000
+      input.map.dnd5ePluginAreas = [{
+        id: 'mirror-area', pluginId, featureId: `${subclassId}.mirror-origin`,
+        utilityProjectionId: 'mirror-origin', label: 'Mirror', color: '#a78bfa',
+        sourceCharacterId: wizard.id, sourceTokenId: input.action.actorTokenId,
+        cells: [{ col: 24, row: 0 }], anchorCell: { col: 24, row: 0 },
+        createdRound: 1, expiresAfterRound: 10,
+      }]
+      input.action.dnd5eSpellCast = {
+        spellId: 'fire-bolt', castingClassId: 'wizard', slotLevel: 0,
+        targetTokenId: enemy.id,
+      }
+      expect(prepareDnd5eSpellCast(input)).toMatchObject({ ok: false, reason: 'target-out-of-range' })
+      input.action.dnd5eSpellCast.spellOriginAreaId = 'mirror-area'
+      expect(prepareDnd5eSpellCast(input)).toMatchObject({ ok: true })
+      input.action.dnd5eSpellCast.spellOriginAreaId = 'forged-area'
+      expect(prepareDnd5eSpellCast(input)).toMatchObject({ ok: false, reason: 'invalid-action' })
+    } finally {
+      dispose()
+    }
+  })
+
   it('rejects actively submitted reaction spells so only their trigger window can cast them', () => {
     const wizard = character('reaction-wizard', '法师', {
       dnd5eClassLevels: { wizard: 5 },
@@ -173,6 +235,38 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     } finally {
       dispose()
     }
+  })
+
+  it('casts a build-granted cantrip without a class while still enforcing ordinary components', () => {
+    const initiate = character('initiate', '战士', {
+      classResources: {},
+      dnd5eContentChoices: {
+        'local.test:magic-initiate': {
+          schemaVersion: 1,
+          contentId: 'local.test:magic-initiate',
+          selections: {},
+          resolvedGrants: [{ kind: 'spell', spellId: 'fire-bolt', mode: 'cantrip', ability: 'int' }],
+        },
+      },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(initiate, 'fire-bolt', 0, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'fire-bolt', slotLevel: 0, racialInnate: true,
+      targetTokenId: enemy.id, targetTokenIds: [enemy.id],
+    }
+    input.characters[0] = { ...initiate, conditions: ['silenced'] }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'verbal-component-unavailable' })
+
+    input.characters[0] = initiate
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      castingClassId: undefined,
+      racialInnate: true,
+      spellcastingAbility: 'int',
+    })
   })
 
   it('casts Scorching Ray from the authoritative Circlet of Blasting without preparing or spending a class spell slot', () => {
@@ -277,6 +371,34 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       projectileTargetIds: [enemy.id, enemy.id, enemy.id],
     }
     expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'item-spell-unavailable' })
+  })
+
+  it('enforces a concrete spell scroll class-list gate from authoritative item data', () => {
+    const grantScroll = (owner: Character) => applyDnd5eInventoryMutation([owner], {
+      type: 'grant', characterId: owner.id,
+      templateId: 'srd-5.1:spell-scroll:fireball', quantity: 1,
+    }).characters[0]
+    const fighter = grantScroll(character('scroll-fighter', '战士'))
+    const wizard = grantScroll(character('scroll-wizard', '法师', {
+      dnd5eClassLevels: { wizard: 5 },
+    }))
+    const scrollInstanceId = (owner: Character) => normalizeDnd5eInventory(owner).entries.find(
+      (entry) => entry.templateId === 'srd-5.1:spell-scroll:fireball',
+    )!.instanceId
+    const enemy = token('scroll-target', 'enemy', 125)
+    const attempt = (owner: Character) => {
+      const input = fixture(owner, 'fireball', 3, enemy)
+      input.action.dnd5eSpellCast = {
+        spellId: 'fireball', slotLevel: 3,
+        itemInstanceId: scrollInstanceId(owner),
+        targetTokenId: enemy.id, targetTokenIds: [enemy.id],
+        areaTargetCell: { col: 2, row: 0 },
+      }
+      return prepareDnd5eSpellCast(input)
+    }
+
+    expect(attempt(fighter)).toEqual({ ok: false, reason: 'item-spell-unavailable' })
+    expect(attempt(wizard).ok).toBe(true)
   })
 
   it('casts an explicitly selected upcast Magic Missile action and spends the shared wand charges', () => {
@@ -1694,16 +1816,24 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     expect(casterEnded.ok).toBe(true)
     if (!casterEnded.ok) return
-    const jumped = resolveDnd5eHeadlessAction(casterEnded.state, {
+    const approached = resolveDnd5eHeadlessAction(casterEnded.state, {
       type: 'move',
       actorId: allyToken.id,
-      to: { x: 20, y: 0 },
+      to: { x: 10, y: 0 },
+      distance: 10,
+    })
+    expect(approached.ok).toBe(true)
+    if (!approached.ok) return
+    const jumped = resolveDnd5eHeadlessAction(approached.state, {
+      type: 'move',
+      actorId: allyToken.id,
+      to: { x: 30, y: 0 },
       distance: 20,
       traversalMode: 'long-jump-running',
     })
     expect(jumped.ok).toBe(true)
     if (!jumped.ok) return
-    expect(jumped.state.combatants[allyToken.id].turn.movementRemaining).toBe(10)
+    expect(jumped.state.combatants[allyToken.id].turn.movementRemaining).toBe(0)
   })
 
   it('casts Shillelagh only on the caster holding a club and stores its authoritative attack choice', () => {
@@ -4864,6 +4994,60 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const enemy = token('enemy', 'enemy', 125)
     expect(prepareDnd5eSpellCast(fixture(wizard, 'magic-missile', 1, enemy))).toEqual({
+      ok: false,
+      reason: 'verbal-component-unavailable',
+    })
+  })
+
+  it('uses an imported spell-attack range multiplier without extending non-attack spells', () => {
+    const pluginId = 'local.test.spell-sniper-feat'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Spell Sniper Feat Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'spell-sniper', name: 'Spell Sniper', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'partial', automationReasons: ['Cantrip choice remains manual.'],
+          staticModifiers: { spellAttackRangeMultiplier: 2, ignoreSpellAttackCoverBonus: true },
+        })
+      },
+    })
+    try {
+      const wizard = character('wizard', '法师', {
+        dnd5eFeatIds: [`${pluginId}:spell-sniper`],
+        dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } } } },
+      })
+      const enemy = token('enemy', 'enemy', 1_525)
+      const input = fixture(wizard, 'fire-bolt', 0, enemy)
+      input.map.width = 2_000
+      expect(prepareDnd5eSpellCast(input).ok).toBe(true)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('projects Silence from the map into the authoritative verbal-component check', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: {
+        classes: { wizard: { selections: { 'spell-prepared': ['magic-missile'] } } },
+      },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 4 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(wizard, 'magic-missile', 1, enemy)
+    input.map.dnd5ePluginAreas = [{
+      id: 'silence-area', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:silence',
+      sourceKind: 'core-spell', coreSpellId: 'silence', label: '沉默术', color: '#818cf8',
+      sourceCharacterId: 'other-caster', sourceTokenId: 'other-token',
+      cells: [{ col: 0, row: 0 }], anchorCell: { col: 0, row: 0 }, anchorMode: 'fixed',
+      createdRound: 1, expiresAfterRound: 100,
+      occupantModifiers: {
+        containment: 'fully-contained', preventsVerbalComponents: true, damageImmunities: ['thunder'],
+      },
+    }]
+    expect(prepareDnd5eSpellCast(input)).toEqual({
       ok: false,
       reason: 'verbal-component-unavailable',
     })

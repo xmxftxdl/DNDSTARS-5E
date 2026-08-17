@@ -83,6 +83,56 @@ describe('core spell persistent area declarations', () => {
     expect(getDnd5eCoreSpellAreaDeclaration('blade-barrier')?.visual?.preset).toBe('blade-barrier')
   })
 
+  it('declares the deterministic fog, silence, hazard and wall primitives without claiming narrative automation', () => {
+    expect(getDnd5eCoreSpellAreaDeclaration('fog-cloud')).toMatchObject({
+      obscuration: { kind: 'heavy' },
+      vertical: { mode: 'volume', heightFeet: 40 },
+    })
+    expect(getDnd5eCoreSpellAreaDeclaration('web')).toMatchObject({
+      movementCostMultiplier: 2,
+      obscuration: { kind: 'light' },
+      triggers: expect.arrayContaining([
+        expect.objectContaining({ timing: 'on-enter', condition: expect.objectContaining({ condition: 'restrained' }) }),
+      ]),
+    })
+    expect(getDnd5eCoreSpellAreaDeclaration('silence')).toMatchObject({
+      occupantModifiers: {
+        containment: 'fully-contained',
+        preventsVerbalComponents: true,
+        damageImmunities: ['thunder'],
+      },
+    })
+    expect(getDnd5eCoreSpellAreaDeclaration('stinking-cloud')).toMatchObject({
+      triggers: [expect.objectContaining({ consumeActionOnFailedSave: true })],
+    })
+    const stinkingCloud = getDnd5eCoreSpellAreaDeclaration('stinking-cloud')
+    expect(stinkingCloud).toBeDefined()
+    if (stinkingCloud) {
+      expect(createDnd5eCoreSpellArea({
+        declaration: stinkingCloud,
+        actionId: 'stinking-cloud-cast',
+        sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token',
+        slotLevel: 3,
+        sourceSaveDc: 15,
+        round: 1,
+        cells: [{ col: 2, row: 2 }],
+        anchorCell: { col: 2, row: 2 },
+      }).triggers?.[0]).toMatchObject({
+        consumeActionOnFailedSave: true,
+        savingThrow: { automaticSuccessForDamageImmunity: 'poison' },
+      })
+    }
+    expect(getDnd5eCoreSpellAreaDeclaration('wall-of-force')).toMatchObject({
+      blocking: { movement: true, lineOfEffect: true },
+    })
+    for (const spellId of ['wall-of-stone', 'wall-of-ice']) {
+      expect(getDnd5eCoreSpellAreaDeclaration(spellId)).toMatchObject({
+        blocking: { movement: true, vision: true, lineOfEffect: true },
+      })
+    }
+  })
+
   it('captures fixed volume elevation and preserves anchored volume offsets in the runtime snapshot', () => {
     const moonbeam = getDnd5eCoreSpellAreaDeclaration('moonbeam')
     const guardians = getDnd5eCoreSpellAreaDeclaration('spirit-guardians')
@@ -291,6 +341,24 @@ describe('core spell persistent area declarations', () => {
     }
     expect(moveDnd5eCoreSpellArea({
       map: placed, areaId: area.id, sourceTokenId: 'caster-token', targetCell: { col: 20, row: 20 },
+    })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
+  })
+
+  it('moves a generic feature projection and enforces its source tether', () => {
+    const base = map()
+    const projection = {
+      id: 'activity-area:projection', pluginId: 'local.test', featureId: 'feature:projection',
+      sourceKind: 'plugin-feature' as const, utilityProjectionId: 'mirror', label: 'Mirror', color: '#a78bfa',
+      sourceCharacterId: 'caster', sourceTokenId: 'caster-token', cells: [{ col: 2, row: 1 }],
+      createdRound: 1, expiresAfterRound: 10, anchorMode: 'fixed' as const, anchorCell: { col: 2, row: 1 },
+      movement: { economy: 'bonus-action' as const, maximumFeet: 30, maximumDistanceFromSourceFeet: 10 },
+    }
+    const placed = { ...base, dnd5ePluginAreas: [projection] }
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, areaId: projection.id, sourceTokenId: 'caster-token', targetCell: { col: 3, row: 1 },
+    })).toMatchObject({ ok: true, area: { utilityProjectionId: 'mirror', anchorCell: { col: 3, row: 1 } } })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, areaId: projection.id, sourceTokenId: 'caster-token', targetCell: { col: 4, row: 1 },
     })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
   })
 

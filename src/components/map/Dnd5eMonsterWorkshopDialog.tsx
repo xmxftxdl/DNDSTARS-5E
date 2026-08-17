@@ -95,7 +95,8 @@ const MECHANIC_EFFECTS = [
   ['damage-replacement', '替换／减免本次伤害'],
   ['roll-modifier', '获得加值／优势／劣势'], ['attack', '发动一次攻击'],
   ['action-grant', '授予动作资源'], ['equipment-modifier', '修改装备'],
-  ['standard-condition', '施加标准状态'], ['remove-standard-condition', '移除标准状态'],
+  ['standard-condition', '施加标准状态'], ['tactical-status', '触发 Token 状态'],
+  ['remove-standard-condition', '移除标准状态'],
   ['summon', '召唤生物'], ['area-attack', '范围攻击'],
 ] as const
 
@@ -129,7 +130,9 @@ function WorkshopTokenMarkerPreview({ markerId }: { markerId: Dnd5eTokenStatusMa
           boxShadow: `inset 0 0 0 1px ${style.stroke}`,
         }}
       >
-        {style.glyph}
+        {style.icon
+          ? <img src={style.icon} alt="" className="h-3.5 w-3.5" />
+          : style.glyph}
       </span>
       <span>
         Token 状态标记：结算成功后自动显示「{definition.label}」；规则状态与 DM 手动地图标记分开管理。
@@ -1207,7 +1210,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-semibold text-sky-100">特殊 Token 状态能力</p>
-                    <p className="mt-0.5 text-[10px] leading-4 text-slate-500">声明该怪物能让谁获得特殊地图标记。基础的中毒、倒地等标准状态无需声明。</p>
+                    <p className="mt-0.5 text-[10px] leading-4 text-slate-500">建立怪物的状态能力目录，并约束只能给予自身或其他目标。可选择纯地图标记，或可被 Headless／DM 触发的 ActiveEffect。</p>
                   </div>
                   <button
                     type="button"
@@ -1222,6 +1225,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                       patchDraft('tokenStatusMarkerGrants', [...draft.tokenStatusMarkerGrants, {
                         statusId: definition.id,
                         target: 'other',
+                        application: 'marker',
                       }])
                     }}
                     className="shrink-0 text-xs text-sky-200 disabled:cursor-not-allowed disabled:text-slate-600"
@@ -1232,7 +1236,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                 {draft.tokenStatusMarkerGrants.length > 0 ? (
                   <div className="mt-2 space-y-2">
                     {draft.tokenStatusMarkerGrants.map((grant, index) => (
-                      <div key={`${grant.statusId}:${grant.target}:${index}`} className="grid grid-cols-[minmax(0,1fr)_120px_auto] gap-2">
+                      <div key={`${grant.statusId}:${grant.target}:${grant.application ?? 'marker'}:${index}`} className="grid grid-cols-[minmax(0,1fr)_120px_130px_auto] gap-2">
                         <select
                           aria-label={`特殊 Token 标记 ${index + 1}`}
                           value={grant.statusId}
@@ -1260,6 +1264,16 @@ export default function Dnd5eMonsterWorkshopDialog({
                         >
                           <option value="self">仅给予自身</option>
                           <option value="other">给予其他目标</option>
+                        </select>
+                        <select
+                          aria-label={`特殊 Token 标记用途 ${index + 1}`}
+                          value={grant.application ?? 'marker'}
+                          onChange={(event) => patchDraft('tokenStatusMarkerGrants', draft.tokenStatusMarkerGrants.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, application: event.target.value as NonNullable<typeof entry.application> } : entry))}
+                          className={inputClass()}
+                        >
+                          <option value="marker">仅地图标记</option>
+                          <option value="active-effect">可触发状态</option>
                         </select>
                         <button type="button" aria-label="移除特殊 Token 标记能力" onClick={() => patchDraft('tokenStatusMarkerGrants', draft.tokenStatusMarkerGrants.filter((_, entryIndex) => entryIndex !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button>
                       </div>
@@ -1444,8 +1458,8 @@ export default function Dnd5eMonsterWorkshopDialog({
                     ...(mechanic.trigger === 'phase-transition' ? ['阶段即时切换仍需要阈值穿越事务'] : []),
                     ...(mechanic.effectKind === 'summon' ? ['需要 DM 指定合法召唤落点'] : []),
                     ...(mechanic.effectKind === 'area-attack' ? ['需要 DM 确认方向、范围格与目标'] : []),
-                    ...(['damage', 'damage-replacement', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.effectTarget === 'trigger-target' && !['after-hit', 'after-move-hit', 'after-miss', 'when-hit', 'target-killed', 'after-dealt-damage'].includes(mechanic.trigger) ? ['该触发时机没有可绑定的目标'] : []),
-                    ...(['damage', 'damage-replacement', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.effectTarget === 'damage-source' && !['before-damaged', 'after-damaged'].includes(mechanic.trigger) ? ['伤害来源只存在于受到伤害前后的事件'] : []),
+                    ...(['damage', 'damage-replacement', 'standard-condition', 'tactical-status', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.effectTarget === 'trigger-target' && !['after-hit', 'after-move-hit', 'after-miss', 'when-hit', 'target-killed', 'after-dealt-damage'].includes(mechanic.trigger) ? ['该触发时机没有可绑定的目标'] : []),
+                    ...(['damage', 'damage-replacement', 'standard-condition', 'tactical-status', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.effectTarget === 'damage-source' && !['before-damaged', 'after-damaged'].includes(mechanic.trigger) ? ['伤害来源只存在于受到伤害前后的事件'] : []),
                     ...preservedCompatibilityReasons,
                   ]
                   const validationErrors = [
@@ -1464,7 +1478,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                     ...(mechanic.effectKind === 'damage-replacement' && ['reduce-by', 'set-to'].includes(mechanic.damageReplacementOperation) && (!Number.isFinite(mechanic.damageReplacementAmount) || mechanic.damageReplacementAmount < 0) ? ['伤害替换点数不能小于 0'] : []),
                     ...((['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) || (mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'dice')) && !/^\d+d\d+(?:\s*[+\-−]\s*\d+)?$/i.test(mechanic.healingDice) ? ['效果骰格式应为 2d6 或 1d8+2'] : []),
                     ...(mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'fixed' && (!Number.isFinite(mechanic.attackFixedDamage) || mechanic.attackFixedDamage < 0) ? ['固定伤害不能小于 0'] : []),
-                    ...(['standard-condition', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.durationKind === 'rounds' && mechanic.durationRounds < 1 ? ['持续轮数至少为 1'] : []),
+                    ...(['standard-condition', 'tactical-status', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.durationKind === 'rounds' && mechanic.durationRounds < 1 ? ['持续轮数至少为 1'] : []),
                     ...(mechanic.effectKind === 'equipment-modifier' && mechanic.equipmentModifierOperation === 'magic-weapon-bonus' && (mechanic.equipmentModifierBonus < 1 || mechanic.equipmentModifierBonus > 3) ? ['魔法武器加值必须为 +1、+2 或 +3'] : []),
                     ...(mechanic.effectKind === 'summon' && !/^(?:srd-5\.1|room-monster):[a-z0-9][a-z0-9-]{0,95}$/.test(mechanic.summonMonsterId) ? ['召唤怪物 ID 必须使用合法命名空间'] : []),
                     ...(mechanic.effectKind === 'summon' && (mechanic.summonCount < 1 || mechanic.summonCount > 20 || mechanic.summonDurationRounds < 1) ? ['召唤数量或持续轮数无效'] : []),
@@ -1495,7 +1509,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                       {mechanic.effectKind === 'attack' && <label className="text-xs text-slate-400">伤害填写方式<select value={mechanic.attackDamageMode} onChange={(event) => update({ attackDamageMode: event.target.value as typeof mechanic.attackDamageMode })} className={`mt-1 ${inputClass()}`}><option value="dice">伤害骰</option><option value="fixed">固定点数</option></select></label>}
                       {(['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) || (mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'dice')) && <label className="text-xs text-slate-400">{mechanic.effectKind === 'attack' ? '攻击伤害骰' : '效果骰'}<input value={mechanic.healingDice} onChange={(event) => update({ healingDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>}
                       {mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'fixed' && <label className="text-xs text-slate-400">固定伤害点数<input type="number" min={0} value={mechanic.attackFixedDamage} onChange={(event) => update({ attackFixedDamage: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
-                      {['damage', 'damage-replacement', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">效果目标<select value={mechanic.effectTarget} onChange={(event) => update({ effectTarget: event.target.value as typeof mechanic.effectTarget })} className={`mt-1 ${inputClass()}`}><option value="selected-subject">前一步监听到的对象</option><option value="self">怪物自身</option><option value="trigger-target">命中／击杀目标</option><option value="damage-source">伤害来源</option></select></label>}
+                      {['damage', 'damage-replacement', 'standard-condition', 'tactical-status', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">效果目标<select value={mechanic.effectTarget} onChange={(event) => update({ effectTarget: event.target.value as typeof mechanic.effectTarget })} className={`mt-1 ${inputClass()}`}><option value="selected-subject">前一步监听到的对象</option><option value="self">怪物自身</option><option value="trigger-target">命中／击杀目标</option><option value="damage-source">伤害来源</option></select></label>}
                       {['damage', 'area-attack', 'attack'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">伤害类型<select value={mechanic.damageType} onChange={(event) => update({ damageType: event.target.value as typeof mechanic.damageType })} className={`mt-1 ${inputClass()}`}>{mechanic.effectKind === 'damage' && <option value="inherit-trigger">继承本次伤害类型</option>}{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>}
                       {mechanic.effectKind === 'roll-modifier' && <><label className="text-xs text-slate-400">修正投骰<select value={mechanic.modifierRoll} onChange={(event) => update({ modifierRoll: event.target.value as typeof mechanic.modifierRoll })} className={`mt-1 ${inputClass()}`}><option value="attack">攻击投骰</option><option value="damage">伤害投骰</option><option value="saving-throw">豁免检定</option></select></label><label className="text-xs text-slate-400">修正方式<select value={mechanic.modifierMode} onChange={(event) => update({ modifierMode: event.target.value as typeof mechanic.modifierMode })} className={`mt-1 ${inputClass()}`}><option value="bonus">数值加值</option><option value="advantage">优势</option><option value="disadvantage">劣势</option></select></label>{mechanic.modifierMode === 'bonus' && <label className="text-xs text-slate-400">加值<input type="number" value={mechanic.modifierBonus} onChange={(event) => update({ modifierBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
                       {mechanic.effectKind === 'attack' && <><label className="text-xs text-slate-400">攻击加值<input type="number" value={mechanic.attackToHit} onChange={(event) => update({ attackToHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">动作资源<select value={mechanic.attackEconomy} onChange={(event) => update({ attackEconomy: event.target.value as typeof mechanic.attackEconomy })} className={`mt-1 ${inputClass()}`}><option value="reaction">消耗反应</option><option value="none">不消耗动作资源</option></select></label></>}
@@ -1504,6 +1518,7 @@ export default function Dnd5eMonsterWorkshopDialog({
                       {mechanic.effectKind === 'equipment-modifier' && <><label className="text-xs text-slate-400">装备类型<select value={mechanic.equipmentModifierEquipment} onChange={(event) => { const equipment = event.target.value as typeof mechanic.equipmentModifierEquipment; update({ equipmentModifierEquipment: equipment, equipmentModifierOperation: equipment === 'armor' ? 'armor-class-bonus' : 'magic-weapon-bonus' }) }} className={`mt-1 ${inputClass()}`}><option value="armor">护甲</option><option value="main-weapon">主手武器</option></select></label><label className="text-xs text-slate-400">修改效果<select value={mechanic.equipmentModifierOperation} onChange={(event) => update({ equipmentModifierOperation: event.target.value as typeof mechanic.equipmentModifierOperation })} className={`mt-1 ${inputClass()}`}><option value={mechanic.equipmentModifierEquipment === 'armor' ? 'armor-class-bonus' : 'magic-weapon-bonus'}>{mechanic.equipmentModifierEquipment === 'armor' ? 'AC 加值' : '魔法武器命中／伤害加值'}</option></select></label><label className="text-xs text-slate-400">加值<input type="number" min={mechanic.equipmentModifierEquipment === 'main-weapon' ? 1 : -20} max={mechanic.equipmentModifierEquipment === 'main-weapon' ? 3 : 20} value={mechanic.equipmentModifierBonus} onChange={(event) => update({ equipmentModifierBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>{mechanic.equipmentModifierEquipment === 'main-weapon' && <label className="text-xs text-slate-400">稳定装备 ID（可选）<input value={mechanic.equipmentModifierEquipmentId} onChange={(event) => update({ equipmentModifierEquipmentId: event.target.value })} placeholder="默认当前主手武器" className={`mt-1 ${inputClass()}`} /></label>}<label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
                       {mechanic.effectKind === 'standard-condition' && <><label className="text-xs text-slate-400">标准状态<select value={mechanic.condition} onChange={(event) => update({ condition: event.target.value as typeof mechanic.condition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label><label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
                       {mechanic.effectKind === 'standard-condition' && <WorkshopTokenMarkerPreview markerId={mechanic.condition} />}
+                      {mechanic.effectKind === 'tactical-status' && <><label className="text-xs text-slate-400">Token 状态<select value={mechanic.statusMarkerId} onChange={(event) => update({ statusMarkerId: event.target.value as typeof mechanic.statusMarkerId })} className={`mt-1 ${inputClass()}`}>{DND5E_TACTICAL_TOKEN_STATUS_MARKER_DEFINITIONS.map((definition) => <option key={definition.id} value={definition.id}>{definition.label}</option>)}</select></label><label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}<WorkshopTokenMarkerPreview markerId={mechanic.statusMarkerId} /></>}
                       {mechanic.effectKind === 'remove-standard-condition' && <label className="text-xs text-slate-400">移除状态<select value={mechanic.condition} onChange={(event) => update({ condition: event.target.value as typeof mechanic.condition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label>}
                       {mechanic.effectKind === 'summon' && <><label className="text-xs text-slate-400">怪物 ID<input value={mechanic.summonMonsterId} onChange={(event) => update({ summonMonsterId: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">数量<input type="number" min={1} max={20} value={mechanic.summonCount} onChange={(event) => update({ summonCount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">持续轮数<input type="number" min={1} value={mechanic.summonDurationRounds} onChange={(event) => update({ summonDurationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}
                       {mechanic.effectKind === 'area-attack' && <><label className="text-xs text-slate-400">范围形状<select value={mechanic.areaShape} onChange={(event) => update({ areaShape: event.target.value as typeof mechanic.areaShape })} className={`mt-1 ${inputClass()}`}><option value="circle">圆形</option><option value="cone">锥形</option><option value="line">线形</option></select></label><label className="text-xs text-slate-400">施放距离<input type="number" min={0} value={mechanic.areaRangeFeet} onChange={(event) => update({ areaRangeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">范围尺寸<input type="number" min={5} value={mechanic.areaSizeFeet} onChange={(event) => update({ areaSizeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}

@@ -1,6 +1,7 @@
 import type { Character } from '../../../types/character'
 import type { Dnd5eCombatant } from '../headlessCombatEngine'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
+import { dnd5eCharacterBuildSpellGrantsV1 } from '../buildChoices'
 
 function identityCandidates(packageId: string, id: string): ReadonlySet<string> {
   return new Set([id, `${packageId}:${id}`])
@@ -46,7 +47,9 @@ export function dnd5eCombatantEntitledToActivityV1(input: {
       ...Object.values(input.combatant.classSelectionsByClass ?? {}).flatMap((selections) =>
         Object.values(selections ?? {}).flat()),
     ]
-    return includesIdentity(selectedSpells, candidates)
+    if (includesIdentity(selectedSpells, candidates)) return true
+    return dnd5eCharacterBuildSpellGrantsV1(input.character ?? {}).some((grant) =>
+      candidates.has(grant.spellId))
   }
   if (source.kind === 'item') {
     return input.character?.dnd5eInventory?.entries.some((entry) => candidates.has(entry.templateId)) === true

@@ -62,8 +62,19 @@ const AMMUNITION_KIND_BY_WEAPON_ID: Readonly<Record<string, Dnd5eAmmunitionKind>
 function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
   const focusText = equipmentSpellcastingFocusText(item)
-  if (!rules) return `该装备不替换基础武器或护甲公式。${equipmentEffectsText(item) || '具体规则由当前规则包或 DM 裁定。'}${focusText}`
-  if (item.id === 'dnd5e-net') return '射程 5/15 尺；命中大型或更小生物时使其受束缚。挣脱、破坏捕网以及每次只能进行一次捕网攻击由 Headless/DM 按 SRD 5.1 裁定。'
+  if (!rules) {
+    const effects = equipmentEffectsText(item)
+    return effects
+      ? `该装备不会替换基础武器伤害或护甲公式。${effects}${focusText}`
+      : `该装备占用${equipmentSlotLabel(item.slot)}栏位，但没有声明攻击、护甲或数值加成。${focusText || '装备后仅作为所穿戴或持用的物件记录。'}`
+  }
+  if (item.id === 'dnd5e-net') {
+    return [
+      '军用远程武器，射程 5/15 尺。投掷：5 尺以内属于普通射程，5–15 尺属于远射程，超过 15 尺无法攻击。特殊：使用捕网进行攻击时，无论你通常能进行多少次攻击，该动作、附赠动作或反应中都只能进行一次捕网攻击。',
+      '命中大型或更小且并非无定形的生物时，目标陷入束缚；捕网不会造成伤害。被束缚的生物或其触及范围内的另一生物可以使用一个动作进行 DC 10 力量检定，成功便挣脱。',
+      '捕网的 AC 为 10；对其造成 5 点挥砍伤害也会摧毁捕网并释放目标，超出的伤害不会传递给目标。由于通常在 5 尺内进行远程攻击会具有劣势，而超过 5 尺又属于远射程，捕网攻击通常会具有劣势。',
+    ].join('\n\n')
+  }
   if (rules.kind === 'shield') return `盾牌。持用时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}${focusText}`
   if (rules.kind === 'armor') {
     const category = rules.category === 'light' ? '轻甲' : rules.category === 'medium' ? '中甲' : '重甲'
@@ -72,14 +83,53 @@ function equipmentRulesText(item: EquipmentItem): string {
       : rules.dexterityBonus === 'max-2'
         ? '加上至多 +2 的敏捷调整值'
         : '不加敏捷调整值'
-    return `${category}。护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}${focusText}`
+    return `${category}。穿戴并生效时，你的护甲等级为 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}${focusText}`
   }
   const category = rules.category === 'simple' ? '简易武器' : '军用武器'
   const range = rules.mode === 'ranged' && rules.rangeFeet
     ? `，射程 ${rules.rangeFeet.normal}/${rules.rangeFeet.long} 尺`
     : `，触及 ${rules.reachFeet ?? 5} 尺`
-  const properties = rules.properties?.length ? `；属性：${rules.properties.join('、')}` : ''
-  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}${focusText}`
+  const properties = rules.properties?.length
+    ? `\n\n武器属性：\n${rules.properties.map((property) =>
+        `• ${weaponPropertyExplanation(item, property)}`,
+      ).join('\n')}`
+    : ''
+  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}。${equipmentEffectsText(item)}${focusText}${properties}`
+}
+
+function weaponPropertyExplanation(item: EquipmentItem, property: string): string {
+  const rules = item.dnd5e
+  if (!rules || rules.kind !== 'weapon') return property
+  if (property.includes('多才多艺')) {
+    const versatileDie = property.match(/1d\d+/i)?.[0] ?? `${rules.damage.count}d${rules.damage.sides}`
+    return `多才多艺：单手攻击使用 ${rules.damage.count}d${rules.damage.sides} 伤害骰；双手攻击改用 ${versatileDie}。系统会根据副手占用、强制单手和擒抱状态自动选择。`
+  }
+  if (property.startsWith('投掷')) {
+    const range = property.match(/(\d+)\/(\d+)/)
+    const rangeText = range ? `${range[1]} 尺以内为普通射程，${range[1]}–${range[2]} 尺为远射程` : '使用装备列出的普通与远射程'
+    return `投掷：可以把该武器投出进行远程武器攻击，并继续使用近战攻击所用的属性调整值计算命中和伤害；${rangeText}，在远射程攻击具有劣势，超过远射程无法攻击。`
+  }
+  if (property === '灵巧') return '灵巧：每次攻击时可选择力量或敏捷调整值计算命中与伤害，但同一次攻击的两项掷骰必须使用同一属性。'
+  if (property === '轻型') return '轻型：适合双武器战斗；当另一只手也持有轻型近战武器时，可按双武器战斗规则用附赠动作进行副手攻击。'
+  if (property === '重型') return '重型：小型或微型生物使用该武器攻击时具有劣势，因为其尺寸和重量难以有效操控。'
+  if (property === '双手') return '双手：进行攻击时必须用双手持用；仅仅拿着或携带该武器时不要求两只手持续占用。'
+  if (property === '触及') return '触及：使用该武器攻击时，触及范围增加 5 尺；使用它发动借机攻击时也采用增加后的触及范围。'
+  if (property === '弹药') return '弹药：每次攻击必须消耗一枚与武器匹配的弹药；弹药从箭袋、弩矢盒等容器中取出属于攻击的一部分。战斗结束后花费 1 分钟搜索战场，可以回收已用弹药的一半。'
+  if (property === '装填') return '装填：由于装填所需时间，无论角色通常能进行多少次攻击，每次使用一个动作、附赠动作或反应射击该武器时都只能发射一枚弹药。'
+  if (property === '特殊' && item.id === 'dnd5e-lance') return '特殊：当目标位于 5 尺内时，骑枪攻击具有劣势；未骑乘时使用骑枪需要双手，骑乘时可以单手使用。'
+  if (property === '特殊') return '特殊：该武器具有独立规则；具体限制已在本物品的规则正文中完整列出。'
+  return `${property}：该属性的数值和使用条件已由当前装备定义记录。`
+}
+
+function equipmentSlotLabel(slot: EquipmentSlot): string {
+  if (slot === 'mainWeapon') return '主手'
+  if (slot === 'offHand') return '副手'
+  if (slot === 'armor') return '护甲'
+  if (slot === 'helmet') return '头盔'
+  if (slot === 'shoes') return '鞋靴'
+  if (slot === 'ring' || slot === 'ring2') return '戒指'
+  if (slot === 'belt') return '腰带'
+  return '项链'
 }
 
 function equipmentSpellcastingFocusText(item: EquipmentItem): string {
@@ -163,18 +213,15 @@ const EQUIPMENT_DETAILS: Readonly<Record<string, { englishName: string; weightLb
 export const DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] =
   DND5E_SRD_EQUIPMENT_CATALOG.map((equipment) => {
     const detail = EQUIPMENT_DETAILS[equipment.id]
+    const rulesText = equipmentRulesText(equipment)
     return {
       id: `srd-5.1:equipment:${equipment.id}`,
       name: equipment.name,
       englishName: detail?.englishName,
       category: 'equipment',
       icon: equipmentIcon(equipment),
-      description: equipment.dnd5e?.kind === 'weapon'
-        ? '可装备的 SRD 5.1 武器。'
-        : equipment.dnd5e?.kind === 'shield'
-          ? '持用后提高护甲等级的防具。'
-          : '决定基础护甲等级的防具。',
-      rulesText: equipmentRulesText(equipment),
+      description: rulesText,
+      rulesText,
       weightLb: detail?.weightLb,
       cost: detail ? { amount: detail.amount, currency: detail.currency } : undefined,
       stackable: false,
@@ -202,35 +249,35 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('hammer', '锤子', 'Hammer', 'adventuring-gear', 'generic', 3, 1, 'gp', '用于钉入岩钉或处理一般营地工作。'),
   gear('piton', '岩钉', 'Piton', 'adventuring-gear', 'generic', 0.25, 5, 'cp', '攀爬和固定绳索使用的金属钉。'),
   gear('candle', '蜡烛', 'Candle', 'adventuring-gear', 'generic', 0, 1, 'cp', '燃烧 1 小时，发出 5 尺明亮光照和其外 5 尺微光。'),
-  gear('string-10-feet', '细绳（10 尺）', 'String (10 feet)', 'adventuring-gear', 'generic', 0, 1, 'sp', '十尺长的普通细绳。'),
+  gear('string-10-feet', '细绳（10 尺）', 'String (10 feet)', 'adventuring-gear', 'string', 0, 1, 'sp', '十尺长的普通细绳。'),
   gear('bell', '铃铛', 'Bell', 'adventuring-gear', 'generic', 0, 1, 'gp', '可配合细绳制作简易警报。'),
   gear('hooded-lantern', '附盖提灯', 'Lantern, hooded', 'adventuring-gear', 'generic', 2, 5, 'gp', '燃烧油料时提供可调节的光照。'),
   gear('lamp', '油灯', 'Lamp', 'adventuring-gear', 'generic', 1, 5, 'sp', '燃烧油料时提供光照。'),
-  gear('oil-flask', '油（瓶）', 'Oil (flask)', 'consumable', 'generic', 1, 1, 'sp', '可作为灯具燃料，泼洒或点燃时由 DM 裁定。'),
+  gear('oil-flask', '油（瓶）', 'Oil (flask)', 'consumable', 'oil-flask', 1, 1, 'sp', '可作为灯具燃料，泼洒或点燃时由 DM 裁定。'),
   gear('chest', '箱子', 'Chest', 'container', 'generic', 25, 5, 'gp', '可容纳 12 立方尺或 300 磅物品。'),
   gear('map-scroll-case', '地图或卷轴匣', 'Case, map or scroll', 'container', 'generic', 1, 1, 'gp', '用于保护地图和卷轴。'),
-  gear('fine-clothes', '优质服装', 'Clothes, fine', 'adventuring-gear', 'generic', 6, 15, 'gp', '适合正式场合的优质服装。'),
-  gear('common-clothes', '普通服装', 'Clothes, common', 'adventuring-gear', 'generic', 3, 5, 'sp', '一套普通服装。'),
+  gear('fine-clothes', '优质服装', 'Clothes, fine', 'adventuring-gear', 'clothing', 6, 15, 'gp', '适合正式场合的优质服装。'),
+  gear('common-clothes', '普通服装', 'Clothes, common', 'adventuring-gear', 'clothing', 3, 5, 'sp', '一套普通服装。'),
   gear('ink-bottle', '墨水（1 盎司瓶）', 'Ink (1 ounce bottle)', 'adventuring-gear', 'generic', 0, 10, 'gp', '书写用墨水。'),
   gear('ink-pen', '墨水笔', 'Ink pen', 'adventuring-gear', 'generic', 0, 2, 'cp', '蘸取墨水书写。'),
   gear('paper-sheet', '纸张', 'Paper (one sheet)', 'adventuring-gear', 'generic', 0, 2, 'sp', '一张书写用纸。'),
   gear('parchment-sheet', '羊皮纸', 'Parchment (one sheet)', 'adventuring-gear', 'generic', 0, 1, 'sp', '一张书写用羊皮纸。'),
-  gear('perfume-vial', '香水（小瓶）', 'Perfume (vial)', 'adventuring-gear', 'generic', 0, 5, 'gp', '一小瓶香水。'),
+  gear('perfume-vial', '香水（小瓶）', 'Perfume (vial)', 'adventuring-gear', 'perfume', 0, 5, 'gp', '一小瓶香水。'),
   gear('sealing-wax', '封蜡', 'Sealing wax', 'adventuring-gear', 'generic', 0, 5, 'sp', '用于封缄信件。'),
   gear('soap', '肥皂', 'Soap', 'adventuring-gear', 'generic', 0, 2, 'cp', '清洁用品。'),
-  gear('costume', '戏服', 'Costume clothes', 'adventuring-gear', 'generic', 4, 5, 'gp', '表演使用的服装。'),
+  gear('costume', '戏服', 'Costume clothes', 'adventuring-gear', 'clothing', 4, 5, 'gp', '表演使用的服装。'),
   gear('disguise-kit', '易容工具', 'Disguise kit', 'tool', 'generic', 3, 25, 'gp', '用于改变外貌的化妆品、染料和小道具。'),
   gear('blanket', '毛毯', 'Blanket', 'adventuring-gear', 'generic', 3, 5, 'sp', '旅行休息使用的毛毯。'),
   gear('alms-box', '布施盒', 'Alms box', 'container', 'generic', 0, 0, 'cp', '祭司套组中的布施盒。'),
   gear('incense-block', '熏香块', 'Block of incense', 'adventuring-gear', 'generic', 0, 0, 'cp', '宗教仪式使用的熏香。'),
   gear('censer', '香炉', 'Censer', 'adventuring-gear', 'generic', 0, 0, 'cp', '燃烧熏香的仪式器具。'),
-  gear('vestments', '祭服', 'Vestments', 'adventuring-gear', 'generic', 0, 0, 'cp', '宗教仪式使用的服装。'),
+  gear('vestments', '祭服', 'Vestments', 'adventuring-gear', 'clothing', 0, 0, 'cp', '宗教仪式使用的服装。'),
   gear('lore-book', '学识书籍', 'Book of lore', 'adventuring-gear', 'generic', 5, 25, 'gp', '有关特定学识的书籍。'),
   gear('sand-bag', '小袋沙', 'Little bag of sand', 'adventuring-gear', 'generic', 0, 0, 'cp', '学者套组中的吸墨沙。'),
-  gear('small-knife', '小刀', 'Small knife', 'adventuring-gear', 'generic', 0, 0, 'cp', '学者套组中的小刀；不作为战斗武器。'),
+  gear('small-knife', '小刀', 'Small knife', 'adventuring-gear', 'small-knife', 0, 0, 'cp', '学者套组中的小刀；不作为战斗武器。'),
   gear('arrows', '箭', 'Arrows', 'adventuring-gear', 'generic', 0.05, 5, 'cp', '短弓和长弓使用的弹药。'),
   gear('crossbow-bolts', '弩矢', 'Crossbow bolts', 'adventuring-gear', 'generic', 0.075, 5, 'cp', '轻弩等弩类武器使用的弹药。'),
-  gear('sling-bullets', '投石索弹丸', 'Sling bullets', 'adventuring-gear', 'generic', 0.075, 4, 'cp', '投石索使用的铅制弹丸。'),
+  gear('sling-bullets', '投石索弹丸', 'Sling bullets', 'adventuring-gear', 'sling-bullets', 0.075, 4, 'cp', '投石索使用的铅制弹丸。'),
   gear('blowgun-needles', '吹箭针', 'Blowgun needles', 'adventuring-gear', 'generic', 0.02, 2, 'cp', '吹箭筒使用的细针。'),
   gear('component-pouch', '材料包', 'Component pouch', 'container', 'generic', 2, 25, 'gp', '存放施展法术所需、未标明价格且不会被消耗的材料成分。'),
   gear('arcane-focus', '奥术法器', 'Arcane focus', 'adventuring-gear', 'spellcasting-focus', 1, 10, 'gp', '奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。', undefined, handheldFocus('arcane-focus', '奥术法器')),
@@ -240,7 +287,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('thieves-tools', '盗贼工具', "Thieves' tools", 'tool', 'generic', 1, 25, 'gp', '开锁与拆除陷阱使用的专用工具。'),
   gear('bagpipes', '风笛', 'Bagpipes', 'tool', 'generic', 6, 30, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('bagpipes', '风笛')),
   gear('drum', '鼓', 'Drum', 'tool', 'generic', 3, 6, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('drum', '鼓')),
-  gear('dulcimer', '扬琴', 'Dulcimer', 'tool', 'generic', 10, 25, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('dulcimer', '扬琴')),
+  gear('dulcimer', '扬琴', 'Dulcimer', 'tool', 'dulcimer', 10, 25, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('dulcimer', '扬琴')),
   gear('lute', '鲁特琴', 'Lute', 'tool', 'generic', 2, 35, 'gp', '吟游诗人常用的乐器；作为施法法器时必须持用。', undefined, handheldFocus('lute', '鲁特琴')),
   gear('flute', '长笛', 'Flute', 'tool', 'generic', 1, 2, 'gp', '一种便携乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('flute', '长笛')),
   gear('horn', '号角', 'Horn', 'tool', 'generic', 2, 3, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('horn', '号角')),
@@ -290,8 +337,8 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
     englishName: 'Potion of healing',
     category: 'consumable',
     icon: 'healing-potion',
-    description: '装有红色液体的常见魔法药水。摇晃时液体会闪烁微光。',
-    rulesText: '饮用者恢复 2d4 + 2 点生命值。饮用或给另一名生物服用药水需要一个动作。',
+    description: '饮用或给另一名生物服用需要一个动作并消耗此药水；饮用者恢复 2d4 + 2 点生命值。该恢复不能使当前生命值超过生命值上限。',
+    rulesText: '饮用或给另一名生物服用需要一个动作并消耗此药水；饮用者恢复 2d4 + 2 点生命值。该恢复不能使当前生命值超过生命值上限。',
     weightLb: 0.5,
     cost: { amount: 50, currency: 'gp' },
     stackable: true,
@@ -318,6 +365,17 @@ const LEGACY_ARCANE_FOCUS_IDS = new Set([
 
 export function dnd5eInventoryItemTemplate(templateId: string): Dnd5eInventoryItemTemplate | undefined {
   return ITEM_TEMPLATE_BY_ID.get(templateId) ?? dnd5ePluginItemDefinition(templateId)
+}
+
+/**
+ * 当前规则运行时可用的完整物品目录。商店、奖励和 DM 工具通过这个入口同时
+ * 看见 SRD 核心物品与已激活工坊插件贡献的物品，不需要为插件另建一套库存池。
+ */
+export function listDnd5eInventoryItemTemplates(): readonly Dnd5eInventoryItemTemplate[] {
+  const byId = new Map<string, Dnd5eInventoryItemTemplate>()
+  for (const item of DND5E_SRD_ITEM_TEMPLATES) byId.set(item.id, item)
+  for (const item of registeredDnd5ePluginItems()) byId.set(item.id, item)
+  return [...byId.values()]
 }
 
 export function dnd5eInventoryItemTemplateForEquipment(equipmentId: string): Dnd5eInventoryItemTemplate | undefined {
@@ -1147,14 +1205,17 @@ function gear(
   use?: Dnd5eInventoryItemTemplate['use'],
   equipment?: EquipmentItem,
 ): Dnd5eInventoryItemTemplate {
+  const detailedRulesText = rulesText.trim().length >= 24
+    ? rulesText
+    : `${rulesText} 这是普通非魔法物品，不会自动提供攻击、伤害、AC、豁免或技能检定加值；只有角色实际使用它且场景满足用途时，才作为相应行动的工具、材料或凭据。`
   return {
     id: `srd-5.1:item:${id}`,
     name,
     englishName,
     category,
     icon,
-    description: 'SRD 5.1 冒险装备。',
-    rulesText,
+    description: detailedRulesText,
+    rulesText: detailedRulesText,
     weightLb,
     cost: { amount, currency },
     stackable: equipment ? false : category !== 'container',
@@ -1188,13 +1249,14 @@ function damageTypeLabel(type: string): string {
 }
 
 function fallbackEquipmentTemplate(equipment: EquipmentItem): Dnd5eInventoryItemTemplate {
+  const rulesText = equipmentRulesText(equipment)
   return {
     id: `character-equipment:${equipment.id}`,
     name: equipment.name,
     category: 'equipment',
     icon: equipmentIcon(equipment),
-    description: '由角色存档或扩展规则提供的装备。',
-    rulesText: equipmentRulesText(equipment),
+    description: rulesText,
+    rulesText,
     stackable: false,
     equipment: { ...equipment },
     source: { book: '角色存档', license: '由提供者声明' },

@@ -8,6 +8,20 @@ export type Dnd5ePluginDiceRoller = (
   declaration: Dnd5ePluginDiceRollDeclaration,
 ) => Promise<readonly number[]>
 
+export function dnd5ePluginDiceRollDeclarationsForTargets(
+  definition: Pick<Dnd5ePluginHeadlessActionDefinition, 'rolls' | 'perTargetRolls'>,
+  targets: readonly { id: string; name?: string }[],
+): Dnd5ePluginDiceRollDeclaration[] {
+  return [
+    ...(definition.rolls ?? []).map((declaration) => ({ ...declaration })),
+    ...(definition.perTargetRolls ?? []).flatMap((declaration) => targets.map((target) => ({
+      ...declaration,
+      id: `${declaration.id}:${target.id}`,
+      label: `${target.name?.trim() || target.id} · ${declaration.label}`,
+    }))),
+  ]
+}
+
 export function validateDnd5ePluginDiceRollResult(
   declaration: Dnd5ePluginDiceRollDeclaration,
   result: Dnd5ePluginDiceRollResult | undefined,

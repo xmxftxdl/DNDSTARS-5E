@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   clearLocalRoomCampaignCache,
   isAccountCampaignId,
+  isMapWorkspacePath,
   LOCAL_ROOM_CAMPAIGN_CACHE_KEYS,
   nextCampaignRoomPath,
   requestedRoomLobbyMode,
@@ -28,5 +29,14 @@ describe('campaign navigation', () => {
     expect(isAccountCampaignId('ABCDEFGH2345')).toBe(true)
     expect(nextCampaignRoomPath('abcdefgh2345')).toBe('/app/rooms?mode=create&campaign=ABCDEFGH2345')
     expect(nextCampaignRoomPath('ABC123')).toBeNull()
+  })
+
+  it('recognizes only map workspace routes as scene-audio destinations', () => {
+    expect(isMapWorkspacePath('/campaign/ABCDEFGH2345/maps')).toBe(true)
+    expect(isMapWorkspacePath('/campaign/ABCDEFGH2345/maps/')).toBe(true)
+    expect(isMapWorkspacePath('/maps')).toBe(true)
+    expect(isMapWorkspacePath('/campaign/ABCDEFGH2345/spellbook')).toBe(false)
+    expect(isMapWorkspacePath('/campaign/ABCDEFGH2345/characters')).toBe(false)
+    expect(isMapWorkspacePath('/campaign/ABCDEFGH2345/overview')).toBe(false)
   })
 })

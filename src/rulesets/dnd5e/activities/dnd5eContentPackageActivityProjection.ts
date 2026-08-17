@@ -11,6 +11,7 @@ import {
 } from './legacyContentActivityAdapters'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
+import { dnd5eActivityAutomationAnalysisV1 } from '../plugins/pluginMechanicsRegistry'
 
 export type Dnd5eActivityProjectionSourceKind =
   | 'headless-action'
@@ -105,6 +106,7 @@ export function dnd5eContentPackageActivityProjectionV1(
     if (fallbackIssues.length) {
       throw new Error(`Activity migration fallback is invalid for ${sourceKind}:${sourceId}: ${fallbackIssues.join('; ')}`)
     }
+    const actualAutomation = dnd5eActivityAutomationAnalysisV1(activity).capability
     activities.push(activity)
     entries.push({
       sourceKind,
@@ -112,9 +114,9 @@ export function dnd5eContentPackageActivityProjectionV1(
       activityId: activity.id,
       mode: issues.length > 0
         ? 'legacy-fallback'
-        : activity.automation.level === 'display-only'
+        : actualAutomation.level === 'display-only'
           ? 'display-only'
-          : activity.automation.level === 'full'
+          : actualAutomation.level === 'full'
             ? 'adapted'
             : 'dm-adjudication',
       issues,

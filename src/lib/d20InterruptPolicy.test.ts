@@ -31,6 +31,11 @@ describe('d20 interrupt policy', () => {
       outcome: 'failure',
       eligibleEnemyModifiers,
     })).toBe(false)
+    expect(shouldOpenD20RollConfirmation({
+      visibility: 'public',
+      outcome: 'failure',
+      eligibleEnemyModifiers: [{ ...eligibleEnemyModifiers[0], replacementValues: [17] }],
+    })).toBe(true)
   })
 
   it('keeps DM-only d20 rolls editable in every settlement mode', () => {

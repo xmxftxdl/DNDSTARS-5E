@@ -9,6 +9,10 @@ export type Dnd5ePluginFeaturePassiveEffect = {
   amount: number
   /** Empty or absent means every damage type. */
   damageTypes?: readonly Dnd5eDamageType[]
+  /** Optional Host-derived source predicates; all configured predicates are conjunctive. */
+  deliveries?: readonly ('weapon-attack' | 'spell' | 'other')[]
+  magical?: boolean
+  requiresHeavyArmor?: boolean
   /** The incoming resolved damage must meet this value before reduction. */
   minimumIncomingDamage?: number
   /** Checked against HP before this damage; 100 or absent means no threshold. */
@@ -38,6 +42,13 @@ export function cloneDnd5ePluginFeaturePassiveEffects(
       (effect.minimumIncomingDamage != null && !finiteInteger(effect.minimumIncomingDamage, 1, 1_000_000)) ||
       (effect.maximumCurrentHitPointPercent != null && !finiteInteger(effect.maximumCurrentHitPointPercent, 1, 100)) ||
       (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean') ||
+      (effect.magical != null && typeof effect.magical !== 'boolean') ||
+      (effect.requiresHeavyArmor != null && typeof effect.requiresHeavyArmor !== 'boolean') ||
+      (effect.deliveries != null && (
+        !Array.isArray(effect.deliveries) || effect.deliveries.length < 1 || effect.deliveries.length > 3 ||
+        new Set(effect.deliveries).size !== effect.deliveries.length ||
+        effect.deliveries.some((delivery) => !['weapon-attack', 'spell', 'other'].includes(delivery))
+      )) ||
       (effect.damageTypes != null && (
         !Array.isArray(effect.damageTypes) || effect.damageTypes.length < 1 ||
         effect.damageTypes.length > DND5E_DAMAGE_TYPES.length ||
@@ -52,6 +63,9 @@ export function cloneDnd5ePluginFeaturePassiveEffects(
       trigger: 'before-damage',
       amount: effect.amount,
       ...(effect.damageTypes?.length ? { damageTypes: [...new Set<Dnd5eDamageType>(effect.damageTypes)] } : {}),
+      ...(effect.deliveries?.length ? { deliveries: [...effect.deliveries] } : {}),
+      ...(effect.magical != null ? { magical: effect.magical } : {}),
+      ...(effect.requiresHeavyArmor === true ? { requiresHeavyArmor: true } : {}),
       ...(effect.minimumIncomingDamage != null ? { minimumIncomingDamage: effect.minimumIncomingDamage } : {}),
       ...(effect.maximumCurrentHitPointPercent != null && effect.maximumCurrentHitPointPercent < 100
         ? { maximumCurrentHitPointPercent: effect.maximumCurrentHitPointPercent }

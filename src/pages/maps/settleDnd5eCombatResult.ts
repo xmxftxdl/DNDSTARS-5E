@@ -6,11 +6,10 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eCombatantPairKey,
-  dnd5eHellishRebukeSlotLevel,
+  dnd5eHellishRebukeReactionOption,
   dnd5ePendingMonsterMechanicResolutions,
   dnd5ePendingMonsterDeathAreaEffects,
   dnd5ePostSpellRandomTablePlan,
-  dnd5eRacialInnateSpellGrant,
   dnd5eSavingThrowMode,
   getDnd5eSrdMonster,
   planDnd5eMapResultApplication,
@@ -19,6 +18,7 @@ import {
   type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
+  type Dnd5eHeadlessCombatState,
   type Dnd5eMapResultPlan,
   type Dnd5eSpellTargetSavingThrowRoll,
 } from '../../rulesets/dnd5e'
@@ -76,6 +76,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     sourceName: string
     damage: number
     slotLevel: number
+    itemName?: string
   }) => Promise<boolean>
   requestPostSpellRandomTableAdjudication?: (request: {
     actor: Dnd5eCombatant
@@ -94,8 +95,26 @@ export async function settleDnd5eConcentrationChecks(input: {
     tableDieSides: number
     transactionId: string
   }) => Promise<number | undefined>
+  /**
+   * Production map hook for registered Activity event windows. It runs after
+   * native interrupt mechanics have settled, but before the map/character
+   * application plan is built, so the whole chain is committed as one result.
+   */
+  settleActivityTriggers?: (request: {
+    state: Dnd5eHeadlessCombatState
+    events: Extract<Dnd5eActionResult, { ok: true }>['events']
+    map: BattleMap
+    characters: readonly Character[]
+    characterIdByCombatantId: Readonly<Record<string, string>>
+  }) => Promise<{
+    state: Dnd5eHeadlessCombatState
+    events: Extract<Dnd5eActionResult, { ok: true }>['events']
+    /** Map snapshot after Activity-owned placement handoffs. */
+    map?: BattleMap
+  }>
 }): Promise<{ result: Extract<Dnd5eActionResult, { ok: true }>; application: Dnd5eMapResultPlan }> {
   let state = input.result.state
+  let map = input.map
   const events = [...input.result.events]
   const resolveWithUnsupportedAirborneFalls = async (
     source: typeof state,
@@ -294,6 +313,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (plan.effect) {
       const nested = await settleDnd5eConcentrationChecks({
         ...input,
+        settleActivityTriggers: undefined,
         result: resolved,
       })
       state = nested.result.state
@@ -333,6 +353,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         if (adjudicated.ok) {
           const nested = await settleDnd5eConcentrationChecks({
             ...input,
+            settleActivityTriggers: undefined,
             result: adjudicated,
           })
           state = nested.result.state
@@ -631,6 +652,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       if (resolved.ok) {
         const nested = await settleDnd5eConcentrationChecks({
           ...input,
+          settleActivityTriggers: undefined,
           result: resolved,
         })
         state = nested.result.state
@@ -650,13 +672,13 @@ export async function settleDnd5eConcentrationChecks(input: {
       const reactorCharacter = reactorCharacterId
         ? input.characters.find((character) => character.id === reactorCharacterId)
         : undefined
-      const slotLevel = reactor ? dnd5eHellishRebukeSlotLevel(reactor) : undefined
+      const rebukeOption = reactor ? dnd5eHellishRebukeReactionOption(reactor) : undefined
       const distance = reactor && damageSource
         ? state.distanceFeetByCombatantPair?.[dnd5eCombatantPairKey(reactor.id, damageSource.id)]
         : undefined
       if (
         !reactor || !damageSource || damageSource.currentHp <= 0 || damageSource.deathSaves.dead ||
-        !reactorCharacter || slotLevel == null ||
+        !reactorCharacter || !rebukeOption ||
         reactor.controller === damageSource.controller || !Number.isFinite(distance) || distance! > 60 ||
         state.lineOfEffectBlockedByCombatantPair?.[`${reactor.id}\u0000${damageSource.id}`]
       ) continue
@@ -666,7 +688,8 @@ export async function settleDnd5eConcentrationChecks(input: {
         targetTokenId: damageEvent.sourceId,
         sourceName: input.map.tokens.find((token) => token.id === damageSource.id)?.label ?? damageSource.name,
         damage: damageEvent.amount,
-        slotLevel,
+        slotLevel: rebukeOption.slotLevel,
+        itemName: rebukeOption.itemName,
       })
       if (!accepted) continue
       const mode = dnd5eSavingThrowMode(damageSource, 'dex', {
@@ -679,21 +702,20 @@ export async function settleDnd5eConcentrationChecks(input: {
         combatant: damageSource,
         targetName: sourceName,
         ability: 'dex',
-        dc: 8 + reactor.proficiencyBonus + Math.floor((reactor.abilities.cha - 10) / 2),
+        dc: rebukeOption.saveDc,
         mode,
         label: '炼狱叱喝·敏捷豁免',
       })
       const effectRolls = await input.rollDice(
-        slotLevel + 1,
+        rebukeOption.slotLevel + 1,
         10,
         '炼狱叱喝·火焰伤害',
         sourceName,
       )
-      const racialInnate = dnd5eRacialInnateSpellGrant(reactor.racialRules, 'hellish-rebuke')?.castAtLevel === slotLevel
       const reaction = await resolveWithUnsupportedAirborneFalls(state, {
         type: 'hellish-rebuke', actorId: reactor.id, targetId: damageSource.id,
-        racialInnate,
-        slotLevel, triggerDamageAmount: damageEvent.amount,
+        racialInnate: rebukeOption.racialInnate,
+        slotLevel: rebukeOption.slotLevel, triggerDamageAmount: damageEvent.amount,
         savingThrowD20: interrupted.d20,
         savingThrowD20Second: interrupted.d20Second,
         savingThrowBlessRoll: interrupted.blessRoll,
@@ -710,6 +732,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       if (!reaction.ok) continue
       const nested = await settleDnd5eConcentrationChecks({
         ...input,
+        settleActivityTriggers: undefined,
         result: reaction,
       })
       state = nested.result.state
@@ -747,15 +770,41 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (!resolved.ok) continue
     const nested = await settleDnd5eConcentrationChecks({
       ...input,
+      settleActivityTriggers: undefined,
       result: resolved,
     })
     state = nested.result.state
     events.push(...nested.result.events)
   }
+  if (input.settleActivityTriggers) {
+    const triggered = await input.settleActivityTriggers({
+      state,
+      events,
+      map,
+      characters: input.characters,
+      characterIdByCombatantId: input.characterIdByCombatantId,
+    })
+    state = triggered.state
+    map = triggered.map ?? map
+    events.push(...triggered.events)
+    // Activity damage uses the same concentration/death/monster follow-up
+    // pipeline. Disable the Activity hook for this nested pass because the
+    // trigger coordinator already consumes Activity-produced event batches.
+    if (triggered.events.length > 0) {
+      const nested = await settleDnd5eConcentrationChecks({
+        ...input,
+        map,
+        settleActivityTriggers: undefined,
+        result: { ok: true, state, events: triggered.events },
+      })
+      state = nested.result.state
+      events.push(...nested.result.events.slice(triggered.events.length))
+    }
+  }
   const result = { ok: true as const, state, events }
   const application = planDnd5eMapResultApplication({
     state,
-    map: input.map,
+    map,
     characters: input.characters,
     characterIdByCombatantId: input.characterIdByCombatantId,
   })

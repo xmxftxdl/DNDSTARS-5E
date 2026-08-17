@@ -15,6 +15,7 @@ import {
   dnd5eActiveFlySpeed,
   dnd5eActiveJumpDistanceMultiplier,
   dnd5eActiveMaximumAttacksPerTurn,
+  dnd5eActiveMovementBoundarySaves,
   dnd5eActiveOptionalBonusDice,
   dnd5eActiveResistanceToAllDamage,
   dnd5eActiveSavingThrowBonus,
@@ -25,6 +26,7 @@ import {
   dnd5eActiveSpeedMultiplier,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveWeaponDamageD4Mode,
+  dnd5eActiveWeaponDamageReplacementApplies,
   dnd5eConditionsFromActiveEffects,
   dnd5eEscapableGrapples,
   normalizeDnd5eActiveEffects,
@@ -440,6 +442,37 @@ describe('D&D 5e ActiveEffectInstance', () => {
     })
   })
 
+  it('normalizes a scoped Activity weapon damage replacement', () => {
+    const replacement = createDnd5eMechanicalEffect({
+      definitionId: 'activity:lightning-arrow:replacement', label: '闪电箭', targetId: 'ranger',
+      source: { kind: 'spell', actorId: 'ranger', rulesId: 'lightning-arrow' },
+      modifiers: { weaponDamageReplacementAttackModes: ['ranged'] },
+    })
+    expect(dnd5eActiveWeaponDamageReplacementApplies([replacement], 'ranged')).toBe(true)
+    expect(dnd5eActiveWeaponDamageReplacementApplies([replacement], 'melee')).toBe(false)
+    expect(dnd5eActiveWeaponDamageReplacementApplies([replacement], 'unarmed')).toBe(false)
+    expect(normalizeDnd5eActiveEffects([replacement])[0].modifiers).toMatchObject({
+      weaponDamageReplacementAttackModes: ['ranged'],
+    })
+    expect(validateDnd5eActiveEffectsStrict([replacement])).toMatchObject({ ok: true })
+  })
+
+  it('normalizes source-relative movement boundary saves', () => {
+    const boundary = createDnd5eMechanicalEffect({
+      definitionId: 'activity:compelled-duel:boundary', label: '强令对决', targetId: 'target',
+      source: { kind: 'spell', actorId: 'paladin', rulesId: 'compelled-duel' },
+      modifiers: { movementBoundarySave: { maximumDistanceFeet: 30, ability: 'wis', dc: 14 } },
+    })
+    expect(dnd5eActiveMovementBoundarySaves([boundary])).toEqual([{
+      effectId: boundary.id,
+      sourceActorId: 'paladin',
+      maximumDistanceFeet: 30,
+      ability: 'wis',
+      dc: 14,
+    }])
+    expect(validateDnd5eActiveEffectsStrict([boundary])).toMatchObject({ ok: true })
+  })
+
   it('normalizes and combines conservative slow-breath action modifiers', () => {
     const slowingBreath = createDnd5eMechanicalEffect({
       definitionId: 'srd-5.1:slowing-breath', label: '迟缓吐息', targetId: 'target',
@@ -460,11 +493,11 @@ describe('D&D 5e ActiveEffectInstance', () => {
     expect(validateDnd5eActiveEffectsStrict([slowingBreath])).toMatchObject({ ok: true })
     expect(normalizeDnd5eActiveEffects([{
       ...slowingBreath,
-      modifiers: { speedMultiplier: 0, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
+      modifiers: { speedMultiplier: -0.1, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
     }])[0].modifiers).toBeUndefined()
     expect(validateDnd5eActiveEffectsStrict([{
       ...slowingBreath,
-      modifiers: { speedMultiplier: 0, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
+      modifiers: { speedMultiplier: -0.1, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
     }])).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([

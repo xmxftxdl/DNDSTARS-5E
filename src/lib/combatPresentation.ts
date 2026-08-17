@@ -86,6 +86,7 @@ export const MINOR_ILLUSION_ANIMATION_DURATION_MS = 1_250
 export const THAUMATURGY_ANIMATION_DURATION_MS = 1_200
 export const SHILLELAGH_ANIMATION_DURATION_MS = 1_200
 export const ENTANGLE_ANIMATION_DURATION_MS = 1_300
+export const WEB_ANIMATION_DURATION_MS = 1_350
 export const GREASE_ANIMATION_DURATION_MS = 1_250
 export const DARKNESS_ANIMATION_DURATION_MS = 1_300
 /** Time before Headless settlement may continue after the summon entrance. */
@@ -109,9 +110,18 @@ export const SPIRIT_GUARDIANS_ANIMATION_DURATION_MS = 1_350
 export const CALL_LIGHTNING_ANIMATION_DURATION_MS = 1_400
 export const CALL_LIGHTNING_STRIKE_ANIMATION_DURATION_MS = 950
 export const INSECT_PLAGUE_ANIMATION_DURATION_MS = 1_350
+export const STINKING_CLOUD_ANIMATION_DURATION_MS = 1_400
 export const WALL_OF_FIRE_ANIMATION_DURATION_MS = 1_400
 export const BLADE_BARRIER_ANIMATION_DURATION_MS = 1_350
 export const CLOUDKILL_ANIMATION_DURATION_MS = 1_400
+export const FOG_CLOUD_ANIMATION_DURATION_MS = 1_350
+export const SILENCE_ANIMATION_DURATION_MS = 1_200
+export const SLEET_STORM_ANIMATION_DURATION_MS = 1_450
+export const WIND_WALL_ANIMATION_DURATION_MS = 1_300
+export const WALL_OF_FORCE_ANIMATION_DURATION_MS = 1_350
+export const WALL_OF_STONE_ANIMATION_DURATION_MS = 1_450
+export const WALL_OF_ICE_ANIMATION_DURATION_MS = 1_450
+export const WALL_OF_THORNS_ANIMATION_DURATION_MS = 1_450
 export const CHAIN_LIGHTNING_ANIMATION_DURATION_MS = 1_050
 export const DISINTEGRATE_ANIMATION_DURATION_MS = 1_150
 
@@ -121,6 +131,7 @@ export const PERSISTENT_AREA_PRESENTATION_SPELL_IDS: ReadonlySet<CombatPresentat
   'mage-hand',
   'darkness',
   'daylight',
+  'web',
   'grease',
   'entangle',
   'black-tentacles',
@@ -132,7 +143,16 @@ export const PERSISTENT_AREA_PRESENTATION_SPELL_IDS: ReadonlySet<CombatPresentat
   'call-lightning',
   'wall-of-fire',
   'insect-plague',
+  'stinking-cloud',
   'cloudkill',
+  'fog-cloud',
+  'silence',
+  'sleet-storm',
+  'wind-wall',
+  'wall-of-force',
+  'wall-of-stone',
+  'wall-of-ice',
+  'wall-of-thorns',
   'blade-barrier',
   'ice-storm',
 ])
@@ -170,6 +190,114 @@ export const CHARM_PERSON_MANIFESTATION_DURATION_MS = 1_000
 export const HIDEOUS_LAUGHTER_MANIFESTATION_DURATION_MS = 1_000
 export const HOLD_PERSON_MANIFESTATION_DURATION_MS = 1_000
 export const BLINDNESS_DEAFNESS_MANIFESTATION_DURATION_MS = 1_000
+
+const STATUS_MANIFESTATION_SPELL_IDS = new Set([
+  'bless', 'bane', 'shield-of-faith', 'mage-armor', 'jump', 'darkvision',
+  'see-invisibility', 'warding-bond', 'fly', 'heroism', 'enlarge-reduce',
+  'enhance-ability', 'divine-favor', 'hunters-mark', 'magic-weapon', 'flame-blade',
+  'invisibility', 'blur', 'barkskin', 'protection-from-poison', 'longstrider',
+  'protection-from-energy', 'death-ward', 'greater-invisibility', 'charm-person',
+  'hideous-laughter', 'hold-person', 'blindness-deafness',
+])
+
+const COMBAT_PRESENTATION_ANIMATION_DURATION_BY_SPELL: Readonly<Record<string, number>> = Object.freeze({
+  'fire-bolt': FIRE_BOLT_ANIMATION_DURATION_MS,
+  fireball: FIREBALL_ANIMATION_DURATION_MS,
+  'shocking-grasp': SHOCKING_GRASP_ANIMATION_DURATION_MS,
+  'chill-touch': CHILL_TOUCH_ANIMATION_DURATION_MS,
+  'ray-of-frost': RAY_OF_FROST_ANIMATION_DURATION_MS,
+  'eldritch-blast': ELDRITCH_BLAST_ANIMATION_DURATION_MS,
+  'produce-flame': PRODUCE_FLAME_ANIMATION_DURATION_MS,
+  guidance: GUIDANCE_MANIFESTATION_DURATION_MS,
+  resistance: RESISTANCE_MANIFESTATION_DURATION_MS,
+  sanctuary: SANCTUARY_MANIFESTATION_DURATION_MS,
+  'sacred-flame': SACRED_FLAME_ANIMATION_DURATION_MS,
+  'spare-the-dying': SPARE_THE_DYING_ANIMATION_DURATION_MS,
+  'acid-splash': ACID_SPLASH_ANIMATION_DURATION_MS,
+  'poison-spray': POISON_SPRAY_ANIMATION_DURATION_MS,
+  'vicious-mockery': VICIOUS_MOCKERY_ANIMATION_DURATION_MS,
+  'magic-missile': MAGIC_MISSILE_ANIMATION_DURATION_MS,
+  'scorching-ray': SCORCHING_RAY_ANIMATION_DURATION_MS,
+  'guiding-bolt': GUIDING_BOLT_ANIMATION_DURATION_MS,
+  'acid-arrow': ACID_ARROW_ANIMATION_DURATION_MS,
+  'cure-wounds': CURE_WOUNDS_ANIMATION_DURATION_MS,
+  'healing-word': HEALING_WORD_ANIMATION_DURATION_MS,
+  'inflict-wounds': INFLICT_WOUNDS_ANIMATION_DURATION_MS,
+  'hellish-rebuke': HELLISH_REBUKE_ANIMATION_DURATION_MS,
+  'burning-hands': BURNING_HANDS_ANIMATION_DURATION_MS,
+  thunderwave: THUNDERWAVE_ANIMATION_DURATION_MS,
+  shatter: SHATTER_ANIMATION_DURATION_MS,
+  'lightning-bolt': LIGHTNING_BOLT_ANIMATION_DURATION_MS,
+  blight: BLIGHT_ANIMATION_DURATION_MS,
+  'finger-of-death': FINGER_OF_DEATH_ANIMATION_DURATION_MS,
+  'power-word-stun': POWER_WORD_STUN_ANIMATION_DURATION_MS,
+  'power-word-kill': POWER_WORD_KILL_ANIMATION_DURATION_MS,
+  'flame-strike': FLAME_STRIKE_ANIMATION_DURATION_MS,
+  sunburst: SUNBURST_ANIMATION_DURATION_MS,
+  'cone-of-cold': CONE_OF_COLD_ANIMATION_DURATION_MS,
+  'circle-of-death': CIRCLE_OF_DEATH_ANIMATION_DURATION_MS,
+  'ice-storm': ICE_STORM_ANIMATION_DURATION_MS,
+  'freezing-sphere': FREEZING_SPHERE_ANIMATION_DURATION_MS,
+  'meteor-swarm': METEOR_SWARM_ANIMATION_DURATION_MS,
+  'color-spray': COLOR_SPRAY_ANIMATION_DURATION_MS,
+  'faerie-fire': FAERIE_FIRE_ANIMATION_DURATION_MS,
+  sleep: SLEEP_ANIMATION_DURATION_MS,
+  entangle: ENTANGLE_ANIMATION_DURATION_MS,
+  web: WEB_ANIMATION_DURATION_MS,
+  grease: GREASE_ANIMATION_DURATION_MS,
+  darkness: DARKNESS_ANIMATION_DURATION_MS,
+  'flaming-sphere': FLAMING_SPHERE_ANIMATION_DURATION_MS,
+  moonbeam: MOONBEAM_ANIMATION_DURATION_MS,
+  daylight: DAYLIGHT_ANIMATION_DURATION_MS,
+  'black-tentacles': BLACK_TENTACLES_ANIMATION_DURATION_MS,
+  'spike-growth': SPIKE_GROWTH_ANIMATION_DURATION_MS,
+  'mage-hand': MAGE_HAND_ANIMATION_DURATION_MS,
+  'spiritual-weapon': SPIRITUAL_WEAPON_ANIMATION_DURATION_MS,
+  'spirit-guardians': SPIRIT_GUARDIANS_ANIMATION_DURATION_MS,
+  'call-lightning': CALL_LIGHTNING_ANIMATION_DURATION_MS,
+  'call-lightning-strike': CALL_LIGHTNING_STRIKE_ANIMATION_DURATION_MS,
+  'insect-plague': INSECT_PLAGUE_ANIMATION_DURATION_MS,
+  'stinking-cloud': STINKING_CLOUD_ANIMATION_DURATION_MS,
+  'wall-of-fire': WALL_OF_FIRE_ANIMATION_DURATION_MS,
+  'blade-barrier': BLADE_BARRIER_ANIMATION_DURATION_MS,
+  cloudkill: CLOUDKILL_ANIMATION_DURATION_MS,
+  'fog-cloud': FOG_CLOUD_ANIMATION_DURATION_MS,
+  silence: SILENCE_ANIMATION_DURATION_MS,
+  'sleet-storm': SLEET_STORM_ANIMATION_DURATION_MS,
+  'wind-wall': WIND_WALL_ANIMATION_DURATION_MS,
+  'wall-of-force': WALL_OF_FORCE_ANIMATION_DURATION_MS,
+  'wall-of-stone': WALL_OF_STONE_ANIMATION_DURATION_MS,
+  'wall-of-ice': WALL_OF_ICE_ANIMATION_DURATION_MS,
+  'wall-of-thorns': WALL_OF_THORNS_ANIMATION_DURATION_MS,
+  'false-life': FALSE_LIFE_ANIMATION_DURATION_MS,
+  'hypnotic-pattern': HYPNOTIC_PATTERN_ANIMATION_DURATION_MS,
+  slow: SLOW_ANIMATION_DURATION_MS,
+  'phantasmal-killer': PHANTASMAL_KILLER_ANIMATION_DURATION_MS,
+  banishment: BANISHMENT_ANIMATION_DURATION_MS,
+  'misty-step': MISTY_STEP_ANIMATION_DURATION_MS,
+  'hold-monster': HOLD_MONSTER_ANIMATION_DURATION_MS,
+  counterspell: COUNTERSPELL_ANIMATION_DURATION_MS,
+  'dispel-magic': DISPEL_MAGIC_ANIMATION_DURATION_MS,
+  shield: SHIELD_ANIMATION_DURATION_MS,
+  'lesser-restoration': LESSER_RESTORATION_ANIMATION_DURATION_MS,
+  heal: HEAL_ANIMATION_DURATION_MS,
+  'mass-cure-wounds': MASS_CURE_WOUNDS_ANIMATION_DURATION_MS,
+  'mass-heal': MASS_HEAL_ANIMATION_DURATION_MS,
+  'mass-healing-word': MASS_HEALING_WORD_ANIMATION_DURATION_MS,
+  'prayer-of-healing': PRAYER_OF_HEALING_ANIMATION_DURATION_MS,
+  'dancing-lights': DANCING_LIGHTS_ANIMATION_DURATION_MS,
+  'minor-illusion': MINOR_ILLUSION_ANIMATION_DURATION_MS,
+  thaumaturgy: THAUMATURGY_ANIMATION_DURATION_MS,
+  shillelagh: SHILLELAGH_ANIMATION_DURATION_MS,
+  'chain-lightning': CHAIN_LIGHTNING_ANIMATION_DURATION_MS,
+  disintegrate: DISINTEGRATE_ANIMATION_DURATION_MS,
+})
+
+export function combatPresentationAnimationDuration(spellId: string): number {
+  if (STATUS_MANIFESTATION_SPELL_IDS.has(spellId)) return BLESS_MANIFESTATION_DURATION_MS
+  return COMBAT_PRESENTATION_ANIMATION_DURATION_BY_SPELL[spellId] ?? FIRE_BOLT_ANIMATION_DURATION_MS
+}
+
 export const COMBAT_PRESENTATION_EVENT_TTL_MS = 1_600
 export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
 export const SPELL_BANNER_TOTAL_DURATION_MS = 3_000
@@ -304,6 +432,7 @@ export interface CombatPresentationAreaSpellEventV1 {
   radiusFeet?: number
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
+  areaAngleDegrees?: number
   createdAt: number
   expiresAt: number
 }
@@ -515,6 +644,7 @@ export interface CombatPresentationMapProjectile {
     | 'faerie-fire'
     | 'sleep'
     | 'entangle'
+    | 'web'
     | 'grease'
     | 'darkness'
     | 'flaming-sphere'
@@ -528,6 +658,7 @@ export interface CombatPresentationMapProjectile {
     | 'call-lightning'
     | 'call-lightning-strike'
     | 'insect-plague'
+    | 'stinking-cloud'
     | 'wall-of-fire'
     | 'blade-barrier'
     | 'bless'
@@ -578,6 +709,14 @@ export interface CombatPresentationMapProjectile {
     | 'thaumaturgy'
     | 'shillelagh'
     | 'cloudkill'
+    | 'fog-cloud'
+    | 'silence'
+    | 'sleet-storm'
+    | 'wind-wall'
+    | 'wall-of-force'
+    | 'wall-of-stone'
+    | 'wall-of-ice'
+    | 'wall-of-thorns'
   hit: boolean
   issuedAt: number
   durationMs: number
@@ -751,6 +890,9 @@ export function parseCombatPresentationEvent(
         (area.wallOfFireShape != null && area.wallOfFireShape !== 'line' && area.wallOfFireShape !== 'ring') ||
         (area.wallOfFireAngleDegrees != null && (!Number.isFinite(area.wallOfFireAngleDegrees) || area.wallOfFireAngleDegrees < 0 || area.wallOfFireAngleDegrees >= 360))
       )) ||
+      (area.areaAngleDegrees != null && (
+        !Number.isFinite(area.areaAngleDegrees) || area.areaAngleDegrees < 0 || area.areaAngleDegrees >= 360
+      )) ||
       !area.targetCell ||
       !Number.isInteger(area.targetCell.col) ||
       !Number.isInteger(area.targetCell.row) ||
@@ -881,219 +1023,7 @@ export function combatPresentationProjectilesForMap(
       event.type === 'attack-banner' ||
       event.type === 'saving-throw-status'
     ) return []
-    const animationDuration = event.spellId === 'fireball'
-      ? FIREBALL_ANIMATION_DURATION_MS
-      : event.spellId === 'shocking-grasp'
-        ? SHOCKING_GRASP_ANIMATION_DURATION_MS
-        : event.spellId === 'guidance'
-          ? GUIDANCE_MANIFESTATION_DURATION_MS
-          : event.spellId === 'resistance'
-            ? RESISTANCE_MANIFESTATION_DURATION_MS
-          : event.spellId === 'sanctuary'
-            ? SANCTUARY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'sacred-flame'
-            ? SACRED_FLAME_ANIMATION_DURATION_MS
-          : event.spellId === 'spare-the-dying'
-            ? SPARE_THE_DYING_ANIMATION_DURATION_MS
-          : event.spellId === 'acid-splash'
-            ? ACID_SPLASH_ANIMATION_DURATION_MS
-          : event.spellId === 'poison-spray'
-            ? POISON_SPRAY_ANIMATION_DURATION_MS
-          : event.spellId === 'vicious-mockery'
-            ? VICIOUS_MOCKERY_ANIMATION_DURATION_MS
-          : event.spellId === 'magic-missile'
-            ? MAGIC_MISSILE_ANIMATION_DURATION_MS
-          : event.spellId === 'scorching-ray'
-            ? SCORCHING_RAY_ANIMATION_DURATION_MS
-          : event.spellId === 'guiding-bolt'
-            ? GUIDING_BOLT_ANIMATION_DURATION_MS
-          : event.spellId === 'acid-arrow'
-            ? ACID_ARROW_ANIMATION_DURATION_MS
-          : event.spellId === 'cure-wounds'
-            ? CURE_WOUNDS_ANIMATION_DURATION_MS
-          : event.spellId === 'healing-word'
-            ? HEALING_WORD_ANIMATION_DURATION_MS
-          : event.spellId === 'inflict-wounds'
-            ? INFLICT_WOUNDS_ANIMATION_DURATION_MS
-          : event.spellId === 'hellish-rebuke'
-            ? HELLISH_REBUKE_ANIMATION_DURATION_MS
-          : event.spellId === 'burning-hands'
-            ? BURNING_HANDS_ANIMATION_DURATION_MS
-          : event.spellId === 'thunderwave'
-            ? THUNDERWAVE_ANIMATION_DURATION_MS
-          : event.spellId === 'shatter'
-            ? SHATTER_ANIMATION_DURATION_MS
-          : event.spellId === 'lightning-bolt'
-            ? LIGHTNING_BOLT_ANIMATION_DURATION_MS
-          : event.spellId === 'blight'
-            ? BLIGHT_ANIMATION_DURATION_MS
-          : event.spellId === 'finger-of-death'
-            ? FINGER_OF_DEATH_ANIMATION_DURATION_MS
-          : event.spellId === 'power-word-stun'
-            ? POWER_WORD_STUN_ANIMATION_DURATION_MS
-          : event.spellId === 'power-word-kill'
-            ? POWER_WORD_KILL_ANIMATION_DURATION_MS
-          : event.spellId === 'flame-strike'
-            ? FLAME_STRIKE_ANIMATION_DURATION_MS
-          : event.spellId === 'sunburst'
-            ? SUNBURST_ANIMATION_DURATION_MS
-          : event.spellId === 'cone-of-cold'
-            ? CONE_OF_COLD_ANIMATION_DURATION_MS
-          : event.spellId === 'circle-of-death'
-            ? CIRCLE_OF_DEATH_ANIMATION_DURATION_MS
-          : event.spellId === 'ice-storm'
-            ? ICE_STORM_ANIMATION_DURATION_MS
-          : event.spellId === 'freezing-sphere'
-            ? FREEZING_SPHERE_ANIMATION_DURATION_MS
-          : event.spellId === 'meteor-swarm'
-            ? METEOR_SWARM_ANIMATION_DURATION_MS
-          : event.spellId === 'color-spray'
-            ? COLOR_SPRAY_ANIMATION_DURATION_MS
-          : event.spellId === 'faerie-fire'
-            ? FAERIE_FIRE_ANIMATION_DURATION_MS
-          : event.spellId === 'sleep'
-            ? SLEEP_ANIMATION_DURATION_MS
-          : event.spellId === 'entangle'
-            ? ENTANGLE_ANIMATION_DURATION_MS
-          : event.spellId === 'grease'
-            ? GREASE_ANIMATION_DURATION_MS
-          : event.spellId === 'darkness'
-            ? DARKNESS_ANIMATION_DURATION_MS
-          : event.spellId === 'flaming-sphere'
-            ? FLAMING_SPHERE_ANIMATION_DURATION_MS
-          : event.spellId === 'moonbeam'
-            ? MOONBEAM_ANIMATION_DURATION_MS
-          : event.spellId === 'daylight'
-            ? DAYLIGHT_ANIMATION_DURATION_MS
-          : event.spellId === 'black-tentacles'
-            ? BLACK_TENTACLES_ANIMATION_DURATION_MS
-          : event.spellId === 'spike-growth'
-            ? SPIKE_GROWTH_ANIMATION_DURATION_MS
-          : event.spellId === 'mage-hand'
-            ? MAGE_HAND_ANIMATION_DURATION_MS
-          : event.spellId === 'spiritual-weapon'
-            ? SPIRITUAL_WEAPON_ANIMATION_DURATION_MS
-          : event.spellId === 'spirit-guardians'
-            ? SPIRIT_GUARDIANS_ANIMATION_DURATION_MS
-          : event.spellId === 'call-lightning'
-            ? CALL_LIGHTNING_ANIMATION_DURATION_MS
-          : event.spellId === 'call-lightning-strike'
-            ? CALL_LIGHTNING_STRIKE_ANIMATION_DURATION_MS
-          : event.spellId === 'insect-plague'
-            ? INSECT_PLAGUE_ANIMATION_DURATION_MS
-          : event.spellId === 'wall-of-fire'
-            ? WALL_OF_FIRE_ANIMATION_DURATION_MS
-          : event.spellId === 'blade-barrier'
-            ? BLADE_BARRIER_ANIMATION_DURATION_MS
-          : event.spellId === 'false-life'
-            ? FALSE_LIFE_ANIMATION_DURATION_MS
-          : event.spellId === 'hypnotic-pattern'
-            ? HYPNOTIC_PATTERN_ANIMATION_DURATION_MS
-          : event.spellId === 'slow'
-            ? SLOW_ANIMATION_DURATION_MS
-          : event.spellId === 'phantasmal-killer'
-            ? PHANTASMAL_KILLER_ANIMATION_DURATION_MS
-          : event.spellId === 'banishment'
-            ? BANISHMENT_ANIMATION_DURATION_MS
-          : event.spellId === 'misty-step'
-            ? MISTY_STEP_ANIMATION_DURATION_MS
-          : event.spellId === 'hold-monster'
-            ? HOLD_MONSTER_ANIMATION_DURATION_MS
-          : event.spellId === 'counterspell'
-            ? COUNTERSPELL_ANIMATION_DURATION_MS
-          : event.spellId === 'dispel-magic'
-            ? DISPEL_MAGIC_ANIMATION_DURATION_MS
-          : event.spellId === 'shield'
-            ? SHIELD_ANIMATION_DURATION_MS
-          : event.spellId === 'lesser-restoration'
-            ? LESSER_RESTORATION_ANIMATION_DURATION_MS
-          : event.spellId === 'heal'
-            ? HEAL_ANIMATION_DURATION_MS
-          : event.spellId === 'mass-cure-wounds'
-            ? MASS_CURE_WOUNDS_ANIMATION_DURATION_MS
-          : event.spellId === 'mass-heal'
-            ? MASS_HEAL_ANIMATION_DURATION_MS
-          : event.spellId === 'mass-healing-word'
-            ? MASS_HEALING_WORD_ANIMATION_DURATION_MS
-          : event.spellId === 'prayer-of-healing'
-            ? PRAYER_OF_HEALING_ANIMATION_DURATION_MS
-          : event.spellId === 'dancing-lights'
-            ? DANCING_LIGHTS_ANIMATION_DURATION_MS
-          : event.spellId === 'minor-illusion'
-            ? MINOR_ILLUSION_ANIMATION_DURATION_MS
-          : event.spellId === 'thaumaturgy'
-            ? THAUMATURGY_ANIMATION_DURATION_MS
-          : event.spellId === 'shillelagh'
-            ? SHILLELAGH_ANIMATION_DURATION_MS
-          : event.spellId === 'chain-lightning'
-            ? CHAIN_LIGHTNING_ANIMATION_DURATION_MS
-          : event.spellId === 'disintegrate'
-            ? DISINTEGRATE_ANIMATION_DURATION_MS
-          : event.spellId === 'bless'
-            ? BLESS_MANIFESTATION_DURATION_MS
-          : event.spellId === 'bane'
-            ? BANE_MANIFESTATION_DURATION_MS
-          : event.spellId === 'shield-of-faith'
-            ? SHIELD_OF_FAITH_MANIFESTATION_DURATION_MS
-          : event.spellId === 'mage-armor'
-            ? MAGE_ARMOR_MANIFESTATION_DURATION_MS
-          : event.spellId === 'jump'
-            ? JUMP_MANIFESTATION_DURATION_MS
-          : event.spellId === 'darkvision'
-            ? DARKVISION_MANIFESTATION_DURATION_MS
-          : event.spellId === 'see-invisibility'
-            ? SEE_INVISIBILITY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'warding-bond'
-            ? WARDING_BOND_MANIFESTATION_DURATION_MS
-          : event.spellId === 'fly'
-            ? FLY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'heroism'
-            ? HEROISM_MANIFESTATION_DURATION_MS
-          : event.spellId === 'enlarge-reduce'
-            ? ENLARGE_REDUCE_MANIFESTATION_DURATION_MS
-          : event.spellId === 'enhance-ability'
-            ? ENHANCE_ABILITY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'divine-favor'
-            ? DIVINE_FAVOR_MANIFESTATION_DURATION_MS
-          : event.spellId === 'hunters-mark'
-            ? HUNTERS_MARK_MANIFESTATION_DURATION_MS
-          : event.spellId === 'magic-weapon'
-            ? MAGIC_WEAPON_MANIFESTATION_DURATION_MS
-          : event.spellId === 'flame-blade'
-            ? FLAME_BLADE_MANIFESTATION_DURATION_MS
-          : event.spellId === 'invisibility'
-            ? INVISIBILITY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'blur'
-            ? BLUR_MANIFESTATION_DURATION_MS
-          : event.spellId === 'barkskin'
-            ? BARKSKIN_MANIFESTATION_DURATION_MS
-          : event.spellId === 'protection-from-poison'
-            ? PROTECTION_FROM_POISON_MANIFESTATION_DURATION_MS
-          : event.spellId === 'longstrider'
-            ? LONGSTRIDER_MANIFESTATION_DURATION_MS
-          : event.spellId === 'protection-from-energy'
-            ? PROTECTION_FROM_ENERGY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'death-ward'
-            ? DEATH_WARD_MANIFESTATION_DURATION_MS
-          : event.spellId === 'greater-invisibility'
-            ? GREATER_INVISIBILITY_MANIFESTATION_DURATION_MS
-          : event.spellId === 'charm-person'
-            ? CHARM_PERSON_MANIFESTATION_DURATION_MS
-          : event.spellId === 'hideous-laughter'
-            ? HIDEOUS_LAUGHTER_MANIFESTATION_DURATION_MS
-          : event.spellId === 'hold-person'
-            ? HOLD_PERSON_MANIFESTATION_DURATION_MS
-          : event.spellId === 'blindness-deafness'
-            ? BLINDNESS_DEAFNESS_MANIFESTATION_DURATION_MS
-        : event.spellId === 'chill-touch'
-          ? CHILL_TOUCH_ANIMATION_DURATION_MS
-          : event.spellId === 'ray-of-frost'
-            ? RAY_OF_FROST_ANIMATION_DURATION_MS
-            : event.spellId === 'eldritch-blast'
-              ? ELDRITCH_BLAST_ANIMATION_DURATION_MS
-              : event.spellId === 'produce-flame'
-                ? PRODUCE_FLAME_ANIMATION_DURATION_MS
-      : FIRE_BOLT_ANIMATION_DURATION_MS
+    const animationDuration = combatPresentationAnimationDuration(event.spellId)
     const animationStartsAt = event.type === 'spell-area-projectile'
       ? event.animationStartsAt
       : event.createdAt
@@ -1222,8 +1152,11 @@ export function combatPresentationProjectilesForMap(
       if (event.shape === 'rect') {
         const widthPx = (event.widthFeet ?? 20) / feetPerCell * gridSize
         const heightPx = (event.heightFeet ?? 20) / feetPerCell * gridSize
-        const orientedStrip = event.spellId === 'wall-of-fire' || event.spellId === 'blade-barrier'
-        const wallRadians = (event.wallOfFireAngleDegrees ?? 0) * Math.PI / 180
+        const orientedStrip = event.spellId === 'wall-of-fire' || event.spellId === 'blade-barrier' ||
+          event.spellId === 'wind-wall' || event.spellId === 'wall-of-force' ||
+          event.spellId === 'wall-of-stone' || event.spellId === 'wall-of-ice' ||
+          event.spellId === 'wall-of-thorns'
+        const wallRadians = (event.wallOfFireAngleDegrees ?? event.areaAngleDegrees ?? 0) * Math.PI / 180
         const wallFrom = orientedStrip
           ? { x: targetPoint.x - Math.cos(wallRadians), y: targetPoint.y - Math.sin(wallRadians) }
           : source
@@ -2366,43 +2299,11 @@ export async function publishAreaSpellPresentation(input: {
   radiusFeet?: number
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
+  areaAngleDegrees?: number
 }): Promise<{ completesAt: number }> {
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
-  const duration = {
-    'dancing-lights': DANCING_LIGHTS_ANIMATION_DURATION_MS,
-    'burning-hands': BURNING_HANDS_ANIMATION_DURATION_MS,
-    thunderwave: THUNDERWAVE_ANIMATION_DURATION_MS,
-    shatter: SHATTER_ANIMATION_DURATION_MS,
-    'lightning-bolt': LIGHTNING_BOLT_ANIMATION_DURATION_MS,
-    'flame-strike': FLAME_STRIKE_ANIMATION_DURATION_MS,
-    sunburst: SUNBURST_ANIMATION_DURATION_MS,
-    'cone-of-cold': CONE_OF_COLD_ANIMATION_DURATION_MS,
-    'circle-of-death': CIRCLE_OF_DEATH_ANIMATION_DURATION_MS,
-    'ice-storm': ICE_STORM_ANIMATION_DURATION_MS,
-    'freezing-sphere': FREEZING_SPHERE_ANIMATION_DURATION_MS,
-    'meteor-swarm': METEOR_SWARM_ANIMATION_DURATION_MS,
-    'color-spray': COLOR_SPRAY_ANIMATION_DURATION_MS,
-    'faerie-fire': FAERIE_FIRE_ANIMATION_DURATION_MS,
-    sleep: SLEEP_ANIMATION_DURATION_MS,
-    entangle: ENTANGLE_ANIMATION_DURATION_MS,
-    grease: GREASE_ANIMATION_DURATION_MS,
-    darkness: DARKNESS_ANIMATION_DURATION_MS,
-    'flaming-sphere': FLAMING_SPHERE_ANIMATION_DURATION_MS,
-    moonbeam: MOONBEAM_ANIMATION_DURATION_MS,
-    daylight: DAYLIGHT_ANIMATION_DURATION_MS,
-    'black-tentacles': BLACK_TENTACLES_ANIMATION_DURATION_MS,
-    'spike-growth': SPIKE_GROWTH_ANIMATION_DURATION_MS,
-    'mage-hand': MAGE_HAND_ANIMATION_DURATION_MS,
-    'spiritual-weapon': SPIRITUAL_WEAPON_ANIMATION_DURATION_MS,
-    'spirit-guardians': SPIRIT_GUARDIANS_ANIMATION_DURATION_MS,
-    'call-lightning': CALL_LIGHTNING_ANIMATION_DURATION_MS,
-    'call-lightning-strike': CALL_LIGHTNING_STRIKE_ANIMATION_DURATION_MS,
-    'insect-plague': INSECT_PLAGUE_ANIMATION_DURATION_MS,
-    'wall-of-fire': WALL_OF_FIRE_ANIMATION_DURATION_MS,
-    'blade-barrier': BLADE_BARRIER_ANIMATION_DURATION_MS,
-    cloudkill: CLOUDKILL_ANIMATION_DURATION_MS,
-  }[input.spellId]
+  const duration = combatPresentationAnimationDuration(input.spellId)
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
     schemaVersion: 1,
     type: 'spell-area-effect',

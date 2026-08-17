@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import Konva from 'konva'
 import { cellKey, cellTopLeft, tokenCenterForAnchorCell } from '../../lib/gridCombat'
@@ -39,11 +39,12 @@ function Dnd5eToxicCloudAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map:
     return { minX, minY, maxX }
   }, [area.cells, grid, map])
   const opacityScale = area.visual?.intensity === 'subtle' ? 0.7 : area.visual?.intensity === 'strong' ? 1.18 : 1
+  const animationPhaseMs = useMemo(() => stableAnimationPhaseMs(area.id, 12_000), [area.id])
 
   useStatusAnimation(
     () => groupRef.current?.getLayer() ?? null,
-    (frame) => {
-      const seconds = (frame?.time ?? 0) / 1000
+    () => {
+      const seconds = (Date.now() + animationPhaseMs) / 1000
       puffRefs.current.forEach((node, index) => {
         const puff = puffs[index]
         if (!node || !puff) return
@@ -58,7 +59,7 @@ function Dnd5eToxicCloudAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map:
         if (node instanceof Konva.Rect) node.dashOffset(-seconds * 8)
       })
     },
-    { active: !reducedMotion, fps: 24 },
+    { active: !reducedMotion, fps: 12 },
   )
 
   const labelWidth = Math.min(Math.max(grid * 1.6, area.label.length * Math.max(7, grid * 0.14) + 34), Math.max(grid * 1.6, bounds.maxX - bounds.minX))
@@ -143,6 +144,9 @@ const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>
   'blade-barrier': { icon: '✧', glow: '#bae6fd' },
   cloudkill: { icon: '☁', glow: '#bef264' },
   'ice-storm-ground': { icon: '❄', glow: '#dbeafe' },
+  'fog-cloud': { icon: '☁', glow: '#cbd5e1' }, web: { icon: '⌘', glow: '#e2e8f0' }, silence: { icon: '∅', glow: '#a5b4fc' },
+  'sleet-storm': { icon: '❄', glow: '#bfdbfe' }, 'stinking-cloud': { icon: '☁', glow: '#fde047' }, 'wind-wall': { icon: '≋', glow: '#bae6fd' },
+  'wall-of-force': { icon: '◇', glow: '#c4b5fd' }, 'wall-of-stone': { icon: '▦', glow: '#a8a29e' }, 'wall-of-ice': { icon: '❄', glow: '#bae6fd' }, 'wall-of-thorns': { icon: '✣', glow: '#a3e635' },
 }
 
 
@@ -161,13 +165,47 @@ const PERSISTENT_AREA_SPRITE_ASSETS: Readonly<Record<string, string>> = {
   'wall-of-fire': '/assets/vfx/wall-of-fire-sprite-v2.png',
   'insect-plague': '/assets/vfx/insect-plague-sprite-v2.png',
   'blade-barrier': '/assets/vfx/blade-barrier-sprite-v2.png',
-  cloudkill: '/assets/vfx/cloudkill-sprite-v2.png',
+  cloudkill: '/assets/vfx/sequence-toxic-cloud-sprite-v3.png',
+  'stinking-cloud': '/assets/vfx/sequence-toxic-cloud-sprite-v3.png',
+  'fog-cloud': '/assets/vfx/sequence-fog-cloud-sprite-v1.png',
+  'sleet-storm': '/assets/vfx/sequence-sleet-storm-sprite-v1.png',
+  'wind-wall': '/assets/vfx/sequence-wind-wall-sprite-v1.png',
+  'wall-of-force': '/assets/vfx/sequence-wall-of-force-sprite-v1.png',
+  'wall-of-stone': '/assets/vfx/sequence-wall-of-stone-sprite-v1.png',
+  'wall-of-ice': '/assets/vfx/sequence-wall-of-ice-sprite-v1.png',
+  'wall-of-thorns': '/assets/vfx/sequence-wall-of-thorns-sprite-v1.png',
   'ice-storm-ground': '/assets/vfx/ice-storm-ground-sprite-v2.png',
 }
 
 
 
-const PERSISTENT_STRIP_PRESETS = new Set(['wall-of-fire', 'blade-barrier'])
+const PERSISTENT_STRIP_PRESETS = new Set([
+  'wall-of-fire', 'blade-barrier', 'wind-wall', 'wall-of-force',
+  'wall-of-stone', 'wall-of-ice', 'wall-of-thorns',
+])
+
+function stableAnimationPhaseMs(value: string, periodMs: number): number {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0) % Math.max(1, periodMs)
+}
+
+function spriteAtlasCrop(
+  frameIndex: number,
+  frameWidth: number,
+  frameHeight: number,
+  cropInset: number,
+) {
+  return {
+    x: (frameIndex % 4) * frameWidth + cropInset,
+    y: Math.floor(frameIndex / 4) * frameHeight + cropInset,
+    width: frameWidth - cropInset * 2,
+    height: frameHeight - cropInset * 2,
+  }
+}
 
 
 function PersistentAreaSpriteAtlas({
@@ -181,6 +219,7 @@ function PersistentAreaSpriteAtlas({
   glow,
   reducedMotion,
   preset,
+  animationId,
   onReady,
 }: {
   image: HTMLImageElement
@@ -193,31 +232,41 @@ function PersistentAreaSpriteAtlas({
   glow: string
   reducedMotion: boolean
   preset: string
+  animationId: string
   onReady?: () => void
 }) {
   const groupRef = useRef<Konva.Group>(null)
-  const spriteRef = useRef<Konva.Image>(null)
+  const primarySpriteRef = useRef<Konva.Image>(null)
+  const secondarySpriteRef = useRef<Konva.Image>(null)
   const frameWidth = (image.naturalWidth || image.width) / 4
   const frameHeight = (image.naturalHeight || image.height) / 4
   const loopFrames = persistentAreaAtlasLoopFrames(preset)
   const cropInset = Math.max(0.5, Math.min(frameWidth, frameHeight) * 0.004)
+  const isSlowCloud = preset === 'cloudkill' || preset === 'stinking-cloud'
+  const frameHoldMs = isSlowCloud ? 1_350 : 165
+  const crossfadeMs = isSlowCloud ? 440 : 70
+  const animationPhaseMs = useMemo(
+    () => stableAnimationPhaseMs(animationId, frameHoldMs * loopFrames.length),
+    [animationId, frameHoldMs, loopFrames.length],
+  )
 
   useStatusAnimation(
     () => groupRef.current?.getLayer() ?? null,
-    (frame) => {
-      const seconds = (frame?.time ?? 0) / 1000
-      const frameIndex = loopFrames[Math.floor(seconds * 7) % loopFrames.length]
-      spriteRef.current?.crop({
-        x: (frameIndex % 4) * frameWidth + cropInset,
-        y: Math.floor(frameIndex / 4) * frameHeight + cropInset,
-        width: frameWidth - cropInset * 2,
-        height: frameHeight - cropInset * 2,
-      })
-      spriteRef.current?.opacity(
-        preset === 'darkness' ? opacity : opacity + Math.sin(seconds * 2.2) * 0.035,
-      )
+    () => {
+      const elapsedMs = Date.now() + animationPhaseMs
+      const step = Math.floor(elapsedMs / frameHoldMs)
+      const stepProgressMs = elapsedMs % frameHoldMs
+      const primaryFrame = loopFrames[step % loopFrames.length]
+      const secondaryFrame = loopFrames[(step + 1) % loopFrames.length]
+      const crossfadeStartMs = frameHoldMs - crossfadeMs
+      const linearMix = Math.max(0, Math.min(1, (stepProgressMs - crossfadeStartMs) / crossfadeMs))
+      const smoothMix = linearMix * linearMix * (3 - 2 * linearMix)
+      primarySpriteRef.current?.crop(spriteAtlasCrop(primaryFrame, frameWidth, frameHeight, cropInset))
+      secondarySpriteRef.current?.crop(spriteAtlasCrop(secondaryFrame, frameWidth, frameHeight, cropInset))
+      primarySpriteRef.current?.opacity(opacity * (1 - smoothMix))
+      secondarySpriteRef.current?.opacity(opacity * smoothMix)
     },
-    { active: !reducedMotion, fps: 14 },
+    { active: !reducedMotion, fps: isSlowCloud ? 12 : 20 },
   )
 
   useEffect(() => {
@@ -241,14 +290,9 @@ function PersistentAreaSpriteAtlas({
       listening={false}
     >
       <KonvaImage
-        ref={spriteRef}
+        ref={primarySpriteRef}
         image={image}
-        crop={{
-          x: (initialFrame % 4) * frameWidth + cropInset,
-          y: Math.floor(initialFrame / 4) * frameHeight + cropInset,
-          width: frameWidth - cropInset * 2,
-          height: frameHeight - cropInset * 2,
-        }}
+        crop={spriteAtlasCrop(initialFrame, frameWidth, frameHeight, cropInset)}
         x={-width / 2}
         y={-height / 2}
         width={width}
@@ -259,6 +303,78 @@ function PersistentAreaSpriteAtlas({
         listening={false}
         perfectDrawEnabled={false}
       />
+      <KonvaImage
+        ref={secondarySpriteRef}
+        image={image}
+        crop={spriteAtlasCrop(loopFrames[1] ?? initialFrame, frameWidth, frameHeight, cropInset)}
+        x={-width / 2}
+        y={-height / 2}
+        width={width}
+        height={height}
+        opacity={0}
+        shadowColor={glow}
+        shadowBlur={Math.min(width, height) * 0.12}
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+    </Group>
+  )
+}
+
+function PersistentSilenceField({
+  areaId,
+  x,
+  y,
+  radius,
+  reducedMotion,
+}: {
+  areaId: string
+  x: number
+  y: number
+  radius: number
+  reducedMotion: boolean
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const innerRingRef = useRef<Konva.Circle>(null)
+  const middleRingRef = useRef<Konva.Circle>(null)
+  const outerRingRef = useRef<Konva.Circle>(null)
+  const phaseMs = useMemo(() => stableAnimationPhaseMs(areaId, 20_000), [areaId])
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    () => {
+      const seconds = (Date.now() + phaseMs) / 1000
+      innerRingRef.current?.rotation(seconds * 4)
+      middleRingRef.current?.rotation(seconds * 2.6 + 48)
+      outerRingRef.current?.rotation(seconds * 1.7 + 112)
+      innerRingRef.current?.opacity(0.34 + Math.sin(seconds * 0.8) * 0.045)
+      middleRingRef.current?.opacity(0.28 + Math.sin(seconds * 0.64 + 1.4) * 0.04)
+      outerRingRef.current?.opacity(0.22 + Math.sin(seconds * 0.52 + 2.6) * 0.035)
+    },
+    { active: !reducedMotion, fps: 12 },
+  )
+
+  return (
+    <Group ref={groupRef} x={x} y={y} listening={false}>
+      <Circle
+        radius={radius}
+        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+        fillRadialGradientEndRadius={radius}
+        fillRadialGradientColorStops={[
+          0, 'rgba(15,23,42,0.34)',
+          0.68, 'rgba(49,46,129,0.2)',
+          1, 'rgba(129,140,248,0.04)',
+        ]}
+        shadowColor="#818cf8"
+        shadowBlur={radius * 0.14}
+        perfectDrawEnabled={false}
+      />
+      <Circle ref={innerRingRef} radius={radius * 0.36} stroke="#c7d2fe" strokeWidth={2} dash={[radius * 0.12, radius * 0.17]} opacity={0.34} />
+      <Circle ref={middleRingRef} radius={radius * 0.64} stroke="#a5b4fc" strokeWidth={2.2} dash={[radius * 0.19, radius * 0.12]} opacity={0.28} />
+      <Circle ref={outerRingRef} radius={radius * 0.9} stroke="#818cf8" strokeWidth={2.4} dash={[radius * 0.25, radius * 0.16]} opacity={0.22} />
+      <Circle radius={radius * 0.09} fill="#0f172a" stroke="#e0e7ff" strokeWidth={2} opacity={0.82} shadowColor="#a5b4fc" shadowBlur={10} />
     </Group>
   )
 }
@@ -581,6 +697,7 @@ export function Dnd5eCoreSpellAreaOverlay({
     }
   }, { minX: Number.POSITIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY, maxY: Number.NEGATIVE_INFINITY })
   const intensity = areaVisual?.intensity === 'strong' ? 1.18 : areaVisual?.intensity === 'subtle' ? 0.72 : 1
+  const animationPhaseMs = useMemo(() => stableAnimationPhaseMs(area.id, 30_000), [area.id])
   const spritePlacement = persistentAreaImage
     ? persistentAreaSpritePlacement(area, map, preset)
     : undefined
@@ -595,7 +712,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           : preset === 'insect-plague'
             ? 0.76
             : 0.82
-  const hasMaterialVisual = preset === 'grease' || preset === 'flaming-sphere' || !!persistentSpriteAsset
+  const hasMaterialVisual = preset === 'grease' || preset === 'flaming-sphere' || preset === 'silence' || !!persistentSpriteAsset
   const reportPersistentVisualReady = useCallback(
     () => onPersistentVisualReady?.(area.id),
     [area.id, onPersistentVisualReady],
@@ -626,10 +743,10 @@ export function Dnd5eCoreSpellAreaOverlay({
 
   useStatusAnimation(
     () => groupRef.current?.getLayer() ?? null,
-    (frame) => {
-      const seconds = (frame?.time ?? 0) / 1000
+    () => {
+      const seconds = (Date.now() + animationPhaseMs) / 1000
       groupRef.current?.opacity(
-        preset === 'flaming-sphere' || preset === 'darkness'
+        hasMaterialVisual
           ? 1
           : (0.84 + Math.sin(seconds * 2.1) * 0.12) * intensity,
       )
@@ -640,7 +757,7 @@ export function Dnd5eCoreSpellAreaOverlay({
       iconRef.current?.scale({ x: iconScale, y: iconScale })
       if (preset === 'spirit-guardians') iconRef.current?.rotation(Math.sin(seconds * 1.4) * 8)
     },
-    { active: !reducedMotion, fps: 24 },
+    { active: !reducedMotion, fps: 16 },
   )
 
   return (
@@ -732,6 +849,17 @@ export function Dnd5eCoreSpellAreaOverlay({
           size={grid * FLAMING_SPHERE_VISUAL_DIAMETER_GRID_FACTOR}
           reducedMotion={reducedMotion}
         />
+      ) : area.cells.length > 0 && preset === 'silence' ? (
+        <PersistentSilenceField
+          areaId={area.id}
+          x={(areaPixelBounds.minX + areaPixelBounds.maxX) / 2}
+          y={(areaPixelBounds.minY + areaPixelBounds.maxY) / 2}
+          radius={Math.max(grid * 0.5, Math.min(
+            areaPixelBounds.maxX - areaPixelBounds.minX,
+            areaPixelBounds.maxY - areaPixelBounds.minY,
+          ) / 2)}
+          reducedMotion={reducedMotion}
+        />
       ) : persistentAreaImage && (preset === 'wall-of-fire' || preset === 'blade-barrier') && area.wallOfFireGeometry?.shape === 'ring' && area.anchorCell ? (
         <WallOfFireRingVisual
           image={persistentAreaImage}
@@ -746,6 +874,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           glow={visual.glow}
           reducedMotion={reducedMotion}
           preset={preset}
+          animationId={area.id}
         />
       ) : firstCell && (
         <Text
@@ -768,6 +897,13 @@ export function Dnd5eCoreSpellAreaOverlay({
     </Group>
   )
 }
+
+// Viewport zoom lives in MapCanvas state. Re-rendering these descendants for
+// a scale-only update would make react-konva reapply their declarative initial
+// crop/opacity between two imperative animation frames, producing a visible
+// one-frame snap. Keep the live Konva nodes mounted across viewport updates.
+const ZoomStableToxicCloudAreaOverlay = memo(Dnd5eToxicCloudAreaOverlay)
+const ZoomStableCoreSpellAreaOverlay = memo(Dnd5eCoreSpellAreaOverlay)
 
 
 
@@ -796,9 +932,9 @@ export function Dnd5ePluginAreaOverlays({
   return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
     const preset = dnd5ePersistentAreaPresentationVisual(area)?.preset ?? ''
     const overlay = preset === 'toxic-cloud'
-      ? <Dnd5eToxicCloudAreaOverlay area={area} map={map} />
+      ? <ZoomStableToxicCloudAreaOverlay area={area} map={map} />
       : CORE_AREA_VISUALS[preset]
-        ? <Dnd5eCoreSpellAreaOverlay
+        ? <ZoomStableCoreSpellAreaOverlay
             area={area}
             map={map}
             onPersistentVisualReady={onPersistentVisualReady}

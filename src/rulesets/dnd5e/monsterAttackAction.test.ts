@@ -35,6 +35,46 @@ describe('SRD monster map action adapter', () => {
     setMapGeometryRuntime([])
   })
 
+  it('prepares a generic summoned companion profile as repeated magical attacks with Host bonuses', () => {
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token', x: 10, type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const wolf = token({
+      id: 'companion-wolf', x: 0, poolId: 'srd-5.1:wolf', hp: 44, maxHp: 44,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'test', featureId: 'test:companion',
+        sourceCharacterId: 'ranger', sourceTokenId: 'ranger-token',
+        createdRound: 1, expiresAfterRound: 14_400, side: 'enemy', persistent: true,
+        weaponAttackBonus: 4, weaponDamageBonus: 4,
+        weaponAttacksMagical: true, attacksPerAction: 2,
+      },
+    })
+    const map: BattleMap = {
+      id: 'companion-attack-map', name: 'Companion attack', width: 100, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [wolf, heroToken],
+    }
+    const initiativeOrder = [
+      { tokenId: wolf.id, label: wolf.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'companion-attack', map, characters: [hero], initiativeOrder,
+      actorTokenId: wolf.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attacks).toHaveLength(2)
+    expect(prepared.prepared.attacks.map((entry) => entry.attack.toHit)).toEqual([8, 8])
+    expect(prepared.prepared.attacks.map((entry) => entry.attack.damage[0]?.bonus)).toEqual([6, 6])
+    expect(prepared.prepared.state.combatants[wolf.id]).toMatchObject({
+      weaponAttacksMagical: true,
+      summonedAttacksPerAction: 2,
+    })
+  })
+
   it('applies underwater disadvantage to land monsters and preserves swimming predators', () => {
     const hero = character()
     const heroToken = token({ id: 'hero-token', x: 10, type: 'player', characterId: hero.id })

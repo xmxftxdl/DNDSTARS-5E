@@ -88,6 +88,26 @@ describe('campaign time model', () => {
       ...state,
       advances: [{ ...state.advances[0], beneficiaryCharacterIds: ['hero', 'hero'] }],
     })).toBe(false)
+    const longRestState = {
+      ...state,
+      worldMinute: 960,
+      advances: [{
+        ...state.advances[0], kind: 'long-rest', toWorldMinute: 960, minutes: 480,
+        restRecoveryReports: undefined,
+        restFeatureD20Rolls: [{
+          characterId: 'hero', featureId: 'local.test:diviner.portent', values: [5, 16],
+        }],
+      }],
+    }
+    expect(validateSharedCampaignTime(longRestState)).toBe(true)
+    expect(normalizeSharedCampaignTime(longRestState).advances[0].restFeatureD20Rolls?.[0].values)
+      .toEqual([5, 16])
+    expect(validateSharedCampaignTime({
+      ...longRestState,
+      advances: [{ ...longRestState.advances[0], restFeatureD20Rolls: [{
+        characterId: 'hero', featureId: 'local.test:diviner.portent', values: [21],
+      }] }],
+    })).toBe(false)
   })
 
   it('creates timed light patches and expires them on the authoritative clock', () => {

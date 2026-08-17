@@ -9,6 +9,14 @@ describe('sidebar navigation visibility', () => {
       '/dm-tools/prep',
     ])
     expect(sidebarNavItems('player').map((item) => item.to)).not.toContain('/simulation')
+    expect(sidebarNavItems('player').map((item) => item.to)).not.toContain('/shops')
+    expect(sidebarNavItems('dm', 'player').map((item) => item.to)).not.toContain('/shops')
+    expect(sidebarNavItems('player').map((item) => item.to)).toEqual([
+      '/maps',
+      '/characters',
+      '/spellbook',
+      '/communications',
+    ])
     expect(sidebarNavItems('player', 'spectator').map((item) => item.to)).not.toContain('/simulation')
   })
 
@@ -18,6 +26,7 @@ describe('sidebar navigation visibility', () => {
       '/campaign/ABC234/maps',
       '/campaign/ABC234/characters',
       '/campaign/ABC234/spellbook',
+      '/campaign/ABC234/shops',
       '/campaign/ABC234/communications',
     ])
     expect(sidebarDmAssistantItems('/campaign/ABC234').map((item) => item.to)).toEqual([

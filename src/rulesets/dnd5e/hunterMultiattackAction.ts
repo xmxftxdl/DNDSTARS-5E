@@ -15,6 +15,7 @@ import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eMonkMartialArtsEligible,
   dnd5eWeaponAttackProfile,
+  dnd5eWeaponPropertyIds,
   dnd5eWeaponRangeFeet,
   dnd5eWearingUnproficientArmor,
   type Dnd5eWeaponAttackProfile,
@@ -217,6 +218,8 @@ export function prepareDnd5eHunterMultiattack(input: {
         normalRangeFeet: profile.rangeFeet?.normal,
         longRangeFeet: profile.rangeFeet?.long,
         weaponId: profile.weaponId,
+        weaponProperties: [...dnd5eWeaponPropertyIds(profile.properties)],
+        proficient: profile.proficient,
         finesse: profile.finesse,
         strengthBased: profile.attackAbility === 'str',
         monkMartialArtsEligible: dnd5eMonkMartialArtsEligible(actor),

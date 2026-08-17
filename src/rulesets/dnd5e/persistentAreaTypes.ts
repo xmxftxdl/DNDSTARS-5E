@@ -31,6 +31,16 @@ export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'blade-barrier',
   'cloudkill',
   'ice-storm-ground',
+  'fog-cloud',
+  'web',
+  'silence',
+  'sleet-storm',
+  'stinking-cloud',
+  'wind-wall',
+  'wall-of-force',
+  'wall-of-stone',
+  'wall-of-ice',
+  'wall-of-thorns',
 ] as const
 
 export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]
@@ -66,7 +76,7 @@ export type Dnd5ePersistentAreaLighting =
     }
 
 export interface Dnd5ePluginEffectDuration {
-  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save' | 'permanent'
+  expiresAt: 'source-next-turn-start' | 'source-turn-end' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save' | 'permanent'
   remainingRounds?: number
   saveAbility?: AbilityKey
   saveDc?: number
@@ -89,6 +99,28 @@ export interface Dnd5ePersistentAreaObscuration {
   sourceCanSeeThrough?: boolean
 }
 
+/** Host-owned environmental rules projected onto creatures occupying an area. */
+export interface Dnd5ePersistentAreaOccupantModifiers {
+  /** `fully-contained` is used by effects such as Silence; the default is any overlap. */
+  containment?: 'intersects' | 'fully-contained'
+  preventsVerbalComponents?: boolean
+  damageImmunities?: readonly Dnd5eDamageType[]
+  damageResistances?: readonly Dnd5eDamageType[]
+  conditionImmunities?: readonly Dnd5eStandardConditionId[]
+  /** Advantage on saving throws against spells while occupying the area. */
+  spellSavingThrowAdvantage?: boolean
+  /** Evasion-style suppression of half damage after a successful spell save. */
+  successfulSpellSaveNegatesDamage?: boolean
+  hitPointMaximumReductionImmunity?: boolean
+}
+
+/** Bounded physical geometry supplied by a persistent-area entity. */
+export interface Dnd5ePersistentAreaBlocking {
+  movement?: boolean
+  vision?: boolean
+  lineOfEffect?: boolean
+}
+
 export type Dnd5ePersistentAreaVerticalSnapshot =
   | { mode: 'ground' }
   | {
@@ -101,6 +133,25 @@ export type Dnd5ePersistentAreaVerticalSnapshot =
 export interface Dnd5ePersistentAreaMovementDeclaration {
   economy: 'action' | 'bonus-action'
   maximumFeet: number
+  /** Optional tether to the source token, checked again after every move. */
+  maximumDistanceFromSourceFeet?: number
+}
+
+/**
+ * Closed turn-boundary evolution for an authoritative map area. This is used
+ * by moving hazards such as a wave, but remains content-neutral so Workshop
+ * rules can reuse the same Host-owned translation and scaling transaction.
+ */
+export interface Dnd5ePersistentAreaTurnLifecycle {
+  timing: 'source-turn-start'
+  /** Move the complete occupied-cell snapshot directly away from its source. */
+  translateAwayFromSourceFeet?: number
+  /** Reduce the authoritative vertical volume after each translation. */
+  heightReductionFeet?: number
+  /** Apply this delta to the named trigger damage dice after each advance. */
+  damageDiceCountDelta?: number
+  damageTriggerIds?: readonly string[]
+  minimumDamageDiceCount?: number
 }
 
 export interface Dnd5ePersistentAreaDamageDeclaration {
@@ -109,6 +160,33 @@ export interface Dnd5ePersistentAreaDamageDeclaration {
   modifier?: number
   modifierFormula?: import('./workshopDamageFormula').Dnd5eWorkshopDamageFormulaV1
   type: Dnd5eDamageType
+}
+
+/**
+ * A data-only rider projected from the current occupants of a persistent area.
+ * It is intentionally narrower than an arbitrary on-hit callback: the Host
+ * owns target membership, attack eligibility, dice, critical doubling and
+ * damage defenses on every weapon hit.
+ */
+export interface Dnd5ePersistentAreaWeaponHitBonusDamage {
+  count: number
+  sides: number
+  bonus?: number
+  type: Dnd5eDamageType
+  magical?: boolean
+}
+
+/**
+ * An active Activity made available only while the owning map area exists.
+ * The area is an entitlement token, not an executable callback: the Host still
+ * reloads the registered Activity, validates ownership/economy/targets and rolls.
+ */
+export interface Dnd5ePersistentAreaGrantedActivity {
+  activityId: string
+  /** Optional map-facing label; the Activity name remains the rules identity. */
+  label?: string
+  /** Prompt the same target workflow after the area is first committed. */
+  activateOnCreate?: boolean
 }
 
 export interface Dnd5ePersistentAreaSaveDeclaration {
@@ -121,6 +199,10 @@ export interface Dnd5ePersistentAreaSaveDeclaration {
   shapechangerDisadvantage?: boolean
   /** 核心规则扩展：变形生物豁免失败时恢复原形。 */
   revertShapechangerOnFailure?: boolean
+  /** Creatures with an authoritative swim speed roll this save with advantage. */
+  advantageIfTargetHasSwimSpeed?: boolean
+  /** Damage immunity may make the environmental saving throw automatically succeed. */
+  automaticSuccessForDamageImmunity?: Dnd5eDamageType
 }
 
 export interface Dnd5ePersistentAreaConditionDeclaration {
@@ -152,6 +234,8 @@ export interface Dnd5ePersistentAreaTriggerDeclaration {
   oncePerRound?: boolean
   /** 同一目标在每个生物回合内最多触发一次；用于“每回合首次进入/开始”语义。 */
   oncePerTurn?: boolean
+  /** Total number of successful trigger transactions allowed for the area. */
+  maximumTotalUses?: number
   /** `on-move-distance` 每累计多少尺触发一次；由 Host 根据完整移动路径计数。 */
   movementIntervalFeet?: number
   savingThrow?: Dnd5ePersistentAreaSaveDeclaration
@@ -161,7 +245,10 @@ export interface Dnd5ePersistentAreaTriggerDeclaration {
    */
   skipSaveWhenSourceConditionActive?: Dnd5eStandardConditionId
   damage?: Dnd5ePersistentAreaDamageDeclaration
+  healing?: { amount: number; onlyIfAtZero?: boolean }
   condition?: Dnd5ePersistentAreaConditionDeclaration
+  /** On a failed save, consume the target's action for the current turn. */
+  consumeActionOnFailedSave?: boolean
   /** Pause before commit so the DM may adjust the proposed save, damage or condition. */
   dmAdjustable?: boolean
 }
@@ -186,8 +273,58 @@ const TIMINGS: readonly Dnd5ePersistentAreaTriggerTiming[] = [
   'on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end',
 ]
 const EXPIRATIONS: readonly Dnd5ePluginEffectDuration['expiresAt'][] = [
-  'source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save', 'permanent',
+  'source-next-turn-start', 'source-turn-end', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save', 'permanent',
 ]
+
+export function normalizeDnd5ePersistentAreaTurnLifecycle(
+  value: unknown,
+): Dnd5ePersistentAreaTurnLifecycle | undefined {
+  const lifecycle = record(value)
+  if (!lifecycle || lifecycle.timing !== 'source-turn-start') return undefined
+  const allowed = new Set([
+    'timing', 'translateAwayFromSourceFeet', 'heightReductionFeet',
+    'damageDiceCountDelta', 'damageTriggerIds', 'minimumDamageDiceCount',
+  ])
+  if (Object.keys(lifecycle).some((key) => !allowed.has(key))) return undefined
+  if (
+    lifecycle.translateAwayFromSourceFeet != null &&
+    !integer(lifecycle.translateAwayFromSourceFeet, 1, 10_000)
+  ) return undefined
+  if (lifecycle.heightReductionFeet != null && !integer(lifecycle.heightReductionFeet, 1, 10_000)) {
+    return undefined
+  }
+  if (
+    lifecycle.damageDiceCountDelta != null &&
+    (!Number.isInteger(lifecycle.damageDiceCountDelta) || Number(lifecycle.damageDiceCountDelta) < -40 || Number(lifecycle.damageDiceCountDelta) > 40 || Number(lifecycle.damageDiceCountDelta) === 0)
+  ) return undefined
+  const damageTriggerIds = lifecycle.damageTriggerIds == null
+    ? undefined
+    : Array.isArray(lifecycle.damageTriggerIds) && lifecycle.damageTriggerIds.length > 0 &&
+      lifecycle.damageTriggerIds.length <= 32 && lifecycle.damageTriggerIds.every((id) =>
+        typeof id === 'string' && /^[a-z0-9][a-z0-9._-]*$/.test(id)) &&
+      new Set(lifecycle.damageTriggerIds).size === lifecycle.damageTriggerIds.length
+      ? [...lifecycle.damageTriggerIds] as string[]
+      : null
+  if (damageTriggerIds === null) return undefined
+  if (
+    lifecycle.minimumDamageDiceCount != null &&
+    !integer(lifecycle.minimumDamageDiceCount, 0, 40)
+  ) return undefined
+  if (
+    lifecycle.translateAwayFromSourceFeet == null &&
+    lifecycle.heightReductionFeet == null &&
+    lifecycle.damageDiceCountDelta == null
+  ) return undefined
+  if (lifecycle.damageDiceCountDelta != null && !damageTriggerIds?.length) return undefined
+  return {
+    timing: 'source-turn-start',
+    translateAwayFromSourceFeet: lifecycle.translateAwayFromSourceFeet as number | undefined,
+    heightReductionFeet: lifecycle.heightReductionFeet as number | undefined,
+    damageDiceCountDelta: lifecycle.damageDiceCountDelta as number | undefined,
+    damageTriggerIds,
+    minimumDamageDiceCount: lifecycle.minimumDamageDiceCount as number | undefined,
+  }
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -197,6 +334,133 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function integer(value: unknown, min: number, max: number): value is number {
   return Number.isInteger(value) && Number(value) >= min && Number(value) <= max
+}
+
+export function normalizeDnd5ePersistentAreaWeaponHitBonusDamage(
+  value: unknown,
+): Dnd5ePersistentAreaWeaponHitBonusDamage | undefined {
+  const damage = record(value)
+  if (
+    !damage ||
+    Object.keys(damage).some((key) => !['count', 'sides', 'bonus', 'type', 'magical'].includes(key)) ||
+    !integer(damage.count, 1, 40) ||
+    !integer(damage.sides, 2, 100) ||
+    !integer(damage.bonus ?? 0, -1_000, 1_000) ||
+    !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(damage.type) ||
+    (damage.magical != null && typeof damage.magical !== 'boolean')
+  ) return undefined
+  return {
+    count: Number(damage.count),
+    sides: Number(damage.sides),
+    bonus: Number(damage.bonus ?? 0),
+    type: damage.type as Dnd5eDamageType,
+    magical: damage.magical === true,
+  }
+}
+
+export function normalizeDnd5ePersistentAreaOccupantModifiers(
+  value: unknown,
+): Dnd5ePersistentAreaOccupantModifiers | undefined {
+  const modifiers = record(value)
+  if (!modifiers || Object.keys(modifiers).some((key) => ![
+    'containment', 'preventsVerbalComponents', 'damageImmunities', 'damageResistances',
+    'conditionImmunities', 'spellSavingThrowAdvantage',
+    'successfulSpellSaveNegatesDamage', 'hitPointMaximumReductionImmunity',
+  ].includes(key))) return undefined
+  const containment = modifiers.containment ?? 'intersects'
+  if (containment !== 'intersects' && containment !== 'fully-contained') return undefined
+  if (modifiers.preventsVerbalComponents != null && typeof modifiers.preventsVerbalComponents !== 'boolean') {
+    return undefined
+  }
+  const damageImmunities = modifiers.damageImmunities == null
+    ? []
+    : Array.isArray(modifiers.damageImmunities)
+      ? [...new Set(modifiers.damageImmunities)]
+      : []
+  if (
+    modifiers.damageImmunities != null &&
+    (!Array.isArray(modifiers.damageImmunities) ||
+      damageImmunities.some((entry) => !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(entry)))
+  ) return undefined
+  const damageResistances = modifiers.damageResistances == null
+    ? []
+    : Array.isArray(modifiers.damageResistances)
+      ? [...new Set(modifiers.damageResistances)]
+      : []
+  if (modifiers.damageResistances != null && (
+    !Array.isArray(modifiers.damageResistances) ||
+    damageResistances.some((entry) => !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(entry))
+  )) return undefined
+  const conditionImmunities = modifiers.conditionImmunities == null
+    ? []
+    : Array.isArray(modifiers.conditionImmunities)
+      ? [...new Set(modifiers.conditionImmunities)]
+      : []
+  if (modifiers.conditionImmunities != null && (
+    !Array.isArray(modifiers.conditionImmunities) ||
+    conditionImmunities.some((entry) => !(DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(entry))
+  )) return undefined
+  for (const key of [
+    'spellSavingThrowAdvantage', 'successfulSpellSaveNegatesDamage',
+    'hitPointMaximumReductionImmunity',
+  ] as const) {
+    if (modifiers[key] != null && typeof modifiers[key] !== 'boolean') return undefined
+  }
+  if (
+    modifiers.preventsVerbalComponents !== true && damageImmunities.length === 0 &&
+    damageResistances.length === 0 && conditionImmunities.length === 0 &&
+    modifiers.spellSavingThrowAdvantage !== true &&
+    modifiers.successfulSpellSaveNegatesDamage !== true &&
+    modifiers.hitPointMaximumReductionImmunity !== true
+  ) return undefined
+  return {
+    containment,
+    preventsVerbalComponents: modifiers.preventsVerbalComponents === true,
+    damageImmunities: damageImmunities as Dnd5eDamageType[],
+    damageResistances: damageResistances as Dnd5eDamageType[],
+    conditionImmunities: conditionImmunities as Dnd5eStandardConditionId[],
+    spellSavingThrowAdvantage: modifiers.spellSavingThrowAdvantage === true,
+    successfulSpellSaveNegatesDamage: modifiers.successfulSpellSaveNegatesDamage === true,
+    hitPointMaximumReductionImmunity: modifiers.hitPointMaximumReductionImmunity === true,
+  }
+}
+
+export function normalizeDnd5ePersistentAreaBlocking(
+  value: unknown,
+): Dnd5ePersistentAreaBlocking | undefined {
+  const blocking = record(value)
+  if (!blocking || Object.keys(blocking).some((key) => ![
+    'movement', 'vision', 'lineOfEffect',
+  ].includes(key))) return undefined
+  if (['movement', 'vision', 'lineOfEffect'].some((key) =>
+    blocking[key] != null && typeof blocking[key] !== 'boolean')) return undefined
+  if (blocking.movement !== true && blocking.vision !== true && blocking.lineOfEffect !== true) return undefined
+  return {
+    movement: blocking.movement === true,
+    vision: blocking.vision === true,
+    lineOfEffect: blocking.lineOfEffect === true,
+  }
+}
+
+export function normalizeDnd5ePersistentAreaGrantedActivity(
+  value: unknown,
+): Dnd5ePersistentAreaGrantedActivity | undefined {
+  const grant = record(value)
+  if (
+    !grant ||
+    Object.keys(grant).some((key) => !['activityId', 'label', 'activateOnCreate'].includes(key)) ||
+    typeof grant.activityId !== 'string' ||
+    !/^[a-z0-9][a-z0-9._:-]{0,159}$/.test(grant.activityId) ||
+    (grant.label != null && (
+      typeof grant.label !== 'string' || !grant.label.trim() || grant.label.length > 120
+    )) ||
+    (grant.activateOnCreate != null && typeof grant.activateOnCreate !== 'boolean')
+  ) return undefined
+  return {
+    activityId: grant.activityId,
+    label: typeof grant.label === 'string' ? grant.label.trim() : undefined,
+    activateOnCreate: grant.activateOnCreate === true,
+  }
 }
 
 /** Runtime boundary for the authoritative vertical extent of a persistent area. */
@@ -320,10 +584,17 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
       }
     : undefined
 
+  const rawHealing = record(trigger.healing)
+  const healing = rawHealing && integer(rawHealing.amount, 1, 1_000_000) &&
+    (rawHealing.onlyIfAtZero == null || typeof rawHealing.onlyIfAtZero === 'boolean')
+    ? { amount: Number(rawHealing.amount), onlyIfAtZero: rawHealing.onlyIfAtZero === true }
+    : undefined
+
   const rawSave = record(trigger.savingThrow)
   const savingThrow = rawSave && ABILITIES.includes(rawSave.ability as AbilityKey) &&
     integer(rawSave.dc, 1, 40) &&
     (rawSave.magical == null || typeof rawSave.magical === 'boolean') &&
+    (rawSave.advantageIfTargetHasSwimSpeed == null || typeof rawSave.advantageIfTargetHasSwimSpeed === 'boolean') &&
     (rawSave.onSuccess === 'none' || rawSave.onSuccess === 'half')
     ? {
         ability: rawSave.ability as AbilityKey,
@@ -332,6 +603,11 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
         magical: rawSave.magical === true,
         shapechangerDisadvantage: rawSave.shapechangerDisadvantage === true,
         revertShapechangerOnFailure: rawSave.revertShapechangerOnFailure === true,
+        advantageIfTargetHasSwimSpeed: rawSave.advantageIfTargetHasSwimSpeed === true,
+        automaticSuccessForDamageImmunity:
+          (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawSave.automaticSuccessForDamageImmunity)
+            ? rawSave.automaticSuccessForDamageImmunity as Dnd5eDamageType
+            : undefined,
       }
     : undefined
 
@@ -392,14 +668,26 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
       }
     : undefined
 
-  if (!damage && !condition) return undefined
+  const consumeActionOnFailedSave = trigger.consumeActionOnFailedSave === true
+  if (trigger.consumeActionOnFailedSave != null && typeof trigger.consumeActionOnFailedSave !== 'boolean') return undefined
+  if (!damage && !healing && !condition && !consumeActionOnFailedSave) return undefined
+  if (trigger.healing != null && !healing) return undefined
   if (trigger.savingThrow != null && !savingThrow) return undefined
+  if (rawSave?.automaticSuccessForDamageImmunity != null &&
+    !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawSave.automaticSuccessForDamageImmunity)) return undefined
+  if (consumeActionOnFailedSave && !savingThrow) return undefined
   const movementIntervalFeet = trigger.timing === 'on-move-distance' &&
     integer(trigger.movementIntervalFeet, 1, 1_000)
     ? trigger.movementIntervalFeet
     : undefined
   if (trigger.timing === 'on-move-distance' && movementIntervalFeet == null) return undefined
   if (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) return undefined
+  const maximumTotalUses = trigger.maximumTotalUses == null
+    ? undefined
+    : integer(trigger.maximumTotalUses, 1, 10_000)
+      ? Number(trigger.maximumTotalUses)
+      : undefined
+  if (trigger.maximumTotalUses != null && maximumTotalUses == null) return undefined
   const cells = trigger.cells == null
     ? undefined
     : Array.isArray(trigger.cells) && trigger.cells.length >= 1 && trigger.cells.length <= 4_096
@@ -425,11 +713,14 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
     timing,
     oncePerRound: trigger.oncePerTurn === true ? false : trigger.oncePerRound !== false,
     oncePerTurn: trigger.oncePerTurn === true,
+    maximumTotalUses,
     movementIntervalFeet,
     savingThrow,
     skipSaveWhenSourceConditionActive,
     damage,
+    healing,
     condition,
+    consumeActionOnFailedSave,
     cells,
     dmAdjustable: trigger.dmAdjustable === true,
   }
@@ -460,6 +751,9 @@ export function normalizeDnd5ePersistentAreaTriggerDeclaration(
           magical: normalized.savingThrow.magical,
           shapechangerDisadvantage: normalized.savingThrow.shapechangerDisadvantage,
           revertShapechangerOnFailure: normalized.savingThrow.revertShapechangerOnFailure,
+          advantageIfTargetHasSwimSpeed: normalized.savingThrow.advantageIfTargetHasSwimSpeed,
+          automaticSuccessForDamageImmunity:
+            normalized.savingThrow.automaticSuccessForDamageImmunity,
         }
       : undefined,
   }

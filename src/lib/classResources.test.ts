@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../types/character'
 import { registerClassDefinition, type ClassDefinition } from './classDefinitionRegistry'
-import { getClassResource, restoreClassResources, spendClassResource, syncCharacterClassResources } from './classResources'
+import {
+  classResourceDisplayLabel,
+  getClassResource,
+  restoreClassResources,
+  spendClassResource,
+  syncCharacterClassResources,
+} from './classResources'
 import { registerDnd5eRulesPlugin } from '../rulesets/dnd5e/pluginApi'
 
 function character(patch: Partial<Character> = {}): Character {
@@ -16,6 +22,14 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e class resources', () => {
+  it('presents persisted built-in resource ids with Chinese labels', () => {
+    const fighter = character()
+    expect(classResourceDisplayLabel(fighter, 'fighterSecondWind')).toBe('回气')
+    expect(classResourceDisplayLabel(fighter, 'dnd5e-sorcery-points')).toBe('术法点')
+    expect(classResourceDisplayLabel(fighter, 'dnd5e-mystic-arcanum-7')).toBe('秘法奥秘（7环）')
+    expect(classResourceDisplayLabel(fighter, 'dnd5e-spell-slot-4')).toBe('4环法术位')
+  })
+
   it('creates, spends and restores fighter short-rest resources', () => {
     const synced = syncCharacterClassResources(character())
     expect(getClassResource(synced, 'fighterSecondWind')).toEqual({ current: 1, max: 1 })
@@ -32,6 +46,26 @@ describe('D&D 5e class resources', () => {
     expect(restoreClassResources(spent!, 'long-rest').classResources?.['dnd5e-spell-slot-3'].current).toBe(2)
   })
 
+  it('removes stale built-in resources from inactive classes while preserving custom resources', () => {
+    const wizard = syncCharacterClassResources(character({
+      charClass: '法师',
+      level: 5,
+      hitDice: '5d6',
+      dnd5eClassLevels: { wizard: 5 },
+      classResources: {
+        fighterSecondWind: { current: 1, max: 1 },
+        fighterActionSurge: { current: 1, max: 1 },
+        'dnd5e-sorcery-points': { current: 5, max: 5 },
+        'custom:charges': { current: 2, max: 3 },
+      },
+    }))
+    expect(wizard.classResources?.fighterSecondWind).toBeUndefined()
+    expect(wizard.classResources?.fighterActionSurge).toBeUndefined()
+    expect(wizard.classResources?.['dnd5e-sorcery-points']).toBeUndefined()
+    expect(wizard.classResources?.['custom:charges']).toEqual({ current: 2, max: 3 })
+    expect(wizard.classResources?.['dnd5e-arcane-recovery']).toEqual({ current: 1, max: 1 })
+  })
+
   it('supports namespaced plugin resources without legacy mirror fields', () => {
     const definition: ClassDefinition = {
       id: 'test-class', classNames: ['测试职业'], matchesClassName: (name) => name === '测试职业',
@@ -46,6 +80,41 @@ describe('D&D 5e class resources', () => {
       expect(synced.classResources?.['com.example:test-charge']).toEqual({ current: 3, max: 3 })
     } finally {
       unregister()
+    }
+  })
+
+  it('adds feat-owned resource contributions to an existing shared pool', () => {
+    const pluginId = 'local.test.additive-resource'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Additive resource fixture', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerResource({
+          id: 'shared-dice', label: '共享骰', classId: 'fighter',
+          minimumLevel: 1, maximum: 4, resetOn: 'short-rest',
+        })
+        api.registerFeat({
+          id: 'extra-die', name: '额外骰', summary: '测试。', description: '测试。',
+          resources: [{
+            id: 'shared-dice', label: '共享骰', maximum: 1,
+            resetOn: 'short-rest', stacking: 'additive',
+          }],
+          automation: 'full', automationReasons: ['由通用资源叠加协议结算。'],
+        })
+      },
+    })
+    try {
+      const resourceId = `${pluginId}:shared-dice`
+      expect(syncCharacterClassResources(character()).classResources?.[resourceId])
+        .toEqual({ current: 4, max: 4 })
+      const withFeat = syncCharacterClassResources(character({
+        dnd5eFeatIds: [`${pluginId}:extra-die`],
+      }))
+      expect(withFeat.classResources?.[resourceId]).toEqual({ current: 5, max: 5 })
+    } finally {
+      dispose()
     }
   })
 

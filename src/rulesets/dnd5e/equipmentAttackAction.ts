@@ -14,14 +14,19 @@ import {
   dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponDamageSource,
+  dnd5eWeaponPropertyIds,
   dnd5eWeaponRangeFeet,
   dnd5eWearingUnproficientArmor,
   type Dnd5eWeaponDamageSource,
   type Dnd5eWeaponAttackProfile,
 } from './equipment'
-import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from './classes'
+import { dnd5eClassDefinitionForCharacter } from './classes'
 import { dnd5eCharacterClassLevel } from './multiclass'
-import { dnd5eDeclarativeCombatManeuverDefinition } from './pluginApi'
+import {
+  dnd5eDeclarativeCombatManeuverDefinition,
+  dnd5eEffectiveAttacksPerAttackAction,
+  dnd5ePluginBonusWeaponAttackForCharacter,
+} from './pluginApi'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
@@ -56,6 +61,10 @@ import {
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eOpeningAttackSavingThrowRoll,
   type Dnd5ePostD20AdjustmentUse,
+  type Dnd5eDamageMitigationInterruptUse,
+  type Dnd5eAttackRetargetInterruptUse,
+  type Dnd5eMountedAttackRedirectUse,
+  type Dnd5eWholeWeaponDamageRerollUse,
 } from './headlessCombatEngine'
 import {
   resolveDnd5eActionWithAirborneFallPreview,
@@ -76,9 +85,10 @@ import { consumeDnd5eWeaponAmmunition } from './items'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 import { dnd5eMartialSpellBonusAttackAvailable } from './martialSpellSynergy'
-import { dnd5eActiveMagicWeaponBonus } from './activeEffects'
+import { dnd5eActiveAttackProfileRewrite, dnd5eActiveMagicWeaponBonus } from './activeEffects'
 import { dnd5eMapTokenDistanceFeet } from './verticalCombatGeometry'
 import type { Dnd5ePluginDiceRollResult } from './pluginApi'
+import { dnd5eActivityWeaponAttackGrantMatchesV1 } from './activities/dnd5eActivityWeaponAttackGrant'
 import {
   dnd5eOpeningAttackHasAdvantage,
   dnd5eOpeningAttackIsAutomaticCritical,
@@ -183,7 +193,18 @@ export function prepareDnd5eEquipmentAttack(input: {
   if (!dnd5eClassDefinitionForCharacter(actor)) return { ok: false, reason: 'not-dnd5e-class' }
   const targetToken = input.map.tokens.find((token) => token.id === action.targetTokenId)
   if (!targetToken || targetToken.id === actorToken.id || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
+  const turnSlotId = input.initiativeOrder[action.initiativeIndex]?.slotId
+  const turnKey = `${action.combatId ?? `map-${input.map.id}`}:${Math.max(1, action.round)}:${turnSlotId ?? actorToken.id}`
   const offHandAttack = action.dnd5eWeaponAttackOptions?.offHandAttack === true
+  const activityWeaponAttackGrantId = action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId
+  const activityWeaponAttackWeaponSlot = action.dnd5eWeaponAttackOptions?.activityWeaponAttackWeaponSlot ?? 'main-hand'
+  if (
+    !['main-hand', 'off-hand'].includes(activityWeaponAttackWeaponSlot) ||
+    (action.dnd5eWeaponAttackOptions?.activityWeaponAttackWeaponSlot != null && activityWeaponAttackGrantId == null)
+  ) return { ok: false, reason: 'invalid-action' }
+  const selectedWeaponSlot = activityWeaponAttackGrantId != null && activityWeaponAttackWeaponSlot === 'off-hand'
+    ? 'offHand' as const
+    : 'mainWeapon' as const
   const shillelaghAbility = action.dnd5eWeaponAttackOptions?.shillelaghAbility
   const shillelagh = dnd5eShillelaghAttackChoice(actor)
   if (
@@ -191,7 +212,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     shillelaghAbility !== 'str' &&
     shillelaghAbility !== 'spellcasting'
   ) return { ok: false, reason: 'invalid-action' }
-  if (shillelaghAbility != null && (offHandAttack || !shillelagh)) {
+  if (shillelaghAbility != null && (offHandAttack || selectedWeaponSlot !== 'mainWeapon' || !shillelagh)) {
     return { ok: false, reason: 'invalid-action' }
   }
   const handSnapshot = createDnd5eMapCombatSnapshot({
@@ -219,17 +240,31 @@ export function prepareDnd5eEquipmentAttack(input: {
       rightSizeRank: rightCombatant ? dnd5eEffectiveSizeRank(rightCombatant) : undefined,
     })
   }
-  if (offHandAttack && maintainedGrapples > 0) {
+  if ((offHandAttack || selectedWeaponSlot === 'offHand') && maintainedGrapples > 0) {
     return { ok: false, reason: 'off-hand-attack-unavailable' }
   }
-  const profile = offHandAttack
+  const baseProfile = offHandAttack
     ? dnd5eOffHandWeaponAttackProfile(actor)
     : dnd5eWeaponAttackProfile(actor, {
         shillelaghAbility,
         forceOneHanded: maintainedGrapples > 0,
+        weaponSlot: selectedWeaponSlot,
       })
-  if (!profile) return { ok: false, reason: 'no-weapon' }
-  const equippedWeapon = offHandAttack ? actor.equipment?.offHand : actor.equipment?.mainWeapon
+  if (!baseProfile) return { ok: false, reason: 'no-weapon' }
+  const attackProfileRewrite = dnd5eActiveAttackProfileRewrite(
+    actor.dnd5eCombatState?.activeEffects,
+    baseProfile.mode,
+    baseProfile.weaponId,
+  )
+  let profile: Dnd5eWeaponAttackProfile = {
+    ...baseProfile,
+    reachFeet: (baseProfile.reachFeet ?? 0) + attackProfileRewrite.reachBonusFeet,
+    damage: {
+      ...baseProfile.damage,
+      type: attackProfileRewrite.damageTypeOverride ?? baseProfile.damage.type,
+    },
+  }
+  const equippedWeapon = offHandAttack ? actor.equipment?.offHand : actor.equipment?.[selectedWeaponSlot]
   const persistedDamageSource = dnd5eWeaponDamageSource(equippedWeapon)
   if (!persistedDamageSource || persistedDamageSource.weaponId !== profile.weaponId) {
     return { ok: false, reason: 'no-weapon' }
@@ -238,7 +273,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     ...persistedDamageSource,
     magical: persistedDamageSource.magical ||
       dnd5eActiveMagicWeaponBonus(actor.dnd5eCombatState?.activeEffects, profile.weaponId) > 0 ||
-      (!offHandAttack && shillelagh?.weaponId === profile.weaponId),
+      (!offHandAttack && selectedWeaponSlot === 'mainWeapon' && shillelagh?.weaponId === profile.weaponId),
   }
   if (!consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
   if (
@@ -272,8 +307,6 @@ export function prepareDnd5eEquipmentAttack(input: {
       !slot || slot.current < 1
     ) return { ok: false, reason: 'divine-smite-unavailable' }
   }
-  const turnSlotId = input.initiativeOrder[action.initiativeIndex]?.slotId
-  const turnKey = `${action.combatId ?? `map-${input.map.id}`}:${Math.max(1, action.round)}:${turnSlotId ?? actorToken.id}`
   const recklessAlreadyActive = actor.dnd5eCombatState?.recklessAttackTurnKey === turnKey
   const recklessAttack = action.dnd5eWeaponAttackOptions?.recklessAttack === true
   if (
@@ -284,11 +317,55 @@ export function prepareDnd5eEquipmentAttack(input: {
   ) return { ok: false, reason: 'reckless-attack-unavailable' }
   const frenzyAttack = action.dnd5eWeaponAttackOptions?.frenzyAttack === true
   const featureBonusWeaponAttack =
-    action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttack === true
+    action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttack === true ||
+    action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttackId != null
+  const genericBonusWeaponAttackId = action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttackId
+  const activityWeaponAttackGrant = activityWeaponAttackGrantId
+    ? actor.dnd5eCombatState?.activityWeaponAttackGrants?.[activityWeaponAttackGrantId]
+    : undefined
+  const activityWeaponAttackGranted = activityWeaponAttackGrantId != null &&
+    dnd5eActivityWeaponAttackGrantMatchesV1(activityWeaponAttackGrant, turnKey, {
+      weaponId: profile.weaponId,
+      baseWeaponId: profile.baseWeaponId,
+      mode: profile.mode,
+      weaponProperties: dnd5eWeaponPropertyIds(profile.properties),
+      proficient: profile.proficient,
+    }, activityWeaponAttackWeaponSlot)
+  if (activityWeaponAttackGranted && activityWeaponAttackGrant?.damageDice) {
+    profile = {
+      ...profile,
+      damage: {
+        ...profile.damage,
+        count: activityWeaponAttackGrant.damageDice.count,
+        sides: activityWeaponAttackGrant.damageDice.sides,
+        type: activityWeaponAttackGrant.damageType ?? profile.damage.type,
+      },
+    }
+  }
+  if (activityWeaponAttackGranted && activityWeaponAttackGrant?.damageBonus) {
+    profile = {
+      ...profile,
+      damage: {
+        ...profile.damage,
+        bonus: profile.damage.bonus + activityWeaponAttackGrant.damageBonus,
+      },
+    }
+  }
+  const genericBonusWeaponAttack = genericBonusWeaponAttackId
+    ? dnd5ePluginBonusWeaponAttackForCharacter(actor, turnKey)
+    : undefined
   if (
     featureBonusWeaponAttack && (
       frenzyAttack || offHandAttack ||
-      !dnd5eMartialSpellBonusAttackAvailable(actor, turnKey) ||
+      (genericBonusWeaponAttackId
+        ? genericBonusWeaponAttack?.id !== genericBonusWeaponAttackId || action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttack === true
+        : !dnd5eMartialSpellBonusAttackAvailable(actor, turnKey)) ||
+      (input.turnEconomy?.bonusAction.current ?? 1) < 1
+    )
+  ) return { ok: false, reason: 'attack-action-spent' }
+  if (
+    activityWeaponAttackGrantId != null && (
+      featureBonusWeaponAttack || frenzyAttack || offHandAttack || !activityWeaponAttackGranted ||
       (input.turnEconomy?.bonusAction.current ?? 1) < 1
     )
   ) return { ok: false, reason: 'attack-action-spent' }
@@ -302,7 +379,8 @@ export function prepareDnd5eEquipmentAttack(input: {
     )
   ) return { ok: false, reason: 'frenzy-attack-unavailable' }
   const hordeBreakerAttack = action.dnd5eWeaponAttackOptions?.hordeBreakerAttack === true
-  const loadingWeapon = profile.properties.some((property) => property.includes('装填'))
+  const loadingWeapon = profile.properties.some((property) => property.includes('装填')) &&
+    handSnapshot.state.combatants[actorToken.id]?.ignoreLoadingWeaponProperty !== true
   const rangerChoices = actor.dnd5eClassChoices?.classes?.ranger
   const hordeBreakerSelected = dnd5eCharacterClassLevel(actor, 'ranger') >= 3 && rangerChoices?.subclass === 'hunter' &&
     rangerChoices.selections?.['hunters-prey']?.includes('horde-breaker') === true
@@ -328,8 +406,8 @@ export function prepareDnd5eEquipmentAttack(input: {
   ) return { ok: false, reason: 'stunning-strike-unavailable' }
   const foeSlayer = action.dnd5eWeaponAttackOptions?.foeSlayer
   const specialAttack = frenzyAttack || hordeBreakerAttack || offHandAttack ||
-    featureBonusWeaponAttack
-  const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
+    featureBonusWeaponAttack || activityWeaponAttackGranted
+  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(actor)
   const weaponAttacksPerAction = loadingWeapon ? 1 : attacksPerAction
   const attacksAllowed = specialAttack ? 1 : weaponAttacksPerAction * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
   if (!specialAttack && input.attacksUsed >= attacksAllowed) return { ok: false, reason: 'attack-action-spent' }
@@ -388,7 +466,10 @@ export function prepareDnd5eEquipmentAttack(input: {
   })
   const classDamageContext: Dnd5eWeaponClassDamageContext = {
     weaponId: profile.weaponId,
-    weaponProperties: [...profile.properties],
+    weaponBaseId: profile.baseWeaponId,
+    weaponProperties: [...dnd5eWeaponPropertyIds(profile.properties)],
+    proficient: profile.proficient,
+    handsUsed: profile.handsUsed,
     mode: profile.mode,
     distanceFeet,
     normalRangeFeet: profile.rangeFeet?.normal,
@@ -411,6 +492,13 @@ export function prepareDnd5eEquipmentAttack(input: {
   }
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+  const mountedMeleeAdvantage = profile.mode === 'melee' &&
+    actorCombatant.mountedMeleeAdvantageAgainstSmallerUnmounted === true &&
+    !dnd5eSourceLinkedRelations(snapshot.state, target.id)
+      .some((link) => link.effect.relation?.movement === 'source-rides-target') &&
+    dnd5eSourceLinkedRelations(snapshot.state, actorCombatant.id).some((link) =>
+      link.effect.relation?.movement === 'source-rides-target' &&
+      link.target.currentHp > 0 && dnd5eEffectiveSizeRank(link.target) > dnd5eEffectiveSizeRank(target))
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) ||
       dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) ||
@@ -425,7 +513,7 @@ export function prepareDnd5eEquipmentAttack(input: {
         target,
         profile.mode === 'melee',
       ) ||
-      dnd5eOpeningAttackHasAdvantage(snapshot.state, actorCombatant, target))
+      dnd5eOpeningAttackHasAdvantage(snapshot.state, actorCombatant, target) || mountedMeleeAdvantage)
   const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
     dnd5eWearingUnproficientArmor(actor) ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
@@ -481,7 +569,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       attackNumber: specialAttack ? 1 : input.attacksUsed + 1,
       attacksAllowed,
       spendsAction,
-      spendsBonusAction: frenzyAttack || offHandAttack || featureBonusWeaponAttack,
+      spendsBonusAction: frenzyAttack || offHandAttack || featureBonusWeaponAttack || activityWeaponAttackGranted,
       countsTowardAttackAction: !specialAttack,
       attackMode,
       declarativeIntentFeatureIds: [...declarativeIntentFeatureIds],
@@ -627,13 +715,18 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   halflingLuckyD20?: number
   halflingLuckyD20Second?: number
   savageAttacksRoll?: number
+  wholeWeaponDamageReroll?: Dnd5eWholeWeaponDamageRerollUse
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
+  grantedDieWeaponDamageRoll?: number
+  grantedDieArmorClassRoll?: number
   strokeOfLuck?: boolean
   cuttingWords?: Dnd5eCuttingWordsUse
   cuttingWordsDamage?: Dnd5eCuttingWordsUse
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse
+  attackRetargetInterrupt?: Dnd5eAttackRetargetInterruptUse
+  mountedAttackRedirect?: Dnd5eMountedAttackRedirectUse
   protectionReactionActorId?: string
   tranquilitySave?: Dnd5eTranquilitySaveRoll
   shieldSpellReaction?: boolean
@@ -658,6 +751,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   damageRolls: readonly number[]
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
   inventoryEffectRolls?: Readonly<Record<string, readonly number[]>>
+  damageMitigationInterrupts?: readonly Dnd5eDamageMitigationInterruptUse[]
   transaction?: CombatTransaction
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): {
@@ -676,18 +770,29 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     spendBonusAction: prepared.spendsBonusAction,
     featureBonusWeaponAttack:
       prepared.action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttack === true,
+    featureBonusWeaponAttackId:
+      prepared.action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttackId,
+    activityWeaponAttackGrantId:
+      prepared.action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId,
+    activityWeaponAttackWeaponSlot:
+      prepared.action.dnd5eWeaponAttackOptions?.activityWeaponAttackWeaponSlot,
     d20: input.d20,
     d20Second: input.d20Second,
     halflingLuckyD20: input.halflingLuckyD20,
     halflingLuckyD20Second: input.halflingLuckyD20Second,
     savageAttacksRoll: input.savageAttacksRoll,
+    wholeWeaponDamageReroll: input.wholeWeaponDamageReroll,
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
     bardicInspirationRoll: input.bardicInspirationRoll,
+    grantedDieWeaponDamageRoll: input.grantedDieWeaponDamageRoll,
+    grantedDieArmorClassRoll: input.grantedDieArmorClassRoll,
     strokeOfLuck: input.strokeOfLuck,
     cuttingWords: input.cuttingWords,
     cuttingWordsDamage: input.cuttingWordsDamage,
     postD20Adjustment: input.postD20Adjustment,
+    attackRetargetInterrupt: input.attackRetargetInterrupt,
+    mountedAttackRedirect: input.mountedAttackRedirect,
     protectionReactionActorId: input.protectionReactionActorId,
     tranquilitySave: input.tranquilitySave,
     shieldSpellReaction: input.shieldSpellReaction,
@@ -714,6 +819,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
     inventoryEffectRolls: input.inventoryEffectRolls,
+    damageMitigationInterrupts: input.damageMitigationInterrupts,
     damage: {
       count: prepared.profile.damage.count,
       sides: prepared.profile.damage.sides,

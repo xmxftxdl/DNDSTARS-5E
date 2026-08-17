@@ -1,4 +1,5 @@
-export type Dnd5eMapEnvironment = 'normal' | 'underwater'
+/** Closed scene tags used by deterministic environmental combat features. */
+export type Dnd5eMapEnvironment = 'normal' | 'outdoors' | 'indoors' | 'underground' | 'underwater'
 
 const UNDERWATER_MELEE_EXCEPTIONS = new Set([
   'dnd5e-dagger', 'dnd5e-javelin', 'dnd5e-shortsword', 'dnd5e-spear', 'dnd5e-trident',

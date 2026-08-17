@@ -9,7 +9,12 @@ import type {
   AccountStoryEventLinkV1,
   AccountStoryEventV1,
 } from '../../lib/accountApi'
-import type { PdfCampaignAnalysisV2, PdfSceneRecordV2 } from '../../lib/pdfCampaignAnalysisV2'
+import type {
+  PdfCampaignAnalysisV2,
+  PdfSceneRecordV2,
+  PdfSourceCitationV2,
+  PdfSourceEvidenceV2,
+} from '../../lib/pdfCampaignAnalysisV2'
 import type { CampaignJournalEntry } from '../../lib/roomCommunications'
 
 function normalizedKey(value: string): string {
@@ -43,6 +48,51 @@ function mergeStoryText(...values: readonly string[]): string {
   }).join('\n\n')
 }
 
+function citationFromEvidence(evidence: PdfSourceEvidenceV2): PdfSourceCitationV2 {
+  return {
+    documentId: evidence.documentId,
+    documentName: evidence.documentName,
+    page: evidence.page,
+    evidenceId: evidence.id,
+    quote: evidence.quote,
+    verification: evidence.verification,
+    ...(evidence.sourceExtractionMethod ? { sourceExtractionMethod: evidence.sourceExtractionMethod } : {}),
+    ...(evidence.sourceConfidence == null ? {} : { sourceConfidence: evidence.sourceConfidence }),
+    ...(evidence.pageRegion ? { pageRegion: evidence.pageRegion } : {}),
+  }
+}
+
+/**
+ * Resolves the immutable PDF evidence behind a story node. The bookmark is a
+ * projection of analysis citations, so graph editing never copies source text
+ * into the synchronized campaign workspace.
+ */
+export function storyEventSourceCitations(
+  event: AccountStoryEventV1,
+  analysis: PdfCampaignAnalysisV2,
+): PdfSourceCitationV2[] {
+  const records = [
+    ...(analysis.timelineEvents ?? []).filter((record) => event.sourceEventIds.includes(record.id)),
+    ...(analysis.scenes ?? []).filter((record) => event.sceneIds.includes(record.id)),
+  ]
+  const evidenceById = new Map((analysis.evidence ?? []).map((evidence) => [evidence.id, evidence]))
+  const citations = records.flatMap((record) => [
+    ...record.citations,
+    ...record.evidenceIds
+      .filter((evidenceId) => !record.citations.some((citation) => citation.evidenceId === evidenceId))
+      .map((evidenceId) => evidenceById.get(evidenceId))
+      .filter((evidence): evidence is PdfSourceEvidenceV2 => Boolean(evidence))
+      .map(citationFromEvidence),
+  ])
+  const seen = new Set<string>()
+  return citations.filter((citation) => {
+    const key = citation.evidenceId || `${citation.documentId}:${citation.page}:${citation.quote}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function storyDetailsFromRecord(record: PdfSceneRecordV2): string {
   const sections = [
     record.description,
@@ -51,6 +101,7 @@ function storyDetailsFromRecord(record: PdfSceneRecordV2): string {
     record.npcs.length > 0 ? `涉及人物：${record.npcs.join('、')}` : '',
     record.monsters.length > 0 ? `怪物与威胁：${record.monsters.join('、')}` : '',
     (record.causedBy?.length ?? 0) > 0 ? `直接前因：${record.causedBy!.join('、')}` : '',
+    ...(record.causalBranches ?? []).map((branch) => `因果分支：${branch.sourceEvent} → ${branch.label || branch.condition || '无条件推进'}${branch.explanation ? `（${branch.explanation}）` : ''}`),
     record.causalExplanation?.trim() ? `因果说明：${record.causalExplanation.trim()}` : '',
     record.branchCondition?.trim() ? `分支条件：${record.branchCondition.trim()}` : '',
     (record.tags?.length ?? 0) > 0 ? `标签：${record.tags!.join('、')}` : '',
@@ -93,6 +144,8 @@ function eventFromRecord(
     details: storyDetailsFromRecord(record),
     timeLabel: record.time ?? '',
     ...(record.gameTimeWorldMinute == null ? {} : { gameTimeWorldMinute: record.gameTimeWorldMinute }),
+    ...(record.timelineOrder == null ? {} : { timelineOrder: record.timelineOrder }),
+    ...(record.timelineKind == null ? {} : { timelineKind: record.timelineKind }),
     status: 'planned',
     source,
     sourceEventIds: source === 'analysis-timeline' ? [record.id] : [],
@@ -144,8 +197,13 @@ function mergeAnalysisRecordIntoEvent(
   event.personIds = unique([...event.personIds, ...next.personIds])
   event.clueIds = unique([...event.clueIds, ...next.clueIds])
   event.tags = unique([...event.tags, ...next.tags])
-  event.summary = mergeStoryText(event.summary, next.summary)
-  event.details = mergeStoryText(event.details, next.details)
+  // SOL timelineEvents own the event narrative. LUNA-extracted scenes are runnable
+  // attachments and evidence bookmarks only; folding their prose into the event
+  // would make the story workspace materially diverge from full-book synthesis.
+  if (source === 'analysis-timeline') {
+    event.summary = mergeStoryText(event.summary, next.summary)
+    event.details = mergeStoryText(event.details, next.details)
+  }
 }
 
 function graphPositionForIndex(index: number): { x: number; y: number } {
@@ -191,15 +249,24 @@ function analysisCausalGraphLinks(
   for (const targetRecord of analysis.timelineEvents ?? []) {
     const targetEvent = storyEventForTimelineRecord(events, targetRecord.id)
     if (!targetEvent) continue
-    for (const causeName of targetRecord.causedBy ?? []) {
+    const structuredBranches = new Map((targetRecord.causalBranches ?? []).map((branch) => [normalizedKey(branch.sourceEvent), branch]))
+    const causeNames = unique([
+      ...(targetRecord.causedBy ?? []),
+      ...(targetRecord.causalBranches ?? []).map((branch) => branch.sourceEvent),
+    ])
+    for (const causeName of causeNames) {
       const causeRecord = recordsByName.get(normalizedKey(causeName))
       const sourceEvent = causeRecord ? storyEventForTimelineRecord(events, causeRecord.id) : undefined
       if (!sourceEvent || sourceEvent.id === targetEvent.id) continue
-      const branchPersonId = targetRecord.branchPerson ? personIdByName(analysis, targetRecord.branchPerson) : undefined
-      const condition: AccountStoryEventLinkConditionV1 = branchPersonId && (targetRecord.branchPersonState === 'dead' || targetRecord.branchPersonState === 'alive')
-        ? { kind: 'person-state', personId: branchPersonId, state: targetRecord.branchPersonState }
-        : targetRecord.branchCondition?.trim()
-          ? { kind: 'manual', expression: targetRecord.branchCondition.trim() }
+      const structured = structuredBranches.get(normalizedKey(causeName))
+      const branchPerson = structured?.branchPerson || targetRecord.branchPerson || ''
+      const branchPersonState = structured?.branchPersonState ?? targetRecord.branchPersonState
+      const branchCondition = structured?.condition || targetRecord.branchCondition || ''
+      const branchPersonId = branchPerson ? personIdByName(analysis, branchPerson) : undefined
+      const condition: AccountStoryEventLinkConditionV1 = branchPersonId && (branchPersonState === 'dead' || branchPersonState === 'alive')
+        ? { kind: 'person-state', personId: branchPersonId, state: branchPersonState }
+        : branchCondition.trim()
+          ? { kind: 'manual', expression: branchCondition.trim() }
           : { kind: 'always' }
       const key = `${sourceEvent.id}:${targetEvent.id}:${JSON.stringify(condition)}`
       if (seen.has(key)) continue
@@ -208,7 +275,7 @@ function analysisCausalGraphLinks(
         id: stableId('story-link', key),
         fromEventId: sourceEvent.id,
         toEventId: targetEvent.id,
-        label: targetRecord.causalExplanation?.trim() ?? '',
+        label: structured?.label?.trim() || structured?.explanation?.trim() || targetRecord.causalExplanation?.trim() || '',
         condition,
       })
     }
@@ -240,14 +307,15 @@ export function canonicalStoryEvents(analysis: PdfCampaignAnalysisV2 | null): Ac
     if (matching) mergeAnalysisRecordIntoEvent(matching, scene, 'analysis-scene', analysis)
   }
   return events.sort((left, right) => (
-    (left.gameTimeWorldMinute ?? Number.MAX_SAFE_INTEGER) - (right.gameTimeWorldMinute ?? Number.MAX_SAFE_INTEGER)
+    (left.timelineOrder ?? Number.MAX_SAFE_INTEGER) - (right.timelineOrder ?? Number.MAX_SAFE_INTEGER)
+    || (left.gameTimeWorldMinute ?? Number.MAX_SAFE_INTEGER) - (right.gameTimeWorldMinute ?? Number.MAX_SAFE_INTEGER)
   ))
 }
 
 export function createStoryWorkspace(analysis: PdfCampaignAnalysisV2 | null): AccountCampaignStoryWorkspaceV1 {
   const events = withGraphPositions(canonicalStoryEvents(analysis))
   const causalLinks = analysisCausalGraphLinks(analysis, events)
-  return { schemaVersion: 1, mode: 'prep', events, graphLinks: causalLinks.length > 0 ? causalLinks : defaultGraphLinks(events), graphInitialized: true, graphLayoutVersion: 2, personStates: [], clueStates: [], recaps: [] }
+  return { schemaVersion: 1, mode: 'prep', events, graphLinks: causalLinks.length > 0 ? causalLinks : defaultGraphLinks(events), graphInitialized: true, graphEditedByDm: false, graphLayoutVersion: 2, personStates: [], clueStates: [], recaps: [] }
 }
 
 export function synchronizeStoryWorkspace(
@@ -271,17 +339,27 @@ export function synchronizeStoryWorkspace(
       .find((candidate) => candidate && !reusedExistingEventIds.has(candidate.id))
     if (existing) reusedExistingEventIds.add(existing.id)
     const splitFromLegacyMergedEvent = Boolean(existing && existing.sourceEventIds.length > event.sourceEventIds.length)
+    const editedFields = new Set(existing?.dmEditedFields ?? [])
     return existing ? {
       ...event,
       id: existing.id,
+      nodeKind: existing.nodeKind ?? event.nodeKind,
       status: existing.status,
-      title: existing.source === 'dm' ? existing.title : event.title,
-      summary: splitFromLegacyMergedEvent ? event.summary : existing.summary || event.summary,
-      details: splitFromLegacyMergedEvent ? event.details : mergeStoryText(existing.details, event.details),
-      personIds: unique([...event.personIds, ...existing.personIds.filter((id) => currentPersonIds.has(id))]),
-      clueIds: unique([...event.clueIds, ...existing.clueIds.filter((id) => currentClueIds.has(id))]),
-      sceneIds: unique([...event.sceneIds, ...existing.sceneIds.filter((id) => currentSceneIds.has(id))]),
-      tags: unique([...event.tags, ...existing.tags]),
+      title: editedFields.has('title') ? existing.title : event.title,
+      summary: !splitFromLegacyMergedEvent && editedFields.has('summary') ? existing.summary : event.summary,
+      details: !splitFromLegacyMergedEvent && editedFields.has('details') ? existing.details : event.details,
+      timeLabel: editedFields.has('timeLabel') ? existing.timeLabel : event.timeLabel,
+      personIds: editedFields.has('personIds')
+        ? unique(existing.personIds.filter((id) => currentPersonIds.has(id)))
+        : event.personIds,
+      clueIds: editedFields.has('clueIds')
+        ? unique(existing.clueIds.filter((id) => currentClueIds.has(id)))
+        : event.clueIds,
+      // Scene attachment is always rebuilt from the latest analysis. Stale scene IDs
+      // must not survive merely because an earlier projection happened to contain them.
+      sceneIds: event.sceneIds.filter((id) => currentSceneIds.has(id)),
+      tags: editedFields.has('tags') ? unique(existing.tags) : event.tags,
+      ...(editedFields.size > 0 ? { dmEditedFields: [...editedFields] } : {}),
       graphPosition: existing.graphPosition ?? event.graphPosition,
     } : event
   })
@@ -298,24 +376,39 @@ export function synchronizeStoryWorkspace(
     && event.sourceEventIds.filter((id) => generatedSourceIds.has(id)).length > 1
   ))
   const causalLinks = analysisCausalGraphLinks(analysis, events)
-  const shouldAdoptCausalGraph = causalLinks.length > 0 && isLegacyLinearGraph(workspace.events, existingLinks)
-  const graphLinks = workspace.graphInitialized && !shouldAdoptCausalGraph && !legacyMergedProjectionDetected
-    ? existingLinks
-      .filter((link) => eventIds.has(link.fromEventId) && eventIds.has(link.toEventId) && link.fromEventId !== link.toEventId)
-      .map((link) => ({
+  const inferredGraphEditedByDm = workspace.graphEditedByDm ?? (
+    existingLinks.length > 0 && !isLegacyLinearGraph(workspace.events, existingLinks)
+  )
+  const validExistingLinks = existingLinks
+    .filter((link) => eventIds.has(link.fromEventId) && eventIds.has(link.toEventId) && link.fromEventId !== link.toEventId)
+    .map((link) => ({
         ...link,
         label: link.label === '然后' ? '' : link.label,
         condition: link.condition ?? (link.label && link.label !== '然后'
           ? { kind: 'manual' as const, expression: link.label }
           : { kind: 'always' as const }),
       }))
+  // Older builds used graphEditedByDm=true both for a deliberate clear and for several migration
+  // paths. That ambiguity persisted an accidental empty graph forever. Only the dedicated flag
+  // introduced with the clear-all action is now allowed to suppress regenerated analysis links.
+  const explicitlyClearedByDm = workspace.graphLinksClearedByDm === true && existingLinks.length === 0
+  const staleEditedGraph = inferredGraphEditedByDm
+    && !legacyMergedProjectionDetected
+    && !explicitlyClearedByDm
+    && validExistingLinks.length === 0
+  const graphLinks = inferredGraphEditedByDm && !legacyMergedProjectionDetected && !staleEditedGraph
+    ? validExistingLinks
     : causalLinks.length > 0 ? causalLinks : defaultGraphLinks(events)
   return {
     ...workspace,
     events,
     graphLinks,
     graphInitialized: true,
-    ...(shouldAdoptCausalGraph || legacyMergedProjectionDetected ? { graphLayoutVersion: 2 as const } : {}),
+    graphEditedByDm: staleEditedGraph ? false : inferredGraphEditedByDm,
+    graphLinksClearedByDm: explicitlyClearedByDm && graphLinks.length === 0,
+    // Adopting SOL links must not move DM-positioned nodes. Only the old
+    // over-merged-node migration needs a fresh automatic layout.
+    ...(legacyMergedProjectionDetected ? { graphLayoutVersion: 2 as const } : {}),
   }
 }
 
@@ -325,6 +418,8 @@ export function evaluateStoryLinkCondition(
   link: AccountStoryEventLinkV1,
   workspace: AccountCampaignStoryWorkspaceV1,
 ): StoryLinkConditionResult {
+  if (link.resolution === 'triggered') return 'matched'
+  if (link.resolution === 'not-triggered') return 'blocked'
   const condition: AccountStoryEventLinkConditionV1 = link.condition ?? (
     link.label && link.label !== '然后'
       ? { kind: 'manual', expression: link.label }
@@ -344,17 +439,86 @@ export function storyEventAvailability(
   workspace: AccountCampaignStoryWorkspaceV1,
   eventId: string,
 ): 'available' | 'waiting' | 'blocked' {
-  const incoming = (workspace.graphLinks ?? []).filter((link) => link.toEventId === eventId)
-  if (incoming.length === 0) return 'available'
-  let hasManual = false
-  for (const link of incoming) {
-    const source = workspace.events.find((event) => event.id === link.fromEventId)
-    if (source?.status !== 'completed') continue
-    const result = evaluateStoryLinkCondition(link, workspace)
-    if (result === 'matched') return 'available'
-    if (result === 'manual') hasManual = true
+  const byId = new Map(workspace.events.map((event) => [event.id, event]))
+  const links = workspace.graphLinks ?? []
+  const visiting = new Set<string>()
+  const resolved = new Map<string, 'available' | 'waiting' | 'blocked'>()
+  const visit = (id: string): 'available' | 'waiting' | 'blocked' => {
+    const cached = resolved.get(id)
+    if (cached) return cached
+    if (visiting.has(id)) return 'waiting'
+    visiting.add(id)
+    const event = byId.get(id)
+    if (event?.status === 'completed' || event?.status === 'active') {
+      visiting.delete(id)
+      resolved.set(id, 'available')
+      return 'available'
+    }
+    const incoming = links.filter((link) => link.toEventId === id)
+    if (incoming.length === 0) {
+      visiting.delete(id)
+      resolved.set(id, 'available')
+      return 'available'
+    }
+    let hasWaitingRoute = false
+    for (const link of incoming) {
+      const condition = evaluateStoryLinkCondition(link, workspace)
+      if (condition === 'blocked') continue
+      const source = byId.get(link.fromEventId)
+      if (!source || source.status === 'skipped') continue
+      if (source.status === 'completed') {
+        if (condition === 'matched') {
+          visiting.delete(id)
+          resolved.set(id, 'available')
+          return 'available'
+        }
+        hasWaitingRoute = true
+        continue
+      }
+      if (visit(source.id) !== 'blocked') hasWaitingRoute = true
+    }
+    const result = hasWaitingRoute ? 'waiting' : 'blocked'
+    visiting.delete(id)
+    resolved.set(id, result)
+    return result
   }
-  return hasManual ? 'waiting' : 'blocked'
+  return visit(eventId)
+}
+
+export function resolveStoryBranch(
+  workspace: AccountCampaignStoryWorkspaceV1,
+  linkId: string,
+  resolution: NonNullable<AccountStoryEventLinkV1['resolution']>,
+): AccountCampaignStoryWorkspaceV1 {
+  const links = workspace.graphLinks ?? []
+  const selected = links.find((link) => link.id === linkId)
+  if (!selected) return workspace
+  const source = workspace.events.find((event) => event.id === selected.fromEventId)
+  const nextLinks = links.map((link) => {
+    if (source?.nodeKind === 'decision' && resolution === 'pending' && link.fromEventId === source.id) {
+      return { ...link, resolution: 'pending' as const }
+    }
+    if (link.id === linkId) return { ...link, resolution }
+    if (source?.nodeKind === 'decision' && resolution === 'triggered' && link.fromEventId === source.id) {
+      return { ...link, resolution: 'not-triggered' as const }
+    }
+    return link
+  })
+  const nextEvents = workspace.events.map((event) => {
+    if (event.id !== selected.fromEventId) return event
+    if (resolution === 'triggered') return { ...event, status: 'completed' as const }
+    if (source?.nodeKind === 'decision' && resolution === 'pending') return { ...event, status: 'planned' as const }
+    return event
+  })
+  return {
+    ...workspace,
+    events: nextEvents,
+    graphLinks: nextLinks,
+    graphInitialized: true,
+    graphEditedByDm: true,
+    graphLinksClearedByDm: false,
+    graphLayoutVersion: 4,
+  }
 }
 
 export function orderedStoryEvents(workspace: AccountCampaignStoryWorkspaceV1): AccountStoryEventV1[] {

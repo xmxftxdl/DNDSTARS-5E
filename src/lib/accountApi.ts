@@ -84,6 +84,8 @@ export interface AccountStoryEventLinkV1 {
   toEventId: string
   label: string
   condition?: AccountStoryEventLinkConditionV1
+  /** DM runtime ruling for a branch. This overrides its inferred condition. */
+  resolution?: 'pending' | 'triggered' | 'not-triggered'
   /** Optional DM-adjusted label position in unscaled story-graph coordinates. */
   labelPosition?: AccountStoryEventGraphPositionV1
 }
@@ -98,6 +100,8 @@ export interface AccountStoryTimelineMarkerV1 {
 
 export interface AccountStoryEventV1 {
   id: string
+  /** Decision nodes are persisted, editable choice boxes rather than inferred decorations. */
+  nodeKind?: 'event' | 'decision'
   title: string
   summary: string
   details: string
@@ -110,6 +114,11 @@ export interface AccountStoryEventV1 {
   personIds: string[]
   clueIds: string[]
   tags: string[]
+  /** SOL-derived chronology metadata; DM graph placement remains independent. */
+  timelineOrder?: number
+  timelineKind?: 'history' | 'current' | 'deadline' | 'conditional'
+  /** Only fields explicitly edited in the story workspace survive a later AI refresh. */
+  dmEditedFields?: Array<'title' | 'summary' | 'details' | 'timeLabel' | 'personIds' | 'clueIds' | 'tags'>
   graphPosition?: AccountStoryEventGraphPositionV1
 }
 
@@ -163,6 +172,10 @@ export interface AccountCampaignStoryWorkspaceV1 {
   events: AccountStoryEventV1[]
   graphLinks?: AccountStoryEventLinkV1[]
   graphInitialized?: boolean
+  /** Distinguishes an intentionally edited/empty DM graph from an uninitialized projection. */
+  graphEditedByDm?: boolean
+  /** Only true when the DM explicitly used the clear-all-arrows command. */
+  graphLinksClearedByDm?: boolean
   graphLayoutVersion?: 2 | 3 | 4
   timelineMarkers?: AccountStoryTimelineMarkerV1[]
   personStates: AccountCampaignPersonStateV1[]

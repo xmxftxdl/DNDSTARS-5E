@@ -9,6 +9,7 @@ import {
 } from './headlessCombatEngine'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
+import { DND5E_CHAIN_MAIL, DND5E_LONGSWORD, DND5E_SHIELD } from './equipment'
 
 function legacyCharacter(): Character {
   return {
@@ -34,6 +35,23 @@ describe('D&D 5e character boundary', () => {
     const character = migrateCharacterToDnd5e({ ...legacyCharacter(), concentrating: true })
     const combatant = createCombatantFromDnd5eCharacter({ character, controller: 'player', initiativeD20: 12, position: { x: 5, y: 5 } })
     expect(combatant).toMatchObject({ concentrating: true, initiative: 15, proficiencyBonus: 3, turn: { actionAvailable: true, reactionAvailable: true, movementRemaining: 30 } })
+  })
+
+  it('projects equipment and spellcasting qualifications for generic Activity predicates', () => {
+    const fighter = migrateCharacterToDnd5e({
+      ...legacyCharacter(), charClass: '战士', rulesetId: 'dnd5e-2014-srd-5.1',
+      equipment: { mainWeapon: DND5E_LONGSWORD, offHand: DND5E_SHIELD, armor: DND5E_CHAIN_MAIL },
+    })
+    expect(fighter.activityEquipment).toMatchObject({
+      armorCategory: 'heavy', armorProficient: true,
+      armorProficiencies: ['light', 'medium', 'heavy', 'shield'], freeHands: 0,
+      mainHand: { roles: ['weapon'], weaponMode: 'melee', proficient: true },
+      offHand: { roles: ['shield'], proficient: true },
+    })
+    expect(fighter.activitySpellcasting).toEqual({ capable: false, classIds: [] })
+
+    const wizard = migrateCharacterToDnd5e({ ...legacyCharacter(), charClass: '法师' })
+    expect(wizard.activitySpellcasting).toEqual({ capable: true, classIds: ['wizard'] })
   })
 
   it('preserves persistent hover through the Character boundary and keeps a prone flyer aloft', () => {

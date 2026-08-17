@@ -117,6 +117,85 @@ export function dnd5eTokenIntersectsPersistentAreaAt(
     })
 }
 
+export function dnd5eTokenFullyContainedInPersistentAreaAt(
+  token: Token,
+  map: BattleMap,
+  area: Dnd5ePluginArea,
+  position: { x: number; y: number },
+  elevationFeet?: number,
+): boolean {
+  const areaCells = new Set(area.cells.map(cellKey))
+  if (!tokenOccupiedCellsAt(token, map, position).every((cell) => areaCells.has(cellKey(cell)))) return false
+  const vertical = area.vertical ?? inferredLegacyCoreAreaVertical(area, map)
+  if (!vertical) return true
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  const positionedToken = { ...token, ...position, elevationFeet: elevationFeet ?? token.elevationFeet }
+  const tokenBottom = mapGeometryTokenElevation(geometry, positionedToken)
+  if (vertical.mode === 'ground') {
+    return Math.abs(tokenBottom - mapGeometryTerrainElevationAtPoint(geometry, position)) <= 1e-4
+  }
+  const anchorToken = area.anchorMode === 'source-token' || area.anchorMode === 'effect-token'
+    ? map.tokens.find((candidate) => candidate.id === (area.anchorTokenId ?? area.sourceTokenId))
+    : undefined
+  const volumeBase = anchorToken && Number.isFinite(vertical.anchorOffsetFeet)
+    ? mapGeometryTokenElevation(geometry, anchorToken) + Number(vertical.anchorOffsetFeet)
+    : vertical.baseElevationFeet
+  const tokenTop = tokenBottom + dnd5eTokenHeightFeet(token)
+  return tokenBottom >= volumeBase - 1e-4 && tokenTop <= volumeBase + vertical.heightFeet + 1e-4
+}
+
+/** Merges bounded environmental modifiers from all eligible areas at a token position. */
+export function dnd5ePersistentAreaOccupantModifiersAt(input: {
+  map: BattleMap
+  token: Token
+  position: { x: number; y: number }
+  elevationFeet?: number
+}): {
+  preventsVerbalComponents: boolean
+  damageImmunities: readonly import('./damageTypes').Dnd5eDamageType[]
+  damageResistances: readonly import('./damageTypes').Dnd5eDamageType[]
+  conditionImmunities: readonly import('./conditions').Dnd5eStandardConditionId[]
+  spellSavingThrowAdvantage: boolean
+  successfulSpellSaveNegatesDamage: boolean
+  hitPointMaximumReductionImmunity: boolean
+} {
+  let preventsVerbalComponents = false
+  const damageImmunities = new Set<import('./damageTypes').Dnd5eDamageType>()
+  const damageResistances = new Set<import('./damageTypes').Dnd5eDamageType>()
+  const conditionImmunities = new Set<import('./conditions').Dnd5eStandardConditionId>()
+  let spellSavingThrowAdvantage = false
+  let successfulSpellSaveNegatesDamage = false
+  let hitPointMaximumReductionImmunity = false
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    const modifiers = area.occupantModifiers
+    if (!modifiers || !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map)) continue
+    const contained = modifiers.containment === 'fully-contained'
+      ? dnd5eTokenFullyContainedInPersistentAreaAt(
+          input.token, input.map, area, input.position, input.elevationFeet,
+        )
+      : dnd5eTokenIntersectsPersistentAreaAt(
+          input.token, input.map, area, input.position, area.cells, input.elevationFeet,
+        )
+    if (!contained) continue
+    preventsVerbalComponents ||= modifiers.preventsVerbalComponents === true
+    for (const immunity of modifiers.damageImmunities ?? []) damageImmunities.add(immunity)
+    for (const resistance of modifiers.damageResistances ?? []) damageResistances.add(resistance)
+    for (const immunity of modifiers.conditionImmunities ?? []) conditionImmunities.add(immunity)
+    spellSavingThrowAdvantage ||= modifiers.spellSavingThrowAdvantage === true
+    successfulSpellSaveNegatesDamage ||= modifiers.successfulSpellSaveNegatesDamage === true
+    hitPointMaximumReductionImmunity ||= modifiers.hitPointMaximumReductionImmunity === true
+  }
+  return {
+    preventsVerbalComponents,
+    damageImmunities: [...damageImmunities],
+    damageResistances: [...damageResistances],
+    conditionImmunities: [...conditionImmunities],
+    spellSavingThrowAdvantage,
+    successfulSpellSaveNegatesDamage,
+    hitPointMaximumReductionImmunity,
+  }
+}
+
 export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
   map: BattleMap
   token: Token

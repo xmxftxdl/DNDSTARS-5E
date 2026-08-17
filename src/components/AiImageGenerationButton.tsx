@@ -8,6 +8,23 @@ import {
   type LocalAiPortraitGenerationInput,
   type LocalAiPortraitGenerationResult,
 } from '../lib/localAiBridgeApi'
+import {
+  AI_MODEL_POLICY,
+  creditCny,
+  imageCredits,
+  reserveCredits,
+} from '../../shared/ai-model-policy.mjs'
+import {
+  generatePlayerCharacterPortrait,
+  playerAiErrorMessage,
+  PlayerAiApiError,
+} from '../lib/playerAiApi'
+
+const IMAGE_ESTIMATED_CREDITS = imageCredits({
+  modelId: AI_MODEL_POLICY.imageModelId,
+  quality: AI_MODEL_POLICY.imageQuality,
+})
+const IMAGE_RESERVED_CREDITS = reserveCredits(IMAGE_ESTIMATED_CREDITS)
 
 interface AiImageGenerationButtonProps {
   defaultPrompt: string
@@ -19,6 +36,7 @@ interface AiImageGenerationButtonProps {
   description?: string
   disabled?: boolean
   className?: string
+  playerTask?: 'character-portrait'
 }
 
 export default function AiImageGenerationButton({
@@ -31,6 +49,7 @@ export default function AiImageGenerationButton({
   description = '可以先修改提示词。生成结果确认写入后，仍可用本地图片替换。',
   disabled = false,
   className = '',
+  playerTask,
 }: AiImageGenerationButtonProps) {
   const [open, setOpen] = useState(false)
   const [prompt, setPrompt] = useState(defaultPrompt)
@@ -41,11 +60,16 @@ export default function AiImageGenerationButton({
     setBusy(true)
     setError('')
     try {
-      const result = await generateLocalAiPortrait({ prompt, aspect, quality: 'low', background })
+      const usePlayerGateway = playerTask === 'character-portrait'
+      const result = usePlayerGateway
+        ? await generatePlayerCharacterPortrait({ prompt, aspect, quality: 'low', background })
+        : await generateLocalAiPortrait({ prompt, aspect, quality: 'low', background })
       await onGenerated(result)
       setOpen(false)
     } catch (cause) {
-      setError(cause instanceof LocalAiBridgeError
+      setError(cause instanceof PlayerAiApiError
+        ? playerAiErrorMessage(cause)
+        : cause instanceof LocalAiBridgeError
         ? localAiPortraitErrorMessage(cause)
         : cause instanceof Error ? cause.message : 'AI 图片生成失败。')
     } finally {
@@ -102,7 +126,9 @@ export default function AiImageGenerationButton({
                 className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm leading-6 text-slate-100 outline-none focus:border-violet-400/50 disabled:opacity-60"
               />
             </label>
-            <p className="mt-3 text-[10px] leading-4 text-slate-500">固定使用低成本标准品质（low），不会请求 medium 或 high 品质。</p>
+            <p className="mt-3 text-[10px] leading-4 text-slate-500">
+              固定使用 {AI_MODEL_POLICY.imageModelId} / low；预计 {IMAGE_ESTIMATED_CREDITS} 积分（约 ¥{creditCny(IMAGE_ESTIMATED_CREDITS).toFixed(2)}），执行前预留 {IMAGE_RESERVED_CREDITS} 积分，完成后自动结算。
+            </p>
             {error && <p role="alert" className="mt-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{error}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" disabled={busy} onClick={() => setOpen(false)} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-40">取消</button>

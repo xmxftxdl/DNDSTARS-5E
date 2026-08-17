@@ -62,6 +62,16 @@ const MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS = new Set([
   'insect-plague',
   'spirit-guardians',
   'wall-of-fire',
+  'fog-cloud',
+  'web',
+  'silence',
+  'sleet-storm',
+  'stinking-cloud',
+  'wind-wall',
+  'wall-of-force',
+  'wall-of-stone',
+  'wall-of-ice',
+  'wall-of-thorns',
 ])
 
 /**

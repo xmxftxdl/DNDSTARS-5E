@@ -16,6 +16,25 @@ const battleMap = (patch: Partial<BattleMap> = {}): BattleMap => ({
 const geometry = (): MapGeometryState => createEmptyMapGeometry('map', 1)
 
 describe('map geometry pathfinding', () => {
+  it('can traverse declared creature spaces but never end inside them', () => {
+    const blocker = token({ id: 'large-creature', type: 'enemy', x: 75, y: 25, size: 1 })
+    const map = battleMap({ height: 50, tokens: [token(), blocker] })
+    expect(findMapGeometryPath({
+      map, token: map.tokens[0], to: { x: 125, y: 25 },
+    })).toBeUndefined()
+    expect(findMapGeometryPath({
+      map, token: map.tokens[0], to: { x: 125, y: 25 },
+      passThroughTokenIds: [blocker.id],
+    })).toMatchObject({ cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }] })
+    expect(findMapGeometryPath({
+      map, token: map.tokens[0], to: blocker,
+      passThroughTokenIds: [blocker.id],
+    })).toBeUndefined()
+    expect(createMapGeometryPathTree({
+      map, token: map.tokens[0], passThroughTokenIds: [blocker.id],
+    }).pathTo(blocker)).toBeUndefined()
+  })
+
   it('finds a legal polyline around walls and charges every grid step', () => {
     const map = battleMap()
     const state = geometry()
@@ -50,10 +69,19 @@ describe('map geometry pathfinding', () => {
       map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
       additionalSpeedCostMultiplier: () => 2,
     })).toMatchObject({ distanceFeet: 10, movementCostFeet: 30 })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      ignoreDifficultTerrain: true,
+      additionalDifficultTerrainMultiplier: () => 2,
+      additionalSpeedCostMultiplier: () => 2,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 20 })
 
     state.obstacles[0] = { ...state.obstacles[0], terrainCostMultiplier: 1, traversal: 'climb' }
     expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 } }))
       .toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 }, ignoreDifficultTerrain: true,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
     expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 }, canClimb: true }))
       .toMatchObject({ distanceFeet: 10, movementCostFeet: 10 })
 

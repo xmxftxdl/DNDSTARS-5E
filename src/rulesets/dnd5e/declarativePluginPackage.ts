@@ -26,7 +26,7 @@ const supportedSpellcastingClassIds = new Set<string>(DND5E_SPELLCASTING_CLASS_I
  * least one supported class remains; genuinely unusable spell declarations
  * still fail normal validation.
  */
-function normalizeLegacySpellClassIds(
+export function normalizeLegacyDnd5eSpellClassIds(
   draft: Dnd5eCustomRulesPluginDraft,
 ): Dnd5eCustomRulesPluginDraft {
   const spells = draft.spells.map((spell) => {
@@ -65,7 +65,7 @@ export function dnd5eRulesPluginFromDeclarativePackageV1(
 ): Dnd5eRulesPlugin {
   const legacy = value.legacy == null
     ? undefined
-    : normalizeLegacySpellClassIds(value.legacy as Dnd5eCustomRulesPluginDraft)
+    : normalizeLegacyDnd5eSpellClassIds(value.legacy as Dnd5eCustomRulesPluginDraft)
   const hasLegacy = !!legacy && (
     legacy.races.length + legacy.backgrounds.length + legacy.features.length + (legacy.feats?.length ?? 0) + legacy.spells.length +
     legacy.items.length + legacy.abilityGenerationMethods.length + (legacy.monsters?.length ?? 0) > 0

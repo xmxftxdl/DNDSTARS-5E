@@ -71,6 +71,10 @@ describe('d20 roll confirmation', () => {
   it('records the DM-accepted player replacement without losing the original roll', () => {
     const base = createD20RollConfirmationInterrupt({
       mapId: 'map-1', rollId: 'roll-2', label: '豁免检定', originalValue: 3, now: 10,
+      eligibleModifiers: [{
+        characterId: 'wizard', featureId: 'portent', featureLabel: '预兆',
+        replacementValues: [18, 7],
+      }],
     })
     const contribution = createD20ReplacementContribution({
       interruptId: base.id, characterId: 'wizard', characterName: '先知',
@@ -85,6 +89,23 @@ describe('d20 roll confirmation', () => {
       method: 'replace', previousValue: 3, replacementValue: 18, sourceId: 'portent',
     })
     expect(resolvedD20Value(response, 3)).toBe(18)
+  })
+
+  it('rejects a replacement that is not in the Host-owned stored d20 pool', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', rollId: 'stored-portent', label: '豁免检定', originalValue: 13,
+      eligibleModifiers: [{
+        characterId: 'wizard', featureId: 'portent', featureLabel: '预兆',
+        replacementValues: [4, 18],
+      }],
+    })
+    const forged = createD20ReplacementContribution({
+      interruptId: interrupt.id, characterId: 'wizard', characterName: '先知',
+      featureId: 'portent', featureLabel: '预兆', replacementValue: 20,
+    })
+    expect(() => settleD20RollConfirmation(
+      { ...interrupt, contributions: [forged] }, forged.id,
+    )).toThrow('invalid-roll-confirmation-replacement')
   })
 
   it('rejects values outside a d20 and ignores an unknown contribution during settlement', () => {
@@ -171,6 +192,30 @@ describe('d20 roll confirmation', () => {
       sourceId: 'support-token',
     })
     expect(resolvedD20Adjustment(response)).toEqual(response.adjustment)
+  })
+
+  it('records a fixed adjustment without requesting or inventing a Host die', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', rollId: 'fixed-adjustment', label: '攻击检定', originalValue: 7,
+      eligibleModifiers: [{
+        characterId: 'cleric', featureId: 'war:guided-strike', featureLabel: '导引打击',
+        modifierKind: 'adjust-d20', sourceTokenId: 'cleric-token', fixedAmount: 10,
+        direction: 'add',
+      }],
+    })
+    const contribution = createD20AdjustmentContribution({
+      interruptId: interrupt.id, characterId: 'cleric', characterName: '战争牧师',
+      featureId: 'war:guided-strike', featureLabel: '导引打击', direction: 'add',
+    })
+
+    const response = settleD20RollConfirmation(
+      { ...interrupt, contributions: [contribution] }, contribution.id,
+    )
+
+    expect(response.adjustment).toEqual({
+      sourceId: 'cleric-token', featureId: 'war:guided-strike', direction: 'add', roll: 10,
+    })
+    expect(response.transaction?.rollLedger.entries).toHaveLength(1)
   })
 
   it('waits for the owning player to explicitly use or decline a choice reroll', () => {

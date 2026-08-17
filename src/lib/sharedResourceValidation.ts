@@ -13,6 +13,8 @@ import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaLighting,
+  normalizeDnd5ePersistentAreaBlocking,
+  normalizeDnd5ePersistentAreaOccupantModifiers,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
@@ -43,6 +45,10 @@ import {
   validateSharedSceneAudioLibrary,
   validateSharedSceneAudioPlayback,
 } from './sceneAudioLibrary'
+import {
+  DND5E_SHOPS_RESOURCE,
+  validateSharedDnd5eShops,
+} from '../rulesets/dnd5e/shops'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -81,6 +87,7 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   [COMBAT_STATISTICS_RESOURCE]: 'sessions',
   [SCENE_ORCHESTRATION_RESOURCE]: 'scenes',
   [SCENE_AUDIO_LIBRARY_RESOURCE]: 'assets',
+  [DND5E_SHOPS_RESOURCE]: 'shops',
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -160,6 +167,13 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     if (raw.lighting != null && !normalizeDnd5ePersistentAreaLighting(raw.lighting)) {
       issues.push(`${areaPath}.lighting 无效`)
     }
+    if (raw.occupantModifiers != null &&
+      !normalizeDnd5ePersistentAreaOccupantModifiers(raw.occupantModifiers)) {
+      issues.push(`${areaPath}.occupantModifiers 无效`)
+    }
+    if (raw.blocking != null && !normalizeDnd5ePersistentAreaBlocking(raw.blocking)) {
+      issues.push(`${areaPath}.blocking 无效`)
+    }
     if (raw.vertical != null && !normalizeDnd5ePersistentAreaVerticalSnapshot(raw.vertical)) {
       issues.push(`${areaPath}.vertical 无效`)
     }
@@ -227,6 +241,23 @@ function validateDnd5eSummon(value: unknown, path: string): string[] {
     issues.push(`${path}.concentrationId 无效`)
   }
   if (value.side !== 'player' && value.side !== 'enemy') issues.push(`${path}.side 无效`)
+  if (value.persistent != null && value.persistent !== true) issues.push(`${path}.persistent 无效`)
+  for (const key of [
+    'minimumMaximumHitPoints', 'maximumHitPointBonus', 'armorClassBonus',
+    'weaponAttackBonus', 'weaponDamageBonus', 'savingThrowBonus',
+    'proficientSkillCheckBonus', 'shareSelfSpellsRangeFeet',
+  ] as const) {
+    if (value[key] != null && (!Number.isInteger(value[key]) || Math.abs(Number(value[key])) > 100_000)) {
+      issues.push(`${path}.${key} 无效`)
+    }
+  }
+  if (value.attacksPerAction != null &&
+    (!Number.isInteger(value.attacksPerAction) || Number(value.attacksPerAction) < 1 || Number(value.attacksPerAction) > 10)) {
+    issues.push(`${path}.attacksPerAction 无效`)
+  }
+  if (value.weaponAttacksMagical != null && value.weaponAttacksMagical !== true) {
+    issues.push(`${path}.weaponAttacksMagical 无效`)
+  }
   return issues
 }
 
@@ -524,6 +555,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === SCENE_AUDIO_PLAYBACK_RESOURCE && !validateSharedSceneAudioPlayback(input)) {
     reasons.push('场景音频播放状态损坏')
+  }
+  if (name === DND5E_SHOPS_RESOURCE && !validateSharedDnd5eShops(input)) {
+    reasons.push('商店资源结构损坏')
   }
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {

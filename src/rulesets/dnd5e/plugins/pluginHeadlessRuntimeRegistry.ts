@@ -9,5 +9,6 @@ export function dnd5ePluginHeadlessActionDefinition(
   return definition ? {
     ...definition,
     rolls: definition.rolls?.map((roll) => ({ ...roll })),
+    perTargetRolls: definition.perTargetRolls?.map((roll) => ({ ...roll })),
   } : undefined
 }

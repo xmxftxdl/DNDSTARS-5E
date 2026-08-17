@@ -20,7 +20,7 @@ import type { Dnd5eStandardConditionId } from './conditions'
 import type { Dnd5eMonsterStatBlock } from './monsters'
 
 export interface Dnd5eSandboxConditionDuration {
-  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
+  expiresAt: 'source-next-turn-start' | 'source-turn-end' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
   remainingRounds?: number
   saveAbility?: AbilityKey
   saveDc?: number
@@ -212,7 +212,7 @@ function validOperation(value: unknown): value is Dnd5eSandboxCapabilityOperatio
     typeof conditionOperation.targetId !== 'string' || !conditionOperation.targetId ||
     !conditionOperation.condition || !duration ||
     !['blinded', 'charmed', 'deafened', 'frightened', 'grappled', 'incapacitated', 'invisible', 'paralyzed', 'petrified', 'poisoned', 'prone', 'restrained', 'stunned', 'unconscious'].includes(conditionOperation.condition) ||
-    !['source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save'].includes(duration.expiresAt)
+    !['source-next-turn-start', 'source-turn-end', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save'].includes(duration.expiresAt)
   ) return false
   if (duration.expiresAt === 'target-turn-end' || duration.expiresAt === 'target-turn-end-save') {
     if (!Number.isInteger(duration.remainingRounds) || (duration.remainingRounds ?? 0) < 1 || (duration.remainingRounds ?? 0) > 10_000) return false

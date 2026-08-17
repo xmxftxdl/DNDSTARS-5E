@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { DND5E_FIGHTER_STARTING_EQUIPMENT } from './equipment'
+import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_QUARTERSTAFF } from './equipment'
 import { createDnd5eConditionEffect } from './activeEffects'
 import {
   findDnd5eOpportunityAttackersForMove,
@@ -11,6 +11,7 @@ import {
   previewDnd5eOpportunityAttack,
   resolvePreparedDnd5eOpportunityAttack,
 } from './opportunityAttackAction'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function hero(): Character {
   return {
@@ -50,6 +51,134 @@ describe('D&D 5e opportunity attack bridge', () => {
       to: { x: 45, y: 5 },
       turnEconomyByToken: {},
     }).map((token) => token.id)).toEqual(['kobold'])
+  })
+
+  it('suppresses opportunity attacks from creatures the Mobile owner attacked in melee this turn', () => {
+    const pluginId = 'local.test.mobile-feat'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Mobile Feat Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'mobile', name: 'Mobile', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'partial', automationReasons: ['One movement rule remains manual.'],
+          staticModifiers: { preventOpportunityAttacksFromMeleeAttackTargets: true },
+        })
+      },
+    })
+    try {
+      const { character, map, initiativeOrder } = fixture()
+      const mobile = {
+        ...character,
+        dnd5eFeatIds: [`${pluginId}:mobile`],
+        dnd5eCombatState: { meleeAttackTargetIdsThisTurn: ['kobold'] },
+      }
+      expect(findDnd5eOpportunityAttackersForMove({
+        map, characters: [mobile], movingToken: map.tokens[1], to: { x: 45, y: 5 },
+        turnEconomyByToken: {},
+      })).toEqual([])
+      expect(prepareDnd5eOpportunityAttack({
+        combatId: 'combat', map, characters: [mobile], initiativeOrder,
+        actorTokenId: 'kobold', targetTokenId: 'hero-token',
+        turnEconomy: createDnd5eTurnEconomyCounts('kobold-turn', 30),
+      })).toEqual({ ok: false, reason: 'invalid-target' })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('uses a registered weapon whitelist to detect entering reach', () => {
+    const pluginId = 'local.test.polearm-feat'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Polearm Feat Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'polearm-master', name: 'Polearm Master', summary: 'Synthetic feat.',
+          description: 'Synthetic feat.', automation: 'full',
+          staticModifiers: { opportunityAttacksOnEnterReachWeaponIds: ['dnd5e-quarterstaff'] },
+        })
+      },
+    })
+    try {
+      const { character, map } = fixture()
+      const polearmUser: Character = {
+        ...character,
+        equipment: { mainWeapon: DND5E_QUARTERSTAFF },
+        dnd5eFeatIds: [`${pluginId}:polearm-master`],
+      }
+      map.tokens[0] = { ...map.tokens[0], x: 45 }
+      expect(findDnd5eOpportunityAttackersForMove({
+        map,
+        characters: [polearmUser],
+        movingToken: map.tokens[0],
+        to: { x: 25, y: 5 },
+        path: [{ x: 45, y: 5 }, { x: 35, y: 5 }, { x: 25, y: 5 }],
+        turnEconomyByToken: {},
+      }).map((token) => token.id)).toEqual(['hero-token'])
+    } finally {
+      dispose()
+    }
+  })
+
+  it('lets Sentinel ignore Disengage and stops movement on a qualifying hit', () => {
+    const pluginId = 'local.test.sentinel-feat'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Sentinel Feat Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'sentinel', name: 'Sentinel', summary: 'Synthetic feat.',
+          description: 'Synthetic feat.', automation: 'full',
+          staticModifiers: {
+            opportunityAttacksIgnoreDisengage: true,
+            opportunityAttackHitStopsMovement: true,
+          },
+        })
+      },
+    })
+    try {
+      const { character, map, initiativeOrder } = fixture()
+      const sentinel: Character = {
+        ...character,
+        equipment: DND5E_FIGHTER_STARTING_EQUIPMENT,
+        dnd5eFeatIds: [`${pluginId}:sentinel`],
+      }
+      map.tokens[0] = { ...map.tokens[0], x: 25 }
+      expect(findDnd5eOpportunityAttackersForMove({
+        map,
+        characters: [sentinel],
+        movingToken: map.tokens[0],
+        to: { x: 45, y: 5 },
+        path: [{ x: 25, y: 5 }, { x: 35, y: 5 }, { x: 45, y: 5 }],
+        turnEconomyByToken: {},
+        disengaged: true,
+      }).map((token) => token.id)).toEqual(['hero-token'])
+
+      const prepared = prepareDnd5eOpportunityAttack({
+        combatId: 'combat', round: 1, map, characters: [sentinel], initiativeOrder,
+        actorTokenId: 'hero-token', targetTokenId: 'kobold',
+        turnEconomy: createDnd5eTurnEconomyCounts('sentinel-turn', 30),
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      const resolved = resolvePreparedDnd5eOpportunityAttack({
+        prepared: prepared.prepared, d20: 20, damageRolls: [4, 4],
+      })
+      expect(resolved.result.ok).toBe(true)
+      if (!resolved.result.ok) return
+      expect(resolved.result.state.combatants.kobold.turn.movementRemaining).toBe(0)
+      expect(resolved.result.state.combatants.kobold.classState.movementStoppedTurnKey)
+        .toBe('combat:1:kobold')
+    } finally {
+      dispose()
+    }
   })
 
   it('spends a reaction in the 5e Headless engine and leaves legacy AP untouched', () => {

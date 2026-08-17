@@ -20,6 +20,9 @@ import type {
   Dnd5ePersistentAreaAnchorMode,
   Dnd5ePersistentAreaMovementDeclaration,
   Dnd5ePersistentAreaLighting,
+  Dnd5ePersistentAreaBlocking,
+  Dnd5ePersistentAreaObscuration,
+  Dnd5ePersistentAreaOccupantModifiers,
   Dnd5ePersistentAreaTriggerDeclaration,
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaVisual,
@@ -72,6 +75,9 @@ export interface Dnd5eCoreSpellAreaDeclaration {
   includeSelf?: boolean
   hiddenFromPlayers?: boolean
   lighting?: Dnd5ePersistentAreaLighting
+  obscuration?: Dnd5ePersistentAreaObscuration
+  occupantModifiers?: Dnd5ePersistentAreaOccupantModifiers
+  blocking?: Dnd5ePersistentAreaBlocking
   movementCostMultiplier?: number
   damageTypeBySourceAlignment?: { evil: Dnd5eCoreSpellAreaDamageDeclaration['type']; otherwise: Dnd5eCoreSpellAreaDamageDeclaration['type'] }
   color: string
@@ -150,6 +156,260 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     color: '#fde68a',
     visual: { preset: 'daylight', intensity: 'subtle' },
     triggers: [],
+  },
+  {
+    spellId: 'fog-cloud',
+    label: '云雾术',
+    minimumSlotLevel: 1,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 120 },
+    durationRounds: 600,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20 },
+    relation: 'any',
+    includeSelf: true,
+    obscuration: { kind: 'heavy' },
+    color: '#94a3b8',
+    visual: { preset: 'fog-cloud', intensity: 'normal' },
+    triggers: [],
+  },
+  {
+    spellId: 'web',
+    label: '蛛网术',
+    minimumSlotLevel: 2,
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
+    durationRounds: 600,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 20 },
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    obscuration: { kind: 'light' },
+    color: '#e2e8f0',
+    visual: { preset: 'web', intensity: 'normal' },
+    triggers: [
+      {
+        id: 'web-enter', frequencyGroupId: 'web-restraint',
+        label: '蛛网术·进入蛛网', timing: 'on-enter', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: {
+          condition: 'restrained', duration: { expiresAt: 'permanent' },
+          escapeCheck: { ability: 'str', economy: 'action' },
+        },
+        dmAdjustable: true,
+      },
+      {
+        id: 'web-turn-start', frequencyGroupId: 'web-restraint',
+        label: '蛛网术·回合开始', timing: 'turn-start', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: {
+          condition: 'restrained', duration: { expiresAt: 'permanent' },
+          escapeCheck: { ability: 'str', economy: 'action' },
+        },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
+    spellId: 'silence',
+    label: '沉默术',
+    minimumSlotLevel: 2,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 120 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20 },
+    relation: 'any',
+    includeSelf: true,
+    occupantModifiers: {
+      containment: 'fully-contained',
+      preventsVerbalComponents: true,
+      damageImmunities: ['thunder'],
+    },
+    color: '#818cf8',
+    visual: { preset: 'silence', intensity: 'subtle' },
+    triggers: [],
+  },
+  {
+    spellId: 'sleet-storm',
+    label: '雪雨暴',
+    minimumSlotLevel: 3,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 40, placeRangeFeet: 150 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 20 },
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    obscuration: { kind: 'heavy' },
+    color: '#bfdbfe',
+    visual: { preset: 'sleet-storm', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'sleet-storm-enter', frequencyGroupId: 'sleet-storm-prone',
+        label: '雪雨暴·进入区域', timing: 'on-enter', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+        dmAdjustable: true,
+      },
+      {
+        id: 'sleet-storm-turn-start', frequencyGroupId: 'sleet-storm-prone',
+        label: '雪雨暴·回合开始', timing: 'turn-start', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
+    spellId: 'stinking-cloud',
+    label: '臭云术',
+    minimumSlotLevel: 3,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 90 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20 },
+    relation: 'any',
+    includeSelf: true,
+    obscuration: { kind: 'heavy' },
+    color: '#ca8a04',
+    visual: { preset: 'stinking-cloud', intensity: 'strong' },
+    triggers: [{
+      id: 'stinking-cloud-turn-start',
+      label: '臭云术·回合开始', timing: 'turn-start', oncePerTurn: true,
+      savingThrow: { ability: 'con', onSuccess: 'none', automaticSuccessForDamageImmunity: 'poison' },
+      consumeActionOnFailedSave: true,
+      dmAdjustable: true,
+    }],
+  },
+  {
+    spellId: 'wind-wall',
+    label: '风墙术',
+    minimumSlotLevel: 3,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 50, minimumWidthFeet: 5,
+      heightFeet: 5, placeRangeFeet: 120, rotatable: true,
+    },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 15 },
+    relation: 'any',
+    includeSelf: true,
+    color: '#bae6fd',
+    visual: { preset: 'wind-wall', intensity: 'strong' },
+    triggers: [{
+      id: 'wind-wall-create', label: '风墙术·风墙出现', timing: 'on-create',
+      savingThrow: { ability: 'str', onSuccess: 'half' },
+      damage: { count: 3, sides: 8, type: 'bludgeoning' },
+      dmAdjustable: true,
+    }],
+  },
+  {
+    spellId: 'wall-of-force',
+    label: '力场墙',
+    minimumSlotLevel: 5,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5,
+      heightFeet: 5, placeRangeFeet: 120, rotatable: true,
+    },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 10 },
+    relation: 'any',
+    includeSelf: true,
+    blocking: { movement: true, lineOfEffect: true },
+    color: '#c4b5fd',
+    visual: { preset: 'wall-of-force', intensity: 'normal' },
+    triggers: [],
+  },
+  {
+    spellId: 'wall-of-stone',
+    label: '石墙术',
+    minimumSlotLevel: 5,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5,
+      heightFeet: 5, placeRangeFeet: 120, rotatable: true,
+    },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 10 },
+    relation: 'any',
+    includeSelf: true,
+    blocking: { movement: true, vision: true, lineOfEffect: true },
+    color: '#78716c',
+    visual: { preset: 'wall-of-stone', intensity: 'normal' },
+    triggers: [],
+  },
+  {
+    spellId: 'wall-of-ice',
+    label: '冰墙术',
+    minimumSlotLevel: 6,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5,
+      heightFeet: 5, placeRangeFeet: 120, rotatable: true,
+    },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 10 },
+    relation: 'any',
+    includeSelf: true,
+    blocking: { movement: true, vision: true, lineOfEffect: true },
+    color: '#bae6fd',
+    visual: { preset: 'wall-of-ice', intensity: 'strong' },
+    triggers: [{
+      id: 'wall-of-ice-create', label: '冰墙术·冰墙出现', timing: 'on-create',
+      savingThrow: { ability: 'dex', onSuccess: 'half' },
+      damage: { count: 10, sides: 6, perHigherSlot: 2, type: 'cold' },
+      dmAdjustable: true,
+    }],
+  },
+  {
+    spellId: 'wall-of-thorns',
+    label: '棘墙术',
+    minimumSlotLevel: 6,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 60, minimumWidthFeet: 5,
+      heightFeet: 5, placeRangeFeet: 120, rotatable: true,
+    },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    vertical: { mode: 'volume', heightFeet: 10 },
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 4,
+    blocking: { vision: true },
+    color: '#4d7c0f',
+    visual: { preset: 'wall-of-thorns', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'wall-of-thorns-create', label: '棘墙术·棘墙出现', timing: 'on-create',
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 7, sides: 8, perHigherSlot: 1, type: 'piercing' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'wall-of-thorns-enter', frequencyGroupId: 'wall-of-thorns-slicing',
+        label: '棘墙术·进入棘墙', timing: 'on-enter', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 7, sides: 8, perHigherSlot: 1, type: 'slashing' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'wall-of-thorns-turn-end', frequencyGroupId: 'wall-of-thorns-slicing',
+        label: '棘墙术·回合结束', timing: 'turn-end', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 7, sides: 8, perHigherSlot: 1, type: 'slashing' },
+        dmAdjustable: true,
+      },
+    ],
   },
   {
     spellId: 'grease',
@@ -628,6 +888,7 @@ function resolvedTrigger(
       ? { ...declaration.savingThrow, dc: input.sourceSaveDc }
       : undefined,
     skipSaveWhenSourceConditionActive: declaration.skipSaveWhenSourceConditionActive,
+    consumeActionOnFailedSave: declaration.consumeActionOnFailedSave === true,
     damage: declaration.damage
       ? {
           count: declaration.damage.count + higherLevels * (declaration.damage.perHigherSlot ?? 0),
@@ -727,6 +988,22 @@ export function createDnd5eCoreSpellArea(input: {
     lighting: declaration.lighting
       ? { ...declaration.lighting, spellLevel: input.slotLevel }
       : undefined,
+    obscuration: declaration.obscuration ? { ...declaration.obscuration } : undefined,
+    occupantModifiers: declaration.occupantModifiers
+      ? {
+          ...declaration.occupantModifiers,
+          damageImmunities: declaration.occupantModifiers.damageImmunities
+            ? [...declaration.occupantModifiers.damageImmunities]
+            : undefined,
+          damageResistances: declaration.occupantModifiers.damageResistances
+            ? [...declaration.occupantModifiers.damageResistances]
+            : undefined,
+          conditionImmunities: declaration.occupantModifiers.conditionImmunities
+            ? [...declaration.occupantModifiers.conditionImmunities]
+            : undefined,
+        }
+      : undefined,
+    blocking: declaration.blocking ? { ...declaration.blocking } : undefined,
     lightingAnchorCells: input.lightingAnchorCells?.map((cell) => ({ ...cell })),
     visual: { ...declaration.visual },
     wallOfFireGeometry: input.wallOfFireGeometry ? { ...input.wallOfFireGeometry } : undefined,
@@ -864,7 +1141,7 @@ export function moveDnd5eCoreSpellArea(input: {
     ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
     : undefined
   const movement = area?.movement ?? declaredMovement
-  if (!area || area.sourceKind !== 'core-spell' || !movement) return { ok: false, reason: 'area-not-movable' }
+  if (!area || !movement) return { ok: false, reason: 'area-not-movable' }
   if (area.sourceTokenId !== input.sourceTokenId) return { ok: false, reason: 'invalid-source' }
   const previous = area.anchorCell ?? area.cells[0]
   const previousLightingAnchors = area.lightingAnchorCells?.length
@@ -886,6 +1163,18 @@ export function moveDnd5eCoreSpellArea(input: {
     Math.max(Math.abs(target.col - origin.col), Math.abs(target.row - origin.row)) * feetPerCell
   ))
   if (distanceFeet > movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
+  if (movement.maximumDistanceFromSourceFeet != null) {
+    const sourceToken = input.map.tokens.find((token) => token.id === input.sourceTokenId)
+    if (!sourceToken) return { ok: false, reason: 'invalid-source' }
+    const sourceCell = tokenAnchorCellFromPixel(sourceToken.x, sourceToken.y, sourceToken, input.map)
+    const tetherDistanceFeet = Math.max(
+      Math.abs(input.targetCell.col - sourceCell.col),
+      Math.abs(input.targetCell.row - sourceCell.row),
+    ) * feetPerCell
+    if (tetherDistanceFeet > movement.maximumDistanceFromSourceFeet) {
+      return { ok: false, reason: 'target-out-of-range' }
+    }
+  }
   const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
   const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
   const requestedTargets = dancingLightTargets ?? [input.targetCell]

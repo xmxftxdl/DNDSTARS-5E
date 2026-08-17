@@ -7,6 +7,7 @@ import {
   applyDnd5eLevelAdvancement,
   buildDnd5eLevelAdvancementPlan,
   dnd5eAdvancementRevisionBaseCharacter,
+  dnd5eBuildChoiceRequirementsV1,
   dnd5eClassDefinition,
   dnd5eRulesPluginRegistrySnapshot,
   fighterFightingStyleSelectionLimit,
@@ -55,6 +56,8 @@ const FAILURE_MESSAGES: Record<Dnd5eLevelAdvancementFailure, string> = {
   'missing-asi-choice': '还有属性值提升／专长尚未选择。',
   'invalid-asi-choice': '属性值提升不合法，或会令属性超过 20。',
   'invalid-feat': '所选专长不满足前提、已经拥有，或对应插件未安装。',
+  'missing-content-choice': '所选专长还有构筑选项尚未选满。',
+  'invalid-content-choice': '所选专长的构筑选项无效、互相冲突，或会让属性超过上限。',
   'missing-class-choice': '还有职业或子职选项尚未选满。',
   'invalid-class-choice': '职业或子职选项无效。',
   'missing-spell-choice': '还有本级戏法、已知法术或法师法术书选择尚未完成。',
@@ -145,6 +148,9 @@ export default function CharacterLevelUpDialog({
   const [spellSelections, setSpellSelections] = useState<Dnd5eAdvancementSpellSelectionsV1 | undefined>(
     initialDecision?.spellSelections,
   )
+  const [contentChoiceSelections, setContentChoiceSelections] = useState<
+    Record<string, Record<string, string[]>>
+  >(initialDecision?.contentChoiceSelections ?? {})
   const [error, setError] = useState('')
   const plan = useMemo(
     () => buildDnd5eLevelAdvancementPlan(
@@ -236,6 +242,30 @@ export default function CharacterLevelUpDialog({
     })
   }
 
+  const toggleContentChoice = (
+    contentId: string,
+    advancementId: string,
+    optionId: string,
+    count: number,
+  ) => {
+    setContentChoiceSelections((current) => {
+      const existing = current[contentId]?.[advancementId] ?? []
+      const selected = existing.includes(optionId)
+      const next = selected
+        ? existing.filter((id) => id !== optionId)
+        : existing.length >= count
+          ? count === 1 ? [optionId] : existing
+          : [...existing, optionId]
+      return {
+        ...current,
+        [contentId]: {
+          ...current[contentId],
+          [advancementId]: next,
+        },
+      }
+    })
+  }
+
   const confirm = () => {
     const asiChoices = plan.asiLevels.flatMap((classLevel) => {
       const choice = choiceFromAsiDraft(asiDrafts[classLevel] ?? { mode: 'single' })
@@ -264,6 +294,7 @@ export default function CharacterLevelUpDialog({
       fighterFightingStyles: classId === 'fighter' ? fighterStyles : undefined,
       fighterSubclassSelections: classId === 'fighter' ? fighterSubclassSelections : undefined,
       ...(effectiveSpellSelections ? { spellSelections: effectiveSpellSelections } : {}),
+      ...(Object.keys(contentChoiceSelections).length > 0 ? { contentChoiceSelections } : {}),
     }
     const result = revisionRecord
       ? reviseDnd5eLevelAdvancement(
@@ -362,6 +393,7 @@ export default function CharacterLevelUpDialog({
                       setSubclassId(option.id)
                       setClassSelections({})
                       setFighterSubclassSelections({})
+                      setContentChoiceSelections({})
                       setSpellSelections(undefined)
                     }}
                     className={`rounded-xl border p-3 text-left transition ${
@@ -453,14 +485,23 @@ export default function CharacterLevelUpDialog({
                   </div>
                   <select
                     value={draft.mode}
-                    onChange={(event) => setAsiDrafts((current) => ({
-                      ...current,
-                      [classLevel]: event.target.value === 'feat'
-                        ? { mode: 'feat' }
-                        : event.target.value === 'split'
-                          ? { mode: 'split' }
-                          : { mode: 'single' },
-                    }))}
+                    onChange={(event) => {
+                      if (draft.mode === 'feat' && draft.featId && event.target.value !== 'feat') {
+                        setContentChoiceSelections((current) => {
+                          const next = { ...current }
+                          delete next[draft.featId!]
+                          return next
+                        })
+                      }
+                      setAsiDrafts((current) => ({
+                        ...current,
+                        [classLevel]: event.target.value === 'feat'
+                          ? { mode: 'feat' }
+                          : event.target.value === 'split'
+                            ? { mode: 'split' }
+                            : { mode: 'single' },
+                      }))
+                    }}
                     className="rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-200"
                   >
                     <option value="single">一项属性 +2</option>
@@ -472,10 +513,19 @@ export default function CharacterLevelUpDialog({
                   <div className="mt-3 space-y-3">
                     <select
                       value={draft.featId ?? ''}
-                      onChange={(event) => setAsiDrafts((current) => ({
-                        ...current,
-                        [classLevel]: { mode: 'feat', featId: event.target.value || undefined },
-                      }))}
+                      onChange={(event) => {
+                        if (draft.featId && draft.featId !== event.target.value) {
+                          setContentChoiceSelections((current) => {
+                            const next = { ...current }
+                            delete next[draft.featId!]
+                            return next
+                          })
+                        }
+                        setAsiDrafts((current) => ({
+                          ...current,
+                          [classLevel]: { mode: 'feat', featId: event.target.value || undefined },
+                        }))
+                      }}
                       className="w-full rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-200"
                     >
                       <option value="">选择满足前提的专长…</option>
@@ -495,16 +545,64 @@ export default function CharacterLevelUpDialog({
                     )}
                     {draft.featId && (() => {
                       const selected = featOptions.find((feat) => feat.id === draft.featId)
+                      const requirements = dnd5eBuildChoiceRequirementsV1(selected?.advancements)
+                      const selectedByGroup = contentChoiceSelections[draft.featId] ?? {}
                       return selected ? (
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-400">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <strong className="text-sm text-slate-100">{selected.name}</strong>
-                            <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">{selected.sourceLabel}</span>
-                            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">
-                              {selected.automation === 'full' ? '完整 Headless' : selected.automation === 'partial' ? '部分 Headless' : 'DM 裁定'}
-                            </span>
+                        <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-400">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <strong className="text-sm text-slate-100">{selected.name}</strong>
+                              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">{selected.sourceLabel}</span>
+                              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">
+                                {selected.automation === 'full' ? '完整 Headless' : selected.automation === 'partial' ? '部分 Headless' : 'DM 裁定'}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-slate-300">{selected.summary}</p>
                           </div>
-                          <p className="mt-1 text-slate-300">{selected.summary}</p>
+                          {requirements.map((requirement) => {
+                            const chosen = new Set(selectedByGroup[requirement.id] ?? [])
+                            return (
+                              <div key={requirement.id} className="rounded-lg border border-sky-300/15 bg-sky-500/[0.04] p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <strong className="text-sky-100">{requirement.label}</strong>
+                                    {requirement.description && <p className="text-slate-500">{requirement.description}</p>}
+                                  </div>
+                                  <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-100">{chosen.size}/{requirement.count}</span>
+                                </div>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  {requirement.options.map((option) => {
+                                    const available = option.requires?.every((dependency) =>
+                                      dependency.optionIds.some((optionId) =>
+                                        (selectedByGroup[dependency.advancementId] ?? []).includes(optionId))) ?? true
+                                    const active = chosen.has(option.id)
+                                    return (
+                                      <button
+                                        key={option.id}
+                                        type="button"
+                                        disabled={!available}
+                                        aria-pressed={active}
+                                        onClick={() => toggleContentChoice(
+                                          selected.id,
+                                          requirement.id,
+                                          option.id,
+                                          requirement.count,
+                                        )}
+                                        className={`rounded-lg border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                                          active
+                                            ? 'border-sky-300/50 bg-sky-500/15 text-sky-50'
+                                            : 'border-white/10 bg-black/20 text-slate-300'
+                                        }`}
+                                      >
+                                        <span className="font-semibold">{option.label}</span>
+                                        {option.description && <span className="mt-0.5 block text-[11px] text-slate-500">{option.description}</span>}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       ) : null
                     })()}
@@ -635,6 +733,71 @@ export default function CharacterLevelUpDialog({
               </section>
             )
           })}
+
+          {plan.contentAdvancements.map((content) => (
+            <section key={content.contentId} className="rounded-2xl border border-cyan-300/15 bg-cyan-500/[0.04] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-cyan-100">{content.label}</h3>
+                  <p className="mt-1 text-xs text-slate-500">固定授予会自动写入人物卡；需要选择的构筑项必须在本次升级中完成。</p>
+                </div>
+                <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
+                  统一构筑协议
+                </span>
+              </div>
+              {content.requirements.length === 0 ? (
+                <p className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-xs text-slate-300">无需额外选择，确认升级时自动授予。</p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {content.requirements.map((requirement) => {
+                    const selectedByGroup = contentChoiceSelections[content.contentId] ?? {}
+                    const chosen = new Set(selectedByGroup[requirement.id] ?? [])
+                    return (
+                      <div key={requirement.id} className="rounded-xl border border-cyan-300/10 bg-black/20 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <strong className="text-sm text-cyan-50">{requirement.label}</strong>
+                            {requirement.description && <p className="mt-1 text-xs text-slate-500">{requirement.description}</p>}
+                          </div>
+                          <span className="text-xs font-semibold text-cyan-100">{chosen.size}/{requirement.count}</span>
+                        </div>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          {requirement.options.map((option) => {
+                            const available = option.requires?.every((dependency) =>
+                              dependency.optionIds.some((optionId) =>
+                                (selectedByGroup[dependency.advancementId] ?? []).includes(optionId))) ?? true
+                            const active = chosen.has(option.id)
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                disabled={!available}
+                                aria-pressed={active}
+                                onClick={() => toggleContentChoice(
+                                  content.contentId,
+                                  requirement.id,
+                                  option.id,
+                                  requirement.count,
+                                )}
+                                className={`rounded-lg border px-3 py-2 text-left text-xs transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                                  active
+                                    ? 'border-cyan-300/50 bg-cyan-500/15 text-cyan-50'
+                                    : 'border-white/10 bg-black/20 text-slate-300'
+                                }`}
+                              >
+                                <span className="font-semibold">{option.label}</span>
+                                {option.description && <span className="mt-0.5 block text-[11px] text-slate-500">{option.description}</span>}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          ))}
 
           {plan.spellAdvancement?.selectionRequired && (
             <Dnd5eSpellAdvancementPicker

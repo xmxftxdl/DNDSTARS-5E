@@ -67,6 +67,50 @@ describe('SRD 5.1 inventory', () => {
     expect(DND5E_SRD_ITEM_TEMPLATES.every((item) => item.source.license === 'CC BY 4.0')).toBe(true)
   })
 
+  it('explains versatile weapon damage in plain one-handed and two-handed terms', () => {
+    const longsword = DND5E_SRD_ITEM_TEMPLATES.find((item) =>
+      item.id === 'srd-5.1:equipment:dnd5e-longsword',
+    )
+    const spear = DND5E_SRD_ITEM_TEMPLATES.find((item) =>
+      item.id === 'srd-5.1:equipment:dnd5e-spear',
+    )
+
+    expect(longsword?.rulesText).toContain('多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10')
+    expect(spear?.rulesText).toContain('多才多艺：单手攻击使用 1d6 伤害骰；双手攻击改用 1d8')
+  })
+
+  it('publishes a concrete effect description instead of a generic item label', () => {
+    expect(DND5E_SRD_ITEM_TEMPLATES.every((item) =>
+      item.description.trim().length >= 24 && item.description.length <= 2_000 &&
+      item.rulesText.trim().length >= 24 && item.rulesText.length <= 20_000 &&
+      !item.description.includes('SRD 5.1 冒险装备') &&
+      !item.description.includes('暂无额外规则效果'),
+    )).toBe(true)
+  })
+
+  it('expands every core weapon property into its actual rule', () => {
+    const propertyLabel = (property: string) => property.startsWith('投掷')
+      ? '投掷：'
+      : property.startsWith('多才多艺')
+        ? '多才多艺：'
+        : `${property}：`
+    const weapons = DND5E_SRD_ITEM_TEMPLATES.filter((item) =>
+      item.id.startsWith('srd-5.1:equipment:') && item.equipment?.dnd5e?.kind === 'weapon',
+    )
+
+    for (const item of weapons) {
+      const rules = item.equipment?.dnd5e
+      if (rules?.kind !== 'weapon') continue
+      for (const property of rules.properties ?? []) {
+        expect(item.rulesText, `${item.name}: ${property}`).toContain(propertyLabel(property))
+      }
+    }
+    expect(DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id.endsWith(':dnd5e-lance'))?.rulesText)
+      .toContain('未骑乘时使用骑枪需要双手')
+    expect(DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id.endsWith(':dnd5e-net'))?.rulesText)
+      .toContain('捕网的 AC 为 10')
+  })
+
   it('equips an arcane focus in either hand and defaults to the free off hand', () => {
     const focusTemplate = DND5E_SRD_GEAR_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:item:arcane-focus')
     expect(focusTemplate?.equipment).toMatchObject({

@@ -175,9 +175,15 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
       <Dnd5eBasicActionsPanel
-        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction)}
+        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction || (
+          turnEconomy.bonusAction.current > 0 &&
+          Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
+            .some((grant) => grant.appliedTurnKey === turnEconomy.turnKey)
+        ))}
         pending={pending}
         targets={basicActionTargets}
+        basicActionGrants={Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
+          .filter((grant) => grant.appliedTurnKey === turnEconomy.turnKey)}
         grappleEscapes={dnd5eEscapableGrapples(character.dnd5eCombatState?.activeEffects).map((grapple) => ({
           grapplerTokenId: grapple.grapplerId,
           dc: grapple.dc,

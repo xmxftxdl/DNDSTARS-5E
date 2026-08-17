@@ -2,14 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import type {
   MobileAccountSession,
+  MobileAccountCharacterRecord,
   MobileCampaignSummary,
+  MobileLevelUpDecision,
   MobilePlayerWorkspace,
   MobileRoomRules,
 } from '../../../../packages/mobile-protocol/src'
+import { applyDnd5eLevelAdvancement } from '../../../../src/rulesets/dnd5e/levelAdvancement'
+import type { Dnd5eLevelAdvancementDecisionV1, Character } from '../../../../src/types/character'
 import {
   answerCombatInterrupt,
   appendPlayerAction,
   fetchMobileAccount,
+  fetchMobileAccountCharacters,
   fetchMobileCampaigns,
   fetchMobileRoomRules,
   fetchRoomResource,
@@ -22,13 +27,20 @@ import {
   logoutMobileAccount,
   mutateRoomJournal,
   publishRoomEvent,
+  registerMobilePushSubscription,
   saveRoomResourceSnapshot,
+  saveMobileAccountCharacter,
   sendRoomChat,
   submitExplorationMove,
+  submitPlayerCharacterCommand,
+  unregisterMobilePushSubscription,
   updateMobileAccountProfile,
   changeMobileAccountPassword,
+  deleteMobileAccount,
   type MobileCredentials,
 } from '../services/mobileApi'
+import { mobilePushPermissionState, requestMobilePushToken, type MobilePushPermissionState } from '../services/pushNotifications'
+import { createMobileDnd5eCharacter, type MobileCharacterCreationInput } from '../character/createMobileCharacter'
 import {
   clearMobileAccount,
   clearMobileRoom,
@@ -36,6 +48,7 @@ import {
   mobileClientId,
   saveActiveCharacterId,
   saveMobileAccount,
+  saveMobileServerUrl,
   saveMobileRoom,
 } from '../services/sessionStore'
 import { buildMobileWorkspace } from '../services/workspaceAdapter'
@@ -44,6 +57,8 @@ import {
   type MobileRoomEventStreamStatusV1,
 } from '../services/roomEventStream'
 import { buildMobileActionRegistry, prepareMobileRoomPlugins } from '../services/actionRegistry'
+import { clearMobileRoomPluginRuntime } from '../services/mobileRoomPluginRuntime'
+import { mobileCharacterCompatibilityForRoom } from '../services/mobileCharacterVault'
 import { defaultGameServerUrl, normalizeGameServerUrl } from '../config'
 
 export type MobileConnectionState = 'restoring' | 'offline' | 'connecting' | 'online' | 'error'
@@ -70,10 +85,23 @@ function copyRecord(value: unknown): Record<string, unknown> {
     : {}
 }
 
+function locallyUnreadyRules(rules: MobileRoomRules): MobileRoomRules {
+  return {
+    ...rules,
+    member: {
+      ...rules.member,
+      ready: false,
+      missing: rules.requiredPlugins.map((plugin) => ({ ...plugin })),
+    },
+  }
+}
+
 export function useMobileWorkspace() {
   const [serverUrl, setServerUrlState] = useState(defaultGameServerUrl)
   const [account, setAccount] = useState<MobileAccountSession | null>(null)
   const [campaigns, setCampaigns] = useState<MobileCampaignSummary[]>([])
+  const [accountCharacters, setAccountCharacters] = useState<MobileAccountCharacterRecord[]>([])
+  const [pushPermission, setPushPermission] = useState<MobilePushPermissionState>('unknown')
   const [credentials, setCredentials] = useState<MobileCredentials | null>(null)
   const [rules, setRules] = useState<MobileRoomRules | null>(null)
   const [workspace, setWorkspace] = useState<MobilePlayerWorkspace | null>(null)
@@ -94,10 +122,24 @@ export function useMobileWorkspace() {
   const rulesRef = useRef(rules)
   const resourceValuesRef = useRef<Record<string, unknown>>({})
   const resourceRevisionsRef = useRef<Record<string, number>>({})
+  const serverUrlEditedRef = useRef(false)
+  const serverUrlSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   workspaceRef.current = workspace
   rulesRef.current = rules
 
-  const setServerUrl = useCallback((value: string) => setServerUrlState(normalizeGameServerUrl(value)), [])
+  const setServerUrl = useCallback((value: string) => {
+    // Keep the draft untouched while the user is typing. Normalizing every
+    // keystroke removes a trailing slash, which makes `https://` impossible to
+    // enter on iOS. Persist the draft so a development-client refresh does not
+    // restore the previous endpoint over the active form.
+    serverUrlEditedRef.current = true
+    setServerUrlState(value)
+    if (serverUrlSaveTimerRef.current != null) clearTimeout(serverUrlSaveTimerRef.current)
+    serverUrlSaveTimerRef.current = setTimeout(() => {
+      serverUrlSaveTimerRef.current = null
+      void saveMobileServerUrl(value)
+    }, 250)
+  }, [])
 
   useEffect(() => {
     if (!notice) return
@@ -108,6 +150,12 @@ export function useMobileWorkspace() {
   const refreshCampaigns = useCallback(async (server: string, session: MobileAccountSession) => {
     const next = await fetchMobileCampaigns(server, session)
     if (mounted.current) setCampaigns(next)
+  }, [])
+
+  const refreshAccountCharacters = useCallback(async (server: string, session: MobileAccountSession) => {
+    const next = await fetchMobileAccountCharacters(server, session)
+    if (mounted.current) setAccountCharacters(next)
+    return next
   }, [])
 
   const refreshWorkspace = useCallback(async (
@@ -181,7 +229,7 @@ export function useMobileWorkspace() {
     void (async () => {
       const stored = await loadMobileAuthState()
       const server = normalizeGameServerUrl(stored.serverUrl || defaultGameServerUrl)
-      setServerUrlState(server)
+      if (!serverUrlEditedRef.current) setServerUrlState(server)
       setActiveCharacterIdState(stored.activeCharacterId)
       if (!stored.account) return setConnection('offline')
       try {
@@ -189,6 +237,7 @@ export function useMobileWorkspace() {
         setAccount(validAccount)
         await saveMobileAccount(server, validAccount)
         await refreshCampaigns(server, validAccount)
+        await refreshAccountCharacters(server, validAccount)
         if (stored.room) {
           const restored = { serverUrl: server, account: validAccount, room: stored.room }
           setCredentials(restored)
@@ -199,8 +248,11 @@ export function useMobileWorkspace() {
         setConnection('offline')
       }
     })()
-    return () => { mounted.current = false }
-  }, [refreshCampaigns])
+    return () => {
+      mounted.current = false
+      if (serverUrlSaveTimerRef.current != null) clearTimeout(serverUrlSaveTimerRef.current)
+    }
+  }, [refreshAccountCharacters, refreshCampaigns])
 
   useEffect(() => {
     if (!credentials) return
@@ -243,6 +295,7 @@ export function useMobileWorkspace() {
           const active = workspaceRef.current?.characters.find((candidate) => candidate.id === activeCharacterId) ?? null
           nextRules = await heartbeatMobileRoom(credentials, active, observedRules.requiredPlugins)
         } catch (cause) {
+          nextRules = locallyUnreadyRules(observedRules)
           if (mounted.current) setNotice(`规则包尚未就绪：${cause instanceof Error ? cause.message : '下载或校验失败'}`)
         }
         rulesRef.current = nextRules
@@ -316,23 +369,31 @@ export function useMobileWorkspace() {
   const login = useCallback(async (identifier: string, password: string) => {
     setBusy(true); setError(''); setConnection('connecting')
     try {
+      const server = normalizeGameServerUrl(serverUrl)
+      if (!/^https?:\/\/[^/]+/i.test(server)) throw new Error('请输入完整服务器地址，例如 https://astraltracevtt.com')
+      setServerUrlState(server)
+      await saveMobileServerUrl(server)
       const clientId = await mobileClientId()
-      const next = await loginMobileAccount(serverUrl, identifier, password, clientId)
-      await saveMobileAccount(serverUrl, next)
+      const next = await loginMobileAccount(server, identifier, password, clientId)
+      await saveMobileAccount(server, next)
       setAccount(next)
-      await refreshCampaigns(serverUrl, next)
+      await refreshCampaigns(server, next)
+      await refreshAccountCharacters(server, next)
       setConnection('offline')
     } catch (cause) {
       setConnection('error'); setError(cause instanceof Error ? cause.message : '登录失败')
     } finally { setBusy(false) }
-  }, [refreshCampaigns, serverUrl])
+  }, [refreshAccountCharacters, refreshCampaigns, serverUrl])
 
   const acceptRegisteredAccount = useCallback(async (next: MobileAccountSession) => {
-    await saveMobileAccount(serverUrl, next)
+    const server = normalizeGameServerUrl(serverUrl)
+    setServerUrlState(server)
+    await saveMobileAccount(server, next)
     setAccount(next)
-    await refreshCampaigns(serverUrl, next)
+    await refreshCampaigns(server, next)
+    await refreshAccountCharacters(server, next)
     setConnection('offline')
-  }, [refreshCampaigns, serverUrl])
+  }, [refreshAccountCharacters, refreshCampaigns, serverUrl])
 
   const joinRoom = useCallback(async (roomId: string, password = '', role: 'player' | 'spectator' = 'player') => {
     if (!account) return
@@ -350,6 +411,7 @@ export function useMobileWorkspace() {
         await prepareMobileRoomPlugins(nextCredentials, joined.rules)
         nextRules = await heartbeatMobileRoom(nextCredentials, null, joined.rules.requiredPlugins)
       } catch (cause) {
+        nextRules = locallyUnreadyRules(joined.rules)
         setNotice(`规则包尚未就绪：${cause instanceof Error ? cause.message : '下载或校验失败'}`)
       }
       await saveMobileRoom(joined.room)
@@ -364,6 +426,7 @@ export function useMobileWorkspace() {
 
   const leaveRoom = useCallback(async () => {
     if (credentials) await leaveMobileRoom(credentials).catch(() => undefined)
+    clearMobileRoomPluginRuntime()
     await clearMobileRoom()
     setCredentials(null); setRules(null); setWorkspace(null); setActiveCharacterIdState(null); setConnection('offline')
     if (account) await refreshCampaigns(serverUrl, account).catch(() => undefined)
@@ -371,8 +434,9 @@ export function useMobileWorkspace() {
 
   const logout = useCallback(async () => {
     if (account) await logoutMobileAccount(serverUrl, account).catch(() => undefined)
+    clearMobileRoomPluginRuntime()
     await clearMobileAccount()
-    setAccount(null); setCredentials(null); setRules(null); setWorkspace(null); setCampaigns([]); setConnection('offline')
+    setAccount(null); setCredentials(null); setRules(null); setWorkspace(null); setCampaigns([]); setAccountCharacters([]); setConnection('offline')
   }, [account, serverUrl])
 
   const updateProfile = useCallback(async (input: { displayName: string; avatar?: string }) => {
@@ -388,6 +452,42 @@ export function useMobileWorkspace() {
     if (!account) throw new Error('account-session-required')
     await changeMobileAccountPassword(serverUrl, account, { currentPassword, newPassword })
     setNotice('密码已更新；其他设备的旧会话可能需要重新登录')
+  }, [account, serverUrl])
+
+  const enablePushNotifications = useCallback(async () => {
+    if (!account) throw new Error('account-session-required')
+    const registration = await requestMobilePushToken()
+    const deviceId = await mobileClientId()
+    await registerMobilePushSubscription(serverUrl, account, { deviceId, ...registration })
+    setPushPermission('enabled')
+    setNotice('房间事件通知已开启')
+  }, [account, serverUrl])
+
+  const disablePushNotifications = useCallback(async () => {
+    if (!account) throw new Error('account-session-required')
+    const deviceId = await mobileClientId()
+    await unregisterMobilePushSubscription(serverUrl, account, deviceId)
+    setPushPermission(await mobilePushPermissionState())
+    setNotice('服务器已停止向此设备发送房间通知')
+  }, [account, serverUrl])
+
+  useEffect(() => {
+    if (!account) return
+    void mobilePushPermissionState().then(setPushPermission).catch(() => setPushPermission('unsupported'))
+  }, [account])
+
+  const deleteAccount = useCallback(async (currentPassword: string) => {
+    if (!account) throw new Error('account-session-required')
+    await deleteMobileAccount(serverUrl, account, currentPassword)
+    clearMobileRoomPluginRuntime()
+    await Promise.all([clearMobileAccount(), clearMobileRoom()])
+    setAccount(null)
+    setCredentials(null)
+    setRules(null)
+    setWorkspace(null)
+    setCampaigns([])
+    setAccountCharacters([])
+    setConnection('offline')
   }, [account, serverUrl])
 
   const selectCharacter = useCallback(async (id: string) => {
@@ -495,12 +595,185 @@ export function useMobileWorkspace() {
     }, '地图互动', !workspaceRef.current?.combat?.active)
   }, [submitAction])
 
-  const mutateOwnedCharacter = useCallback(async (
-    characterId: string,
-    mutator: (character: Record<string, unknown>) => Record<string, unknown>,
+  const submitOwnedCharacterCommand = useCallback(async (
+    command: Record<string, unknown>,
     label: string,
   ) => {
     if (!credentials) throw new Error('room-session-required')
+    if (credentials.room.role !== 'player') throw new Error('player-role-required')
+    const commandId = uid('mobile-character-command')
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const snapshot = await fetchRoomResourceSnapshot<RawCharacterState>(credentials, 'characters')
+      try {
+        const response = await submitPlayerCharacterCommand(credentials, snapshot.revision, {
+          ...command,
+          commandId,
+        })
+        setNotice(`${label}已保存`)
+        const resultCharacter = copyRecord(response.result.character)
+        await refreshWorkspace(credentials, String(command.characterId ?? resultCharacter.id ?? ''))
+        return response.result
+      } catch (cause) {
+        lastError = cause
+        if (!(cause instanceof Error) || !['shared-state-conflict', 'state-revision-conflict'].includes(cause.message)) throw cause
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('shared-state-conflict')
+  }, [credentials, refreshWorkspace])
+
+  const updateCharacterProfile = useCallback(async (characterId: string, patch: {
+    name?: string
+    avatar?: string
+    portrait?: string
+    tokenPortrait?: string
+    alignment?: string
+    backstory?: string
+    notes?: string
+  }) => {
+    await submitOwnedCharacterCommand({ type: 'profile', characterId, patch }, '角色资料')
+  }, [submitOwnedCharacterCommand])
+
+  const createCharacter = useCallback(async (input: MobileCharacterCreationInput) => {
+    if (!credentials || !rulesRef.current) throw new Error('room-session-required')
+    if (credentials.room.role !== 'player') throw new Error('player-role-required')
+    const character = createMobileDnd5eCharacter(input, {
+      roomId: credentials.room.roomId,
+      roomMemberId: credentials.room.memberId,
+      ownerAccountId: credentials.account.accountId,
+      player: credentials.room.displayName,
+    })
+    const result = await submitOwnedCharacterCommand({
+      type: 'create',
+      character,
+      ...(input.hostAbilityRollCommandId ? { abilityRollCommandId: input.hostAbilityRollCommandId } : {}),
+    }, '角色创建')
+    const authoritative = copyRecord(result.character ?? character as unknown as Record<string, unknown>)
+    const authoritativeId = String(authoritative.id ?? character.id)
+    const authoritativeName = String(authoritative.name ?? character.name)
+    const updatedAt = Date.now()
+    const vaultSaved = await saveMobileAccountCharacter(credentials.serverUrl, credentials.account, {
+      id: authoritativeId,
+      name: authoritativeName,
+      updatedAt,
+      character: Object.fromEntries(Object.entries(authoritative).filter(([key]) => key !== 'roomId' && key !== 'roomMemberId')),
+      compatibility: {
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        characterSchemaVersion: 1,
+        minimumGameProtocolVersion: 5,
+        lastSavedGameProtocolVersion: 5,
+        requiredPlugins: rulesRef.current.requiredPlugins.map((plugin) => ({ ...plugin })),
+      },
+    }).then(() => true).catch(() => false)
+    setActiveCharacterIdState(authoritativeId)
+    await saveActiveCharacterId(authoritativeId)
+    const activePlugins = rulesRef.current.member.ready === true ? rulesRef.current.requiredPlugins : []
+    const nextRules = await heartbeatMobileRoom(credentials, {
+      ...authoritative,
+      id: authoritativeId,
+      name: authoritativeName,
+    }, activePlugins)
+    rulesRef.current = nextRules
+    setRules(nextRules)
+    setNotice(vaultSaved
+      ? `${authoritativeName}已由 Host 创建并保存到账号角色库`
+      : `${authoritativeName}已由 Host 创建；账号角色库将在下次同步时重试`)
+    await refreshWorkspace(credentials, authoritativeId)
+    await refreshAccountCharacters(credentials.serverUrl, credentials.account).catch(() => undefined)
+    return authoritativeId
+  }, [credentials, refreshAccountCharacters, refreshWorkspace, submitOwnedCharacterCommand])
+
+  const rollCharacterAbilities = useCallback(async () => {
+    const result = await submitOwnedCharacterCommand({ type: 'roll-abilities' }, '属性骰')
+    const commandId = String(result.commandId ?? '')
+    const rolls = Array.isArray(result.rolls) ? result.rolls.map((raw) => {
+      const roll = copyRecord(raw)
+      return {
+        dice: Array.isArray(roll.dice) ? roll.dice.map(Number) : [],
+        discardedIndices: Array.isArray(roll.discardedIndices) ? roll.discardedIndices.map(Number) : [Number(roll.discardedIndex)],
+        total: Number(roll.total),
+      }
+    }) : []
+    if (!commandId || rolls.length !== 6) throw new Error('invalid-host-ability-roll')
+    return { commandId, rolls }
+  }, [submitOwnedCharacterCommand])
+
+  const attachAccountCharacter = useCallback(async (record: MobileAccountCharacterRecord) => {
+    if (!credentials || !rulesRef.current) throw new Error('room-session-required')
+    if (credentials.room.role !== 'player') throw new Error('player-role-required')
+    const compatibility = mobileCharacterCompatibilityForRoom(record, rulesRef.current)
+    if (!compatibility.compatible) throw new Error(compatibility.errors[0] || 'character-incompatible')
+    const source = copyRecord(record.character)
+    if (String(source.ownerAccountId ?? credentials.account.accountId) !== credentials.account.accountId) {
+      throw new Error('account-character-owner-mismatch')
+    }
+    const attached = {
+      ...source,
+      id: record.id,
+      name: record.name || String(source.name ?? '新冒险者'),
+      ownerAccountId: credentials.account.accountId,
+      roomId: credentials.room.roomId,
+      roomMemberId: credentials.room.memberId,
+      player: credentials.room.displayName,
+      visibleToPlayers: true,
+    }
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const snapshot = await fetchRoomResourceSnapshot<RawCharacterState>(credentials, 'characters')
+      const state = copyRecord(snapshot.value)
+      const characters = Array.isArray(state.characters) ? state.characters.map(copyRecord) : []
+      const conflicting = characters.find((candidate) => String(candidate.id ?? '') === record.id)
+      if (conflicting && String(conflicting.ownerAccountId ?? '') !== credentials.account.accountId) {
+        throw new Error('character-id-conflict')
+      }
+      try {
+        await saveRoomResourceSnapshot(credentials, 'characters', {
+          ...state,
+          characters: [...characters.filter((candidate) => String(candidate.id ?? '') !== record.id), attached],
+          selectedId: record.id,
+          updatedAt: Date.now(),
+        }, snapshot.revision)
+        setActiveCharacterIdState(record.id)
+        await saveActiveCharacterId(record.id)
+        const activePlugins = rulesRef.current.member.ready === true ? rulesRef.current.requiredPlugins : []
+        const nextRules = await heartbeatMobileRoom(credentials, attached, activePlugins)
+        rulesRef.current = nextRules
+        setRules(nextRules)
+        setNotice(`${record.name}已从账号角色库带入房间`)
+        await refreshWorkspace(credentials, record.id)
+        return record.id
+      } catch (cause) {
+        lastError = cause
+        if (!(cause instanceof Error) || cause.message !== 'shared-state-conflict') throw cause
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('shared-state-conflict')
+  }, [credentials, refreshWorkspace])
+
+  const setSpellSlot = useCallback(async (characterId: string, resourceKey: string, current: number) => {
+    if (!/^dnd5e-spell-slot-[1-9]$/.test(resourceKey) && resourceKey !== 'dnd5e-pact-slot') {
+      throw new Error('invalid-spell-slot-resource')
+    }
+    await submitOwnedCharacterCommand({ type: 'spell-slot', characterId, resourceKey, current }, '法术位')
+  }, [submitOwnedCharacterCommand])
+
+  const setSpellPrepared = useCallback(async (spellId: string, prepared: boolean) => {
+    const spell = workspaceRef.current?.spells.find((candidate) => candidate.id === spellId)
+    const characterId = workspaceRef.current?.activeCharacterId
+    if (!spell?.preparationSelection || !characterId) throw new Error('spell-preparation-not-editable')
+    await submitOwnedCharacterCommand({
+      type: 'spell-preparation',
+      characterId,
+      owner: spell.preparationSelection.owner,
+      classId: spell.preparationSelection.classId,
+      selectionKey: spell.preparationSelection.key,
+      spellId,
+      prepared,
+    }, prepared ? '法术准备' : '取消准备')
+  }, [submitOwnedCharacterCommand])
+
+  const levelUpCharacter = useCallback(async (characterId: string, decision: MobileLevelUpDecision) => {
+    if (!credentials || !rulesRef.current) throw new Error('room-session-required')
     if (credentials.room.role !== 'player') throw new Error('player-role-required')
     let lastError: unknown
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -514,68 +787,57 @@ export function useMobileWorkspace() {
         String(current.roomMemberId ?? '') !== credentials.room.memberId &&
         String(current.ownerAccountId ?? '') !== credentials.account.accountId
       ) throw new Error('character-owner-mismatch')
-      characters[index] = mutator(current)
+      const result = applyDnd5eLevelAdvancement(
+        current as unknown as Character,
+        decision as unknown as Dnd5eLevelAdvancementDecisionV1,
+        { completedBy: 'player' },
+      )
+      if (!result.ok) throw new Error(`level-up:${result.reason}`)
+      if ((result.character.dnd5eCreationTargetLevel ?? 0) <= result.character.level) {
+        result.character.dnd5eCreationTargetLevel = undefined
+      }
       try {
-        await saveRoomResourceSnapshot(credentials, 'characters', {
-          ...state,
-          characters,
-          selectedId: state.selectedId ?? characterId,
-          updatedAt: Date.now(),
-        }, snapshot.revision)
-        setNotice(`${label}已保存`)
+        const response = await submitPlayerCharacterCommand(credentials, snapshot.revision, {
+          commandId: uid('mobile-level-up'),
+          type: 'level-up',
+          characterId,
+          character: result.character as unknown as Record<string, unknown>,
+          ...(decision.hostHitPointRollCommandId ? { hitPointRollCommandId: decision.hostHitPointRollCommandId } : {}),
+        })
+        const authoritative = copyRecord(response.result.character ?? result.character as unknown as Record<string, unknown>)
+        const updatedAt = Date.now()
+        await saveMobileAccountCharacter(credentials.serverUrl, credentials.account, {
+          id: String(authoritative.id ?? result.character.id),
+          name: String(authoritative.name ?? result.character.name),
+          updatedAt,
+          character: Object.fromEntries(Object.entries(authoritative).filter(([key]) => key !== 'roomId' && key !== 'roomMemberId')),
+          compatibility: {
+            rulesetId: 'dnd5e-2014-srd-5.1',
+            characterSchemaVersion: 1,
+            minimumGameProtocolVersion: 5,
+            lastSavedGameProtocolVersion: 5,
+            requiredPlugins: rulesRef.current.requiredPlugins.map((plugin) => ({ ...plugin })),
+          },
+        })
+        setNotice(`${String(authoritative.name ?? result.character.name)}已由 Host 提升至 ${Number(authoritative.level ?? result.character.level)} 级`)
         await refreshWorkspace(credentials, characterId)
         return
       } catch (cause) {
         lastError = cause
-        if (!(cause instanceof Error) || cause.message !== 'shared-state-conflict') throw cause
+        if (!(cause instanceof Error) || !['shared-state-conflict', 'state-revision-conflict'].includes(cause.message)) throw cause
       }
     }
     throw lastError instanceof Error ? lastError : new Error('shared-state-conflict')
   }, [credentials, refreshWorkspace])
 
-  const setSpellSlot = useCallback(async (characterId: string, resourceKey: string, current: number) => {
-    if (!/^dnd5e-spell-slot-[1-9]$/.test(resourceKey) && resourceKey !== 'dnd5e-pact-slot') {
-      throw new Error('invalid-spell-slot-resource')
-    }
-    await mutateOwnedCharacter(characterId, (character) => {
-      const classResources = copyRecord(character.classResources)
-      const resource = copyRecord(classResources[resourceKey])
-      const maximum = Math.max(0, Number(resource.max) || 0)
-      classResources[resourceKey] = { ...resource, current: Math.max(0, Math.min(maximum, Math.floor(current))), max: maximum }
-      return { ...character, classResources }
-    }, '法术位')
-  }, [mutateOwnedCharacter])
-
-  const setSpellPrepared = useCallback(async (spellId: string, prepared: boolean) => {
-    const spell = workspaceRef.current?.spells.find((candidate) => candidate.id === spellId)
-    const characterId = workspaceRef.current?.activeCharacterId
-    if (!spell?.preparationSelection || !characterId) throw new Error('spell-preparation-not-editable')
-    await mutateOwnedCharacter(characterId, (character) => {
-      const choices = copyRecord(character.dnd5eClassChoices)
-      if (spell.preparationSelection!.owner === 'classes') {
-        const classes = copyRecord(choices.classes)
-        const definition = copyRecord(classes[spell.preparationSelection!.classId])
-        const selections = copyRecord(definition.selections)
-        const current = Array.isArray(selections[spell.preparationSelection!.key])
-          ? [...new Set((selections[spell.preparationSelection!.key] as unknown[]).map(String))]
-          : []
-        selections[spell.preparationSelection!.key] = prepared
-          ? [...new Set([...current, spellId])]
-          : current.filter((id) => id !== spellId)
-        classes[spell.preparationSelection!.classId] = { ...definition, selections }
-        return { ...character, dnd5eClassChoices: { ...choices, classes } }
-      }
-      const fighter = copyRecord(choices.fighter)
-      const extensionChoices = copyRecord(fighter.extensionChoices)
-      const current = Array.isArray(extensionChoices[spell.preparationSelection!.key])
-        ? [...new Set((extensionChoices[spell.preparationSelection!.key] as unknown[]).map(String))]
-        : []
-      extensionChoices[spell.preparationSelection!.key] = prepared
-        ? [...new Set([...current, spellId])]
-        : current.filter((id) => id !== spellId)
-      return { ...character, dnd5eClassChoices: { ...choices, fighter: { ...fighter, extensionChoices } } }
-    }, prepared ? '法术准备' : '取消准备')
-  }, [mutateOwnedCharacter])
+  const rollLevelHitPoints = useCallback(async (characterId: string, classId: string) => {
+    const result = await submitOwnedCharacterCommand({ type: 'roll-level-hit-points', characterId, classId }, '升级生命骰')
+    const commandId = String(result.commandId ?? '')
+    const roll = Number(result.roll)
+    const hitDie = Number(result.hitDie)
+    if (!commandId || !Number.isSafeInteger(roll) || roll < 1 || roll > hitDie) throw new Error('invalid-host-hit-point-roll')
+    return { commandId, roll, hitDie }
+  }, [submitOwnedCharacterCommand])
 
   const submitInventoryMutation = useCallback(async (mutation: Record<string, unknown>) => {
     if (!credentials) throw new Error('room-session-required')
@@ -592,65 +854,20 @@ export function useMobileWorkspace() {
     setTimeout(() => void refreshWorkspace(credentials, workspaceRef.current?.activeCharacterId ?? null), 350)
   }, [credentials, refreshWorkspace])
 
-  const spendHitDie = useCallback(async (characterId: string, poolIndex: number, roll: number, healing: number) => {
-    await mutateOwnedCharacter(characterId, (character) => {
-      const hitPointDice = Array.isArray(character.hitPointDice)
-        ? character.hitPointDice.map((pool) => copyRecord(pool))
-        : []
-      const pool = hitPointDice[poolIndex]
-      const maxHp = Math.max(1, Number(character.maxHp) || 1)
-      const currentHp = Math.max(0, Number(character.currentHp) || 0)
-      if (!pool || Number(pool.current) < 1 || currentHp >= maxHp) throw new Error('hit-die-unavailable')
-      pool.current = Math.max(0, Number(pool.current) - 1)
-      return {
-        ...character,
-        currentHp: Math.min(maxHp, currentHp + Math.max(0, Math.floor(healing))),
-        hitPointDice,
-        dnd5eMobileLastHitDie: { poolIndex, roll, healing, updatedAt: Date.now() },
-      }
-    }, '生命骰恢复')
-  }, [mutateOwnedCharacter])
+  const spendHitDie = useCallback(async (characterId: string, poolIndex: number) => {
+    await submitOwnedCharacterCommand({ type: 'spend-hit-die', characterId, poolIndex }, '生命骰恢复')
+  }, [submitOwnedCharacterCommand])
 
   const recoverSpellSlot = useCallback(async (characterId: string, resourceKey: string, restAdvanceId: string) => {
-    const currentView = workspaceRef.current?.characters.find((candidate) => candidate.id === characterId)
-    if (!currentView) throw new Error('character-not-found')
-    const featureKey = (currentView.classLevels?.wizard ?? 0) > 0 || currentView.charClass.includes('法师')
-      ? 'dnd5e-arcane-recovery'
-      : ((currentView.classLevels?.druid ?? 0) >= 2 || currentView.charClass.includes('德鲁伊')) &&
-          currentView.dnd5eClassChoices?.classes?.druid?.subclass === 'land'
-        ? 'dnd5e-natural-recovery'
-        : ''
-    const slotLevel = Number(resourceKey.match(/^dnd5e-spell-slot-([1-5])$/)?.[1])
-    if (!featureKey || !slotLevel) throw new Error('rest-slot-recovery-unavailable')
-    await mutateOwnedCharacter(characterId, (character) => {
-      const resources = copyRecord(character.classResources)
-      const feature = copyRecord(resources[featureKey])
-      const slot = copyRecord(resources[resourceKey])
-      const classLevels = copyRecord(character.dnd5eClassLevels)
-      const classLevel = featureKey === 'dnd5e-arcane-recovery'
-        ? Math.max(1, Number(classLevels.wizard) || (String(character.charClass).includes('法师') ? Number(character.level) : 0))
-        : Math.max(2, Number(classLevels.druid) || (String(character.charClass).includes('德鲁伊') ? Number(character.level) : 0))
-      const recoveryLimit = Math.max(1, Math.ceil(classLevel / 2))
-      const recoveryMarker = copyRecord(character.dnd5eMobileRestSlotRecovery)
-      const continuing = String(recoveryMarker.restAdvanceId ?? '') === restAdvanceId
-      const spentLevels = continuing ? Math.max(0, Number(recoveryMarker.levelsRecovered) || 0) : 0
-      if ((!continuing && Number(feature.current) < 1) || spentLevels + slotLevel > recoveryLimit) throw new Error('rest-slot-recovery-limit')
-      if (Number(slot.current) >= Number(slot.max)) throw new Error('slot-already-full')
-      resources[resourceKey] = { ...slot, current: Number(slot.current) + 1 }
-      if (!continuing) resources[featureKey] = { ...feature, current: Math.max(0, Number(feature.current) - 1) }
-      return {
-        ...character,
-        classResources: resources,
-        dnd5eMobileRestSlotRecovery: { restAdvanceId, levelsRecovered: spentLevels + slotLevel, updatedAt: Date.now() },
-      }
-    }, featureKey === 'dnd5e-arcane-recovery' ? '奥术回想' : '自然回想')
-  }, [mutateOwnedCharacter])
+    await submitOwnedCharacterCommand({ type: 'recover-spell-slot', characterId, resourceKey, restAdvanceId }, '休息法术位恢复')
+  }, [submitOwnedCharacterCommand])
 
   return {
-    serverUrl, setServerUrl, account, campaigns, credentials, rules, workspace,
+    serverUrl, setServerUrl, account, campaigns, accountCharacters, credentials, rules, workspace,
     connection, roomEventStream, error, notice, busy, login, acceptRegisteredAccount, joinRoom, leaveRoom, logout,
-    updateProfile, changePassword,
+    updateProfile, changePassword, deleteAccount, pushPermission, enablePushNotifications, disablePushNotifications,
     refresh: () => refreshWorkspace(), selectCharacter, submitAction, moveControlledToken, sendChat, mutateSharedNote, answerInterrupt,
-    interactWithPoint, setSpellSlot, setSpellPrepared, submitInventoryMutation, spendHitDie, recoverSpellSlot,
+    interactWithPoint, setSpellSlot, setSpellPrepared, levelUpCharacter, rollLevelHitPoints, updateCharacterProfile, submitInventoryMutation, spendHitDie, recoverSpellSlot,
+    createCharacter, rollCharacterAbilities, attachAccountCharacter,
   }
 }

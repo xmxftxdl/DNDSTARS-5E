@@ -1,6 +1,11 @@
 import type { AbilityKey } from './dnd'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
+import {
+  normalizeSceneWeather,
+  validateSceneWeather,
+  type SceneWeatherConfig,
+} from './sceneWeather'
 
 export const SCENE_ORCHESTRATION_RESOURCE = 'scene-orchestration'
 export const SCENE_ORCHESTRATION_SCHEMA_VERSION = 1
@@ -21,6 +26,7 @@ export type SceneTriggerEvent = 'enter' | 'leave' | 'manual'
 export type SceneTokenFilter = 'any' | 'player' | 'enemy'
 export type SceneRepeatMode = 'always' | 'per-token' | 'once'
 export type SceneAudioCue = 'none' | 'discovery' | 'danger' | 'door' | 'mystery' | 'victory'
+export type SceneBackgroundAudioMode = 'inherit' | 'override' | 'silent'
 export type SceneRollSelection = `ability:${AbilityKey}` | `skill:${string}` | `save:${AbilityKey}`
 export type SceneInteractionPointIcon = 'bookshelf' | 'chest' | 'search' | 'altar' | 'switch' | 'custom'
 export type SceneInteractionRepeat = 'once' | 'per-character' | 'always'
@@ -157,16 +163,31 @@ export interface OrchestratedScene {
   name: string
   description: string
   environmentLabel: string
+  weather: SceneWeatherConfig
   backgroundCue: SceneAudioCue
+  backgroundAudioMode: SceneBackgroundAudioMode
   backgroundAudioId?: string
   backgroundAudioLoop: boolean
   backgroundAudioVolume: number
+  backgroundAudioAutoPlay: boolean
   boundHandoutIds: string[]
   boundJournalEntryIds: string[]
   interactionPoints: SceneInteractionPoint[]
   triggers: SceneTrigger[]
   createdAt: number
   updatedAt: number
+}
+
+export interface SceneAudioPreset {
+  assetId?: string
+  loop: boolean
+  volume: number
+  autoPlay: boolean
+}
+
+export interface ResolvedSceneAudioPreset extends SceneAudioPreset {
+  source: 'global' | 'map' | 'silent' | 'none'
+  sceneId?: string
 }
 
 export interface SceneTriggerTokenSnapshot {
@@ -218,6 +239,7 @@ export interface SceneRuntimeState {
 
 export interface SharedSceneOrchestrationState {
   schemaVersion: typeof SCENE_ORCHESTRATION_SCHEMA_VERSION
+  globalAudio: SceneAudioPreset
   scenes: OrchestratedScene[]
   runtime: SceneRuntimeState
   updatedAt: number
@@ -560,10 +582,17 @@ function normalizeScene(value: unknown): OrchestratedScene | null {
     name: text(value.name, 160) || '未命名场景',
     description: text(value.description, 2_000),
     environmentLabel: text(value.environmentLabel, 300),
+    weather: normalizeSceneWeather(value.weather),
     backgroundCue: cue,
+    backgroundAudioMode: value.backgroundAudioMode === 'silent'
+      ? 'silent'
+      : value.backgroundAudioMode === 'override' || id(value.backgroundAudioId)
+        ? 'override'
+        : 'inherit',
     ...(id(value.backgroundAudioId) ? { backgroundAudioId: id(value.backgroundAudioId) } : {}),
     backgroundAudioLoop: value.backgroundAudioLoop !== false,
     backgroundAudioVolume: Math.min(1, Math.max(0, finite(value.backgroundAudioVolume, 0.7))),
+    backgroundAudioAutoPlay: value.backgroundAudioAutoPlay === true,
     boundHandoutIds: (Array.isArray(value.boundHandoutIds) ? value.boundHandoutIds : []).map(id).filter(Boolean).slice(0, 100),
     boundJournalEntryIds: (Array.isArray(value.boundJournalEntryIds) ? value.boundJournalEntryIds : []).map(id).filter(Boolean).slice(0, 100),
     interactionPoints: (Array.isArray(value.interactionPoints) ? value.interactionPoints : [])
@@ -574,6 +603,17 @@ function normalizeScene(value: unknown): OrchestratedScene | null {
       .filter((entry): entry is SceneTrigger => entry !== null).slice(0, SCENE_MAX_TRIGGERS),
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
+  }
+}
+
+function normalizeAudioPreset(value: unknown): SceneAudioPreset {
+  const source = object(value) ? value : {}
+  const assetId = id(source.assetId)
+  return {
+    ...(assetId ? { assetId } : {}),
+    loop: source.loop !== false,
+    volume: Math.min(1, Math.max(0, finite(source.volume, 0.7))),
+    autoPlay: source.autoPlay === true,
   }
 }
 
@@ -680,6 +720,7 @@ export function normalizeSharedSceneOrchestration(value: unknown): SharedSceneOr
   const runtime = normalizeRuntime(source.runtime)
   return {
     schemaVersion: SCENE_ORCHESTRATION_SCHEMA_VERSION,
+    globalAudio: normalizeAudioPreset(source.globalAudio),
     scenes: (Array.isArray(source.scenes) ? source.scenes : []).map(normalizeScene)
       .filter((entry): entry is OrchestratedScene => entry !== null).slice(-SCENE_MAX_SCENES),
     runtime: containsLegacyGroupRoll(source)
@@ -689,8 +730,39 @@ export function normalizeSharedSceneOrchestration(value: unknown): SharedSceneOr
   }
 }
 
+export function resolveSceneAudioPreset(
+  shared: Pick<SharedSceneOrchestrationState, 'globalAudio' | 'scenes'>,
+  mapId: string,
+): ResolvedSceneAudioPreset {
+  const scene = shared.scenes.find((candidate) => candidate.mapId === mapId)
+  if (scene?.backgroundAudioMode === 'silent') {
+    return { source: 'silent', sceneId: scene.id, loop: false, volume: 0, autoPlay: true }
+  }
+  if (scene?.backgroundAudioMode === 'override') {
+    return {
+      source: scene.backgroundAudioId ? 'map' : 'none',
+      sceneId: scene.id,
+      ...(scene.backgroundAudioId ? { assetId: scene.backgroundAudioId } : {}),
+      loop: scene.backgroundAudioLoop,
+      volume: scene.backgroundAudioVolume,
+      autoPlay: scene.backgroundAudioAutoPlay,
+    }
+  }
+  return {
+    source: shared.globalAudio.assetId ? 'global' : 'none',
+    ...shared.globalAudio,
+  }
+}
+
 export function validateSharedSceneOrchestration(value: unknown): boolean {
   if (!object(value) || value.schemaVersion !== SCENE_ORCHESTRATION_SCHEMA_VERSION || !Array.isArray(value.scenes) || !object(value.runtime)) return false
+  if (value.globalAudio != null && (
+    !object(value.globalAudio) ||
+    (value.globalAudio.assetId != null && !/^[a-zA-Z0-9_-]{1,160}$/.test(String(value.globalAudio.assetId))) ||
+    typeof value.globalAudio.loop !== 'boolean' ||
+    typeof value.globalAudio.autoPlay !== 'boolean' ||
+    !Number.isFinite(value.globalAudio.volume) || Number(value.globalAudio.volume) < 0 || Number(value.globalAudio.volume) > 1
+  )) return false
   if (!Array.isArray(value.runtime.pendingRuns) || !Array.isArray(value.runtime.receipts) || !Array.isArray(value.runtime.history)) return false
   const rawScenes = value.scenes
   const rawRuntime = normalizeRuntime(value.runtime)
@@ -705,6 +777,9 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
     if (
       !object(raw) ||
       sceneIds.has(scene.id) ||
+      (raw.weather != null && !validateSceneWeather(raw.weather)) ||
+      (raw.backgroundAudioMode != null && !['inherit', 'override', 'silent'].includes(String(raw.backgroundAudioMode))) ||
+      (raw.backgroundAudioAutoPlay != null && typeof raw.backgroundAudioAutoPlay !== 'boolean') ||
       !Array.isArray(raw.triggers) ||
       raw.triggers.length !== scene.triggers.length ||
       (raw.interactionPoints != null && (
@@ -815,6 +890,34 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
 export function scenePointInsideRegion(point: { x: number; y: number }, region: SceneRegion): boolean {
   if (region.kind === 'circle') return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius
   return point.x >= region.x && point.y >= region.y && point.x <= region.x + region.width && point.y <= region.y + region.height
+}
+
+/**
+ * Moves an authored Region without changing its shape and keeps the full
+ * Region inside the map. This mirrors a placeable-layer drag: circle points
+ * use their centre while rectangles use their top-left anchor.
+ */
+export function sceneRegionMovedWithinMap(
+  region: SceneRegion,
+  position: { x: number; y: number },
+  map: { width: number; height: number },
+): SceneRegion {
+  if (region.kind === 'circle') {
+    const minimumX = Math.min(region.radius, map.width / 2)
+    const minimumY = Math.min(region.radius, map.height / 2)
+    const maximumX = Math.max(minimumX, map.width - region.radius)
+    const maximumY = Math.max(minimumY, map.height - region.radius)
+    return {
+      ...region,
+      x: Math.min(maximumX, Math.max(minimumX, position.x)),
+      y: Math.min(maximumY, Math.max(minimumY, position.y)),
+    }
+  }
+  return {
+    ...region,
+    x: Math.min(Math.max(0, map.width - region.width), Math.max(0, position.x)),
+    y: Math.min(Math.max(0, map.height - region.height), Math.max(0, position.y)),
+  }
 }
 
 export function sceneTriggerAcceptsToken(trigger: SceneTrigger, token: SceneTriggerTokenSnapshot): boolean {

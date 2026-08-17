@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Character } from '../types/character'
 import {
   buildInitiativeOrder,
+  initiativeResultLogDetails,
   initiativeOrderForRound,
   insertInitiativeEntriesPreservingActive,
   migrateLegacyApCombatLogText,
@@ -51,7 +52,19 @@ describe('D&D 5e map helpers', () => {
 
   it('includes Remarkable Athlete in a Champion initiative check', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.45) // d20 = 10
-    expect(rollInitiative({} as never, champion())).toBe(14) // 10 + DEX 2 + half proficiency 2
+    const fighter = champion()
+    const token = {
+      id: 'fighter-token', label: fighter.name, emoji: '⚔️', color: '#fff', type: 'player',
+      characterId: fighter.id, x: 0, y: 0, size: 1,
+    } as never
+    const order = buildInitiativeOrder([token], [fighter])
+    expect(order[0]).toMatchObject({
+      roll: 14,
+      initiativeCalculation: { rolls: [10], d20: 10, modifier: 4, mode: 'normal' },
+    })
+    expect(initiativeResultLogDetails(order)).toEqual([
+      '1. 勇士：d20 10 + 先攻调整值（+4） = 14',
+    ])
   })
 
   it('rolls Feral Instinct initiative with advantage and lets exhaustion cancel it', () => {
@@ -65,8 +78,18 @@ describe('D&D 5e map helpers', () => {
 
   it('uses the monster Dexterity modifier for initiative instead of a random bonus', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.45) // d20 = 10
-    const goblin = { poolId: 'srd-5.1:goblin' } as never
-    expect(rollInitiative(goblin)).toBe(12) // DEX 14 = +2
+    const goblin = {
+      id: 'goblin-token', label: '哥布林', emoji: '👺', color: '#ef4444', type: 'enemy',
+      poolId: 'srd-5.1:goblin', x: 0, y: 0, size: 1,
+    } as never
+    const order = buildInitiativeOrder([goblin], [])
+    expect(order[0]).toMatchObject({
+      roll: 12,
+      initiativeCalculation: { rolls: [10], d20: 10, modifier: 2, mode: 'normal' },
+    })
+    expect(initiativeResultLogDetails(order)).toEqual([
+      '1. 哥布林：d20 10 + 先攻调整值（+2） = 12',
+    ])
     expect(Math.random).toHaveBeenCalledTimes(1)
   })
 
@@ -125,6 +148,57 @@ describe('D&D 5e map helpers', () => {
     expect(initiativeOrderForRound(order, 2).map((entry) => entry.slotId)).toEqual([
       'rogue:normal',
       'enemy:normal',
+    ])
+  })
+
+  it('formats the final initiative order for the shared combat log', () => {
+    expect(initiativeResultLogDetails([
+      {
+        slotId: 'wizard-token:normal',
+        tokenId: 'wizard-token',
+        label: '法师',
+        emoji: '🧙',
+        color: '#3b82f6',
+        roll: 18,
+        initiativeCalculation: {
+          rolls: [14],
+          d20: 14,
+          modifier: 4,
+          mode: 'normal',
+        },
+      },
+      {
+        slotId: 'thief-token:thief-reflexes',
+        tokenId: 'thief-token',
+        label: '盗贼',
+        emoji: '🗡️',
+        color: '#64748b',
+        roll: 8,
+        firstRoundOnly: true,
+        turnKind: 'thief-reflexes',
+        initiativeCalculation: {
+          rolls: [14],
+          d20: 14,
+          modifier: 4,
+          mode: 'normal',
+        },
+      },
+    ])).toEqual([
+      '1. 法师：d20 14 + 先攻调整值（+4） = 18',
+      '2. 盗贼：d20 14 + 先攻调整值（+4） - 盗贼反射 10 = 8（首轮额外回合）',
+    ])
+  })
+
+  it('shows both dice and the selected die for initiative advantage', () => {
+    const barbarian = { ...champion(), name: '野蛮人', charClass: '野蛮人', level: 7, dnd5eClassChoices: undefined }
+    const token = {
+      id: 'barbarian-token', label: barbarian.name, emoji: '🪓', color: '#fff', type: 'player',
+      characterId: barbarian.id, x: 0, y: 0, size: 1,
+    } as never
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.15).mockReturnValueOnce(0.8) // 4, 17
+
+    expect(initiativeResultLogDetails(buildInitiativeOrder([token], [barbarian]))).toEqual([
+      '1. 野蛮人：d20（4、17，优势取高 17） + 先攻调整值（+2） = 19',
     ])
   })
 

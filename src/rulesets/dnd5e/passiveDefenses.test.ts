@@ -31,6 +31,49 @@ describe('SRD 5.1 passive class defenses', () => {
       .toBe('normal')
   })
 
+  it('applies a projected spell-save aura only to matching spell damage types', () => {
+    const exposed = creature({
+      spellSavingThrowDisadvantageDamageTypes: ['fire', 'radiant'],
+      spellSavingThrowDisadvantageCastingClassIds: ['paladin'],
+    })
+    expect(dnd5eSavingThrowMode(exposed, 'dex', {
+      sourceIsSpell: true,
+      damageType: 'fire',
+    })).toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(exposed, 'con', {
+      sourceIsSpell: true,
+      damageType: 'cold',
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(exposed, 'wis', {
+      sourceIsSpell: true,
+      sourceSpellcastingClassId: 'paladin',
+    })).toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(exposed, 'wis', {
+      sourceIsSpell: true,
+      sourceSpellcastingClassId: 'wizard',
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(exposed, 'dex', {
+      sourceIsSpell: false,
+      damageType: 'fire',
+    })).toBe('normal')
+  })
+
+  it('applies nearby spell-save advantage only within the declared source distance', () => {
+    const mageHunter = creature({ spellSavingThrowAdvantageWithinFeet: 5 })
+    expect(dnd5eSavingThrowMode(mageHunter, 'dex', {
+      sourceIsSpell: true,
+      sourceDistanceFeet: 5,
+    })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(mageHunter, 'dex', {
+      sourceIsSpell: true,
+      sourceDistanceFeet: 10,
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(mageHunter, 'dex', {
+      sourceIsSpell: false,
+      sourceDistanceFeet: 5,
+    })).toBe('normal')
+  })
+
   it('applies imported racial saving-throw advantages only to declared contexts', () => {
     const ancestry = creature({
       racialSavingThrowAdvantages: {

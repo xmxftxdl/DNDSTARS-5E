@@ -11,6 +11,7 @@ import {
   replaceRoomCharacterSpellSelections,
   isEditableDnd5eSpellSlotResourceKey,
   setRoomMonsterBerserk,
+  setRoomMonsterRuntimeStatus,
   spendRoomCharacterClassResources,
   setRoomCharacterHitPoints,
   setRoomCharacterSpellSlot,
@@ -699,6 +700,71 @@ describe('DM monster runtime status commands', () => {
       active: false,
     })).resolves.toEqual({ status: 'applied' })
     expect(useMapStore.getState().maps[0]?.tokens[0]?.dnd5eCombatState?.monsterBerserk)
+      .toBeUndefined()
+  })
+
+  it('adds and removes declared damage aversion but rejects it on an unrelated monster', async () => {
+    useMapStore.setState((state) => ({
+      maps: state.maps.map((map) => map.id === 'map-berserk'
+        ? {
+            ...map,
+            tokens: [...map.tokens,
+              {
+                id: 'red-dragon', label: '红龙雏龙', x: 10, y: 0,
+                color: '#ef4444', emoji: 'D', size: 1, type: 'enemy',
+                poolId: 'srd-5.1:red-dragon-wyrmling',
+              },
+              {
+                id: 'troll', label: '巨魔', x: 20, y: 0,
+                color: '#ef4444', emoji: 'T', size: 1, type: 'enemy',
+                poolId: 'srd-5.1:troll',
+              },
+            ],
+          }
+        : map),
+    }))
+
+    await expect(setRoomMonsterRuntimeStatus({
+      mapId: 'map-berserk',
+      tokenId: 'flesh-golem',
+      statusId: 'monster-damage-aversion',
+      active: true,
+    })).resolves.toEqual({ status: 'applied' })
+    expect(useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'flesh-golem')?.dnd5eCombatState)
+      .toMatchObject({ monsterDamageAversionActive: true })
+
+    await expect(setRoomMonsterRuntimeStatus({
+      mapId: 'map-berserk',
+      tokenId: 'flesh-golem',
+      statusId: 'monster-damage-aversion',
+      active: false,
+    })).resolves.toEqual({ status: 'applied' })
+    expect(useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'flesh-golem')?.dnd5eCombatState?.monsterDamageAversionActive)
+      .toBeUndefined()
+
+    await expect(setRoomMonsterRuntimeStatus({
+      mapId: 'map-berserk',
+      tokenId: 'red-dragon',
+      statusId: 'monster-damage-aversion',
+      active: true,
+    })).resolves.toMatchObject({ status: 'rejected' })
+
+    await expect(setRoomMonsterRuntimeStatus({
+      mapId: 'map-berserk',
+      tokenId: 'troll',
+      statusId: 'monster-regeneration-suppressed',
+      active: true,
+    })).resolves.toEqual({ status: 'applied' })
+    expect(useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'troll')?.dnd5eCombatState)
+      .toMatchObject({ monsterRegenerationSuppressedDamageTypes: ['acid', 'fire'] })
+
+    await expect(setRoomMonsterRuntimeStatus({
+      mapId: 'map-berserk',
+      tokenId: 'troll',
+      statusId: 'monster-regeneration-suppressed',
+      active: false,
+    })).resolves.toEqual({ status: 'applied' })
+    expect(useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'troll')?.dnd5eCombatState?.monsterRegenerationSuppressedDamageTypes)
       .toBeUndefined()
   })
 })

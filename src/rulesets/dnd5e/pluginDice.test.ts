@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  dnd5ePluginDiceRollDeclarationsForTargets,
   executeDnd5ePluginDiceRolls,
   validateDnd5ePluginDiceRolls,
 } from './pluginDice'
@@ -40,5 +41,19 @@ describe('D&D 5e plugin declarative dice', () => {
       secret: { values: [17], modifier: 0, total: 17 },
       forged: { values: [1], modifier: 0, total: 1 },
     })).toBe(false)
+  })
+
+  it('expands one stable recipe into an independent roll for every Host target', () => {
+    expect(dnd5ePluginDiceRollDeclarationsForTargets({
+      rolls: [{ id: 'damage', label: '伤害', count: 2, sides: 6 }],
+      perTargetRolls: [{ id: 'save-d20', label: '敏捷豁免', count: 1, sides: 20 }],
+    }, [
+      { id: 'enemy-a', name: '敌人 A' },
+      { id: 'enemy-b', name: '敌人 B' },
+    ])).toEqual([
+      expect.objectContaining({ id: 'damage', count: 2, sides: 6 }),
+      expect.objectContaining({ id: 'save-d20:enemy-a', label: '敌人 A · 敏捷豁免' }),
+      expect.objectContaining({ id: 'save-d20:enemy-b', label: '敌人 B · 敏捷豁免' }),
+    ])
   })
 })

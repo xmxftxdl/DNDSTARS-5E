@@ -14,7 +14,7 @@ import {
 } from './voiceTypes'
 import { VoiceRoomContext, type VoiceRoomContextValue } from './useVoiceRoom'
 import {
-  loadVoiceChangerConfig,
+  loadVoiceChangerConfigWithFallback,
   saveVoiceChangerConfig,
   DEFAULT_VOICE_CHANGER_SELECTION,
   toggleVoiceChangerShortcut,
@@ -39,12 +39,17 @@ function VoiceRoomProviderSession({ session, children }: { session: RoomSession 
   const [enabled, setEnabled] = useState<boolean | null>(session ? null : false)
   const [joining, setJoining] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const voiceChangerOwnerId = session?.accountId ?? session?.clientId ?? session?.memberId ?? 'anonymous'
   const voiceChangerKey = session
-    ? voiceChangerStorageKey(session.roomId, session.memberId)
+    ? voiceChangerStorageKey(session.campaignId ?? session.roomId, voiceChangerOwnerId)
     : voiceChangerStorageKey('no-room', 'anonymous')
-  const [voiceChangerConfig, setVoiceChangerConfig] = useState(() => loadVoiceChangerConfig(
+  const legacyVoiceChangerKey = session
+    ? voiceChangerStorageKey(session.roomId, session.memberId)
+    : undefined
+  const [voiceChangerConfig, setVoiceChangerConfig] = useState(() => loadVoiceChangerConfigWithFallback(
     typeof window === 'undefined' ? undefined : window.localStorage,
     voiceChangerKey,
+    legacyVoiceChangerKey,
   ))
   const connected = state.connectionState === 'connected' || state.connectionState === 'reconnecting'
 

@@ -105,6 +105,28 @@ describe('CharacterDetailPanel', () => {
     expect(markup).toContain('value="94"')
   })
 
+  it('显示扩展角色详情并兼容缺少技能熟练字段的旧角色', () => {
+    const markup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
+      token,
+      character: {
+        ...character,
+        passivePerception: 14,
+        saveDC: 16,
+        classResources: {
+          'dnd5e-spell-slot-1': { current: 2, max: 4 },
+        },
+      },
+      onSetHitPoints: () => undefined,
+      onClose: () => undefined,
+    }))
+
+    expect(markup).toContain('data-testid="character-detail-combat-summary"')
+    expect(markup).toContain('data-testid="character-detail-abilities"')
+    expect(markup).toContain('data-testid="character-detail-skills"')
+    expect(markup).toContain('data-testid="character-detail-resources"')
+    expect(markup).toContain('data-testid="character-detail-equipment"')
+  })
+
   it('只向 DM 提供移除地图标记入口，并明确保留人物卡数据', () => {
     const dmMarkup = renderToStaticMarkup(createElement(CharacterDetailPanel, {
       token,

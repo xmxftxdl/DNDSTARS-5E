@@ -3,6 +3,7 @@ import { Directory, File, Paths } from 'expo-file-system'
 import { Platform } from 'react-native'
 import { FilterMode, Image as SkiaImage, MipmapMode, useImage } from '@shopify/react-native-skia'
 import type { CameraState, MapAssetManifest } from '../../../../packages/mobile-protocol/src'
+import { mobileFetch } from '../services/mobileHttp'
 
 function safeName(hash: string) {
   return `${hash.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 90) || 'map'}.img`
@@ -28,7 +29,10 @@ export function SkiaMapImage({ manifest, camera }: { manifest: MapAssetManifest;
           return
         }
       }
-      const response = await fetch(sourceUrl, { headers: JSON.parse(sourceHeaders) as Record<string, string>, signal: controller.signal })
+      const response = await mobileFetch(sourceUrl, {
+        headers: JSON.parse(sourceHeaders) as Record<string, string>,
+        signal: controller.signal,
+      }, { timeoutMs: 45_000, retries: 2 })
       if (!response.ok) throw new Error(`map-image-http-${response.status}`)
       if (Platform.OS === 'web') {
         objectUrl = URL.createObjectURL(await response.blob())

@@ -35,6 +35,8 @@ function rollConfirmationGenerationKey(
       entry.modifierKind ?? 'replace-d20',
       entry.rerollScope ?? '',
       entry.additionalDice ?? 1,
+      entry.fixedAmount ?? '',
+      entry.replacementValues?.join(',') ?? '',
       entry.selectionPolicy ?? 'owner-chooses',
       entry.direction ?? '',
     ].join(':'))
@@ -181,6 +183,15 @@ export function createD20RollConfirmationInterrupt(input: {
         ...(entry.modifierKind ? { modifierKind: entry.modifierKind } : {}),
         ...(entry.sourceTokenId ? { sourceTokenId: requireText(entry.sourceTokenId, 'eligible-source-token-id', 160) } : {}),
         ...(entry.dieSides != null ? { dieSides: entry.dieSides } : {}),
+        ...(entry.fixedAmount != null ? { fixedAmount: entry.fixedAmount } : {}),
+        ...(entry.replacementValues ? {
+          replacementValues: (() => {
+            if (entry.replacementValues.length < 1 || entry.replacementValues.length > 8) {
+              throw new Error('invalid-roll-confirmation-replacement-values')
+            }
+            return entry.replacementValues.map(requireD20)
+          })(),
+        } : {}),
         ...(entry.direction ? { direction: entry.direction } : {}),
         ...(entry.rerollScope ? { rerollScope: entry.rerollScope } : {}),
         ...(entry.additionalDice ? { additionalDice: entry.additionalDice } : {}),
@@ -246,6 +257,16 @@ export function settleD20RollConfirmation(
   let choiceReroll: RollConfirmationInterruptResponse['choiceReroll']
   if (contribution?.kind === 'replace-d20') {
     requireD20(contribution.replacementValue)
+    const eligible = interrupt.payload.eligibleModifiers?.find((entry) =>
+      entry.characterId === contribution.characterId &&
+      entry.featureId === contribution.featureId &&
+      entry.featureLabel === contribution.featureLabel &&
+      (entry.modifierKind ?? 'replace-d20') === 'replace-d20',
+    )
+    if (
+      !eligible ||
+      (eligible.replacementValues != null && !eligible.replacementValues.includes(contribution.replacementValue))
+    ) throw new Error('invalid-roll-confirmation-replacement')
     transaction = replaceLedgerDie(transaction, {
       entryId: interrupt.payload.rollId,
       dieIndex: contribution.dieIndex,
@@ -262,28 +283,34 @@ export function settleD20RollConfirmation(
       entry.modifierKind === 'adjust-d20' &&
       entry.direction === contribution.direction,
     )
+    const fixedAmount = eligible?.fixedAmount
+    const hasFixedAmount = Number.isInteger(fixedAmount) && Number(fixedAmount) >= 1 && Number(fixedAmount) <= 100
+    const hasAdjustmentDie = Number.isInteger(eligible?.dieSides) &&
+      Number(eligible?.dieSides) >= 2 && Number(eligible?.dieSides) <= 100
+    const adjustmentAmount = hasFixedAmount ? Number(fixedAmount) : Number(adjustmentRoll)
     if (
-      !eligible || !eligible.sourceTokenId || !Number.isInteger(eligible.dieSides) ||
-      Number(eligible.dieSides) < 2 || Number(eligible.dieSides) > 100 ||
-      !Number.isInteger(adjustmentRoll) || Number(adjustmentRoll) < 1 ||
-      Number(adjustmentRoll) > Number(eligible.dieSides)
+      !eligible || !eligible.sourceTokenId || hasFixedAmount === hasAdjustmentDie ||
+      !Number.isInteger(adjustmentAmount) || adjustmentAmount < 1 ||
+      (hasAdjustmentDie && adjustmentAmount > Number(eligible.dieSides))
     ) throw new Error('invalid-roll-confirmation-adjustment')
     adjustment = {
       sourceId: eligible.sourceTokenId,
       featureId: contribution.featureId,
       direction: contribution.direction,
-      roll: Number(adjustmentRoll),
+      roll: adjustmentAmount,
     }
-    transaction = appendRollLedgerEntry(transaction, {
-      id: `${interrupt.payload.rollId}:adjustment`,
-      kind: 'other',
-      label: contribution.featureLabel,
-      dice: { sides: Number(eligible.dieSides), values: [Number(adjustmentRoll)] },
-      modifier: 0,
-      visibility: interrupt.payload.visibility,
-      sourceId: eligible.sourceTokenId,
-      createdAt: now,
-    })
+    if (hasAdjustmentDie) {
+      transaction = appendRollLedgerEntry(transaction, {
+        id: `${interrupt.payload.rollId}:adjustment`,
+        kind: 'other',
+        label: contribution.featureLabel,
+        dice: { sides: Number(eligible.dieSides), values: [adjustmentAmount] },
+        modifier: 0,
+        visibility: interrupt.payload.visibility,
+        sourceId: eligible.sourceTokenId,
+        createdAt: now,
+      })
+    }
   } else if (contribution?.kind === 'choice-reroll' && contribution.decision === 'use') {
     const eligible = interrupt.payload.eligibleModifiers?.find((entry) =>
       entry.characterId === contribution.characterId &&

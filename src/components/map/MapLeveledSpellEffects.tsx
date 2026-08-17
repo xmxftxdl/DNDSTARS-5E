@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Circle, Group, Image as KonvaImage, Line } from 'react-konva'
+import { Circle, Group, Image as KonvaImage, Line, Rect } from 'react-konva'
 import Konva from 'konva'
 import { THUNDERWAVE_ANIMATION_DURATION_MS } from '../../lib/combatPresentation'
 import WallOfFireRingVisual from './WallOfFireRingVisual'
@@ -23,7 +23,7 @@ interface BurningHandsSmokeSpec {
   drift: number
   radius: number
 }
-export function MagicMissileProjectile({ projectile }: { projectile: MapProjectile }) {
+export function MagicMissileProjectile({ projectile, assetUrl }: { projectile: MapProjectile; assetUrl?: string }) {
   const effectRef = useRef<Konva.Group>(null)
   const missileRef = useRef<Konva.Group>(null)
   const trailGlowRef = useRef<Konva.Line>(null)
@@ -38,7 +38,7 @@ export function MagicMissileProjectile({ projectile }: { projectile: MapProjecti
   const auraRefs = useRef<Array<Konva.Circle | null>>([])
   const wispRefs = useRef<Array<Konva.Circle | null>>([])
   const sparkRefs = useRef<Array<Konva.Circle | null>>([])
-  const image = useTokenBadgeImage('/assets/vfx/magic-missile-fluid.png')
+  const image = useTokenBadgeImage(assetUrl ?? '/assets/vfx/magic-missile-fluid.png')
   const dx = projectile.to.x - projectile.from.x
   const dy = projectile.to.y - projectile.from.y
   const distance = Math.max(1, Math.hypot(dx, dy))
@@ -445,7 +445,13 @@ export function MagicMissileProjectile({ projectile }: { projectile: MapProjecti
   )
 }
 
-export function MaterialSpellProjectile({ projectile }: { projectile: MapProjectile }) {
+export function MaterialSpellProjectile({
+  projectile,
+  assetUrl,
+}: {
+  projectile: MapProjectile
+  assetUrl?: string
+}) {
   const config: {
     asset: string
     heightRatio: number
@@ -547,7 +553,7 @@ export function MaterialSpellProjectile({ projectile }: { projectile: MapProject
             particleColor: '#a3e635',
             particleHighlight: '#f7fee7',
                   }
-  const image = useTokenBadgeImage(config.asset)
+  const image = useTokenBadgeImage(assetUrl ?? config.asset)
   if (!image) return null
   if (config.sprite) {
     return (
@@ -577,7 +583,13 @@ export function MaterialSpellProjectile({ projectile }: { projectile: MapProject
   )
 }
 
-export function MaterialTargetSpellEffect({ projectile }: { projectile: MapProjectile }) {
+export function MaterialTargetSpellEffect({
+  projectile,
+  assetUrl,
+}: {
+  projectile: MapProjectile
+  assetUrl?: string
+}) {
   const materialKind = String(projectile.kind)
   const isCureWounds = projectile.kind === 'cure-wounds'
   const isBlight = projectile.kind === 'blight'
@@ -595,8 +607,12 @@ export function MaterialTargetSpellEffect({ projectile }: { projectile: MapProje
   const isDispelMagic = materialKind === 'dispel-magic'
   const isShield = materialKind === 'shield'
   const isLesserRestoration = materialKind === 'lesser-restoration'
+  const isShockingGrasp = materialKind === 'shocking-grasp'
+  const isSpareTheDying = materialKind === 'spare-the-dying'
+  const isViciousMockery = materialKind === 'vicious-mockery'
+  const isChillTouch = materialKind === 'chill-touch'
   const image = useTokenBadgeImage(
-    isCureWounds
+    assetUrl ?? (isCureWounds
       ? '/assets/vfx/cure-wounds-sprite-v2.png'
       : isBlight
         ? '/assets/vfx/blight-sprite-v2.png'
@@ -628,10 +644,36 @@ export function MaterialTargetSpellEffect({ projectile }: { projectile: MapProje
                 ? '/assets/vfx/shield-sprite-v2.png'
               : isLesserRestoration
                 ? '/assets/vfx/lesser-restoration-sprite-v2.png'
-                : '/assets/vfx/hellish-rebuke-sprite-v2.png',
+                : '/assets/vfx/hellish-rebuke-sprite-v2.png'),
   )
   if (!image) return null
   const radius = Math.max(24, projectile.radiusPx ?? 42)
+  if (isShockingGrasp || isSpareTheDying || isViciousMockery || isChillTouch) {
+    const shadowColor = isShockingGrasp
+      ? '#38bdf8'
+      : isSpareTheDying
+        ? projectile.glowColor ?? '#4ade80'
+        : isViciousMockery
+          ? '#e879f9'
+          : '#7c3aed'
+    const particleColor = isShockingGrasp
+      ? '#60a5fa'
+      : isSpareTheDying
+        ? projectile.accentColor ?? '#86efac'
+        : isViciousMockery
+          ? '#f0abfc'
+          : '#67e8f9'
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * (isChillTouch ? 3.7 : isViciousMockery ? 3.45 : 3.25)}
+        shadowColor={shadowColor}
+        particleColor={particleColor}
+        particleHighlight={isChillTouch ? '#d9f99d' : '#ffffff'}
+      />
+    )
+  }
   if (isCureWounds) {
     return (
       <TargetSpriteAtlasEffect
@@ -929,7 +971,6 @@ export function BurningHandsSpriteEffect({
   const effectRef = useRef<Konva.Group>(null)
   const spriteRef = useRef<Konva.Image>(null)
   const launchGlowRef = useRef<Konva.Circle>(null)
-  const frontGlowRef = useRef<Konva.Circle>(null)
   const sparkRefs = useRef<Array<Konva.Circle | null>>([])
   const smokeRefs = useRef<Array<Konva.Circle | null>>([])
   const dx = projectile.to.x - projectile.from.x
@@ -977,16 +1018,22 @@ export function BurningHandsSpriteEffect({
     const effect = effectRef.current
     const sprite = spriteRef.current
     const launchGlow = launchGlowRef.current
-    const frontGlow = frontGlowRef.current
     const layer = effect?.getLayer()
-    if (!effect || !sprite || !launchGlow || !frontGlow || !layer) return
+    if (!effect || !sprite || !launchGlow || !layer) return
     const duration = Math.max(1, projectile.durationMs ?? 1_150)
     const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
     effect.rotation(Math.atan2(dy, dx) * 180 / Math.PI)
 
     const drawFrame = (elapsed: number) => {
       const raw = Math.min(1, elapsed / duration)
-      const spriteRaw = Math.min(1, raw / 0.82)
+      // Hold the broad turbulent frames through the visual's readable middle.
+      // A linear atlas walk reached the ember frames before the cone had time
+      // to register on a battle map.
+      const spriteRaw = raw < 0.18
+        ? raw / 0.18 * 0.25
+        : raw < 0.68
+          ? 0.25 + (raw - 0.18) / 0.5 * 0.375
+          : 0.625 + (raw - 0.68) / 0.32 * 0.375
       const frameIndex = Math.min(frameCount - 1, Math.floor(spriteRaw * frameCount))
       const column = frameIndex % columns
       const row = Math.floor(frameIndex / columns)
@@ -1004,10 +1051,6 @@ export function BurningHandsSpriteEffect({
 
       launchGlow.radius(height * (0.1 + Math.min(1, raw * 7) * 0.16))
       launchGlow.opacity(Math.sin(Math.min(1, raw * 6) * Math.PI) * 0.8)
-      const frontRaw = Math.max(0, Math.min(1, (raw - 0.24) / 0.42))
-      frontGlow.position({ x: width * (0.64 + frontRaw * 0.27), y: 0 })
-      frontGlow.scale({ x: 1.5 + frontRaw * 1.2, y: 0.7 + frontRaw * 0.5 })
-      frontGlow.opacity(Math.sin(frontRaw * Math.PI) * 0.3 * fade)
 
       sparkRefs.current.forEach((spark, index) => {
         if (!spark) return
@@ -1085,14 +1128,6 @@ export function BurningHandsSpriteEffect({
         shadowBlur={24}
         perfectDrawEnabled={false}
       />
-      <Circle
-        ref={frontGlowRef}
-        radius={height * 0.12}
-        fill="#fff7c2"
-        shadowColor="#fb923c"
-        shadowBlur={20}
-        perfectDrawEnabled={false}
-      />
       {sparkSpecs.map((spec, index) => (
         <Circle
           key={`burning-hands-spark:${index}`}
@@ -1121,10 +1156,378 @@ export function BurningHandsSpriteEffect({
   )
 }
 
-export function MaterialAreaSpellEffect({
+interface WebStrandSpec {
+  points: number[]
+  opacity: number
+  width: number
+  closed?: boolean
+}
+
+export function SequenceFireProjectileEffect({
   projectile,
+  assetUrl,
 }: {
   projectile: MapProjectile
+  assetUrl?: string
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const auraRef = useRef<Konva.Circle>(null)
+  const spriteRef = useRef<Konva.Image>(null)
+  const image = useTokenBadgeImage(assetUrl)
+  const reducedMotion = usePrefersReducedMotion()
+  const frameWidth = image ? (image.naturalWidth || image.width) / 4 : 0
+  const frameHeight = image ? (image.naturalHeight || image.height) / 4 : 0
+  const dx = projectile.to.x - projectile.from.x
+  const dy = projectile.to.y - projectile.from.y
+  const distance = Math.max(1, Math.hypot(dx, dy))
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI
+  const arcSign = [...projectile.id].reduce((sum, value) => sum + value.charCodeAt(0), 0) % 2 ? 1 : -1
+
+  useEffect(() => {
+    const group = groupRef.current
+    const aura = auraRef.current
+    const sprite = spriteRef.current
+    const layer = group?.getLayer()
+    if (!image || !group || !aura || !sprite || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_100)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const headSize = projectile.kind === 'fireball' ? 58 : projectile.kind === 'produce-flame' ? 45 : 40
+    const targetRadius = Math.max(20, projectile.radiusPx ?? 34)
+    const impactSize = projectile.kind === 'fireball'
+      ? targetRadius * 2.18
+      : targetRadius * (projectile.kind === 'produce-flame' ? 2.4 : 2.15)
+    const normalX = -dy / distance
+    const normalY = dx / distance
+    const arcHeight = Math.min(72, Math.max(14, distance * 0.1)) * arcSign
+
+    const drawFrame = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      let frameIndex: number
+      let x: number
+      let y: number
+      let size: number
+      let rotation: number
+      if (raw < 0.2) {
+        const ignite = raw / 0.2
+        frameIndex = Math.min(3, Math.floor(ignite * 4))
+        x = projectile.from.x
+        y = projectile.from.y
+        size = headSize * (0.38 + ignite * 0.62)
+        rotation = angle
+      } else if (raw < 0.66) {
+        const travelRaw = (raw - 0.2) / 0.46
+        const travel = 1 - Math.pow(1 - travelRaw, 2.25)
+        frameIndex = 4 + Math.min(3, Math.floor(travelRaw * 4))
+        x = projectile.from.x + dx * travel + normalX * Math.sin(travel * Math.PI) * arcHeight
+        y = projectile.from.y + dy * travel + normalY * Math.sin(travel * Math.PI) * arcHeight
+        size = headSize * (0.94 + Math.sin(travelRaw * Math.PI) * 0.12)
+        rotation = angle
+      } else {
+        const impactRaw = (raw - 0.66) / 0.34
+        frameIndex = 8 + Math.min(7, Math.floor(impactRaw * 8))
+        x = projectile.to.x
+        y = projectile.to.y
+        size = impactSize * (0.42 + (1 - Math.pow(1 - impactRaw, 2.4)) * 0.58)
+        rotation = 0
+      }
+      const fade = raw < 0.92 ? 1 : Math.max(0, (1 - raw) / 0.08)
+      group.position({ x, y })
+      group.rotation(rotation)
+      group.opacity(fade)
+      sprite.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      sprite.position({ x: -size / 2, y: -size / 2 })
+      sprite.size({ width: size, height: size })
+      aura.radius(size * (raw < 0.66 ? 0.31 : 0.43))
+      aura.opacity((raw < 0.66 ? 0.3 : 0.46) * fade)
+      return raw
+    }
+
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    if (reducedMotion) return
+    const animation = new Konva.Animation((frame) => {
+      if (drawFrame(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [
+    angle,
+    arcSign,
+    distance,
+    dx,
+    dy,
+    frameHeight,
+    frameWidth,
+    image,
+    projectile.durationMs,
+    projectile.from.x,
+    projectile.from.y,
+    projectile.issuedAt,
+    projectile.kind,
+    projectile.radiusPx,
+    projectile.to.x,
+    projectile.to.y,
+    reducedMotion,
+  ])
+
+  if (!image) return null
+  return (
+    <Group ref={groupRef} x={projectile.from.x} y={projectile.from.y} listening={false}>
+      <Circle ref={auraRef} radius={12} fill="rgba(251,146,60,0.24)" shadowColor="#fb923c" shadowBlur={24} opacity={0.3} perfectDrawEnabled={false} />
+      <KonvaImage
+        ref={spriteRef}
+        image={image}
+        crop={{ x: 0, y: 0, width: frameWidth, height: frameHeight }}
+        x={-20}
+        y={-20}
+        width={40}
+        height={40}
+        shadowColor="#f97316"
+        shadowBlur={22}
+        perfectDrawEnabled={false}
+      />
+    </Group>
+  )
+}
+
+function WebAreaEntranceEffect({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const webRef = useRef<Konva.Group>(null)
+  const boundaryRef = useRef<Konva.Rect>(null)
+  const strandRefs = useRef<Array<Konva.Line | null>>([])
+  const reducedMotion = usePrefersReducedMotion()
+  const width = Math.max(48, projectile.areaWidthPx ?? (projectile.radiusPx ?? 70) * 2)
+  const height = Math.max(48, projectile.areaHeightPx ?? (projectile.radiusPx ?? 70) * 2)
+  const halfWidth = width / 2
+  const halfHeight = height / 2
+  const strands = useMemo<WebStrandSpec[]>(() => {
+    const spokes = Array.from({ length: 14 }, (_, index) => {
+      const angle = index / 14 * Math.PI * 2
+      const cosine = Math.cos(angle)
+      const sine = Math.sin(angle)
+      const extent = 1 / Math.max(
+        Math.abs(cosine) / Math.max(1, halfWidth),
+        Math.abs(sine) / Math.max(1, halfHeight),
+      )
+      const endX = cosine * extent
+      const endY = sine * extent
+      const bend = Math.sin(index * 2.17) * Math.min(width, height) * 0.035
+      return {
+        points: [
+          0, 0,
+          endX * 0.34 - sine * bend, endY * 0.34 + cosine * bend,
+          endX * 0.68 + sine * bend * 0.7, endY * 0.68 - cosine * bend * 0.7,
+          endX, endY,
+        ],
+        opacity: 0.52 + index % 3 * 0.13,
+        width: Math.max(1.2, Math.min(width, height) * (index % 4 === 0 ? 0.013 : 0.008)),
+      }
+    })
+    const rings = [0.2, 0.36, 0.54, 0.73, 0.91].map((radiusScale, ringIndex) => {
+      const points = Array.from({ length: 18 }, (_, pointIndex) => {
+        const angle = pointIndex / 18 * Math.PI * 2
+        const wobble = 1 + Math.sin(pointIndex * 2.63 + ringIndex * 1.71) * 0.045
+        return [
+          Math.cos(angle) * halfWidth * radiusScale * wobble,
+          Math.sin(angle) * halfHeight * radiusScale * wobble,
+        ]
+      }).flat()
+      return {
+        points,
+        closed: true,
+        opacity: 0.44 + ringIndex * 0.08,
+        width: Math.max(1.1, Math.min(width, height) * 0.009),
+      }
+    })
+    return [...spokes, ...rings]
+  }, [halfHeight, halfWidth, height, width])
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const web = webRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !web || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_350)
+    const initialElapsed = reducedMotion
+      ? duration
+      : Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const holdMatureFrame = !!projectile.handoffAreaId
+    const drawFrame = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      const spreadRaw = Math.min(1, raw / 0.68)
+      const spread = 1 - Math.pow(1 - spreadRaw, 3)
+      const fade = holdMatureFrame || raw < 0.8
+        ? 1
+        : Math.max(0, (1 - raw) / 0.2)
+      effect.opacity(fade)
+      web.scale({ x: 0.08 + spread * 0.92, y: 0.08 + spread * 0.92 })
+      web.rotation((1 - spread) * -9 + Math.sin(elapsed * 0.008) * (1 - spread) * 2)
+      boundaryRef.current?.dashOffset(-elapsed * 0.022)
+      strandRefs.current.forEach((strand, index) => {
+        strand?.dashOffset(-elapsed * (0.014 + index % 3 * 0.004))
+      })
+      return raw
+    }
+    drawFrame(initialElapsed)
+    layer.batchDraw()
+    const animation = new Konva.Animation((frame) => {
+      if (drawFrame(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile.durationMs, projectile.handoffAreaId, projectile.issuedAt, reducedMotion])
+
+  return (
+    <Group ref={effectRef} x={projectile.to.x} y={projectile.to.y} listening={false}>
+      <Group ref={webRef}>
+        <Rect
+          x={-halfWidth}
+          y={-halfHeight}
+          width={width}
+          height={height}
+          cornerRadius={Math.min(width, height) * 0.06}
+          fill="rgba(226,232,240,0.1)"
+          shadowColor="#f8fafc"
+          shadowBlur={Math.min(width, height) * 0.12}
+          listening={false}
+        />
+        {strands.map((strand, index) => (
+          <Line
+            key={`web-strand:${index}`}
+            ref={(node) => { strandRefs.current[index] = node }}
+            points={strand.points}
+            closed={strand.closed}
+            stroke={index % 4 === 0 ? '#ffffff' : '#e2e8f0'}
+            strokeWidth={strand.width}
+            opacity={strand.opacity}
+            dash={strand.closed ? [Math.max(7, width * 0.045), Math.max(3, width * 0.018)] : undefined}
+            lineCap="round"
+            lineJoin="round"
+            tension={strand.closed ? 0.24 : 0.16}
+            shadowColor="#f8fafc"
+            shadowBlur={Math.max(3, strand.width * 2.8)}
+            perfectDrawEnabled={false}
+            listening={false}
+          />
+        ))}
+        <Circle radius={Math.min(width, height) * 0.045} fill="#ffffff" opacity={0.88} shadowColor="#ffffff" shadowBlur={12} listening={false} />
+        <Rect
+          ref={boundaryRef}
+          x={-halfWidth}
+          y={-halfHeight}
+          width={width}
+          height={height}
+          cornerRadius={Math.min(width, height) * 0.05}
+          stroke="#f8fafc"
+          strokeWidth={Math.max(2, Math.min(width, height) * 0.014)}
+          dash={[Math.max(9, width * 0.06), Math.max(4, width * 0.025)]}
+          opacity={0.72}
+          shadowColor="#cbd5e1"
+          shadowBlur={10}
+          listening={false}
+        />
+      </Group>
+    </Group>
+  )
+}
+
+function SilenceAreaEntranceEffect({ projectile }: { projectile: MapProjectile }) {
+  const groupRef = useRef<Konva.Group>(null)
+  const fieldRef = useRef<Konva.Circle>(null)
+  const ringRefs = useRef<Array<Konva.Circle | null>>([])
+  const radius = Math.max(30, projectile.radiusPx ?? 70)
+  const reducedMotion = usePrefersReducedMotion()
+
+  useEffect(() => {
+    const group = groupRef.current
+    const field = fieldRef.current
+    const layer = group?.getLayer()
+    if (!group || !field || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_200)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const draw = (elapsed: number) => {
+      const raw = Math.min(1, elapsed / duration)
+      const enterRaw = Math.min(1, raw / 0.34)
+      const enter = 1 - Math.pow(1 - enterRaw, 3)
+      const fade = raw < 0.78 ? 1 : Math.max(0, (1 - raw) / 0.22)
+      group.opacity(fade)
+      field.radius(radius * enter)
+      field.opacity(0.16 + Math.sin(raw * Math.PI) * 0.16)
+      ringRefs.current.forEach((ring, index) => {
+        if (!ring) return
+        const delay = index * 0.08
+        const localRaw = Math.max(0, Math.min(1, (raw - delay) / Math.max(0.01, 0.78 - delay)))
+        const collapse = 1 - Math.pow(localRaw, 1.7)
+        ring.radius(radius * (0.22 + collapse * (0.88 - index * 0.11)))
+        ring.opacity(Math.sin(localRaw * Math.PI) * (0.72 - index * 0.1) * fade)
+        ring.rotation((index % 2 ? -1 : 1) * elapsed * (0.012 + index * 0.002))
+      })
+      return raw
+    }
+    draw(initialElapsed)
+    layer.batchDraw()
+    if (reducedMotion) return
+    const animation = new Konva.Animation((frame) => {
+      if (draw(initialElapsed + (frame?.time ?? 0)) >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile.durationMs, projectile.issuedAt, radius, reducedMotion])
+
+  return (
+    <Group ref={groupRef} x={projectile.to.x} y={projectile.to.y} listening={false}>
+      <Circle
+        ref={fieldRef}
+        radius={0}
+        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+        fillRadialGradientEndRadius={radius}
+        fillRadialGradientColorStops={[
+          0, 'rgba(15,23,42,0.5)',
+          0.62, 'rgba(49,46,129,0.28)',
+          1, 'rgba(129,140,248,0.02)',
+        ]}
+        shadowColor="#818cf8"
+        shadowBlur={radius * 0.18}
+        perfectDrawEnabled={false}
+      />
+      {[0, 1, 2, 3].map((index) => (
+        <Circle
+          key={`silence-collapse-ring:${index}`}
+          ref={(node) => { ringRefs.current[index] = node }}
+          radius={radius * (0.88 - index * 0.11)}
+          stroke={index % 2 ? '#a5b4fc' : '#e0e7ff'}
+          strokeWidth={Math.max(2, radius * 0.018)}
+          dash={[radius * (0.16 + index * 0.025), radius * (0.09 + index * 0.018)]}
+          opacity={0}
+          shadowColor="#818cf8"
+          shadowBlur={10}
+          perfectDrawEnabled={false}
+        />
+      ))}
+      <Circle radius={Math.max(5, radius * 0.075)} fill="#020617" stroke="#e0e7ff" strokeWidth={2.4} shadowColor="#a5b4fc" shadowBlur={14} />
+    </Group>
+  )
+}
+
+export function MaterialAreaSpellEffect({
+  projectile,
+  assetUrl,
+}: {
+  projectile: MapProjectile
+  assetUrl?: string
 }) {
   const isShatter = projectile.kind === 'shatter'
   const isFlameStrike = projectile.kind === 'flame-strike'
@@ -1137,6 +1540,7 @@ export function MaterialAreaSpellEffect({
   const isFaerieFire = projectile.kind === 'faerie-fire'
   const isSleep = projectile.kind === 'sleep'
   const isEntangle = projectile.kind === 'entangle'
+  const isWeb = projectile.kind === 'web'
   const isGrease = projectile.kind === 'grease'
   const isDarkness = projectile.kind === 'darkness'
   const isFlamingSphere = projectile.kind === 'flaming-sphere'
@@ -1150,71 +1554,24 @@ export function MaterialAreaSpellEffect({
   const isCallLightning = projectile.kind === 'call-lightning'
   const isCallLightningStrike = projectile.kind === 'call-lightning-strike'
   const isInsectPlague = projectile.kind === 'insect-plague'
+  const isStinkingCloud = projectile.kind === 'stinking-cloud'
   const isCloudkill = projectile.kind === 'cloudkill'
+  const isFogCloud = projectile.kind === 'fog-cloud'
+  const isSilence = projectile.kind === 'silence'
+  const isSleetStorm = projectile.kind === 'sleet-storm'
+  const isWindWall = projectile.kind === 'wind-wall'
+  const isWallOfForce = projectile.kind === 'wall-of-force'
+  const isWallOfStone = projectile.kind === 'wall-of-stone'
+  const isWallOfIce = projectile.kind === 'wall-of-ice'
+  const isWallOfThorns = projectile.kind === 'wall-of-thorns'
   const isWallOfFire = projectile.kind === 'wall-of-fire'
   const isBladeBarrier = projectile.kind === 'blade-barrier'
-  const asset = projectile.kind === 'burning-hands'
-    ? '/assets/vfx/burning-hands-sprite-v2.png'
-    : projectile.kind === 'thunderwave'
-      ? '/assets/vfx/thunderwave-fluid.webp'
-      : isShatter
-        ? '/assets/vfx/shatter-sprite-v2.png'
-        : isFlameStrike
-          ? '/assets/vfx/flame-strike-sprite-v2.png'
-          : isSunburst
-            ? '/assets/vfx/sunburst-sprite-v2.png'
-            : isConeOfCold
-              ? '/assets/vfx/cone-of-cold-sprite-v2.png'
-              : isCircleOfDeath
-                ? '/assets/vfx/circle-of-death-sprite-v2.png'
-                : isIceStorm
-                  ? '/assets/vfx/ice-storm-sprite-v2.png'
-                  : isFreezingSphere
-                    ? '/assets/vfx/freezing-sphere-sprite-v2.png'
-                    : isColorSpray
-                      ? '/assets/vfx/color-spray-sprite-v2.png'
-                      : isFaerieFire
-                        ? '/assets/vfx/faerie-fire-sprite-v2.png'
-                        : isSleep
-                          ? '/assets/vfx/sleep-sprite-v2.png'
-                          : isEntangle
-                            ? '/assets/vfx/entangle-sprite-v2.png'
-                            : isGrease
-                              ? '/assets/vfx/grease-sprite-v2.png'
-                              : isDarkness
-                                ? '/assets/vfx/darkness-sprite-v2.png'
-                                : isFlamingSphere
-                                  ? '/assets/vfx/flaming-sphere-sprite-v2.png'
-                                  : isMoonbeam
-                                    ? '/assets/vfx/moonbeam-sprite-v2.png'
-                                    : isDaylight
-                                      ? '/assets/vfx/daylight-sprite-v2.png'
-                                      : isBlackTentacles
-                                        ? '/assets/vfx/black-tentacles-sprite-v2.png'
-                                        : isSpikeGrowth
-                                          ? '/assets/vfx/spike-growth-sprite-v2.png'
-                                          : isMageHand
-                                            ? '/assets/vfx/mage-hand-sprite-v2.png'
-                                            : isSpiritualWeapon
-                                              ? '/assets/vfx/spiritual-weapon-sprite-v2.png'
-                                              : isSpiritGuardians
-                                                ? '/assets/vfx/spirit-guardians-sprite-v2.png'
-                                                : isCallLightning
-                                                  ? '/assets/vfx/call-lightning-sprite-v2.png'
-                                                  : isCallLightningStrike
-                                                    ? '/assets/vfx/call-lightning-strike-sprite-v2.png'
-                                                  : isInsectPlague
-                                                  ? '/assets/vfx/insect-plague-sprite-v2.png'
-                                                  : isCloudkill
-                                                    ? '/assets/vfx/cloudkill-sprite-v2.png'
-                                                    : isWallOfFire
-                                                      ? '/assets/vfx/wall-of-fire-sprite-v2.png'
-                                                      : isBladeBarrier
-                                                        ? '/assets/vfx/blade-barrier-sprite-v2.png'
-                                                        : '/assets/vfx/lightning-bolt-sprite-v2.png'
+  const asset = isWeb ? undefined : assetUrl
   const loadedImage = useTokenBadgeImage(asset)
   const image = loadedImage
   const reducedMotion = usePrefersReducedMotion()
+  if (isWeb) return <WebAreaEntranceEffect projectile={projectile} />
+  if (isSilence) return <SilenceAreaEntranceEffect projectile={projectile} />
   if (!image) return null
   if ((isWallOfFire || isBladeBarrier) && projectile.areaShape === 'ring') {
     return (
@@ -1317,22 +1674,40 @@ export function MaterialAreaSpellEffect({
       />
     )
   }
-  if (isMageHand || isSpiritualWeapon || isSpiritGuardians || isCallLightning || isCallLightningStrike || isInsectPlague || isCloudkill) {
+  if (isFogCloud || isSleetStorm) {
+    const radius = Math.max(30, projectile.radiusPx ?? 70)
+    return (
+      <TargetSpriteAtlasEffect
+        projectile={projectile}
+        image={image}
+        diameter={radius * 2.08}
+        shadowColor={isFogCloud ? '#cbd5e1' : '#7dd3fc'}
+        particleColor={isFogCloud ? '#e2e8f0' : '#bfdbfe'}
+        particleHighlight="#ffffff"
+      />
+    )
+  }
+  if (isMageHand || isSpiritualWeapon || isSpiritGuardians || isCallLightning || isCallLightningStrike || isInsectPlague || isStinkingCloud || isCloudkill) {
     const radius = Math.max(30, projectile.radiusPx ?? 70)
     return (
       <TargetSpriteAtlasEffect
         projectile={projectile}
         image={image}
         diameter={radius * (isMageHand ? 2.05 : isSpiritualWeapon ? 2.55 : isCallLightningStrike ? 2.7 : 2.08)}
-        shadowColor={isMageHand ? '#22d3ee' : isSpiritualWeapon ? '#c4b5fd' : isSpiritGuardians ? '#fde68a' : isCallLightning || isCallLightningStrike ? '#38bdf8' : isCloudkill ? '#84cc16' : '#d6a94d'}
-        particleColor={isMageHand ? '#67e8f9' : isSpiritualWeapon ? '#ddd6fe' : isSpiritGuardians ? '#fef3c7' : isCallLightning || isCallLightningStrike ? '#60a5fa' : isCloudkill ? '#bef264' : '#a16207'}
-        particleHighlight={isInsectPlague ? '#fde68a' : isCloudkill ? '#ecfccb' : '#ffffff'}
+        shadowColor={isMageHand ? '#22d3ee' : isSpiritualWeapon ? '#c4b5fd' : isSpiritGuardians ? '#fde68a' : isCallLightning || isCallLightningStrike ? '#38bdf8' : isStinkingCloud || isCloudkill ? '#84cc16' : '#d6a94d'}
+        particleColor={isMageHand ? '#67e8f9' : isSpiritualWeapon ? '#ddd6fe' : isSpiritGuardians ? '#fef3c7' : isCallLightning || isCallLightningStrike ? '#60a5fa' : isStinkingCloud || isCloudkill ? '#bef264' : '#a16207'}
+        particleHighlight={isInsectPlague ? '#fde68a' : isStinkingCloud || isCloudkill ? '#ecfccb' : '#ffffff'}
       />
     )
   }
-  if (isWallOfFire || isBladeBarrier) {
+  if (
+    isWallOfFire || isBladeBarrier || isWindWall || isWallOfForce ||
+    isWallOfStone || isWallOfIce || isWallOfThorns
+  ) {
     const width = Math.max(60, projectile.areaWidthPx ?? 120)
-    const height = Math.max(34, (projectile.areaHeightPx ?? 20) * (isWallOfFire ? 2.2 : 1.8))
+    const height = Math.max(34, (projectile.areaHeightPx ?? 20) * (
+      isWallOfFire ? 2.2 : isWindWall ? 1.7 : isWallOfIce || isWallOfThorns ? 2 : 1.8
+    ))
     const angle = Math.atan2(
       projectile.to.y - projectile.from.y,
       projectile.to.x - projectile.from.x,
@@ -1345,9 +1720,29 @@ export function MaterialAreaSpellEffect({
         width={width}
         height={height}
         rotation={angle}
-        shadowColor={isWallOfFire ? '#ef4444' : '#67e8f9'}
-        particleColor={isWallOfFire ? '#fb923c' : '#bae6fd'}
-        particleHighlight="#ffffff"
+        shadowColor={isWallOfFire
+          ? '#ef4444'
+          : isWindWall || isWallOfIce
+            ? '#7dd3fc'
+            : isWallOfForce
+              ? '#8b5cf6'
+              : isWallOfThorns
+                ? '#65a30d'
+                : isWallOfStone
+                  ? '#78716c'
+                  : '#67e8f9'}
+        particleColor={isWallOfFire
+          ? '#fb923c'
+          : isWindWall || isWallOfIce
+            ? '#e0f2fe'
+            : isWallOfForce
+              ? '#c4b5fd'
+              : isWallOfThorns
+                ? '#a3e635'
+                : isWallOfStone
+                  ? '#d6d3d1'
+                  : '#bae6fd'}
+        particleHighlight={isWallOfThorns ? '#d9f99d' : '#ffffff'}
       />
     )
   }

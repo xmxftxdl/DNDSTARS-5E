@@ -51,7 +51,7 @@ export interface CombatHotbarSelectionViewModel {
   item?: { characterId: string; instanceId: string } | null
   moveActive?: boolean
   playerCanControlTurn?: boolean
-  weapon?: { characterId: string; featureBonusWeaponAttack?: boolean } | null
+  weapon?: { characterId: string; featureBonusWeaponAttack?: boolean; featureBonusWeaponAttackId?: string; activityWeaponAttackGrantId?: string } | null
   teleport?: { characterId: string } | null
   persistentArea?: { characterId: string; areaId: string } | null
 }
@@ -69,7 +69,11 @@ export function combatHotbarActiveActionId(view: CombatHotbarSelectionViewModel)
   if (item && item.characterId === view.activeCharacterId) result = `item:${item.instanceId}`
   if (view.moveActive && view.playerCanControlTurn) result = 'system:move'
   if (weapon && weapon.characterId === view.activeCharacterId) {
-    result = weapon.featureBonusWeaponAttack
+    result = weapon.activityWeaponAttackGrantId
+      ? `feature:activity-weapon-attack:${weapon.activityWeaponAttackGrantId}`
+      : weapon.featureBonusWeaponAttackId
+      ? `feature:generic-bonus-weapon-attack:${weapon.featureBonusWeaponAttackId}`
+      : weapon.featureBonusWeaponAttack
       ? 'feature:martial-spell-synergy-cantrip-then-bonus-attack-attack'
       : 'system:weapon-attack'
   }

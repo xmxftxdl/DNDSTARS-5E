@@ -1,4 +1,4 @@
-import type { SharedCampaignTimeState } from '../../lib/campaignTime'
+import type { CampaignRestFeatureD20Roll, SharedCampaignTimeState } from '../../lib/campaignTime'
 import { campaignDawnsCrossed, canBenefitFromLongRest } from '../../lib/campaignTime'
 import { restoreClassResources } from '../../lib/classResources'
 import type { Character } from '../../types/character'
@@ -10,9 +10,12 @@ import {
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { advanceDnd5eDivineInterventionCalendarDays } from './restFeatures'
 import {
+  advanceDnd5eHitPointMaximumReductionDurations,
   normalizeDnd5eHitPointMaximumReductionLedger,
   recoverDnd5eHitPointMaximumReductions,
 } from './hitPointMaximumReductions'
+import { dnd5eStoredD20ReplacementFeaturesForCharacter } from './pluginApi'
+import { removeDnd5eActiveEffectsForEvent } from './activeEffects'
 
 export interface Dnd5eCampaignTimeReconcileResult {
   character: Character
@@ -32,6 +35,10 @@ function applyDawn(character: Character, dawns: number): Character {
 }
 
 export function applyDnd5eShortRestBenefits(character: Character): Character {
+  const remainingEffects = removeDnd5eActiveEffectsForEvent({
+    effects: character.dnd5eCombatState?.activeEffects,
+    trigger: 'short-rest-complete',
+  }).effects
   return resolveDnd5eAttunementAfterShortRest(restoreDnd5eInventoryResources(
     applyDnd5eShortRestResourceFeatures(restoreClassResources({
       ...character,
@@ -40,13 +47,31 @@ export function applyDnd5eShortRestBenefits(character: Character): Character {
         relentlessRageDc: undefined,
         relentlessRagePendingDc: undefined,
         abilityScoreReductionLedger: undefined,
+        activeEffects: remainingEffects.length > 0 ? remainingEffects : undefined,
       } : undefined,
     }, 'short-rest')),
     'short-rest',
   ))
 }
 
-export function applyDnd5eLongRestBenefits(character: Character, completionWorldMinute: number): Character {
+/** Stable fallback used only when replaying a legacy long-rest event without Host dice. */
+export function dnd5eLongRestStoredD20(seed: string): number {
+  let hash = 2166136261
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  hash ^= hash >>> 16
+  hash = Math.imul(hash, 0x7feb352d)
+  hash ^= hash >>> 15
+  return (Math.abs(hash | 0) % 20) + 1
+}
+
+export function applyDnd5eLongRestBenefits(
+  character: Character,
+  completionWorldMinute: number,
+  restFeatureD20Rolls: readonly CampaignRestFeatureD20Roll[] = [],
+): Character {
   const gainsTranquility = dnd5eCharacterClassLevel(character, 'monk') >= 11 &&
     character.dnd5eClassChoices?.classes?.monk?.subclass === 'open-hand'
   const divineInterventionCooldownDays = character.dnd5eCombatState?.divineInterventionCooldownDays
@@ -60,6 +85,19 @@ export function applyDnd5eLongRestBenefits(character: Character, completionWorld
   const exhaustionLevel = character.rulesetId === 'dnd5e-2014-srd-5.1'
     ? Math.max(0, Math.floor(character.exhaustionLevel ?? 0) - 1)
     : character.exhaustionLevel
+  const storedD20ByFeatureId = Object.fromEntries(
+    dnd5eStoredD20ReplacementFeaturesForCharacter(character).map(({ feature, count }) => {
+      const authoritative = restFeatureD20Rolls.find((entry) =>
+        entry.characterId === character.id && entry.featureId === feature.id)
+      const values = authoritative?.values.length === count && authoritative.values.every((value) =>
+        Number.isInteger(value) && value >= 1 && value <= 20)
+        ? [...authoritative.values]
+        : Array.from({ length: count }, (_, index) => dnd5eLongRestStoredD20(
+            `${character.id}:${feature.id}:${completionWorldMinute}:${index}`,
+          ))
+      return [feature.id, values]
+    }),
+  )
   const restored = restoreDnd5eInventoryResources(restoreClassResources({
     ...character,
     exhaustionLevel,
@@ -78,7 +116,8 @@ export function applyDnd5eLongRestBenefits(character: Character, completionWorld
     dnd5eCombatState:
       gainsTranquility ||
       divineInterventionCooldownDays ||
-      maximumReductionRecovery.ledger
+      maximumReductionRecovery.ledger ||
+      Object.keys(storedD20ByFeatureId).length > 0
       ? {
           ...(gainsTranquility ? { tranquilityActive: true } : {}),
           ...(divineInterventionCooldownDays ? { divineInterventionCooldownDays } : {}),
@@ -87,6 +126,9 @@ export function applyDnd5eLongRestBenefits(character: Character, completionWorld
                 hitPointMaximumReductionLedger:
                   maximumReductionRecovery.ledger,
               }
+            : {}),
+          ...(Object.keys(storedD20ByFeatureId).length > 0
+            ? { declarativeStoredD20ByFeatureId: storedD20ByFeatureId }
             : {}),
         }
       : undefined,
@@ -143,7 +185,11 @@ export function reconcileDnd5eCharacterCampaignTime(
         advance.ignoreLongRestCooldown === true ||
         canBenefitFromLongRest(next.dnd5eLastLongRestWorldMinute, advance.toWorldMinute)
       ) {
-        next = applyDnd5eLongRestBenefits(next, advance.toWorldMinute)
+        next = applyDnd5eLongRestBenefits(
+          next,
+          advance.toWorldMinute,
+          advance.restFeatureD20Rolls,
+        )
         longRestsApplied += 1
       } else {
         longRestsBlocked += 1
@@ -156,6 +202,23 @@ export function reconcileDnd5eCharacterCampaignTime(
     if (dawns > 0) {
       next = applyDawn(next, dawns)
       dawnsApplied += dawns
+    }
+  }
+  const timedMaximumReduction = advanceDnd5eHitPointMaximumReductionDurations(
+    normalizeDnd5eHitPointMaximumReductionLedger(
+      next.dnd5eCombatState?.hitPointMaximumReductionLedger,
+    ),
+    Math.max(0, clock.worldMinute - appliedMinute!) * 10,
+  )
+  if (timedMaximumReduction.maximum != null) {
+    next = {
+      ...next,
+      maxHp: timedMaximumReduction.maximum,
+      currentHp: Math.min(next.currentHp, timedMaximumReduction.maximum),
+      dnd5eCombatState: {
+        ...next.dnd5eCombatState,
+        hitPointMaximumReductionLedger: timedMaximumReduction.ledger,
+      },
     }
   }
   next = { ...next, dnd5eWorldTimeAppliedMinute: clock.worldMinute }

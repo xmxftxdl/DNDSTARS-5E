@@ -18,8 +18,8 @@ export default function CharacterRailEntry({
       type="button"
       data-testid={`character-rail-${character.id}`}
       onClick={onAvatarClick}
-      title={`${character.name} · 打开底部行动栏`}
-      aria-label={`${character.name}的行动栏`}
+      title={`${character.name} · 查看角色详情`}
+      aria-label={`查看${character.name}的角色详情`}
       className={[
         'flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br text-xl shadow-lg transition-all',
         character.accent,

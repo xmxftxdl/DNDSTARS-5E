@@ -5,6 +5,7 @@ import type { Character } from '../../types/character'
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 import { buildDnd5eCombatActionDescriptors, groupDnd5eCombatHotbarDescriptors } from '../../lib/dnd5eCombatActionDescriptors'
 import PlayerCombatHotbar from './PlayerCombatHotbar'
+import { resolveDnd5eHotbarSpellCommand } from './playerCombatHotbarSpellCommand'
 
 function character(): Character {
   return {
@@ -18,6 +19,34 @@ function character(): Character {
 }
 
 describe('PlayerCombatHotbar', () => {
+  it('preserves an armed Overchannel intent in the spell command submitted to the map', () => {
+    const wizard = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      charClass: '法师',
+      level: 18,
+      dnd5eClassLevels: { wizard: 18 },
+      dnd5eClassChoices: {
+        classes: { wizard: { subclass: 'evocation' } },
+      },
+    } as Character
+
+    expect(resolveDnd5eHotbarSpellCommand(wizard, {
+      kind: 'cast-spell',
+      spellId: 'fireball',
+      castingClassId: 'wizard',
+      slotLevel: 3,
+    }, 3, ['evocation-overchannel'])).toMatchObject({
+      ok: true,
+      command: {
+        options: {
+          overchannel: true,
+          autoSubmitOnTargetSelection: true,
+        },
+      },
+    })
+  })
+
   it('groups spells, items and basic actions into stable independent sections', () => {
     const icon = dnd5eSpellActionIcon({ id: 'fire-bolt', name: '火焰箭' })
     const descriptors = buildDnd5eCombatActionDescriptors({
@@ -108,6 +137,8 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('data-testid="combat-hotbar-features"')
     expect(html).toContain('data-testid="combat-hotbar-items"')
     expect(html).toContain('data-testid="combat-hotbar-basics"')
+    expect(html).toContain('data-testid="combat-hotbar-character-portrait"')
+    expect(html).toContain('aria-label="快速查看冒险者的人物卡"')
     expect(html).toMatch(/data-action-id="system:move"[^>]*aria-disabled="true"/)
     expect(html).toContain('基础动作只能在战斗中、轮到自己时使用。')
   })
@@ -150,6 +181,31 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('data-action-id="feature:persistent-area-move:flaming-sphere-area"')
     expect(html).toContain('/assets/icons/flaming-sphere-spell-action.png')
     expect(html).toContain('>30<')
+  })
+
+  it('战斗外仍将持续区域附赠移动路由到地图移动，而不是职业特性面板', () => {
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: character(),
+      mode: 'exploration',
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      movablePersistentAreas: [{
+        id: 'dancing-lights-area',
+        label: '舞光术光源',
+        economy: 'bonus-action',
+        maximumFeet: 60,
+        coreSpellId: 'dancing-lights',
+      }],
+      onCommand: () => undefined,
+    }))
+
+    expect(html).toMatch(
+      /data-action-id="feature:persistent-area-move:dancing-lights-area"[^>]*data-command-kind="move-persistent-area"/,
+    )
+    expect(html).not.toMatch(
+      /data-action-id="feature:persistent-area-move:dancing-lights-area"[^>]*data-command-kind="open-panel"/,
+    )
   })
 
   it('将权威地图实体的后续攻击显示为不消耗法术位的快捷动作', () => {

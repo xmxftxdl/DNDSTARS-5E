@@ -5,6 +5,7 @@ export interface SharedServerContextOptions {
   serverStartedAt?: number
   serverBuildId: string
   telemetry?: import('./ports/server-telemetry.mjs').ServerTelemetryPort
+  playerAiService?: import('./player-ai-service.mjs').PlayerAiService | null
 }
 
 export function createSharedServerContext(options: SharedServerContextOptions): {
@@ -24,4 +25,5 @@ export function createSharedServerContext(options: SharedServerContextOptions): 
   serverInstanceId: string
   serverStartedAt: number
   serverBuildId: string
+  playerAiService: import('./player-ai-service.mjs').PlayerAiService | null
 }

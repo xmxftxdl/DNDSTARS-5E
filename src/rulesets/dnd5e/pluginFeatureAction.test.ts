@@ -4,6 +4,7 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { dnd5eHeadlessActionFromDeclarativeDraft } from './declarativePluginPackage'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import {
   activateDnd5ePluginSandbox,
@@ -92,6 +93,97 @@ function action(featureId: string): SharedPlayerActionState {
 }
 
 describe('D&D 5e plugin feature authority action', () => {
+  it('authorizes an unowned Activity only through its live persistent area and derives range from the area', () => {
+    const pluginId = 'local.area-grant-test'
+    const featureId = `${pluginId}:area-control.vine-control`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Area grant', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeature({
+          id: 'area-control.vine-control', name: 'Vine control', summary: 'Vine control',
+          description: 'Pull from a Host-owned area.', automation: 'full',
+          action: {
+            id: 'vine-control', label: 'Vine control', economy: 'bonusAction',
+            targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 30 },
+          },
+        })
+        api.registerHeadlessAction({ id: 'vine-control', resolve: ({ succeed }) => succeed() })
+      },
+    })
+    try {
+      const hero = character('hero')
+      const enemy = character('enemy')
+      const heroToken = token('hero-token', hero.id, 25)
+      const enemyToken = token('enemy-token', enemy.id, 325, 'enemy')
+      const map: BattleMap = {
+        id: 'map-1', name: 'Area grant map', width: 600, height: 400,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [heroToken, enemyToken],
+        dnd5ePluginAreas: [{
+          id: 'vine-area', pluginId, featureId: 'vine-cast', label: 'Vine', color: '#166534',
+          sourceCharacterId: hero.id, sourceTokenId: heroToken.id,
+          cells: [{ col: 5, row: 0 }], anchorCell: { col: 5, row: 0 },
+          createdRound: 1, expiresAfterRound: 10,
+          grantedActivities: [{ activityId: 'vine-control', activateOnCreate: true }],
+        }],
+      }
+      const initiativeOrder: InitiativeEntry[] = [
+        { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+        { slotId: 'enemy-token:normal', tokenId: enemyToken.id, label: enemy.name, emoji: 'E', color: '#f00', roll: 10 },
+      ]
+      const requested = {
+        ...action(featureId),
+        targetTokenId: enemyToken.id,
+        dnd5ePluginAction: { featureId, payload: { persistentAreaId: 'vine-area' } },
+      }
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: requested,
+        map,
+        characters: [hero, enemy],
+        initiativeOrder,
+        turnEconomy: {
+          turnKey: 'combat-1:1:hero-token:normal',
+          attacksUsed: 0,
+          action: { current: 1, max: 1 }, bonusAction: { current: 0, max: 1 },
+          reaction: { current: 1, max: 1 }, movement: { current: 30, max: 30 },
+        },
+      })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.distanceFeet).toBe(5)
+      expect(prepared.prepared.headlessAction).toMatchObject({
+        hostEntitlement: { kind: 'persistent-area', areaId: 'vine-area' },
+        hostWaiveActionEconomy: true,
+        hostDistanceFeetByTargetId: { 'enemy-token': 5 },
+      })
+
+      const consumedMap = {
+        ...map,
+        dnd5ePluginAreas: map.dnd5ePluginAreas?.map((area) => ({
+          ...area,
+          grantedActivityUseReceipts: ['vine-control'],
+        })),
+      }
+      expect(prepareDnd5ePluginFeatureAction({
+        action: requested,
+        map: consumedMap,
+        characters: [hero, enemy],
+        initiativeOrder,
+        turnEconomy: {
+          turnKey: 'combat-1:1:hero-token:normal',
+          attacksUsed: 0,
+          action: { current: 1, max: 1 }, bonusAction: { current: 0, max: 1 },
+          reaction: { current: 1, max: 1 }, movement: { current: 30, max: 30 },
+        },
+      })).toEqual({ ok: false, reason: 'bonus-action-unavailable' })
+    } finally {
+      dispose()
+    }
+  })
+
   it('replays a Worker condition with Host-provided airborne fall dice', async () => {
     const pluginId = 'com.example.worker-airborne'
     const featureId = `${pluginId}:drop-flyer`
@@ -622,6 +714,119 @@ describe('D&D 5e plugin feature authority action', () => {
         authoritativePayload: { source: 'host' },
       })
       expect(accepted.result.ok).toBe(true)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('executes a workshop multi-target save as independent Host rolls', async () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.workshop-multi-save',
+        name: 'Workshop multi save',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Tests',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction(dnd5eHeadlessActionFromDeclarativeDraft({
+          id: 'thunder-burst',
+          label: 'Thunder Burst',
+          savingThrow: { ability: 'con', dc: 'source-save-dc', onSuccess: 'half' },
+          effects: [
+            { kind: 'damage', dice: { count: 2, sides: 6 }, damageType: 'thunder' },
+            {
+              kind: 'condition',
+              condition: 'prone',
+              duration: { expiresAt: 'target-turn-end', remainingRounds: 1 },
+            },
+          ],
+        }))
+        featureId = api.registerFeature({
+          id: 'thunder-burst',
+          name: 'Thunder Burst',
+          summary: 'Each selected target makes its own save.',
+          description: 'Workshop vertical-slice fixture.',
+          automation: 'full',
+          action: {
+            id: 'thunder-burst',
+            label: 'Use Thunder Burst',
+            economy: 'action',
+            targeting: {
+              kind: 'multiple-creatures',
+              relation: 'enemy',
+              rangeFeet: 30,
+              maximumTargets: 3,
+            },
+          },
+        })
+      },
+    })
+    try {
+      const hero = character('hero', { dnd5ePluginFeatureIds: [featureId], saveDC: 14 })
+      const savedEnemy = character('saved-enemy')
+      const failedEnemy = character('failed-enemy')
+      const map: BattleMap = {
+        id: 'map-1',
+        name: 'Workshop multi-save map',
+        width: 500,
+        height: 500,
+        gridSize: 50,
+        gridOffsetX: 0,
+        gridOffsetY: 0,
+        feetPerCell: 5,
+        showGrid: true,
+        tokens: [
+          token('hero-token', hero.id, 25),
+          token('saved-token', savedEnemy.id, 125, 'enemy'),
+          token('failed-token', failedEnemy.id, 175, 'enemy'),
+        ],
+      }
+      const initiativeOrder: InitiativeEntry[] = map.tokens.map((entry, index) => ({
+        slotId: `${entry.id}:normal`,
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: entry.emoji ?? '',
+        color: entry.color ?? '',
+        roll: 20 - index,
+      }))
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: {
+          ...action(featureId),
+          targetTokenId: undefined,
+          targetTokenIds: ['saved-token', 'failed-token'],
+        },
+        map,
+        characters: [hero, savedEnemy, failedEnemy],
+        initiativeOrder,
+      })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([
+        'saved-token',
+        'failed-token',
+      ])
+
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+        rolls: {
+          'effect-0': { values: [6, 4], modifier: 0, total: 10 },
+          'target-save-d20:saved-token': { values: [20], modifier: 0, total: 20 },
+          'target-save-d20:failed-token': { values: [2], modifier: 0, total: 2 },
+        },
+      })
+      expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+      expect(resolved.application?.characters.find((entry) => entry.id === savedEnemy.id)).toMatchObject({
+        currentHp: 15,
+        conditions: [],
+      })
+      expect(resolved.application?.characters.find((entry) => entry.id === failedEnemy.id)).toMatchObject({
+        currentHp: 10,
+        conditions: expect.arrayContaining(['prone']),
+      })
     } finally {
       dispose()
     }

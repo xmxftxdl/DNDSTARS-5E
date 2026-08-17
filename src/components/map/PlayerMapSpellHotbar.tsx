@@ -1,4 +1,8 @@
-import type { Dnd5eCombatActionCommand, Dnd5eCombatActionDescriptorV1 } from '../../lib/dnd5eCombatActionDescriptors'
+import type {
+  Dnd5eCombatActionCommand,
+  Dnd5eCombatActionDescriptorV1,
+  Dnd5eCombatSpellModifier,
+} from '../../lib/dnd5eCombatActionDescriptors'
 import { canSubmitPlayerSpellAction } from '../../lib/playerActionAuthorityRouter'
 import type { PendingPlayerActionLock } from '../../lib/playerActionSync'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
@@ -7,7 +11,11 @@ import { createDnd5eTurnEconomyCounts } from '../../rulesets/dnd5e/turnEconomy'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import PlayerCombatHotbar from './PlayerCombatHotbar'
-import { playerMapMovablePersistentAreas, playerMapSustainedAreaControls } from './playerMapPersistentAreas'
+import {
+  playerMapGrantedActivityControls,
+  playerMapMovablePersistentAreas,
+  playerMapSustainedAreaControls,
+} from './playerMapPersistentAreas'
 
 interface PlayerMapSpellHotbarProps {
   isDM: boolean
@@ -24,6 +32,8 @@ interface PlayerMapSpellHotbarProps {
   activeTurnEconomy: Dnd5eTurnEconomyCounts
   activeActionId?: string
   grappleEscapes?: readonly { grapplerTokenId: string; grapplerLabel: string; dc?: number }[]
+  armedSpellModifiers?: readonly Dnd5eCombatSpellModifier[]
+  onArmedSpellModifiersChange?: (modifiers: readonly Dnd5eCombatSpellModifier[]) => void
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
   onCommand: (command: Dnd5eCombatActionCommand, descriptor: Dnd5eCombatActionDescriptorV1) => void
@@ -58,6 +68,7 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
   })
   const movablePersistentAreas = playerMapMovablePersistentAreas(props.map, character)
   const sustainedAreaControls = playerMapSustainedAreaControls(props.map, character)
+  const persistentAreaActivityControls = playerMapGrantedActivityControls(props.map, character)
   const hunterMarkTargetId = character.dnd5eCombatState?.huntersMarkTargetId
   const hunterMarkTarget = hunterMarkTargetId
     ? props.map.tokens.find((candidate) => candidate.id === hunterMarkTargetId)
@@ -78,8 +89,11 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
         turnEconomy={turnEconomy}
         activeActionId={props.activeActionId}
         grappleEscapes={props.combatActive ? props.grappleEscapes : []}
+        armedSpellModifiers={props.armedSpellModifiers}
+        onArmedSpellModifiersChange={props.onArmedSpellModifiersChange}
         movablePersistentAreas={movablePersistentAreas}
         sustainedAreaControls={sustainedAreaControls}
+        persistentAreaActivityControls={persistentAreaActivityControls}
         hunterMarkTransferAvailable={hunterMarkTransferAvailable}
         selectedSpellSlotLevels={props.selectedSpellSlotLevels}
         onSelectedSpellSlotLevelChange={props.onSelectedSpellSlotLevelChange}

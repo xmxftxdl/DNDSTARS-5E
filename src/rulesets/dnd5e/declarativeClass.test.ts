@@ -156,7 +156,7 @@ describe('DeclarativeClassV1 and independent feats', () => {
     }
   })
 
-  it('registers a feat and revalidates level, ability and race prerequisites on the Host', () => {
+  it('registers feats and revalidates build capabilities on the Host', () => {
     const dispose = registerDnd5eRulesPlugin({
       manifest: {
         id: 'test.feat-editor', name: '专长测试包', version: '1.0.0', apiVersion: 2,
@@ -165,16 +165,27 @@ describe('DeclarativeClassV1 and independent feats', () => {
       setup(api) {
         api.registerFeat({
           id: 'star-sight', name: '星视', summary: '测试专长。', description: '获得特殊感知。', automation: 'manual',
-          prerequisite: { minimumLevel: 4, abilityScores: { wis: 13 }, raceIds: ['人类'] },
+          prerequisite: {
+            minimumLevel: 4, abilityScores: { wis: 13 }, raceIds: ['人类'], armorProficiencies: ['heavy'],
+          },
+        })
+        api.registerFeat({
+          id: 'spell-gate', name: '法术门槛', summary: '测试施法前提。', description: '需要施法能力。',
+          automation: 'manual', prerequisite: { spellcasting: true },
         })
       },
     })
     try {
-      const feat = registeredDnd5ePluginFeats()[0]
+      const feats = registeredDnd5ePluginFeats()
+      const feat = feats.find((entry) => entry.id === 'test.feat-editor:star-sight')!
       expect(feat.id).toBe('test.feat-editor:star-sight')
       expect(dnd5ePluginFeatAvailableForCharacter(feat, character())).toBe(true)
       expect(dnd5ePluginFeatAvailableForCharacter(feat, character({ level: 3 }))).toBe(false)
       expect(dnd5ePluginFeatAvailableForCharacter(feat, character({ race: '精灵' }))).toBe(false)
+      expect(dnd5ePluginFeatAvailableForCharacter(feat, character({ charClass: '游荡者' }))).toBe(false)
+      const spellGate = feats.find((entry) => entry.id === 'test.feat-editor:spell-gate')!
+      expect(dnd5ePluginFeatAvailableForCharacter(spellGate, character())).toBe(false)
+      expect(dnd5ePluginFeatAvailableForCharacter(spellGate, character({ charClass: '法师', level: 1 }))).toBe(true)
     } finally {
       dispose()
     }

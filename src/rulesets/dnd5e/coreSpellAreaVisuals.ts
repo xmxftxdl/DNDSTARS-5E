@@ -24,6 +24,16 @@ export const DND5E_CORE_SPELL_AREA_VISUALS: Readonly<Record<string, Dnd5ePersist
   cloudkill: { preset: 'cloudkill', intensity: 'strong' },
   'blade-barrier': { preset: 'blade-barrier', intensity: 'strong' },
   'ice-storm': { preset: 'ice-storm-ground', intensity: 'subtle' },
+  'fog-cloud': { preset: 'fog-cloud', intensity: 'normal' },
+  web: { preset: 'web', intensity: 'normal' },
+  silence: { preset: 'silence', intensity: 'subtle' },
+  'sleet-storm': { preset: 'sleet-storm', intensity: 'strong' },
+  'stinking-cloud': { preset: 'stinking-cloud', intensity: 'strong' },
+  'wind-wall': { preset: 'wind-wall', intensity: 'strong' },
+  'wall-of-force': { preset: 'wall-of-force', intensity: 'normal' },
+  'wall-of-stone': { preset: 'wall-of-stone', intensity: 'normal' },
+  'wall-of-ice': { preset: 'wall-of-ice', intensity: 'strong' },
+  'wall-of-thorns': { preset: 'wall-of-thorns', intensity: 'strong' },
 }
 
 export function dnd5eCoreSpellAreaVisual(

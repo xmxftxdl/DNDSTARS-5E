@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Hand, ListChecks } from 'lucide-react'
 import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
+import type { Dnd5eActivityBasicActionGrantV1 } from '../../rulesets/dnd5e'
 
 export interface Dnd5eBasicActionTarget {
   tokenId: string
@@ -25,12 +26,14 @@ export default function Dnd5eBasicActionsPanel({
   pending,
   targets,
   grappleEscapes = EMPTY_GRAPPLE_ESCAPES,
+  basicActionGrants = [],
   onAction,
 }: {
   canAct: boolean
   pending: boolean
   targets: readonly Dnd5eBasicActionTarget[]
   grappleEscapes?: readonly Dnd5eGrappleEscapeTarget[]
+  basicActionGrants?: readonly Dnd5eActivityBasicActionGrantV1[]
   onAction: (payload: Dnd5eBasicActionPayload) => void
 }) {
   const [kind, setKind] = useState<BasicActionKind>('help')
@@ -41,6 +44,7 @@ export default function Dnd5eBasicActionsPanel({
   const [readyKind, setReadyKind] = useState<'attack' | 'move' | 'interact-object' | 'other'>('attack')
   const [interactionId, setInteractionId] = useState('')
   const [adjudicationDescription, setAdjudicationDescription] = useState('')
+  const [selectedGrantId, setSelectedGrantId] = useState('')
 
   const grappleEscapeTargetIds = useMemo(
     () => new Set(grappleEscapes.map((entry) => entry.grapplerTokenId)),
@@ -71,14 +75,20 @@ export default function Dnd5eBasicActionsPanel({
   const selectedTarget = targetOptions.some((target) => target.tokenId === targetTokenId)
     ? targetTokenId
     : targetOptions[0]?.tokenId ?? ''
+  const matchingBasicActionGrants = (kind === 'grapple' || kind === 'shove')
+    ? basicActionGrants.filter((grant) => grant.actions.includes(kind))
+    : []
+  const activeBasicActionGrantId = matchingBasicActionGrants.some((grant) => grant.grantId === selectedGrantId)
+    ? selectedGrantId
+    : ''
 
   const buildPayload = (): Dnd5eBasicActionPayload | undefined => {
     if (kind === 'dash' || kind === 'hide' || kind === 'escape-effect') return { kind }
     if (kind === 'help') return selectedTarget ? { kind, helpKind, targetTokenId: selectedTarget } : undefined
     // The defending creature chooses Athletics or Acrobatics. The authority
     // engine selects its stronger legal option; the attacker never controls it.
-    if (kind === 'grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics' } : undefined
-    if (kind === 'shove') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics', outcome: shoveOutcome } : undefined
+    if (kind === 'grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics', ...(activeBasicActionGrantId ? { activityBasicActionGrantId: activeBasicActionGrantId } : {}) } : undefined
+    if (kind === 'shove') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics', outcome: shoveOutcome, ...(activeBasicActionGrantId ? { activityBasicActionGrantId: activeBasicActionGrantId } : {}) } : undefined
     if (kind === 'release-grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
     if (kind === 'escape-grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
     if (kind === 'wake') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
@@ -136,6 +146,7 @@ export default function Dnd5eBasicActionsPanel({
       {kind === 'help' ? <label className="mt-2 block text-xs text-slate-400">协助类型<select value={helpKind} onChange={(event) => setHelpKind(event.target.value as typeof helpKind)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="attack">协助下一次攻击</option><option value="ability-check">协助能力检定</option></select></label> : null}
       {targetRelation !== 'none' ? <label className="mt-2 block text-xs text-slate-400">目标<select value={selectedTarget} onChange={(event) => setTargetTokenId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">选择目标…</option>{targetOptions.map((target) => <option key={target.tokenId} value={target.tokenId}>{target.label} · {target.distanceFeet}尺</option>)}</select></label> : null}
       {kind === 'grapple' || kind === 'shove' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">目标将自动使用力量（运动）或敏捷（体操）中较高的一项进行对抗。</p> : null}
+      {matchingBasicActionGrants.length > 0 ? <label className="mt-2 block text-xs text-emerald-200">行动来源<select value={activeBasicActionGrantId} onChange={(event) => setSelectedGrantId(event.target.value)} className="mt-1 w-full rounded-lg border border-emerald-400/20 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">普通攻击动作/替换一次攻击</option>{matchingBasicActionGrants.map((grant) => <option key={grant.grantId} value={grant.grantId}>{grant.label} · 附赠动作{kind === 'shove' && grant.shovePushDistanceBonusFeet ? ` · 额外推开 ${grant.shovePushDistanceBonusFeet} 尺` : ''}</option>)}</select></label> : null}
       {kind === 'release-grapple' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">无需动作，立即松开由你通过基础动作擒抱的目标。</p> : null}
       {kind === 'escape-grapple' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，以自身力量（运动）或敏捷（体操）中较高的一项，对抗擒抱者的力量（运动）。</p> : null}
       {kind === 'escape-effect' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，按照当前状态规定的能力与 DC 进行检定；成功时由 Headless 权威结算移除该状态。纠缠术使用力量；黑触手允许力量或敏捷，由系统采用更有利的一项。</p> : null}

@@ -231,6 +231,116 @@ describe('D&D 5e level advancement transaction', () => {
     })
   })
 
+  it('applies plugin subclass build advancements atomically with the level-up receipt', () => {
+    const pluginId = 'test.subclass-build-choices'
+    let subclassId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: '子职构筑协议测试', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0-1.0',
+      },
+      setup(api) {
+        subclassId = api.registerSubclass({
+          id: 'lore-keeper', classId: 'rogue', name: '典籍守护者', summary: '验证子职固定授予与选择。',
+          features: [{
+            id: 'lore-training', level: 3, name: '典籍训练', description: '构筑协议测试特性。',
+          }],
+          advancements: [{
+            schemaVersion: 1,
+            id: 'lore-keeper-training',
+            level: 3,
+            kind: 'select',
+            label: '守护者训练',
+            count: 1,
+            options: [
+              {
+                id: 'arcana',
+                label: '奥秘专精',
+                grants: [
+                  { kind: 'proficiency', category: 'skill', id: 'arcana' },
+                  { kind: 'tag', key: 'skill-expertise', value: 'arcana' },
+                ],
+              },
+              {
+                id: 'history',
+                label: '历史专精',
+                grants: [
+                  { kind: 'proficiency', category: 'skill', id: 'history' },
+                  { kind: 'tag', key: 'skill-expertise', value: 'history' },
+                ],
+              },
+            ],
+          }, {
+            schemaVersion: 1,
+            id: 'lore-keeper-armor',
+            level: 3,
+            kind: 'build-grant',
+            grants: [{ kind: 'proficiency', category: 'armor', id: 'medium' }],
+          }],
+        })
+      },
+    })
+    try {
+      const rogue = fighter({
+        name: '测试游荡者', charClass: '游荡者', level: 2,
+        dnd5eClassLevels: { rogue: 2 },
+        dnd5eClassChoices: { classes: { rogue: { selections: { expertise: ['stealth', 'perception'] } } } },
+        skills: ['stealth', 'perception'], savingThrows: ['dex', 'int'], hitDice: '2d8',
+        hitPointDice: [{ sides: 8, current: 2, max: 2 }], maxHp: 17, currentHp: 17,
+      })
+      const contentId = `${subclassId}:level-3`
+      const plan = buildDnd5eLevelAdvancementPlan(rogue, 'rogue', 1, subclassId)
+      expect(plan?.contentAdvancements).toEqual([
+        expect.objectContaining({
+          contentId,
+          requirements: [expect.objectContaining({ id: 'lore-keeper-training', count: 1 })],
+        }),
+      ])
+
+      const missing = applyDnd5eLevelAdvancement(rogue, {
+        schemaVersion: 1,
+        classId: 'rogue',
+        subclassId,
+        levelsGained: 1,
+        hitPointMethod: 'fixed',
+        hitPointRolls: [],
+        asiChoices: [],
+      })
+      expect(missing).toEqual({ ok: false, reason: 'missing-content-choice' })
+
+      const result = applyDnd5eLevelAdvancement(rogue, {
+        schemaVersion: 1,
+        classId: 'rogue',
+        subclassId,
+        levelsGained: 1,
+        hitPointMethod: 'fixed',
+        hitPointRolls: [],
+        asiChoices: [],
+        contentChoiceSelections: {
+          [contentId]: { 'lore-keeper-training': ['arcana'] },
+        },
+      })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.character.skills).toContain('arcana')
+      expect(result.character.dnd5eContentChoices).toMatchObject({
+        [contentId]: {
+          selections: { 'lore-keeper-training': ['arcana'] },
+          resolvedGrants: expect.arrayContaining([
+            { kind: 'proficiency', category: 'skill', id: 'arcana' },
+            { kind: 'proficiency', category: 'armor', id: 'medium' },
+            { kind: 'tag', key: 'skill-expertise', value: 'arcana' },
+          ]),
+        },
+      })
+      expect(result.record.decision.contentChoiceSelections).toEqual({
+        [contentId]: { 'lore-keeper-training': ['arcana'] },
+      })
+    } finally {
+      dispose()
+    }
+  })
+
   it('does not record an ability score choice as a fixed granted feature', () => {
     const levelThree = advanceFighter(fighter(), 3)
     const result = applyDnd5eLevelAdvancement(

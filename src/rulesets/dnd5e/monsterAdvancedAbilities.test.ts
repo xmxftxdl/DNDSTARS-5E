@@ -97,7 +97,11 @@ describe('advanced monster Headless declarations', () => {
         automation: 'manual',
       })
     }
-    for (const spellId of ['cloudkill', 'darkness', 'spirit-guardians', 'wall-of-fire']) {
+    for (const spellId of [
+      'cloudkill', 'darkness', 'spirit-guardians', 'wall-of-fire',
+      'fog-cloud', 'web', 'silence', 'sleet-storm', 'stinking-cloud', 'wind-wall',
+      'wall-of-force', 'wall-of-stone', 'wall-of-ice', 'wall-of-thorns',
+    ]) {
       expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toEqual({
         automation: 'full',
       })

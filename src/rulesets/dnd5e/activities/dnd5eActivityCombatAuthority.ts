@@ -27,6 +27,7 @@ const STANDARD_CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 export function dnd5eActivityActorSnapshotFromCombatantV1(
   combatant: Dnd5eCombatant,
 ): Dnd5eActivityActorSnapshot {
+  const spellAttackBonus = combatant.saveDc == null ? undefined : combatant.saveDc - 8
   return {
     id: combatant.id,
     controller: combatant.controller,
@@ -40,6 +41,18 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
     currentHp: combatant.currentHp,
     maxHp: combatant.maxHp,
     armorClass: combatant.armorClass,
+    sizeRank: combatant.sizeRank,
+    creatureType: combatant.creatureType,
+    illumination: combatant.illumination,
+    spellSaveDc: combatant.saveDc,
+    spellAttackBonus,
+    spellcastingAbilityModifier: spellAttackBonus == null
+      ? undefined
+      : spellAttackBonus - combatant.proficiencyBonus,
+    abilityCheckModifiers: Object.fromEntries(Object.entries(combatant.abilities).map(([ability, score]) => [
+      ability,
+      Math.floor((score - 10) / 2),
+    ])),
     conditions: combatant.conditions.filter((condition): condition is Dnd5eStandardConditionId =>
       STANDARD_CONDITIONS.has(condition)),
     savingThrowModifiers: { ...combatant.savingThrowBonuses },
@@ -47,6 +60,18 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
       current: resource.current,
       maximum: resource.max,
     }])),
+    activeEffectDefinitionIds: (combatant.classState.activeEffects ?? []).map((effect) => ({
+      definitionId: effect.definitionId,
+      sourceActorId: effect.source.actorId,
+    })),
+    equipment: combatant.activityEquipment ? structuredClone(combatant.activityEquipment) : undefined,
+    spellcasting: combatant.activitySpellcasting
+      ? { ...combatant.activitySpellcasting, classIds: [...combatant.activitySpellcasting.classIds] }
+      : undefined,
+    successfulSpellSaveNegatesDamage: combatant.successfulSpellSaveNegatesDamage,
+    elementalAdeptDamageTypes: combatant.elementalAdeptDamageTypes
+      ? [...combatant.elementalAdeptDamageTypes]
+      : undefined,
   }
 }
 

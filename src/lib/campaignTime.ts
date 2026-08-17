@@ -48,6 +48,12 @@ export interface CampaignRestRecoveryReport {
   entries: CampaignRestRecoveryEntry[]
 }
 
+export interface CampaignRestFeatureD20Roll {
+  characterId: string
+  featureId: string
+  values: number[]
+}
+
 export interface CampaignTimeAdvance {
   id: string
   kind: 'advance' | 'short-rest' | 'long-rest'
@@ -60,6 +66,7 @@ export interface CampaignTimeAdvance {
   beneficiaryCharacterIds?: string[]
   ignoreLongRestCooldown?: boolean
   restRecoveryReports?: CampaignRestRecoveryReport[]
+  restFeatureD20Rolls?: CampaignRestFeatureD20Roll[]
   createdAt: number
 }
 
@@ -82,6 +89,7 @@ export type CampaignTimeMutation =
       beneficiaryCharacterIds?: string[]
       ignoreLongRestCooldown?: boolean
       restRecoveryReports?: CampaignRestRecoveryReport[]
+      restFeatureD20Rolls?: CampaignRestFeatureD20Roll[]
     }
   | {
       operation: 'set-time'
@@ -275,6 +283,19 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
   const restRecoveryReports = Array.isArray(value.restRecoveryReports)
     ? value.restRecoveryReports.map(normalizeRestRecoveryReport).filter((entry): entry is CampaignRestRecoveryReport => entry !== null).slice(0, 64)
     : undefined
+  const restFeatureD20Rolls = Array.isArray(value.restFeatureD20Rolls)
+    ? value.restFeatureD20Rolls.flatMap((entry) => {
+        if (!object(entry)) return []
+        const characterId = bounded(entry.characterId, 160)
+        const featureId = bounded(entry.featureId, 200)
+        const values = Array.isArray(entry.values)
+          ? entry.values.filter((roll) => integer(roll, 1, 20) != null).map(Number).slice(0, 8)
+          : []
+        return characterId && featureId && values.length > 0
+          ? [{ characterId, featureId, values }]
+          : []
+      }).slice(0, 128)
+    : undefined
   return {
     id,
     kind,
@@ -289,6 +310,7 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
       ? { ignoreLongRestCooldown: true }
       : {}),
     ...(restRecoveryReports ? { restRecoveryReports } : {}),
+    ...(restFeatureD20Rolls ? { restFeatureD20Rolls } : {}),
     createdAt,
   }
 }
@@ -345,6 +367,21 @@ export function validateSharedCampaignTime(value: unknown): boolean {
         (entry.kind !== 'short-rest' && entry.kind !== 'long-rest') ||
         !Array.isArray(entry.restRecoveryReports) || entry.restRecoveryReports.length > 64 ||
         entry.restRecoveryReports.some((report) => normalizeRestRecoveryReport(report) == null)
+      ) return false
+    }
+    if (entry.restFeatureD20Rolls != null) {
+      const rollKeys = Array.isArray(entry.restFeatureD20Rolls)
+        ? entry.restFeatureD20Rolls.map((roll) => object(roll)
+            ? `${bounded(roll.characterId, 160)}\u001f${bounded(roll.featureId, 200)}`
+            : '')
+        : []
+      if (
+        entry.kind !== 'long-rest' || !Array.isArray(entry.restFeatureD20Rolls) ||
+        entry.restFeatureD20Rolls.length > 128 || new Set(rollKeys).size !== rollKeys.length ||
+        entry.restFeatureD20Rolls.some((roll) => !object(roll) ||
+          !bounded(roll.characterId, 160) || !bounded(roll.featureId, 200) ||
+          !Array.isArray(roll.values) || roll.values.length < 1 || roll.values.length > 8 ||
+          roll.values.some((value) => integer(value, 1, 20) == null))
       ) return false
     }
     return entry.ignoreLongRestCooldown == null ||

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SharedCampaignTimeState } from '../../lib/campaignTime'
 import type { Character } from '../../types/character'
-import { reconcileDnd5eCharacterCampaignTime } from './campaignTimeRules'
+import { applyDnd5eLongRestBenefits, reconcileDnd5eCharacterCampaignTime } from './campaignTimeRules'
+import { consumeDnd5eStoredD20Replacement, registerDnd5eRulesPlugin } from './pluginApi'
 
 function character(patch: Partial<Character> = {}): Character {
   return {
@@ -21,6 +22,50 @@ function clock(worldMinute: number, advances: SharedCampaignTimeState['advances'
 }
 
 describe('D&D 5e campaign-time reconciliation', () => {
+  it('persists deterministic Host d20 results for a stored-result feature after a long rest', () => {
+    const pluginId = 'com.example.stored-d20'
+    const subclassId = `${pluginId}:diviner`
+    const featureId = `${subclassId}.portent`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Stored D20 Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerDeclarativeSubclass({
+          schemaVersion: 1, id: 'diviner', classId: 'wizard', name: 'Diviner', summary: 'Fixture.',
+          abilities: [{
+            schemaVersion: 1, id: 'portent', name: 'Portent', description: 'Stores Host d20 results.', level: 2,
+            trigger: { kind: 'long-rest-complete' }, targeting: { kind: 'self' }, effects: [],
+            mechanic: { kind: 'stored-d20-replacement', count: 2, countByClassLevel: [{ level: 14, count: 3 }] },
+            canModifyEnemyD20: true, automation: 'full',
+          }],
+        })
+      },
+    })
+    try {
+      const wizard = character({
+        charClass: '法师', level: 14, dnd5eClassLevels: { wizard: 14 },
+        dnd5eClassChoices: { classes: { wizard: { subclass: subclassId } } },
+        dnd5eCombatState: { declarativeStoredD20ByFeatureId: { [featureId]: [1] } },
+      })
+      const authoritativeRolls = [{ characterId: wizard.id, featureId, values: [2, 11, 19] }]
+      const first = applyDnd5eLongRestBenefits(wizard, 1_440, authoritativeRolls)
+      const second = applyDnd5eLongRestBenefits(wizard, 1_440, authoritativeRolls)
+      const values = first.dnd5eCombatState?.declarativeStoredD20ByFeatureId?.[featureId]
+      expect(values).toEqual([2, 11, 19])
+      expect(values?.every((value) => Number.isInteger(value) && value >= 1 && value <= 20)).toBe(true)
+      expect(second.dnd5eCombatState?.declarativeStoredD20ByFeatureId?.[featureId]).toEqual(values)
+      const duplicate = character({
+        dnd5eCombatState: { declarativeStoredD20ByFeatureId: { [featureId]: [7, 7, 12] } },
+      })
+      expect(consumeDnd5eStoredD20Replacement(duplicate, featureId, 7)
+        ?.dnd5eCombatState?.declarativeStoredD20ByFeatureId?.[featureId]).toEqual([7, 12])
+    } finally {
+      dispose()
+    }
+  })
+
   it('uses the first observation as a migration baseline', () => {
     const result = reconcileDnd5eCharacterCampaignTime(character(), clock(2_000, []))
     expect(result.character.dnd5eWorldTimeAppliedMinute).toBe(2_000)
@@ -85,6 +130,34 @@ describe('D&D 5e campaign-time reconciliation', () => {
     expect(selected.character.classResources?.fighterSecondWind.current).toBe(1)
     expect(skipped.character.classResources?.fighterSecondWind.current).toBe(0)
     expect(skipped.character.dnd5eWorldTimeAppliedMinute).toBe(540)
+  })
+
+  it('expires a timed maximum-HP reduction after sixty campaign minutes', () => {
+    const source = character({
+      maxHp: 24,
+      currentHp: 1,
+      dnd5eWorldTimeAppliedMinute: 480,
+      dnd5eCombatState: {
+        hitPointMaximumReductionLedger: {
+          schemaVersion: 1,
+          baseMaximum: 80,
+          entries: [{
+            id: 'harm:1',
+            amount: 56,
+            recovery: 'greater-restoration-or-other-magic',
+            remainingRounds: 600,
+          }],
+        },
+      },
+    })
+    const result = reconcileDnd5eCharacterCampaignTime(source, clock(540, [{
+      id: 'advance-hour', kind: 'advance', fromWorldMinute: 480, toWorldMinute: 540,
+      minutes: 60, reason: '推进一小时', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1,
+    }]))
+
+    expect(result.character.maxHp).toBe(80)
+    expect(result.character.currentHp).toBe(1)
+    expect(result.character.dnd5eCombatState?.hitPointMaximumReductionLedger).toBeUndefined()
   })
 
   it('lets a DM override the 24-hour long-rest limit for selected characters only', () => {

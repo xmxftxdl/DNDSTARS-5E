@@ -61,6 +61,10 @@ export interface Dnd5eDefensiveCreature {
   conditions: readonly string[]
   creatureType?: string
   magicResistance?: boolean
+  spellSavingThrowAdvantage?: boolean
+  spellSavingThrowAdvantageWithinFeet?: number
+  spellSavingThrowDisadvantageDamageTypes?: readonly Dnd5eDamageType[]
+  spellSavingThrowDisadvantageCastingClassIds?: readonly string[]
   racialSavingThrowAdvantages?: {
     conditions?: readonly string[]
     damageTypes?: readonly Dnd5eDamageType[]
@@ -102,6 +106,18 @@ const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason,
   'magic-resistance': {
     label: '魔法抗性',
     detail: '对法术或其他魔法效应的豁免具有优势。',
+  },
+  'spell-saving-throw-advantage': {
+    label: '法术抗性',
+    detail: '对抗法术的豁免具有优势。',
+  },
+  'nearby-spell-saving-throw-advantage': {
+    label: '近身抗法',
+    detail: '施法来源位于规则限定距离内，对该法术的豁免具有优势。',
+  },
+  'spell-saving-throw-disadvantage-aura': {
+    label: '法术压制灵光',
+    detail: '处于敌方灵光范围内，对匹配伤害类型法术的豁免具有劣势。',
   },
   'racial-save-advantage': {
     label: '种族适应',
@@ -200,8 +216,10 @@ export function dnd5eSavingThrowModeExplanation(
     condition?: string
     sourceCreatureType?: string
     sourceIsSpell?: boolean
+    sourceSpellcastingClassId?: string
     sourceIsMagical?: boolean
     damageType?: Dnd5eDamageType
+    sourceDistanceFeet?: number
   } = {},
 ): Dnd5eSavingThrowModeExplanation {
   const dangerSenseBlocked = dnd5eIsIncapacitated(creature) || hasCondition(creature, new Set([
@@ -224,6 +242,17 @@ export function dnd5eSavingThrowModeExplanation(
   const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
   const magicResistance = creature.magicResistance === true &&
     (context.sourceIsSpell === true || context.sourceIsMagical === true)
+  const spellSavingThrowAdvantage = creature.spellSavingThrowAdvantage === true &&
+    context.sourceIsSpell === true
+  const nearbySpellSavingThrowAdvantage = context.sourceIsSpell === true &&
+    (creature.spellSavingThrowAdvantageWithinFeet ?? 0) > 0 &&
+    Number.isFinite(context.sourceDistanceFeet) &&
+    (context.sourceDistanceFeet ?? Number.POSITIVE_INFINITY) <= (creature.spellSavingThrowAdvantageWithinFeet ?? 0)
+  const spellSavingThrowDisadvantageAura = context.sourceIsSpell === true && (
+    (context.damageType != null && creature.spellSavingThrowDisadvantageDamageTypes?.includes(context.damageType) === true) ||
+    (context.sourceSpellcastingClassId != null &&
+      creature.spellSavingThrowDisadvantageCastingClassIds?.includes(context.sourceSpellcastingClassId) === true)
+  )
   const racialSaveAdvantage = !!((
     context.condition != null &&
     creature.racialSavingThrowAdvantages?.conditions?.some((condition) =>
@@ -247,6 +276,8 @@ export function dnd5eSavingThrowModeExplanation(
       { active: rageStrength, reason: 'rage-strength-save' },
       { active: holyNimbus, reason: 'holy-nimbus' },
       { active: magicResistance, reason: 'magic-resistance' },
+      { active: spellSavingThrowAdvantage, reason: 'spell-saving-throw-advantage' },
+      { active: nearbySpellSavingThrowAdvantage, reason: 'nearby-spell-saving-throw-advantage' },
       { active: racialSaveAdvantage, reason: 'racial-save-advantage' },
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: dodgeDexterity, reason: 'dodge' },
@@ -287,6 +318,10 @@ export function dnd5eSavingThrowModeExplanation(
         active: mechanicModifiers.some((entry) => entry.mode === 'disadvantage'),
         reason: 'monster-mechanic-disadvantage',
       },
+      {
+        active: spellSavingThrowDisadvantageAura,
+        reason: 'spell-saving-throw-disadvantage-aura',
+      },
     ],
   })
   return {
@@ -304,8 +339,10 @@ export function dnd5eSavingThrowMode(
     condition?: string
     sourceCreatureType?: string
     sourceIsSpell?: boolean
+    sourceSpellcastingClassId?: string
     sourceIsMagical?: boolean
     damageType?: Dnd5eDamageType
+    sourceDistanceFeet?: number
   } = {},
 ): D20RollMode {
   return dnd5eSavingThrowModeExplanation(creature, ability, context).mode
@@ -323,10 +360,12 @@ export function dnd5eDamageAfterSavingThrow(input: {
   damage: number
   success: boolean
   successfulSave: 'none' | 'half'
+  /** An authoritative external source, such as a mounted rider, grants Evasion for this save. */
+  externalEvasion?: boolean
 }): number {
   const damage = Math.max(0, Math.floor(input.damage))
   if (input.successfulSave === 'none') return input.success ? 0 : damage
-  if (input.ability === 'dex' && dnd5eHasEvasion(input.creature)) {
+  if (input.ability === 'dex' && (input.externalEvasion === true || dnd5eHasEvasion(input.creature))) {
     return input.success ? 0 : Math.floor(damage / 2)
   }
   return input.success ? Math.floor(damage / 2) : damage

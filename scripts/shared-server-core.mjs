@@ -91,6 +91,8 @@ import {
   updateMarketplaceInstallation,
 } from '../shared/marketplace-analytics.mjs'
 import { sharedAuthenticatedSystemRoute, sharedPublicSystemRoute } from './shared-server-system-routes.mjs'
+import { projectDnd5eShopsForPlayer, validateDnd5eShopState } from './dnd5e-shop-state.mjs'
+export { projectDnd5eShopsForPlayer } from './dnd5e-shop-state.mjs'
 import { createInMemorySseEventPublisher } from './adapters/in-memory-sse-event-publisher.mjs'
 import { listCampaignSnapshotSummaries, readCampaignSnapshot } from './application/campaign-snapshot-catalog.mjs'
 import { handleRoomVoiceApi } from './application/room-voice-api.mjs'
@@ -158,6 +160,8 @@ const EVENT_CHANNEL_POLICIES = Object.freeze({
   'dice-roll-request-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dice-roll-request-dm-to-player': { publish: ['dm'], subscribe: ['player', 'spectator'] },
   'dnd5e-inventory-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
+  'dnd5e-shop-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
+  'dnd5e-shop-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'map-tabletop': { publish: ['dm', 'player'], subscribe: ['dm', 'player', 'spectator'] },
   'combat-presentation': { publish: ['dm'], subscribe: ['dm', 'player', 'spectator'] },
   'scene-presentation': { publish: ['dm'], subscribe: ['dm', 'player', 'spectator'] },
@@ -350,6 +354,7 @@ const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
   'characters',
   'maps',
   'combat',
+  'dm-authority-ready',
   'combat-interrupts',
   'combat-log',
   'dice-events',
@@ -360,6 +365,7 @@ const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
   'combat-command-receipts',
   'map-geometry',
   'room-journal',
+  'dnd5e-shops',
 ])
 
 export const COMBAT_COMMAND_SCHEMA_VERSION = 1
@@ -1511,6 +1517,451 @@ export function mergePlayerCharactersStateForAuthority(
   return { ...incomingState, characters: merged, selectedId }
 }
 
+const DND5E_CLASS_HIT_DIE_BY_ID = Object.freeze({
+  barbarian: 12,
+  bard: 8,
+  cleric: 8,
+  druid: 8,
+  fighter: 10,
+  monk: 8,
+  paladin: 10,
+  ranger: 10,
+  rogue: 8,
+  sorcerer: 6,
+  warlock: 8,
+  wizard: 6,
+})
+
+const DND5E_CLASS_ASI_LEVELS_BY_ID = Object.freeze({
+  barbarian: [4, 8, 12, 16, 19],
+  bard: [4, 8, 12, 16, 19],
+  cleric: [4, 8, 12, 16, 19],
+  druid: [4, 8, 12, 16, 19],
+  fighter: [4, 6, 8, 12, 14, 16, 19],
+  monk: [4, 8, 12, 16, 19],
+  paladin: [4, 8, 12, 16, 19],
+  ranger: [4, 8, 12, 16, 19],
+  rogue: [4, 8, 10, 12, 16, 19],
+  sorcerer: [4, 8, 12, 16, 19],
+  warlock: [4, 8, 12, 16, 19],
+  wizard: [4, 8, 12, 16, 19],
+})
+
+const DND5E_ABILITY_KEYS = Object.freeze(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+
+const DND5E_STANDARD_ARRAY = Object.freeze([15, 14, 13, 12, 10, 8])
+const DND5E_POINT_BUY_COST = Object.freeze({ 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 })
+
+function dnd5eAbilityModifier(score) {
+  return Math.floor((Number(score) - 10) / 2)
+}
+
+function validDnd5eAbilityGeneration(character) {
+  const abilities = plainObject(character?.abilities) ? character.abilities : null
+  const generation = plainObject(character?.dnd5eAbilityGeneration) ? character.dnd5eAbilityGeneration : null
+  const baseScores = plainObject(generation?.baseScores) ? generation.baseScores : null
+  const racialBonuses = plainObject(generation?.racialBonuses) ? generation.racialBonuses : null
+  if (!abilities || !baseScores || !racialBonuses) return false
+  const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha']
+  if (keys.some((key) => !Number.isSafeInteger(abilities[key]) || abilities[key] < 1 || abilities[key] > 22)) return false
+  if (keys.some((key) => !Number.isSafeInteger(baseScores[key]))) return false
+  if (keys.some((key) => !Number.isSafeInteger(racialBonuses[key]) || racialBonuses[key] < 0 || racialBonuses[key] > 2)) return false
+  if (keys.reduce((sum, key) => sum + racialBonuses[key], 0) > 6) return false
+  if (keys.some((key) => abilities[key] !== baseScores[key] + racialBonuses[key])) return false
+  const method = String(generation.method ?? '')
+  if (method === 'standard-array') {
+    return keys.map((key) => baseScores[key]).sort((a, b) => b - a).join(',') === DND5E_STANDARD_ARRAY.join(',')
+  }
+  if (method === 'point-buy') {
+    return keys.every((key) => DND5E_POINT_BUY_COST[baseScores[key]] != null) &&
+      keys.reduce((sum, key) => sum + DND5E_POINT_BUY_COST[baseScores[key]], 0) === 27
+  }
+  if (method !== 'roll-4d6') return false
+  const rolls = Array.isArray(generation.rolls) ? generation.rolls : []
+  if (rolls.length !== 6) return false
+  const rolledAbilities = new Set()
+  for (const roll of rolls) {
+    if (!plainObject(roll) || !keys.includes(roll.ability) || rolledAbilities.has(roll.ability)) return false
+    const dice = Array.isArray(roll.dice) ? roll.dice : []
+    const discarded = Number.isSafeInteger(roll.discardedIndex)
+      ? [roll.discardedIndex]
+      : Array.isArray(roll.discardedIndices) ? roll.discardedIndices : []
+    if (dice.length !== 4 || dice.some((die) => !Number.isSafeInteger(die) || die < 1 || die > 6)) return false
+    if (discarded.length !== 1 || !Number.isSafeInteger(discarded[0]) || discarded[0] < 0 || discarded[0] > 3) return false
+    if (dice[discarded[0]] !== Math.min(...dice)) return false
+    const total = dice.reduce((sum, die, index) => sum + (index === discarded[0] ? 0 : die), 0)
+    if (roll.total !== total || baseScores[roll.ability] !== total) return false
+    rolledAbilities.add(roll.ability)
+  }
+  return rolledAbilities.size === 6
+}
+
+function hostAbilityRollsMatch(character, issuedRolls) {
+  if (!Array.isArray(issuedRolls) || issuedRolls.length !== 6) return false
+  const submitted = Array.isArray(character?.dnd5eAbilityGeneration?.rolls)
+    ? character.dnd5eAbilityGeneration.rolls
+    : []
+  if (submitted.length !== 6) return false
+  const signature = (roll) => JSON.stringify({
+    dice: Array.isArray(roll?.dice) ? roll.dice.map(Number) : [],
+    discardedIndex: Number.isSafeInteger(roll?.discardedIndex)
+      ? roll.discardedIndex
+      : Array.isArray(roll?.discardedIndices) ? Number(roll.discardedIndices[0]) : -1,
+    total: Number(roll?.total),
+  })
+  return submitted.map(signature).sort().join('|') === issuedRolls.map(signature).sort().join('|')
+}
+
+function rollDnd5eAbilityScores(rollDie) {
+  const die = typeof rollDie === 'function' ? rollDie : (sides) => randomInt(1, sides + 1)
+  return Array.from({ length: 6 }, () => {
+    const dice = Array.from({ length: 4 }, () => Math.max(1, Math.min(6, Math.floor(Number(die(6))) || 1)))
+    const discardedIndex = dice.indexOf(Math.min(...dice))
+    return {
+      dice,
+      discardedIndex,
+      discardedIndices: [discardedIndex],
+      total: dice.reduce((sum, value, index) => sum + (index === discardedIndex ? 0 : value), 0),
+    }
+  })
+}
+
+function validateNewPlayerCharacterForAuthority(character, member) {
+  if (!plainObject(character) || typeof character.id !== 'string' || character.id.length < 3 || character.id.length > 160) {
+    return 'invalid-character'
+  }
+  if (character.rulesetId !== DND5E_2014_RULESET_ID || character.level !== 1) return 'invalid-character-level'
+  if (character.roomMemberId !== member.memberId) return 'character-ownership-required'
+  if (member.accountId && character.ownerAccountId !== member.accountId) return 'character-account-mismatch'
+  if (!validDnd5eAbilityGeneration(character)) return 'invalid-ability-generation'
+  const classLevels = plainObject(character.dnd5eClassLevels) ? character.dnd5eClassLevels : {}
+  const classEntries = Object.entries(classLevels).filter(([, level]) => Number(level) > 0)
+  if (classEntries.length !== 1 || classEntries[0][1] !== 1 || !DND5E_CLASS_HIT_DIE_BY_ID[classEntries[0][0]]) {
+    return 'invalid-class-levels'
+  }
+  const hitDie = DND5E_CLASS_HIT_DIE_BY_ID[classEntries[0][0]]
+  const expectedMaximum = Math.max(1, hitDie + dnd5eAbilityModifier(character.abilities.con))
+  if (character.maxHp !== expectedMaximum || character.currentHp !== expectedMaximum || Number(character.tempHp ?? 0) !== 0) {
+    return 'invalid-starting-hit-points'
+  }
+  const hitPointDice = Array.isArray(character.hitPointDice) ? character.hitPointDice : []
+  if (hitPointDice.length !== 1 || hitPointDice[0]?.sides !== hitDie || hitPointDice[0]?.current !== 1 || hitPointDice[0]?.max !== 1) {
+    return 'invalid-starting-hit-dice'
+  }
+  if (
+    (Array.isArray(character.conditions) && character.conditions.length > 0) ||
+    character.concentrating === true || character.dnd5eCombatState != null ||
+    Number(character.deathSaveSuccesses ?? 0) !== 0 || Number(character.deathSaveFailures ?? 0) !== 0 ||
+    (Array.isArray(character.dnd5eLevelAdvancements) && character.dnd5eLevelAdvancements.length > 0)
+  ) return 'invalid-starting-combat-state'
+  if (typeof character.name !== 'string' || !character.name.trim() || character.name.length > 80) return 'invalid-character-name'
+  return null
+}
+
+function validateDnd5eAdvancementForAuthority(current, incoming, authority = {}) {
+  if (playerAdvancementTransition(current, incoming) !== 'append') return 'invalid-advancement-receipt'
+  const currentLevels = plainObject(current.dnd5eClassLevels) ? current.dnd5eClassLevels : {}
+  const nextLevels = plainObject(incoming.dnd5eClassLevels) ? incoming.dnd5eClassLevels : {}
+  const allClasses = [...new Set([...Object.keys(currentLevels), ...Object.keys(nextLevels)])]
+  const advanced = allClasses.filter((classId) => Number(nextLevels[classId] ?? 0) === Number(currentLevels[classId] ?? 0) + 1)
+  if (
+    advanced.length !== 1 ||
+    allClasses.some((classId) => classId !== advanced[0] && Number(nextLevels[classId] ?? 0) !== Number(currentLevels[classId] ?? 0)) ||
+    Object.values(nextLevels).reduce((sum, level) => sum + Math.max(0, Number(level) || 0), 0) !== incoming.level
+  ) return 'invalid-class-level-transition'
+  const receipt = incoming.dnd5eLevelAdvancements.at(-1)
+  if (
+    receipt.classId !== advanced[0] ||
+    !DND5E_CLASS_HIT_DIE_BY_ID[receipt.classId] ||
+    receipt.fromClassLevel !== Number(currentLevels[receipt.classId] ?? 0) ||
+    receipt.toClassLevel !== Number(nextLevels[receipt.classId] ?? 0) ||
+    receipt.toClassLevel !== receipt.fromClassLevel + 1
+  ) return 'invalid-advancement-class'
+  const hitDie = DND5E_CLASS_HIT_DIE_BY_ID[receipt.classId]
+  const constitutionModifier = dnd5eAbilityModifier(incoming.abilities?.con)
+  const hpIncrease = Number(incoming.maxHp) - Number(current.maxHp)
+  const hitPointMethod = receipt.decision.hitPointMethod
+  const hitPointRolls = Array.isArray(receipt.decision.hitPointRolls) ? receipt.decision.hitPointRolls : []
+  if (hitPointMethod !== 'fixed' && hitPointMethod !== 'rolled') return 'invalid-hit-point-advancement'
+  if (receipt.fromClassLevel === 0 && hitPointMethod === 'rolled') return 'invalid-hit-point-advancement'
+  const hitPointBase = hitPointMethod === 'fixed'
+    ? Math.floor(hitDie / 2) + 1
+    : hitPointRolls.length === 1 && Number.isSafeInteger(hitPointRolls[0]) && hitPointRolls[0] >= 1 && hitPointRolls[0] <= hitDie
+      ? hitPointRolls[0]
+      : null
+  if (hitPointMethod === 'rolled' && hitPointBase !== authority.expectedHitPointRoll) {
+    return 'host-hit-point-roll-required'
+  }
+  const expectedIncrease = hitPointBase == null ? null : Math.max(1, hitPointBase + constitutionModifier)
+  if (
+    expectedIncrease == null ||
+    (hitPointMethod === 'fixed' && hitPointRolls.length !== 0) ||
+    hpIncrease !== expectedIncrease
+  ) {
+    return 'invalid-hit-point-advancement'
+  }
+  const expectedCurrentHp = Math.min(Number(incoming.maxHp), Number(current.currentHp) + expectedIncrease)
+  if (Number(incoming.currentHp) !== expectedCurrentHp) return 'invalid-hit-point-advancement'
+
+  const currentAbilities = plainObject(current.abilities) ? current.abilities : {}
+  const nextAbilities = plainObject(incoming.abilities) ? incoming.abilities : {}
+  const currentFeatIds = Array.isArray(current.dnd5eFeatIds) ? [...new Set(current.dnd5eFeatIds.map(String))] : []
+  const nextFeatIds = Array.isArray(incoming.dnd5eFeatIds) ? [...new Set(incoming.dnd5eFeatIds.map(String))] : []
+  const asiEntries = Array.isArray(receipt.decision.asiChoices) ? receipt.decision.asiChoices : []
+  const asiAvailable = DND5E_CLASS_ASI_LEVELS_BY_ID[receipt.classId]?.includes(receipt.toClassLevel) === true
+  if (!asiAvailable) {
+    if (asiEntries.length !== 0 || !sameJsonValue(currentAbilities, nextAbilities) || !sameJsonValue(currentFeatIds, nextFeatIds)) {
+      return 'invalid-asi-advancement'
+    }
+  } else {
+    if (asiEntries.length !== 1 || asiEntries[0]?.classLevel !== receipt.toClassLevel || !plainObject(asiEntries[0]?.choice)) {
+      return 'invalid-asi-advancement'
+    }
+    const choice = asiEntries[0].choice
+    if (choice.kind === 'ability-score') {
+      const increases = plainObject(choice.increases) ? choice.increases : {}
+      const entries = Object.entries(increases)
+      const total = entries.reduce((sum, [, value]) => sum + Number(value), 0)
+      if (
+        total !== 2 ||
+        entries.some(([key, value]) => !DND5E_ABILITY_KEYS.includes(key) || ![1, 2].includes(value)) ||
+        DND5E_ABILITY_KEYS.some((key) => Number(nextAbilities[key]) !== Number(currentAbilities[key]) + Number(increases[key] ?? 0)) ||
+        DND5E_ABILITY_KEYS.some((key) => Number(nextAbilities[key]) > 20) ||
+        !sameJsonValue(currentFeatIds, nextFeatIds)
+      ) return 'invalid-asi-advancement'
+    } else if (choice.kind === 'feat') {
+      const featId = boundedText(choice.featId, 180)
+      if (
+        !featId || currentFeatIds.includes(featId) ||
+        !sameJsonValue(currentAbilities, nextAbilities) ||
+        !sameJsonValue([...currentFeatIds, featId], nextFeatIds)
+      ) return 'invalid-asi-advancement'
+    } else {
+      return 'invalid-asi-advancement'
+    }
+  }
+  return null
+}
+
+function ownedCharacterIndex(characters, characterId, member) {
+  return characters.findIndex((candidate) => candidate?.id === characterId && candidate?.roomMemberId === member.memberId &&
+    (!member.accountId || !candidate.ownerAccountId || candidate.ownerAccountId === member.accountId))
+}
+
+/** Server-side command reducer used by web and native players. */
+export function applyPlayerCharacterCommand(currentState, rawCommand, member, options = {}) {
+  const command = plainObject(rawCommand) ? rawCommand : {}
+  const commandId = boundedText(command.commandId, 180)
+  const type = boundedText(command.type, 80)
+  if (!commandId || !type || !member?.memberId) return { ok: false, status: 400, error: 'invalid-character-command' }
+  const receipts = Array.isArray(currentState?.mobileCommandReceipts) ? currentState.mobileCommandReceipts : []
+  const prior = receipts.find((receipt) => receipt?.commandId === commandId && receipt?.memberId === member.memberId)
+  if (prior) return { ok: true, changed: false, next: currentState, result: prior.result, receipt: prior }
+  const characters = Array.isArray(currentState?.characters) ? currentState.characters.map((character) => structuredClone(character)) : []
+  let result = {}
+  const receiptDependencies = {}
+
+  if (type === 'roll-abilities') {
+    const rolls = rollDnd5eAbilityScores(options.rollDie)
+    result = { commandId, rolls }
+  } else if (type === 'create') {
+    const character = structuredClone(command.character)
+    const reason = validateNewPlayerCharacterForAuthority(character, member)
+    if (reason) return { ok: false, status: 422, error: reason }
+    const abilityMethod = String(character?.dnd5eAbilityGeneration?.method ?? '')
+    const abilityRollCommandId = boundedText(command.abilityRollCommandId, 180)
+    if (abilityMethod === 'roll-4d6') {
+      const issued = receipts.find((receipt) => receipt?.commandId === abilityRollCommandId && receipt?.memberId === member.memberId && receipt?.type === 'roll-abilities')
+      const consumed = receipts.some((receipt) => receipt?.type === 'create' && receipt?.abilityRollCommandId === abilityRollCommandId)
+      if (!issued || consumed || !hostAbilityRollsMatch(character, issued.result?.rolls)) {
+        return { ok: false, status: 422, error: 'host-ability-roll-required' }
+      }
+      receiptDependencies.abilityRollCommandId = abilityRollCommandId
+    } else if (abilityRollCommandId) {
+      return { ok: false, status: 422, error: 'unexpected-ability-roll-receipt' }
+    }
+    if (characters.some((candidate) => candidate?.id === character.id)) return { ok: false, status: 409, error: 'character-id-conflict' }
+    character.roomId = options.roomId ?? character.roomId
+    character.roomMemberId = member.memberId
+    if (member.accountId) character.ownerAccountId = member.accountId
+    character.dmNotes = ''
+    character.visibleToPlayers = true
+    characters.push(character)
+    result = { character }
+  } else {
+    const characterId = boundedText(command.characterId, 160)
+    const index = ownedCharacterIndex(characters, characterId, member)
+    if (index < 0) return { ok: false, status: 403, error: 'character-ownership-required' }
+    const current = characters[index]
+    if (type === 'roll-level-hit-points') {
+      const classId = boundedText(command.classId, 80)
+      const classLevels = plainObject(current.dnd5eClassLevels) ? current.dnd5eClassLevels : {}
+      const hitDie = DND5E_CLASS_HIT_DIE_BY_ID[classId]
+      const fromClassLevel = Math.max(0, Number(classLevels[classId]) || 0)
+      if (!hitDie || current.level >= 20) return { ok: false, status: 422, error: 'invalid-level-hit-die' }
+      const existing = receipts.find((receipt) => receipt?.type === 'roll-level-hit-points' && receipt?.memberId === member.memberId &&
+        receipt?.result?.characterId === current.id && receipt?.result?.classId === classId &&
+        receipt?.result?.fromClassLevel === fromClassLevel && receipt?.result?.toLevel === current.level + 1)
+      if (existing) return { ok: true, changed: false, next: currentState, result: existing.result, receipt: existing }
+      const rolled = (options.rollDie ?? ((sides) => randomInt(1, sides + 1)))(hitDie)
+      const roll = Math.max(1, Math.min(hitDie, Math.floor(Number(rolled)) || 1))
+      result = { commandId, characterId: current.id, classId, fromClassLevel, toClassLevel: fromClassLevel + 1, toLevel: current.level + 1, hitDie, roll }
+    } else if (type === 'profile') {
+      const patch = plainObject(command.patch) ? command.patch : {}
+      characters[index] = {
+        ...current,
+        ...(typeof patch.name === 'string' ? { name: boundedText(patch.name, 80) || current.name } : {}),
+        ...(typeof patch.avatar === 'string' ? { avatar: boundedText(patch.avatar, 12) || current.avatar } : {}),
+        ...(typeof patch.portrait === 'string' ? { portrait: patch.portrait.slice(0, 2_000_000) || undefined } : {}),
+        ...(typeof patch.tokenPortrait === 'string' ? { tokenPortrait: patch.tokenPortrait.slice(0, 2_000_000) || undefined } : {}),
+        ...(typeof patch.alignment === 'string' ? { alignment: boundedText(patch.alignment, 40) } : {}),
+        ...(typeof patch.backstory === 'string' ? { backstory: patch.backstory.slice(0, 20_000) } : {}),
+        ...(typeof patch.notes === 'string' ? { notes: patch.notes.slice(0, 20_000) } : {}),
+      }
+    } else if (type === 'spell-preparation') {
+      const owner = command.owner === 'fighter' ? 'fighter' : 'classes'
+      const classId = boundedText(command.classId, 80)
+      const selectionKey = boundedText(command.selectionKey, 100)
+      const spellId = boundedText(command.spellId, 160)
+      if (!classId || !selectionKey || !spellId) return { ok: false, status: 400, error: 'invalid-spell-preparation' }
+      const choices = structuredClone(plainObject(current.dnd5eClassChoices) ? current.dnd5eClassChoices : {})
+      choices.classes = plainObject(choices.classes) ? choices.classes : {}
+      choices.classes[classId] = plainObject(choices.classes[classId]) ? choices.classes[classId] : {}
+      choices.classes[classId].selections = plainObject(choices.classes[classId].selections) ? choices.classes[classId].selections : {}
+      choices.fighter = plainObject(choices.fighter) ? choices.fighter : {}
+      choices.fighter.extensionChoices = plainObject(choices.fighter.extensionChoices) ? choices.fighter.extensionChoices : {}
+      const selectionOwner = owner === 'fighter' ? choices.fighter.extensionChoices : choices.classes[classId].selections
+      const selected = Array.isArray(selectionOwner[selectionKey])
+        ? [...new Set(selectionOwner[selectionKey].map(String))]
+        : []
+      if (owner === 'classes' && classId === 'wizard') {
+        const spellbook = Array.isArray(choices.classes.wizard.selections['wizard-spellbook'])
+          ? choices.classes.wizard.selections['wizard-spellbook'].map(String)
+          : []
+        if (!spellbook.includes(spellId)) return { ok: false, status: 422, error: 'spell-not-in-spellbook' }
+      }
+      selectionOwner[selectionKey] = command.prepared === true
+        ? [...new Set([...selected, spellId])]
+        : selected.filter((id) => id !== spellId)
+      characters[index] = { ...current, dnd5eClassChoices: choices }
+    } else if (type === 'spell-slot') {
+      const resourceKey = boundedText(command.resourceKey, 100)
+      if (!/^dnd5e-spell-slot-[1-9]$/.test(resourceKey) && resourceKey !== 'dnd5e-pact-slot') {
+        return { ok: false, status: 400, error: 'invalid-spell-slot-resource' }
+      }
+      const resources = structuredClone(plainObject(current.classResources) ? current.classResources : {})
+      const resource = plainObject(resources[resourceKey]) ? resources[resourceKey] : null
+      if (!resource) return { ok: false, status: 404, error: 'spell-slot-resource-not-found' }
+      const maximum = Math.max(0, Number(resource.max) || 0)
+      resources[resourceKey] = { ...resource, current: Math.max(0, Math.min(maximum, Math.floor(Number(command.current) || 0))), max: maximum }
+      characters[index] = { ...current, classResources: resources }
+    } else if (type === 'spend-hit-die') {
+      if (options.combatActive === true) return { ok: false, status: 409, error: 'hit-die-combat-active' }
+      const poolIndex = Number(command.poolIndex)
+      const pools = Array.isArray(current.hitPointDice) ? structuredClone(current.hitPointDice) : []
+      const pool = pools[poolIndex]
+      const maximumHp = Math.max(1, Number(current.maxHp) || 1)
+      const currentHp = Math.max(0, Number(current.currentHp) || 0)
+      if (!Number.isSafeInteger(poolIndex) || !pool || Number(pool.current) < 1 || currentHp >= maximumHp) {
+        return { ok: false, status: 409, error: 'hit-die-unavailable' }
+      }
+      const sides = Math.max(2, Math.min(100, Math.floor(Number(pool.sides) || 0)))
+      const roll = (options.rollDie ?? ((die) => randomInt(1, die + 1)))(sides)
+      const healing = Math.max(0, roll + dnd5eAbilityModifier(current.abilities?.con))
+      pool.current = Math.max(0, Number(pool.current) - 1)
+      characters[index] = {
+        ...current,
+        currentHp: Math.min(maximumHp, currentHp + healing),
+        hitPointDice: pools,
+        dnd5eMobileLastHitDie: { poolIndex, roll, healing, updatedAt: options.now ?? Date.now() },
+      }
+      result = { roll, healing, currentHp: characters[index].currentHp }
+    } else if (type === 'recover-spell-slot') {
+      if (options.combatActive === true) return { ok: false, status: 409, error: 'rest-recovery-combat-active' }
+      const resourceKey = boundedText(command.resourceKey, 100)
+      const restAdvanceId = boundedText(command.restAdvanceId, 180)
+      const slotLevel = Number(resourceKey.match(/^dnd5e-spell-slot-([1-5])$/)?.[1])
+      const classLevels = plainObject(current.dnd5eClassLevels) ? current.dnd5eClassLevels : {}
+      const wizardLevel = Math.max(0, Number(classLevels.wizard) || 0)
+      const druidLevel = Math.max(0, Number(classLevels.druid) || 0)
+      const landDruid = current.dnd5eClassChoices?.classes?.druid?.subclass === 'land'
+      const featureKey = wizardLevel > 0
+        ? 'dnd5e-arcane-recovery'
+        : druidLevel >= 2 && landDruid ? 'dnd5e-natural-recovery' : ''
+      if (!featureKey || !slotLevel || !restAdvanceId) return { ok: false, status: 400, error: 'rest-slot-recovery-unavailable' }
+      const resources = structuredClone(plainObject(current.classResources) ? current.classResources : {})
+      const feature = plainObject(resources[featureKey]) ? resources[featureKey] : null
+      const slot = plainObject(resources[resourceKey]) ? resources[resourceKey] : null
+      if (!feature || !slot) return { ok: false, status: 404, error: 'rest-slot-resource-not-found' }
+      const classLevel = featureKey === 'dnd5e-arcane-recovery' ? wizardLevel : druidLevel
+      const recoveryLimit = Math.max(1, Math.ceil(classLevel / 2))
+      const marker = plainObject(current.dnd5eMobileRestSlotRecovery) ? current.dnd5eMobileRestSlotRecovery : {}
+      const continuing = marker.restAdvanceId === restAdvanceId
+      const spentLevels = continuing ? Math.max(0, Number(marker.levelsRecovered) || 0) : 0
+      if ((!continuing && Number(feature.current) < 1) || spentLevels + slotLevel > recoveryLimit) {
+        return { ok: false, status: 409, error: 'rest-slot-recovery-limit' }
+      }
+      if (Number(slot.current) >= Number(slot.max)) return { ok: false, status: 409, error: 'slot-already-full' }
+      resources[resourceKey] = { ...slot, current: Number(slot.current) + 1 }
+      if (!continuing) resources[featureKey] = { ...feature, current: Math.max(0, Number(feature.current) - 1) }
+      characters[index] = {
+        ...current,
+        classResources: resources,
+        dnd5eMobileRestSlotRecovery: { restAdvanceId, levelsRecovered: spentLevels + slotLevel, updatedAt: options.now ?? Date.now() },
+      }
+    } else if (type === 'level-up') {
+      const proposed = structuredClone(command.character)
+      if (!plainObject(proposed) || proposed.id !== current.id) return { ok: false, status: 400, error: 'invalid-level-up-character' }
+      const advancement = proposed?.dnd5eLevelAdvancements?.at?.(-1)
+      const hitPointRollCommandId = boundedText(command.hitPointRollCommandId, 180)
+      let expectedHitPointRoll
+      if (advancement?.decision?.hitPointMethod === 'rolled') {
+        const issued = receipts.find((receipt) => receipt?.commandId === hitPointRollCommandId && receipt?.memberId === member.memberId && receipt?.type === 'roll-level-hit-points')
+        const consumed = receipts.some((receipt) => receipt?.type === 'level-up' && receipt?.hitPointRollCommandId === hitPointRollCommandId)
+        if (
+          !issued || consumed || issued.result?.characterId !== current.id ||
+          issued.result?.classId !== advancement.classId || issued.result?.fromClassLevel !== advancement.fromClassLevel ||
+          issued.result?.toClassLevel !== advancement.toClassLevel || issued.result?.toLevel !== advancement.toLevel
+        ) return { ok: false, status: 422, error: 'host-hit-point-roll-required' }
+        expectedHitPointRoll = issued.result.roll
+        receiptDependencies.hitPointRollCommandId = hitPointRollCommandId
+      } else if (hitPointRollCommandId) {
+        return { ok: false, status: 422, error: 'unexpected-hit-point-roll-receipt' }
+      }
+      const reason = validateDnd5eAdvancementForAuthority(current, proposed, { expectedHitPointRoll })
+      if (reason) return { ok: false, status: 422, error: reason }
+      const merged = mergePlayerCharactersStateForAuthority(
+        { characters: [current], selectedId: current.id },
+        { characters: [proposed], selectedId: proposed.id },
+        member.memberId,
+        { combatActive: options.combatActive === true },
+      ).characters[0]
+      if (playerAdvancementTransition(current, merged) !== 'append') return { ok: false, status: 422, error: 'invalid-level-up-result' }
+      characters[index] = merged
+      result = { character: merged }
+    } else {
+      return { ok: false, status: 400, error: 'unsupported-character-command' }
+    }
+    result = Object.keys(result).length ? result : { character: characters[index] }
+  }
+
+  const now = options.now ?? Date.now()
+  const receipt = { commandId, memberId: member.memberId, type, result, ...receiptDependencies, appliedAt: now }
+  return {
+    ok: true,
+    changed: true,
+    next: {
+      ...(plainObject(currentState) ? currentState : {}),
+      characters,
+      selectedId: result.character?.id ?? currentState?.selectedId ?? characters.find((character) => character.roomMemberId === member.memberId)?.id ?? null,
+      mobileCommandReceipts: [...receipts, receipt].slice(-96),
+      updatedAt: now,
+    },
+    result,
+    receipt,
+  }
+}
+
 async function sharedCombatIsActiveForAuthority(ctx) {
   for (const root of [ctx.stateRoot, ctx.legacyStateRoot]) {
     if (!root) continue
@@ -2175,6 +2626,9 @@ export function mutateCombatInterruptQueue(
         (interrupt.payload.eligibleModifiers != null && (!Array.isArray(interrupt.payload.eligibleModifiers) ||
           interrupt.payload.eligibleModifiers.some((entry) => !plainObject(entry) ||
             (entry.additionalDice != null && ![1, 2].includes(entry.additionalDice)) ||
+            (entry.replacementValues != null && (!Array.isArray(entry.replacementValues) ||
+              entry.replacementValues.length < 1 || entry.replacementValues.length > 8 ||
+              entry.replacementValues.some((value) => !Number.isInteger(value) || value < 1 || value > 20))) ||
             (entry.selectionPolicy != null && !['owner-chooses', 'highest', 'lowest', 'must-use-latest'].includes(entry.selectionPolicy))))) ||
         !plainObject(interrupt.payload.transaction)
       )
@@ -2369,6 +2823,12 @@ export function mutateCombatInterruptQueue(
     )
     if (!eligibleModifier) {
       return { ok: false, status: 403, error: 'ineligible-roll-modifier' }
+    }
+    if (
+      contribution.kind === 'replace-d20' && Array.isArray(eligibleModifier.replacementValues) &&
+      !eligibleModifier.replacementValues.includes(contribution.replacementValue)
+    ) {
+      return { ok: false, status: 403, error: 'ineligible-roll-replacement' }
     }
     if (
       authorityRole === 'player' &&
@@ -2606,6 +3066,61 @@ function validTokenMovementAnimation(animation) {
     Number.isFinite(animation.issuedAt) && animation.issuedAt >= 0
 }
 
+export function roomMemberCharacterAssignment(member) {
+  const revision = Number.isSafeInteger(member?.characterAssignmentRevision)
+    ? Math.max(0, member.characterAssignmentRevision)
+    : 0
+  const characterId = boundedText(member?.dmAssignedCharacterId, 128)
+  const characterName = boundedText(member?.dmAssignedCharacterName, 80)
+  const enforced = member?.dmCharacterAssignmentEnforced === true && !!characterId
+  return {
+    revision,
+    enforced,
+    characterId: enforced ? characterId : null,
+    characterName: enforced ? (characterName || null) : null,
+  }
+}
+
+export function mutateRoomPlayerCharacterAssignment(room, input, now = Date.now()) {
+  const players = Array.isArray(room?.players) ? room.players : []
+  const target = players.find((player) =>
+    player?.memberId === input?.targetMemberId &&
+    player?.role !== 'spectator' &&
+    roomPlayerPresence(player, now) !== 'removed')
+  if (!target) return { ok: false, status: 404, error: 'member-not-found' }
+  const characterId = boundedText(input?.characterId, 128)
+  const characterName = boundedText(input?.characterName, 80)
+  const revision = Math.max(0, Number(target.characterAssignmentRevision) || 0) + 1
+  const assigned = characterId
+    ? {
+        ...target,
+        dmCharacterAssignmentEnforced: true,
+        dmAssignedCharacterId: characterId,
+        dmAssignedCharacterName: characterName || '未命名角色',
+        characterAssignmentRevision: revision,
+        activeCharacterId: characterId,
+        activeCharacterName: characterName || '未命名角色',
+      }
+    : {
+        ...target,
+        dmCharacterAssignmentEnforced: false,
+        dmAssignedCharacterId: undefined,
+        dmAssignedCharacterName: undefined,
+        characterAssignmentRevision: revision,
+      }
+  return {
+    ok: true,
+    member: room.host,
+    role: 'dm',
+    assignment: roomMemberCharacterAssignment(assigned),
+    next: {
+      ...room,
+      players: players.map((player) => player?.memberId === target.memberId ? assigned : player),
+      updatedAt: now,
+    },
+  }
+}
+
 const DND5E_TOKEN_STATUS_MARKER_IDS = new Set([
   'blinded', 'charmed', 'deafened', 'frightened', 'grappled', 'incapacitated',
   'invisible', 'paralyzed', 'petrified', 'poisoned', 'prone', 'restrained',
@@ -2630,6 +3145,21 @@ function validDnd5eTokenStatusMarkers(markers) {
     ) return false
     ids.add(marker.id)
     statusIds.add(marker.statusId)
+  }
+  return true
+}
+
+function validDnd5eSuppressedStatusMarkerIds(markerIds) {
+  if (markerIds == null) return true
+  if (!Array.isArray(markerIds) || markerIds.length > 64) return false
+  const ids = new Set()
+  for (const markerId of markerIds) {
+    if (
+      typeof markerId !== 'string' ||
+      !/^[a-z0-9][a-z0-9:_-]{0,159}$/i.test(markerId) ||
+      ids.has(markerId)
+    ) return false
+    ids.add(markerId)
   }
   return true
 }
@@ -3143,9 +3673,10 @@ export function projectRoomJournalForMember(value, memberId, isDm = false) {
 }
 
 function characterOwnedByRoomMember(character, member) {
-  return character?.roomMemberId === member?.memberId || (
-    typeof member?.accountId === 'string' && member.accountId && character?.ownerAccountId === member.accountId
-  )
+  if (typeof character?.roomMemberId === 'string' && character.roomMemberId) {
+    return character.roomMemberId === member?.memberId
+  }
+  return typeof member?.accountId === 'string' && !!member.accountId && character?.ownerAccountId === member.accountId
 }
 
 function projectUnidentifiedInventoryForPlayer(inventory) {
@@ -3454,11 +3985,57 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
  * to players. Explicitly public interaction points retain only the marker and prompt required for
  * the player to request a Host-authoritative interaction.
  */
+const SCENE_WEATHER_KINDS = new Set([
+  'none',
+  'sunny',
+  'cloudy',
+  'night',
+  'cave',
+  'fog',
+  'rain',
+  'snow',
+  'thunderstorm',
+  'hail',
+  'blizzard',
+  'sandstorm',
+  'wind',
+  'embers',
+])
+
+function validSceneWeather(weather) {
+  return plainObject(weather) &&
+    SCENE_WEATHER_KINDS.has(weather.kind) &&
+    Number.isFinite(weather.intensity) && weather.intensity >= 0 && weather.intensity <= 1 &&
+    Number.isFinite(weather.windAngleDegrees) && weather.windAngleDegrees >= -70 && weather.windAngleDegrees <= 70 &&
+    Number.isFinite(weather.speed) && weather.speed >= 0.35 && weather.speed <= 2.5 &&
+    (weather.soundEnabled == null || typeof weather.soundEnabled === 'boolean') &&
+    (weather.soundVolume == null || (
+      Number.isFinite(weather.soundVolume) && weather.soundVolume >= 0 && weather.soundVolume <= 1
+    ))
+}
+
+function projectSceneWeather(weather) {
+  return validSceneWeather(weather)
+    ? {
+        kind: weather.kind,
+        intensity: weather.intensity,
+        windAngleDegrees: weather.windAngleDegrees,
+        speed: weather.speed,
+        soundEnabled: weather.soundEnabled !== false,
+        soundVolume: Number.isFinite(weather.soundVolume) ? weather.soundVolume : 0.55,
+      }
+    : {
+        kind: 'none', intensity: 0.6, windAngleDegrees: 10, speed: 1,
+        soundEnabled: true, soundVolume: 0.55,
+      }
+}
+
 export function projectSceneOrchestrationForPlayer(value) {
   return {
     schemaVersion: 1,
     scenes: (Array.isArray(value?.scenes) ? value.scenes : []).flatMap((scene) => {
       if (!plainObject(scene) || !validSceneId(scene.id) || !validSceneId(scene.mapId)) return []
+      const weather = projectSceneWeather(scene.weather)
       const interactionPoints = (Array.isArray(scene.interactionPoints) ? scene.interactionPoints : [])
         .filter((point) => plainObject(point) && point.enabled === true && point.visibleToPlayers === true)
         .map((point) => ({
@@ -3478,13 +4055,14 @@ export function projectSceneOrchestrationForPlayer(value) {
           successEffects: [],
           failureEffects: [],
         }))
-      if (interactionPoints.length < 1) return []
+      if (interactionPoints.length < 1 && weather.kind === 'none') return []
       return [{
         id: scene.id,
         mapId: scene.mapId,
         name: scene.name,
         description: '',
         environmentLabel: '',
+        weather,
         backgroundCue: 'none',
         backgroundAudioLoop: false,
         backgroundAudioVolume: 0,
@@ -3553,6 +4131,22 @@ function validCampaignRestRecoveryReports(value) {
   return true
 }
 
+function validCampaignRestFeatureD20Rolls(value) {
+  if (!Array.isArray(value) || value.length > 128) return false
+  const keys = new Set()
+  for (const roll of value) {
+    const key = `${roll?.characterId ?? ''}\u001f${roll?.featureId ?? ''}`
+    if (
+      !plainObject(roll) || typeof roll.characterId !== 'string' || !roll.characterId || roll.characterId.length > 160 ||
+      typeof roll.featureId !== 'string' || !roll.featureId || roll.featureId.length > 200 || keys.has(key) ||
+      !Array.isArray(roll.values) || roll.values.length < 1 || roll.values.length > 8 ||
+      roll.values.some((value) => !Number.isInteger(value) || value < 1 || value > 20)
+    ) return false
+    keys.add(key)
+  }
+  return true
+}
+
 function validateCampaignTimeState(value) {
   if (
     ![1, CAMPAIGN_TIME_SCHEMA_VERSION].includes(value?.schemaVersion) || !Number.isSafeInteger(value.worldMinute) || value.worldMinute < 0 ||
@@ -3605,6 +4199,9 @@ function validateCampaignTimeState(value) {
       (advance.restRecoveryReports != null && (
         !['short-rest', 'long-rest'].includes(advance.kind) ||
         !validCampaignRestRecoveryReports(advance.restRecoveryReports)
+      )) ||
+      (advance.restFeatureD20Rolls != null && (
+        advance.kind !== 'long-rest' || !validCampaignRestFeatureD20Rolls(advance.restFeatureD20Rolls)
       )) ||
       typeof advance.reason !== 'string' || advance.reason.length > 160 ||
       !Number.isFinite(advance.createdAt) || advance.createdAt < 0
@@ -3664,6 +4261,9 @@ function advanceCampaignTimeState(base, minutes, reason, kind, now, options = {}
     ...(Array.isArray(options.restRecoveryReports)
       ? { restRecoveryReports: options.restRecoveryReports }
       : {}),
+    ...(Array.isArray(options.restFeatureD20Rolls)
+      ? { restFeatureD20Rolls: options.restFeatureD20Rolls }
+      : {}),
     createdAt: now,
   }
   return {
@@ -3719,11 +4319,23 @@ export function mutateCampaignTimeState(current, mutation, now, member, context 
       }
       restRecoveryReports = mutation.restRecoveryReports
     }
+    let restFeatureD20Rolls
+    if (mutation.restFeatureD20Rolls != null) {
+      if (kind !== 'long-rest' || !validCampaignRestFeatureD20Rolls(mutation.restFeatureD20Rolls)) {
+        return { ok: false, status: 400, error: 'invalid-rest-feature-d20-rolls' }
+      }
+      const beneficiarySet = beneficiaryCharacterIds ? new Set(beneficiaryCharacterIds) : null
+      if (beneficiarySet && mutation.restFeatureD20Rolls.some((roll) => !beneficiarySet.has(roll.characterId))) {
+        return { ok: false, status: 400, error: 'rest-feature-roll-beneficiary-mismatch' }
+      }
+      restFeatureD20Rolls = mutation.restFeatureD20Rolls
+    }
     const reason = boundedText(mutation.reason, 160) || (kind === 'long-rest' ? '完成长休' : kind === 'short-rest' ? '完成短休' : '推进时间')
     const advanced = advanceCampaignTimeState(base, minutes, reason, kind, now, {
       beneficiaryCharacterIds,
       ignoreLongRestCooldown: mutation.ignoreLongRestCooldown === true,
       restRecoveryReports,
+      restFeatureD20Rolls,
     })
     if (!advanced) return { ok: false, status: 400, error: 'campaign-time-overflow' }
     return {
@@ -3897,6 +4509,7 @@ function validateCustomMonsterState(value) {
   const tacticalTokenStatusMarkerIds = new Set([
     'burning', 'bleeding', 'diseased', 'cursed', 'marked', 'concentrating',
     'silenced', 'slowed', 'weakened', 'protected', 'exposed', 'hidden', 'fire-averse',
+    'attached', 'suffocating',
   ])
   for (const monster of value.monsters) {
     if (
@@ -3921,9 +4534,10 @@ function validateCustomMonsterState(value) {
         monster.tokenStatusMarkerGrants.length > 32 ||
         monster.tokenStatusMarkerGrants.some((grant) =>
           !plainObject(grant) ||
-          Object.keys(grant).some((key) => key !== 'statusId' && key !== 'target') ||
+          Object.keys(grant).some((key) => key !== 'statusId' && key !== 'target' && key !== 'application') ||
           !tacticalTokenStatusMarkerIds.has(grant.statusId) ||
-          !['self', 'other'].includes(grant.target))
+          !['self', 'other'].includes(grant.target) ||
+          (grant.application != null && !['marker', 'active-effect'].includes(grant.application)))
       )) ||
       !plainObject(monster.challenge) || typeof monster.challenge.rating !== 'string' ||
       !Number.isSafeInteger(monster.challenge.xp) || monster.challenge.xp < 0
@@ -4092,16 +4706,26 @@ function validateSceneOrchestrationState(value) {
     !Array.isArray(value.runtime.receipts) || value.runtime.receipts.length > 2_000 ||
     !Array.isArray(value.runtime.history) || value.runtime.history.length > 240 ||
     typeof value.runtime.paused !== 'boolean') return 'invalid-scene-orchestration'
+  if (value.globalAudio != null && (
+    !plainObject(value.globalAudio) ||
+    (value.globalAudio.assetId != null && (typeof value.globalAudio.assetId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(value.globalAudio.assetId))) ||
+    typeof value.globalAudio.loop !== 'boolean' ||
+    typeof value.globalAudio.autoPlay !== 'boolean' ||
+    !Number.isFinite(value.globalAudio.volume) || value.globalAudio.volume < 0 || value.globalAudio.volume > 1
+  )) return 'invalid-scene-global-audio'
   const sceneIds = new Set()
   for (const scene of value.scenes) {
     if (!plainObject(scene) || !validSceneId(scene.id) || sceneIds.has(scene.id) || !validSceneId(scene.mapId) ||
       typeof scene.name !== 'string' || !scene.name || scene.name.length > 160 ||
       typeof scene.description !== 'string' || scene.description.length > 2_000 ||
       typeof scene.environmentLabel !== 'string' || scene.environmentLabel.length > 300 ||
+      (scene.weather != null && !validSceneWeather(scene.weather)) ||
       !['none', 'discovery', 'danger', 'door', 'mystery', 'victory'].includes(scene.backgroundCue) ||
+      (scene.backgroundAudioMode != null && !['inherit', 'override', 'silent'].includes(scene.backgroundAudioMode)) ||
       (scene.backgroundAudioId != null && (typeof scene.backgroundAudioId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(scene.backgroundAudioId))) ||
       (scene.backgroundAudioLoop != null && typeof scene.backgroundAudioLoop !== 'boolean') ||
       (scene.backgroundAudioVolume != null && (!Number.isFinite(scene.backgroundAudioVolume) || scene.backgroundAudioVolume < 0 || scene.backgroundAudioVolume > 1)) ||
+      (scene.backgroundAudioAutoPlay != null && typeof scene.backgroundAudioAutoPlay !== 'boolean') ||
       !Array.isArray(scene.boundHandoutIds) || scene.boundHandoutIds.length > 100 || !scene.boundHandoutIds.every(validSceneId) ||
       !Array.isArray(scene.boundJournalEntryIds) || scene.boundJournalEntryIds.length > 100 || !scene.boundJournalEntryIds.every(validSceneId) ||
       (scene.interactionPoints != null && (
@@ -4239,6 +4863,7 @@ function validateDnd5eResourceStates(name, value) {
   if (name === 'scene-orchestration') return validateSceneOrchestrationState(value)
   if (name === 'scene-audio-library') return validateSceneAudioLibraryState(value)
   if (name === 'scene-audio-playback') return validateSceneAudioPlaybackState(value)
+  if (name === 'dnd5e-shops') return validateDnd5eShopState(value)
   if (name === 'characters') {
     let portraitLength = 0
     for (const character of value.characters ?? []) {
@@ -4281,6 +4906,9 @@ function validateDnd5eResourceStates(name, value) {
         }
         if (!validDnd5eTokenStatusMarkers(token.dnd5eTokenStatusMarkers)) {
           return 'invalid-dnd5e-token-status-markers'
+        }
+        if (!validDnd5eSuppressedStatusMarkerIds(token.dnd5eSuppressedStatusMarkerIds)) {
+          return 'invalid-dnd5e-suppressed-status-marker-ids'
         }
         const reason = validateActiveEffectState(token.dnd5eCombatState, token.dnd5eCombatState?.conditions ?? [])
         if (reason) return reason
@@ -5040,6 +5668,7 @@ function redactUnseenToken(token) {
     poolId: _poolId,
     dnd5eCombatState: _dnd5eCombatState,
     dnd5eTokenStatusMarkers: _dnd5eTokenStatusMarkers,
+    dnd5eSuppressedStatusMarkerIds: _dnd5eSuppressedStatusMarkerIds,
     playerVisibleEnemyDetail: _playerVisibleEnemyDetail,
     obstacleKind: _obstacleKind,
     ...position
@@ -5070,8 +5699,9 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
     .filter((character) => plainObject(character) && typeof character.id === 'string')
     .map((character) => [character.id, character]))
   const ownsCharacter = (character) =>
-    (typeof viewerIdentity?.memberId === 'string' && character.roomMemberId === viewerIdentity.memberId) ||
-    (typeof viewerIdentity?.accountId === 'string' && character.ownerAccountId === viewerIdentity.accountId)
+    typeof character?.roomMemberId === 'string' && character.roomMemberId
+      ? typeof viewerIdentity?.memberId === 'string' && character.roomMemberId === viewerIdentity.memberId
+      : typeof viewerIdentity?.accountId === 'string' && character.ownerAccountId === viewerIdentity.accountId
   const requestedCharacterId = typeof activeCharacterId === 'string' && activeCharacterId.length > 0
     ? activeCharacterId
     : null
@@ -5381,6 +6011,7 @@ export function validateSharedStateShape(name, value) {
     'combat-statistics': 'sessions',
     'scene-orchestration': 'scenes',
     'scene-audio-library': 'assets',
+    'dnd5e-shops': 'shops',
   }
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
@@ -5587,6 +6218,7 @@ const DM_UNDOABLE_STATE = new Set([
   'scene-orchestration',
   'scene-audio-playback',
   'room-journal',
+  'dnd5e-shops',
 ])
 
 function dmUndoJournalFile(ctx) {
@@ -7999,6 +8631,49 @@ async function mutateAccount(ctx, accountId, updater) {
   })
 }
 
+function normalizePushSubscription(value) {
+  if (!plainObject(value)) return null
+  const deviceId = typeof value.deviceId === 'string' ? value.deviceId.trim() : ''
+  const token = typeof value.token === 'string' ? value.token.trim() : ''
+  const platform = value.platform === 'ios' || value.platform === 'android' ? value.platform : null
+  if (!/^[a-zA-Z0-9._:-]{8,160}$/.test(deviceId)) return null
+  if (!/^Expo(?:nent)?PushToken\[[a-zA-Z0-9_-]{10,220}\]$/.test(token)) return null
+  if (!platform) return null
+  return { deviceId, token, platform }
+}
+
+async function deleteRegisteredAccount(ctx, account, currentPassword) {
+  if (!plainObject(account?.auth) || !plainObject(account.auth.password)) {
+    throw new RoomProtocolError(409, 'registered-account-required')
+  }
+  if (!currentPassword || !secretMatches(account.auth.password, currentPassword)) {
+    throw new RoomProtocolError(401, 'invalid-account-current-password')
+  }
+  return withWriteLock(accountAuthLockFile(ctx), async () => {
+    const current = await readAccount(ctx, account.accountId)
+    if (!plainObject(current?.auth) || !secretMatches(current.auth.password, currentPassword)) {
+      throw new RoomProtocolError(401, 'invalid-account-current-password')
+    }
+    const identityFiles = []
+    const usernameKey = normalizeAccountUsername(current.auth.username)?.key ?? current.auth.usernameKey
+    if (typeof usernameKey === 'string' && usernameKey) {
+      identityFiles.push(accountIdentityFile(ctx, 'username', usernameKey))
+    }
+    const channel = current.auth.channel
+    const destination = normalizeAccountContact(channel, current.auth.destination)
+    if ((channel === 'email' || channel === 'phone') && destination) {
+      identityFiles.push(accountIdentityFile(ctx, channel, destination))
+    }
+    const store = await accountPersistentStore(ctx)
+    if (store) await store.deleteAccount(current.accountId)
+    await Promise.all([
+      rm(accountFile(ctx, current.accountId), { force: true }),
+      ...identityFiles.map((filePath) => rm(filePath, { force: true })),
+    ])
+    return { deleted: true, accountId: current.accountId }
+  })
+}
+
 async function createAccountRecord(ctx, payload, now = Date.now()) {
   const displayName = normalizedLabel(payload?.displayName, 24)
   const clientId = payload?.clientId
@@ -8897,6 +9572,7 @@ function roomMemberResponse(room, member, role, roomToken = undefined) {
       role,
       ...(member.slot ? { slot: member.slot } : {}),
       displayName: member.displayName,
+      characterAssignment: roomMemberCharacterAssignment(member),
     },
   }
 }
@@ -9517,6 +10193,18 @@ async function handleAccountApi(req, res, parsed, ctx) {
     return true
   }
 
+  if (parsed.pathname === '/api/accounts/me' && req.method === 'DELETE') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const currentPassword = normalizeAccountPassword(payload?.currentPassword)
+    if (payload?.confirmation !== 'DELETE') {
+      throw new RoomProtocolError(400, 'account-deletion-confirmation-required')
+    }
+    const result = await deleteRegisteredAccount(ctx, account, currentPassword)
+    writeJson(res, 200, result)
+    return true
+  }
+
   if (parsed.pathname === '/api/accounts/me' && req.method === 'PATCH') {
     const account = await authenticateAccount(req, ctx)
     const payload = await readJsonRequest(req, 512 * 1024)
@@ -9562,6 +10250,45 @@ async function handleAccountApi(req, res, parsed, ctx) {
       updatedAt: now,
     }))
     writeJson(res, 200, { ok: true })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/push-subscriptions' && req.method === 'PUT') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const subscription = normalizePushSubscription(payload)
+    if (!subscription) throw new RoomProtocolError(400, 'invalid-push-subscription')
+    const now = Date.now()
+    await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      pushSubscriptions: [
+        ...(Array.isArray(current.pushSubscriptions)
+          ? current.pushSubscriptions.filter((candidate) => candidate?.deviceId !== subscription.deviceId)
+          : []),
+        { ...subscription, provider: 'expo', enabledAt: now, updatedAt: now },
+      ].slice(-12),
+      updatedAt: now,
+    }))
+    writeJson(res, 200, { registered: true, deviceId: subscription.deviceId })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/push-subscriptions' && req.method === 'DELETE') {
+    const account = await authenticateAccount(req, ctx)
+    const payload = await readJsonRequest(req)
+    const deviceId = typeof payload?.deviceId === 'string' ? payload.deviceId.trim() : ''
+    if (!/^[a-zA-Z0-9._:-]{8,160}$/.test(deviceId)) {
+      throw new RoomProtocolError(400, 'invalid-push-subscription')
+    }
+    const now = Date.now()
+    await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      pushSubscriptions: Array.isArray(current.pushSubscriptions)
+        ? current.pushSubscriptions.filter((candidate) => candidate?.deviceId !== deviceId)
+        : [],
+      updatedAt: now,
+    }))
+    writeJson(res, 200, { registered: false, deviceId })
     return true
   }
 
@@ -11041,6 +11768,22 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     const memberId = payload?.memberId
     const operation = payload?.operation
     const account = await authenticateAccount(req, ctx, true)
+    let assignmentCharacter = null
+    if (operation === 'assign-character' && payload?.characterId != null) {
+      const characterId = boundedText(payload.characterId, 128)
+      if (!characterId) throw new RoomProtocolError(400, 'invalid-character-assignment')
+      const characterState = await readCharactersForProjection(scopedContext(ctx, roomId))
+      if (characterState.corrupted) throw new RoomProtocolError(409, 'characters-unavailable')
+      assignmentCharacter = (Array.isArray(characterState.value?.characters) ? characterState.value.characters : [])
+        .find((character) => character?.id === characterId)
+      if (
+        !assignmentCharacter ||
+        assignmentCharacter.visibleToPlayers === false ||
+        assignmentCharacter.roomMemberId !== payload?.targetMemberId
+      ) {
+        throw new RoomProtocolError(409, 'character-assignment-conflict')
+      }
+    }
     const result = await mutateLobbyRoom(ctx, roomId, (room) => {
       if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
       if (room.host?.memberId !== memberId || !roomMemberAccountAuthorized(room.host, account)) {
@@ -11101,6 +11844,13 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           },
         }
       }
+      if (operation === 'assign-character') {
+        return mutateRoomPlayerCharacterAssignment(room, {
+          targetMemberId: payload.targetMemberId,
+          characterId: assignmentCharacter?.id ?? null,
+          characterName: assignmentCharacter?.name ?? null,
+        }, now)
+      }
       if (operation === 'transfer-dm') {
         const target = activePlayers.find((player) => player.memberId === payload.targetMemberId)
         if (!target) return { ok: false, status: 404, error: 'member-not-found' }
@@ -11132,6 +11882,13 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       }
       return { ok: false, status: 400, error: 'invalid-room-operation' }
     })
+    if (operation === 'assign-character') {
+      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
+        id: `room-character-assignment:${payload?.targetMemberId}:${result.room.updatedAt}`,
+        name: 'room-character-assignment',
+        updatedAt: result.room.updatedAt,
+      })
+    }
     writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role))
     return true
   }
@@ -11218,6 +11975,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         online: roomPlayerPresence(player, now) === 'online',
         activeCharacterId: normalizedLabel(player.activeCharacterId, 128) || null,
         activeCharacterName: normalizedLabel(player.activeCharacterName, 80) || null,
+        characterAssignment: roomMemberCharacterAssignment(player),
         ...roomPluginReadiness(result.room.requiredPlugins, player.activePlugins),
       })),
     })
@@ -11282,15 +12040,24 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
     const characterPresenceProvided = Object.prototype.hasOwnProperty.call(payload ?? {}, 'activeCharacterId') ||
       Object.prototype.hasOwnProperty.call(payload ?? {}, 'activeCharacterName')
-    const presencePatch = (member) => characterPresenceProvided
-      ? {
-          activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
-          activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+    const presencePatch = (member) => {
+      const assignment = roomMemberCharacterAssignment(member)
+      if (assignment.enforced) {
+        return {
+          activeCharacterId: assignment.characterId,
+          activeCharacterName: assignment.characterName,
         }
-      : {
-          activeCharacterId: member?.activeCharacterId ?? null,
-          activeCharacterName: member?.activeCharacterName ?? null,
-        }
+      }
+      return characterPresenceProvided
+        ? {
+            activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
+            activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+          }
+        : {
+            activeCharacterId: member?.activeCharacterId ?? null,
+            activeCharacterName: member?.activeCharacterName ?? null,
+          }
+    }
     const result = await mutateLobbyRoom(ctx, roomId, (room) => {
       if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
       if (room.host?.memberId === memberId) {
@@ -11414,11 +12181,99 @@ function addEventClient(ctx, channel, res, viewer) {
 
 function publishEvent(ctx, channel, payload) {
   eventPublisher(ctx).publish(channel, payload)
+  scheduleRoomPushForEvent(ctx, channel, payload)
 }
 
 /** A committed state transaction must not be reported as failed when SSE delivery throws. */
 export function publishEventBestEffort(ctx, channel, payload) {
-  return eventPublisher(ctx).publishBestEffort(channel, payload)
+  const result = eventPublisher(ctx).publishBestEffort(channel, payload)
+  scheduleRoomPushForEvent(ctx, channel, payload)
+  return result
+}
+
+const ROOM_PUSH_RESOURCE_MESSAGES = Object.freeze({
+  'combat-interrupts': {
+    title: '战斗中有待处理的决断',
+    body: '返回 Astral Trace 处理你的投掷、反应或能力选择。',
+  },
+  'room-chat': {
+    title: '房间收到新消息',
+    body: '打开 Astral Trace 查看最新通讯。',
+  },
+})
+
+export async function sendExpoPushMessages(messages, fetchImpl = fetch) {
+  const safe = Array.isArray(messages)
+    ? messages.filter((message) => plainObject(message) && /^Expo(?:nent)?PushToken\[[a-zA-Z0-9_-]{10,220}\]$/.test(message.to))
+    : []
+  if (safe.length === 0) return { sent: 0, tickets: [] }
+  const response = await fetchImpl('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'gzip, deflate',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(safe.slice(0, 100)),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`expo-push-http-${response.status}`)
+  const payload = await response.json()
+  return { sent: safe.length, tickets: Array.isArray(payload?.data) ? payload.data : [] }
+}
+
+async function dispatchRoomPushForEvent(ctx, channel, payload) {
+  const definition = channel === SHARED_STATE_CHANGED_CHANNEL
+    ? ROOM_PUSH_RESOURCE_MESSAGES[payload?.name]
+    : null
+  const roomId = normalizeLobbyRoomCode(ctx.roomId)
+  if (!definition || roomId.length !== 6) return
+  const room = await readLobbyRoomOptional(ctx, roomId)
+  if (!room || room.closedAt) return
+  const accountIds = [...new Set((Array.isArray(room.players) ? room.players : [])
+    .filter((player) => player?.role !== 'spectator' && typeof player?.accountId === 'string')
+    .map((player) => player.accountId))]
+  const subscriptions = []
+  for (const accountId of accountIds) {
+    try {
+      const account = await readAccount(ctx, accountId)
+      for (const subscription of Array.isArray(account.pushSubscriptions) ? account.pushSubscriptions : []) {
+        const normalized = normalizePushSubscription(subscription)
+        if (normalized) subscriptions.push(normalized)
+      }
+    } catch {
+      // A stale/deleted account must never break the room transaction that emitted the event.
+    }
+  }
+  const tokens = [...new Map(subscriptions.map((subscription) => [subscription.token, subscription])).values()]
+  if (tokens.length === 0) return
+  await sendExpoPushMessages(tokens.map((subscription) => ({
+    to: subscription.token,
+    title: definition.title,
+    body: definition.body,
+    sound: 'default',
+    channelId: 'room-events',
+    data: { roomId, resource: payload.name, route: 'room' },
+  })))
+}
+
+function scheduleRoomPushForEvent(ctx, channel, payload) {
+  if (channel !== SHARED_STATE_CHANGED_CHANNEL || !ROOM_PUSH_RESOURCE_MESSAGES[payload?.name]) return
+  const roomId = normalizeLobbyRoomCode(ctx.roomId)
+  if (roomId.length !== 6) return
+  const debounce = ctx.pushNotificationDebounce instanceof Map ? ctx.pushNotificationDebounce : null
+  const key = `${roomId}:${payload.name}`
+  const now = Date.now()
+  if (debounce && now - Number(debounce.get(key) ?? 0) < 5_000) return
+  debounce?.set(key, now)
+  void dispatchRoomPushForEvent(ctx, channel, payload).catch((error) => {
+    ctx.telemetry?.observe?.({
+      operation: 'room-push-delivery',
+      outcome: 'error',
+      durationMs: 0,
+      attributes: { roomId, resource: payload.name, error: String(error?.message ?? error) },
+    })
+  })
 }
 
 async function handleCampaignApi(req, res, parsed, ctx) {
@@ -11477,6 +12332,55 @@ async function handleCampaignApi(req, res, parsed, ctx) {
   }
 
   throw new RoomProtocolError(405, 'method-not-allowed')
+}
+
+async function handlePlayerAiApi(req, res, parsed, ctx, authenticatedRoomMember) {
+  if (!parsed.pathname.startsWith('/api/player-ai/')) return false
+  if (!authenticatedRoomMember || !['player', 'dm'].includes(ctx.accessRole)) {
+    writeJson(res, 403, { error: 'player-ai-room-membership-required' })
+    return true
+  }
+  const service = ctx.playerAiService
+  if (!service) {
+    writeJson(res, 503, { error: 'player-ai-unconfigured' })
+    return true
+  }
+  if (parsed.pathname === '/api/player-ai/capabilities' && req.method === 'GET') {
+    writeJson(res, 200, service.capabilities())
+    return true
+  }
+  try {
+    if (parsed.pathname === '/api/player-ai/character-excel' && req.method === 'POST') {
+      const payload = await readJsonRequest(req, 256 * 1024)
+      const result = await service.enhanceCharacterExcel({
+        workbookText: payload?.workbookText,
+        fileName: payload?.fileName,
+        actorId: authenticatedRoomMember.memberId,
+        roomId: ctx.roomId,
+      })
+      writeJson(res, 200, result)
+      return true
+    }
+    if (parsed.pathname === '/api/player-ai/character-portrait' && req.method === 'POST') {
+      const payload = await readJsonRequest(req, 16 * 1024)
+      const result = await service.generateCharacterPortrait({
+        prompt: payload?.prompt,
+        aspect: payload?.aspect,
+        background: payload?.background,
+        actorId: authenticatedRoomMember.memberId,
+        roomId: ctx.roomId,
+      })
+      writeJson(res, 200, result)
+      return true
+    }
+  } catch (error) {
+    const code = normalizedLabel(error?.code ?? error?.message, 240) || 'player-ai-task-failed'
+    const status = Number(error?.statusCode) || (code.startsWith('upstream-') ? 502 : 500)
+    writeJson(res, status, { error: code })
+    return true
+  }
+  writeJson(res, 405, { error: 'method-not-allowed' })
+  return true
 }
 
 /**
@@ -11649,6 +12553,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   }
 
   try {
+    if (await handlePlayerAiApi(req, res, parsed, ctx, authenticatedRoomMember)) return true
     if (await handleCampaignApi(req, res, parsed, ctx)) return true
     if (await handlePlayerExplorationMoveApi({
       req,
@@ -11666,6 +12571,79 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     })
     if (authenticatedSystemRoute) {
       writeJson(res, authenticatedSystemRoute.status, authenticatedSystemRoute.body)
+      return true
+    }
+
+    if (parsed.pathname === '/api/state/characters/command' && req.method === 'POST') {
+      if (!authenticatedRoomMember || ctx.accessRole !== 'player') {
+        writeJson(res, 403, { error: 'player-role-required' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      let payload
+      try {
+        payload = await readJsonRequest(req, 3 * 1024 * 1024)
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const expectedRevision = Number(payload?.expectedRevision)
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        writeJson(res, 400, { error: 'invalid-expected-revision' })
+        return true
+      }
+      const combatActive = await sharedCombatIsActiveForAuthority(ctx)
+      const now = Date.now()
+      const filePath = path.join(ctx.stateRoot, 'characters.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (state) => {
+        const currentRevision = sharedStateRevision(state)
+        const applied = applyPlayerCharacterCommand(state, payload?.command, authenticatedRoomMember, {
+          roomId: ctx.roomId,
+          combatActive,
+          now,
+        })
+        if (!applied.ok || !applied.changed) return applied
+        if (currentRevision !== expectedRevision) {
+          return {
+            ok: false,
+            changed: false,
+            status: 409,
+            error: 'state-revision-conflict',
+            currentRevision,
+            next: state,
+          }
+        }
+        const validation = validateSharedStateShape('characters', applied.next)
+        return validation.ok
+          ? applied
+          : { ok: false, changed: false, status: 422, error: 'invalid-character-command-result', reason: validation.reason, next: state }
+      })
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, {
+          error: result?.error ?? 'character-command-failed',
+          ...(Number.isSafeInteger(result?.currentRevision) ? { currentRevision: result.currentRevision } : {}),
+          ...(result?.reason ? { reason: result.reason } : {}),
+        })
+        return true
+      }
+      if (result.changed) {
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `characters:${now}:${payload.command?.commandId}`,
+          name: 'characters',
+          updatedAt: now,
+        })
+      }
+      const revision = sharedStateRevision(result.next)
+      res.writeHead(result.changed ? 201 : 200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(revision),
+      })
+      res.end(JSON.stringify({
+        ok: true,
+        replayed: result.changed !== true,
+        revision,
+        result: result.result ?? result.receipt?.result ?? {},
+      }))
       return true
     }
 
@@ -12628,6 +13606,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'scene-orchestration') value = projectSceneOrchestrationForPlayer(value)
+        if (playerRead && name === 'dnd5e-shops') value = projectDnd5eShopsForPlayer(value)
         if (playerRead && name === 'characters') value = projectCharactersForRoomMember(value, roomMember)
         if (playerRead && name === 'dice') value = projectDiceForRoomMember(value)
         if (playerRead && name === 'dice-events') value = projectDiceEventsForRoomMember(value)

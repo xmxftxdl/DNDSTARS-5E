@@ -23,13 +23,14 @@ export default function Dnd5eTokenStatusMarkerEditor({
     (definition): Dnd5eTokenStatusMarkerOption => ({
       definition,
       kind: 'base',
+      applications: ['marker', 'active-effect'],
       sourceTokenIds: [],
       sourceLabels: [],
     }),
   )
   const activeIds = useMemo(() => new Set(markers.map((marker) => marker.statusId)), [markers])
   const available = effectiveOptions.filter(
-    (option) => !activeIds.has(option.definition.id),
+    (option) => option.applications.includes('marker') && !activeIds.has(option.definition.id),
   )
   const [selectedStatusId, setSelectedStatusId] = useState<Dnd5eTokenStatusMarkerId>(
     available[0]?.definition.id ?? 'blinded',
@@ -53,7 +54,7 @@ export default function Dnd5eTokenStatusMarkerEditor({
         </span>
       </div>
       <p className="mb-2 text-[10px] leading-4 text-slate-500">
-        仅用于地图显示，不会赋予中毒、倒地等 Headless 规则。DM 可在战斗内外随时添加或移除。
+        仅用于地图显示，不会赋予中毒、倒地等 Headless 规则。需要实际规则效果时，请使用下方“触发状态”。
       </p>
 
       {markers.length > 0 ? (
@@ -79,7 +80,9 @@ export default function Dnd5eTokenStatusMarkerEditor({
                     boxShadow: `inset 0 0 0 1px ${style.stroke}`,
                   }}
                 >
-                  {style.glyph}
+                  {style.icon
+                    ? <img src={style.icon} alt="" className="h-3 w-3" />
+                    : style.glyph}
                 </span>
                 {marker.label ?? definition.label}
                 <Trash2 className="h-3 w-3 text-slate-500" aria-hidden="true" />

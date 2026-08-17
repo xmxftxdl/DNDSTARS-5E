@@ -19,8 +19,13 @@ const CLASSES: readonly [Dnd5eClassId, string][] = [
   ['rogue', '游荡者'], ['sorcerer', '术士'], ['warlock', '邪术师'], ['wizard', '法师'],
 ]
 const TRIGGERS: readonly [DeclarativeSubclassAbilityV1['trigger']['kind'], string][] = [
-  ['active-use', '主动使用'], ['after-attack-hit', '攻击命中后'], ['before-damage-taken', '受到伤害前'],
+  ['active-use', '主动使用'], ['before-attack-roll', '攻击检定前'], ['after-attack-roll', '攻击检定后'],
+  ['after-attack-hit', '攻击命中后'], ['after-attack-miss', '攻击未命中后'], ['after-d20-roll', 'D20 结算后'],
+  ['before-spell-effect', '法术影响目标前'],
+  ['before-damage-taken', '受到伤害前'],
   ['after-damage-taken', '受到伤害后'], ['turn-start', '回合开始'], ['turn-end', '回合结束'],
+  ['after-spell-cast', '施法结算后'], ['after-condition-attempted', '状态施加尝试后'],
+  ['after-condition-applied', '状态成功施加后'], ['before-drop-to-zero', '生命降至 0 前'],
   ['short-rest-complete', '短休完成'], ['long-rest-complete', '长休完成'],
 ]
 
@@ -177,7 +182,7 @@ function ResourceRow({ resource, onChange, onDelete }: { resource: DeclarativeSu
   </div>
 }
 
-type BasicEffectKind = DeclarativeSubclassEffectV1['kind']
+type BasicEffectKind = Exclude<DeclarativeSubclassEffectV1['kind'], 'activity-effect'>
 
 function AbilityCard({ ability, onChange, onDelete }: { ability: DeclarativeSubclassAbilityV1; onChange(value: DeclarativeSubclassAbilityV1): void; onDelete(): void }) {
   const target = ability.targeting
@@ -210,6 +215,15 @@ function AbilityCard({ ability, onChange, onDelete }: { ability: DeclarativeSubc
       onChange({ ...ability, rolls: [], effects: [{ kind, target: 'target', condition: 'blinded', duration: { kind: 'fixed-rounds', rounds: 1 } }] })
     } else if (kind === 'move') {
       onChange({ ...ability, rolls: [], effects: [{ kind, target: 'target', distanceFeet: 5, mode: 'push' }] })
+    } else if (kind === 'dispel-area') {
+      onChange({ ...ability, rolls: [], effects: [{ kind, target: 'actor', areaKind: 'magical-darkness', radiusFeet: 30, maximumSpellLevel: { kind: 'fixed', value: 9 } }] })
+    } else if (kind === 'command-owned-companion') {
+      onChange({
+        ...ability,
+        rolls: [],
+        targeting: { kind: 'single-creature', relation: 'ally', rangeFeet: 60, requiresSight: true },
+        effects: [{ kind, target: 'target', command: 'attack' }],
+      })
     } else {
       onChange({ ...ability, rolls: [], effects: [{ kind, resourceId: resourceCost?.resourceId ?? 'resource-1', amount: { kind: 'fixed', value: 1 } }] })
     }
@@ -282,12 +296,14 @@ function AbilityCard({ ability, onChange, onDelete }: { ability: DeclarativeSubc
 
     <section className="mt-3 rounded-lg border border-white/8 p-2">
       <div className="grid gap-2 sm:grid-cols-4">
-        <label><span className="mb-1 block text-[11px] text-slate-500">主要效果</span><select className={fieldClass()} value={primaryEffect?.kind ?? 'damage'} onChange={(event) => setPrimaryEffect(event.target.value as BasicEffectKind)}><option value="damage">伤害</option><option value="healing">治疗</option><option value="temporary-hit-points">临时生命</option><option value="standard-condition">标准状态</option><option value="move">强制移动</option><option value="spend-resource">消耗资源</option><option value="restore-resource">恢复资源</option></select></label>
+        <label><span className="mb-1 block text-[11px] text-slate-500">主要效果</span><select className={fieldClass()} value={primaryEffect?.kind ?? 'damage'} onChange={(event) => setPrimaryEffect(event.target.value as BasicEffectKind)}><option value="damage">伤害</option><option value="healing">治疗</option><option value="temporary-hit-points">临时生命</option><option value="standard-condition">标准状态</option><option value="move">强制移动</option><option value="dispel-area">解除地图魔法黑暗</option><option value="command-owned-companion">指挥已拥有伙伴</option><option value="spend-resource">消耗资源</option><option value="restore-resource">恢复资源</option></select></label>
         {(primaryEffect?.kind === 'damage' || primaryEffect?.kind === 'healing') && primaryRoll && (primaryRoll.kind === 'damage' || primaryRoll.kind === 'healing') && <><EditorNumber label="骰子数量" value={primaryRoll.dice.count} min={0} max={40} onChange={(count) => patchRoll({ count })} /><EditorNumber label="骰面" value={primaryRoll.dice.sides} min={2} max={100} onChange={(sides) => patchRoll({ sides })} />{primaryRoll.kind === 'damage' ? <label><span className="mb-1 block text-[11px] text-slate-500">伤害类型</span><select className={fieldClass()} value={primaryRoll.damageType} onChange={(event) => patchRoll({ damageType: event.target.value as Dnd5eDamageType })}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label> : <div />}</>}
         {primaryEffect?.kind === 'temporary-hit-points' && primaryEffect.amount?.kind === 'fixed' && <EditorNumber label="临时生命值" value={primaryEffect.amount.value} min={0} max={1_000_000} onChange={(value) => onChange({ ...ability, effects: [{ ...primaryEffect, amount: { kind: 'fixed', value } }] })} />}
         {primaryEffect?.kind === 'standard-condition' && <><label><span className="mb-1 block text-[11px] text-slate-500">状态</span><select className={fieldClass()} value={primaryEffect.condition} onChange={(event) => onChange({ ...ability, effects: [{ ...primaryEffect, condition: event.target.value as Dnd5eStandardConditionId }] })}>{DND5E_STANDARD_CONDITION_IDS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}</select></label><EditorNumber label="持续轮数" value={primaryEffect.duration.kind === 'fixed-rounds' ? primaryEffect.duration.rounds : 1} min={1} max={14_400} onChange={(rounds) => onChange({ ...ability, effects: [{ ...primaryEffect, duration: { kind: 'fixed-rounds', rounds } }] })} /></>}
         {primaryEffect?.kind === 'move' && <EditorNumber label="移动距离（尺）" value={primaryEffect.distanceFeet} min={0} max={10_000} onChange={(distanceFeet) => onChange({ ...ability, effects: [{ ...primaryEffect, distanceFeet }] })} />}
+        {primaryEffect?.kind === 'dispel-area' && <><EditorNumber label="解除半径（尺）" value={primaryEffect.radiusFeet} min={1} max={10_000} onChange={(radiusFeet) => onChange({ ...ability, effects: [{ ...primaryEffect, radiusFeet }] })} />{primaryEffect.maximumSpellLevel.kind === 'fixed' && <EditorNumber label="最高法术环级" value={primaryEffect.maximumSpellLevel.value} min={0} max={9} onChange={(value) => onChange({ ...ability, effects: [{ ...primaryEffect, maximumSpellLevel: { kind: 'fixed', value } }] })} />}</>}
         {(primaryEffect?.kind === 'spend-resource' || primaryEffect?.kind === 'restore-resource') && <><EditorField label="效果资源 ID" value={primaryEffect.resourceId} onChange={(resourceId) => onChange({ ...ability, effects: [{ ...primaryEffect, resourceId }] })} />{primaryEffect.amount.kind === 'fixed' && <EditorNumber label="效果数量" value={primaryEffect.amount.value} min={1} max={1_000_000} onChange={(value) => onChange({ ...ability, effects: [{ ...primaryEffect, amount: { kind: 'fixed', value } }] })} />}</>}
+        {primaryEffect?.kind === 'command-owned-companion' && <label><span className="mb-1 block text-[11px] text-slate-500">伙伴指令</span><select className={fieldClass()} value={primaryEffect.command} onChange={(event) => onChange({ ...ability, effects: [{ ...primaryEffect, command: event.target.value as typeof primaryEffect.command }] })}><option value="attack">攻击</option><option value="dash">疾走</option><option value="disengage">撤离</option><option value="dodge">闪避</option><option value="help">协助</option></select></label>}
       </div>
       <p className="mt-2 text-[10px] text-slate-600">基础模式编辑一个主要效果；组合效果、数值公式、升阶骰、重复豁免和高级持续时间请使用上方高级 JSON，并会经过相同严格校验。</p>
     </section>

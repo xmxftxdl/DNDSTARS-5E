@@ -8,6 +8,8 @@ import {
   dnd5ePluginAbilityGenerationMethod,
   dnd5ePluginBackgroundDefinition,
   dnd5ePluginFeatureDefinition,
+  dnd5ePluginSpellAbilityCheckBonus,
+  dnd5ePluginSpellTargetExpansionForCharacter,
   normalizeDnd5ePluginPersistentAreaVerticalDeclaration,
   dnd5ePluginRaceDefinition,
   registerDnd5eRulesPlugin,
@@ -21,6 +23,7 @@ import {
   registeredDnd5ePluginSubclasses,
   dnd5eCharacterHasPluginFeature,
   registeredDnd5eRulesPlugins,
+  registeredDnd5eRulesPluginRuntimeIndex,
 } from './pluginApi'
 import { syncCharacterClassResources } from '../../lib/classResources'
 import {
@@ -52,6 +55,23 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e rules plugin API', () => {
+  it('records frozen Legacy adapter provenance in the runtime index', () => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.legacy-runtime-index', name: 'Legacy', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup() {},
+    }, { adapterKind: 'worker-module-adapter' })
+    try {
+      expect(registeredDnd5eRulesPluginRuntimeIndex().find(
+        (entry) => entry.manifest.id === 'com.example.legacy-runtime-index',
+      )?.adapterKind).toBe('worker-module-adapter')
+    } finally {
+      dispose()
+    }
+  })
+
   it('omits local-only metadata from room handshake requirements', () => {
     const disposeLocal = registerDnd5eRulesPlugin({
       manifest: {
@@ -291,7 +311,7 @@ describe('D&D 5e rules plugin API', () => {
       },
       setup(api) {
         expect(api.registerItem({
-          id: 'test-blade', name: '测试剑', category: 'equipment', icon: 'weapon',
+          id: 'test-blade', name: '测试剑', category: 'equipment', icon: 'sword',
           description: '测试装备。', rulesText: '命中与伤害 +1。', stackable: false,
           resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' }],
           headlessEffects: [{
@@ -334,6 +354,7 @@ describe('D&D 5e rules plugin API', () => {
       expect(registeredDnd5ePluginItems()).toEqual([
         expect.objectContaining({
           id: `${pluginId}:test-blade`, name: '测试剑', ownerPluginId: pluginId,
+          icon: 'sword',
           source: { book: 'Item Test', license: 'CC0-1.0' },
           equipment: expect.objectContaining({
             id: `${pluginId}:test-blade`, name: '测试剑',
@@ -561,5 +582,88 @@ describe('D&D 5e rules plugin API', () => {
       type: 'plugin', pluginId: 'missing.plugin', actionId: 'unknown', actorId: 'active',
     })
     expect(result).toMatchObject({ ok: false, reason: 'invalid-plugin-action' })
+  })
+
+  it('projects a closed proficiency bonus only for declared spell ability checks', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.spell-check-bonus', name: 'Spell Check Bonus', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        featureId = api.registerFeature({
+          id: 'spell-check-proficiency', name: 'Spell Check Proficiency', summary: 'Fixture.',
+          description: 'Fixture.', automation: 'full',
+          declarativeAbility: {
+            schemaVersion: 1, id: 'spell-check-proficiency', name: 'Spell Check Proficiency',
+            description: 'Fixture.', level: 1, trigger: { kind: 'after-d20-roll' },
+            targeting: { kind: 'self' }, effects: [],
+            mechanic: {
+              kind: 'spell-ability-check-bonus',
+              spellIds: ['counterspell', 'dispel-magic'],
+              bonus: 'proficiency',
+            },
+            automation: 'full',
+          },
+        })
+      },
+    })
+    try {
+      expect(dnd5ePluginSpellAbilityCheckBonus({
+        pluginFeatureIds: [featureId], spellId: 'counterspell', proficiencyBonus: 4,
+      })).toBe(4)
+      expect(dnd5ePluginSpellAbilityCheckBonus({
+        pluginFeatureIds: [featureId], spellId: 'fireball', proficiencyBonus: 4,
+      })).toBe(0)
+      expect(dnd5ePluginSpellAbilityCheckBonus({
+        pluginFeatureIds: [], spellId: 'counterspell', proficiencyBonus: 4,
+      })).toBe(0)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('expands only matching single-target class spells through the generic primitive', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.spell-target-expansion', name: 'Spell Target Expansion', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        featureId = api.registerFeature({
+          id: 'split-enchantment', name: 'Split Enchantment', summary: 'Fixture.',
+          description: 'Fixture.', automation: 'full',
+          declarativeAbility: {
+            schemaVersion: 1, id: 'split-enchantment', name: 'Split Enchantment',
+            description: 'Fixture.', level: 1, trigger: { kind: 'after-spell-cast' },
+            targeting: { kind: 'self' }, effects: [],
+            mechanic: {
+              kind: 'spell-target-expansion', spellcastingClassId: 'wizard',
+              spellSchools: ['enchantment'], baseMaximumTargets: 1, additionalTargets: 1,
+            },
+            automation: 'full',
+          },
+        })
+      },
+    })
+    try {
+      const owner = character({ level: 10, dnd5ePluginFeatureIds: [featureId] })
+      expect(dnd5ePluginSpellTargetExpansionForCharacter({
+        character: owner, spellcastingClassId: 'wizard', spellSchool: 'enchantment', baseMaximumTargets: 1,
+      })).toBe(1)
+      expect(dnd5ePluginSpellTargetExpansionForCharacter({
+        character: owner, spellcastingClassId: 'wizard', spellSchool: 'evocation', baseMaximumTargets: 1,
+      })).toBe(0)
+      expect(dnd5ePluginSpellTargetExpansionForCharacter({
+        character: owner, spellcastingClassId: 'wizard', spellSchool: 'enchantment', baseMaximumTargets: 2,
+      })).toBe(0)
+      expect(dnd5ePluginSpellTargetExpansionForCharacter({
+        character: { ...owner, dnd5ePluginFeatureIds: [] }, spellcastingClassId: 'wizard', spellSchool: 'enchantment', baseMaximumTargets: 1,
+      })).toBe(0)
+    } finally {
+      dispose()
+    }
   })
 })

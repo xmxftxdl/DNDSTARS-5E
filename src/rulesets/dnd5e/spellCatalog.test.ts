@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DND5E_SRD_COMBAT_SPELLS, dnd5eSpellDiceCount, getDnd5eSrdCombatSpell } from './spells'
+import { DND5E_SRD_COMBAT_SPELLS, dnd5eSpellAreaAtSlot, dnd5eSpellDiceCount, getDnd5eSrdCombatSpell } from './spells'
 import { DND5E_SRD_SPELL_CATALOG, dnd5eBardMagicalSecretsOptions, dnd5eSrdSpellCatalogForClass, dnd5eWarlockMysticArcanumOptions, getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
 import {
@@ -73,7 +73,7 @@ describe('official SRD 5.1 spell-list catalog', () => {
   })
 
   it('requires every mechanically implemented combat spell to agree with the official catalog', () => {
-    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(111)
+    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(122)
     for (const spell of DND5E_SRD_COMBAT_SPELLS) {
       const catalog = getDnd5eSrdSpellCatalogEntry(spell.id)
       expect(catalog, spell.id).toBeDefined()
@@ -86,6 +86,14 @@ describe('official SRD 5.1 spell-list catalog', () => {
         expect(catalog?.visibilityRequirement, spell.id).toBe('not-required')
       }
     }
+  })
+
+  it('expands Fog Cloud through the same slot-scaled area template used by map targeting', () => {
+    const fogCloud = getDnd5eSrdCombatSpell('fog-cloud')
+    expect(fogCloud).toBeDefined()
+    if (!fogCloud) return
+    expect(dnd5eSpellAreaAtSlot(fogCloud, 1)).toMatchObject({ shape: 'circle', radiusFeet: 20 })
+    expect(dnd5eSpellAreaAtSlot(fogCloud, 4)).toMatchObject({ shape: 'circle', radiusFeet: 80 })
   })
 
   it('keeps Fireball at 8d6 for its base 3rd-level cast and adds only one die at 4th level', () => {

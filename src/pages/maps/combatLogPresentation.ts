@@ -49,6 +49,11 @@ export function combatLogEntryIsRoundBoundary(entry: Pick<CombatLogEntry, 'kind'
     /^round\s+\d+\s*(?:begins|starts)?$/iu.test(text)
 }
 
+export function combatLogEntryIsInitiativeResult(entry: Pick<CombatLogEntry, 'kind' | 'text'>): boolean {
+  return entry.kind === 'system' &&
+    /^先攻结果(?:（由高到低）)?$/u.test(entry.text.trim())
+}
+
 function normalizedAlias(value: string | undefined): string | undefined {
   const normalized = value?.trim()
   return normalized ? normalized : undefined
@@ -155,7 +160,7 @@ export function inferCombatLogActorTokenId(input: {
   characters: readonly Character[]
   currentTurnTokenId?: string
 }): string | undefined {
-  if (combatLogEntryIsRoundBoundary(input)) return undefined
+  if (combatLogEntryIsRoundBoundary(input) || combatLogEntryIsInitiativeResult(input)) return undefined
   const candidates = subjectCandidates(input.tokens, input.characters)
   const named = candidateMention(candidates, input.text, input.currentTurnTokenId)
   if (named) return named.token.id
@@ -202,9 +207,11 @@ export function resolveCombatLogSubject(input: {
   characters: readonly Character[]
   currentTurnTokenId?: string
 }): CombatLogSubjectPresentation {
-  if (combatLogEntryIsRoundBoundary(input.entry)) {
+  const isRoundBoundary = combatLogEntryIsRoundBoundary(input.entry)
+  const isInitiativeResult = combatLogEntryIsInitiativeResult(input.entry)
+  if (isRoundBoundary || isInitiativeResult) {
     return {
-      label: '回合推进',
+      label: isInitiativeResult ? '先攻结果' : '回合推进',
       emoji: '',
       borderColor: '#64748b',
       side: 'neutral',

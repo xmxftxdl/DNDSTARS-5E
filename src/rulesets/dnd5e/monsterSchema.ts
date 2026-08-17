@@ -2444,9 +2444,11 @@ function persistentAreaRuleIsValid(raw: Record<string, unknown>): boolean {
   const movement = raw.movement
   const movementIsValid = movement == null || (
     isRecord(movement) &&
-    Object.keys(movement).every((key) => key === 'economy' || key === 'maximumFeet') &&
+    Object.keys(movement).every((key) => key === 'economy' || key === 'maximumFeet' || key === 'maximumDistanceFromSourceFeet') &&
     (movement.economy === 'action' || movement.economy === 'bonus-action') &&
-    finiteInteger(movement.maximumFeet, 1, 10_000)
+    finiteInteger(movement.maximumFeet, 1, 10_000) &&
+    (movement.maximumDistanceFromSourceFeet == null ||
+      finiteInteger(movement.maximumDistanceFromSourceFeet, 1, 10_000))
   )
   return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
     areaTargetingIsValid(raw.area) &&
@@ -2504,6 +2506,11 @@ function mechanicEffectV2IsValid(raw: unknown): boolean {
   }
   if (raw.kind === 'standard-condition') {
     return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition)) &&
+      mechanicDurationV2IsValid(raw.duration)
+  }
+  if (raw.kind === 'tactical-status') {
+    return MECHANIC_TARGETS.has(String(raw.target)) &&
+      TOKEN_STATUS_MARKER_IDS.has(String(raw.statusId)) &&
       mechanicDurationV2IsValid(raw.duration)
   }
   if (raw.kind === 'remove-standard-condition') {
@@ -2853,9 +2860,10 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
     raw.tokenStatusMarkerGrants.length > 32 ||
     raw.tokenStatusMarkerGrants.some((grant) =>
       !isRecord(grant) ||
-      Object.keys(grant).some((key) => key !== 'statusId' && key !== 'target') ||
+      Object.keys(grant).some((key) => key !== 'statusId' && key !== 'target' && key !== 'application') ||
       !TOKEN_STATUS_MARKER_IDS.has(String(grant.statusId)) ||
-      (grant.target !== 'self' && grant.target !== 'other'))
+      (grant.target !== 'self' && grant.target !== 'other') ||
+      (grant.application != null && grant.application !== 'marker' && grant.application !== 'active-effect'))
   )) {
     issues.push(issue(monsterId, 'Token 状态标记能力数据无效'))
   }

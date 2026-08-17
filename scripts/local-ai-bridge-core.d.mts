@@ -32,6 +32,8 @@ export interface LocalAiBridgeStartOptions {
   allowedOrigins?: readonly string[]
   pairingCode?: string
   accessToken?: string
+  usageAuditPath?: string
+  billingPolicy?: import('../shared/ai-model-policy.mjs').AiCreditPolicyV1
 }
 
 export interface LocalAiBridgeController {
@@ -41,5 +43,31 @@ export interface LocalAiBridgeController {
   getPairingCode(): string
   close(): Promise<void>
 }
+
+export function safeAuditError(error: unknown): string
+export function errorWithUsage<T extends Error>(error: T, usage?: unknown): T
+export function estimatedStructuredInputTokens(request: Record<string, unknown>): number
+export function openAiStrictJsonSchema(schema: unknown): unknown
+export function externalModelApiUrl(value: string): URL
+export function appendApiPath(baseUrl: string | URL, pathName: string): URL
+export function fetchJson(
+  url: string | URL,
+  init?: RequestInit,
+  timeoutMs?: number,
+  externalSignal?: AbortSignal | null,
+): Promise<unknown>
+export function createUsageAuditStore(file?: string, policy?: import('../shared/ai-model-policy.mjs').AiCreditPolicyV1): {
+  begin(input: Record<string, unknown>): Promise<Record<string, unknown>>
+  settle(reservation: Record<string, unknown>, input: Record<string, unknown>): Promise<Record<string, unknown>>
+  recent(limit?: number): Promise<Record<string, unknown>[]>
+}
+export function generateStructured(input: Record<string, unknown>): Promise<Record<string, unknown>>
+export function generateExternalImage(input: Record<string, unknown>): Promise<{
+  schemaVersion: 1
+  modelId: string
+  quality: 'low'
+  mimeType: 'image/png'
+  dataUrl: string
+}>
 
 export function startLocalAiBridge(options?: LocalAiBridgeStartOptions): Promise<LocalAiBridgeController>

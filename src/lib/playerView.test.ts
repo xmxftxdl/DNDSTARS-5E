@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  assignableRoomCharactersForPlayer,
+  applyRoomCharacterAssignment,
   getAssignedPlayerCharacterId,
   getPlayerCharacter,
+  getRoomCharacterAssignment,
   playerViewCharacters,
   planRoomCharacterOwnershipRecovery,
   roomCharactersOwnedByMembers,
@@ -84,6 +87,17 @@ describe('player view assignment', () => {
       .toEqual([mine])
   })
 
+  it('treats room member assignment as authoritative over a previous account owner', () => {
+    const transferred = {
+      ...character('transferred', '玩家乙'),
+      roomId: 'ABC234',
+      roomMemberId: 'member-b',
+      ownerAccountId: 'ACCOUNTOLD1',
+    }
+    expect(roomOwnedPlayerCharacters([transferred], 'ABC234', 'member-a')).toEqual([])
+    expect(roomOwnedPlayerCharacters([transferred], 'ABC234', 'member-b')).toEqual([transferred])
+  })
+
   it('only gives DM consumers characters owned by current room members', () => {
     const current = { ...character('current', '玩家甲'), roomId: 'ABC234', roomMemberId: 'member-current' }
     const departed = { ...character('departed', '玩家乙'), roomId: 'ABC234', roomMemberId: 'member-departed' }
@@ -93,6 +107,18 @@ describe('player view assignment', () => {
       'ABC234',
       new Set(['member-current']),
     )).toEqual([current])
+  })
+
+  it('only offers a player unassigned cards and cards already owned by that player', () => {
+    const unassigned = { ...character('unassigned', 'DM 待分配'), roomId: 'ABC234' }
+    const mine = { ...character('mine', '玩家甲'), roomId: 'ABC234', roomMemberId: 'member-a' }
+    const occupied = { ...character('occupied', '玩家乙'), roomId: 'ABC234', roomMemberId: 'member-b' }
+    const otherRoom = { ...character('other-room', 'DM 待分配'), roomId: 'XYZ234' }
+    expect(assignableRoomCharactersForPlayer(
+      [unassigned, mine, occupied, otherRoom],
+      'ABC234',
+      'member-a',
+    ).map((entry) => entry.id)).toEqual(['unassigned', 'mine'])
   })
 
   it('migrates room character assignment from a slot key to the stable member key', () => {
@@ -112,6 +138,38 @@ describe('player view assignment', () => {
 
     expect(getAssignedPlayerCharacterId('player1')).toBe('hero-character')
     expect(values.get('stars-player-character-id:ABC234:member-stable-123')).toBe('hero-character')
+  })
+
+  it('applies a newer DM assignment to the stable member selection and rejects stale revisions', () => {
+    const values = new Map<string, string>()
+    const dispatched: string[] = []
+    const localStorage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, String(value)),
+      removeItem: (key: string) => values.delete(key),
+    }
+    values.set(ROOM_SESSION_STORAGE_KEY, JSON.stringify({
+      roomId: 'ABC234', roomName: '测试房间', rulesetId: 'dnd5e-2014-srd-5.1',
+      memberId: 'member-stable-123', roomToken: 'room-token-abcdefghijklmnopqrstuvwxyz-1234567890', clientId: 'client-stable-123', role: 'player',
+      slot: 'player1', displayName: '玩家甲', createdAt: 1,
+    }))
+    vi.stubGlobal('window', {
+      localStorage,
+      dispatchEvent: (event: Event) => dispatched.push(event.type),
+    })
+
+    expect(applyRoomCharacterAssignment({
+      revision: 2, enforced: true, characterId: 'dm-hero', characterName: '霍霍菲尔',
+    })).toBe(true)
+    expect(getAssignedPlayerCharacterId('player1')).toBe('dm-hero')
+    expect(getRoomCharacterAssignment()).toMatchObject({
+      revision: 2, enforced: true, characterId: 'dm-hero', characterName: '霍霍菲尔',
+    })
+    expect(dispatched).toContain('stars-player-assignment-changed')
+    expect(applyRoomCharacterAssignment({
+      revision: 1, enforced: true, characterId: 'stale-hero', characterName: '旧角色',
+    })).toBe(false)
+    expect(getAssignedPlayerCharacterId('player1')).toBe('dm-hero')
   })
 
   it('recovers a uniquely named orphaned room character for a rejoined current member', () => {

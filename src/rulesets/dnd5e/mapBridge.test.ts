@@ -6,6 +6,7 @@ import {
   dnd5eCombatantCanSee,
   dnd5eEffectiveFlySpeed,
   dnd5eTargetArmorClassForAttack,
+  dnd5eWeaponClassDamageDefinitions,
   resolveDnd5eHeadlessAction,
   type Dnd5eCombatEvent,
 } from './headlessCombatEngine'
@@ -25,6 +26,8 @@ import {
   DND5E_OFFHAND_SHORTSWORD,
   DND5E_SHORTSWORD,
 } from './equipment'
+import { registerDnd5eRulesPlugin } from './pluginApi'
+import { dnd5eSavingThrowMode } from './passiveDefenses'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -48,6 +51,103 @@ describe('D&D 5e map bridge', () => {
   afterEach(() => {
     setMapGeometryRuntime([])
     setDnd5eRoomMonsterCatalog([])
+  })
+
+  it('projects persistent-area weapon riders only to current eligible occupants', () => {
+    const sourceCharacter = { ...character(), id: 'mantle-source-character', name: 'Source' }
+    const allyCharacter = { ...character(), id: 'mantle-ally-character', name: 'Ally' }
+    const outsideCharacter = { ...character(), id: 'mantle-outside-character', name: 'Outside' }
+    const source = token({
+      id: 'mantle-source', type: 'player', characterId: sourceCharacter.id, x: 0, y: 0,
+    })
+    const ally = token({
+      id: 'mantle-ally', type: 'player', characterId: allyCharacter.id, x: 10, y: 0,
+    })
+    const outside = token({
+      id: 'mantle-outside', type: 'player', characterId: outsideCharacter.id, x: 50, y: 0,
+    })
+    const enemy = token({ id: 'mantle-enemy', type: 'enemy', x: 20, y: 0 })
+    const map: BattleMap = {
+      id: 'persistent-area-rider-map', name: 'Persistent area rider', width: 100, height: 50,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, ally, outside, enemy],
+      dnd5ePluginAreas: [{
+        id: 'mantle-area', pluginId: 'test', featureId: 'mantle', label: 'Mantle', color: '#facc15',
+        sourceCharacterId: sourceCharacter.id, sourceTokenId: source.id,
+        cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }],
+        createdRound: 1, expiresAfterRound: 10, relation: 'ally', includeSelf: true,
+        weaponHitBonusDamage: { count: 1, sides: 4, type: 'radiant', magical: true },
+      }],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'persistent-area-rider-combat', map,
+      characters: [sourceCharacter, allyCharacter, outsideCharacter], round: 1,
+      initiativeOrder: [source, ally, outside, enemy].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+    })
+    expect(snapshot.state.combatants[source.id].persistentAreaWeaponHitBonusDamage).toHaveLength(1)
+    expect(snapshot.state.combatants[ally.id].persistentAreaWeaponHitBonusDamage).toHaveLength(1)
+    expect(snapshot.state.combatants[outside.id].persistentAreaWeaponHitBonusDamage).toBeUndefined()
+    expect(snapshot.state.combatants[enemy.id].persistentAreaWeaponHitBonusDamage).toBeUndefined()
+    expect(dnd5eWeaponClassDamageDefinitions({
+      state: snapshot.state,
+      actorId: ally.id,
+      targetId: enemy.id,
+      context: {
+        mode: 'melee', finesse: false, strengthBased: true,
+        weaponDamageSides: 8, damageType: 'slashing', adjacentEnemyOfTarget: false,
+      },
+      critical: true,
+    })).toContainEqual(expect.objectContaining({
+      source: 'persistent-area-rider', count: 1, sides: 4, type: 'radiant',
+      magical: true, doubleOnCritical: true,
+    }))
+  })
+
+  it('projects generic spell-save disadvantage auras by opposition, range, and damage type', () => {
+    const aura = createDnd5eMechanicalEffect({
+      definitionId: 'test:spell-save-pressure-aura',
+      label: 'Spell-save pressure aura',
+      targetId: 'aura-source-token',
+      source: { kind: 'feature', actorId: 'aura-source-token', rulesId: 'test:aura' },
+      modifiers: {
+        spellSaveDisadvantageAura: { radiusFeet: 60, damageTypes: ['fire', 'radiant'], spellcastingClassIds: ['paladin'] },
+      },
+    })
+    const hero: Character = {
+      ...character(),
+      id: 'aura-source-character',
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [aura] },
+    }
+    const source = token({
+      id: 'aura-source-token', type: 'player', characterId: hero.id, x: 10, y: 10,
+    })
+    const nearbyEnemy = token({ id: 'aura-nearby-enemy', type: 'enemy', x: 110, y: 10 })
+    const distantEnemy = token({ id: 'aura-distant-enemy', type: 'enemy', x: 210, y: 10 })
+    const map: BattleMap = {
+      id: 'generic-spell-save-aura-map', name: 'Generic aura', width: 300, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, nearbyEnemy, distantEnemy],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'generic-spell-save-aura-combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: source.id, label: source.label, emoji: '', color: '', roll: 20 },
+        { tokenId: nearbyEnemy.id, label: nearbyEnemy.label, emoji: '', color: '', roll: 15 },
+        { tokenId: distantEnemy.id, label: distantEnemy.label, emoji: '', color: '', roll: 10 },
+      ],
+    })
+    const nearby = snapshot.state.combatants[nearbyEnemy.id]
+    const distant = snapshot.state.combatants[distantEnemy.id]
+    expect(dnd5eSavingThrowMode(nearby, 'dex', { sourceIsSpell: true, damageType: 'fire' }))
+      .toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(nearby, 'dex', { sourceIsSpell: true, damageType: 'cold' }))
+      .toBe('normal')
+    expect(dnd5eSavingThrowMode(nearby, 'wis', { sourceIsSpell: true, sourceSpellcastingClassId: 'paladin' }))
+      .toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(distant, 'dex', { sourceIsSpell: true, damageType: 'fire' }))
+      .toBe('normal')
   })
 
   it('fails closed when a player token references a character that has not synchronized', () => {
@@ -342,6 +442,48 @@ describe('D&D 5e map bridge', () => {
       },
       moralAlignment: 'evil',
       damageDefenseRules: monster.damageDefenseRules,
+    })
+  })
+
+  it('projects a persisted summon combat profile into the authoritative companion snapshot', () => {
+    const base = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const monster = {
+      ...base,
+      id: 'room-monster:companion-profile',
+      armorClass: { value: 12, note: 'natural armor' },
+      savingThrows: { dex: 2 },
+      skills: [{ key: 'perception', name: '察觉', bonus: 2 }],
+    }
+    setDnd5eRoomMonsterCatalog([monster])
+    const companion = token({
+      id: 'companion', poolId: monster.id, hp: 40, maxHp: 40,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'test', featureId: 'test:companion',
+        sourceCharacterId: 'owner', sourceTokenId: 'owner-token',
+        createdRound: 1, expiresAfterRound: 14_400, side: 'player', persistent: true,
+        armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
+        savingThrowBonus: 3, proficientSkillCheckBonus: 3,
+        weaponAttacksMagical: true, attacksPerAction: 2,
+      },
+    })
+    const map: BattleMap = {
+      id: 'companion-profile-map', name: 'Companion profile', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [companion],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'companion-profile-combat', map, characters: [],
+      initiativeOrder: [{ tokenId: companion.id, label: companion.label, emoji: '', color: '', roll: 10 }],
+    })
+    expect(snapshot.state.combatants.companion).toMatchObject({
+      armorClass: 15,
+      savingThrowBonuses: { dex: 5 },
+      passivePerception: 15,
+      weaponAttacksMagical: true,
+      summonedWeaponAttackBonus: 3,
+      summonedWeaponDamageBonus: 3,
+      summonedProficientSkillCheckBonus: 3,
+      summonedAttacksPerAction: 2,
     })
   })
 
@@ -1608,6 +1750,61 @@ describe('D&D 5e map bridge', () => {
     })
     expect(snapshot.state.combatants[paladinToken.id].savingThrowBonuses.cha).toBe(11)
     expect(snapshot.state.combatants[enemy.id].savingThrowBonuses.dex).toBeUndefined()
+  })
+
+  it('derives a declarative spell-damage resistance aura for the paladin and nearby allies', () => {
+    const pluginId = 'com.example.warding-aura'
+    const subclassId = `${pluginId}:ancients`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Warding Aura Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerDeclarativeSubclass({
+          schemaVersion: 1, id: 'ancients', classId: 'paladin', name: 'Ancients', summary: 'Fixture.',
+          abilities: [{
+            schemaVersion: 1, id: 'aura-of-warding', name: 'Aura of Warding', description: 'Resists spell damage.', level: 7,
+            trigger: { kind: 'before-damage-taken' },
+            targeting: {
+              kind: 'multiple-creatures', relation: 'ally', rangeFeet: 10,
+              maximumTargets: 32, includeSelf: true,
+            },
+            effects: [], mechanic: {
+              kind: 'spell-damage-resistance-aura', radiusFeet: 10,
+              expandedRadius: { level: 18, radiusFeet: 30 },
+            }, automation: 'full',
+          }],
+        })
+      },
+    })
+    try {
+      const paladin: Character = {
+        ...character(), id: 'paladin', rulesetId: 'dnd5e-2014-srd-5.1', charClass: '圣武士', level: 7,
+        dnd5eClassLevels: { paladin: 7 },
+        dnd5eClassChoices: { classes: { paladin: { subclass: subclassId } } },
+      }
+      const ally: Character = { ...character(), id: 'ally', rulesetId: 'dnd5e-2014-srd-5.1' }
+      const paladinToken = token({ id: 'paladin-token', type: 'player', characterId: paladin.id, x: 25, y: 25 })
+      const allyToken = token({ id: 'ally-token', type: 'player', characterId: ally.id, x: 75, y: 25 })
+      const enemy = token({ id: 'enemy-token', poolId: 'srd-5.1:goblin', x: 75, y: 75 })
+      const map: BattleMap = {
+        id: 'map', name: 'Map', width: 500, height: 500, gridSize: 50,
+        gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+        tokens: [paladinToken, allyToken, enemy],
+      }
+      const initiativeOrder = [paladinToken, allyToken, enemy].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      }))
+      const snapshot = createDnd5eMapCombatSnapshot({
+        combatId: 'combat', map, characters: [paladin, ally], initiativeOrder,
+      })
+      expect(snapshot.state.combatants[paladinToken.id].spellDamageResistance).toBe(true)
+      expect(snapshot.state.combatants[allyToken.id].spellDamageResistance).toBe(true)
+      expect(snapshot.state.combatants[enemy.id].spellDamageResistance).toBeUndefined()
+    } finally {
+      dispose()
+    }
   })
 
   it('derives Holy Nimbus enemy sources from opposition and 30-foot map distance', () => {

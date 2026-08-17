@@ -27,7 +27,7 @@ const selection: AiProviderSelectionV1 = {
 }
 
 describe('resource structuring model routing', () => {
-  it('routes external resource extraction through Luna with Terra as the conditional fallback', () => {
+  it('routes external resource extraction through the fixed Luna model without a Sol/Terra fallback', () => {
     expect(selectResourceStructuringModelRouting([
       model('external:gpt-5.6-luna', 'GPT-5.6 Luna'),
       model('external:synthesis:gpt-5.6-terra', 'GPT-5.6 Terra'),
@@ -35,7 +35,6 @@ describe('resource structuring model routing', () => {
       schemaVersion: 1,
       providerId: 'external-account',
       primary: { modelId: 'external:gpt-5.6-luna', displayName: 'GPT-5.6 Luna', tier: 'luna' },
-      fallback: { modelId: 'external:synthesis:gpt-5.6-terra', displayName: 'GPT-5.6 Terra', tier: 'terra' },
       automatic: true,
     })
   })

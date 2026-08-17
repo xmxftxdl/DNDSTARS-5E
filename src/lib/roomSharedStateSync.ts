@@ -19,6 +19,8 @@ import { SCENE_ORCHESTRATION_RESOURCE } from './sceneOrchestration'
 import { useSceneOrchestrationStore } from '../store/sceneOrchestration'
 import { SCENE_AUDIO_LIBRARY_RESOURCE, SCENE_AUDIO_PLAYBACK_RESOURCE } from './sceneAudioLibrary'
 import { useSceneAudioStore } from '../store/sceneAudio'
+import { DND5E_SHOPS_RESOURCE } from '../rulesets/dnd5e/shops'
+import { useDnd5eShopStore } from '../store/dnd5eShops'
 
 /**
  * Starts room-wide resource hydration after a room is actually entered.
@@ -40,6 +42,7 @@ export function startRoomSharedStateSync(): () => void {
   const loadSharedSceneOrchestration = useSceneOrchestrationStore.getState().loadShared
   const loadSharedSceneAudioLibrary = useSceneAudioStore.getState().loadLibrary
   const loadSharedSceneAudioPlayback = useSceneAudioStore.getState().loadPlayback
+  const loadSharedDnd5eShops = useDnd5eShopStore.getState().loadShared
 
   void Promise.all([
     loadSharedMaps(),
@@ -56,6 +59,7 @@ export function startRoomSharedStateSync(): () => void {
     loadSharedSceneOrchestration(),
     loadSharedSceneAudioLibrary(),
     loadSharedSceneAudioPlayback(),
+    loadSharedDnd5eShops(),
   ]).catch((error) => {
     console.error('[room-state] initial hydration failed', error)
   })
@@ -79,6 +83,7 @@ export function startRoomSharedStateSync(): () => void {
   const stopSceneOrchestration = subscribeSharedResourceInvalidation(SCENE_ORCHESTRATION_RESOURCE, loadSharedSceneOrchestration, hotSubscriptionOptions)
   const stopSceneAudioLibrary = subscribeSharedResourceInvalidation(SCENE_AUDIO_LIBRARY_RESOURCE, loadSharedSceneAudioLibrary, coldSubscriptionOptions)
   const stopSceneAudioPlayback = subscribeSharedResourceInvalidation(SCENE_AUDIO_PLAYBACK_RESOURCE, loadSharedSceneAudioPlayback, hotSubscriptionOptions)
+  const stopDnd5eShops = subscribeSharedResourceInvalidation(DND5E_SHOPS_RESOURCE, loadSharedDnd5eShops, hotSubscriptionOptions)
 
   return () => {
     stopMaps()
@@ -95,5 +100,6 @@ export function startRoomSharedStateSync(): () => void {
     stopSceneOrchestration()
     stopSceneAudioLibrary()
     stopSceneAudioPlayback()
+    stopDnd5eShops()
   }
 }

@@ -70,6 +70,27 @@ export interface MobileCampaignSummary {
   }
 }
 
+export interface MobileAccountCharacterCompatibility {
+  rulesetId: 'dnd5e-2014-srd-5.1'
+  characterSchemaVersion: number
+  minimumGameProtocolVersion: number
+  lastSavedGameProtocolVersion: number
+  requiredPlugins: Array<{ id: string; version: string; integrity: string; stateSchemaVersion: number }>
+}
+
+/**
+ * Account-owned character payloads deliberately remain opaque to the mobile
+ * shell. They are only projected for a compatibility preview and are written
+ * into a room after the Host-facing compatibility checks have passed.
+ */
+export interface MobileAccountCharacterRecord {
+  id: string
+  name: string
+  updatedAt: number
+  character: Record<string, unknown>
+  compatibility: MobileAccountCharacterCompatibility
+}
+
 export interface MobileRoomSession {
   roomId: string
   campaignId?: string
@@ -141,6 +162,121 @@ export interface MobileImageSource {
   headers?: Record<string, string>
 }
 
+export interface MobileCharacterFeatureView {
+  id: string
+  name: string
+  description: string
+  source: 'class' | 'subclass' | 'race' | 'background' | 'feat' | 'plugin'
+  sourceLabel: string
+  level?: number
+  automation?: 'full' | 'partial' | 'manual'
+  automationReasons?: string[]
+  resourceId?: string
+}
+
+export interface MobileLevelUpChoiceRequirement {
+  key: string
+  name: string
+  description?: string
+  options: Array<{ id: string; name: string; summary: string }>
+  currentSelections: string[]
+  targetLimit: number
+  additionalRequired: number
+  kind: 'class' | 'fighter-subclass'
+  replaceable?: boolean
+}
+
+export interface MobileLevelUpSpellPlan {
+  previousCantrips: string[]
+  previousKnownSpells: string[]
+  previousWizardSpellbook: string[]
+  targetCantripCount: number
+  targetKnownSpellCount?: number
+  targetWizardSpellbookCount?: number
+  canReplaceCantrip: boolean
+  canReplaceKnownSpell: boolean
+  highestSpellLevel: number
+  newlyUnlockedSpellLevels: number[]
+  cantripOptions: Array<{ id: string; name: string; level: number }>
+  spellOptions: Array<{ id: string; name: string; level: number }>
+  defaultSelections: MobileAdvancementSpellSelections
+  selectionRequired: boolean
+}
+
+export interface MobileLevelUpPlan {
+  classId: string
+  className: string
+  proposedSubclassId?: string
+  hitDie: 6 | 8 | 10 | 12
+  fromLevel: number
+  toLevel: number
+  fromClassLevel: number
+  toClassLevel: number
+  grantedFeatures: Array<{ id: string; level: number; name: string; description: string }>
+  asiLevels: number[]
+  subclassChoiceUnlocked: boolean
+  subclassRequired: boolean
+  subclassOptions: Array<{ id: string; name: string; summary: string }>
+  choiceRequirements: MobileLevelUpChoiceRequirement[]
+  spellAdvancement?: MobileLevelUpSpellPlan
+  multiclass: boolean
+  rolledHitPointsAllowed: boolean
+  featOptions: Array<{
+    id: string
+    name: string
+    summary: string
+    description: string
+    automation: 'full' | 'partial' | 'manual'
+    sourceLabel: string
+    eligible: boolean
+    disabledReason?: string
+  }>
+  fighterStyleOptions?: Array<{ id: string; name: string; summary: string }>
+  fighterStyleTargetLimit?: number
+  fighterCurrentStyles?: string[]
+  eligible: boolean
+  disabledReason?: string
+}
+
+export interface MobileAdvancementSpellSelections {
+  cantrips: string[]
+  knownSpells?: string[]
+  wizardSpellbook?: string[]
+}
+
+export type MobileAdvancementAsiChoice =
+  | { kind: 'ability-score'; increases: Partial<Record<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', number>> }
+  | { kind: 'feat'; featId: string }
+
+export interface MobileLevelUpDecision {
+  schemaVersion: 1
+  classId: string
+  levelsGained: 1
+  hitPointMethod: 'fixed' | 'rolled'
+  hitPointRolls: number[]
+  /** Receipt for a one-time Host roll. Required when hitPointMethod is rolled. */
+  hostHitPointRollCommandId?: string
+  subclassId?: string
+  asiChoices: Array<{ classLevel: number; choice: MobileAdvancementAsiChoice }>
+  classChoiceSelections?: Record<string, string[]>
+  fighterFightingStyles?: string[]
+  fighterSubclassSelections?: Record<string, string[]>
+  spellSelections?: MobileAdvancementSpellSelections
+}
+
+export interface MobileLevelAdvancementRecordView {
+  id: string
+  fromLevel: number
+  toLevel: number
+  classId: string
+  className: string
+  fromClassLevel: number
+  toClassLevel: number
+  completedAt: number
+  completedBy: 'player' | 'dm'
+  grantedFeatures: MobileCharacterFeatureView[]
+}
+
 export interface MobileCharacterView {
   id: string
   name: string
@@ -169,6 +305,8 @@ export interface MobileCharacterView {
   }
   charClass: string
   level: number
+  /** During high-level creation every intermediate level must be confirmed separately. */
+  creationTargetLevel?: number
   classLevels?: Record<string, number>
   background: string
   alignment?: string
@@ -203,6 +341,9 @@ export interface MobileCharacterView {
   classSelections?: Record<string, string[]>
   dnd5ePluginFeatureIds?: string[]
   dnd5eFeatIds?: string[]
+  features?: MobileCharacterFeatureView[]
+  levelUpPlans?: MobileLevelUpPlan[]
+  levelAdvancements?: MobileLevelAdvancementRecordView[]
   dnd5eInventory?: {
     schemaVersion: number
     revision?: number
@@ -460,6 +601,25 @@ export interface MobileHandoutView {
   createdAt: number
 }
 
+/** Read-only room clock projection. Only the DM may mutate campaign time. */
+export interface MobileCampaignTimeView {
+  schemaVersion: 1
+  worldMinute: number
+  displayMode: 'campaign-day' | 'gregorian'
+  displayMinuteOffset: number
+  calendarEpochDate?: string
+  formatted: string
+  updatedAt: number
+  activeTimers: Array<{
+    id: string
+    kind: 'reminder' | 'concentration'
+    label: string
+    expiresAtWorldMinute: number
+    remainingMinutes: number
+    characterName?: string
+  }>
+}
+
 /** One safe, player-only aggregate consumed by every mobile page. */
 export interface MobilePlayerWorkspace {
   schemaVersion: 1
@@ -501,6 +661,7 @@ export interface MobilePlayerWorkspace {
   }>
   interactionPoints: MobileSceneInteractionPoint[]
   restAdvances: MobileRestAdvance[]
+  campaignTime: MobileCampaignTimeView
   voice: { enabled: boolean; reason?: string }
 }
 
@@ -528,6 +689,7 @@ export interface PlayerTokenView extends WorldPoint {
   id: string
   characterId?: string
   name: string
+  avatar?: string
   portraitColor: string
   portrait?: string
   portraitImageId?: string
@@ -558,6 +720,46 @@ export interface OpaqueSegment {
   open: boolean
 }
 
+/** Player-safe projection of a Host-owned persistent spell, item, or plugin area. */
+export interface MobilePersistentAreaView {
+  id: string
+  label: string
+  color: string
+  ownerPluginId?: string
+  sourceCharacterId?: string
+  sourceTokenId?: string
+  coreSpellId?: string
+  cells: Array<{ col: number; row: number }>
+  anchorCell?: { col: number; row: number }
+  movement?: { economy: 'action' | 'bonus-action'; maximumFeet: number }
+  grantedActivities?: Array<{ activityId: string; label?: string; activateOnCreate?: boolean }>
+  grantedActivityUseReceipts?: string[]
+  visual?: { preset: string; intensity?: 'subtle' | 'normal' | 'strong' }
+  lighting?:
+    | { kind: 'light'; brightRadiusFeet: number; dimRadiusFeet: number; color: string }
+    | { kind: 'magical-darkness'; radiusFeet: number }
+  obscuration?: 'light' | 'heavy'
+  movementCostMultiplier?: number
+}
+
+/** Only visible terrain contours are projected; private DM geometry metadata is omitted. */
+export interface MobileTerrainElevationView {
+  id: string
+  label: string
+  points: WorldPoint[]
+  elevationFeet: number
+  magicalDarkness?: boolean
+}
+
+export interface MobileMapLightView extends WorldPoint {
+  id: string
+  label: string
+  brightRadiusFeet: number
+  dimRadiusFeet: number
+  color: string
+  elevationFeet: number
+}
+
 export interface PlayerSceneSnapshot {
   schemaVersion: 1
   protocolVersion: typeof MOBILE_PLAYER_PROTOCOL_VERSION
@@ -568,6 +770,9 @@ export interface PlayerSceneSnapshot {
   controlledTokens: PlayerTokenView[]
   visibleTokens: PlayerTokenView[]
   opaqueSegments: OpaqueSegment[]
+  persistentAreas?: MobilePersistentAreaView[]
+  terrainElevations?: MobileTerrainElevationView[]
+  lights?: MobileMapLightView[]
   fogChunks: FogChunk[]
   /** Player-projected explored/currently visible map polygons. No DM fog data is exposed. */
   visibilityPolygons?: WorldPoint[][]

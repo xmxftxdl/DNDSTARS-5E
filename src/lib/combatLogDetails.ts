@@ -49,6 +49,7 @@ const CLASS_DAMAGE_LABELS: Record<string, string> = {
   'hunters-mark': '猎人印记',
   'divine-favor': '神恩',
   'divine-strike': '神圣打击',
+  'weapon-damage-rider': '特性附伤',
   lifedrinker: '饮命者',
   'foe-slayer': '屠灭众敌',
 }
@@ -487,6 +488,14 @@ function eventDetails(
       return [`${resolveName(event.targetId)}｜使用传奇抗性｜剩余 ${event.remainingUses} 次`]
     case 'counterspell-resolved':
       return [`${resolveName(event.actorId)}反制 ${resolveName(event.casterId)} 的 ${event.spellId}｜${event.success ? '反制成功' : '反制失败'}${event.dc === undefined ? '' : `｜检定 ${event.abilityCheckTotal ?? '—'} vs DC ${event.dc}`}`]
+    case 'spell-interception-resolved':
+      return [
+        `${resolveName(event.actorId)}以 ${event.featureId} 拦截 ${resolveName(event.casterId)} 的 ${event.spellId}｜施法者豁免 ${event.savingThrowTotal} vs DC ${event.dc}｜${event.success ? '豁免成功，法术照常生效' : [
+          event.negatedForSelf ? '对拦截者无效' : '未抵消法术',
+          event.temporaryAccessGranted ? `临时掌握 ${event.durationRounds} 轮` : '',
+          event.sourceCastingProhibited ? `原施法者被封锁 ${event.durationRounds} 轮` : '',
+        ].filter(Boolean).join('、')}`,
+      ]
     case 'undead-fortitude-resolved':
       return [`${resolveName(event.targetId)}｜亡灵坚韧 ${event.total} vs DC ${event.dc}｜${event.success ? '保留 1 HP' : '失败'}`]
     case 'relentless-rage-resolved':

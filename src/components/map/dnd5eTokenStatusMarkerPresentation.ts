@@ -27,7 +27,9 @@ const TACTICAL_MARKER_STYLES: Readonly<Record<
   protected: { glyph: '◇', fill: '#14532d', stroke: '#4ade80', text: '#f0fdf4' },
   exposed: { glyph: '!', fill: '#7c2d12', stroke: '#fdba74', text: '#fff7ed' },
   hidden: { glyph: '◐', fill: '#134e4a', stroke: '#5eead4', text: '#f0fdfa' },
-  'fire-averse': { glyph: '↓', fill: '#581c87', stroke: '#f0abfc', text: '#fdf4ff' },
+  'fire-averse': { glyph: '火', icon: '/assets/icons/conditions/condition-fire-averse.svg', fill: '#581c87', stroke: '#f0abfc', text: '#fdf4ff' },
+  attached: { glyph: '⛓', fill: '#3f3f46', stroke: '#d4d4d8', text: '#fafafa' },
+  suffocating: { glyph: '◌', fill: '#164e63', stroke: '#a5f3fc', text: '#ecfeff' },
 }
 
 export function dnd5eTokenStatusMarkerStyle(
@@ -45,6 +47,8 @@ export function dnd5eTokenStatusMarkerTooltip(
   const definition = dnd5eTokenStatusMarkerDefinition(marker.statusId)
   return {
     title: marker.label ?? definition.label,
-    description: `${definition.description} 该图标仅是 Token 标记，不会单独改变 Headless 规则。`,
+    description: marker.detailDescription ?? (marker.mechanical
+      ? definition.description
+      : `${definition.description} 该图标仅是 Token 标记，不会单独改变 Headless 规则。`),
   }
 }

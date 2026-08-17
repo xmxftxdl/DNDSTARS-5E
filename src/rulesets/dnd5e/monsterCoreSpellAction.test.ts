@@ -150,6 +150,54 @@ describe('monster core spell map action', () => {
     }))
   })
 
+  it('lets a Mummy Lord resolve Harm through the same maximum-HP authority', () => {
+    const mummyLord = token({
+      id: 'mummy-lord',
+      label: 'Mummy Lord',
+      poolId: 'srd-5.1:mummy-lord',
+      hp: 97,
+      maxHp: 97,
+      dnd5eCombatState: {
+        monsterSpellSlots: { 6: { current: 1, max: 1 } },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      hp: 20,
+      maxHp: 80,
+      x: 35,
+    })
+    const map = battleMap([mummyLord, heroToken])
+    const hero = { ...character(), currentHp: 20, maxHp: 80 }
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'monster-harm',
+      map,
+      characters: [hero],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mummyLord.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'harm',
+      slotLevel: 6,
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: heroToken.id, d20: 1 }],
+        effectRolls: [Array(14).fill(4)],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0]).toMatchObject({ currentHp: 1, maxHp: 24 })
+    expect(resolved.application?.characters[0].dnd5eCombatState?.hitPointMaximumReductionLedger)
+      .toMatchObject({ entries: [{ amount: 56, remainingRounds: 600 }] })
+  })
+
   it('derives an adult black dragon breath target set from map cells and rejects a partial client submission', () => {
     const dragon = token({
       id: 'dragon', label: '成年黑龙', poolId: 'srd-5.1:adult-black-dragon',

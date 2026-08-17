@@ -143,6 +143,7 @@ const COLLECTION_KEYS: readonly CollectionKey[] = [
   'items',
   'abilityGenerationMethods',
   'headlessActions',
+  'activities',
   'subclasses',
   'classes',
   'monsters',

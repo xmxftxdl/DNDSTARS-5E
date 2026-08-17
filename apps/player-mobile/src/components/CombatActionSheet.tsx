@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { MobileActionDescriptorV1, MobilePlayerWorkspace, MobileSpellView, PlayerTokenView } from '../../../../packages/mobile-protocol/src'
+import { dnd5eSpellActionIcon } from '../../../../src/lib/dnd5eActionIcons'
 import { DND5E_SRD_COMBAT_SPELLS } from '../../../../src/rulesets/dnd5e/spells'
 import { cellsForAoe } from '../../../../src/lib/skillTargeting'
 import { colors } from '../theme'
@@ -25,10 +26,11 @@ export interface PendingMapTarget {
   finish?: () => Promise<void>
 }
 
-export function CombatActionSheet({ visible, initialTab = 'actions', workspace, onClose, onSubmit, onBeginMapTarget }: {
+export function CombatActionSheet({ visible, initialTab = 'actions', workspace, assetBaseUrl, onClose, onSubmit, onBeginMapTarget }: {
   visible: boolean
   initialTab?: ActionTab
   workspace: MobilePlayerWorkspace
+  assetBaseUrl: string
   onClose: () => void
   onSubmit: (patch: Record<string, unknown>, label: string, omitCombatId?: boolean) => Promise<string>
   onBeginMapTarget: (target: PendingMapTarget) => void
@@ -73,6 +75,10 @@ export function CombatActionSheet({ visible, initialTab = 'actions', workspace, 
       }
       const basic = objectField(payload, 'dnd5eBasicAction')
       if (targetTokenId && Object.keys(basic).length) payload.dnd5eBasicAction = { ...basic, targetTokenId }
+      const persistentMove = objectField(payload, 'dnd5ePersistentAreaMove')
+      if (targetCell && Object.keys(persistentMove).length) {
+        payload.dnd5ePersistentAreaMove = { ...persistentMove, targetCell }
+      }
       await onSubmit(payload, descriptor.label, !workspace.combat?.active)
     }
     if (descriptor.targeting.kind === 'self') return void submitCommand(actor?.id)
@@ -152,23 +158,23 @@ export function CombatActionSheet({ visible, initialTab = 'actions', workspace, 
     } else requireTarget(`为${spell.name}选择目标`, async (target) => { await onSubmit(payload([target.id]), `施放${spell.name}`, omitCombatId) })
   }
   if (!character) return null
-  return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}><View style={styles.backdrop}><View style={styles.sheet}>
+  return <Modal visible={visible} animationType="slide" transparent supportedOrientations={['landscape-left', 'landscape-right']} onRequestClose={onClose}><View style={styles.backdrop}><View style={styles.sheet}>
     <View style={styles.head}><Text style={styles.title}>行动控制栏</Text><Pressable onPress={onClose}><Text style={styles.close}>×</Text></Pressable></View>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>{([['actions', '基础行动'], ['spells', '法术'], ['items', '物品'], ['features', '职业特性'], ['checks', '检定']] as const).map(([id, label]) => <Pressable key={id} style={[styles.tab, tab === id && styles.tabActive]} onPress={() => setTab(id)}><Text style={styles.tabText}>{label}</Text></Pressable>)}</ScrollView>
     <TargetPicker targets={targets} value={selectedTargetId} onChange={setSelectedTargetId} />
     <ScrollView style={styles.body} contentContainerStyle={styles.content}>
-      {tab === 'actions' && <RegisteredActionGrid actions={workspace.actionRegistry.actions.filter((entry) => entry.group === 'actions')} onAction={runRegisteredAction} />}
+      {tab === 'actions' && <RegisteredActionGrid actions={workspace.actionRegistry.actions.filter((entry) => entry.group === 'actions')} assetBaseUrl={assetBaseUrl} onAction={runRegisteredAction} />}
       {tab === 'spells' && workspace.spells.length ? workspace.spells.map((spell) => {
         const baseSlot = mobileSpellBaseSlotLevel(spell, character)
         const capacity = spellTargetCapacity(spell, baseSlot, character.level)
         const assigned = spellTargets[spell.id] ?? []
         const canCast = spell.level === 0 || spell.prepared || spell.known || spell.racialInnate
         const configurable = mobileAvailableSpellSlotLevels(spell, character).some((level) => level > baseSlot)
-        return <View key={spell.id} style={styles.entry}><Pressable style={{ flex: 1 }} disabled={!configurable} delayLongPress={420} onLongPress={() => openSpellConfiguration(spell)}><Text style={styles.entryTitle}>{spell.name}</Text><Text style={styles.entryMeta}>{spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.headless ? 'Headless' : 'DM 裁定'}{spell.racialInnate ? ' · 种族天生施法' : spell.prepared ? ' · 已准备' : spell.known ? ' · 已知' : ' · 未准备'}</Text>{spell.racialInnate && <Text style={styles.small}>固定按 {baseSlot} 环施放，不消耗职业法术位</Text>}{configurable && <Text style={styles.longPressHint}>长按打开升环配置</Text>}{capacity.maximum > 1 && !spell.area && <TargetAllocation spell={spell} maximum={capacity.maximum} assigned={assigned} selectedTargetId={selectedTargetId} targets={targets} onChange={(value) => setSpellTargets((state) => ({ ...state, [spell.id]: value }))} />}</Pressable><Pressable disabled={!canCast} delayLongPress={420} accessibilityHint={configurable ? '轻点按基础环位施放，长按配置升环施法' : '轻点施放法术'} style={[styles.use, !canCast && styles.disabled]} onPressIn={() => { longPressSpellRef.current = null }} onLongPress={() => { longPressSpellRef.current = spell.id; openSpellConfiguration(spell) }} onPress={() => { if (longPressSpellRef.current === spell.id) { longPressSpellRef.current = null; return } castSpell(spell, undefined, baseSlot) }}><Text style={styles.useText}>{canCast ? '施放' : '未准备'}</Text></Pressable></View>
+        return <View key={spell.id} style={styles.entry}><ActionArtwork assetBaseUrl={assetBaseUrl} assetPath={spellArtwork(spell)} fallback="✧" badge={spell.level === 0 ? '戏' : spell.level} /><Pressable style={{ flex: 1 }} disabled={!configurable} delayLongPress={420} onLongPress={() => openSpellConfiguration(spell)}><Text style={styles.entryTitle}>{spell.name}</Text><Text style={styles.entryMeta}>{spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.headless ? 'Headless' : 'DM 裁定'}{spell.racialInnate ? ' · 种族天生施法' : spell.prepared ? ' · 已准备' : spell.known ? ' · 已知' : ' · 未准备'}</Text>{spell.racialInnate && <Text style={styles.small}>固定按 {baseSlot} 环施放，不消耗职业法术位</Text>}{configurable && <Text style={styles.longPressHint}>长按打开升环配置</Text>}{capacity.maximum > 1 && !spell.area && <TargetAllocation spell={spell} maximum={capacity.maximum} assigned={assigned} selectedTargetId={selectedTargetId} targets={targets} onChange={(value) => setSpellTargets((state) => ({ ...state, [spell.id]: value }))} />}</Pressable><Pressable disabled={!canCast} delayLongPress={420} accessibilityHint={configurable ? '轻点按基础环位施放，长按配置升环施法' : '轻点施放法术'} style={[styles.use, !canCast && styles.disabled]} onPressIn={() => { longPressSpellRef.current = null }} onLongPress={() => { longPressSpellRef.current = spell.id; openSpellConfiguration(spell) }} onPress={() => { if (longPressSpellRef.current === spell.id) { longPressSpellRef.current = null; return } castSpell(spell, undefined, baseSlot) }}><Text style={styles.useText}>{canCast ? '施放' : '未准备'}</Text></Pressable></View>
       }) : tab === 'spells' && <Text style={styles.empty}>当前角色没有可用法术。</Text>}
       {tab === 'items' && (character.dnd5eInventory?.entries ?? []).map((entry) => {
         const actions = entry.item.useActions?.length ? entry.item.useActions : entry.item.use ? [{ id: 'default', label: '使用', ...entry.item.use }] : []
-        return <View key={entry.instanceId} style={styles.entry}><Text style={styles.itemIcon}>{entry.item.icon || '◇'}</Text><View style={{ flex: 1 }}><Text style={styles.entryTitle}>{entry.item.name} ×{entry.quantity}</Text><Text style={styles.entryMeta} numberOfLines={3}>{entry.item.description || entry.item.rulesText}</Text><View style={styles.itemActions}>{actions.map((action) => <Pressable key={action.id} style={styles.miniUse} onPress={() => {
+        return <View key={entry.instanceId} style={styles.entry}><ActionArtwork assetBaseUrl={assetBaseUrl} fallback={itemGlyph(entry.item.icon)} badge={entry.quantity} /><View style={{ flex: 1 }}><Text style={styles.entryTitle}>{entry.item.name} ×{entry.quantity}</Text><Text style={styles.entryMeta} numberOfLines={3}>{entry.item.description || entry.item.rulesText}</Text><View style={styles.itemActions}>{actions.map((action) => <Pressable key={action.id} style={styles.miniUse} onPress={() => {
           const effect = objectField(action, 'effect')
           if (effect.kind === 'spell-cast' && typeof effect.spellId === 'string') {
             const spell = mobileSpellForItem(effect.spellId, Number(effect.castAtLevel) || 0)
@@ -207,7 +213,7 @@ export function CombatActionSheet({ visible, initialTab = 'actions', workspace, 
           await onSubmit({ type: 'dnd5e-racial-action', targetCell, targetTokenIds, dnd5eRacialAction: { feature: 'dragonborn-breath' } }, `${ancestry.name}龙裔吐息`)
         } })
         onClose()
-      }} /><RegisteredActionGrid actions={workspace.actionRegistry.actions.filter((entry) => entry.group === 'features')} onAction={runRegisteredAction} emptyLabel="当前规则包没有可在移动端主动使用的扩展能力。" /></>}
+      }} /><RegisteredActionGrid actions={workspace.actionRegistry.actions.filter((entry) => entry.group === 'features')} assetBaseUrl={assetBaseUrl} onAction={runRegisteredAction} emptyLabel="当前规则包没有可在移动端主动使用的扩展能力。" /></>}
       {tab === 'checks' && <View style={styles.checkCard}><Text style={styles.entryTitle}>属性 / 技能检定</Text><Text style={styles.small}>直接选属性，或选择一项技能；技能会自动关联正确属性。</Text><View style={styles.abilityRow}>{Object.entries({ str: '力量', dex: '敏捷', con: '体质', int: '智力', wis: '感知', cha: '魅力' }).map(([id, label]) => <Pressable key={id} style={[styles.ability, ability === id && !skill && styles.abilityActive]} onPress={() => { setAbility(id); setSkill('') }}><Text style={styles.abilityText}>{label}</Text></Pressable>)}</View><View style={styles.skillGrid}>{mobileSkills.map(([id, label, relatedAbility]) => <Pressable key={id} style={[styles.skill, skill === id && styles.abilityActive]} onPress={() => { setSkill(id); setAbility(relatedAbility) }}><Text style={styles.skillText}>{label} · {abilityShort(relatedAbility)}</Text></Pressable>)}</View><TextInput value={dc} onChangeText={setDc} keyboardType="number-pad" style={styles.input} placeholder="DC" placeholderTextColor={colors.muted} /><Pressable style={styles.toggle} onPress={() => setSpendAction((value) => !value)}><View style={[styles.box, spendAction && styles.boxChecked]} /><Text style={styles.small}>作为主动动作</Text></Pressable><Pressable style={styles.primary} onPress={() => void submit({ type: 'dnd5e-ability-check', dnd5eAbilityCheck: { ability, ...(skill ? { skill } : {}), dc: Number(dc) || 10, mode: 'normal', spendAction } }, `${skill ? mobileSkills.find(([id]) => id === skill)?.[1] : abilityShort(ability)}检定`, !workspace.combat?.active)}><Text style={styles.primaryText}>投掷检定</Text></Pressable></View>}
       {!!error && <Text style={styles.error}>{error}</Text>}
     </ScrollView>
@@ -304,8 +310,55 @@ function mobileSpellForItem(spellId: string, castAtLevel: number): MobileSpellVi
     automationReason: `由物品以 ${castAtLevel || spell.level} 环施放`,
   }
 }
-function RegisteredActionGrid({ actions, onAction, emptyLabel }: {
+
+const coreActionArtwork: Record<string, string> = {
+  'core.weapon-attack': '/assets/icons/melee-attack-action.png',
+  'core.dash': '/assets/icons/dash-action.png',
+  'core.disengage': '/assets/icons/disengage-action.png',
+  'core.dodge': '/assets/icons/dodge-action.png',
+}
+
+function absoluteAssetUrl(baseUrl: string, assetPath?: string) {
+  if (!assetPath) return ''
+  if (/^https?:\/\//i.test(assetPath)) return assetPath
+  return `${baseUrl.replace(/\/$/, '')}/${assetPath.replace(/^\//, '')}`
+}
+
+function spellArtwork(spell: MobileSpellView) {
+  return dnd5eSpellActionIcon({
+    id: spell.id,
+    name: spell.name,
+    englishName: spell.englishName,
+    level: spell.level,
+    school: spell.school,
+    castingClassId: spell.castingClassId,
+  }).asset
+}
+
+function itemGlyph(icon: string) {
+  if (/potion|healing|药/.test(icon)) return '✚'
+  if (/weapon|sword|bow|武器/.test(icon)) return '⚔'
+  if (/armor|shield|护甲|盾/.test(icon)) return '⛨'
+  if (/wand|staff|scroll|focus|magic|法/.test(icon)) return '✧'
+  return '◇'
+}
+
+function ActionArtwork({ assetBaseUrl, assetPath, fallback, badge }: {
+  assetBaseUrl: string
+  assetPath?: string
+  fallback: string
+  badge?: string | number
+}) {
+  const uri = absoluteAssetUrl(assetBaseUrl, assetPath)
+  return <View style={styles.artwork}>
+    {uri ? <Image source={{ uri }} resizeMode="cover" style={styles.artworkImage} /> : <Text style={styles.artworkFallback}>{fallback}</Text>}
+    {badge !== undefined && <View style={styles.artworkBadge}><Text style={styles.artworkBadgeText}>{badge}</Text></View>}
+  </View>
+}
+
+function RegisteredActionGrid({ actions, assetBaseUrl, onAction, emptyLabel }: {
   actions: MobileActionDescriptorV1[]
+  assetBaseUrl: string
   onAction: (action: MobileActionDescriptorV1) => void
   emptyLabel?: string
 }) {
@@ -316,7 +369,7 @@ function RegisteredActionGrid({ actions, onAction, emptyLabel }: {
     accessibilityHint={`${entry.automation === 'full' ? '完整自动化' : '需要 Host 复核'} · ${entry.economy}`}
     style={styles.action}
     onPress={() => onAction(entry)}
-  ><Text style={styles.actionIcon}>{entry.icon ?? (entry.source === 'plugin' ? '◇' : '✦')}</Text><Text numberOfLines={2} style={styles.actionText}>{entry.label}</Text>{entry.source === 'plugin' && <Text style={styles.registryMeta}>{entry.automation === 'full' ? 'Headless' : 'Host 复核'}</Text>}</Pressable>)}</View>
+  ><ActionArtwork assetBaseUrl={assetBaseUrl} assetPath={coreActionArtwork[entry.id]} fallback={entry.icon ?? (entry.source === 'plugin' ? '◇' : '✦')} /><Text numberOfLines={2} style={styles.actionText}>{entry.label}</Text>{entry.source === 'plugin' && <Text style={styles.registryMeta}>{entry.automation === 'full' ? 'Headless' : 'Host 复核'}</Text>}</Pressable>)}</View>
 }
 function FeatureActions({ character, actor, workspace, submit, requireTarget, beginDragonbornBreath }: {
   character: MobilePlayerWorkspace['characters'][number]
@@ -391,7 +444,8 @@ function shortFeatureId(value: string) {
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0008' }, sheet: { height: '82%', backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: colors.border }, head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15 }, title: { color: colors.text, fontSize: 18, fontWeight: '900' }, close: { color: colors.muted, fontSize: 26 }, tabs: { gap: 7, paddingHorizontal: 12, paddingBottom: 9 }, tab: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border }, tabActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft }, tabText: { color: colors.text, fontWeight: '800', fontSize: 10 }, targets: { gap: 7, paddingHorizontal: 12, paddingBottom: 9 }, target: { width: 74, padding: 7, alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 12 }, targetActive: { borderColor: colors.warning }, targetDot: { width: 30, height: 30, borderRadius: 15 }, targetText: { color: colors.text, fontSize: 9, fontWeight: '800', marginTop: 4 }, body: { flex: 1 }, content: { padding: 12, paddingBottom: 40 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, action: { width: '31%', minHeight: 82, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 15, alignItems: 'center', justifyContent: 'center', padding: 8 }, actionIcon: { color: colors.primary, fontSize: 21 }, actionText: { color: colors.text, fontWeight: '800', fontSize: 10, textAlign: 'center', marginTop: 6 }, registryMeta: { color: colors.teal, fontSize: 8, fontWeight: '800', marginTop: 4 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, action: { width: '31%', minHeight: 104, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 15, alignItems: 'center', justifyContent: 'center', padding: 8 }, actionIcon: { color: colors.primary, fontSize: 21 }, actionText: { color: colors.text, fontWeight: '800', fontSize: 10, textAlign: 'center', marginTop: 6 }, registryMeta: { color: colors.teal, fontSize: 8, fontWeight: '800', marginTop: 4 },
+  artwork: { width: 52, height: 52, borderRadius: 13, borderWidth: 1, borderColor: '#7857cf', backgroundColor: '#24183f', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }, artworkImage: { width: 48, height: 48, borderRadius: 11 }, artworkFallback: { color: '#e9ddff', fontSize: 25, fontWeight: '900' }, artworkBadge: { position: 'absolute', right: -5, bottom: -5, minWidth: 19, height: 19, paddingHorizontal: 4, borderRadius: 10, borderWidth: 1, borderColor: '#d8ccff', backgroundColor: '#171222', alignItems: 'center', justifyContent: 'center' }, artworkBadgeText: { color: '#fff', fontSize: 8, fontWeight: '900' },
   featureConfig: { gap: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 13, backgroundColor: colors.surface }, featureInput: { color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: 9, backgroundColor: colors.background, paddingHorizontal: 10, paddingVertical: 8 },
   entry: { flexDirection: 'row', gap: 10, alignItems: 'center', padding: 11, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, marginBottom: 8 }, entryTitle: { color: colors.text, fontWeight: '900', fontSize: 13 }, entryMeta: { color: colors.muted, fontSize: 9, lineHeight: 14, marginTop: 3 }, itemIcon: { fontSize: 22 }, use: { backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.primary, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 8 }, useText: { color: '#d8ccff', fontWeight: '900', fontSize: 10 }, small: { color: colors.muted, fontSize: 10 }, longPressHint: { color: colors.warning, fontSize: 9, fontWeight: '800', marginTop: 5 },
   allocation: { marginTop: 7, padding: 7, borderRadius: 9, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }, allocationText: { color: colors.muted, fontSize: 9, lineHeight: 13 }, allocationButtons: { flexDirection: 'row', gap: 6, marginTop: 6 }, allocate: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 7, borderWidth: 1, borderColor: colors.primary }, allocateText: { color: '#d8ccff', fontSize: 8, fontWeight: '800' }, itemActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }, miniUse: { borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8 }, miniUseText: { color: '#d8ccff', fontSize: 9, fontWeight: '900' }, unusable: { color: colors.muted, fontSize: 9 },

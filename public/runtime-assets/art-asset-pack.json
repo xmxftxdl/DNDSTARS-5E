@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "packId": "astraltrace.dnd5e-2014.art",
-  "version": "content-be1313bcace7419c",
+  "version": "content-42abfd56b5f4dc0d",
   "assetBasePath": "/assets/",
   "sourceCatalog": "src/lib/enemyPool.ts",
   "summary": {
-    "totalFiles": 2873,
-    "totalBytes": 3279653464,
-    "runtimeFiles": 2185,
-    "runtimeBytes": 621157988,
+    "totalFiles": 2983,
+    "totalBytes": 3347549557,
+    "runtimeFiles": 2295,
+    "runtimeBytes": 689054081,
     "authoringFiles": 688,
     "authoringBytes": 2658495476,
     "catalogTokenPortraits": 677,
@@ -17,8 +17,8 @@
     "legacyInitiativeDerivatives": 11,
     "authoringMasters": 426,
     "authoringRaw": 262,
-    "icons": 730,
-    "vfx": 79
+    "icons": 746,
+    "vfx": 173
   },
   "files": [
     {
@@ -872,6 +872,102 @@
       "bytes": 72515,
       "sha256": "287e78ee8ad3d2378404289cb7415df6c8d20ebca888c3148f2b2a00381613ad",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/icons/conditions/condition-blinded.svg",
+      "bytes": 290,
+      "sha256": "565658ae0cf0983ad4ce5388bc967f6c5e4651079b6d17bd24e2bf7cf2d9b496",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-charmed.svg",
+      "bytes": 234,
+      "sha256": "bfb376028c906d4d6ee7ad5fa93fb3623b35b121fce2fb6184bf1fcdf5f9da84",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-deafened.svg",
+      "bytes": 344,
+      "sha256": "a4bdbdfab2ff87c512713885499b11a1e67c89ca34094accbacb56b8f28af866",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-fire-averse.svg",
+      "bytes": 375,
+      "sha256": "a485e34d9af8241930eb7dc986f95ed43f6f519750d3f4c9fc22a9114503263d",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-flying.svg",
+      "bytes": 566,
+      "sha256": "ec490862ac0562e7577c665f32028b0d5612a6336e781651fd4bbb4ad4386de4",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-frightened.svg",
+      "bytes": 307,
+      "sha256": "6becc33b71301ce123035065122cc31d6bdaaa0882531cdb4885bf90eee5bc9b",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-grappled.svg",
+      "bytes": 325,
+      "sha256": "06f4af319c6725c5c680485682304d94bf5650037d678e9728f1c2be02e719ca",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-incapacitated.svg",
+      "bytes": 317,
+      "sha256": "a7d7a7a05ba2bd6dce06102809479a0035c42852db14620d64ad9a48c9d32709",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-invisible.svg",
+      "bytes": 340,
+      "sha256": "d93f44fdecfb8eef8c7b2c3a55e104b5995fa54f614094dffc08c81a5c62a34f",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-paralyzed.svg",
+      "bytes": 311,
+      "sha256": "3a4da4255f42b3d39019345ed24802a3bbb995be033d26490e16640dadb4970e",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-petrified.svg",
+      "bytes": 268,
+      "sha256": "bf7cde80463cf2e295043b0910e77d81e7abb1ff64363c2b4b71d42ba92deed7",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-poisoned.svg",
+      "bytes": 383,
+      "sha256": "47fea443ac0301a0dd67501f752bed77fd22a4ff745daf63b1cd15d18fd1644a",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-prone.svg",
+      "bytes": 294,
+      "sha256": "4653e11f7f1b509e922098feeb05526e7718605c594a9fb668adc8d5de2a3ea9",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-restrained.svg",
+      "bytes": 299,
+      "sha256": "db23ef7ea7b5b0b70fea96a784d78b6a90e407f3fcf55e4320ace399c8b46eb7",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-stunned.svg",
+      "bytes": 294,
+      "sha256": "f9779ffde21cdad86c8074d4d57d542e9f5439d345a9547a011fc4ffc9f32e4e",
+      "contentType": "image/svg+xml"
+    },
+    {
+      "path": "assets/icons/conditions/condition-unconscious.svg",
+      "bytes": 271,
+      "sha256": "75f0d46fa000ba29721eff29aa4314d05e6b9d1e1ff950aa406719fc5d3c4bca",
+      "contentType": "image/svg+xml"
     },
     {
       "path": "assets/icons/cone-of-cold-spell-action.png",
@@ -12670,6 +12766,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/acid-arrow-sprite-v2.webp",
+      "bytes": 265898,
+      "sha256": "d20591fef65f3331dd8bc2244096a35bfcef4b7de9374c17ce89faab4e4f94b3",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/acid-splash-fluid.png",
       "bytes": 1074768,
       "sha256": "031e10c05370b47b0de0cf282b0b55350dcb26e71239982899fc353e656a87fa",
@@ -12682,10 +12784,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/acid-splash-sprite-v2.webp",
+      "bytes": 262326,
+      "sha256": "f6890ba936c7a164fb1835d0690b0bf352110057d061ea88184da6da02f8b3ff",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/banishment-sprite-v2.png",
       "bytes": 1334215,
       "sha256": "8709df4bb6c4e464c804ad5391820a9a8b57c1fcf56cafe697ef066f2d8248df",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/banishment-sprite-v2.webp",
+      "bytes": 255514,
+      "sha256": "c903f330ec2b8527acbf35647e91b2107051f5acccff7b4eb190d6f5aa6bb065",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/black-tentacles-sprite-v2.png",
@@ -12694,16 +12808,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/black-tentacles-sprite-v2.webp",
+      "bytes": 394306,
+      "sha256": "3ef6a41b08a29dcbf7a8aa627884b728163ec6aab1879ecba95dbe1010c44817",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/blade-barrier-sprite-v2.png",
       "bytes": 922170,
       "sha256": "8c4dcc4f254ee301faedbc746851143c2ae6a98093902ccf0d58e72ada07967b",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/blade-barrier-sprite-v2.webp",
+      "bytes": 226278,
+      "sha256": "73c240e28d8d5b2a528e0f4c9d8f4eae2f9663d72efb584795361a352b1c401c",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/blight-sprite-v2.png",
       "bytes": 841715,
       "sha256": "91ff9c1557b4f73c9d68ef9084457f7bab04e9449e171ec1358ed4e163af1d1c",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/blight-sprite-v2.webp",
+      "bytes": 240716,
+      "sha256": "2d55a7e833e0b0093fcdf25699a0b5732a7b9e117adc7cc6cd8dfaa213647468",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/burning-hands-fluid.png",
@@ -12724,16 +12856,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/call-lightning-sprite-v2.webp",
+      "bytes": 304082,
+      "sha256": "72c23e6ce8db5391073eb5fbe7d4a014dba1e7257c60756471786d812cabbb1d",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/call-lightning-strike-sprite-v2.png",
       "bytes": 772147,
       "sha256": "99a6587b4c471d313d9764155c034273d1a283a8be6430de963e5c4e368665d3",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/call-lightning-strike-sprite-v2.webp",
+      "bytes": 185826,
+      "sha256": "b7463e684d25a656ad41e79d7d528c050e3f43bc2094cbe910c353bf75475b7d",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/chain-lightning-sprite-v2.png",
       "bytes": 625309,
       "sha256": "44547a891c0099dd199ca9649ec367bac04b9e8662cf9dffbedd2608ef98a2cd",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/chain-lightning-sprite-v2.webp",
+      "bytes": 187042,
+      "sha256": "c73cbaf841372f804bb9f772f92cc2b53467dbfe39721c399e1287c4da06f6d3",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/chill-touch-hand.png",
@@ -12748,6 +12898,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/circle-of-death-sprite-v2.webp",
+      "bytes": 466912,
+      "sha256": "633594b46a7b5fb0451c16f812b4e3c5ee53f4a3ce4a0001f54484cf4faf1f8a",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/cloudkill-sprite-v2.png",
       "bytes": 1869537,
       "sha256": "19e1a6cadbf32ee24a3b0dfbc142e61a630144fba00fdd10c324149414a1ced6",
@@ -12760,16 +12916,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/color-spray-sprite-v2.webp",
+      "bytes": 295836,
+      "sha256": "311d69518697b7a296541c99946a6cdc771c8638462186d67a4c356537d3e685",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/cone-of-cold-sprite-v2.png",
       "bytes": 1048860,
       "sha256": "f2a161b4a2b1c8b6ce458a822ddd354a70632079d581a425223d743f90cbc726",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/cone-of-cold-sprite-v2.webp",
+      "bytes": 260846,
+      "sha256": "7122ef87949e5c6543ee47a7deb0a63f3db064e39def5504e68e31f605a68484",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/counterspell-sprite-v2.png",
       "bytes": 1384403,
       "sha256": "12feb693ee2a69e417b6d3f6717cbdfe1a02cd99d3e025a66a8357cae3c71a71",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/counterspell-sprite-v2.webp",
+      "bytes": 386884,
+      "sha256": "6a636840a08f5634f26f736f7a20090a6290f7a13c45da1ef84a32f1575be98d",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/cure-wounds-fluid.png",
@@ -12784,10 +12958,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/cure-wounds-sprite-v2.webp",
+      "bytes": 318782,
+      "sha256": "c657c1e3c3ea3b9957e117338a56e39d7bd82a3924113db793dcf76b8b7a1880",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/darkness-sprite-v2.png",
       "bytes": 1043914,
       "sha256": "0e1f43094de9b8bd0bcebf8d28d6b9bb4fd95285a3c81267160e36ed18d72f5c",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/darkness-sprite-v2.webp",
+      "bytes": 197334,
+      "sha256": "7cda88bdbb7a3f5df03d8151794380fe4cf9d48c0f48b9f4dda3b8608a745783",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/daylight-sprite-v2.png",
@@ -12796,16 +12982,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/daylight-sprite-v2.webp",
+      "bytes": 367768,
+      "sha256": "34a7e053959057ee74bf0c9400f0982ea973135ccc0d71aac8d95f60289e0568",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/disintegrate-sprite-v2.png",
       "bytes": 732333,
       "sha256": "c47357084efaa317c43d106eb2f918cc21541487beeee657cda4ceb602f7e984",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/disintegrate-sprite-v2.webp",
+      "bytes": 220710,
+      "sha256": "fec9d943e12f336a000c8fa419f5a4e38ecae90c6d3020fb1d874881aa8d6c6c",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/dispel-magic-sprite-v2.png",
       "bytes": 1176182,
       "sha256": "eb14bab48c4c878a9169d7f1f005da80bf580d80afe5763e6590a9317b5bc876",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/dispel-magic-sprite-v2.webp",
+      "bytes": 357660,
+      "sha256": "11408393a6ec6f268bd5d928bb4f9ea549e49ada342afe7108dd5ebe84a5615d",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/eldritch-blast-fluid.png",
@@ -12820,10 +13024,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/eldritch-blast-sprite-v2.webp",
+      "bytes": 221912,
+      "sha256": "32d0d5a12c1f7f6d7db530cc32df5adeab96f824bcaab4a10430e290adce33f6",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/entangle-sprite-v2.png",
       "bytes": 2009968,
       "sha256": "acc72d16b924e9d17a1b405e2665b6f5c30375edc5f9630e47c64cc7cf6b33b4",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/entangle-sprite-v2.webp",
+      "bytes": 355858,
+      "sha256": "d41e5abc94d1bc64ec0d711db12dae2a13ed528b5e2d955b3e1ee8e8efb6490d",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/faerie-fire-sprite-v2.png",
@@ -12832,16 +13048,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/faerie-fire-sprite-v2.webp",
+      "bytes": 388782,
+      "sha256": "866bc8a34661e6cd7abc43b8852f9954ee0e239ccc393a994f6233d91d915e2b",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/false-life-sprite-v2.png",
       "bytes": 1321033,
       "sha256": "8dfe5f2c93d9bf24c0cf0ac2e25e705f273fb8a85cac3b6207576304a302b594",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/false-life-sprite-v2.webp",
+      "bytes": 246638,
+      "sha256": "8482620e8adee1812a92c305a80cb07080105010c2a786ec0106533dd06926d3",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/finger-of-death-sprite-v2.png",
       "bytes": 1079246,
       "sha256": "d8744cac0130870884916dea5869f519186f81fdcd9aa80bb0580e1b9f728f74",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/finger-of-death-sprite-v2.webp",
+      "bytes": 259584,
+      "sha256": "907be8711bbeb9298187fa675e8ed137c49f2900e1ebd3e23496925d74cedc4a",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/fire-projectile-fluid.png",
@@ -12862,10 +13096,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/flame-strike-sprite-v2.webp",
+      "bytes": 198940,
+      "sha256": "fdae5502ff2222a257eaec9049105b6d5114b3bbabbd936d0a17cdbcd30721c7",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/flaming-sphere-sprite-v2.png",
       "bytes": 1167340,
       "sha256": "85e0da347621b2b1049c73398e1e594b1cb572ef37f2de4205eef84ba7398e07",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/flaming-sphere-sprite-v2.webp",
+      "bytes": 263552,
+      "sha256": "59d58bbf8fe40e62f1aae1483e6d9be34ab3220f6a09607368fa682bb8d44afc",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/freezing-sphere-sprite-v2.png",
@@ -12874,10 +13120,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/freezing-sphere-sprite-v2.webp",
+      "bytes": 406078,
+      "sha256": "635ff9c07e7710105d91d752ea708a2590b9beffdaca8faeecc399ec5d882a65",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/grease-sprite-v2.png",
       "bytes": 1465722,
       "sha256": "a3b629b599be7a45a088ec4f3f69f01a3abaffa47b6be6694adf2ca23a7757aa",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/grease-sprite-v2.webp",
+      "bytes": 290528,
+      "sha256": "4c3feb29ad43a0f9663174fa135690bd21aca032fe742233deb1d0476dd349b9",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/guiding-bolt-fluid.png",
@@ -12892,6 +13150,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/guiding-bolt-sprite-v2.webp",
+      "bytes": 176236,
+      "sha256": "7267a5bb18f8201626cf8a83fea93cd3e77fb87530e7ce874dfea0910ba82956",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/healing-word-fluid.png",
       "bytes": 908014,
       "sha256": "5145eae7e6e4a0cb8ad591ffa1777ce4ea703d6bb472f638a0dadd89886f576c",
@@ -12902,6 +13166,12 @@
       "bytes": 629048,
       "sha256": "05ca46edefb64a9c02c6c204905c2a4b0b0421c55d8760982004bfa8b53c77e0",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/healing-word-sprite-v2.webp",
+      "bytes": 166472,
+      "sha256": "94319eb2fbfd5b13d23fefde6d3a4f663107ca4aedbccb9806ceb3330afa7845",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/hellish-rebuke-fluid.png",
@@ -12916,16 +13186,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/hellish-rebuke-sprite-v2.webp",
+      "bytes": 320102,
+      "sha256": "69cf48934bf6b789e623b79684d426d641f1d4bdca74524c056a8354d6922ab8",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/hold-monster-sprite-v2.png",
       "bytes": 2103805,
       "sha256": "3aa91ec0775af08d65c353d63a2588d4783867f3cc60424fa7f43abf294a1cff",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/hold-monster-sprite-v2.webp",
+      "bytes": 455618,
+      "sha256": "56481f521689e37375aa903b96a6a46895bb8f100a3798999e083c4512cf15db",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/hypnotic-pattern-sprite-v2.png",
       "bytes": 1829334,
       "sha256": "93de308d855fa290e3121a67d574d825dd40856c52ef9bfdadddb112896d4685",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/hypnotic-pattern-sprite-v2.webp",
+      "bytes": 434188,
+      "sha256": "2e7413875afb06efdbebeaa7a548431045a25b4d627d4baefb5cffb9312c2098",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/ice-storm-ground-sprite-v2.png",
@@ -12940,6 +13228,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/ice-storm-sprite-v2.webp",
+      "bytes": 357244,
+      "sha256": "c2cca4fc3b97947649fc638d56354e5e14ca0def319b5c46b59fcc6770382914",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/inflict-wounds-fluid.png",
       "bytes": 1385063,
       "sha256": "2d06d931ed8e75edeb862e7c24f862b9c739a228190c2c2febf7d1146d89926c",
@@ -12952,16 +13246,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/inflict-wounds-sprite-v2.webp",
+      "bytes": 238522,
+      "sha256": "07b9ce2d105634803739bb9306495fd39eaa96033aec3ec00999f4a8ca72fd8a",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/insect-plague-sprite-v2.png",
       "bytes": 1580738,
       "sha256": "d7746160b22fafb62cad034475051bb9cfab88f639741912ee4527ee021a1bb1",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/insect-plague-sprite-v2.webp",
+      "bytes": 368454,
+      "sha256": "3f2074d6da125a6509a0e560b6e95ccf5e3e1c6634fd947ad5ec674a8c8d103c",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/lesser-restoration-sprite-v2.png",
       "bytes": 1301713,
       "sha256": "4274746256167470ad9578070f409d0efc4af2d662bab54294cbc9cc04810d3d",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/lesser-restoration-sprite-v2.webp",
+      "bytes": 430808,
+      "sha256": "f99cbc5e33245b2799803e7450888e87850b153d7190e3b5c41e26e90f510e3e",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/lightning-bolt-fluid.png",
@@ -12976,10 +13288,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/lightning-bolt-sprite-v2.webp",
+      "bytes": 190810,
+      "sha256": "8e848a672af9a5bc64325da11329dbeb1a8ca84d7409c87bb30843260bd6ddf2",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/mage-hand-sprite-v2.png",
       "bytes": 1318799,
       "sha256": "116c15636bee12c19612f5db50da61696a8a3a409a3485c8fb80c3c1e2d0c875",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/mage-hand-sprite-v2.webp",
+      "bytes": 267656,
+      "sha256": "929c30592455f2c557f2e93ffaa286205cbd33ce8b4a549ee96dae74746c24f3",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/magic-missile-fluid.png",
@@ -12994,16 +13318,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/misty-step-sprite-v2.webp",
+      "bytes": 252502,
+      "sha256": "a6b4c16f3eb4dd8856e6842767a6427d4a09ede89828cc76f1790466fa370f59",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/moonbeam-sprite-v2.png",
       "bytes": 1306439,
       "sha256": "af8ac4fc737b9322d3abfd8b4fe0aba1abcbad4d70614ab264f11933f224e74f",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/moonbeam-sprite-v2.webp",
+      "bytes": 271454,
+      "sha256": "5558238152d82b27925fa691b4e5b623415e08239a70d223fd8449d609bfea84",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/phantasmal-killer-sprite-v2.png",
       "bytes": 1913947,
       "sha256": "9936ead595602cf5fdd55eb5904d7a7abef51e00729feb8b9db8e0a3e61e3284",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/phantasmal-killer-sprite-v2.webp",
+      "bytes": 416512,
+      "sha256": "7fcad083ad82937279305c1299f3a3f53e96588699b06830db06658b1023dfb4",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/poison-spray-fluid.png",
@@ -13018,16 +13360,34 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/poison-spray-sprite-v2.webp",
+      "bytes": 258882,
+      "sha256": "39343c3e5d4cc5a91fed533910654c3df0b456dcd515cf87b43641b02d6610e5",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/power-word-kill-sprite-v2.png",
       "bytes": 1147527,
       "sha256": "278c83f321f050c3716394682e89cda889d51d4ad48ef01e8dc3653f16a94e80",
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/power-word-kill-sprite-v2.webp",
+      "bytes": 312422,
+      "sha256": "ead12429731b399d4556e24bddb780e9f6b2e594b94fd20401cfe0ab1e7e9c1a",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/power-word-stun-sprite-v2.png",
       "bytes": 1105929,
       "sha256": "5ea463d2ea29bffa817ac713ea29751a622e38f92304f5b0ffaf0f6b36b0f17b",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/power-word-stun-sprite-v2.webp",
+      "bytes": 242896,
+      "sha256": "58854088a33851f42445a8236ac66943f46b0244dab4eb6060f7fae01f112193",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/ray-of-frost-fluid.png",
@@ -13042,6 +13402,12 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/ray-of-frost-sprite-v2.webp",
+      "bytes": 264124,
+      "sha256": "bc5e7b1871f153bacb760b6db7181f54e2b8c17a8679d507adc283729e51d83a",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/sacred-flame-fluid.png",
       "bytes": 1074784,
       "sha256": "3f7a3c6f8a48a04e6963786211f1a0afb88a007dc36b5eff97ff3642e2d21285",
@@ -13052,6 +13418,12 @@
       "bytes": 900128,
       "sha256": "8e3ec0aaa0ff30774feb3bccece127da436662bdbfd9842194a82fc78281e282",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sacred-flame-sprite-v2.webp",
+      "bytes": 201344,
+      "sha256": "5f4ccb7d54edeeda32d62682a3f0846adc10372f30893afe306a09089f284ae7",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/scorching-ray-fluid.png",
@@ -13066,6 +13438,240 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/scorching-ray-sprite-v2.webp",
+      "bytes": 149462,
+      "sha256": "6f4512f9c39a0fa95acef2223f2e325527f7be7fa710417c70790b985972b48e",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-chill-touch-sprite-v1.png",
+      "bytes": 2184557,
+      "sha256": "304c96e530dd49ea0e862a0294efa612105bb32d4892a065d64c0a6491127749",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-chill-touch-sprite-v1.webp",
+      "bytes": 483904,
+      "sha256": "848cf06fac5fb4e3831022e174a50ac2840b64380013388eed0a30123d729f96",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-dancing-lights-sprite-v1.png",
+      "bytes": 1823322,
+      "sha256": "b659826a8eb8ab7d08877b9c6c57e34187586db1c89ca210b08ae76032364f2c",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-dancing-lights-sprite-v1.webp",
+      "bytes": 503112,
+      "sha256": "ecbfdea348fbddadc8bca668469dc3418f817b583488efb135901728d6171b5e",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-fire-projectile-impact-sprite-v1.png",
+      "bytes": 1439004,
+      "sha256": "127d578353d7c07ac986f5cb1ec69d7cae5c6d64e7fe9ba0f4b808c7ee43abdd",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-fire-projectile-impact-sprite-v1.webp",
+      "bytes": 457004,
+      "sha256": "f02fde05f09cb16d398c007ee7b5ebb32fd75a9314c2de4ffe1b3edfea8aeb31",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-flame-cone-sprite-v3.png",
+      "bytes": 1560539,
+      "sha256": "bb62ceb329a4b69b07cb08de18131ce279de6527778fadd4f68f933cf26edcca",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-flame-cone-sprite-v3.webp",
+      "bytes": 529264,
+      "sha256": "af4b4959d2017b425b07bf2eaea57eb999bb16d13aa8b349d4cacfc870020ae4",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-fog-cloud-sprite-v1.png",
+      "bytes": 2466799,
+      "sha256": "3a6ec33c4cf8994326332fb7293cb19601ea16fdb7eed09d6fc680237d81ed08",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-fog-cloud-sprite-v1.webp",
+      "bytes": 630136,
+      "sha256": "f1fbbc5a14e2f3a0e833ae784f0aba1c42951bdc1e4834ccaf78a9a6faf179d2",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-healing-bloom-sprite-v1.png",
+      "bytes": 2017942,
+      "sha256": "dfbc4c65805455dd539df98154bbf129412aab5f7db4f539b9103cda592a204b",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-healing-bloom-sprite-v1.webp",
+      "bytes": 565408,
+      "sha256": "394df2a9ae14be62585347b65e154ffb5f56a4b5cfab456c2681b5c94f1fbf56",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-minor-illusion-sprite-v1.png",
+      "bytes": 2442324,
+      "sha256": "f8fbb642b1acb255620752d584bf99993d05726c7fa23fa58276e2064b78b850",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-minor-illusion-sprite-v1.webp",
+      "bytes": 712264,
+      "sha256": "91ae69cf055d284df4b770b2bd1a78f559edb3f4380e45fb08f6695443dd60c0",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-shillelagh-sprite-v1.png",
+      "bytes": 1455266,
+      "sha256": "7a66c71252d797de9545ab4c81c9f83eab1f4bd4c7ceca1848fea43647a0870e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-shillelagh-sprite-v1.webp",
+      "bytes": 429784,
+      "sha256": "c0582d79d097956c308e3b612f521bcccddf96946b1c55f76d9b017ddf7b9da8",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-shocking-grasp-sprite-v1.png",
+      "bytes": 2289959,
+      "sha256": "2e1157fee2526bda678ea49295d8136aba73e210d3bfa627e191824e7b1a43f7",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-shocking-grasp-sprite-v1.webp",
+      "bytes": 741550,
+      "sha256": "59eb52a52504a8332d13069b6dc7e01b990356097703a1430dee92ffc1cb64ff",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-sleet-storm-sprite-v1.png",
+      "bytes": 3068391,
+      "sha256": "3f041738d62392e798f62cd46c9dd299ad758dd3ac87b1733eb46074fc4e23b1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-sleet-storm-sprite-v1.webp",
+      "bytes": 727036,
+      "sha256": "af78ad3a874fb17088d1e7a56cd710f1cf220949c40788fdbeda4342f32331ce",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-spare-the-dying-sprite-v1.png",
+      "bytes": 2213298,
+      "sha256": "66ff85a61802a92da3df8aaba09371d1bb50459ed1ab7f7f28ac27797d3e33a1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-spare-the-dying-sprite-v1.webp",
+      "bytes": 544316,
+      "sha256": "a317bed3a3e51d5f8b34c8576c42faa805a0415f9a452b530c6d8d4d964a4133",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-thaumaturgy-sprite-v1.png",
+      "bytes": 2381579,
+      "sha256": "01c2c87b15915968d5b2ecc5ff80e1b1c10eccbfc15ac201b1fab1a6bcef39b9",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-thaumaturgy-sprite-v1.webp",
+      "bytes": 612000,
+      "sha256": "3f6132678a249fc8962467e19e33a0f12cd9fed6888d7ea2b6ceb612d07d2b06",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-toxic-cloud-sprite-v3.png",
+      "bytes": 2255409,
+      "sha256": "9d3f2c8992ae9b3791ace06bacfe980fc861b12a109735913b4943c739c92612",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-toxic-cloud-sprite-v3.webp",
+      "bytes": 588076,
+      "sha256": "ef2136c7f2b2712db73eda4f727a690d061525673a91f9a8887f3ce635dcaee3",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-vicious-mockery-sprite-v1.png",
+      "bytes": 2027873,
+      "sha256": "8d87eda9ff670fb96e2334df54f2502e79b02f4cd81a41465f18500255b910e4",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-vicious-mockery-sprite-v1.webp",
+      "bytes": 697610,
+      "sha256": "9ae624f922c242977f5b60ace9af43d0fcd4f9e09aea01795786f9b659029e3f",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-force-sprite-v1.png",
+      "bytes": 1784522,
+      "sha256": "cd1886a95c7c139ee6de645e2cf3f6cbdc2bd130035f27616df270fe02bff914",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-force-sprite-v1.webp",
+      "bytes": 319528,
+      "sha256": "80d5ffcf59d2789097b2abcec2a5b2791a1a79c83d617ff5617fd8d39cb62423",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-ice-sprite-v1.png",
+      "bytes": 2549792,
+      "sha256": "2c64ceb55072ee3509ad7f0eae919dc2c8e8c29f13103ffdf9c99c739264fd5e",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-ice-sprite-v1.webp",
+      "bytes": 557662,
+      "sha256": "8ec184cce6e64bc09ad2184882af3329be8d363c94ca6a28d7667e399c63a7f1",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-stone-sprite-v1.png",
+      "bytes": 2474854,
+      "sha256": "84dc07d4a9f241a787b769b6de56da45efeefcfae9502e207d42cb10c99a15b1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-stone-sprite-v1.webp",
+      "bytes": 353620,
+      "sha256": "e26fa05db226693262f9d3071e5c5348fb8ff7038a438a7f25b700b33225ca69",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-thorns-sprite-v1.png",
+      "bytes": 2499805,
+      "sha256": "5db95220d54c5d9fe4a2254e189b5fb332ba44eb7c017fa8a1260176d260a6f1",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-wall-of-thorns-sprite-v1.webp",
+      "bytes": 399374,
+      "sha256": "4a1094f0d31d3e26ffbc160829921cb3b1c16504a919845960ba23ae1914be81",
+      "contentType": "image/webp"
+    },
+    {
+      "path": "assets/vfx/sequence-wind-wall-sprite-v1.png",
+      "bytes": 2245882,
+      "sha256": "fc402383c0aa39d8ef8794dd197f15198b494bd7710a6128805776e158e2f695",
+      "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sequence-wind-wall-sprite-v1.webp",
+      "bytes": 451490,
+      "sha256": "31b0b46d074c24479901228247c0805b679a8f211630d40294b440423b3e4122",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/shatter-fluid.png",
       "bytes": 2445659,
       "sha256": "1665ec30d58008f89a0028ffda9392b060cfabc5bdbdb8be096df55e10aac56a",
@@ -13078,10 +13684,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/shatter-sprite-v2.webp",
+      "bytes": 432154,
+      "sha256": "e67fc7d5235386cdba0a5218fc595e898418b4ce83e4e6cadf887a4be1ddfe1e",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/shield-sprite-v2.png",
       "bytes": 1064940,
       "sha256": "f394665f901b8fe1325ddb9b3401e246c5c8f295e82a4c96a30f2b8aaf58fac6",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/shield-sprite-v2.webp",
+      "bytes": 276206,
+      "sha256": "4666d8b6a1c413f925b3ee39f44e269439f8cdb8984ebfbbd5b847c118c3a0a1",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/sleep-sprite-v2.png",
@@ -13090,10 +13708,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/sleep-sprite-v2.webp",
+      "bytes": 248104,
+      "sha256": "6dc592107e888b448e3707e57a79f6d5f0e5903ceb5135fc6a1b8e134bf46852",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/slow-sprite-v2.png",
       "bytes": 1516405,
       "sha256": "ca10b588e40c3490d17567c668c1a1996ec5970389d7e6fc26101f9e0cf76732",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/slow-sprite-v2.webp",
+      "bytes": 315108,
+      "sha256": "c55246dd9de1e5994afe5f44bcc9e60bc6570d3479bf415d3e993fd6fc73a55f",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/spike-growth-sprite-v2.png",
@@ -13102,10 +13732,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/spike-growth-sprite-v2.webp",
+      "bytes": 381670,
+      "sha256": "02a7ee76e3dea2a526c374bd7050cb08bc04ef6d6c7d6aeaef388db0ad73d8a4",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/spirit-guardians-sprite-v2.png",
       "bytes": 1240330,
       "sha256": "6113ace7102f3b7632d4e6bcc4c6c2db9b1e3b0e50e57f153f2b4a679d952645",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/spirit-guardians-sprite-v2.webp",
+      "bytes": 329324,
+      "sha256": "e4c4718b1d7ca1977e0bb20fd4ec7dd12fbfcec249fb674e54a28656489db1b8",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/spiritual-weapon-sprite-v2.png",
@@ -13114,10 +13756,22 @@
       "contentType": "image/png"
     },
     {
+      "path": "assets/vfx/spiritual-weapon-sprite-v2.webp",
+      "bytes": 205908,
+      "sha256": "c9bece724ba81647a823b139d132db60bf93ec1558143a09e397e3426207e706",
+      "contentType": "image/webp"
+    },
+    {
       "path": "assets/vfx/sunburst-sprite-v2.png",
       "bytes": 1722020,
       "sha256": "ec68386d44f14498e76552a9401a92ed756539c702c430d8e6fb5e4f0b4f6475",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/sunburst-sprite-v2.webp",
+      "bytes": 337870,
+      "sha256": "f275105e4c2fc069147be70194048aada332033f6ff81a45ef355228897adbee",
+      "contentType": "image/webp"
     },
     {
       "path": "assets/vfx/thunderwave-fluid.webp",
@@ -13130,6 +13784,12 @@
       "bytes": 1281022,
       "sha256": "4a719dba8d55bcadfc09f7155db3ac9fa1705d2fb1342526b09a52bb373da11a",
       "contentType": "image/png"
+    },
+    {
+      "path": "assets/vfx/wall-of-fire-sprite-v2.webp",
+      "bytes": 277976,
+      "sha256": "6a4f32350d678750010f6193ac68d1546d587c76de0063ecfe76cea11428f4a8",
+      "contentType": "image/webp"
     }
   ],
   "collections": {
@@ -22256,6 +22916,102 @@
           "sha256": "287e78ee8ad3d2378404289cb7415df6c8d20ebca888c3148f2b2a00381613ad"
         },
         {
+          "path": "/assets/icons/conditions/condition-blinded.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 290,
+          "sha256": "565658ae0cf0983ad4ce5388bc967f6c5e4651079b6d17bd24e2bf7cf2d9b496"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-charmed.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 234,
+          "sha256": "bfb376028c906d4d6ee7ad5fa93fb3623b35b121fce2fb6184bf1fcdf5f9da84"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-deafened.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 344,
+          "sha256": "a4bdbdfab2ff87c512713885499b11a1e67c89ca34094accbacb56b8f28af866"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-fire-averse.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 375,
+          "sha256": "a485e34d9af8241930eb7dc986f95ed43f6f519750d3f4c9fc22a9114503263d"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-flying.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 566,
+          "sha256": "ec490862ac0562e7577c665f32028b0d5612a6336e781651fd4bbb4ad4386de4"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-frightened.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 307,
+          "sha256": "6becc33b71301ce123035065122cc31d6bdaaa0882531cdb4885bf90eee5bc9b"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-grappled.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 325,
+          "sha256": "06f4af319c6725c5c680485682304d94bf5650037d678e9728f1c2be02e719ca"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-incapacitated.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 317,
+          "sha256": "a7d7a7a05ba2bd6dce06102809479a0035c42852db14620d64ad9a48c9d32709"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-invisible.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 340,
+          "sha256": "d93f44fdecfb8eef8c7b2c3a55e104b5995fa54f614094dffc08c81a5c62a34f"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-paralyzed.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 311,
+          "sha256": "3a4da4255f42b3d39019345ed24802a3bbb995be033d26490e16640dadb4970e"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-petrified.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 268,
+          "sha256": "bf7cde80463cf2e295043b0910e77d81e7abb1ff64363c2b4b71d42ba92deed7"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-poisoned.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 383,
+          "sha256": "47fea443ac0301a0dd67501f752bed77fd22a4ff745daf63b1cd15d18fd1644a"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-prone.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 294,
+          "sha256": "4653e11f7f1b509e922098feeb05526e7718605c594a9fb668adc8d5de2a3ea9"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-restrained.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 299,
+          "sha256": "db23ef7ea7b5b0b70fea96a784d78b6a90e407f3fcf55e4320ace399c8b46eb7"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-stunned.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 294,
+          "sha256": "f9779ffde21cdad86c8074d4d57d542e9f5439d345a9547a011fc4ffc9f32e4e"
+        },
+        {
+          "path": "/assets/icons/conditions/condition-unconscious.svg",
+          "mediaType": "image/svg+xml",
+          "bytes": 271,
+          "sha256": "75f0d46fa000ba29721eff29aa4314d05e6b9d1e1ff950aa406719fc5d3c4bca"
+        },
+        {
           "path": "/assets/icons/cone-of-cold-spell-action.png",
           "mediaType": "image/png",
           "bytes": 368833,
@@ -25798,6 +26554,12 @@
           "sha256": "b98e7ba4d297e1fe64cfd18aa70ee90ba73bd81ab39f68f419b2298136892ecb"
         },
         {
+          "path": "/assets/vfx/acid-arrow-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 265898,
+          "sha256": "d20591fef65f3331dd8bc2244096a35bfcef4b7de9374c17ce89faab4e4f94b3"
+        },
+        {
           "path": "/assets/vfx/acid-splash-fluid.png",
           "mediaType": "image/png",
           "bytes": 1074768,
@@ -25810,10 +26572,22 @@
           "sha256": "56ac587c0d9bc838b80f84d0b299a1f28050b6119c0b62f73ea8237e28831618"
         },
         {
+          "path": "/assets/vfx/acid-splash-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 262326,
+          "sha256": "f6890ba936c7a164fb1835d0690b0bf352110057d061ea88184da6da02f8b3ff"
+        },
+        {
           "path": "/assets/vfx/banishment-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1334215,
           "sha256": "8709df4bb6c4e464c804ad5391820a9a8b57c1fcf56cafe697ef066f2d8248df"
+        },
+        {
+          "path": "/assets/vfx/banishment-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 255514,
+          "sha256": "c903f330ec2b8527acbf35647e91b2107051f5acccff7b4eb190d6f5aa6bb065"
         },
         {
           "path": "/assets/vfx/black-tentacles-sprite-v2.png",
@@ -25822,16 +26596,34 @@
           "sha256": "7eb01ed48744dea9fb092fd1577572a5ef025aa55a7dca8ba41baaeed06fdec8"
         },
         {
+          "path": "/assets/vfx/black-tentacles-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 394306,
+          "sha256": "3ef6a41b08a29dcbf7a8aa627884b728163ec6aab1879ecba95dbe1010c44817"
+        },
+        {
           "path": "/assets/vfx/blade-barrier-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 922170,
           "sha256": "8c4dcc4f254ee301faedbc746851143c2ae6a98093902ccf0d58e72ada07967b"
         },
         {
+          "path": "/assets/vfx/blade-barrier-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 226278,
+          "sha256": "73c240e28d8d5b2a528e0f4c9d8f4eae2f9663d72efb584795361a352b1c401c"
+        },
+        {
           "path": "/assets/vfx/blight-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 841715,
           "sha256": "91ff9c1557b4f73c9d68ef9084457f7bab04e9449e171ec1358ed4e163af1d1c"
+        },
+        {
+          "path": "/assets/vfx/blight-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 240716,
+          "sha256": "2d55a7e833e0b0093fcdf25699a0b5732a7b9e117adc7cc6cd8dfaa213647468"
         },
         {
           "path": "/assets/vfx/burning-hands-fluid.png",
@@ -25852,16 +26644,34 @@
           "sha256": "e1011059d29c6fd9740534d430611456a4c92e474c2b048d5778c492929be004"
         },
         {
+          "path": "/assets/vfx/call-lightning-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 304082,
+          "sha256": "72c23e6ce8db5391073eb5fbe7d4a014dba1e7257c60756471786d812cabbb1d"
+        },
+        {
           "path": "/assets/vfx/call-lightning-strike-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 772147,
           "sha256": "99a6587b4c471d313d9764155c034273d1a283a8be6430de963e5c4e368665d3"
         },
         {
+          "path": "/assets/vfx/call-lightning-strike-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 185826,
+          "sha256": "b7463e684d25a656ad41e79d7d528c050e3f43bc2094cbe910c353bf75475b7d"
+        },
+        {
           "path": "/assets/vfx/chain-lightning-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 625309,
           "sha256": "44547a891c0099dd199ca9649ec367bac04b9e8662cf9dffbedd2608ef98a2cd"
+        },
+        {
+          "path": "/assets/vfx/chain-lightning-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 187042,
+          "sha256": "c73cbaf841372f804bb9f772f92cc2b53467dbfe39721c399e1287c4da06f6d3"
         },
         {
           "path": "/assets/vfx/chill-touch-hand.png",
@@ -25876,6 +26686,12 @@
           "sha256": "c4ea7cfbc49aff7610582a1156a23839e8440df14882de3d14dc551031f8792a"
         },
         {
+          "path": "/assets/vfx/circle-of-death-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 466912,
+          "sha256": "633594b46a7b5fb0451c16f812b4e3c5ee53f4a3ce4a0001f54484cf4faf1f8a"
+        },
+        {
           "path": "/assets/vfx/cloudkill-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1869537,
@@ -25888,16 +26704,34 @@
           "sha256": "328723e9967cc0f0a5036b635b72ee2bbb3d26a09ad9968ba21658ebec54bf4e"
         },
         {
+          "path": "/assets/vfx/color-spray-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 295836,
+          "sha256": "311d69518697b7a296541c99946a6cdc771c8638462186d67a4c356537d3e685"
+        },
+        {
           "path": "/assets/vfx/cone-of-cold-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1048860,
           "sha256": "f2a161b4a2b1c8b6ce458a822ddd354a70632079d581a425223d743f90cbc726"
         },
         {
+          "path": "/assets/vfx/cone-of-cold-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 260846,
+          "sha256": "7122ef87949e5c6543ee47a7deb0a63f3db064e39def5504e68e31f605a68484"
+        },
+        {
           "path": "/assets/vfx/counterspell-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1384403,
           "sha256": "12feb693ee2a69e417b6d3f6717cbdfe1a02cd99d3e025a66a8357cae3c71a71"
+        },
+        {
+          "path": "/assets/vfx/counterspell-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 386884,
+          "sha256": "6a636840a08f5634f26f736f7a20090a6290f7a13c45da1ef84a32f1575be98d"
         },
         {
           "path": "/assets/vfx/cure-wounds-fluid.png",
@@ -25912,10 +26746,22 @@
           "sha256": "30081e5ff8ddeb69f62159e1a87adc4d75223a29184b0d47a363be079acf118c"
         },
         {
+          "path": "/assets/vfx/cure-wounds-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 318782,
+          "sha256": "c657c1e3c3ea3b9957e117338a56e39d7bd82a3924113db793dcf76b8b7a1880"
+        },
+        {
           "path": "/assets/vfx/darkness-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1043914,
           "sha256": "0e1f43094de9b8bd0bcebf8d28d6b9bb4fd95285a3c81267160e36ed18d72f5c"
+        },
+        {
+          "path": "/assets/vfx/darkness-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 197334,
+          "sha256": "7cda88bdbb7a3f5df03d8151794380fe4cf9d48c0f48b9f4dda3b8608a745783"
         },
         {
           "path": "/assets/vfx/daylight-sprite-v2.png",
@@ -25924,16 +26770,34 @@
           "sha256": "c4c41fb67d5b8b11201b4ddca71ec792a27b7cf291023992a49da39f2787c552"
         },
         {
+          "path": "/assets/vfx/daylight-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 367768,
+          "sha256": "34a7e053959057ee74bf0c9400f0982ea973135ccc0d71aac8d95f60289e0568"
+        },
+        {
           "path": "/assets/vfx/disintegrate-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 732333,
           "sha256": "c47357084efaa317c43d106eb2f918cc21541487beeee657cda4ceb602f7e984"
         },
         {
+          "path": "/assets/vfx/disintegrate-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 220710,
+          "sha256": "fec9d943e12f336a000c8fa419f5a4e38ecae90c6d3020fb1d874881aa8d6c6c"
+        },
+        {
           "path": "/assets/vfx/dispel-magic-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1176182,
           "sha256": "eb14bab48c4c878a9169d7f1f005da80bf580d80afe5763e6590a9317b5bc876"
+        },
+        {
+          "path": "/assets/vfx/dispel-magic-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 357660,
+          "sha256": "11408393a6ec6f268bd5d928bb4f9ea549e49ada342afe7108dd5ebe84a5615d"
         },
         {
           "path": "/assets/vfx/eldritch-blast-fluid.png",
@@ -25948,10 +26812,22 @@
           "sha256": "50fbe19a6354c3491583502583639e3f20c4578ad95f7c871a6ae5b86133f650"
         },
         {
+          "path": "/assets/vfx/eldritch-blast-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 221912,
+          "sha256": "32d0d5a12c1f7f6d7db530cc32df5adeab96f824bcaab4a10430e290adce33f6"
+        },
+        {
           "path": "/assets/vfx/entangle-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 2009968,
           "sha256": "acc72d16b924e9d17a1b405e2665b6f5c30375edc5f9630e47c64cc7cf6b33b4"
+        },
+        {
+          "path": "/assets/vfx/entangle-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 355858,
+          "sha256": "d41e5abc94d1bc64ec0d711db12dae2a13ed528b5e2d955b3e1ee8e8efb6490d"
         },
         {
           "path": "/assets/vfx/faerie-fire-sprite-v2.png",
@@ -25960,16 +26836,34 @@
           "sha256": "db2871586581613b864cb8c1309e0f00e790e949022e3abe22eae7cb9df51327"
         },
         {
+          "path": "/assets/vfx/faerie-fire-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 388782,
+          "sha256": "866bc8a34661e6cd7abc43b8852f9954ee0e239ccc393a994f6233d91d915e2b"
+        },
+        {
           "path": "/assets/vfx/false-life-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1321033,
           "sha256": "8dfe5f2c93d9bf24c0cf0ac2e25e705f273fb8a85cac3b6207576304a302b594"
         },
         {
+          "path": "/assets/vfx/false-life-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 246638,
+          "sha256": "8482620e8adee1812a92c305a80cb07080105010c2a786ec0106533dd06926d3"
+        },
+        {
           "path": "/assets/vfx/finger-of-death-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1079246,
           "sha256": "d8744cac0130870884916dea5869f519186f81fdcd9aa80bb0580e1b9f728f74"
+        },
+        {
+          "path": "/assets/vfx/finger-of-death-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 259584,
+          "sha256": "907be8711bbeb9298187fa675e8ed137c49f2900e1ebd3e23496925d74cedc4a"
         },
         {
           "path": "/assets/vfx/fire-projectile-fluid.png",
@@ -25990,10 +26884,22 @@
           "sha256": "bf0cacf51bdd78113ca5dec598c5b1cba5368ffdd31aca74aa2ced81df3027b2"
         },
         {
+          "path": "/assets/vfx/flame-strike-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 198940,
+          "sha256": "fdae5502ff2222a257eaec9049105b6d5114b3bbabbd936d0a17cdbcd30721c7"
+        },
+        {
           "path": "/assets/vfx/flaming-sphere-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1167340,
           "sha256": "85e0da347621b2b1049c73398e1e594b1cb572ef37f2de4205eef84ba7398e07"
+        },
+        {
+          "path": "/assets/vfx/flaming-sphere-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 263552,
+          "sha256": "59d58bbf8fe40e62f1aae1483e6d9be34ab3220f6a09607368fa682bb8d44afc"
         },
         {
           "path": "/assets/vfx/freezing-sphere-sprite-v2.png",
@@ -26002,10 +26908,22 @@
           "sha256": "9f358f5a3b9483c12b07833fcaf6c0466a3fac215b3ff887362cf0308b35ec32"
         },
         {
+          "path": "/assets/vfx/freezing-sphere-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 406078,
+          "sha256": "635ff9c07e7710105d91d752ea708a2590b9beffdaca8faeecc399ec5d882a65"
+        },
+        {
           "path": "/assets/vfx/grease-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1465722,
           "sha256": "a3b629b599be7a45a088ec4f3f69f01a3abaffa47b6be6694adf2ca23a7757aa"
+        },
+        {
+          "path": "/assets/vfx/grease-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 290528,
+          "sha256": "4c3feb29ad43a0f9663174fa135690bd21aca032fe742233deb1d0476dd349b9"
         },
         {
           "path": "/assets/vfx/guiding-bolt-fluid.png",
@@ -26020,6 +26938,12 @@
           "sha256": "d35dc09f975d68dad8f27ae491d349409dc0210f4d35ac7b25c02866d2dcfcbf"
         },
         {
+          "path": "/assets/vfx/guiding-bolt-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 176236,
+          "sha256": "7267a5bb18f8201626cf8a83fea93cd3e77fb87530e7ce874dfea0910ba82956"
+        },
+        {
           "path": "/assets/vfx/healing-word-fluid.png",
           "mediaType": "image/png",
           "bytes": 908014,
@@ -26030,6 +26954,12 @@
           "mediaType": "image/png",
           "bytes": 629048,
           "sha256": "05ca46edefb64a9c02c6c204905c2a4b0b0421c55d8760982004bfa8b53c77e0"
+        },
+        {
+          "path": "/assets/vfx/healing-word-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 166472,
+          "sha256": "94319eb2fbfd5b13d23fefde6d3a4f663107ca4aedbccb9806ceb3330afa7845"
         },
         {
           "path": "/assets/vfx/hellish-rebuke-fluid.png",
@@ -26044,16 +26974,34 @@
           "sha256": "04c5d987d8c29599f7105a147ee757ecb50229f4a31427baef915b20e663fb6a"
         },
         {
+          "path": "/assets/vfx/hellish-rebuke-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 320102,
+          "sha256": "69cf48934bf6b789e623b79684d426d641f1d4bdca74524c056a8354d6922ab8"
+        },
+        {
           "path": "/assets/vfx/hold-monster-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 2103805,
           "sha256": "3aa91ec0775af08d65c353d63a2588d4783867f3cc60424fa7f43abf294a1cff"
         },
         {
+          "path": "/assets/vfx/hold-monster-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 455618,
+          "sha256": "56481f521689e37375aa903b96a6a46895bb8f100a3798999e083c4512cf15db"
+        },
+        {
           "path": "/assets/vfx/hypnotic-pattern-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1829334,
           "sha256": "93de308d855fa290e3121a67d574d825dd40856c52ef9bfdadddb112896d4685"
+        },
+        {
+          "path": "/assets/vfx/hypnotic-pattern-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 434188,
+          "sha256": "2e7413875afb06efdbebeaa7a548431045a25b4d627d4baefb5cffb9312c2098"
         },
         {
           "path": "/assets/vfx/ice-storm-ground-sprite-v2.png",
@@ -26068,6 +27016,12 @@
           "sha256": "ba126801a7a1fd40e00844dd82e2bb62fb3615a6a3ae4509638ffe6a03205fb4"
         },
         {
+          "path": "/assets/vfx/ice-storm-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 357244,
+          "sha256": "c2cca4fc3b97947649fc638d56354e5e14ca0def319b5c46b59fcc6770382914"
+        },
+        {
           "path": "/assets/vfx/inflict-wounds-fluid.png",
           "mediaType": "image/png",
           "bytes": 1385063,
@@ -26080,16 +27034,34 @@
           "sha256": "dac2b38bf0c2598a8249504e3db1a03e68c4609fa965a9633f6183ea140b4d39"
         },
         {
+          "path": "/assets/vfx/inflict-wounds-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 238522,
+          "sha256": "07b9ce2d105634803739bb9306495fd39eaa96033aec3ec00999f4a8ca72fd8a"
+        },
+        {
           "path": "/assets/vfx/insect-plague-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1580738,
           "sha256": "d7746160b22fafb62cad034475051bb9cfab88f639741912ee4527ee021a1bb1"
         },
         {
+          "path": "/assets/vfx/insect-plague-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 368454,
+          "sha256": "3f2074d6da125a6509a0e560b6e95ccf5e3e1c6634fd947ad5ec674a8c8d103c"
+        },
+        {
           "path": "/assets/vfx/lesser-restoration-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1301713,
           "sha256": "4274746256167470ad9578070f409d0efc4af2d662bab54294cbc9cc04810d3d"
+        },
+        {
+          "path": "/assets/vfx/lesser-restoration-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 430808,
+          "sha256": "f99cbc5e33245b2799803e7450888e87850b153d7190e3b5c41e26e90f510e3e"
         },
         {
           "path": "/assets/vfx/lightning-bolt-fluid.png",
@@ -26104,10 +27076,22 @@
           "sha256": "8c238fb4deffcdde068d67ce21b580c1e55820a3071f6d6c8f31160378fd8dd8"
         },
         {
+          "path": "/assets/vfx/lightning-bolt-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 190810,
+          "sha256": "8e848a672af9a5bc64325da11329dbeb1a8ca84d7409c87bb30843260bd6ddf2"
+        },
+        {
           "path": "/assets/vfx/mage-hand-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1318799,
           "sha256": "116c15636bee12c19612f5db50da61696a8a3a409a3485c8fb80c3c1e2d0c875"
+        },
+        {
+          "path": "/assets/vfx/mage-hand-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 267656,
+          "sha256": "929c30592455f2c557f2e93ffaa286205cbd33ce8b4a549ee96dae74746c24f3"
         },
         {
           "path": "/assets/vfx/magic-missile-fluid.png",
@@ -26122,16 +27106,34 @@
           "sha256": "32a7615da94efb7be262fbb838e189b32010772089159c4697516d0c71e838af"
         },
         {
+          "path": "/assets/vfx/misty-step-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 252502,
+          "sha256": "a6b4c16f3eb4dd8856e6842767a6427d4a09ede89828cc76f1790466fa370f59"
+        },
+        {
           "path": "/assets/vfx/moonbeam-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1306439,
           "sha256": "af8ac4fc737b9322d3abfd8b4fe0aba1abcbad4d70614ab264f11933f224e74f"
         },
         {
+          "path": "/assets/vfx/moonbeam-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 271454,
+          "sha256": "5558238152d82b27925fa691b4e5b623415e08239a70d223fd8449d609bfea84"
+        },
+        {
           "path": "/assets/vfx/phantasmal-killer-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1913947,
           "sha256": "9936ead595602cf5fdd55eb5904d7a7abef51e00729feb8b9db8e0a3e61e3284"
+        },
+        {
+          "path": "/assets/vfx/phantasmal-killer-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 416512,
+          "sha256": "7fcad083ad82937279305c1299f3a3f53e96588699b06830db06658b1023dfb4"
         },
         {
           "path": "/assets/vfx/poison-spray-fluid.png",
@@ -26146,16 +27148,34 @@
           "sha256": "fb61f473672d4721e4f15f348fa0cf9309756b6ae685e5181004f91769931b3d"
         },
         {
+          "path": "/assets/vfx/poison-spray-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 258882,
+          "sha256": "39343c3e5d4cc5a91fed533910654c3df0b456dcd515cf87b43641b02d6610e5"
+        },
+        {
           "path": "/assets/vfx/power-word-kill-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1147527,
           "sha256": "278c83f321f050c3716394682e89cda889d51d4ad48ef01e8dc3653f16a94e80"
         },
         {
+          "path": "/assets/vfx/power-word-kill-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 312422,
+          "sha256": "ead12429731b399d4556e24bddb780e9f6b2e594b94fd20401cfe0ab1e7e9c1a"
+        },
+        {
           "path": "/assets/vfx/power-word-stun-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1105929,
           "sha256": "5ea463d2ea29bffa817ac713ea29751a622e38f92304f5b0ffaf0f6b36b0f17b"
+        },
+        {
+          "path": "/assets/vfx/power-word-stun-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 242896,
+          "sha256": "58854088a33851f42445a8236ac66943f46b0244dab4eb6060f7fae01f112193"
         },
         {
           "path": "/assets/vfx/ray-of-frost-fluid.png",
@@ -26170,6 +27190,12 @@
           "sha256": "2b6f9d90407fb1e86d10a74a4c2f7e8e0332bb9738878def24fa0673119aedb9"
         },
         {
+          "path": "/assets/vfx/ray-of-frost-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 264124,
+          "sha256": "bc5e7b1871f153bacb760b6db7181f54e2b8c17a8679d507adc283729e51d83a"
+        },
+        {
           "path": "/assets/vfx/sacred-flame-fluid.png",
           "mediaType": "image/png",
           "bytes": 1074784,
@@ -26180,6 +27206,12 @@
           "mediaType": "image/png",
           "bytes": 900128,
           "sha256": "8e3ec0aaa0ff30774feb3bccece127da436662bdbfd9842194a82fc78281e282"
+        },
+        {
+          "path": "/assets/vfx/sacred-flame-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 201344,
+          "sha256": "5f4ccb7d54edeeda32d62682a3f0846adc10372f30893afe306a09089f284ae7"
         },
         {
           "path": "/assets/vfx/scorching-ray-fluid.png",
@@ -26194,6 +27226,240 @@
           "sha256": "aaa0a201fb7c401ff72586b75b3beb1299477b181bc2b16ed29507ac25bb3c16"
         },
         {
+          "path": "/assets/vfx/scorching-ray-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 149462,
+          "sha256": "6f4512f9c39a0fa95acef2223f2e325527f7be7fa710417c70790b985972b48e"
+        },
+        {
+          "path": "/assets/vfx/sequence-chill-touch-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2184557,
+          "sha256": "304c96e530dd49ea0e862a0294efa612105bb32d4892a065d64c0a6491127749"
+        },
+        {
+          "path": "/assets/vfx/sequence-chill-touch-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 483904,
+          "sha256": "848cf06fac5fb4e3831022e174a50ac2840b64380013388eed0a30123d729f96"
+        },
+        {
+          "path": "/assets/vfx/sequence-dancing-lights-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 1823322,
+          "sha256": "b659826a8eb8ab7d08877b9c6c57e34187586db1c89ca210b08ae76032364f2c"
+        },
+        {
+          "path": "/assets/vfx/sequence-dancing-lights-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 503112,
+          "sha256": "ecbfdea348fbddadc8bca668469dc3418f817b583488efb135901728d6171b5e"
+        },
+        {
+          "path": "/assets/vfx/sequence-fire-projectile-impact-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 1439004,
+          "sha256": "127d578353d7c07ac986f5cb1ec69d7cae5c6d64e7fe9ba0f4b808c7ee43abdd"
+        },
+        {
+          "path": "/assets/vfx/sequence-fire-projectile-impact-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 457004,
+          "sha256": "f02fde05f09cb16d398c007ee7b5ebb32fd75a9314c2de4ffe1b3edfea8aeb31"
+        },
+        {
+          "path": "/assets/vfx/sequence-flame-cone-sprite-v3.png",
+          "mediaType": "image/png",
+          "bytes": 1560539,
+          "sha256": "bb62ceb329a4b69b07cb08de18131ce279de6527778fadd4f68f933cf26edcca"
+        },
+        {
+          "path": "/assets/vfx/sequence-flame-cone-sprite-v3.webp",
+          "mediaType": "image/webp",
+          "bytes": 529264,
+          "sha256": "af4b4959d2017b425b07bf2eaea57eb999bb16d13aa8b349d4cacfc870020ae4"
+        },
+        {
+          "path": "/assets/vfx/sequence-fog-cloud-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2466799,
+          "sha256": "3a6ec33c4cf8994326332fb7293cb19601ea16fdb7eed09d6fc680237d81ed08"
+        },
+        {
+          "path": "/assets/vfx/sequence-fog-cloud-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 630136,
+          "sha256": "f1fbbc5a14e2f3a0e833ae784f0aba1c42951bdc1e4834ccaf78a9a6faf179d2"
+        },
+        {
+          "path": "/assets/vfx/sequence-healing-bloom-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2017942,
+          "sha256": "dfbc4c65805455dd539df98154bbf129412aab5f7db4f539b9103cda592a204b"
+        },
+        {
+          "path": "/assets/vfx/sequence-healing-bloom-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 565408,
+          "sha256": "394df2a9ae14be62585347b65e154ffb5f56a4b5cfab456c2681b5c94f1fbf56"
+        },
+        {
+          "path": "/assets/vfx/sequence-minor-illusion-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2442324,
+          "sha256": "f8fbb642b1acb255620752d584bf99993d05726c7fa23fa58276e2064b78b850"
+        },
+        {
+          "path": "/assets/vfx/sequence-minor-illusion-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 712264,
+          "sha256": "91ae69cf055d284df4b770b2bd1a78f559edb3f4380e45fb08f6695443dd60c0"
+        },
+        {
+          "path": "/assets/vfx/sequence-shillelagh-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 1455266,
+          "sha256": "7a66c71252d797de9545ab4c81c9f83eab1f4bd4c7ceca1848fea43647a0870e"
+        },
+        {
+          "path": "/assets/vfx/sequence-shillelagh-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 429784,
+          "sha256": "c0582d79d097956c308e3b612f521bcccddf96946b1c55f76d9b017ddf7b9da8"
+        },
+        {
+          "path": "/assets/vfx/sequence-shocking-grasp-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2289959,
+          "sha256": "2e1157fee2526bda678ea49295d8136aba73e210d3bfa627e191824e7b1a43f7"
+        },
+        {
+          "path": "/assets/vfx/sequence-shocking-grasp-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 741550,
+          "sha256": "59eb52a52504a8332d13069b6dc7e01b990356097703a1430dee92ffc1cb64ff"
+        },
+        {
+          "path": "/assets/vfx/sequence-sleet-storm-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 3068391,
+          "sha256": "3f041738d62392e798f62cd46c9dd299ad758dd3ac87b1733eb46074fc4e23b1"
+        },
+        {
+          "path": "/assets/vfx/sequence-sleet-storm-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 727036,
+          "sha256": "af78ad3a874fb17088d1e7a56cd710f1cf220949c40788fdbeda4342f32331ce"
+        },
+        {
+          "path": "/assets/vfx/sequence-spare-the-dying-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2213298,
+          "sha256": "66ff85a61802a92da3df8aaba09371d1bb50459ed1ab7f7f28ac27797d3e33a1"
+        },
+        {
+          "path": "/assets/vfx/sequence-spare-the-dying-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 544316,
+          "sha256": "a317bed3a3e51d5f8b34c8576c42faa805a0415f9a452b530c6d8d4d964a4133"
+        },
+        {
+          "path": "/assets/vfx/sequence-thaumaturgy-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2381579,
+          "sha256": "01c2c87b15915968d5b2ecc5ff80e1b1c10eccbfc15ac201b1fab1a6bcef39b9"
+        },
+        {
+          "path": "/assets/vfx/sequence-thaumaturgy-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 612000,
+          "sha256": "3f6132678a249fc8962467e19e33a0f12cd9fed6888d7ea2b6ceb612d07d2b06"
+        },
+        {
+          "path": "/assets/vfx/sequence-toxic-cloud-sprite-v3.png",
+          "mediaType": "image/png",
+          "bytes": 2255409,
+          "sha256": "9d3f2c8992ae9b3791ace06bacfe980fc861b12a109735913b4943c739c92612"
+        },
+        {
+          "path": "/assets/vfx/sequence-toxic-cloud-sprite-v3.webp",
+          "mediaType": "image/webp",
+          "bytes": 588076,
+          "sha256": "ef2136c7f2b2712db73eda4f727a690d061525673a91f9a8887f3ce635dcaee3"
+        },
+        {
+          "path": "/assets/vfx/sequence-vicious-mockery-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2027873,
+          "sha256": "8d87eda9ff670fb96e2334df54f2502e79b02f4cd81a41465f18500255b910e4"
+        },
+        {
+          "path": "/assets/vfx/sequence-vicious-mockery-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 697610,
+          "sha256": "9ae624f922c242977f5b60ace9af43d0fcd4f9e09aea01795786f9b659029e3f"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-force-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 1784522,
+          "sha256": "cd1886a95c7c139ee6de645e2cf3f6cbdc2bd130035f27616df270fe02bff914"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-force-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 319528,
+          "sha256": "80d5ffcf59d2789097b2abcec2a5b2791a1a79c83d617ff5617fd8d39cb62423"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-ice-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2549792,
+          "sha256": "2c64ceb55072ee3509ad7f0eae919dc2c8e8c29f13103ffdf9c99c739264fd5e"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-ice-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 557662,
+          "sha256": "8ec184cce6e64bc09ad2184882af3329be8d363c94ca6a28d7667e399c63a7f1"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-stone-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2474854,
+          "sha256": "84dc07d4a9f241a787b769b6de56da45efeefcfae9502e207d42cb10c99a15b1"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-stone-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 353620,
+          "sha256": "e26fa05db226693262f9d3071e5c5348fb8ff7038a438a7f25b700b33225ca69"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-thorns-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2499805,
+          "sha256": "5db95220d54c5d9fe4a2254e189b5fb332ba44eb7c017fa8a1260176d260a6f1"
+        },
+        {
+          "path": "/assets/vfx/sequence-wall-of-thorns-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 399374,
+          "sha256": "4a1094f0d31d3e26ffbc160829921cb3b1c16504a919845960ba23ae1914be81"
+        },
+        {
+          "path": "/assets/vfx/sequence-wind-wall-sprite-v1.png",
+          "mediaType": "image/png",
+          "bytes": 2245882,
+          "sha256": "fc402383c0aa39d8ef8794dd197f15198b494bd7710a6128805776e158e2f695"
+        },
+        {
+          "path": "/assets/vfx/sequence-wind-wall-sprite-v1.webp",
+          "mediaType": "image/webp",
+          "bytes": 451490,
+          "sha256": "31b0b46d074c24479901228247c0805b679a8f211630d40294b440423b3e4122"
+        },
+        {
           "path": "/assets/vfx/shatter-fluid.png",
           "mediaType": "image/png",
           "bytes": 2445659,
@@ -26206,10 +27472,22 @@
           "sha256": "9e58d899f339f36a8ffc38bceae3f9463bb205c87bc34e7a1a9571dfa9628308"
         },
         {
+          "path": "/assets/vfx/shatter-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 432154,
+          "sha256": "e67fc7d5235386cdba0a5218fc595e898418b4ce83e4e6cadf887a4be1ddfe1e"
+        },
+        {
           "path": "/assets/vfx/shield-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1064940,
           "sha256": "f394665f901b8fe1325ddb9b3401e246c5c8f295e82a4c96a30f2b8aaf58fac6"
+        },
+        {
+          "path": "/assets/vfx/shield-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 276206,
+          "sha256": "4666d8b6a1c413f925b3ee39f44e269439f8cdb8984ebfbbd5b847c118c3a0a1"
         },
         {
           "path": "/assets/vfx/sleep-sprite-v2.png",
@@ -26218,10 +27496,22 @@
           "sha256": "1620d6c93a8d7de7a326e30194b987346c2e8e53e7205acc4c3b0e237cabdf14"
         },
         {
+          "path": "/assets/vfx/sleep-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 248104,
+          "sha256": "6dc592107e888b448e3707e57a79f6d5f0e5903ceb5135fc6a1b8e134bf46852"
+        },
+        {
           "path": "/assets/vfx/slow-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1516405,
           "sha256": "ca10b588e40c3490d17567c668c1a1996ec5970389d7e6fc26101f9e0cf76732"
+        },
+        {
+          "path": "/assets/vfx/slow-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 315108,
+          "sha256": "c55246dd9de1e5994afe5f44bcc9e60bc6570d3479bf415d3e993fd6fc73a55f"
         },
         {
           "path": "/assets/vfx/spike-growth-sprite-v2.png",
@@ -26230,10 +27520,22 @@
           "sha256": "6f36391da07dd7dfa77daf5de12f562615060b76330c620c3754104429d7a713"
         },
         {
+          "path": "/assets/vfx/spike-growth-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 381670,
+          "sha256": "02a7ee76e3dea2a526c374bd7050cb08bc04ef6d6c7d6aeaef388db0ad73d8a4"
+        },
+        {
           "path": "/assets/vfx/spirit-guardians-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1240330,
           "sha256": "6113ace7102f3b7632d4e6bcc4c6c2db9b1e3b0e50e57f153f2b4a679d952645"
+        },
+        {
+          "path": "/assets/vfx/spirit-guardians-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 329324,
+          "sha256": "e4c4718b1d7ca1977e0bb20fd4ec7dd12fbfcec249fb674e54a28656489db1b8"
         },
         {
           "path": "/assets/vfx/spiritual-weapon-sprite-v2.png",
@@ -26242,10 +27544,22 @@
           "sha256": "4fedbde986cda2ddf9c2f0254741d1e7cbbcec1a877ea804ed3943d18292fb71"
         },
         {
+          "path": "/assets/vfx/spiritual-weapon-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 205908,
+          "sha256": "c9bece724ba81647a823b139d132db60bf93ec1558143a09e397e3426207e706"
+        },
+        {
           "path": "/assets/vfx/sunburst-sprite-v2.png",
           "mediaType": "image/png",
           "bytes": 1722020,
           "sha256": "ec68386d44f14498e76552a9401a92ed756539c702c430d8e6fb5e4f0b4f6475"
+        },
+        {
+          "path": "/assets/vfx/sunburst-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 337870,
+          "sha256": "f275105e4c2fc069147be70194048aada332033f6ff81a45ef355228897adbee"
         },
         {
           "path": "/assets/vfx/thunderwave-fluid.webp",
@@ -26258,6 +27572,12 @@
           "mediaType": "image/png",
           "bytes": 1281022,
           "sha256": "4a719dba8d55bcadfc09f7155db3ac9fa1705d2fb1342526b09a52bb373da11a"
+        },
+        {
+          "path": "/assets/vfx/wall-of-fire-sprite-v2.webp",
+          "mediaType": "image/webp",
+          "bytes": 277976,
+          "sha256": "6a4f32350d678750010f6193ac68d1546d587c76de0063ecfe76cea11428f4a8"
         }
       ]
     },
@@ -30396,5 +31716,5 @@
       ]
     }
   },
-  "contentSha256": "be1313bcace7419c29442167f2346f24f0d9836f4e18f4b2d447d58e83ff65fb"
+  "contentSha256": "42abfd56b5f4dc0dc77ae64519defcabbf08e8d7529fe5c175e77ceb811ee3cb"
 }

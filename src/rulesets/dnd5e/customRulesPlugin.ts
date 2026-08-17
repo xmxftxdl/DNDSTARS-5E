@@ -38,8 +38,13 @@ import {
 } from './persistentAreaTypes'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 import { validateDnd5eActivityDefinitionV1 } from './activities/dnd5eActivityValidation'
+import {
+  validateDnd5eAdvancementCollectionV1,
+  validateDnd5eAdvancementDefinitionV1,
+} from './activities/dnd5eAdvancementContracts'
 import type { Dnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
 import { validateDnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
+import type { AbilityKey } from '../../lib/dnd'
 
 export interface Dnd5eCustomHeadlessDiceFormula {
   count: number
@@ -72,6 +77,11 @@ export interface Dnd5eCustomHeadlessActionDraft {
   id: string
   label: string
   effects: Dnd5eCustomHeadlessEffectDraft[]
+  savingThrow?: {
+    ability: AbilityKey
+    dc: number | 'source-save-dc'
+    onSuccess: 'none' | 'half'
+  }
   requiredInterruptOptionId?: string
 }
 
@@ -114,6 +124,13 @@ function invalidFeaturePassiveEffects(feature: Dnd5ePluginFeatureDefinition): bo
         effect.maximumCurrentHitPointPercent < 1 || effect.maximumCurrentHitPointPercent > 100
       )) ||
       (effect.oncePerTurn != null && typeof effect.oncePerTurn !== 'boolean') ||
+      (effect.magical != null && typeof effect.magical !== 'boolean') ||
+      (effect.requiresHeavyArmor != null && typeof effect.requiresHeavyArmor !== 'boolean') ||
+      (effect.deliveries != null && (
+        !Array.isArray(effect.deliveries) || effect.deliveries.length < 1 || effect.deliveries.length > 3 ||
+        new Set(effect.deliveries).size !== effect.deliveries.length ||
+        effect.deliveries.some((delivery: string) => !['weapon-attack', 'spell', 'other'].includes(delivery))
+      )) ||
       (effect.damageTypes != null && (
         !Array.isArray(effect.damageTypes) || effect.damageTypes.length < 1 ||
         effect.damageTypes.length > DND5E_DAMAGE_TYPES.length ||
@@ -128,12 +145,14 @@ function invalidFeaturePassiveEffects(feature: Dnd5ePluginFeatureDefinition): bo
 export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPluginDraft): string[] {
   const errors: string[] = []
   const activityIds = new Set<string>()
+  const activityBoundSources = new Set<string>()
   for (const activity of draft.activities ?? []) {
     errors.push(...validateDnd5eActivityDefinitionV1(activity).map((error) =>
       `Activity ${activity.id || 'unnamed'}: ${error}`))
     if (activityIds.has(activity.id)) errors.push(`Activity ID duplicated: ${activity.id}`)
     activityIds.add(activity.id)
     if (!activity.legacySource) errors.push(`Activity ${activity.id || 'unnamed'} must declare legacySource for V2 binding`)
+    else activityBoundSources.add(`${activity.legacySource.kind}:${activity.legacySource.id}`)
   }
   const manifest = draft.manifest
   if (!ID_PATTERN.test(manifest.id)) errors.push('插件 ID 只能使用小写字母、数字、点、下划线和连字符。')
@@ -236,7 +255,11 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!feature.name.trim() || !feature.summary.trim() || !feature.description.trim()) {
       errors.push(`特性 ${feature.id || '未命名'} 缺少名称、摘要或正文。`)
     }
-    if (feature.automation !== 'manual' && !feature.action && !feature.staticModifiers && !feature.passiveEffects?.length && !feature.declarativeAbility) {
+    if (
+      feature.automation !== 'manual' && !feature.action && !feature.staticModifiers &&
+      !feature.passiveEffects?.length && !feature.declarativeAbility &&
+      !activityBoundSources.has(`feature:${feature.id}`)
+    ) {
       errors.push(`自动化特性 ${feature.name || feature.id} 缺少战斗行动。`)
     }
     if (feature.declarativeAbility) {
@@ -299,7 +322,11 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!feat.name.trim() || !feat.summary.trim() || !feat.description.trim()) {
       errors.push(`专长 ${feat.id || '未命名'} 缺少名称、摘要或正文。`)
     }
-    if (feat.automation !== 'manual' && !feat.action && !feat.staticModifiers && !feat.passiveEffects?.length && !feat.declarativeAbility) {
+    if (
+      feat.automation !== 'manual' && !feat.action && !feat.staticModifiers &&
+      !feat.passiveEffects?.length && !feat.declarativeAbility && !feat.advancements?.length &&
+      !activityBoundSources.has(`feat:${feat.id}`)
+    ) {
       errors.push(`自动化专长 ${feat.name || feat.id} 缺少战斗行动或固定效果。`)
     }
     if (feat.declarativeAbility) {
@@ -315,7 +342,8 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
         const invalid = !ID_PATTERN.test(resource.id) || featResourceIds.has(resource.id) ||
           !resource.label.trim() || (resource.shortLabel != null && !resource.shortLabel.trim()) ||
           !Number.isInteger(resource.maximum) || resource.maximum < 1 || resource.maximum > 1_000_000 ||
-          !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn)
+          !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn) ||
+          (resource.stacking != null && !['maximum', 'additive'].includes(resource.stacking))
         featResourceIds.add(resource.id)
         return invalid
       })
@@ -336,6 +364,35 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (Object.values(feat.prerequisite?.abilityScores ?? {}).some((score) => !Number.isInteger(score) || score < 1 || score > 30)) {
       errors.push(`专长 ${feat.name || feat.id} 的属性前提无效。`)
     }
+    const anyAbilityScores = Object.values(feat.prerequisite?.anyAbilityScores ?? {})
+    if (feat.prerequisite?.anyAbilityScores != null && (
+      anyAbilityScores.length < 1 || anyAbilityScores.some((score) => !Number.isInteger(score) || score < 1 || score > 30)
+    )) errors.push(`专长 ${feat.name || feat.id} 的任一属性前提无效。`)
+    if (feat.advancements && (
+      feat.advancements.length < 1 || feat.advancements.length > 64 ||
+      new Set(feat.advancements.map((advancement) => advancement.id)).size !== feat.advancements.length
+    )) errors.push(`专长 ${feat.name || feat.id} 的构筑选择声明无效。`)
+    feat.advancements?.forEach((advancement, index) => {
+      const advancementErrors = validateDnd5eAdvancementDefinitionV1(advancement)
+      if (advancementErrors.length) {
+        errors.push(`专长 ${feat.name || feat.id} 的构筑选择 ${index + 1} 无效：${advancementErrors.join('；')}`)
+      }
+    })
+    const advancementDependencyErrors = feat.advancements
+      ? validateDnd5eAdvancementCollectionV1(feat.advancements)
+      : []
+    if (advancementDependencyErrors.length) {
+      errors.push(`专长 ${feat.name || feat.id} 的构筑选择依赖无效：${advancementDependencyErrors.join('；')}`)
+    }
+    if (feat.prerequisite?.armorProficiencies && (
+      feat.prerequisite.armorProficiencies.length < 1 ||
+      feat.prerequisite.armorProficiencies.length > 4 ||
+      feat.prerequisite.armorProficiencies.some((category) => !['light', 'medium', 'heavy', 'shield'].includes(category)) ||
+      new Set(feat.prerequisite.armorProficiencies).size !== feat.prerequisite.armorProficiencies.length
+    )) errors.push(`专长 ${feat.name || feat.id} 的护甲熟练前提无效。`)
+    if (feat.prerequisite?.spellcasting != null && typeof feat.prerequisite.spellcasting !== 'boolean') {
+      errors.push(`专长 ${feat.name || feat.id} 的施法能力前提无效。`)
+    }
   }
   const headlessActionIds = new Set<string>()
   const effectlessMapActionIds = new Set(
@@ -345,6 +402,13 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!ID_PATTERN.test(action.id)) errors.push(`Headless 行动 ID 无效：${action.id || '未填写'}`)
     if (headlessActionIds.has(action.id)) errors.push(`Headless 行动 ID 重复：${action.id}`)
     headlessActionIds.add(action.id)
+    if (action.savingThrow && (
+      !['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(action.savingThrow.ability) ||
+      (action.savingThrow.dc !== 'source-save-dc' && (
+        !Number.isInteger(action.savingThrow.dc) || action.savingThrow.dc < 1 || action.savingThrow.dc > 40
+      )) ||
+      !['none', 'half'].includes(action.savingThrow.onSuccess)
+    )) errors.push(`Headless 行动 ${action.label || action.id} 的目标豁免声明无效。`)
     if (!action.label.trim()) errors.push(`Headless 行动 ${action.id || '未命名'} 缺少名称。`)
     if ((!effectlessMapActionIds.has(action.id) && action.effects.length < 1) || action.effects.length > 16) {
       errors.push(`Headless 行动 ${action.label || action.id} 必须包含 1～16 个效果，纯持续区域或召唤行动可不含目标效果。`)
@@ -373,7 +437,7 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
         }
         const duration = effect.duration
         const expirations: readonly Dnd5ePluginEffectDuration['expiresAt'][] = [
-          'source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save',
+          'source-next-turn-start', 'source-turn-end', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save',
         ]
         if (
           !expirations.includes(duration.expiresAt) ||

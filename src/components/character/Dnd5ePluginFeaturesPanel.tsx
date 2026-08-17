@@ -147,6 +147,10 @@ export default function Dnd5ePluginFeaturesPanel({
               ...Object.entries(feat.prerequisite?.abilityScores ?? {}).map(([ability, score]) =>
                 `${ability.toUpperCase()} ${score}+`),
               feat.prerequisite?.raceIds?.length ? `种族：${feat.prerequisite.raceIds.join(' / ')}` : '',
+              feat.prerequisite?.armorProficiencies?.length
+                ? `护甲熟练：${feat.prerequisite.armorProficiencies.join(' / ')}`
+                : '',
+              feat.prerequisite?.spellcasting ? '需要施法能力' : '',
             ].filter(Boolean).join('；')
             return (
               <article key={feat.id} className={`rounded-xl border p-4 ${

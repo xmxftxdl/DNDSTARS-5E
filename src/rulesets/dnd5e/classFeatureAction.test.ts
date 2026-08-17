@@ -4,7 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { prepareDnd5eClassFeature, previewDnd5eMonkBonusAttack, resolvePreparedDnd5eClassFeature } from './classFeatureAction'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
@@ -668,6 +668,56 @@ describe('D&D 5e generic class feature authority bridge', () => {
     expect(resolved.application?.characters[0].classResources?.['dnd5e-ki']).toEqual({ current: 1, max: 5 })
     expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(0)
     expect(resolved.result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(2)
+  })
+
+  it('applies a generic active-effect attack profile to Monk reach and damage while rejecting forged rewrites', () => {
+    const fireFist = createDnd5eMechanicalEffect({
+      definitionId: 'local:effect:fangs-of-fire-snake-mode',
+      label: '火蛇之牙',
+      source: { kind: 'feature', actorId: 'monk', rulesId: 'fangs-of-fire-snake-stance' },
+      targetId: 'monk',
+      duration: { type: 'until-turn-boundary', boundary: 'source-turn-end' },
+      modifiers: {
+        attackProfiles: [{ attackModes: ['unarmed'], reachBonusFeet: 10, damageTypeOverride: 'fire' }],
+      },
+    })
+    const monk = character('monk', '武僧', {
+      level: 5,
+      abilities: { str: 10, dex: 16, con: 14, int: 10, wis: 16, cha: 8 },
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        monkAttackActionTurnKey: 'combat:1:monk-token',
+        monkMartialArtsTurnKey: 'combat:1:monk-token',
+        activeEffects: [fireFist],
+      },
+    })
+    const input = fixture(monk, {
+      feature: 'monk-unarmed-bonus', mode: 'martial-arts', targetTokenIds: ['enemy-token'],
+    })
+    const enemy = input.map.tokens.find((entry) => entry.id === 'enemy-token')!
+    enemy.x = 175
+    enemy.y = 25
+    const prepared = prepareDnd5eClassFeature(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.monkBonusAttack).toMatchObject({ reachFeet: 15, damageType: 'fire' })
+    const resolved = resolvePreparedDnd5eClassFeature({
+      prepared: prepared.prepared,
+      monkAttackRolls: [{ d20: 15, damageRolls: [4] }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', attackMode: 'unarmed', damageType: 'fire', hit: true,
+    }))
+
+    const forged = prepareDnd5eClassFeature(input)
+    expect(forged.ok).toBe(true)
+    if (!forged.ok || forged.prepared.headlessAction.type !== 'monk-unarmed-bonus') return
+    forged.prepared.headlessAction = { ...forged.prepared.headlessAction, damageType: 'cold' }
+    expect(resolvePreparedDnd5eClassFeature({
+      prepared: forged.prepared,
+      monkAttackRolls: [{ d20: 15, damageRolls: [4] }],
+    }).result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
   })
 
   it('lets a Lore Bard reduce a Monk bonus unarmed damage roll', () => {

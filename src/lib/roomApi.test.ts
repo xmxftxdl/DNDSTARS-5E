@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   getRoomVoiceStatus,
+  normalizeRoomCharacterAssignment,
   normalizeRoomRosterPayload,
   onlineRoomRoster,
   requestRoomVoiceAccess,
@@ -99,10 +100,31 @@ describe('room roster payload migration', () => {
         status: 'online',
         activeCharacterId: null,
         activeCharacterName: null,
+        characterAssignment: { revision: 0, enforced: false, characterId: null, characterName: null },
         ready: true,
         missing: [],
         mismatched: [],
       }],
+    })
+  })
+
+  it('normalizes a DM-enforced character assignment and fails closed on malformed data', () => {
+    expect(normalizeRoomCharacterAssignment({
+      revision: 3,
+      enforced: true,
+      characterId: 'hero-1',
+      characterName: '霍霍菲尔',
+    })).toEqual({
+      revision: 3,
+      enforced: true,
+      characterId: 'hero-1',
+      characterName: '霍霍菲尔',
+    })
+    expect(normalizeRoomCharacterAssignment({ revision: 4, enforced: true })).toEqual({
+      revision: 4,
+      enforced: false,
+      characterId: null,
+      characterName: null,
     })
   })
 

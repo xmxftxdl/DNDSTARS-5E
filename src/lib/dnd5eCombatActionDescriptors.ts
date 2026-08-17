@@ -16,7 +16,11 @@ export type Dnd5eCombatActionTargeting = 'none' | 'self' | 'creature' | 'area' |
 export type Dnd5eCombatActionPanel = 'inventory' | 'features' | 'spells' | 'skills'
 
 export interface Dnd5eCombatSpellOptions {
+  /** UI-selected Host-owned projection to use as this cast's geometric origin. */
+  spellOriginAreaId?: string
   overchannel?: boolean
+  /** Generic imported feature that replaces eligible damage dice with their maximum values. */
+  damageMaximizationFeatureId?: string
   metamagic?: Dnd5eSpellMetamagicPayload
   empowered?: boolean
   draconicResistance?: boolean
@@ -50,6 +54,7 @@ export type Dnd5eCombatActionCommand =
   | { kind: 'use-class-feature'; payload: Dnd5eClassFeaturePayload }
   | { kind: 'select-extra-action-teleport-destination' }
   | { kind: 'move-persistent-area'; areaId: string }
+  | { kind: 'use-persistent-area-activity'; areaId: string; featureId: string }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
   | { kind: 'use-item'; instanceId: string; useActionId?: string }
   | { kind: 'end-turn' }

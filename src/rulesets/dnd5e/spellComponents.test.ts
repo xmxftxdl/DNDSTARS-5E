@@ -7,6 +7,7 @@ import {
 import { DND5E_MACE, DND5E_QUARTERSTAFF, DND5E_SHIELD } from './equipment'
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from './items'
 import { normalizeCharacter } from '../../store/characters'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 describe('D&D 5e spell component authority checks', () => {
   it('parses the reviewed SRD component text instead of treating every spell alike', () => {
@@ -178,6 +179,37 @@ describe('D&D 5e spell component authority checks', () => {
     expect(dnd5eSpellComponentsAvailable(occupied)).toBe(false)
     expect(rapierOnly.somatic).toBe('available')
     expect(dnd5eSpellComponentsAvailable(rapierOnly)).toBe(true)
+  })
+
+  it('allows occupied hands only when a selected feature grants the generic somatic capability', () => {
+    const pluginId = 'local.test.occupied-somatic-components'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Occupied somatic test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'somatic-guard', name: 'Somatic Guard', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'full', staticModifiers: { ignoreOccupiedHandsForSomaticComponents: true },
+        })
+      },
+    })
+    try {
+      const wizard = normalizeCharacter({
+        id: 'somatic-guard-wizard', name: 'Somatic Guard Wizard', player: 'tester',
+        charClass: '法师', level: 5, maxHp: 20, currentHp: 20,
+        dnd5eFeatIds: [`${pluginId}:somatic-guard`],
+        equipment: { mainWeapon: DND5E_MACE, offHand: DND5E_SHIELD },
+      })
+      const check = dnd5eSpellComponentCheck(wizard, {
+        verbal: true, somatic: true, material: false,
+      }, 'wizard')
+      expect(check.somatic).toBe('available')
+      expect(dnd5eSpellComponentsAvailable(check)).toBe(true)
+    } finally {
+      dispose()
+    }
   })
 
   it('lets a free off hand access a component pouch while the main hand holds a rapier', () => {

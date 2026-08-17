@@ -1,14 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { Circle, Group, Line } from 'react-konva'
 import Konva from 'konva'
 import type { CombatPresentationAttackTargetEffect } from '../../lib/combatPresentation'
 import { DND5E_CLASS_ICON_PALETTES } from '../../lib/dnd5eActionIcons'
 import type { MapProjectile } from './mapCanvasContracts'
-import { ProjectileArrow } from './MapEffectPrimitives'
-import { AcidSplashEffect, ChillTouchManifestation, EldritchBlastProjectile, FireBoltProjectile, GuidanceManifestation, NewSpellManifestation, PoisonSprayEffect, ProduceFlameProjectile, RayOfFrostProjectile, ResistanceManifestation, SacredFlameEffect, SanctuaryManifestation, ShockingGraspEffect, SpareTheDyingEffect, StatusSpellManifestation, ViciousMockeryEffect } from './MapCantripEffects'
-import { FireballProjectile, MagicMissileProjectile, MaterialAreaSpellEffect, MaterialSpellProjectile, MaterialTargetSpellEffect } from './MapLeveledSpellEffects'
+import { VfxSequenceRenderer } from './VfxSequenceRenderer'
 export { ChillTouchPersistentMark } from './MapCantripEffects'
-export function AttackTargetEffect({
+function AttackTargetEffectComponent({
   effect,
 }: {
   effect: CombatPresentationAttackTargetEffect
@@ -282,131 +280,10 @@ export function AttackTargetEffect({
   )
 }
 
-export function CombatProjectileEffect({ projectile }: { projectile: MapProjectile }) {
-  return projectile.kind === 'fireball'
-    ? <FireballProjectile projectile={projectile} />
-    : projectile.kind === 'fire-bolt'
-      ? <FireBoltProjectile projectile={projectile} />
-      : projectile.kind === 'ray-of-frost'
-        ? <RayOfFrostProjectile projectile={projectile} />
-        : projectile.kind === 'eldritch-blast'
-          ? <EldritchBlastProjectile projectile={projectile} />
-          : projectile.kind === 'produce-flame'
-            ? <ProduceFlameProjectile projectile={projectile} />
-            : projectile.kind === 'shocking-grasp'
-              ? <ShockingGraspEffect projectile={projectile} />
-              : projectile.kind === 'guidance'
-                ? <GuidanceManifestation projectile={projectile} />
-                : projectile.kind === 'resistance'
-                  ? <ResistanceManifestation projectile={projectile} />
-              : projectile.kind === 'sanctuary'
-                ? <SanctuaryManifestation projectile={projectile} />
-                : ['heal', 'mass-cure-wounds', 'mass-heal', 'mass-healing-word', 'prayer-of-healing', 'dancing-lights', 'minor-illusion', 'thaumaturgy', 'shillelagh'].includes(String(projectile.kind))
-                  ? <NewSpellManifestation projectile={projectile} />
-                : projectile.kind === 'bless' ||
-                        projectile.kind === 'bane' ||
-                        projectile.kind === 'shield-of-faith' ||
-                        projectile.kind === 'mage-armor' ||
-                        projectile.kind === 'jump' ||
-                        projectile.kind === 'darkvision' ||
-                        projectile.kind === 'see-invisibility' ||
-                        projectile.kind === 'warding-bond' ||
-                        projectile.kind === 'fly' ||
-                        projectile.kind === 'heroism' ||
-                        projectile.kind === 'enlarge-reduce' ||
-                        projectile.kind === 'enhance-ability' ||
-                        projectile.kind === 'divine-favor' ||
-                        projectile.kind === 'hunters-mark' ||
-                        projectile.kind === 'magic-weapon' ||
-                        projectile.kind === 'flame-blade' ||
-                        projectile.kind === 'invisibility' ||
-                        projectile.kind === 'blur' ||
-                        projectile.kind === 'barkskin' ||
-                        projectile.kind === 'protection-from-poison' ||
-                        projectile.kind === 'longstrider' ||
-                        projectile.kind === 'protection-from-energy' ||
-                        projectile.kind === 'death-ward' ||
-                        projectile.kind === 'greater-invisibility' ||
-                        projectile.kind === 'charm-person' ||
-                        projectile.kind === 'hideous-laughter' ||
-                        projectile.kind === 'hold-person' ||
-                        projectile.kind === 'blindness-deafness'
-                      ? <StatusSpellManifestation projectile={projectile} />
-                      : projectile.kind === 'sacred-flame'
-                        ? <SacredFlameEffect projectile={projectile} />
-                        : projectile.kind === 'spare-the-dying'
-                          ? <SpareTheDyingEffect projectile={projectile} />
-                          : projectile.kind === 'acid-splash'
-                            ? <AcidSplashEffect projectile={projectile} />
-                            : projectile.kind === 'poison-spray'
-                              ? <PoisonSprayEffect projectile={projectile} />
-                              : projectile.kind === 'vicious-mockery'
-                                ? <ViciousMockeryEffect projectile={projectile} />
-                                : projectile.kind === 'magic-missile'
-                                  ? <MagicMissileProjectile projectile={projectile} />
-                                  : projectile.kind === 'scorching-ray' ||
-                                     projectile.kind === 'guiding-bolt' ||
-                                     projectile.kind === 'acid-arrow' ||
-                                     projectile.kind === 'chain-lightning' ||
-                                     projectile.kind === 'disintegrate' ||
-                                     projectile.kind === 'healing-word' ||
-                                    projectile.kind === 'inflict-wounds'
-                                  ? <MaterialSpellProjectile projectile={projectile} />
-                                    : [
-                                        'hypnotic-pattern',
-                                        'slow',
-                                        'phantasmal-killer',
-                                        'banishment',
-                                        'misty-step',
-                                        'hold-monster',
-                                        'counterspell',
-                                        'dispel-magic',
-                                        'shield',
-                                        'lesser-restoration',
-                                      ].includes(String(projectile.kind))
-                                      ? <MaterialTargetSpellEffect projectile={projectile} />
-                                    : projectile.kind === 'cure-wounds' ||
-                                      projectile.kind === 'hellish-rebuke' ||
-                                      projectile.kind === 'blight' ||
-                                      projectile.kind === 'finger-of-death' ||
-                                      projectile.kind === 'power-word-stun' ||
-                                      projectile.kind === 'power-word-kill' ||
-                                      projectile.kind === 'false-life'
-                                    ? <MaterialTargetSpellEffect projectile={projectile} />
-                                    : projectile.kind === 'burning-hands' ||
-                                        projectile.kind === 'thunderwave' ||
-                                        projectile.kind === 'shatter' ||
-                                        projectile.kind === 'lightning-bolt' ||
-                                        projectile.kind === 'flame-strike' ||
-                                        projectile.kind === 'sunburst'
-                                        || projectile.kind === 'cone-of-cold'
-                                        || projectile.kind === 'circle-of-death'
-                                        || projectile.kind === 'ice-storm'
-                                        || projectile.kind === 'freezing-sphere' || projectile.kind === 'meteor-swarm'
-                                        || projectile.kind === 'color-spray'
-                                        || projectile.kind === 'faerie-fire'
-                                        || projectile.kind === 'sleep'
-                                        || projectile.kind === 'entangle'
-                                        || projectile.kind === 'grease'
-                                        || projectile.kind === 'darkness'
-                                        || projectile.kind === 'flaming-sphere'
-                                        || projectile.kind === 'moonbeam'
-                                        || projectile.kind === 'daylight'
-                                        || projectile.kind === 'black-tentacles'
-                                        || projectile.kind === 'spike-growth'
-                                        || projectile.kind === 'mage-hand'
-                                        || projectile.kind === 'spiritual-weapon'
-                                        || projectile.kind === 'spirit-guardians'
-                                        || projectile.kind === 'call-lightning'
-                                        || projectile.kind === 'call-lightning-strike'
-                                        || projectile.kind === 'insect-plague'
-                                        || projectile.kind === 'cloudkill'
-                                        || projectile.kind === 'wall-of-fire'
-                                        || projectile.kind === 'blade-barrier'
-                                      ? <MaterialAreaSpellEffect
-                                          projectile={projectile}
-                                        />
-                                      : projectile.kind === 'chill-touch'
-                                        ? <ChillTouchManifestation projectile={projectile} />
-                                        : <ProjectileArrow projectile={projectile} />
+export const AttackTargetEffect = memo(AttackTargetEffectComponent)
+
+function CombatProjectileEffectComponent({ projectile }: { projectile: MapProjectile }) {
+  return <VfxSequenceRenderer projectile={projectile} />
 }
+
+export const CombatProjectileEffect = memo(CombatProjectileEffectComponent)

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, Clock3, Eye, MoonStar, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
-import { roomCharactersOwnedByMembers } from '../../lib/playerView'
-import { loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
+import { AlertTriangle, Clock3, Eye, LoaderCircle, MoonStar, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
+import { assignableRoomCharactersForPlayer, roomCharactersOwnedByMembers } from '../../lib/playerView'
+import { assignRoomPlayerCharacter, loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
 import { getRoomSession } from '../../lib/roomSession'
 import { completeDnd5eCampaignLongRest } from '../../store/campaignLongRest'
 import { useCharacterStore } from '../../store/characters'
@@ -12,12 +12,16 @@ import CharacterSheet from './CharacterSheet'
 export default function DMRoster() {
   const roomSession = useMemo(() => getRoomSession(), [])
   const characters = useCharacterStore((state) => state.characters)
+  const updateCharacter = useCharacterStore((state) => state.update)
+  const saveCharactersNow = useCharacterStore((state) => state.saveSharedNow)
   const [players, setPlayers] = useState<RoomRosterMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inspectedCharacterId, setInspectedCharacterId] = useState<string | null>(null)
   const [longRestBusy, setLongRestBusy] = useState(false)
   const [longRestMessage, setLongRestMessage] = useState('')
+  const [assignmentBusyMemberId, setAssignmentBusyMemberId] = useState<string | null>(null)
+  const [assignmentMessage, setAssignmentMessage] = useState('')
   const completeLongRest = async () => {
     if (longRestBusy) return
     setLongRestBusy(true)
@@ -78,6 +82,42 @@ export default function DMRoster() {
     player.memberId,
     currentRoomCharacters.filter((character) => character.roomMemberId === player.memberId),
   ])), [currentPlayers, currentRoomCharacters])
+  const assignCharacter = async (player: RoomRosterMember, characterId: string | null) => {
+    if (!roomSession || roomSession.role !== 'dm' || assignmentBusyMemberId) return
+    setAssignmentBusyMemberId(player.memberId)
+    setAssignmentMessage('')
+    try {
+      const candidate = characterId
+        ? assignableRoomCharactersForPlayer(characters, roomSession.roomId, player.memberId)
+          .find((character) => character.id === characterId)
+        : null
+      if (characterId && !candidate) throw new Error('character-assignment-conflict')
+      if (candidate && candidate.roomMemberId !== player.memberId) {
+        updateCharacter(candidate.id, {
+          roomId: roomSession.roomId,
+          roomMemberId: player.memberId,
+          player: player.displayName,
+          visibleToPlayers: true,
+        })
+        await saveCharactersNow()
+      }
+      await assignRoomPlayerCharacter(
+        roomSession,
+        player.memberId,
+        candidate ? { id: candidate.id, name: candidate.name } : null,
+      )
+      setAssignmentMessage(candidate
+        ? `已将「${candidate.name}」分配给 ${player.displayName}。`
+        : `已允许 ${player.displayName} 自行选择角色。`)
+      await refresh()
+    } catch (cause) {
+      setAssignmentMessage(cause instanceof Error && cause.message === 'character-assignment-conflict'
+        ? '角色卡已经被其他玩家占用，或尚未完成房间同步。'
+        : roomApiErrorMessage(cause))
+    } finally {
+      setAssignmentBusyMemberId(null)
+    }
+  }
   const inspectedCharacter = inspectedCharacterId
     ? currentRoomCharacters.find((character) => character.id === inspectedCharacterId) ?? null
     : null
@@ -99,7 +139,7 @@ export default function DMRoster() {
             <Users className="h-5 w-5 text-arcane-300" />
             <h2 className="font-semibold text-slate-100">房间玩家</h2>
           </div>
-          <p className="mt-1 text-sm text-slate-500">检视已加入本房间的玩家与角色；仅升级记录允许 DM 留痕修订。</p>
+          <p className="mt-1 text-sm text-slate-500">为房间玩家指定角色卡、检视人物数据，并处理全队长休。</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -136,6 +176,11 @@ export default function DMRoster() {
           {longRestMessage}
         </div>
       )}
+      {assignmentMessage && (
+        <div className="mt-4 rounded-xl border border-arcane-300/15 bg-arcane-500/[0.07] px-4 py-3 text-sm text-arcane-100">
+          {assignmentMessage}
+        </div>
+      )}
 
       <Dnd5eDmInventoryDistributor players={onlinePlayers} />
 
@@ -154,6 +199,9 @@ export default function DMRoster() {
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {currentPlayers.map((player) => {
             const ownedCharacters = charactersByMember.get(player.memberId) ?? []
+            const assignmentCandidates = roomSession
+              ? assignableRoomCharactersForPlayer(characters, roomSession.roomId, player.memberId)
+              : []
             const unresolvedPluginCount = (player.missing?.length ?? 0) + (player.mismatched?.length ?? 0)
             return (
               <article key={player.memberId} className="rounded-2xl border border-white/8 bg-black/15 p-4">
@@ -181,12 +229,33 @@ export default function DMRoster() {
                 </div>
 
                 <div className="mt-4 border-t border-white/6 pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">当前控制</p>
-                  <p className="mt-1 text-sm text-slate-300">{player.activeCharacterName ?? '未选择角色'}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">DM 分配角色卡</p>
+                    {assignmentBusyMemberId === player.memberId && <LoaderCircle className="h-3.5 w-3.5 animate-spin text-arcane-300" />}
+                  </div>
+                  <select
+                    value={player.characterAssignment.enforced ? player.characterAssignment.characterId ?? '' : ''}
+                    disabled={assignmentBusyMemberId !== null}
+                    onChange={(event) => void assignCharacter(player, event.currentTarget.value || null)}
+                    aria-label={`为 ${player.displayName} 分配角色卡`}
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-void-950/90 px-3 py-2 text-sm text-slate-200 outline-none transition focus:border-arcane-400/60 disabled:opacity-50"
+                  >
+                    <option value="">由玩家自行选择</option>
+                    {assignmentCandidates.map((character) => (
+                      <option key={character.id} value={character.id}>{character.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    当前控制：{player.activeCharacterName ?? '未选择角色'}
+                    {player.characterAssignment.enforced ? ' · DM 已锁定' : ''}
+                  </p>
+                  {assignmentCandidates.length === 0 && (
+                    <p className="mt-1 text-[11px] text-amber-300/80">暂无可分配角色；可在本页顶部使用 Excel / AI 填卡导入。</p>
+                  )}
                 </div>
 
                 <div className="mt-3 border-t border-white/6 pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">创建的角色</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">名下角色</p>
                   {ownedCharacters.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {ownedCharacters.map((character) => (

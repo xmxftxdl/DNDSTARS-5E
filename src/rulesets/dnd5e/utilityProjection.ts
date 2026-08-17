@@ -1,6 +1,7 @@
 import {
   DND_FEET_PER_CELL,
   cellDistance,
+  tokenCenterForAnchorCell,
   tokenOccupiedCellsAt,
 } from '../../lib/gridCombat'
 import type { BattleMap, Token } from '../../store/maps'
@@ -9,7 +10,7 @@ import type {
   Dnd5eCombatant,
   Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
-import { dnd5eCombatantClassLevel } from './headlessCombatPrimitives'
+import { dnd5eCombatantClassLevel, dnd5eCombatantPairKey } from './headlessCombatPrimitives'
 import {
   dnd5eCharacterHasPluginFeature,
   dnd5ePluginFeatureDefinition,
@@ -43,6 +44,64 @@ function combatantOwnsFeature(
   return true
 }
 
+export interface Dnd5eSpellOriginProjection {
+  areaId: string
+  projectionId: string
+  label: string
+  cell: { col: number; row: number }
+  position: { x: number; y: number }
+}
+
+/**
+ * Returns only Host-declared persistent projections that the character owns
+ * and whose imported mechanic explicitly allows spell origination. Saved
+ * areas never become a spell origin merely by copying a projection id.
+ */
+export function dnd5eSpellOriginProjectionsForCharacter(
+  character: Character,
+  map: BattleMap,
+): readonly Dnd5eSpellOriginProjection[] {
+  const allowedProjectionIds = new Set(
+    registeredDnd5ePluginFeatures().flatMap((feature) => {
+      const mechanic = feature.declarativeAbility?.mechanic
+      if (
+        feature.automation !== 'full' ||
+        mechanic?.kind !== 'persistent-projection' ||
+        mechanic.spellOrigin !== true ||
+        !dnd5eCharacterHasPluginFeature(character, feature.id)
+      ) return []
+      return [mechanic.projectionId]
+    }),
+  )
+  if (allowedProjectionIds.size === 0) return []
+  return (map.dnd5ePluginAreas ?? []).flatMap((area) => {
+    const projectionId = area.utilityProjectionId
+    const cell = area.anchorCell ?? area.cells[0]
+    if (
+      !projectionId || !cell ||
+      area.sourceCharacterId !== character.id ||
+      !allowedProjectionIds.has(projectionId)
+    ) return []
+    return [{
+      areaId: area.id,
+      projectionId,
+      label: area.label,
+      cell: { ...cell },
+      position: tokenCenterForAnchorCell(cell, { size: 1 }, map),
+    }]
+  })
+}
+
+export function dnd5eSpellOriginProjectionForCharacter(input: {
+  character: Character
+  map: BattleMap
+  areaId: string | undefined
+}): Dnd5eSpellOriginProjection | undefined {
+  if (!input.areaId) return undefined
+  return dnd5eSpellOriginProjectionsForCharacter(input.character, input.map)
+    .find((projection) => projection.areaId === input.areaId)
+}
+
 export function dnd5eUtilityProjectionMovementEconomy(
   character: Character,
   projectionId: string,
@@ -61,6 +120,25 @@ export function dnd5eUtilityProjectionMovementEconomy(
       : 'action' as const]
   })
   return overrides.includes('bonus-action') ? 'bonus-action' : fallback
+}
+
+/** Resolves the largest Host-registered instance count for one projection family. */
+export function dnd5eUtilityProjectionInstanceCount(
+  actor: Dnd5eCombatant,
+  projectionId: string,
+  baseCount = 1,
+): number {
+  return registeredDnd5ePluginFeatures().reduce((maximum, feature) => {
+    const mechanic = feature.declarativeAbility?.mechanic
+    if (
+      feature.automation !== 'full' ||
+      !combatantOwnsFeature(actor, feature.id, true) ||
+      (mechanic?.kind !== 'persistent-projection' &&
+        mechanic?.kind !== 'persistent-projection-upgrade') ||
+      mechanic.projectionId !== projectionId
+    ) return maximum
+    return Math.max(maximum, mechanic.instanceCount ?? 1)
+  }, Math.max(1, Math.min(16, baseCount)))
 }
 
 export function dnd5eUtilityProjectionTargetDistanceFeet(input: {
@@ -83,8 +161,7 @@ export function dnd5eUtilityProjectionTargetDistanceFeet(input: {
   )
   const distances = (input.map.dnd5ePluginAreas ?? []).flatMap((area) => {
     if (
-      area.sourceKind !== 'core-spell' ||
-      area.coreSpellId !== mechanic.projectionId ||
+      (area.utilityProjectionId ?? area.coreSpellId) !== mechanic.projectionId ||
       area.sourceCharacterId !== input.character.id
     ) return []
     let minimum = Number.POSITIVE_INFINITY
@@ -116,6 +193,23 @@ export function dnd5eUtilityProjectionAttackAdvantageApplies(
   actor: Dnd5eCombatant,
   target: Dnd5eCombatant,
 ): boolean {
+  const passiveProjectionAdvantage = registeredDnd5ePluginFeatures().some((feature) => {
+    const mechanic = feature.declarativeAbility?.mechanic
+    if (
+      feature.automation !== 'full' || mechanic?.kind !== 'persistent-projection' ||
+      mechanic.attackAdvantageWithinFeet == null ||
+      !combatantOwnsFeature(actor, feature.id, false)
+    ) return false
+    const projectionDistance = dnd5eUtilityProjectionDistanceFeet(
+      state, actor.id, mechanic.projectionId, target.id,
+    )
+    const actorDistance = state.distanceFeetByCombatantPair?.[
+      dnd5eCombatantPairKey(actor.id, target.id)
+    ]
+    return projectionDistance != null && projectionDistance <= mechanic.attackAdvantageWithinFeet &&
+      actorDistance != null && actorDistance <= mechanic.attackAdvantageWithinFeet
+  })
+  if (passiveProjectionAdvantage) return true
   const marker = actor.classState.utilityProjectionAttackAdvantage
   if (
     !marker ||

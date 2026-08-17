@@ -82,6 +82,57 @@ describe('plugin feature passive effects', () => {
     }).amount).toBe(5)
   })
 
+  it('checks Host-derived armor, delivery, and magical-source predicates', () => {
+    const effect = damageReductionSnapshot({
+      damageTypes: ['bludgeoning', 'piercing', 'slashing'],
+      deliveries: ['weapon-attack'],
+      magical: false,
+      requiresHeavyArmor: true,
+    })
+    const base = {
+      currentHp: 20,
+      maxHp: 20,
+      wearingHeavyArmor: true,
+      pluginFeaturePassiveEffects: [effect],
+      classState: {},
+    }
+    const resolve = (patch: Partial<typeof base>, damageSource?: { delivery: 'weapon-attack' | 'spell' | 'other'; magical: boolean }) =>
+      resolveDnd5ePluginFeatureDamageReduction({
+        combatant: { ...base, ...patch }, amount: 8, damageTypes: ['slashing'], damageSource, turnKey: 'turn-1',
+      }).amount
+
+    expect(resolve({}, { delivery: 'weapon-attack', magical: false })).toBe(5)
+    expect(resolve({ wearingHeavyArmor: false }, { delivery: 'weapon-attack', magical: false })).toBe(8)
+    expect(resolve({}, { delivery: 'weapon-attack', magical: true })).toBe(8)
+    expect(resolve({}, { delivery: 'spell', magical: false })).toBe(8)
+    expect(resolve({}, undefined)).toBe(8)
+  })
+
+  it('does not reduce an unmatched component in a mixed weapon hit', () => {
+    const result = resolveDnd5ePluginFeatureDamageReduction({
+      combatant: {
+        currentHp: 30,
+        maxHp: 30,
+        wearingHeavyArmor: true,
+        classState: {},
+        pluginFeaturePassiveEffects: [damageReductionSnapshot({
+          damageTypes: ['bludgeoning', 'piercing', 'slashing'],
+          deliveries: ['weapon-attack'],
+          magical: false,
+          requiresHeavyArmor: true,
+        })],
+      },
+      amount: 11,
+      damageTypes: ['slashing', 'fire'],
+      damageAmountsByType: { slashing: 1, fire: 10 },
+      damageSource: { delivery: 'weapon-attack', magical: false },
+      turnKey: 'turn-1',
+    })
+
+    expect(result.amount).toBe(10)
+    expect(result.applications).toContainEqual(expect.objectContaining({ amount: 1 }))
+  })
+
   it('runs inside the authoritative damage pipeline before HP is written', () => {
     const attacker = createDnd5eCombatant({
       id: 'attacker', name: 'attacker', controller: 'player', initiative: 20,

@@ -244,8 +244,8 @@ async function mockBridge(page: Page, capturedSystemPrompts: string[]): Promise<
   })
 }
 
-test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 V1', async ({ browser, request }) => {
-  test.setTimeout(90_000)
+test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 V1', async ({ browser, request }, testInfo) => {
+  test.setTimeout(180_000)
   const suffix = Date.now()
   const account = await createAccount(request, suffix)
   const campaign = await createCampaign(request, account, suffix)
@@ -267,6 +267,7 @@ test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 
 
   await page.goto(`${APP}/campaign/${campaign.campaignId}/dm-tools/prep`, { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: '备团助手' })).toBeVisible()
+  await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^导入与复核/ }).click()
   await expect(page.getByText('已安全配对')).toBeVisible()
   await page.locator('input[type="file"][accept*="pdf"]').setInputFiles({
     name: 'evidence-fixture.pdf',
@@ -276,6 +277,8 @@ test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 
   await page.getByRole('button', { name: /快速提取/ }).click()
   await page.getByRole('button', { name: '开始分析 PDF' }).click()
 
+  await expect(page.getByText('艾琳在暮钟旅馆调查赤烛会。')).toBeVisible({ timeout: 45_000 })
+  await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^导入与复核/ }).click()
   await expect(page.getByRole('button', { name: '人物 1' })).toBeVisible({ timeout: 45_000 })
   await page.getByRole('button', { name: '人物 1' }).click()
   await expect(page.getByText('艾琳·灰羽', { exact: true }).first()).toBeVisible()
@@ -292,11 +295,44 @@ test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 
   await drawer.getByRole('button', { name: '关闭原文' }).last().click()
 
   await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^导入与复核/ }).click()
   await page.getByRole('button', { name: '人物 1' }).click()
   await expect(page.getByText('艾琳·灰羽', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: /evidence-fixture\.pdf · 第 1 页 · 查看原文/ }).first().click()
   await expect(page.getByRole('dialog', { name: 'PDF 原文证据' }).locator('mark')).toContainText(EVIDENCE_QUOTE)
   await page.getByRole('dialog', { name: 'PDF 原文证据' }).getByRole('button', { name: '关闭原文' }).last().click()
+
+  await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^剧情/ }).click()
+  const storyGraph = page.getByTestId('dm-story-flow-graph')
+  await expect(storyGraph).toBeVisible()
+  await expect(storyGraph.getByTestId('dm-story-edit-tools')).toHaveCount(0)
+  await storyGraph.getByRole('button', { name: '全屏' }).click()
+
+  const editToolsToggle = storyGraph.getByRole('button', { name: '切换剧情编辑工具' })
+  await expect(editToolsToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(storyGraph.getByTestId('dm-story-edit-tools')).toHaveCount(0)
+  const graphBox = await storyGraph.boundingBox()
+  const viewport = page.viewportSize()
+  expect(graphBox).not.toBeNull()
+  expect(viewport).not.toBeNull()
+  expect(graphBox!.x).toBeLessThanOrEqual(1)
+  expect(graphBox!.y).toBeLessThanOrEqual(1)
+  expect(graphBox!.width).toBeGreaterThanOrEqual(viewport!.width - 2)
+  expect(graphBox!.height).toBeGreaterThanOrEqual(viewport!.height - 2)
+  const toolbarBox = await storyGraph.getByTestId('dm-story-flow-toolbar').boundingBox()
+  const storyViewportBox = await storyGraph.getByTestId('dm-story-flow-viewport').boundingBox()
+  expect(toolbarBox).not.toBeNull()
+  expect(storyViewportBox).not.toBeNull()
+  expect(storyViewportBox!.y).toBeGreaterThanOrEqual(toolbarBox!.y + toolbarBox!.height - 1)
+
+  await editToolsToggle.click()
+  await expect(editToolsToggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(storyGraph.getByTestId('dm-story-edit-tools')).toHaveAttribute('data-overlay', 'true')
+  await page.screenshot({ path: testInfo.outputPath('story-flow-fullscreen-editor.png') })
+  await editToolsToggle.click()
+  await expect(storyGraph.getByTestId('dm-story-edit-tools')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('story-flow-fullscreen-canvas.png') })
+  await storyGraph.getByRole('button', { name: '退出全屏' }).click()
 
   const jobsResponse = await request.get(`${APP}/api/accounts/me/campaigns/${campaign.campaignId}/ai-jobs?includeArtifact=1`, {
     headers: { 'X-Stars-Account-Token': account.sessionToken },
@@ -309,6 +345,7 @@ test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 
   expect(v2?.payload).not.toHaveProperty('sourcePages')
   expect((v2?.payload?.documents as Array<Record<string, unknown>>)[0]).not.toHaveProperty('text')
 
+  await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^导入与复核/ }).click()
   const legacyCard = page.locator('article').filter({ hasText: 'legacy-v1.pdf' })
   await legacyCard.getByRole('button', { name: '打开草稿' }).click()
   await page.getByRole('button', { name: '人物 1' }).click()

@@ -1,14 +1,17 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Cloud, KeyRound, LoaderCircle, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
 import type { AiProviderSelectionV1 } from '../../../shared/ai-provider.mjs'
+import { fixedBridgeModelIdForTask } from '../../../shared/ai-model-policy.mjs'
 import { BUILTIN_AI_PROVIDER_CATALOG } from '../../lib/aiProvider'
 import {
   disconnectLocalAiBridge,
   localAiBridgeSnapshot,
+  loadLocalAiUsage,
   pairLocalAiBridge,
   probeLocalAiBridge,
   subscribeLocalAiBridge,
 } from '../../lib/localAiBridgeApi'
+import type { LocalAiUsageSnapshot } from '../../lib/localAiBridgeApi'
 import { selectPdfAnalysisModelRouting } from '../../lib/pdfCampaignAnalysis'
 
 const PROVIDER_ICONS = {
@@ -16,7 +19,7 @@ const PROVIDER_ICONS = {
   'external-account': KeyRound,
 } as const
 
-const SELECTABLE_AI_PROVIDER_CATALOG = BUILTIN_AI_PROVIDER_CATALOG.filter((provider) => provider.id !== 'local-bridge')
+const SELECTABLE_AI_PROVIDER_CATALOG = BUILTIN_AI_PROVIDER_CATALOG.filter((provider) => provider.id === 'external-account')
 
 const STATUS_LABELS = {
   ready: '已连接',
@@ -39,13 +42,17 @@ export default function AiProviderSelector({
   const [pairingCode, setPairingCode] = useState('')
   const [bridgeBusy, setBridgeBusy] = useState(false)
   const [bridgeError, setBridgeError] = useState<string | null>(null)
+  const [usage, setUsage] = useState<LocalAiUsageSnapshot | null>(null)
   const bridgeProviderSelected = value.providerId === 'external-account'
+  const fixedModelId = taskProfile === 'pdf-campaign'
+    ? fixedBridgeModelIdForTask('pdf-extraction', 'pdf-extraction')
+    : fixedBridgeModelIdForTask(taskProfile === 'map-analysis' ? 'map-analysis' : 'resource-structuring')
   const modelSupportsProfile = (model: (typeof bridge.models)[number]) => {
     if (taskProfile === 'resource-structuring') {
-      return model.supportedTasks.includes('resource-structuring') && model.capabilities.includes('structured-output')
+      return model.id === fixedModelId && model.supportedTasks.includes('resource-structuring') && model.capabilities.includes('structured-output')
     }
     if (taskProfile === 'map-analysis') {
-      return model.supportedTasks.includes('map-analysis') &&
+      return model.id === fixedModelId && model.supportedTasks.includes('map-analysis') &&
         model.capabilities.includes('vision') && model.capabilities.includes('structured-output')
     }
     return true
@@ -57,9 +64,9 @@ export default function AiProviderSelector({
     : null
 
   useEffect(() => {
-    if (value.providerId !== 'local-bridge') return
-    onChange({ ...value, providerId: 'external-account', modelId: undefined, allowPaidFallback: false })
-  }, [onChange, value])
+    if (value.providerId === 'external-account' && value.modelId === fixedModelId) return
+    onChange({ ...value, providerId: 'external-account', modelId: fixedModelId, allowPaidFallback: false })
+  }, [fixedModelId, onChange, value])
 
   useEffect(() => {
     if (!bridgeProviderSelected || bridge.status !== 'unknown') return
@@ -68,19 +75,16 @@ export default function AiProviderSelector({
 
   useEffect(() => {
     if (!bridgeProviderSelected || bridge.status !== 'ready') return
-    const first = bridgeModels[0]
-    const currentStillAvailable = bridgeModels.some((model) => model.id === value.modelId)
-    if (!currentStillAvailable && first) onChange({ ...value, modelId: first.id })
-    else if (!currentStillAvailable && !first && value.modelId) onChange({ ...value, modelId: undefined })
-  }, [bridge.status, bridgeModels, bridgeProviderSelected, onChange, value])
+    void loadLocalAiUsage(20).then(setUsage).catch(() => setUsage(null))
+  }, [bridge.status, bridgeProviderSelected])
 
   const pairBridge = async () => {
     setBridgeBusy(true)
     setBridgeError(null)
     try {
       const next = await pairLocalAiBridge(pairingCode)
-      const first = next.models.find((model) => model.providerId === value.providerId && modelSupportsProfile(model))
-      onChange({ ...value, modelId: first?.id })
+      const fixed = next.models.find((model) => model.id === fixedModelId && modelSupportsProfile(model))
+      onChange({ ...value, providerId: 'external-account', modelId: fixed?.id ?? fixedModelId })
       setPairingCode('')
     } catch (error) {
       setBridgeError(error instanceof Error ? error.message : '本机 Bridge 配对失败。')
@@ -194,16 +198,11 @@ export default function AiProviderSelector({
                     扫描页 OCR：{bridge.engines.rapidocr === 'ready' ? 'RapidOCR 已就绪' : '未配置'}
                   </span>
                 )}
-                <select
-                  value={value.modelId ?? ''}
-                  onChange={(event) => onChange({ ...value, modelId: event.currentTarget.value || undefined })}
-                  className="min-w-56 rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-xs text-slate-200"
-                >
-                  {bridgeModels.length === 0 && (
-                    <option value="">Bridge 未配置模型 API</option>
-                  )}
-                  {bridgeModels.map((model) => <option key={model.id} value={model.id}>{model.displayName}</option>)}
-                </select>
+                <span className="min-w-56 rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-xs text-slate-200">
+                  {taskProfile === 'pdf-campaign' && pdfModelRouting
+                    ? `${pdfModelRouting.extraction.displayName} → ${pdfModelRouting.synthesis.displayName}`
+                    : bridgeModels.find((model) => model.id === fixedModelId)?.displayName ?? '固定模型尚未就绪'}
+                </span>
                 <button
                   type="button"
                   onClick={() => disconnectLocalAiBridge()}
@@ -219,6 +218,17 @@ export default function AiProviderSelector({
                   {' → '}全书综合使用 <span className="text-slate-200">{pdfModelRouting.synthesis.displayName}</span>。
                 </div>
               )}
+              {usage?.records?.length ? (
+                <div className="mt-2 rounded-lg border border-amber-400/12 bg-amber-500/[0.035] px-3 py-2 text-[10px] leading-4 text-slate-400">
+                  <strong className="text-amber-200">最近 AI 计费：</strong>
+                  {usage.records.slice(0, 3).map((record) => (
+                    <span key={record.auditId} className="ml-2 inline-block">
+                      {record.modelId.split(':').at(-1)} · {record.actualCredits} 分 · {(record.durationMs / 1_000).toFixed(1)} 秒
+                    </span>
+                  ))}
+                  <span className="ml-2 text-slate-500">（1000 分 = ¥10，预留按 500 分向上取整）</span>
+                </div>
+              ) : null}
             </div>
           ) : bridge.status === 'offline' ? (
             <p className="mt-3 text-xs text-amber-300">未检测到 DM 本机 Bridge。请先运行启动命令，再点击“重新检测”。</p>

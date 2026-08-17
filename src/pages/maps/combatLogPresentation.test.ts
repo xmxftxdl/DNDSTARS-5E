@@ -3,6 +3,7 @@ import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  combatLogEntryIsInitiativeResult,
   dnd5eCharacterPresentationColors,
   inferCombatLogActorTokenId,
   resolveCombatLogSubject,
@@ -132,6 +133,28 @@ describe('combat log subject presentation', () => {
       currentTurnTokenId: goblinToken.id,
     })
     expect(subject).toMatchObject({
+      side: 'neutral',
+      resolution: 'neutral',
+    })
+    expect(subject.token).toBeUndefined()
+  })
+
+  it('keeps the shared initiative result neutral even when its details name combatants', () => {
+    const initiativeEntry = entry({
+      text: '先攻结果（由高到低）',
+      kind: 'system',
+      details: ['1. 哥布林：先攻 18', '2. 法师：先攻 12'],
+    })
+
+    expect(combatLogEntryIsInitiativeResult(initiativeEntry)).toBe(true)
+    const subject = resolveCombatLogSubject({
+      entry: initiativeEntry,
+      tokens: [goblinToken, wizardToken],
+      characters: [wizard],
+      currentTurnTokenId: goblinToken.id,
+    })
+    expect(subject).toMatchObject({
+      label: '先攻结果',
       side: 'neutral',
       resolution: 'neutral',
     })

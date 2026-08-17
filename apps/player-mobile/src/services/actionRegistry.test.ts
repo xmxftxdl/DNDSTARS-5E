@@ -182,9 +182,93 @@ describe('mobile action registry', () => {
     expect(registry.actions.some((entry) => entry.id === 'plugin-action:demo.plugin:passive-aura')).toBe(false)
   })
 
+  it('exposes an explicitly active manual feature through the DM adjudication action', async () => {
+    const manualWorkspace = {
+      ...workspace,
+      characters: [{ ...workspace.characters[0], dnd5ePluginFeatureIds: ['demo.plugin:parley'] }],
+    } as MobilePlayerWorkspace
+    const registry = await buildMobileActionRegistry({ workspace: manualWorkspace, credentials, rules, loadPlugin: async () => ({
+      format: 'dndstars5e-content', schemaVersion: 2, manifest: { id: 'demo.plugin' },
+      content: { features: [{
+        id: 'parley', name: '战场交涉', automation: 'manual',
+        action: { label: '尝试交涉', description: '说服敌方暂时停手。', economy: 'action', targeting: { kind: 'single-creature' } },
+      }] },
+    }) })
+    expect(registry.actions.find((entry) => entry.id === 'plugin-action:demo.plugin:parley')).toMatchObject({
+      automation: 'manual',
+      execution: { kind: 'host-command', command: { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'other-action' } } },
+    })
+  })
+
+  it('labels weapon actions from equipped inventory and exposes a host-validated off-hand attack', async () => {
+    const armedWorkspace = {
+      ...workspace,
+      characters: [{
+        ...workspace.characters[0],
+        dnd5eInventory: { entries: [
+          { instanceId: 'main', quantity: 1, equippedSlot: 'mainWeapon', item: { name: '短剑', category: 'equipment', equipment: { dnd5e: { kind: 'weapon' } } } },
+          { instanceId: 'off', quantity: 1, equippedSlot: 'offHand', item: { name: '匕首', category: 'equipment', equipment: { dnd5e: { kind: 'weapon' } } } },
+        ] },
+      }],
+    } as unknown as MobilePlayerWorkspace
+    const registry = await buildMobileActionRegistry({ workspace: armedWorkspace, credentials, rules: null })
+    expect(registry.actions.find((entry) => entry.id === 'core.weapon-attack')?.label).toBe('短剑')
+    expect(registry.actions.find((entry) => entry.id === 'core.off-hand-attack')).toMatchObject({
+      economy: 'bonusAction', execution: { command: { dnd5eWeaponAttackOptions: { offHandAttack: true } } },
+    })
+  })
+
+  it('registers owned persistent-area movement and area-granted plugin activities', async () => {
+    const areaWorkspace = {
+      ...workspace,
+      characters: [{ ...workspace.characters[0], dnd5ePluginFeatureIds: [] }],
+      scene: {
+        persistentAreas: [{
+          id: 'vine-area', label: '藤蔓区域', color: '#16a34a', ownerPluginId: 'demo.plugin',
+          sourceCharacterId: 'hero', cells: [{ col: 2, row: 3 }],
+          movement: { economy: 'bonus-action', maximumFeet: 30 },
+          grantedActivities: [{ activityId: 'vine-control', label: '拉拽' }],
+        }],
+      },
+    } as unknown as MobilePlayerWorkspace
+    const registry = await buildMobileActionRegistry({ workspace: areaWorkspace, credentials, rules, loadPlugin: async () => ({
+      format: 'dndstars5e-content', schemaVersion: 2, manifest: { id: 'demo.plugin' },
+      content: { features: [{
+        id: 'area-control', name: '藤蔓操控', automation: 'full',
+        action: { id: 'vine-control', label: '拉拽目标', economy: 'bonusAction', targeting: { kind: 'single-creature', relation: 'enemy' } },
+      }] },
+    }) })
+    expect(registry.actions.find((entry) => entry.id === 'persistent-area-move:vine-area')).toMatchObject({
+      economy: 'bonusAction', targeting: { kind: 'area', rangeFeet: 30 },
+      execution: { command: { dnd5ePersistentAreaMove: { areaId: 'vine-area' } } },
+    })
+    expect(registry.actions.find((entry) => entry.id.endsWith(':area:vine-area'))).toMatchObject({
+      label: '藤蔓区域 · 拉拽目标',
+      execution: { command: { dnd5ePluginAction: {
+        featureId: 'demo.plugin:area-control', payload: { persistentAreaId: 'vine-area' },
+      } } },
+    })
+  })
+
   it('keeps old owned features operable through a partial Host-only fallback', async () => {
     const registry = await buildMobileActionRegistry({ workspace, credentials, rules: { ...rules, member: { ...rules.member, ready: false } }, loadPlugin: async () => { throw new Error('must-not-load') } })
     expect(registry.actions.find((entry) => entry.id === 'plugin-action:demo.plugin:arc-bolt')).toMatchObject({ automation: 'partial', execution: { kind: 'host-command' } })
     expect(registry.rejectedPluginEntries).toEqual([])
+  })
+
+  it('projects active actions from a validated legacy declarative room package', async () => {
+    const registry = await buildMobileActionRegistry({ workspace, credentials, rules, loadPlugin: async () => ({
+      format: 'dndstars5e-declarative', schemaVersion: 1,
+      manifest: { id: 'demo.plugin' },
+      subclasses: [], classes: [],
+      legacy: {
+        features: [{
+          id: 'arc-bolt', name: '旧版秘法箭', automation: 'full',
+          action: { label: '发射旧版秘法箭', economy: 'action', targeting: { kind: 'single-creature', rangeFeet: 60 } },
+        }],
+      },
+    }) })
+    expect(registry.actions.find((entry) => entry.id === 'plugin-action:demo.plugin:arc-bolt'))
+      .toMatchObject({ label: '发射旧版秘法箭', automation: 'full' })
   })
 })

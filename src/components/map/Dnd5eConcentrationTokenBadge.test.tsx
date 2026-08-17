@@ -12,9 +12,21 @@ function elementProps(node: ReactNode): Record<string, unknown> {
   return node.props
 }
 
+const concentrationInstance = {
+  id: 'concentration:wizard-token:flaming-sphere',
+  tokenId: 'wizard-token',
+  kind: 'concentration' as const,
+  title: '专注：炽焰法球',
+  description: '维持专注。',
+  statusId: 'flaming-sphere',
+  sourceLabel: '法师',
+  authority: 'headless' as const,
+}
+
 describe('Dnd5eConcentrationTokenBadge', () => {
   it('renders the non-interactive raster concentration asset', () => {
     const mark: ConcentrationTokenMark = {
+      instance: concentrationInstance,
       tokenId: 'wizard-token',
       spellId: 'flaming-sphere',
       backgroundHighlightColor: '#3b82f6',
@@ -67,6 +79,7 @@ describe('Dnd5eConcentrationTokenBadge', () => {
       y: 0,
       size: 24,
       mark: {
+        instance: concentrationInstance,
         tokenId: 'wizard-token',
         spellId: 'flaming-sphere',
         backgroundHighlightColor: '#3b82f6',
@@ -85,6 +98,7 @@ describe('Dnd5eConcentrationTokenBadge', () => {
       size: 24,
       image: {} as HTMLImageElement,
       mark: {
+        instance: concentrationInstance,
         tokenId: 'wizard-token',
         spellId: 'flaming-sphere',
         backgroundHighlightColor: '#3b82f6',

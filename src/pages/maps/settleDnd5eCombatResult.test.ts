@@ -88,6 +88,70 @@ describe('地图战斗结果结算器', () => {
     expect(settled.application.map.id).toBe('map')
   })
 
+  it('runs registered Activity windows before building the production map application', async () => {
+    const state = startDnd5eHeadlessCombat('activity-production', [
+      combatant('hero', 20), combatant('enemy', 10),
+    ])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = { ok: true, state, events: [] }
+    const settleActivityTriggers = vi.fn(async (request: Parameters<
+      NonNullable<Parameters<typeof settleDnd5eConcentrationChecks>[0]['settleActivityTriggers']>
+    >[0]) => {
+      const next = structuredClone(request.state)
+      next.combatants.hero.currentHp = 19
+      return { state: next, events: [] }
+    })
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+      settleActivityTriggers,
+    })
+
+    expect(settleActivityTriggers).toHaveBeenCalledOnce()
+    expect(settled.result.state.combatants.hero.currentHp).toBe(19)
+    expect(settled.application.map.tokens.find((entry) => entry.id === 'hero')?.hp).toBe(19)
+  })
+
+  it('builds the final application from the map returned by Activity placement handoffs', async () => {
+    const state = startDnd5eHeadlessCombat('activity-map-production', [
+      combatant('hero', 20), combatant('enemy', 10),
+    ])
+    const sourceMap = map()
+    const summoned = { ...token('activity-summon', 'enemy'), x: 150, y: 150 }
+    const settled = await settleDnd5eConcentrationChecks({
+      result: { ok: true, state, events: [] },
+      map: sourceMap,
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+      settleActivityTriggers: async (request) => ({
+        state: request.state,
+        events: [],
+        map: {
+          ...request.map,
+          tokens: [...request.map.tokens, summoned],
+          dnd5ePluginAreas: [{
+            id: 'activity-area', pluginId: 'local.test', featureId: 'zone',
+            label: 'Zone', color: '#8b5cf6', sourceCharacterId: 'hero',
+            sourceTokenId: 'hero', cells: [{ col: 2, row: 2 }], createdRound: 1,
+            expiresAfterRound: 2,
+          }],
+        },
+      }),
+    })
+
+    expect(settled.application.map.tokens.map((entry) => entry.id)).toContain('activity-summon')
+    expect(settled.application.map.dnd5ePluginAreas?.[0]?.id).toBe('activity-area')
+    expect(sourceMap.tokens).toHaveLength(2)
+  })
+
   it('保留前一事务阶段已经产生的地图与角色变更标识', async () => {
     const state = startDnd5eHeadlessCombat('combat', [combatant('hero', 20), combatant('enemy', 10)])
     const result: Extract<Dnd5eActionResult, { ok: true }> = { ok: true, state, events: [] }

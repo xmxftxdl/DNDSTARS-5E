@@ -205,6 +205,7 @@ export interface Dnd5eCustomMonsterMechanicDraft {
     | 'damage'
     | 'damage-replacement'
     | 'standard-condition'
+    | 'tactical-status'
     | 'remove-standard-condition'
     | 'summon'
     | 'area-attack'
@@ -216,6 +217,7 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   healingDice: string
   damageType: Dnd5eDamageType | 'inherit-trigger'
   condition: Dnd5eStandardConditionId
+  statusMarkerId: Dnd5eTokenStatusMarkerGrantDeclaration['statusId']
   durationKind: 'permanent' | 'until-target-turn-start' | 'until-source-turn-start' | 'rounds'
   durationRounds: number
   summonMonsterId: string
@@ -428,6 +430,7 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     healingDice: '2d6',
     damageType: 'necrotic',
     condition: 'frightened',
+    statusMarkerId: 'marked',
     durationKind: 'rounds',
     durationRounds: 1,
     summonMonsterId: 'srd-5.1:wolf',
@@ -544,7 +547,10 @@ export function restoreDnd5eCustomMonsterDraft(
       ? [...source.conditionImmunities]
       : [],
     tokenStatusMarkerGrants: Array.isArray(source.tokenStatusMarkerGrants)
-      ? source.tokenStatusMarkerGrants.map((entry) => ({ ...entry }))
+      ? source.tokenStatusMarkerGrants.map((entry) => ({
+          ...entry,
+          application: entry.application ?? 'marker',
+        }))
       : [],
     equipment: Array.isArray(source.equipment)
       ? source.equipment.map((entry) => ({ ...entry }))
@@ -1215,6 +1221,14 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                 ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
                 : { kind: mechanic.durationKind },
             }
+          : mechanic.effectKind === 'tactical-status'
+            ? {
+                id: 'effect-0', kind: 'tactical-status' as const, target: mechanic.effectTarget,
+                statusId: mechanic.statusMarkerId,
+                duration: mechanic.durationKind === 'rounds'
+                  ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
+                  : { kind: mechanic.durationKind },
+              }
           : mechanic.effectKind === 'remove-standard-condition'
             ? {
                 id: 'effect-0', kind: 'remove-standard-condition' as const,
@@ -1413,9 +1427,13 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
         }
       : {}),
     conditionImmunities: [...new Set(draft.conditionImmunities)],
-    tokenStatusMarkerGrants: (draft.tokenStatusMarkerGrants ?? []).filter((grant, index, grants) =>
+    tokenStatusMarkerGrants: (draft.tokenStatusMarkerGrants ?? []).map((grant) => ({
+      ...grant,
+      application: grant.application ?? 'marker',
+    })).filter((grant, index, grants) =>
       grants.findIndex((candidate) =>
-        candidate.statusId === grant.statusId && candidate.target === grant.target) === index),
+        candidate.statusId === grant.statusId && candidate.target === grant.target &&
+        candidate.application === grant.application) === index),
     passivePerception: Math.trunc(draft.passivePerception),
     languages: draft.languages.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean),
     challenge: { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
@@ -1716,7 +1734,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         : effect && 'dice' in effect
           ? effect.dice
           : { count: 2, sides: 6, bonus: 0 }
-      const duration = effect?.kind === 'standard-condition' || effect?.kind === 'equipment-modifier'
+      const duration = effect?.kind === 'standard-condition' || effect?.kind === 'tactical-status' || effect?.kind === 'equipment-modifier'
         ? effect.duration
         : { kind: 'rounds' as const, rounds: 1 }
       return {
@@ -1755,6 +1773,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         condition: effect?.kind === 'standard-condition' || effect?.kind === 'remove-standard-condition'
           ? effect.condition
           : 'frightened',
+        statusMarkerId: effect?.kind === 'tactical-status' ? effect.statusId : 'marked',
         durationKind: duration.kind,
         durationRounds: duration.kind === 'rounds' ? duration.rounds : 1,
         summonMonsterId: effect?.kind === 'summon' ? effect.monsterId : 'srd-5.1:wolf',

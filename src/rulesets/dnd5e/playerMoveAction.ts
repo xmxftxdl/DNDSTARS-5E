@@ -20,17 +20,26 @@ import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import {
   dnd5eEffectiveFlySpeed,
   dnd5eEffectiveSpeed,
+  dnd5eDeclarativeCreatureSpaceTraversalMinimumLargerSizeRanks,
   dnd5eGrappleDragExtraMovementFeet,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eOpeningAttackSavingThrowRoll,
 } from './headlessCombatEngine'
+import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './persistentAreaGeometry'
 import { dnd5eFallingDamageDice, dnd5eTraversalMovementCost } from './traversal'
 import { dnd5eClimbingMovementCost, dnd5eRunningJumpBonusFeet } from './classes'
-import { dnd5eActiveJumpDistanceMultiplier, dnd5eActiveSafeFallFeet } from './activeEffects'
-import { dnd5eIsIncapacitated } from './passiveDefenses'
+import {
+  dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveMovementBoundarySaves,
+  dnd5eActiveSafeFallFeet,
+  effectiveDnd5eActiveEffects,
+} from './activeEffects'
+import { dnd5eIsIncapacitated, dnd5eSavingThrowMode } from './passiveDefenses'
+import type { PreparedDnd5eOpeningAttackSavingThrow } from './spellAction'
 
 export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
@@ -78,11 +87,80 @@ export interface PreparedDnd5ePlayerMove {
   movementTraces: readonly Dnd5eMapMovementTrace[]
   path: Array<{ x: number; y: number }>
   pathElevationsFeet: number[]
+  /** Derived from the Host pathfinder result, not from the player request. */
+  straightLine: boolean
   standFromProne: boolean
   /** When present, the player attempted to stand but a rule keeps them prone. */
   standPreventedBy?: 'hideous-laughter'
+  boundarySavingThrows: readonly {
+    effectId: string
+    sourceActorId: string
+    sourceName: string
+    requirement: PreparedDnd5eOpeningAttackSavingThrow
+  }[]
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
+}
+
+function dnd5ePathIsStraightLine(points: readonly { x: number; y: number }[]): boolean {
+  if (points.length < 3) return points.length >= 2
+  const start = points[0]
+  const end = points.at(-1)!
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared <= 1e-8) return false
+  return points.slice(1, -1).every((point) => {
+    const px = point.x - start.x
+    const py = point.y - start.y
+    const cross = Math.abs(px * dy - py * dx)
+    const dot = px * dx + py * dy
+    return cross <= Math.max(1, Math.sqrt(lengthSquared)) * 1e-6 &&
+      dot >= -1e-6 && dot <= lengthSquared + 1e-6
+  })
+}
+
+const CREATURE_SIZE_RANK = {
+  微型: 0,
+  小型: 1,
+  中型: 2,
+  大型: 3,
+  超大型: 4,
+  巨型: 5,
+} as const
+
+function explorationCreatureSizeRank(
+  token: Token,
+  characters: readonly Character[],
+): number {
+  if (token.creatureSize) return CREATURE_SIZE_RANK[token.creatureSize]
+  const character = token.characterId
+    ? characters.find((candidate) => candidate.id === token.characterId)
+    : undefined
+  return character ? migrateCharacterToDnd5e(character).sizeRank : 2
+}
+
+function explorationPassThroughTokenIds(input: {
+  actor: Character
+  actorToken: Token
+  map: BattleMap
+  characters: readonly Character[]
+}): string[] {
+  const migrated = migrateCharacterToDnd5e(input.actor)
+  const runtime = createCombatantFromDnd5eCharacter({
+    character: migrated,
+    controller: 'player',
+    initiativeD20: 10,
+    position: { x: input.actorToken.x, y: input.actorToken.y },
+  })
+  const minimumDifference = dnd5eDeclarativeCreatureSpaceTraversalMinimumLargerSizeRanks(runtime)
+  if (minimumDifference == null) return []
+  const actorSizeRank = explorationCreatureSizeRank(input.actorToken, input.characters)
+  return input.map.tokens
+    .filter((token) => token.id !== input.actorToken.id &&
+      (token.type === 'player' || token.type === 'enemy') &&
+      explorationCreatureSizeRank(token, input.characters) >= actorSizeRank + minimumDifference)
+    .map((token) => token.id)
 }
 
 /**
@@ -151,6 +229,12 @@ export function prepareDnd5eExplorationMove(input: {
     canFly: heightAboveGround > 0,
     targetElevationFeet: toElevationFeet,
     maximumTerrainStepFeet: 10,
+    passThroughTokenIds: explorationPassThroughTokenIds({
+      actor,
+      actorToken,
+      map: input.map,
+      characters: input.characters,
+    }),
     additionalDifficultTerrainMultiplier: (token, position) =>
       dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>
@@ -248,6 +332,12 @@ export function prepareDnd5ePlayerMove(input: {
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
+  const activeTurnKey = `${action.combatId ?? `map-${input.map.id}`}:${Math.max(1, action.round)}:${
+    input.initiativeOrder[action.initiativeIndex]?.slotId ?? actorToken.id
+  }`
+  if (actorCombatant.classState.movementStoppedTurnKey === activeTurnKey) {
+    return { ok: false, reason: 'insufficient-movement' }
+  }
   // The snapshot reconciles source-linked effects first. Checking the projected
   // Headless conditions prevents a stale, already-invalid grapple from pinning
   // the player on the live map.
@@ -288,6 +378,16 @@ export function prepareDnd5ePlayerMove(input: {
     canFly: traversalMode === 'fly',
     targetElevationFeet: toElevationFeet,
     maximumTerrainStepFeet: traversalMode === 'fall' ? 10_000 : 10,
+    passThroughTokenIds: (() => {
+      const minimumDifference = dnd5eDeclarativeCreatureSpaceTraversalMinimumLargerSizeRanks(actorCombatant)
+      if (minimumDifference == null) return []
+      return input.map.tokens
+        .filter((token) => token.id !== actorToken.id &&
+          (snapshot.state.combatants[token.id]?.sizeRank ?? 2) >= actorCombatant.sizeRank + minimumDifference)
+        .map((token) => token.id)
+    })(),
+    ignoreDifficultTerrain: actorCombatant.ignoreDifficultTerrainWhileDashing === true &&
+      actorCombatant.classState.dashedTurnKey === `${action.combatId ?? `map-${input.map.id}`}:${Math.max(1, action.round)}:${input.initiativeOrder[action.initiativeIndex]?.slotId ?? actorToken.id}`,
     additionalDifficultTerrainMultiplier: (token, position) =>
       dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>
@@ -354,6 +454,11 @@ export function prepareDnd5ePlayerMove(input: {
     effect.source.kind === 'spell' && effect.source.rulesId === 'hideous-laughter',
   ) === true
   const standFromProne = isProne && !cannotStand && action.dnd5eStandFromProne !== false
+  if (
+    traversalMode === 'long-jump-running' &&
+    (actorCombatant.classState.runningJumpApproachFeet ?? 0) <
+      (actorCombatant.runningJumpMinimumApproachFeet ?? 10)
+  ) return { ok: false, reason: 'movement-blocked' }
   const traversal = dnd5eTraversalMovementCost({
     distanceFeet: path.distanceFeet,
     baseMovementCostFeet: path.movementCostFeet,
@@ -369,7 +474,10 @@ export function prepareDnd5ePlayerMove(input: {
       climbSpeed: actorCombatant.movementSpeeds?.climb,
       swimSpeed: actorCombatant.movementSpeeds?.swim,
       flySpeed: dnd5eEffectiveFlySpeed(actorCombatant),
-      climbWithoutSpeedCostMultiplier: dnd5eClimbingMovementCost(actor, 1),
+      climbWithoutSpeedCostMultiplier: Math.min(
+        actorCombatant.climbWithoutSpeedCostMultiplier ?? 2,
+        dnd5eClimbingMovementCost(actor, 1),
+      ),
       runningLongJumpBonusFeet: dnd5eRunningJumpBonusFeet(actor),
       jumpDistanceMultiplier: dnd5eActiveJumpDistanceMultiplier(actorCombatant.classState.activeEffects),
     },
@@ -379,9 +487,38 @@ export function prepareDnd5ePlayerMove(input: {
     (action.dnd5eCarefulMovement ? path.distanceFeet : 0) +
     (isProne && !standFromProne ? path.distanceFeet : 0)
   const movementCostFeet = locomotionCostFeet +
-    (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0) +
+    (standFromProne
+      ? Math.min(
+          Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2),
+          actorCombatant.standFromProneMovementCostFeet ?? Number.POSITIVE_INFINITY,
+        )
+      : 0) +
     dnd5eGrappleDragExtraMovementFeet(snapshot.state, actorToken.id, locomotionCostFeet)
   if (movementCostFeet > input.turnEconomy.movement.current) return { ok: false, reason: 'insufficient-movement' }
+  const boundarySavingThrows = dnd5eActiveMovementBoundarySaves(actorCombatant.classState.activeEffects)
+    .flatMap((boundary) => {
+      const source = snapshot.state.combatants[boundary.sourceActorId]
+      if (!source) return []
+      const destinationDistance = Math.hypot(to.x - source.position.x, to.y - source.position.y)
+      if (destinationDistance <= boundary.maximumDistanceFeet + 1e-6) return []
+      const activeEffects = effectiveDnd5eActiveEffects(actorCombatant.classState.activeEffects)
+      return [{
+        effectId: boundary.effectId,
+        sourceActorId: source.id,
+        sourceName: source.name,
+        requirement: {
+          featureId: boundary.effectId,
+          ability: boundary.ability,
+          dc: boundary.dc,
+          modifier: actorCombatant.savingThrowBonuses[boundary.ability] ??
+            Math.floor((actorCombatant.abilities[boundary.ability] - 10) / 2),
+          mode: dnd5eSavingThrowMode(actorCombatant, boundary.ability),
+          blessed: activeEffects.some((effect) => effect.source.rulesId === 'bless'),
+          baned: activeEffects.some((effect) => effect.source.rulesId === 'bane'),
+          failureDamageMultiplier: 1,
+        },
+      }]
+    })
   actorCombatant.turn = {
     actionAvailable: input.turnEconomy.action.current > 0,
     bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
@@ -429,10 +566,12 @@ export function prepareDnd5ePlayerMove(input: {
       ],
       path: path.points,
       pathElevationsFeet: path.elevationsFeet,
+      straightLine: dnd5ePathIsStraightLine(path.points),
       standFromProne,
       standPreventedBy: isProne && cannotStand && action.dnd5eStandFromProne !== false
         ? 'hideous-laughter'
         : undefined,
+      boundarySavingThrows,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
     },
@@ -441,6 +580,7 @@ export function prepareDnd5ePlayerMove(input: {
 
 export function resolvePreparedDnd5ePlayerMove(input: {
   prepared: PreparedDnd5ePlayerMove
+  boundarySavingThrows?: readonly (Dnd5eOpeningAttackSavingThrowRoll & { effectId: string })[]
   fallingDamageRolls?: readonly number[]
   fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
@@ -450,6 +590,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     actorId: prepared.actorToken.id,
     to: prepared.to,
     distance: prepared.distanceFeet,
+    straightLine: prepared.straightLine,
     movementCost: prepared.movementCostFeet,
     movementCostIncludesDrag: true,
     standFromProne: prepared.standFromProne,
@@ -457,6 +598,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     traversalMode: prepared.action.dnd5eTraversalMode,
     toElevationFeet: prepared.toElevationFeet,
     toGroundElevationFeet: prepared.toGroundElevationFeet,
+    boundarySavingThrows: input.boundarySavingThrows,
     fallingDamageRolls: input.fallingDamageRolls,
     fallingDamageRollsByCombatantId: input.fallingDamageRollsByCombatantId,
   })

@@ -14,6 +14,13 @@ import {
   getDnd5eSrdCombatSpell,
   type Dnd5eSrdSpellDefinition,
 } from './spells'
+import {
+  dnd5eDeclarativeResourceKey,
+  dnd5ePluginFeatureDefinition,
+  dnd5ePluginFeaturesAvailableForCharacter,
+  registeredDnd5ePluginFeatures,
+  type RegisteredDnd5ePluginFeature,
+} from './pluginApi'
 
 export const DND5E_SPELL_MODIFIER_INTENT_SCHEMA_VERSION = 1 as const
 
@@ -23,6 +30,7 @@ export type Dnd5eSpellModifierIntentId =
   | `metamagic-${Dnd5eMetamagicId}`
   | 'draconic-elemental-resistance'
   | 'repelling-blast'
+  | `declarative-damage-maximization:${string}`
 
 export type Dnd5eSpellModifierOperationV1 =
   | { kind: 'sculpt-spell' }
@@ -31,6 +39,7 @@ export type Dnd5eSpellModifierOperationV1 =
   | { kind: 'empowered-spell' }
   | { kind: 'draconic-elemental-resistance' }
   | { kind: 'repelling-blast' }
+  | { kind: 'declarative-damage-maximization'; featureId: string }
 
 export interface Dnd5eSpellModifierIntentDefinitionV1 {
   schemaVersion: typeof DND5E_SPELL_MODIFIER_INTENT_SCHEMA_VERSION
@@ -39,10 +48,11 @@ export interface Dnd5eSpellModifierIntentDefinitionV1 {
   description: string
   iconMotif: Dnd5eActionIconMotif
   source: {
-    classId: Dnd5eClassId
-    minimumLevel: number
+    classId?: Dnd5eClassId
+    minimumLevel?: number
     subclassId?: string
     selection?: { groupId: string; optionId: string }
+    featureId?: string
   }
   operation: Dnd5eSpellModifierOperationV1
   exclusiveGroup?: 'primary-metamagic'
@@ -64,6 +74,7 @@ export interface Dnd5eResolvedSpellModifierOptionsV1 {
   empowered?: boolean
   draconicResistance?: boolean
   repellingBlast?: boolean
+  damageMaximizationFeatureId?: string
 }
 
 export interface Dnd5eSpellModifierResolutionV1 {
@@ -217,16 +228,60 @@ const definitions: readonly Dnd5eSpellModifierIntentDefinitionV1[] = [
   },
 ] as const
 
-const definitionById = new Map(definitions.map((definition) => [definition.id, definition]))
+const definitionById = new Map<Dnd5eSpellModifierIntentId, Dnd5eSpellModifierIntentDefinitionV1>(
+  definitions.map((definition) => [definition.id, definition]),
+)
+
+function declarativeDamageMaximizationDefinition(
+  feature: RegisteredDnd5ePluginFeature,
+): Dnd5eSpellModifierIntentDefinitionV1 | undefined {
+  const ability = feature.declarativeAbility
+  const mechanic = ability?.mechanic
+  if (feature.automation === 'manual' || !ability || mechanic?.kind !== 'damage-roll-maximization' ||
+    !mechanic.deliveries.includes('spell')) return undefined
+  const resourceCost = ability.cost?.resources?.[0]
+  const resourceId = resourceCost
+    ? resourceCost.scope === 'core'
+      ? resourceCost.resourceId
+      : dnd5eDeclarativeResourceKey(feature.ownerPluginId, resourceCost)
+    : undefined
+  return {
+    schemaVersion: 1,
+    id: `declarative-damage-maximization:${feature.id}`,
+    label: ability.name,
+    description: ability.description,
+    iconMotif: mechanic.damageTypes.includes('lightning') ? 'lightning' : 'force',
+    source: { featureId: feature.id },
+    operation: { kind: 'declarative-damage-maximization', featureId: feature.id },
+    ...(resourceId && resourceCost ? {
+      minimumResourceCost: { resourceId, label: resourceId, amount: resourceCost.amount },
+    } : {}),
+  }
+}
+
+function runtimeDefinitionById(id: Dnd5eSpellModifierIntentId): Dnd5eSpellModifierIntentDefinitionV1 | undefined {
+  const staticDefinition = definitionById.get(id)
+  if (staticDefinition) return staticDefinition
+  if (!id.startsWith('declarative-damage-maximization:')) return undefined
+  const featureId = id.slice('declarative-damage-maximization:'.length)
+  const feature = dnd5ePluginFeatureDefinition(featureId)
+  return feature ? declarativeDamageMaximizationDefinition(feature) : undefined
+}
 
 export function dnd5eSpellModifierIntentDefinitions(): readonly Dnd5eSpellModifierIntentDefinitionV1[] {
-  return definitions
+  return [
+    ...definitions,
+    ...registeredDnd5ePluginFeatures().flatMap((feature) => {
+      const definition = declarativeDamageMaximizationDefinition(feature)
+      return definition ? [definition] : []
+    }),
+  ]
 }
 
 export function dnd5eSpellModifierIntentDefinition(
   id: Dnd5eSpellModifierIntentId,
 ): Dnd5eSpellModifierIntentDefinitionV1 | undefined {
-  return definitionById.get(id)
+  return runtimeDefinitionById(id)
 }
 
 function characterOwnsDefinition(
@@ -234,7 +289,10 @@ function characterOwnsDefinition(
   definition: Dnd5eSpellModifierIntentDefinitionV1,
 ): boolean {
   const { source } = definition
-  if (dnd5eCharacterClassLevel(character, source.classId) < source.minimumLevel) return false
+  if (source.featureId) {
+    return dnd5ePluginFeaturesAvailableForCharacter(character).some((feature) => feature.id === source.featureId)
+  }
+  if (!source.classId || dnd5eCharacterClassLevel(character, source.classId) < (source.minimumLevel ?? 1)) return false
   const choices = character.dnd5eClassChoices?.classes?.[source.classId]
   if (source.subclassId && choices?.subclass !== source.subclassId) return false
   if (source.selection && !choices?.selections?.[source.selection.groupId]?.includes(source.selection.optionId)) return false
@@ -244,7 +302,7 @@ function characterOwnsDefinition(
 export function dnd5eAvailableSpellModifierIntents(
   character: Character,
 ): readonly Dnd5eAvailableSpellModifierIntentV1[] {
-  return definitions.flatMap<Dnd5eAvailableSpellModifierIntentV1>((definition) => {
+  return dnd5eSpellModifierIntentDefinitions().flatMap<Dnd5eAvailableSpellModifierIntentV1>((definition) => {
     if (!characterOwnsDefinition(character, definition)) return []
     const resourceCost = definition.minimumResourceCost
     if (!resourceCost) return [{ definition, available: true }]
@@ -268,16 +326,16 @@ export function toggleDnd5eSpellModifierIntent(
 ): Set<Dnd5eSpellModifierIntentId> {
   const next = new Set(currentIds)
   if (next.delete(id)) return next
-  const definition = definitionById.get(id)
+  const definition = runtimeDefinitionById(id)
   if (!definition) return next
   if (definition.exclusiveGroup) {
     for (const selectedId of next) {
-      if (definitionById.get(selectedId)?.exclusiveGroup === definition.exclusiveGroup) next.delete(selectedId)
+      if (runtimeDefinitionById(selectedId)?.exclusiveGroup === definition.exclusiveGroup) next.delete(selectedId)
     }
   }
   for (const incompatibleId of definition.incompatibleWith ?? []) next.delete(incompatibleId)
   for (const selectedId of next) {
-    if (definitionById.get(selectedId)?.incompatibleWith?.includes(id)) next.delete(selectedId)
+    if (runtimeDefinitionById(selectedId)?.incompatibleWith?.includes(id)) next.delete(selectedId)
   }
   next.add(id)
   return next
@@ -293,6 +351,7 @@ export function dnd5eSpellModifierIntentIdsFromOptions(
   if (options?.empowered) ids.push('metamagic-empowered')
   if (options?.draconicResistance) ids.push('draconic-elemental-resistance')
   if (options?.repellingBlast) ids.push('repelling-blast')
+  if (options?.damageMaximizationFeatureId) ids.push(`declarative-damage-maximization:${options.damageMaximizationFeatureId}`)
   return ids
 }
 
@@ -344,7 +403,7 @@ export function resolveDnd5eSpellModifierIntents(input: {
   const exclusiveGroups = new Set<string>()
   let requiresTargetConfiguration = false
   for (const id of uniqueIds) {
-    const definition = definitionById.get(id)
+    const definition = runtimeDefinitionById(id)
     const available = owned.get(id)
     if (!definition || !available) {
       reasons.push(`角色未拥有施法修正“${definition?.label ?? id}”。`)
@@ -363,11 +422,27 @@ export function resolveDnd5eSpellModifierIntents(input: {
       exclusiveGroups.add(definition.exclusiveGroup)
     }
     if (definition.incompatibleWith?.some((otherId) => uniqueIds.includes(otherId))) {
-      reasons.push(`${definition.label}不能与${definition.incompatibleWith.map((otherId) => definitionById.get(otherId)?.label ?? otherId).join('、')}同时使用。`)
+      reasons.push(`${definition.label}不能与${definition.incompatibleWith.map((otherId) => runtimeDefinitionById(otherId)?.label ?? otherId).join('、')}同时使用。`)
       continue
     }
 
     const operation = definition.operation
+    if (operation.kind === 'declarative-damage-maximization') {
+      const feature = dnd5ePluginFeatureDefinition(operation.featureId)
+      const mechanic = feature?.declarativeAbility?.mechanic
+      const damageType = spell?.damageType
+      const compatible = feature?.automation !== 'manual' && mechanic?.kind === 'damage-roll-maximization' &&
+        mechanic.deliveries.includes('spell') && !!damageType && mechanic.damageTypes.includes(damageType) &&
+        spell?.delayedDamage == null && (spell?.additionalDamageComponents?.length ?? 0) === 0 &&
+        !['healing', 'fixed-healing', 'healing-pool'].includes(spell?.effect ?? '')
+      if (!compatible) reasons.push(`${definition.label}不适用于该法术的伤害类型或复合伤害结构。`)
+      else options.damageMaximizationFeatureId = operation.featureId
+      if (definition.minimumResourceCost) {
+        resourceCosts[definition.minimumResourceCost.resourceId] =
+          (resourceCosts[definition.minimumResourceCost.resourceId] ?? 0) + definition.minimumResourceCost.amount
+      }
+      continue
+    }
     if (operation.kind === 'sculpt-spell') {
       const classLevel = dnd5eCharacterClassLevel(input.character, input.castingClassId)
       const contextualCaster = {

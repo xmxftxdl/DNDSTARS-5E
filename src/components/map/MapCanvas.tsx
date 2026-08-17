@@ -36,7 +36,9 @@ import { preloadBrowserImage } from '../../lib/browserImageCache'
 import type { Dnd5eTokenStatusMarker } from '../../rulesets/dnd5e/tokenStatusMarkers'
 import MapMeasureLine from './MapMeasureLine'
 import { rectFromPoints, type AoeHighlight, type DeleteSelectionRect, type MapProjectile, type SpellStatusTokenMark, type StandardConditionTokenMark } from './mapCanvasContracts'
+import type { MapTokenStatusInstance } from './mapTokenStatusInstance'
 export type { AoeHighlight, DeleteSelectionRect, MapProjectile, SpellStatusTokenMark, StandardConditionTokenMark } from './mapCanvasContracts'
+export type { MapTokenStatusInstance } from './mapTokenStatusInstance'
 import Dnd5eItemAreaOverlays from './Dnd5eItemAreaOverlays'
 import type { ConcentrationTokenMark } from './Dnd5eConcentrationTokenBadge'
 import {
@@ -105,7 +107,11 @@ import type {
   MapTabletopPoint,
   MapTabletopTool,
 } from '../../lib/mapTabletop'
-import type { SceneInteractionPointIcon, SceneRegion } from '../../lib/sceneOrchestration'
+import {
+  sceneRegionMovedWithinMap,
+  type SceneInteractionPointIcon,
+  type SceneRegion,
+} from '../../lib/sceneOrchestration'
 import { mapLightingRadiusFromDrag } from './mapLightingPresentation'
 import {
   mapCanvasAoeGridCell,
@@ -117,6 +123,7 @@ import {
   mapCanvasStageCanPan,
   mapCanvasTokenUsesInstantPosition,
   mapCanvasTokenClickAction,
+  syncMapCanvasViewportDataset,
 } from './mapCanvasInteraction'
 
 export interface MoveCircle {
@@ -134,6 +141,7 @@ export interface SceneTriggerZoneOverlay {
 }
 
 export interface SceneInteractionPointOverlay {
+  sceneId: string
   id: string
   name: string
   enabled: boolean
@@ -142,6 +150,16 @@ export interface SceneInteractionPointOverlay {
   x: number
   y: number
   prompt: string
+}
+
+export interface SceneTeleportDestinationOverlay {
+  sceneId: string
+  triggerId: string
+  actionId: string
+  name: string
+  enabled: boolean
+  x: number
+  y: number
 }
 
 interface MapCanvasProps {
@@ -170,6 +188,7 @@ interface MapCanvasProps {
   speedCostMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
   /** Circular AOE selection: highlighted cells plus click confirm. */
   aoeSelectMode?: boolean
+  /** Passive AOE previews can remain visible without taking over pointer input. */
   aoeHighlight?: AoeHighlight
   rangedRangeCells?: GridCell[]
   onAoePreviewCell?: (cell: GridCell | null) => void
@@ -180,7 +199,7 @@ interface MapCanvasProps {
   /** Non-standard status badges projected from authoritative ActiveEffects. */
   dnd5eTokenStatusMarkersByToken?: Record<string, readonly Dnd5eTokenStatusMarker[]>
   standardConditionTokenMarks?: StandardConditionTokenMark[]
-  onDnd5eConditionClick?: (tokenId: string, condition?: Dnd5eStandardConditionId) => void
+  onDnd5eStatusTokenClick?: (instance: MapTokenStatusInstance) => void
   onDnd5ePluginAreaVisibilityToggle?: (areaId: string) => void
   onDnd5ePluginAreaClick?: (areaId: string) => void
   tokenHoverLabels?: Record<string, string>
@@ -197,6 +216,8 @@ interface MapCanvasProps {
   concentrationTokenMarks?: ConcentrationTokenMark[]
   /** Characters currently wielding a club or quarterstaff empowered by Shillelagh. */
   shillelaghTokenIds?: string[]
+  /** Concrete Shillelagh ActiveEffect ids, keyed by owning Token. */
+  shillelaghEffectIdsByToken?: Record<string, string>
   /** Defeated tokens are dimmed. */
   defeatedTokenIds?: string[]
   /** Token currently resolving a saving throw. */
@@ -226,6 +247,20 @@ interface MapCanvasProps {
   onDeleteCancel?: () => void
   sceneTriggerZones?: readonly SceneTriggerZoneOverlay[]
   sceneInteractionPoints?: readonly SceneInteractionPointOverlay[]
+  sceneTeleportDestinations?: readonly SceneTeleportDestinationOverlay[]
+  sceneOverlayEditMode?: boolean
+  onSceneTriggerZoneMove?: (sceneId: string, triggerId: string, region: SceneRegion) => void
+  onSceneInteractionPointMove?: (
+    sceneId: string,
+    interactionPointId: string,
+    point: { x: number; y: number },
+  ) => void
+  onSceneTeleportDestinationMove?: (
+    sceneId: string,
+    triggerId: string,
+    actionId: string,
+    point: { x: number; y: number },
+  ) => void
   onSceneInteractionPointClick?: (interactionPointId: string) => void
   sceneEditMode?: boolean
   sceneRegionKind?: SceneRegion['kind']
@@ -329,7 +364,7 @@ export default function MapCanvas({
   dnd5eConditionsByToken = {},
   dnd5eTokenStatusMarkersByToken = {},
   standardConditionTokenMarks = [],
-  onDnd5eConditionClick,
+  onDnd5eStatusTokenClick,
   onDnd5ePluginAreaVisibilityToggle,
   onDnd5ePluginAreaClick,
   tokenHoverLabels = {},
@@ -340,6 +375,7 @@ export default function MapCanvas({
   spellStatusTokenMarks = [],
   concentrationTokenMarks = [],
   shillelaghTokenIds = [],
+  shillelaghEffectIdsByToken = {},
   defeatedTokenIds = [],
   savingThrowTokenId,
   savingThrowAbility,
@@ -357,6 +393,11 @@ export default function MapCanvas({
   onDeleteCancel,
   sceneTriggerZones = [],
   sceneInteractionPoints = [],
+  sceneTeleportDestinations = [],
+  sceneOverlayEditMode = false,
+  onSceneTriggerZoneMove,
+  onSceneInteractionPointMove,
+  onSceneTeleportDestinationMove,
   onSceneInteractionPointClick,
   sceneEditMode = false,
   sceneRegionKind = 'circle',
@@ -651,7 +692,14 @@ export default function MapCanvas({
       preloadBrowserImage('/assets/vfx/dispel-magic-sprite-v2.png'),
       preloadBrowserImage('/assets/vfx/shield-sprite-v2.png'),
       preloadBrowserImage('/assets/vfx/lesser-restoration-sprite-v2.png'),
-      preloadBrowserImage('/assets/vfx/cloudkill-sprite-v2.png'),
+      preloadBrowserImage('/assets/vfx/sequence-toxic-cloud-sprite-v3.png'),
+      preloadBrowserImage('/assets/vfx/sequence-fog-cloud-sprite-v1.png'),
+      preloadBrowserImage('/assets/vfx/sequence-sleet-storm-sprite-v1.png'),
+      preloadBrowserImage('/assets/vfx/sequence-wind-wall-sprite-v1.png'),
+      preloadBrowserImage('/assets/vfx/sequence-wall-of-force-sprite-v1.png'),
+      preloadBrowserImage('/assets/vfx/sequence-wall-of-stone-sprite-v1.png'),
+      preloadBrowserImage('/assets/vfx/sequence-wall-of-ice-sprite-v1.png'),
+      preloadBrowserImage('/assets/vfx/sequence-wall-of-thorns-sprite-v1.png'),
       preloadBrowserImage('/assets/vfx/ice-storm-ground-sprite-v2.png'),
     ])
   }, [])
@@ -1753,11 +1801,13 @@ export default function MapCanvas({
     }
     const direction = e.evt.deltaY > 0 ? -1 : 1
     const newScale = Math.max(0.1, Math.min(4, direction > 0 ? oldScale * 1.08 : oldScale / 1.08))
-    setView({
+    const nextView = {
       scale: newScale,
       x: pointer.x - mousePointTo.x * newScale,
       y: pointer.y - mousePointTo.y * newScale,
-    })
+    }
+    syncMapCanvasViewportDataset(containerRef.current, nextView)
+    setView(nextView)
   }
 
   const showGridOverlay = (map.showGrid || gridAdjustMode || gridSizePreview) && map.gridSize > 0
@@ -1872,16 +1922,142 @@ export default function MapCanvas({
         height: Math.max(4, Math.abs(current.y - start.y)),
       }
 
-  const sceneRegionNode = (region: SceneRegion, key: string, label: string, enabled: boolean, draft = false) => {
+  const sceneRegionNode = (
+    region: SceneRegion,
+    key: string,
+    label: string,
+    enabled: boolean,
+    draft = false,
+    movable?: { sceneId: string; triggerId: string },
+  ) => {
     const fill = draft ? 'rgba(251,191,36,0.18)' : enabled ? 'rgba(34,211,238,0.12)' : 'rgba(148,163,184,0.08)'
     const stroke = draft ? '#fbbf24' : enabled ? '#22d3ee' : '#64748b'
+    const canMove = isDM && sceneOverlayEditMode && !!movable && !draft
     const shape = region.kind === 'circle'
-      ? <Circle x={region.x} y={region.y} radius={region.radius} fill={fill} stroke={stroke} strokeWidth={2 * inv} dash={[8 * inv, 5 * inv]} listening={false} />
-      : <Rect x={region.x} y={region.y} width={region.width} height={region.height} fill={fill} stroke={stroke} strokeWidth={2 * inv} dash={[8 * inv, 5 * inv]} listening={false} />
-    const labelX = region.kind === 'circle' ? region.x - region.radius : region.x
-    const labelY = region.kind === 'circle' ? region.y - region.radius : region.y
-    return <Group key={key} listening={false}>{shape}<Text x={labelX} y={labelY - 18 * inv} text={label} fill={draft ? '#fde68a' : '#a5f3fc'} fontSize={12 * inv} listening={false} /></Group>
+      ? <Circle radius={region.radius} fill={fill} stroke={stroke} strokeWidth={2 * inv} dash={[8 * inv, 5 * inv]} listening={canMove} />
+      : <Rect width={region.width} height={region.height} fill={fill} stroke={stroke} strokeWidth={2 * inv} dash={[8 * inv, 5 * inv]} listening={canMove} />
+    const anchorX = region.x
+    const anchorY = region.y
+    const labelX = region.kind === 'circle' ? -region.radius : 0
+    const labelY = region.kind === 'circle' ? -region.radius : 0
+    return (
+      <Group
+        key={key}
+        x={anchorX}
+        y={anchorY}
+        draggable={canMove}
+        listening={canMove}
+        onMouseDown={(event) => { if (canMove) event.cancelBubble = true }}
+        onDragStart={(event) => { event.cancelBubble = true }}
+        onDragEnd={(event) => {
+          if (!movable) return
+          event.cancelBubble = true
+          const moved = sceneRegionMovedWithinMap(
+            region,
+            { x: event.target.x(), y: event.target.y() },
+            map,
+          )
+          event.target.position({ x: moved.x, y: moved.y })
+          onSceneTriggerZoneMove?.(movable.sceneId, movable.triggerId, moved)
+        }}
+        onMouseEnter={(event) => {
+          if (canMove) event.target.getStage()?.container().style.setProperty('cursor', 'move')
+        }}
+        onMouseLeave={(event) => {
+          if (canMove) event.target.getStage()?.container().style.removeProperty('cursor')
+        }}
+      >
+        {shape}
+        <Text x={labelX} y={labelY - 18 * inv} text={label} fill={draft ? '#fde68a' : '#a5f3fc'} fontSize={12 * inv} listening={false} />
+      </Group>
+    )
   }
+
+  const sceneInteractionPointNodes = sceneInteractionPoints.map((point) => {
+    const glyph: Record<SceneInteractionPointIcon, string> = {
+      bookshelf: '📚',
+      chest: '🎁',
+      search: '🔎',
+      altar: '✦',
+      switch: '⚙',
+      custom: '◆',
+    }
+    // Interaction points are DM-authored map objects, so the DM must be able
+    // to reposition them directly without first opening a separate editor.
+    // Players keep the click-only presentation below.
+    const canMove = isDM
+    return (
+      <Group
+        key={`scene-interaction:${point.id}`}
+        x={point.x}
+        y={point.y}
+        draggable={canMove}
+        listening={canMove || !!onSceneInteractionPointClick}
+        onMouseDown={(event) => {
+          event.cancelBubble = true
+        }}
+        onDragStart={(event) => { event.cancelBubble = true }}
+        onDragEnd={(event) => {
+          event.cancelBubble = true
+          const next = {
+            x: Math.min(map.width, Math.max(0, event.target.x())),
+            y: Math.min(map.height, Math.max(0, event.target.y())),
+          }
+          event.target.position(next)
+          onSceneInteractionPointMove?.(point.sceneId, point.id, next)
+        }}
+        onMouseEnter={(event) => {
+          if (canMove) event.target.getStage()?.container().style.setProperty('cursor', 'move')
+        }}
+        onMouseLeave={(event) => {
+          if (canMove) event.target.getStage()?.container().style.removeProperty('cursor')
+        }}
+        onTap={(event) => {
+          event.cancelBubble = true
+          onSceneInteractionPointClick?.(point.id)
+        }}
+        onClick={(event) => {
+          event.cancelBubble = true
+          onSceneInteractionPointClick?.(point.id)
+        }}
+      >
+        <Circle
+          radius={20}
+          fill={point.enabled ? 'rgba(15, 23, 42, 0.94)' : 'rgba(30, 41, 59, 0.75)'}
+          stroke={point.enabled ? '#fbbf24' : '#64748b'}
+          strokeWidth={2}
+          hitStrokeWidth={14}
+          shadowColor="#000"
+          shadowBlur={8}
+          shadowOpacity={0.7}
+        />
+        <Text
+          x={-16}
+          y={-13}
+          width={32}
+          height={26}
+          text={glyph[point.icon]}
+          align="center"
+          verticalAlign="middle"
+          fontSize={19}
+          listening={false}
+        />
+        <Text
+          x={-60}
+          y={24}
+          width={120}
+          text={point.name}
+          align="center"
+          fontSize={11}
+          fontStyle="bold"
+          fill="#fef3c7"
+          stroke="#020617"
+          strokeWidth={3}
+          listening={false}
+        />
+      </Group>
+    )
+  })
 
   const stagePanAllowedByTools = mapCanvasStageCanPan({
     tabletopTool,
@@ -1898,6 +2074,7 @@ export default function MapCanvas({
     sceneEditMode: sceneEditMode || scenePointPlacementMode,
   })
   const stageCanPan = !geometryDragActive && !geometryViewportPanActive && stagePanAllowedByTools
+  const aoeHighlightVisible = aoeSelectMode || aoeHighlight != null
   const savingThrowToken = savingThrowTokenId
     ? map.tokens.find((candidate) => candidate.id === savingThrowTokenId)
     : undefined
@@ -2028,6 +2205,11 @@ export default function MapCanvas({
           // during the gesture, then commit React state once on release.
           stage.position({ x: nextX, y: nextY })
           stage.batchDraw()
+          syncMapCanvasViewportDataset(containerRef.current, {
+            x: nextX,
+            y: nextY,
+            scale: stage.scaleX(),
+          })
           if (savingThrowToken) syncSavingThrowMarkerPosition()
         } else {
           setView((current) => ({ ...current, x: nextX, y: nextY }))
@@ -2099,7 +2281,10 @@ export default function MapCanvas({
           `${mark.condition}:${mark.backgroundColor}:${mark.borderColor}`)
         .join(',')}
       data-saving-throw-token-id={savingThrowTokenId ?? ''}
+      data-scene-trigger-count={sceneTriggerZones.length}
       data-scene-interaction-count={sceneInteractionPoints.length}
+      data-scene-teleport-destination-count={sceneTeleportDestinations.length}
+      data-scene-overlay-editing={sceneOverlayEditMode ? 'true' : 'false'}
       data-viewport-x={view.x}
       data-viewport-y={view.y}
       data-viewport-scale={view.scale}
@@ -2150,11 +2335,16 @@ export default function MapCanvas({
         onWheel={handleWheel}
         onDragMove={(e) => {
           // Konva moves the Stage imperatively while panning; React's `view`
-          // is committed only on drag end. Keep the DOM saving-throw marker
-          // attached to the same world point without re-rendering the canvas
-          // for every pointer event.
-          if (e.target !== e.target.getStage() || !savingThrowToken) return
-          syncSavingThrowMarkerPosition()
+          // is committed only on drag end. Publish that live transform so DOM
+          // overlays remain on the same frame without re-rendering the canvas.
+          const stage = e.target.getStage()
+          if (e.target !== stage || !stage) return
+          syncMapCanvasViewportDataset(containerRef.current, {
+            x: stage.x(),
+            y: stage.y(),
+            scale: stage.scaleX(),
+          })
+          if (savingThrowToken) syncSavingThrowMarkerPosition()
         }}
         onDragEnd={(e) => {
           // Only update viewport when dragging the stage itself.
@@ -2420,84 +2610,90 @@ export default function MapCanvas({
           {gridLines}
           {coordinateLabels}
           <TerrainElevationContours geometry={geometry} inv={inv} />
-          <Dnd5eItemAreaOverlays map={map} />
-          <Dnd5ePluginAreaOverlays
-            map={map}
-            isDM={isDM}
-            onVisibilityToggle={onDnd5ePluginAreaVisibilityToggle}
-            onAreaClick={onDnd5ePluginAreaClick}
-            dragPreviewPositions={dragPreviewPositions}
-            registerEffectTokenAreaOverlay={registerEffectTokenAreaOverlay}
-            onPersistentVisualReady={markPersistentVisualReady}
-          />
           <DifficultTerrainCellOverlays map={map} cells={difficultTerrainCells} />
           {isDM && sceneTriggerZones.map((zone) =>
-            sceneRegionNode(zone.region, `scene-zone:${zone.sceneId}:${zone.triggerId}`, zone.name, zone.enabled))}
+            sceneRegionNode(
+              zone.region,
+              `scene-zone:${zone.sceneId}:${zone.triggerId}`,
+              zone.name,
+              zone.enabled,
+              false,
+              { sceneId: zone.sceneId, triggerId: zone.triggerId },
+            ))}
           {isDM && sceneEditMode && sceneDraft && sceneRegionNode(sceneDraft, 'scene-zone:draft', '绘制触发区', true, true)}
-          {sceneInteractionPoints.map((point) => {
-            const glyph: Record<SceneInteractionPointIcon, string> = {
-              bookshelf: '📚',
-              chest: '🎁',
-              search: '🔎',
-              altar: '✦',
-              switch: '⚙',
-              custom: '◆',
-            }
+          {isDM && sceneTeleportDestinations.map((destination) => {
+            const canMove = sceneOverlayEditMode
             return (
               <Group
-                key={`scene-interaction:${point.id}`}
-                x={point.x}
-                y={point.y}
-                listening={!!onSceneInteractionPointClick}
-                onMouseDown={(event) => {
+                key={`scene-teleport-destination:${destination.sceneId}:${destination.triggerId}:${destination.actionId}`}
+                x={destination.x}
+                y={destination.y}
+                draggable={canMove}
+                listening={canMove}
+                onMouseDown={(event) => { event.cancelBubble = true }}
+                onDragStart={(event) => { event.cancelBubble = true }}
+                onDragEnd={(event) => {
                   event.cancelBubble = true
+                  const point = {
+                    x: Math.min(map.width, Math.max(0, event.target.x())),
+                    y: Math.min(map.height, Math.max(0, event.target.y())),
+                  }
+                  event.target.position(point)
+                  onSceneTeleportDestinationMove?.(
+                    destination.sceneId,
+                    destination.triggerId,
+                    destination.actionId,
+                    point,
+                  )
                 }}
-                onTap={(event) => {
-                  event.cancelBubble = true
-                  onSceneInteractionPointClick?.(point.id)
+                onMouseEnter={(event) => {
+                  if (canMove) event.target.getStage()?.container().style.setProperty('cursor', 'move')
                 }}
-                onClick={(event) => {
-                  event.cancelBubble = true
-                  onSceneInteractionPointClick?.(point.id)
+                onMouseLeave={(event) => {
+                  if (canMove) event.target.getStage()?.container().style.removeProperty('cursor')
                 }}
               >
                 <Circle
-                  radius={20 * inv}
-                  fill={point.enabled ? 'rgba(15, 23, 42, 0.94)' : 'rgba(30, 41, 59, 0.75)'}
-                  stroke={point.enabled ? '#fbbf24' : '#64748b'}
-                  strokeWidth={2 * inv}
-                  shadowColor="#000"
-                  shadowBlur={8 * inv}
-                  shadowOpacity={0.7}
+                  radius={18}
+                  fill={destination.enabled ? 'rgba(76, 29, 149, 0.94)' : 'rgba(30, 41, 59, 0.78)'}
+                  stroke={destination.enabled ? '#c4b5fd' : '#64748b'}
+                  strokeWidth={2}
+                  shadowColor={destination.enabled ? '#8b5cf6' : '#000'}
+                  shadowBlur={10}
+                  shadowOpacity={0.75}
+                  listening={canMove}
                 />
                 <Text
-                  x={-16 * inv}
-                  y={-13 * inv}
-                  width={32 * inv}
-                  height={26 * inv}
-                  text={glyph[point.icon]}
+                  x={-15}
+                  y={-11}
+                  width={30}
+                  height={22}
+                  text="⇥"
                   align="center"
                   verticalAlign="middle"
-                  fontSize={19 * inv}
+                  fontSize={20}
+                  fontStyle="bold"
+                  fill="#ede9fe"
                   listening={false}
                 />
                 <Text
-                  x={-60 * inv}
-                  y={24 * inv}
-                  width={120 * inv}
-                  text={point.name}
+                  x={-72}
+                  y={23}
+                  width={144}
+                  text={`出口 · ${destination.name}`}
                   align="center"
-                  fontSize={11 * inv}
+                  fontSize={11}
                   fontStyle="bold"
-                  fill="#fef3c7"
+                  fill="#ddd6fe"
                   stroke="#020617"
-                  strokeWidth={3 * inv}
+                  strokeWidth={3}
                   listening={false}
                 />
               </Group>
             )
           })}
-          {aoeSelectMode && aoeHighlight?.areaCircle && (
+          {!isDM && sceneInteractionPointNodes}
+          {aoeHighlightVisible && aoeHighlight?.areaCircle && (
             <Circle
               x={aoeHighlight.areaCircle.centerX}
               y={aoeHighlight.areaCircle.centerY}
@@ -2509,7 +2705,7 @@ export default function MapCanvas({
               listening={false}
             />
           )}
-          {aoeSelectMode && aoeHighlight?.areaPolygon && (
+          {aoeHighlightVisible && aoeHighlight?.areaPolygon && (
             <Line
               points={aoeHighlight.areaPolygon}
               closed
@@ -2520,7 +2716,7 @@ export default function MapCanvas({
               listening={false}
             />
           )}
-          {aoeSelectMode && aoeHighlight?.rangeCells && aoeHighlight.rangeCells.length > 0 && (
+          {aoeHighlightVisible && aoeHighlight?.rangeCells && aoeHighlight.rangeCells.length > 0 && (
             <AoeCellHighlights
               map={map}
               cells={aoeHighlight.rangeCells}
@@ -2528,7 +2724,7 @@ export default function MapCanvas({
               variant="range"
             />
           )}
-          {aoeSelectMode && aoeHighlight?.committedAreaCircles?.map((circle, index) => (
+          {aoeHighlightVisible && aoeHighlight?.committedAreaCircles?.map((circle, index) => (
             <Circle
               key={`committed-area-${index}-${circle.centerX}-${circle.centerY}`}
               x={circle.centerX}
@@ -2541,7 +2737,7 @@ export default function MapCanvas({
               listening={false}
             />
           ))}
-          {aoeSelectMode && aoeHighlight?.hazardCells && aoeHighlight.hazardCells.length > 0 && (
+          {aoeHighlightVisible && aoeHighlight?.hazardCells && aoeHighlight.hazardCells.length > 0 && (
             <AoeCellHighlights
               map={map}
               cells={aoeHighlight.hazardCells}
@@ -2549,7 +2745,7 @@ export default function MapCanvas({
               variant="hazard"
             />
           )}
-          {aoeSelectMode && aoeHighlight && aoeHighlight.cells.length > 0 && (
+          {aoeHighlightVisible && aoeHighlight && aoeHighlight.cells.length > 0 && (
             <AoeCellHighlights
               map={map}
               cells={aoeHighlight.cells}
@@ -2557,7 +2753,7 @@ export default function MapCanvas({
               variant="attack"
             />
           )}
-          {!aoeSelectMode && rangedRangeCells.length > 0 && (
+          {!aoeHighlightVisible && rangedRangeCells.length > 0 && (
             <AoeCellHighlights
               map={map}
               cells={rangedRangeCells}
@@ -2595,6 +2791,16 @@ export default function MapCanvas({
           )}
         </Layer>
         <Layer name="token-body-layer">
+          <Dnd5eItemAreaOverlays map={map} />
+          <Dnd5ePluginAreaOverlays
+            map={map}
+            isDM={isDM}
+            onVisibilityToggle={onDnd5ePluginAreaVisibilityToggle}
+            onAreaClick={onDnd5ePluginAreaClick}
+            dragPreviewPositions={dragPreviewPositions}
+            registerEffectTokenAreaOverlay={registerEffectTokenAreaOverlay}
+            onPersistentVisualReady={markPersistentVisualReady}
+          />
           {map.tokens.map((t) => {
             const hp = hpByToken?.[t.id]
             const defeated = hp != null ? hp.hp <= 0 : defeatedTokenIds.includes(t.id)
@@ -2824,11 +3030,12 @@ export default function MapCanvas({
                 derivedTokenStatusMarkers={dnd5eTokenStatusMarkersByToken[t.id]}
                 standardConditionMarks={standardConditionTokenMarks.filter((mark) => mark.tokenId === t.id)}
                 shillelaghActive={shillelaghTokenIds.includes(t.id)}
+                shillelaghEffectId={shillelaghEffectIdsByToken[t.id]}
                 spellStatusMarks={spellStatusTokenMarks.filter((mark) => mark.tokenId === t.id)}
                 concentrationMark={concentrationTokenMarks.find((mark) => mark.tokenId === t.id)}
                 airborne={mapGeometryTokenElevation(geometry, t) >
                   mapGeometryTerrainElevationAtPoint(geometry, t)}
-                onStandardConditionClick={(condition) => onDnd5eConditionClick?.(t.id, condition)}
+                onStatusTokenClick={onDnd5eStatusTokenClick}
                 onStatusTooltipChange={handleTokenStatusTooltipChange}
                 hoverLabel={hoveredTokenId === t.id ? tokenHoverLabels[t.id] : undefined}
                 showName={hoveredTokenId === t.id}
@@ -2899,6 +3106,7 @@ export default function MapCanvas({
             />
           )}
           </Group>
+          {isDM && sceneInteractionPointNodes}
         </Layer>
         <Layer name="map-world-overlay-layer">
           <LightingLayer map={visibilityMap} geometry={geometry} worldMinute={worldMinute} isDM={isDM} visionSourceTokenIds={visionSourceTokenIds} />

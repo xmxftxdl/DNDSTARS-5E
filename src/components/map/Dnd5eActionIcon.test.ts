@@ -17,6 +17,16 @@ import Dnd5eActionIcon from './Dnd5eActionIcon'
 import { dnd5eActionIconBackdropImage } from './dnd5eActionIconBackdropImage'
 
 describe('Dnd5eActionIcon', () => {
+  it('does not render meaningless generated decorative runes', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: { ...dnd5eSystemActionIcon('decorative-runes-removed', 'force'), runeIndex: 2 },
+    }))
+
+    expect(html).not.toContain('M12 58h14l-7 10z')
+    expect(html).not.toContain('M58 56h10v10H58z')
+    expect(html).not.toContain('M15 15h11M20 10v11')
+  })
+
   it('渲染原创 SVG、环级和资源角标', () => {
     const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
       spec: dnd5eSpellActionIcon({ id: 'fireball', name: '火球术', level: 3, damageType: 'fire' }),
@@ -259,7 +269,7 @@ describe('Dnd5eActionIcon', () => {
     expect(svg).toContain('stop-color="#26072C"')
   })
 
-  it('renders magic items with a subtle gradient and a simple rarity-colored border', () => {
+  it('renders magic items with a rarity palette background and two-layer colored border', () => {
     const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
       spec: dnd5eItemActionIcon({
         id: 'srd-5.1:magic-item:amulet-of-health',
@@ -271,10 +281,56 @@ describe('Dnd5eActionIcon', () => {
       }),
     }))
     expect(html).toContain('data-rarity-border="rare"')
-    expect(html).toContain('data-rarity-background="subtle-gradient"')
-    expect(html).toContain('stop-opacity=".3"')
+    expect(html).toContain('data-rarity-background="palette-gradient"')
+    expect(html).toContain('data-rarity-background-color="#2563A8"')
+    expect(html).toContain('stop-opacity=".58"')
+    expect(html).toContain('stroke="#2563A8"')
     expect(html).toContain('stroke="#60A5FA"')
     expect(html).not.toContain('data-rarity-detail=')
-    expect(html).toContain('data-icon-detail="painted-amulet-of-health"')
+    expect(html).toContain('data-icon-detail="colored-magic-wondrous"')
+    expect(html).toContain('data-inventory-glyph="magic-wondrous"')
+    expect(html).not.toContain('href="/assets/icons/amulet-of-health-item-action.png"')
+  })
+
+  it('renders a multicolour semantic SVG when an item has no bespoke artwork', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eItemActionIcon({
+        id: 'custom:climbing-rope',
+        name: '探险家绳索',
+        englishName: 'Explorer Rope',
+        category: 'adventuring-gear',
+        icon: 'rope',
+      }),
+    }))
+
+    expect(html).toContain('data-icon-detail="colored-rope"')
+    expect(html).toContain('data-inventory-glyph="rope"')
+    expect(html).toContain('data-icon-tone="multicolor"')
+    expect(html).not.toContain('<image')
+  })
+
+  it.each([
+    ['custom:piton', '岩钉', 'generic', 'nails'],
+    ['custom:pickaxe', '矿镐', 'generic', 'pickaxe'],
+    ['custom:handaxe', '手斧', 'weapon', 'axe'],
+    ['custom:longsword', '长剑', 'weapon', 'sword'],
+    ['custom:warhammer', '战锤', 'weapon', 'hammer'],
+    ['custom:longbow', '长弓', 'weapon', 'bow'],
+    ['custom:crossbow', '轻弩', 'weapon', 'crossbow'],
+    ['custom:trident', '三叉戟', 'weapon', 'trident'],
+    ['custom:sling-bullets', '投石索弹丸', 'generic', 'sling-bullets'],
+    ['custom:string', '细绳（10 尺）', 'generic', 'string'],
+    ['custom:perfume', '香水（小瓶）', 'generic', 'perfume'],
+    ['custom:small-knife', '小刀', 'generic', 'small-knife'],
+    ['custom:dulcimer', '扬琴', 'generic', 'dulcimer'],
+    ['custom:oil-flask', '油（瓶）', 'generic', 'oil-flask'],
+    ['custom:common-clothes', '普通服装', 'generic', 'clothing'],
+  ] as const)('automatically selects the %s semantic SVG from multilingual item names', (id, name, icon, expected) => {
+    const html = renderToStaticMarkup(createElement(Dnd5eActionIcon, {
+      spec: dnd5eItemActionIcon({ id, name, category: 'adventuring-gear', icon }),
+    }))
+
+    expect(html).toContain(`data-icon-detail="colored-${expected}"`)
+    expect(html).toContain(`data-inventory-glyph="${expected}"`)
   })
 })

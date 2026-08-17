@@ -1,7 +1,10 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   DND_FEET_PER_CELL,
+  cellDistance,
+  cellToPixel,
   pixelToCell,
+  tokenOccupiedCellsAt,
   tokenFootprintDistanceCells,
   type GridCell,
 } from '../../lib/gridCombat'
@@ -46,6 +49,7 @@ import {
 } from './mapBridge'
 import { planDnd5eSummonedCreature } from './summonedCreatures'
 import type { Dnd5ePersistentAreaVerticalSnapshot } from './persistentAreaTypes'
+import type { Dnd5eActivityAreaPlacementV1 } from './activities/dnd5eActivityContracts'
 import {
   dnd5eInstantAoeAffectsTokenVertically,
   dnd5eTokenToPointDistanceFeet,
@@ -84,6 +88,13 @@ export interface PreparedDnd5ePluginFeatureAction {
   feature: RegisteredDnd5ePluginFeature
   distanceFeet: number
   headlessAction: Dnd5ePluginAction
+  /** Map entity that granted this otherwise unowned Activity control. */
+  persistentAreaGrant?: {
+    areaId: string
+    anchorCell: GridCell
+    activityId: string
+    waiveActionEconomy: boolean
+  }
 }
 
 export type Dnd5ePluginApplicationRebaseResult =
@@ -189,6 +200,43 @@ function economyRejectReason(
   return undefined
 }
 
+function persistentAreaGrantForAction(input: {
+  map: BattleMap
+  actor: Character
+  actorToken: Token
+  feature: RegisteredDnd5ePluginFeature
+  payload: NonNullable<SharedPlayerActionState['dnd5ePluginAction']>
+}) {
+  const raw = input.payload.payload
+  const areaId = raw && typeof raw === 'object' && !Array.isArray(raw) &&
+    typeof raw.persistentAreaId === 'string'
+    ? raw.persistentAreaId
+    : undefined
+  if (!areaId || !input.feature.action) return undefined
+  const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === areaId)
+  if (
+    !area || area.sourceCharacterId !== input.actor.id || area.sourceTokenId !== input.actorToken.id ||
+    area.pluginId !== input.feature.ownerPluginId ||
+    !area.grantedActivities?.some((grant) => grant.activityId === input.feature.action!.id)
+  ) return undefined
+  return {
+    area,
+    anchorCell: area.anchorCell ?? area.cells[0],
+  }
+}
+
+function persistentAreaDistanceFeet(input: {
+  map: BattleMap
+  areaCells: readonly GridCell[]
+  target: Token
+}): number {
+  const targetCells = tokenOccupiedCellsAt(input.target, input.map, input.target)
+  const cells = input.areaCells.length > 0 ? input.areaCells : [{ col: 0, row: 0 }]
+  return Math.min(...cells.flatMap((areaCell) => targetCells.map((targetCell) =>
+    cellDistance(areaCell, targetCell),
+  ))) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+}
+
 export function prepareDnd5ePluginFeatureAction(input: {
   action: SharedPlayerActionState
   map: BattleMap
@@ -230,10 +278,24 @@ export function prepareDnd5ePluginFeatureAction(input: {
     token.id === action.actorTokenId && token.characterId === action.characterId,
   )
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  if (!dnd5eCharacterHasPluginFeature(actor, feature.id)) {
+  const persistentAreaGrant = persistentAreaGrantForAction({
+    map: input.map,
+    actor,
+    actorToken,
+    feature,
+    payload,
+  })
+  if (!persistentAreaGrant && !dnd5eCharacterHasPluginFeature(actor, feature.id)) {
     return { ok: false, reason: feature.grantedBySubclass ? 'feature-unavailable' : 'feature-not-selected' }
   }
-  const economyFailure = economyRejectReason(feature.action.economy, input.turnEconomy)
+  const grantedActivity = persistentAreaGrant?.area.grantedActivities?.find((grant) =>
+    grant.activityId === feature.action!.id,
+  )
+  const waiveActionEconomy = grantedActivity?.activateOnCreate === true &&
+    !persistentAreaGrant?.area.grantedActivityUseReceipts?.includes(feature.action.id)
+  const economyFailure = waiveActionEconomy
+    ? undefined
+    : economyRejectReason(feature.action.economy, input.turnEconomy)
   if (economyFailure) return { ok: false, reason: economyFailure }
 
   let targetToken: Token | undefined
@@ -241,7 +303,9 @@ export function prepareDnd5ePluginFeatureAction(input: {
   let targetCell: GridCell | undefined
   let targetCells: GridCell[] = []
   let areaTargetElevationFeet: number | undefined
+  let activityAreaPlacement: Dnd5eActivityAreaPlacementV1 | undefined
   let distanceFeet = 0
+  const distanceFeetByTargetId: Record<string, number> = {}
   if (feature.action.targeting.kind === 'self') {
     if (action.targetTokenId && action.targetTokenId !== actorToken.id) {
       return { ok: false, reason: 'invalid-target' }
@@ -261,19 +325,62 @@ export function prepareDnd5ePluginFeatureAction(input: {
     if (feature.action.targeting.relation === 'enemy' && !opposed) {
       return { ok: false, reason: 'invalid-target' }
     }
-    distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map) *
-      Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    distanceFeet = persistentAreaGrant
+      ? persistentAreaDistanceFeet({
+          map: input.map,
+          areaCells: persistentAreaGrant.area.cells,
+          target: targetToken,
+        })
+      : tokenFootprintDistanceCells(actorToken, targetToken, input.map) *
+        Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
     if (
       feature.action.targeting.rangeFeet != null &&
       distanceFeet > feature.action.targeting.rangeFeet
     ) {
       return { ok: false, reason: 'target-out-of-range' }
     }
+    distanceFeetByTargetId[targetToken.id] = distanceFeet
     targetTokens = [targetToken]
+  } else if (feature.action.targeting.kind === 'multiple-creatures') {
+    const targeting = feature.action.targeting
+    const uniqueIds = [...new Set(action.targetTokenIds ?? [])]
+    if (uniqueIds.length < 1 || uniqueIds.length > targeting.maximumTargets) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    targetTokens = uniqueIds.flatMap((id) => {
+      const token = input.map.tokens.find((candidate) => candidate.id === id)
+      return token ? [token] : []
+    })
+    if (targetTokens.length !== uniqueIds.length || targetTokens.some((token) => token.type === 'obstacle')) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    for (const token of targetTokens) {
+      if (token.id === actorToken.id && targeting.includeSelf !== true) {
+        return { ok: false, reason: 'invalid-target' }
+      }
+      const opposed = areOpposedCombatTokens(actorToken, token)
+      if ((targeting.relation === 'ally' && opposed) || (targeting.relation === 'enemy' && !opposed)) {
+        return { ok: false, reason: 'invalid-target' }
+      }
+      const targetDistanceFeet = persistentAreaGrant
+        ? persistentAreaDistanceFeet({
+            map: input.map,
+            areaCells: persistentAreaGrant.area.cells,
+            target: token,
+          })
+        : tokenFootprintDistanceCells(actorToken, token, input.map) *
+          Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      if (targeting.rangeFeet != null && targetDistanceFeet > targeting.rangeFeet) {
+        return { ok: false, reason: 'target-out-of-range' }
+      }
+      distanceFeetByTargetId[token.id] = targetDistanceFeet
+      distanceFeet = Math.max(distanceFeet, targetDistanceFeet)
+    }
+    targetToken = targetTokens[0]
   } else {
     const targeting = feature.action.targeting
     const geometry = mapGeometryRuntimeForMap(input.map.id)
-    const casterCell = pixelToCell(actorToken.x, actorToken.y, input.map)
+    const casterCell = persistentAreaGrant?.anchorCell ?? pixelToCell(actorToken.x, actorToken.y, input.map)
     targetCell = action.targetCell ?? (targeting.template.shape === 'circle' && targeting.template.origin === 'self'
       ? casterCell
       : undefined)
@@ -294,7 +401,12 @@ export function prepareDnd5ePluginFeatureAction(input: {
       x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
       y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
     }
-    const effectOrigin = targeting.template.origin === 'point' ? effectAim : actorToken
+    const grantedOrigin = persistentAreaGrant
+      ? cellToPixel(persistentAreaGrant.anchorCell, input.map)
+      : undefined
+    const effectOrigin = targeting.template.origin === 'point'
+      ? effectAim
+      : grantedOrigin ?? actorToken
     if (
       action.targetElevationFeet != null &&
       (!Number.isFinite(action.targetElevationFeet) ||
@@ -306,6 +418,26 @@ export function prepareDnd5ePluginFeatureAction(input: {
     areaTargetElevationFeet = targeting.template.origin === 'point'
       ? effectAimElevationFeet
       : mapGeometryTokenElevation(geometry, actorToken)
+    const anchor = cellToPixel(targetCell, input.map)
+    const angleDegrees = targeting.template.shape === 'line' || targeting.template.shape === 'cone'
+      ? Math.atan2(targetCell.row - casterCell.row, targetCell.col - casterCell.col) * 180 / Math.PI
+      : targeting.template.shape === 'rect' && targeting.template.rotatable
+        ? (targetOrientation ?? 0) * 90
+        : undefined
+    activityAreaPlacement = {
+      x: anchor.x,
+      y: anchor.y,
+      elevationFeet: areaTargetElevationFeet,
+      angleDegrees,
+      radiusFeet: targeting.template.shape === 'circle' ? targeting.template.radiusFeet : undefined,
+      lengthFeet: targeting.template.shape === 'line' || targeting.template.shape === 'cone'
+        ? targeting.template.lengthFeet
+        : undefined,
+      widthFeet: targeting.template.shape === 'rect' || targeting.template.shape === 'line'
+        ? targeting.template.widthFeet
+        : undefined,
+      heightFeet: targeting.template.shape === 'rect' ? targeting.template.heightFeet : undefined,
+    }
     if (targeting.template.origin === 'point') {
       const areaPointToken: Token = {
         ...actorToken,
@@ -316,19 +448,24 @@ export function prepareDnd5ePluginFeatureAction(input: {
         ...effectOrigin,
         elevationFeet: areaTargetElevationFeet,
       }
-      const horizontalDistanceFeet = tokenFootprintDistanceCells(
-        actorToken,
-        areaPointToken,
-        input.map,
-      ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      const horizontalDistanceFeet = persistentAreaGrant
+        ? cellDistance(casterCell, targetCell) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+        : tokenFootprintDistanceCells(
+            actorToken,
+            areaPointToken,
+            input.map,
+          ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+      distanceFeet = horizontalDistanceFeet
       if (
         targeting.template.placeRangeFeet != null &&
-        dnd5eTokenToPointDistanceFeet({
-          geometry,
-          token: actorToken,
-          pointElevationFeet: areaTargetElevationFeet,
-          horizontalDistanceFeet,
-        }) > targeting.template.placeRangeFeet + 1e-4
+        (persistentAreaGrant
+          ? horizontalDistanceFeet
+          : dnd5eTokenToPointDistanceFeet({
+              geometry,
+              token: actorToken,
+              pointElevationFeet: areaTargetElevationFeet,
+              horizontalDistanceFeet,
+            })) > targeting.template.placeRangeFeet + 1e-4
       ) return { ok: false, reason: 'target-out-of-range' }
     }
     targetTokens = tokensInCells(input.map, input.map.tokens, cells)
@@ -425,14 +562,34 @@ export function prepareDnd5ePluginFeatureAction(input: {
         actionId: feature.action.id,
         transactionId: action.id,
         featureId: feature.id,
+        modifierFeatureIds: payload.modifierFeatureIds
+          ? [...new Set(payload.modifierFeatureIds)]
+          : undefined,
         actorId: actorToken.id,
         targetId: targetTokens[0]?.id,
         targetIds: targetTokens.map((token) => token.id),
         targetCell,
         targetOrientation: action.targetOrientation,
         distanceFeet,
+        activityAreaPlacement,
+        activityAreaPlacementDistanceFeet: distanceFeet,
         payload: payload.payload,
+        hostEntitlement: persistentAreaGrant
+          ? { kind: 'persistent-area', areaId: persistentAreaGrant.area.id }
+          : undefined,
+        hostDistanceFeetByTargetId: persistentAreaGrant
+          ? distanceFeetByTargetId
+          : undefined,
+        hostWaiveActionEconomy: waiveActionEconomy || undefined,
       },
+      persistentAreaGrant: persistentAreaGrant?.anchorCell
+        ? {
+            areaId: persistentAreaGrant.area.id,
+            anchorCell: { ...persistentAreaGrant.anchorCell },
+            activityId: feature.action.id,
+            waiveActionEconomy,
+          }
+        : undefined,
     },
   }
 }
@@ -451,6 +608,7 @@ const PLUGIN_FAILURE_REASONS = new Set<Dnd5eActionFailure>([
   'invalid-plugin-action',
   'invalid-monster-action',
   'insufficient-movement',
+  'movement-boundary-save-failed',
   'invalid-dice',
 ])
 

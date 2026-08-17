@@ -1,34 +1,71 @@
 import type { EquipmentItem, EquipmentSlot } from './equipment'
+import type { AbilityKey } from '../lib/dnd'
 import type { Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 
-export type Dnd5eInventoryIconId =
-  | 'weapon'
-  | 'armor'
-  | 'shield'
-  | 'backpack'
-  | 'bedroll'
-  | 'rope'
-  | 'torch'
-  | 'tinderbox'
-  | 'waterskin'
-  | 'rations'
-  | 'healers-kit'
-  | 'ball-bearings'
-  | 'caltrops'
-  | 'hunting-trap'
-  | 'acid'
-  | 'alchemists-fire'
-  | 'holy-water'
-  | 'antitoxin'
-  | 'poison'
-  | 'healing-potion'
-  | 'spellcasting-focus'
-  | 'magic-ring'
-  | 'magic-wand'
-  | 'magic-staff'
-  | 'magic-scroll'
-  | 'magic-wondrous'
-  | 'generic'
+export const DND5E_INVENTORY_ICON_IDS = [
+  'weapon',
+  'sword',
+  'dagger',
+  'club',
+  'staff',
+  'hammer',
+  'sickle',
+  'spear',
+  'polearm',
+  'trident',
+  'flail',
+  'bow',
+  'crossbow',
+  'sling',
+  'sling-bullets',
+  'dart',
+  'whip',
+  'blowgun',
+  'net',
+  'ammunition',
+  'armor',
+  'light-armor',
+  'medium-armor',
+  'heavy-armor',
+  'shield',
+  'backpack',
+  'bedroll',
+  'clothing',
+  'rope',
+  'string',
+  'nails',
+  'pickaxe',
+  'axe',
+  'torch',
+  'tinderbox',
+  'oil-flask',
+  'waterskin',
+  'rations',
+  'healers-kit',
+  'ball-bearings',
+  'caltrops',
+  'hunting-trap',
+  'acid',
+  'alchemists-fire',
+  'holy-water',
+  'antitoxin',
+  'poison',
+  'healing-potion',
+  'perfume',
+  'small-knife',
+  'dulcimer',
+  'spellcasting-focus',
+  'magic-ring',
+  'magic-potion',
+  'magic-wand',
+  'magic-staff',
+  'magic-rod',
+  'magic-scroll',
+  'magic-wondrous',
+  'generic',
+] as const
+
+export type Dnd5eInventoryIconId = typeof DND5E_INVENTORY_ICON_IDS[number]
 
 export type Dnd5eInventoryCategory = 'equipment' | 'magic-item' | 'adventuring-gear' | 'consumable' | 'tool' | 'container'
 
@@ -204,6 +241,19 @@ export interface Dnd5eInventoryHeadlessEffectSnapshot {
   resources: Record<string, Dnd5eInventoryResourceState>
 }
 
+/** Host-authored inventory projection for the three SRD reaction spells. */
+export interface Dnd5eInventoryReactionSpellSnapshot {
+  instanceId: string
+  templateId: string
+  itemName: string
+  spellId: 'shield' | 'counterspell' | 'hellish-rebuke'
+  castAtLevel: number
+  spellSaveDc?: number
+  spellAttackBonus?: number
+  spellcastingAbility: AbilityKey
+  quantity: number
+}
+
 export interface Dnd5eItemCost {
   amount: number
   currency: Dnd5eCurrency
@@ -241,6 +291,8 @@ export type Dnd5eInventoryUseEffect =
       useCharacterSpellcasting?: boolean
       /** Magic items normally waive components unless their text says otherwise. */
       requiresComponents?: boolean
+      /** Optional class spell-list gate used by concrete spell scrolls. */
+      spellcastingClassIds?: readonly string[]
       /** Optional restriction imposed by the item in addition to the spell's normal targeting. */
       targeting?: 'spell-default' | 'self-only'
     }

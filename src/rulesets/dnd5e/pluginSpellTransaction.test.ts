@@ -9,6 +9,10 @@ import { DND5E_SRD_MONSTERS } from './monsters'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { prepareDnd5ePluginSpellCast, resolvePreparedDnd5ePluginSpellCast } from './pluginSpellTransaction'
 import { createDnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
+import { automationCapabilityFromLegacyStatus } from '../../domain/automation/automationCapability'
+import { compileDnd5eActivityHeadlessAction } from './activities/dnd5eActivityHeadlessCompiler'
+import { registerDnd5eActivityPackage } from './activities/dnd5eActivityRegistry'
+import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 
 function wizard(spellId: string): Character {
   return {
@@ -27,6 +31,194 @@ function token(id: string, type: 'player' | 'enemy', x: number, characterId?: st
 }
 
 describe('plugin spell CombatTransaction', () => {
+  it('settles a mechanics-free workshop spell through one unified Activity transaction', () => {
+    const pluginId = 'com.example.activity-spell'
+    const activity: Dnd5eActivityDefinitionV1 = {
+      schemaVersion: 1,
+      id: 'resonant-wave-activity',
+      name: 'Resonant Wave',
+      activation: { kind: 'action', cost: 1 },
+      invocation: { kind: 'active', confirmation: 'actor-choice' },
+      target: { kind: 'creature', relation: 'enemy', count: 1, rangeFeet: 60 },
+      consumption: [
+        { kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' },
+        { kind: 'spell-slot', minimumLevel: 2, level: 'selected', amount: 1, consumeOn: 'resolve' },
+      ],
+      checks: [{
+        id: 'save', kind: 'saving-throw', rollId: 'save', ability: 'wis',
+        dc: { kind: 'reference', reference: { kind: 'actor-spell-save-dc' } },
+        rollMode: 'host-derived', scope: 'per-target',
+      }],
+      outcomes: [{
+        id: 'failure', when: { kind: 'check', checkId: 'save', result: 'failure' },
+        operations: [{
+          id: 'psychic', kind: 'damage', target: 'target',
+          amount: { kind: 'dice', rollId: 'psychic', count: 2, sides: 6 },
+          damageType: 'psychic', magical: true,
+        }, {
+          id: 'thunder', kind: 'damage', target: 'target',
+          amount: { kind: 'dice', rollId: 'thunder', count: 1, sides: 4 },
+          damageType: 'thunder', magical: true,
+        }],
+      }],
+      scaling: [{
+        basis: 'slot-level', baseLevel: 2,
+        adjustments: [{ operationId: 'psychic', diceCountPerStep: 1 }],
+      }],
+      automation: automationCapabilityFromLegacyStatus('full'),
+      legacySource: { kind: 'spell', id: 'resonant-wave' },
+    }
+    const activityRegistration = registerDnd5eActivityPackage({
+      packageId: pluginId,
+      packageVersion: '1.0.0',
+      activities: [activity],
+    })
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: pluginId, name: 'Activity Spell', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction: true }))
+        spellId = api.registerSpell({
+          id: 'resonant-wave', name: '共鸣波', level: 2, school: 'evocation', ritual: false,
+          castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+          targeting: { relation: 'enemy', includeSelf: false, maximumTargets: 1 },
+          components: { verbal: true, somatic: true, material: false },
+          duration: { type: 'instantaneous', concentration: false }, classes: ['wizard'],
+          description: 'Activity-only spell test.',
+          automation: { mode: 'headless-action', actionId: activity.id },
+        })
+      },
+    })
+    try {
+      const actor = wizard(spellId)
+      actor.classResources = { 'dnd5e-spell-slot-3': { current: 1, max: 2 } }
+      const actorToken = token('wizard-token', 'player', 25, actor.id)
+      const enemy = token('enemy-token', 'enemy', 125)
+      const map: BattleMap = { id: 'map', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actorToken, enemy] }
+      const action: SharedPlayerActionState = {
+        id: 'activity-spell-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy.id,
+        dnd5eSpellCast: { spellId, castingClassId: 'wizard', slotLevel: 3, targetTokenId: enemy.id },
+        round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const initiativeOrder = [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index }))
+      const prepared = prepareDnd5ePluginSpellCast({ action, map, characters: [actor], initiativeOrder })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.activity?.id).toBe(activity.id)
+      const resolved = resolvePreparedDnd5ePluginSpellCast({
+        prepared: prepared.prepared,
+        rolls: { activityRolls: {
+          psychic: { values: [5, 4, 6], modifier: 0, total: 15 },
+          thunder: { values: [3], modifier: 0, total: 3 },
+          [`save:${enemy.id}`]: { values: [1, 2], modifier: 0, total: 3 },
+        } },
+      })
+      expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+      expect(resolved.result.state.combatants[enemy.id].currentHp).toBe(12)
+      expect(resolved.result.state.combatants[actorToken.id].classResources['dnd5e-spell-slot-3']).toMatchObject({ current: 0 })
+      expect(resolved.result.state.combatants[actorToken.id].turn.actionAvailable).toBe(false)
+      expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'spell-cast', spellId }))
+    } finally {
+      dispose()
+      activityRegistration.dispose()
+    }
+  })
+
+  it('keeps an assisted Activity spell atomic until the shared DM boundary is approved', () => {
+    const pluginId = 'com.example.assisted-activity-spell'
+    const activity: Dnd5eActivityDefinitionV1 = {
+      schemaVersion: 1,
+      id: 'assisted-phantasm-activity',
+      name: 'Assisted Phantasm',
+      activation: { kind: 'action', cost: 1 },
+      invocation: { kind: 'active', confirmation: 'actor-choice' },
+      target: { kind: 'creature', relation: 'enemy', count: 1, rangeFeet: 60 },
+      consumption: [
+        { kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' },
+        { kind: 'spell-slot', minimumLevel: 2, level: 'selected', amount: 1, consumeOn: 'resolve' },
+      ],
+      outcomes: [{
+        id: 'safe-subset',
+        when: { kind: 'always' },
+        operations: [{
+          id: 'psychic', kind: 'damage', target: 'target',
+          amount: { kind: 'dice', rollId: 'psychic', count: 2, sides: 6 },
+          damageType: 'psychic', magical: true,
+        }, {
+          id: 'illusion-boundary', kind: 'manual-adjudication',
+          prompt: 'DM confirms the illusion boundary.',
+          reason: 'Scene interpretation is not a white-listed state mutation.',
+          requiresDmApproval: true,
+        }],
+      }],
+      automation: automationCapabilityFromLegacyStatus('partial', ['Illusion interpretation requires DM approval.']),
+      legacySource: { kind: 'spell', id: 'assisted-phantasm' },
+    }
+    const activityRegistration = registerDnd5eActivityPackage({
+      packageId: pluginId,
+      packageVersion: '1.0.0',
+      activities: [activity],
+    })
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: pluginId, name: 'Assisted Activity Spell', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction: true }))
+        spellId = api.registerSpell({
+          id: 'assisted-phantasm', name: '协助幻象', level: 2, school: 'illusion', ritual: false,
+          castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+          targeting: { relation: 'enemy', includeSelf: false, maximumTargets: 1 },
+          components: { verbal: true, somatic: true, material: false },
+          duration: { type: 'instantaneous', concentration: false }, classes: ['wizard'],
+          description: 'Assisted Activity spell test.',
+          automation: { mode: 'headless-action', actionId: activity.id },
+        })
+      },
+    })
+    try {
+      const actor = wizard(spellId)
+      const actorToken = token('wizard-token-assisted', 'player', 25, actor.id)
+      const enemy = token('enemy-token-assisted', 'enemy', 125)
+      const map: BattleMap = { id: 'map-assisted', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actorToken, enemy] }
+      const action: SharedPlayerActionState = {
+        id: 'assisted-activity-spell-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy.id,
+        dnd5eSpellCast: { spellId, castingClassId: 'wizard', slotLevel: 2, targetTokenId: enemy.id },
+        round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const initiativeOrder = [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index }))
+      const prepared = prepareDnd5ePluginSpellCast({ action, map, characters: [actor], initiativeOrder })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      const activityRolls = { psychic: { values: [3, 4], modifier: 0, total: 7 } }
+
+      const pending = resolvePreparedDnd5ePluginSpellCast({
+        prepared: prepared.prepared,
+        rolls: { activityRolls },
+      })
+      expect(pending.result).toMatchObject({ ok: false, reason: 'dm-adjudication-pending' })
+      expect(pending.result.state.combatants[actorToken.id].classResources['dnd5e-spell-slot-2']).toMatchObject({ current: 1 })
+      expect(pending.result.state.combatants[actorToken.id].turn.actionAvailable).toBe(true)
+      expect(pending.result.state.combatants[enemy.id].currentHp).toBe(30)
+
+      const approved = resolvePreparedDnd5ePluginSpellCast({
+        prepared: prepared.prepared,
+        rolls: { activityRolls, activityInterruptChoiceId: 'dm-apply' },
+      })
+      expect(
+        approved.result.ok,
+        approved.result.ok ? undefined : `${approved.result.reason}: ${JSON.stringify(approved.result.events)}`,
+      ).toBe(true)
+      expect(approved.result.state.combatants[actorToken.id].classResources['dnd5e-spell-slot-2']).toMatchObject({ current: 0 })
+      expect(approved.result.state.combatants[actorToken.id].turn.actionAvailable).toBe(false)
+      expect(approved.result.state.combatants[enemy.id].currentHp).toBe(23)
+    } finally {
+      dispose()
+      activityRegistration.dispose()
+    }
+  })
+
   it('keeps Sculpt Spells and Overchannel on a workshop Wizard spell cast through a held arcane focus', () => {
     let spellId = ''
     const dispose = registerDnd5eRulesPlugin({

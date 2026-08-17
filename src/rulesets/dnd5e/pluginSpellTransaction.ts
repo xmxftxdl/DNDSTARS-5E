@@ -7,7 +7,7 @@ import {
   rollbackCombatTransaction,
   type CombatTransaction,
 } from '../../lib/combatTransaction'
-import { DND_FEET_PER_CELL, pixelToCell, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import { DND_FEET_PER_CELL, cellToPixel, pixelToCell, tokenFootprintDistanceCells, type GridCell } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, resolveAoeDimensions, tokensInCells, type SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { BattleMap, Token } from '../../store/maps'
@@ -28,7 +28,10 @@ import { resolveDnd5eRollMode } from './rollMode'
 import {
   dnd5ePluginHeadlessActionDefinition,
   dnd5ePluginSpellDefinition,
+  dnd5eSpellAttackRangeMultiplierForCharacter,
   missingDnd5eRulesPluginRequirements,
+  type Dnd5ePluginAction,
+  type Dnd5ePluginDiceRollResult,
   type RegisteredDnd5ePluginSpell,
 } from './pluginApi'
 import { dnd5eSpellcastingClassIdForSpell } from './spells'
@@ -51,7 +54,12 @@ import {
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import { dnd5ePluginSpellArea, dnd5ePluginSpellTargetCapacity } from './pluginSpellTargeting'
 import { dnd5eTrackableDefinitionIdV1 } from './activities/dnd5eActivityIdentity'
+import type { Dnd5eActivityAreaPlacementV1, Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
+import { dnd5eActivityManualAdjudicationOperationsV1 } from './activities/dnd5eActivityHeadlessCompiler'
+import { getRegisteredDnd5eActivity } from './activities/dnd5eActivityRegistry'
+import { dnd5eActivityAutomationAnalysisV1 } from './plugins/pluginMechanicsRegistry'
 import { evaluateDnd5eWorkshopDamageFormula, normalizeDnd5eWorkshopFormulaClassLevels } from './workshopDamageFormula'
+import { dnd5eActiveAttackRollFlags } from './activeEffects'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -105,6 +113,13 @@ export interface PreparedDnd5ePluginSpellCast {
   targetTokens: Token[]
   targets: PreparedDnd5ePluginSpellTarget[]
   area?: SkillAoeTargeting
+  /** Unified, data-only Activity bound to this spell by the content package compiler. */
+  activity?: Dnd5eActivityDefinitionV1
+  activityHeadlessAction?: Dnd5ePluginAction
+  activityTargetCell?: GridCell
+  activityTargetCells: GridCell[]
+  activityAreaPlacement?: Dnd5eActivityAreaPlacementV1
+  activityAreaPlacementDistanceFeet?: number
   slotLevel: number
   castingTime: 'action' | 'bonus-action'
   componentCheck: Dnd5ePluginSpellComponentCheck
@@ -138,6 +153,10 @@ export interface Dnd5ePluginSpellResolutionRolls {
     savingThrowD20Second?: number
     damageRolls?: number[]
   }>
+  /** Host-expanded formula and per-target save recipe from the unified Activity compiler. */
+  activityRolls?: Record<string, Dnd5ePluginDiceRollResult>
+  /** Shared DM interrupt receipt for an assisted Activity transaction. */
+  activityInterruptChoiceId?: 'dm-apply'
 }
 
 export interface Dnd5ePluginSpellTargetResolution {
@@ -166,15 +185,40 @@ export interface Dnd5ePluginSpellResolution {
 /** 当前 Host 事务真正覆盖的插件法术子集；超出能力的声明必须回落到 DM 裁定。 */
 export type SupportedDnd5ePluginSpell = RegisteredDnd5ePluginSpell & {
   automation: { mode: 'headless-action'; actionId: string }
-  mechanics: Dnd5eSpellMechanicsDefinition
+  mechanics?: Dnd5eSpellMechanicsDefinition
+}
+
+export function dnd5ePluginSpellActivity(
+  spell: RegisteredDnd5ePluginSpell | undefined,
+): Dnd5eActivityDefinitionV1 | undefined {
+  if (!spell || spell.automation.mode !== 'headless-action') return undefined
+  const activity = getRegisteredDnd5eActivity(spell.ownerPluginId, spell.automation.actionId)
+  const actualAutomation = activity ? dnd5eActivityAutomationAnalysisV1(activity).capability : undefined
+  if (
+    !activity || (
+      actualAutomation?.level !== 'full' &&
+      !(
+        actualAutomation?.level === 'assisted' &&
+        dnd5eActivityManualAdjudicationOperationsV1(activity).length > 0
+      )
+    ) || activity.authorityBinding ||
+    activity.legacySource?.kind !== 'spell'
+  ) return undefined
+  const localSpellId = spell.id.startsWith(`${spell.ownerPluginId}:`)
+    ? spell.id.slice(spell.ownerPluginId.length + 1)
+    : spell.id
+  return activity.legacySource.id === localSpellId || activity.legacySource.id === spell.id
+    ? activity
+    : undefined
 }
 
 export function dnd5ePluginSpellAutomationSupported(spell: RegisteredDnd5ePluginSpell | undefined): spell is SupportedDnd5ePluginSpell {
-  if (
-    !spell || spell.automation.mode !== 'headless-action' || !spell.mechanics ||
-    spell.mechanics.resolution === 'dm-adjudication' ||
-    !dnd5ePluginHeadlessActionDefinition(spell.ownerPluginId, spell.automation.actionId)
-  ) return false
+  if (!spell || spell.automation.mode !== 'headless-action' ||
+    !dnd5ePluginHeadlessActionDefinition(spell.ownerPluginId, spell.automation.actionId)) return false
+  const activity = dnd5ePluginSpellActivity(spell)
+  if (activity) return ['self', 'touch', 'distance', 'sight'].includes(spell.range.type) &&
+    (spell.range.shape == null || dnd5ePluginSpellArea(spell) != null)
+  if (!spell.mechanics || spell.mechanics.resolution === 'dm-adjudication') return false
   return spell.mechanics.kind !== 'healing' &&
     (!!spell.mechanics.damage || !!spell.mechanics.conditions?.length) &&
     ['self', 'touch', 'distance', 'sight'].includes(spell.range.type) &&
@@ -197,6 +241,8 @@ export function prepareDnd5ePluginSpellCast(input: {
   const spell = dnd5ePluginSpellDefinition(payload.spellId)
   if (!spell) return { ok: false, reason: 'plugin-missing' }
   if (!dnd5ePluginSpellAutomationSupported(spell)) return { ok: false, reason: 'spell-not-headless' }
+  const activity = dnd5ePluginSpellActivity(spell)
+  const mechanics = spell.mechanics
   if (input.roomRequiredPlugins === null) return { ok: false, reason: 'room-rules-unavailable' }
   if (input.roomRequiredPlugins) {
     const requirement = input.roomRequiredPlugins.find((plugin) => plugin.id === spell.ownerPluginId)
@@ -245,6 +291,11 @@ export function prepareDnd5ePluginSpellCast(input: {
     : classDefinition.spellcasting.kind === 'pact' && spell.level <= 5
       ? dnd5ePactSlotLevel(castingClassLevel)
       : requestedSlot
+  const usesSpellAttackRoll = mechanics?.resolution === 'spell-attack' ||
+    activity?.checks?.some((check) => check.kind === 'attack-roll') === true
+  const spellAttackRangeMultiplier = usesSpellAttackRoll
+    ? dnd5eSpellAttackRangeMultiplierForCharacter(actor)
+    : 1
   if (!Number.isInteger(requestedSlot) || requestedSlot < 0 || requestedSlot > 9 || slotLevel < spell.level) {
     return { ok: false, reason: 'slot-unavailable' }
   }
@@ -269,6 +320,10 @@ export function prepareDnd5ePluginSpellCast(input: {
   )) return { ok: false, reason: 'invalid-target' }
   const targetCapacity = dnd5ePluginSpellTargetCapacity(spell, slotLevel)
   let targetTokens: Token[]
+  let activityTargetCell: GridCell | undefined
+  let activityTargetCells: GridCell[] = []
+  let activityAreaPlacement: Dnd5eActivityAreaPlacementV1 | undefined
+  let activityAreaPlacementDistanceFeet: number | undefined
   if (area) {
     const casterCell = pixelToCell(actorToken.x, actorToken.y, input.map)
     const targetCell = payload.areaTargetCell ?? (spell.range.type === 'self' ? casterCell : undefined)
@@ -283,6 +338,24 @@ export function prepareDnd5ePluginSpellCast(input: {
       rectAngleDegrees: payload.areaTargetAngleDegrees,
     })
     const affectedCells = cellsForAoe(area, orientFrom, targetCell)
+    activityTargetCell = { ...targetCell }
+    activityTargetCells = affectedCells.map((cell) => ({ ...cell }))
+    const anchor = cellToPixel(targetCell, input.map)
+    activityAreaPlacementDistanceFeet = Math.hypot(
+      targetCell.col - casterCell.col,
+      targetCell.row - casterCell.row,
+    ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    activityAreaPlacement = {
+      x: anchor.x,
+      y: anchor.y,
+      elevationFeet: actorToken.elevationFeet,
+      angleDegrees: payload.areaTargetAngleDegrees ??
+        (payload.areaTargetOrientation == null ? undefined : payload.areaTargetOrientation * 90),
+      radiusFeet: 'radiusFeet' in area ? area.radiusFeet : undefined,
+      lengthFeet: 'lengthFeet' in area ? area.lengthFeet : payload.areaTargetLengthFeet,
+      widthFeet: 'widthFeet' in area ? area.widthFeet : payload.areaTargetWidthFeet,
+      heightFeet: payload.areaTargetHeightFeet,
+    }
     targetTokens = tokensInCells(input.map, input.map.tokens, affectedCells)
       .filter((token) => {
         if (token.type === 'obstacle') return false
@@ -313,7 +386,11 @@ export function prepareDnd5ePluginSpellCast(input: {
       if (spell.targeting?.relation === 'ally' && opposed) return { ok: false, reason: 'invalid-target' }
       if (spell.targeting?.relation === 'enemy' && !opposed) return { ok: false, reason: 'invalid-target' }
       const distanceFeet = tokenFootprintDistanceCells(actorToken, token, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-      const maximumRange = spell.range.type === 'touch' ? 5 : spell.range.type === 'distance' ? (spell.range.feet ?? 0) : Number.POSITIVE_INFINITY
+      const maximumRange = spell.range.type === 'touch'
+        ? 5
+        : spell.range.type === 'distance'
+          ? (spell.range.feet ?? 0) * spellAttackRangeMultiplier
+          : Number.POSITIVE_INFINITY
       if (distanceFeet > maximumRange) return { ok: false, reason: 'target-out-of-range' }
     }
   }
@@ -324,7 +401,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   const overchannel = payload.overchannel === true
   const canOverchannel = contextualWizard && castingClassLevel >= 14 &&
     spell.school === 'evocation' && spell.level >= 1 && spell.level <= 5 &&
-    slotLevel >= spell.level && slotLevel <= 5 && spell.mechanics.damage != null
+    slotLevel >= spell.level && slotLevel <= 5 && mechanics?.damage != null
   if (overchannel && !canOverchannel) return { ok: false, reason: 'invalid-action' }
   if (
     payload.empowered === true || payload.draconicResistance === true ||
@@ -334,7 +411,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   const sculptedTargetIds = [...new Set(suppliedSculptedTargetIds)]
   const canSculpt = contextualWizard && castingClassLevel >= 2 &&
     spell.school === 'evocation' && area != null &&
-    spell.mechanics.resolution === 'saving-throw'
+    (mechanics?.resolution === 'saving-throw' || activity?.checks?.some((check) => check.kind === 'saving-throw') === true)
   if (
     sculptedTargetIds.length !== suppliedSculptedTargetIds.length ||
     (!canSculpt && sculptedTargetIds.length > 0) ||
@@ -378,8 +455,10 @@ export function prepareDnd5ePluginSpellCast(input: {
       movementRemaining: input.turnEconomy.movement.current,
     }
   }
-  const damage = spell.mechanics.damage
-  const upcast = dnd5eSpellUpcastTotals(spell.mechanics, slotLevel, spell.level)
+  const damage = mechanics?.damage
+  const upcast = mechanics
+    ? dnd5eSpellUpcastTotals(mechanics, slotLevel, spell.level)
+    : { damageDice: 0, flatDamage: 0, durationRounds: 0 }
   const cantripScaling = dnd5eSpellCantripScalingTotals(damage, actor.level)
   const castingModifier = damage?.addSpellcastingModifier
     ? rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
@@ -400,7 +479,9 @@ export function prepareDnd5ePluginSpellCast(input: {
   }
   const spellSaveDc = 8 + rules.proficiencyBonus(actor.level) +
     rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
-  const saveAbility = spell.mechanics.savingThrow?.ability
+  const activitySavingThrow = activity?.checks?.find((check) => check.kind === 'saving-throw')
+  const saveAbility = mechanics?.savingThrow?.ability ??
+    (activitySavingThrow?.kind === 'saving-throw' ? activitySavingThrow.ability : undefined)
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const affectedTargets: PreparedDnd5ePluginSpellTarget[] = targetTokens.map((token, index) => {
     const targetCombatant = snapshot.state.combatants[token.id]!
@@ -411,16 +492,18 @@ export function prepareDnd5ePluginSpellCast(input: {
         (saveAbility === 'dex' && spell.id !== 'sacred-flame' ? snapshot.state.coverBonusByCombatantPair?.[directedPairKey] ?? 0 : 0)
       : undefined
     const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+    const actorAttackRollEffect = dnd5eActiveAttackRollFlags(actorCombatant.classState.activeEffects)
     const attackAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) && (
       dnd5eTargetGrantsAttackAdvantage(targetCombatant) || actorCombatant.classState.hiddenCheckTotal != null ||
       !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || (targetProne && distanceFeet <= 5)
+      || actorAttackRollEffect.advantage
     )
     const attackDisadvantage = actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(targetCombatant) ||
       dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, token.id) ||
       dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
       dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne ||
-      (targetProne && distanceFeet > 5)
+      (targetProne && distanceFeet > 5) || actorAttackRollEffect.disadvantage
     return {
       key: `${token.id}:${index}`,
       token,
@@ -434,9 +517,10 @@ export function prepareDnd5ePluginSpellCast(input: {
         effectVisible: true,
         sourceCreatureType: actorCombatant.creatureType,
         sourceIsSpell: true,
+        sourceDistanceFeet: distanceFeet,
       }) : undefined,
       saveAutomaticallyFails: saveAbility ? dnd5eConditionSavingThrowAutomaticallyFails(targetCombatant, saveAbility) : false,
-      armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, token.id),
+      armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, token.id, 'spell'),
     }
   })
   const targets = affectedTargets.filter((target) => !sculptedTargetIdSet.has(target.token.id))
@@ -463,6 +547,29 @@ export function prepareDnd5ePluginSpellCast(input: {
       targetTokens,
       targets,
       area: area ?? undefined,
+      activity,
+      activityHeadlessAction: activity ? {
+        type: 'plugin',
+        pluginId: spell.ownerPluginId,
+        actionId: spell.automation.actionId,
+        transactionId: input.action.id,
+        actorId: actorToken.id,
+        targetId: targets[0]?.token.id,
+        targetIds: targets.map((target) => target.token.id),
+        targetCell: activityTargetCell,
+        targetOrientation: payload.areaTargetOrientation,
+        distanceFeet: Math.max(0, ...targets.map((target) => target.distanceFeet)),
+        activityAreaPlacement,
+        activityAreaPlacementDistanceFeet,
+        castLevel: slotLevel,
+        payload: payload.activityChoices
+          ? { activityChoices: { ...payload.activityChoices } }
+          : undefined,
+      } : undefined,
+      activityTargetCell,
+      activityTargetCells,
+      activityAreaPlacement,
+      activityAreaPlacementDistanceFeet,
       slotLevel,
       castingTime,
       componentCheck,
@@ -511,6 +618,75 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
 }): Dnd5ePluginSpellResolution {
   const { prepared, rolls: supplied } = input
+  if (prepared.activity && prepared.activityHeadlessAction) {
+    const now = input.now ?? Date.now()
+    const activityAction: Dnd5ePluginAction = {
+      ...prepared.activityHeadlessAction,
+      rolls: supplied.activityRolls,
+      interruptChoiceId: supplied.activityInterruptChoiceId,
+    }
+    const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(
+      prepared.state,
+      {
+        type: 'plugin-spell-activity',
+        actorId: prepared.actorToken.id,
+        pluginAction: activityAction,
+        spell: {
+          castingClassId: prepared.castingClassId,
+          spellId: prepared.spell.id,
+          spellName: prepared.spell.name,
+          spellLevel: prepared.spell.level,
+          slotLevel: prepared.slotLevel,
+          castingTime: prepared.castingTime,
+          concentrationRounds: prepared.concentrationRounds,
+          concentrationTargetIds: prepared.concentrationRounds
+            ? prepared.targets.length > 0
+              ? prepared.targets.map((target) => target.token.id)
+              : [prepared.actorToken.id]
+            : undefined,
+          spellSchool: prepared.spell.school,
+          sculptedTargetIds: prepared.sculptedTargetIds,
+        },
+      },
+      input.airborneFallDamageRollsByCombatantId,
+      { transaction: prepared.transaction, now },
+    )
+    const transaction = result.transaction ?? (result.ok
+      ? commitCombatTransaction(prepared.transaction, now)
+      : rollbackCombatTransaction(prepared.transaction, result.reason, now))
+    if (!result.ok) return { result, transaction, airborneFalls }
+    const targetResolutions = prepared.targets.map((target) => {
+      const before = prepared.state.combatants[target.token.id]
+      const after = result.state.combatants[target.token.id]
+      const finalDamage = Math.max(
+        0,
+        (before.currentHp + before.temporaryHp) - (after.currentHp + after.temporaryHp),
+      )
+      return {
+        key: target.key,
+        targetTokenId: target.token.id,
+        critical: false,
+        rawDamage: finalDamage,
+        finalDamage,
+      }
+    })
+    const finalDamage = targetResolutions.reduce((total, target) => total + target.finalDamage, 0)
+    return {
+      result,
+      application: planDnd5eMapResultApplication({
+        state: result.state,
+        map: prepared.map,
+        characters: prepared.characters,
+        characterIdByCombatantId: prepared.characterIdByCombatantId,
+      }),
+      transaction,
+      critical: false,
+      rawDamage: finalDamage,
+      finalDamage,
+      targetResolutions,
+      airborneFalls,
+    }
+  }
   const mechanics = prepared.spell.mechanics!
   const now = input.now ?? Date.now()
   let transaction = prepared.transaction

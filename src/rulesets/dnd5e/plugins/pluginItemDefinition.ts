@@ -1,16 +1,12 @@
 import type { EquipmentItem } from '../../../types/equipment'
+import { DND5E_INVENTORY_ICON_IDS } from '../../../types/inventory'
 import type { Dnd5ePluginItemDefinition } from '../pluginApi'
 import type { Dnd5eRulesPluginManifest } from './pluginManifestContracts'
 import type { RegisteredDnd5ePluginItem } from './pluginRegistryContracts'
 import { validateAndNormalizeDnd5ePluginItemHeadlessProtocol } from './pluginItemHeadlessProtocol'
 
 const INVENTORY_CATEGORIES = ['equipment', 'magic-item', 'adventuring-gear', 'consumable', 'tool', 'container'] as const
-const INVENTORY_ICONS = [
-  'weapon', 'armor', 'shield', 'backpack', 'bedroll', 'rope', 'torch', 'tinderbox',
-  'waterskin', 'rations', 'healers-kit', 'ball-bearings', 'caltrops', 'hunting-trap',
-  'acid', 'alchemists-fire', 'holy-water', 'antitoxin', 'poison', 'healing-potion',
-  'spellcasting-focus', 'magic-ring', 'magic-wand', 'magic-staff', 'magic-scroll', 'magic-wondrous', 'generic',
-] as const
+const INVENTORY_ICONS: readonly string[] = DND5E_INVENTORY_ICON_IDS
 const EQUIPMENT_SLOTS = ['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'ring2', 'belt', 'necklace'] as const
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
@@ -46,6 +42,13 @@ export function clonePluginItemDefinition(
     typeof definition.weightLb !== 'number' || !Number.isFinite(definition.weightLb) ||
     definition.weightLb < 0 || definition.weightLb > 1_000_000
   )) throw new Error(`Invalid plugin item weight: ${itemId}`)
+  if (definition.containerCapacityWeightLb != null && (
+    definition.category !== 'container' ||
+    typeof definition.containerCapacityWeightLb !== 'number' ||
+    !Number.isFinite(definition.containerCapacityWeightLb) ||
+    definition.containerCapacityWeightLb <= 0 ||
+    definition.containerCapacityWeightLb > 1_000_000
+  )) throw new Error(`Invalid plugin item container capacity: ${itemId}`)
   if (definition.cost && (
     typeof definition.cost.amount !== 'number' || !Number.isFinite(definition.cost.amount) ||
     definition.cost.amount < 0 || definition.cost.amount > 1_000_000_000 ||
@@ -140,6 +143,9 @@ export function clonePluginItemDefinition(
     rulesText,
     ...(definition.weightLb != null ? { weightLb: definition.weightLb } : {}),
     ...(definition.cost ? { cost: { ...definition.cost } } : {}),
+    ...(definition.containerCapacityWeightLb != null
+      ? { containerCapacityWeightLb: definition.containerCapacityWeightLb }
+      : {}),
     stackable: definition.stackable,
     ...(equipment ? { equipment } : {}),
     ...(magicItem ? { magicItem: { ...magicItem } } : {}),

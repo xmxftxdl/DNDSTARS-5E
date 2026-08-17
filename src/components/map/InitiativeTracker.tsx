@@ -21,6 +21,13 @@ export interface InitiativeEntry {
   /** Current-turn flowing border color, normally sourced from the actor's class palette. */
   turnGlowColor?: string
   roll: number
+  /** The authoritative dice and modifier used to produce the initiative total. */
+  initiativeCalculation?: {
+    rolls: number[]
+    d20: number
+    modifier: number
+    mode: 'normal' | 'advantage' | 'disadvantage'
+  }
 }
 
 const VISIBLE_MAX = 7

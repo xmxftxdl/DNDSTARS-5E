@@ -19,10 +19,10 @@ export function RoomLobbyScreen({ account, campaigns, busy, error, onJoin, onLog
     <View style={styles.account}><View><Text style={styles.greeting}>欢迎回来</Text><Text style={styles.name}>{account.displayName || account.username}</Text></View><Pressable onPress={() => void onLogout()}><Text style={styles.logout}>退出账号</Text></Pressable></View>
     <Text style={styles.title}>加入冒险房间</Text><Text style={styles.meta}>房间创建者需在线；重连会恢复同一玩家身份与角色归属。</Text>
     <View style={styles.joinCard}>
-      <TextInput value={roomId} onChangeText={(value) => setRoomId(value.toUpperCase())} autoCapitalize="characters" placeholder="6 位房间码" placeholderTextColor={colors.muted} style={styles.input} />
-      <TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="房间密码（如有）" placeholderTextColor={colors.muted} style={styles.input} />
+      <TextInput testID="lobby-room-id" value={roomId} onChangeText={(value) => setRoomId(value.toUpperCase())} autoCapitalize="characters" placeholder="6 位房间码" placeholderTextColor={colors.muted} style={styles.input} />
+      <TextInput testID="lobby-room-password" value={password} onChangeText={setPassword} secureTextEntry placeholder="房间密码（如有）" placeholderTextColor={colors.muted} style={styles.input} />
       <Pressable style={styles.spectatorRow} onPress={() => setSpectator((value) => !value)}><View style={[styles.check, spectator && styles.checked]} /><Text style={styles.checkText}>以观战席位加入（只读）</Text></Pressable>
-      <Pressable disabled={busy || roomId.trim().length < 4} style={[styles.primary, (busy || roomId.trim().length < 4) && styles.disabled]} onPress={() => void onJoin(roomId, password, spectator ? 'spectator' : 'player')}><Text style={styles.primaryText}>{busy ? '正在连接…' : '加入房间'}</Text></Pressable>
+      <Pressable testID="lobby-join" disabled={busy || roomId.trim().length < 4} style={[styles.primary, (busy || roomId.trim().length < 4) && styles.disabled]} onPress={() => void onJoin(roomId, password, spectator ? 'spectator' : 'player')}><Text style={styles.primaryText}>{busy ? '正在连接…' : '加入房间'}</Text></Pressable>
       {!!error && <Text style={styles.error}>{error}</Text>}
     </View>
     <Text style={styles.section}>账号战役</Text>

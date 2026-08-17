@@ -2,6 +2,7 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   assignEnemyVisualVariants,
   DND5E_SRD_ENEMY_POOL,
+  dnd5eMonsterToEnemyTemplate,
   enemyTemplateToTokenPatch,
 } from '../../lib/enemyPool'
 import {
@@ -22,13 +23,33 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { getDnd5eSrdMonster } from './monsters'
-import type { Dnd5ePluginFeatureAction } from './pluginApi'
 
 export type Dnd5eSummonPlanFailure = 'invalid-summon' | 'summon-position-blocked'
 
 export interface Dnd5eSummonPlan {
   token: Token
   initiativeEntry: InitiativeEntry
+}
+
+export interface Dnd5eSummonedCreatureSpec {
+  /** SRD or room-local monster catalog id. */
+  monsterId: string
+  label?: string
+  durationRounds: number
+  concentration?: boolean
+  side?: 'ally' | 'enemy'
+  persistent?: boolean
+  temporaryHitPoints?: number
+  minimumMaximumHitPoints?: number
+  maximumHitPointBonus?: number
+  armorClassBonus?: number
+  weaponAttackBonus?: number
+  weaponDamageBonus?: number
+  savingThrowBonus?: number
+  proficientSkillCheckBonus?: number
+  weaponAttacksMagical?: boolean
+  attacksPerAction?: number
+  shareSelfSpellsRangeFeet?: number
 }
 
 /**
@@ -65,14 +86,19 @@ export function planDnd5eSummonedCreature(input: {
   featureId: string
   pluginId: string
   actionId: string
+  /** Optional stable occurrence suffix for multi-creature Activity summons. */
+  occurrenceIndex?: number
+  /** Authority-owned concentration id when the caller is not a legacy plugin action. */
+  concentrationId?: string
   round: number
   targetCell: GridCell
   initiativeD20: number
-  summon: NonNullable<Dnd5ePluginFeatureAction['summon']>
+  summon: Dnd5eSummonedCreatureSpec
   geometry?: MapGeometryState
 }): { ok: true; plan: Dnd5eSummonPlan } | { ok: false; reason: Dnd5eSummonPlanFailure } {
   const monster = getDnd5eSrdMonster(input.summon.monsterId)
-  const template = DND5E_SRD_ENEMY_POOL.find((candidate) => candidate.id === input.summon.monsterId)
+  const template = DND5E_SRD_ENEMY_POOL.find((candidate) => candidate.id === input.summon.monsterId) ??
+    (monster ? dnd5eMonsterToEnemyTemplate(monster) : undefined)
   if (
     !monster || !template || !Number.isInteger(input.initiativeD20) ||
     input.initiativeD20 < 1 || input.initiativeD20 > 20
@@ -106,6 +132,7 @@ export function planDnd5eSummonedCreature(input: {
     mapGeometryPlacementBlocked({ geometry, map: input.map, token: placementToken, at: position }).blocked ||
     mapGeometryLineOfEffectBlocked({
       geometry,
+      map: input.map,
       from: input.actorToken,
       to: position,
       fromElevationFeet: input.actorToken.elevationFeet,
@@ -114,8 +141,20 @@ export function planDnd5eSummonedCreature(input: {
   ) return { ok: false, reason: 'summon-position-blocked' }
 
   const side = summonSide(input.actorToken, input.summon.side)
-  const concentrationId = input.summon.concentration ? `plugin-summon:${input.actionId}` : undefined
-  const tokenId = `plugin-summon:${input.actionId}`
+  const concentrationId = input.summon.concentration
+    ? input.concentrationId ?? `plugin-summon:${input.actionId}`
+    : undefined
+  const tokenId = input.summon.persistent
+    ? `plugin-companion:${input.sourceCharacterId}:${input.featureId}`
+    : `plugin-summon:${input.actionId}${input.occurrenceIndex == null ? '' : `:${input.occurrenceIndex + 1}`}`
+  const baseMaximumHitPoints = Math.max(
+    1,
+    (patch.maxHp ?? monster.hitPoints.average) + Math.max(0, input.summon.maximumHitPointBonus ?? 0),
+  )
+  const maximumHitPoints = Math.max(
+    baseMaximumHitPoints,
+    Math.max(1, Math.floor(input.summon.minimumMaximumHitPoints ?? 1)),
+  )
   const token: Token = {
     id: tokenId,
     label: input.summon.label?.trim() || monster.name,
@@ -125,8 +164,11 @@ export function planDnd5eSummonedCreature(input: {
     emoji: patch.emoji ?? '✦',
     size: tokenBase.size,
     type: 'enemy',
-    hp: patch.hp,
-    maxHp: patch.maxHp,
+    hp: maximumHitPoints,
+    maxHp: maximumHitPoints,
+    dnd5eCombatState: input.summon.temporaryHitPoints
+      ? { temporaryHp: input.summon.temporaryHitPoints }
+      : undefined,
     poolId: patch.poolId,
     visualVariantId: patch.visualVariantId,
     creatureTypes: patch.creatureTypes,
@@ -143,6 +185,17 @@ export function planDnd5eSummonedCreature(input: {
       expiresAfterRound: input.round + input.summon.durationRounds - 1,
       concentrationId,
       side,
+      persistent: input.summon.persistent === true ? true : undefined,
+      minimumMaximumHitPoints: input.summon.minimumMaximumHitPoints,
+      maximumHitPointBonus: input.summon.maximumHitPointBonus,
+      armorClassBonus: input.summon.armorClassBonus,
+      weaponAttackBonus: input.summon.weaponAttackBonus,
+      weaponDamageBonus: input.summon.weaponDamageBonus,
+      savingThrowBonus: input.summon.savingThrowBonus,
+      proficientSkillCheckBonus: input.summon.proficientSkillCheckBonus,
+      weaponAttacksMagical: input.summon.weaponAttacksMagical === true ? true : undefined,
+      attacksPerAction: input.summon.attacksPerAction,
+      shareSelfSpellsRangeFeet: input.summon.shareSelfSpellsRangeFeet,
     },
   }
   const initiative = input.initiativeD20 + rules.abilityModifier(monster.abilities.dex)
@@ -168,16 +221,19 @@ export function reconcileDnd5eSummonedCreatures(input: {
   round: number
 }): { map: BattleMap; removedTokenIds: string[] } {
   const characters = new Map(input.characters.map((character) => [character.id, character]))
+  const tokensById = new Map(input.map.tokens.map((token) => [token.id, token]))
   const removedTokenIds: string[] = []
   const tokens = input.map.tokens.filter((token) => {
     const summon = token.dnd5eSummon
     if (!summon) return true
     const source = characters.get(summon.sourceCharacterId)
-    const expired = input.round > summon.expiresAfterRound
+    const sourceToken = tokensById.get(summon.sourceTokenId)
+    const expired = summon.persistent !== true && input.round > summon.expiresAfterRound
     const defeated = (token.hp ?? token.maxHp ?? 1) <= 0
     const concentrationEnded = !!summon.concentrationId &&
-      source?.dnd5eCombatState?.concentrationSpellId !== summon.concentrationId
-    if (!source || expired || defeated || concentrationEnded) {
+      (source?.dnd5eCombatState?.concentrationSpellId ??
+        sourceToken?.dnd5eCombatState?.concentrationSpellId) !== summon.concentrationId
+    if ((!source && !sourceToken) || expired || defeated || concentrationEnded) {
       removedTokenIds.push(token.id)
       return false
     }

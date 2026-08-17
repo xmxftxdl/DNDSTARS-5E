@@ -18,10 +18,12 @@ export function dnd5eWildShapeDurationHours(level: number): number {
 export function dnd5eAvailableWildShapeForms(
   character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
   monsters: readonly Dnd5eMonsterStatBlock[] = DND5E_SRD_MONSTERS,
+  extraAllowed?: (monster: Dnd5eMonsterStatBlock) => boolean,
 ): readonly Dnd5eMonsterStatBlock[] {
   const druidLevel = dnd5eCharacterClassLevel(character, 'druid')
   if (druidLevel < 2) return []
-  return monsters.filter((monster) => dnd5eWildShapeFormAllowedForLevel(druidLevel, monster))
+  return monsters.filter((monster) =>
+    dnd5eWildShapeFormAllowedForLevel(druidLevel, monster) || extraAllowed?.(monster) === true)
 }
 
 export function dnd5eWildShapeFormAllowedForLevel(level: number, monster: Dnd5eMonsterStatBlock): boolean {
@@ -35,9 +37,13 @@ export function dnd5eWildShapeFormAllowedForLevel(level: number, monster: Dnd5eM
 
 export function dnd5eKnownWildShapeForms(
   character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
+  monsters: readonly Dnd5eMonsterStatBlock[] = DND5E_SRD_MONSTERS,
+  extraAllowed?: (monster: Dnd5eMonsterStatBlock) => boolean,
+  extraAllowedWithoutKnown?: (monster: Dnd5eMonsterStatBlock) => boolean,
 ): readonly Dnd5eMonsterStatBlock[] {
   const known = new Set(character.dnd5eClassChoices?.classes?.druid?.selections?.[DND5E_WILD_SHAPE_KNOWN_FORMS_KEY] ?? [])
-  return dnd5eAvailableWildShapeForms(character).filter((monster) => known.has(monster.id))
+  return dnd5eAvailableWildShapeForms(character, monsters, extraAllowed)
+    .filter((monster) => known.has(monster.id) || extraAllowedWithoutKnown?.(monster) === true)
 }
 
 export function dnd5eCanWildShapeInto(

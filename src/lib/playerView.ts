@@ -2,8 +2,14 @@ import type { Character } from '../types/character'
 import { playerSlotFromPort, playerSlotLabel, type PlayerSlot } from './appMode'
 import { getRoomSession } from './roomSession'
 import { getAccountSession } from './accountSession'
+import type { RoomCharacterAssignment } from './roomApi'
 
 export const PLAYER_ASSIGNMENT_EVENT = 'stars-player-assignment-changed'
+
+export interface CachedRoomCharacterAssignment extends RoomCharacterAssignment {
+  roomId: string
+  memberId: string
+}
 
 function storageAvailable(): boolean {
   return typeof window !== 'undefined' && !!window.localStorage
@@ -43,6 +49,63 @@ export function setAssignedPlayerCharacterId(id: string | null, slot = currentPl
   window.dispatchEvent(new Event(PLAYER_ASSIGNMENT_EVENT))
 }
 
+function roomCharacterAssignmentStorageKey(): string | null {
+  const session = getRoomSession()
+  return session?.role === 'player'
+    ? `stars-dm-character-assignment:${session.roomId}:${session.memberId}`
+    : null
+}
+
+export function getRoomCharacterAssignment(): CachedRoomCharacterAssignment | null {
+  if (!storageAvailable()) return null
+  const session = getRoomSession()
+  const key = roomCharacterAssignmentStorageKey()
+  if (!key || !session) return null
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key) ?? 'null') as Partial<CachedRoomCharacterAssignment> | null
+    if (!value || value.roomId !== session.roomId || value.memberId !== session.memberId) return null
+    const characterId = typeof value.characterId === 'string' && value.characterId ? value.characterId : null
+    const enforced = value.enforced === true && characterId !== null
+    return {
+      roomId: session.roomId,
+      memberId: session.memberId,
+      revision: Number.isSafeInteger(value.revision) ? Math.max(0, Number(value.revision)) : 0,
+      enforced,
+      characterId: enforced ? characterId : null,
+      characterName: enforced && typeof value.characterName === 'string' ? value.characterName : null,
+    }
+  } catch {
+    window.localStorage.removeItem(key)
+    return null
+  }
+}
+
+export function applyRoomCharacterAssignment(assignment: RoomCharacterAssignment): boolean {
+  if (!storageAvailable()) return false
+  const session = getRoomSession()
+  const key = roomCharacterAssignmentStorageKey()
+  if (!session || !key) return false
+  const previous = getRoomCharacterAssignment()
+  if (assignment.revision < (previous?.revision ?? 0)) return false
+  const next: CachedRoomCharacterAssignment = {
+    roomId: session.roomId,
+    memberId: session.memberId,
+    revision: Math.max(0, assignment.revision),
+    enforced: assignment.enforced && !!assignment.characterId,
+    characterId: assignment.enforced ? assignment.characterId : null,
+    characterName: assignment.enforced ? assignment.characterName : null,
+  }
+  window.localStorage.setItem(key, JSON.stringify(next))
+  let changed = JSON.stringify(previous) !== JSON.stringify(next)
+  if (next.enforced && next.characterId && getAssignedPlayerCharacterId(session.slot) !== next.characterId) {
+    const assignmentKey = playerAssignmentStorageKey(session.slot)
+    window.localStorage.setItem(assignmentKey, next.characterId)
+    changed = true
+  }
+  if (changed) window.dispatchEvent(new Event(PLAYER_ASSIGNMENT_EVENT))
+  return changed
+}
+
 function playerAliases(slot: PlayerSlot): string[] {
   const label = playerSlotLabel(slot)
   const index = slot.slice(-1)
@@ -55,10 +118,13 @@ export function roomOwnedPlayerCharacters(
   memberId: string,
 ): Character[] {
   const accountId = getAccountSession()?.accountId
-  return characters.filter((character) =>
-    character.visibleToPlayers !== false &&
-    character.roomId === roomId &&
-    (character.roomMemberId === memberId || (!!accountId && character.ownerAccountId === accountId)))
+  return characters.filter((character) => {
+    if (character.visibleToPlayers === false || character.roomId !== roomId) return false
+    if (typeof character.roomMemberId === 'string' && character.roomMemberId) {
+      return character.roomMemberId === memberId
+    }
+    return !!accountId && character.ownerAccountId === accountId
+  })
 }
 
 export function roomCharactersOwnedByMembers(
@@ -71,6 +137,17 @@ export function roomCharactersOwnedByMembers(
     character.roomId === roomId &&
     typeof character.roomMemberId === 'string' &&
     memberIds.has(character.roomMemberId))
+}
+
+export function assignableRoomCharactersForPlayer(
+  characters: readonly Character[],
+  roomId: string,
+  targetMemberId: string,
+): Character[] {
+  return characters.filter((character) =>
+    character.visibleToPlayers !== false &&
+    character.roomId === roomId &&
+    (!character.roomMemberId || character.roomMemberId === targetMemberId))
 }
 
 export function planRoomCharacterOwnershipRecovery(

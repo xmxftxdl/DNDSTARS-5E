@@ -9,6 +9,8 @@ import type {
 } from '../../types/inventory'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED } from './magicItemRulesZh.reviewed.generated'
+import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
+import { DND5E_SRD_COMBAT_SPELLS, type Dnd5eSrdSpellDefinition } from './spells'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
@@ -612,19 +614,26 @@ export const DND5E_MAGIC_ITEM_KIND_LABELS: Readonly<Record<Dnd5eMagicItemKind, s
 function iconForKind(kind: Dnd5eMagicItemKind): Dnd5eInventoryIconId {
   if (kind === 'weapon' || kind === 'ammunition') return 'weapon'
   if (kind === 'armor') return 'armor'
-  if (kind === 'potion') return 'healing-potion'
+  if (kind === 'potion') return 'magic-potion'
   if (kind === 'ring') return 'magic-ring'
   if (kind === 'wand') return 'magic-wand'
-  if (kind === 'staff' || kind === 'rod') return 'magic-staff'
+  if (kind === 'staff') return 'magic-staff'
+  if (kind === 'rod') return 'magic-rod'
   if (kind === 'scroll') return 'magic-scroll'
   return 'magic-wondrous'
+}
+
+function detailedMagicItemDescription(rulesText: string, flavor?: string): string {
+  const combined = flavor?.trim() ? `${flavor.trim()}\n\n${rulesText.trim()}` : rulesText.trim()
+  if (combined.length <= 2_000) return combined
+  const excerpt = combined.slice(0, 1_990)
+  const sentenceEnd = Math.max(excerpt.lastIndexOf('。'), excerpt.lastIndexOf('；'))
+  return `${excerpt.slice(0, sentenceEnd >= 1_200 ? sentenceEnd + 1 : 1_990).trimEnd()}…`
 }
 
 function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryItemTemplate {
   const attunement = ATTUNEMENT_IDS.has(entry.id) ? 'required' as const : 'none' as const
   const requirement = ATTUNEMENT_REQUIREMENTS[entry.id]
-  const rarity = DND5E_MAGIC_ITEM_RARITY_LABELS[entry.rarity]
-  const kind = DND5E_MAGIC_ITEM_KIND_LABELS[entry.kind]
   const rules = CATALOG_RULE_OVERRIDES[entry.id]
   const srdRules = DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED[entry.id]
   const rulesText = rules?.rulesText ?? srdRules?.rulesText
@@ -653,7 +662,7 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     englishName: entry.englishName,
     category: entry.kind === 'potion' ? 'consumable' : 'magic-item',
     icon: iconForKind(entry.kind),
-    description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
+    description: detailedMagicItemDescription(rulesText, rules?.description),
     rulesText,
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
     ...(equipment ? { equipment } : {}),
@@ -693,16 +702,17 @@ function magicEquipmentTemplate(
   const effects = kind === 'weapon'
     ? { ...base.effects, weaponAttackBonus: bonus, weaponDamageBonus: bonus }
     : { ...base.effects, armorClassBonus: bonus }
+  const rulesText = kind === 'weapon'
+    ? `使用该魔法武器进行攻击检定和伤害掷骰时获得 +${bonus} 加值；其余伤害骰、伤害类型、射程和武器属性均沿用所选基础武器，并按基础武器的完整规则结算。`
+    : `穿戴该魔法护甲时，先按基础护甲的类别、基础 AC、敏捷加值上限、力量需求和隐匿劣势计算护甲等级，再额外获得 +${bonus} AC。`
   return {
     id,
     name: magicName,
     englishName: `${baseEnglishName}, +${bonus}`,
     category: 'equipment',
     icon: kind,
-    description: `${DND5E_MAGIC_ITEM_RARITY_LABELS[rarity]}魔法${kind === 'weapon' ? '武器' : '护甲'}，无需同调。`,
-    rulesText: kind === 'weapon'
-      ? `使用该魔法武器进行攻击检定和伤害掷骰时获得 +${bonus} 加值；其余武器数据沿用基础武器。`
-      : `穿戴该魔法护甲时，护甲等级在基础护甲公式之外再获得 +${bonus} 加值。`,
+    description: rulesText,
+    rulesText,
     stackable: false,
     equipment: {
       ...base,
@@ -749,7 +759,7 @@ export const DND5E_SRD_DRAGON_SLAYER_TEMPLATES: readonly Dnd5eInventoryItemTempl
       englishName: `Dragon Slayer ${baseEnglishName}`,
       category: 'equipment',
       icon: 'weapon',
-      description: '稀有魔法武器，无需同调。',
+      description: DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED['dragon-slayer']!.rulesText,
       rulesText: DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED['dragon-slayer']!.rulesText,
       stackable: false,
       equipment: {
@@ -793,14 +803,15 @@ export const DND5E_SRD_MAGIC_SHIELD_TEMPLATES: readonly Dnd5eInventoryItemTempla
   const rarity: Dnd5eMagicItemRarity = bonus === 1 ? 'uncommon' : bonus === 2 ? 'rare' : 'very-rare'
   const id = `srd-5.1:magic-item:shield-plus-${bonus}`
   const name = `+${bonus} 盾牌`
+  const rulesText = `持用该盾牌时，先获得普通盾牌提供的 +2 AC，再额外获得 +${bonus} AC；总计由这面盾牌提供 +${bonus + 2} AC。同一时间只能从一面盾牌获得盾牌加值。`
   return {
     id,
     name,
     englishName: `Shield, +${bonus}`,
     category: 'equipment',
     icon: 'shield',
-    description: `${DND5E_MAGIC_ITEM_RARITY_LABELS[rarity]}魔法盾牌，无需同调。`,
-    rulesText: `持用该盾牌时，除盾牌通常提供的 +2 AC 外，再获得 +${bonus} AC。`,
+    description: rulesText,
+    rulesText,
     stackable: false,
     equipment: {
       ...base,
@@ -827,26 +838,128 @@ const HEALING_POTION_VARIANTS: ReadonlyArray<{
 ]
 
 export const DND5E_SRD_MAGIC_CONSUMABLE_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] =
-  HEALING_POTION_VARIANTS.map(({ id, name, englishName, rarity, dice }) => ({
-    id: `srd-5.1:magic-item:potion-of-healing-${id}`,
-    name,
-    englishName,
+  HEALING_POTION_VARIANTS.map(({ id, name, englishName, rarity, dice }) => {
+    const rulesText = `饮用或给另一名生物服用需要一个动作并消耗此药水；饮用者恢复 ${dice.count}d${dice.sides} + ${dice.bonus} 点生命值。该恢复不能使当前生命值超过生命值上限。`
+    return {
+      id: `srd-5.1:magic-item:potion-of-healing-${id}`,
+      name,
+      englishName,
+      category: 'consumable',
+      icon: 'healing-potion',
+      description: rulesText,
+      rulesText,
+      weightLb: 0.5,
+      stackable: true,
+      use: { economy: 'action', consumeQuantity: 1, effect: { kind: 'healing', dice } },
+      magicItem: { kind: 'potion', rarity, attunement: 'none', automation: 'headless' },
+      source: SRD_SOURCE,
+    }
+  })
+
+const SPELL_SCROLL_RARITY_BY_LEVEL: readonly Dnd5eMagicItemRarity[] = [
+  'common', 'common', 'uncommon', 'uncommon', 'rare', 'rare',
+  'very-rare', 'very-rare', 'very-rare', 'legendary',
+]
+const SPELL_SCROLL_PRICE_GP_BY_LEVEL = [50, 50, 200, 200, 2_000, 2_000, 20_000, 20_000, 20_000, 100_000] as const
+const SPELL_SCROLL_DC_AND_ATTACK_BY_LEVEL = [
+  { spellSaveDc: 13, spellAttackBonus: 5 },
+  { spellSaveDc: 13, spellAttackBonus: 5 },
+  { spellSaveDc: 13, spellAttackBonus: 5 },
+  { spellSaveDc: 15, spellAttackBonus: 7 },
+  { spellSaveDc: 15, spellAttackBonus: 7 },
+  { spellSaveDc: 17, spellAttackBonus: 9 },
+  { spellSaveDc: 17, spellAttackBonus: 9 },
+  { spellSaveDc: 18, spellAttackBonus: 10 },
+  { spellSaveDc: 18, spellAttackBonus: 10 },
+  { spellSaveDc: 19, spellAttackBonus: 11 },
+] as const
+const SPELLCASTING_CLASS_LABELS: Readonly<Record<string, string>> = {
+  bard: '吟游诗人',
+  cleric: '牧师',
+  druid: '德鲁伊',
+  paladin: '圣武士',
+  ranger: '游侠',
+  sorcerer: '术士',
+  warlock: '邪术师',
+  wizard: '法师',
+}
+
+function spellScrollLevelLabel(level: number): string {
+  return level === 0 ? '戏法' : `${level} 环法术`
+}
+
+function spellScrollTemplate(spell: Dnd5eSrdSpellDefinition): Dnd5eInventoryItemTemplate {
+  const details = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED[spell.id]
+  const level = Math.max(0, Math.min(9, Math.floor(spell.level)))
+  const rarity = SPELL_SCROLL_RARITY_BY_LEVEL[level]!
+  const fixedCasting = SPELL_SCROLL_DC_AND_ATTACK_BY_LEVEL[level]!
+  const classLabels = spell.classes.map((classId) => SPELLCASTING_CLASS_LABELS[classId] ?? classId).join('、')
+  const wizardCopyRule = spell.level > 0 && spell.classes.includes('wizard')
+    ? '\n\n【法师抄录】法师可以把这张卷轴上的法师法术抄入法术书；抄录前须进行一次智力（奥秘）检定，DC 为 10 + 法术环阶。成功后法术写入法术书，失败则不能抄录；无论结果如何，卷轴上的文字都会消失。'
+    : ''
+  const spellDetails = details
+    ? [
+        `施法时间：${details.castingTime}；射程：${details.range}；成分：${details.components}；持续时间：${details.duration}。`,
+        details.description,
+        details.higherLevels ? `升环：${details.higherLevels}` : '',
+      ].filter(Boolean).join('\n\n')
+    : spell.description
+  const rulesText = [
+    `【卷轴施放】卷轴内封存“${spell.name}”（${spellScrollLevelLabel(level)}，${spell.school}学派）。该法术必须出现在使用者所属职业的法术列表中（${classLabels}），否则卷轴无法使用。施放不消耗法术位，使用卷轴后文字消失并消耗 1 张卷轴。`,
+    level > 0
+      ? `若使用者通常能施放的最高环阶低于 ${level} 环，须以自己的施法关键属性进行 DC ${10 + level} 检定；成功则施放，失败则法术不生效且卷轴仍被消耗。此项高环检定在当前版本由 DM 于施放前裁定。`
+      : '戏法卷轴不需要高环施法能力检定。',
+    `卷轴固定法术豁免 DC ${fixedCasting.spellSaveDc}、固定法术攻击加值 +${fixedCasting.spellAttackBonus}；施放时无需提供法术成分。`,
+    `【具体效果】${spellDetails}${wizardCopyRule}`,
+  ].join('\n\n')
+  return {
+    id: `srd-5.1:spell-scroll:${spell.id}`,
+    name: `${spell.name}卷轴`,
+    englishName: `Spell Scroll (${spell.englishName})`,
     category: 'consumable',
-    icon: 'healing-potion',
-    description: `${DND5E_MAGIC_ITEM_RARITY_LABELS[rarity]}魔法药水。`,
-    rulesText: `饮用或给其他生物服用后恢复 ${dice.count}d${dice.sides}+${dice.bonus} 点生命值。`,
-    weightLb: 0.5,
+    icon: 'magic-scroll',
+    description: detailedMagicItemDescription(rulesText),
+    rulesText,
+    weightLb: 0,
+    cost: { amount: SPELL_SCROLL_PRICE_GP_BY_LEVEL[level]!, currency: 'gp' },
     stackable: true,
-    use: { economy: 'action', consumeQuantity: 1, effect: { kind: 'healing', dice } },
-    magicItem: { kind: 'potion', rarity, attunement: 'none', automation: 'headless' },
+    use: {
+      economy: spell.castingTime === 'bonus-action'
+        ? 'bonusAction'
+        : spell.castingTime === 'reaction'
+          ? 'none'
+          : 'action',
+      consumeQuantity: 1,
+      effect: {
+        kind: 'spell-cast',
+        schemaVersion: 1,
+        spellId: spell.id,
+        castAtLevel: level,
+        spellSaveDc: fixedCasting.spellSaveDc,
+        spellAttackBonus: fixedCasting.spellAttackBonus,
+        requiresComponents: false,
+        spellcastingClassIds: [...spell.classes],
+      },
+    },
+    magicItem: { kind: 'scroll', rarity, attunement: 'none', automation: 'headless' },
     source: SRD_SOURCE,
-  }))
+  }
+}
+
+/**
+ * Concrete, immediately usable scrolls. Reaction scrolls are consumed by the
+ * map's authoritative interrupt windows rather than by the ordinary item button.
+ */
+export const DND5E_SRD_SPELL_SCROLL_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] =
+  DND5E_SRD_COMBAT_SPELLS
+    .map(spellScrollTemplate)
 
 const ABSTRACT_MAGIC_ITEM_CATALOG_TEMPLATE_IDS = new Set([
   'srd-5.1:magic-item:armor',
   'srd-5.1:magic-item:shield',
   'srd-5.1:magic-item:weapon',
   'srd-5.1:magic-item:potion-of-healing',
+  'srd-5.1:magic-item:spell-scroll',
 ])
 
 export const DND5E_SRD_MAGIC_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
@@ -855,5 +968,6 @@ export const DND5E_SRD_MAGIC_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate
   ...DND5E_SRD_MAGIC_ARMOR_TEMPLATES,
   ...DND5E_SRD_MAGIC_SHIELD_TEMPLATES,
   ...DND5E_SRD_MAGIC_CONSUMABLE_TEMPLATES,
+  ...DND5E_SRD_SPELL_SCROLL_TEMPLATES,
   ...DND5E_SRD_DRAGON_SLAYER_TEMPLATES,
 ]

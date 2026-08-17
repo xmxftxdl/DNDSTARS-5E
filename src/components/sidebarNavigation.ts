@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   MessageSquareText,
   NotebookTabs,
+  Store,
   Swords,
   Users,
 } from 'lucide-react'
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/maps', label: '战斗地图', icon: Swords },
   { to: '/characters', label: '角色', icon: Users },
   { to: '/spellbook', label: '法术书', icon: BookOpen },
+  { to: '/shops', label: '商店', icon: Store },
   { to: '/communications', label: '通讯与日志', icon: MessageSquareText },
 ]
 
@@ -38,7 +40,7 @@ export function sidebarNavItems(
 ) {
   const selected = roomRole === 'spectator'
     ? navItems.filter((item) => item.to === '/maps')
-    : mode === 'player' ? playerNavItems : navItems
+    : roomRole === 'player' || mode === 'player' ? playerNavItems : navItems
   if (!campaignBasePath) return selected
   return selected.map((item) => ({
     ...item,

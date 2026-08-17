@@ -354,11 +354,14 @@ export default function MapGeometryToolbar({
               全图环境
               <select
                 value={geometry.environment ?? 'normal'}
-                onChange={(event) => setEnvironment(mapId, event.target.value as 'normal' | 'underwater')}
+                onChange={(event) => setEnvironment(mapId, event.target.value as NonNullable<MapGeometryState['environment']>)}
                 className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
                 aria-label="全图环境规则"
               >
-                <option value="normal">地表</option>
+                <option value="normal">普通／未指定</option>
+                <option value="outdoors">室外地表</option>
+                <option value="indoors">室内</option>
+                <option value="underground">地下</option>
                 <option value="underwater">水下</option>
               </select>
             </label>

@@ -615,6 +615,7 @@ describe('D&D 5e monster map movement', () => {
   it('uses the monster Strength score for running and standing long jumps', () => {
     const goblin = token({
       id: 'goblin', poolId: 'srd-5.1:goblin', x: 5, y: 5, hp: 7, maxHp: 7,
+      dnd5eCombatState: { schemaVersion: 2, runningJumpApproachFeet: 10 },
     })
     const hero = character()
     const heroToken = token({

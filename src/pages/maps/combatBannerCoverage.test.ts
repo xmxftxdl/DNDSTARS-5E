@@ -36,4 +36,20 @@ describe('combat banner coverage', () => {
     expect(PLAYER_ACTION_COMBAT_BANNER_ROUTES['dnd5e-map-interaction']).toBe('none')
     expect(playerActionCombatBannerName(action)).toBeNull()
   })
+
+  it.each([
+    'release-grapple',
+    'escape-grapple',
+    'escape-effect',
+    'wake',
+    'other-action',
+    'other-bonus-action',
+  ] as const)('does not publish a combat banner for %s', (kind) => {
+    const action = {
+      type: 'dnd5e-basic-action',
+      dnd5eBasicAction: { kind },
+    } as SharedPlayerActionState
+
+    expect(playerActionCombatBannerName(action)).toBeNull()
+  })
 })

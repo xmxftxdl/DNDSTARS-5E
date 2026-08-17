@@ -5,6 +5,7 @@ import type { Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
 import {
   collectDnd5ePersistentAreaTriggers,
   collectDnd5ePersistentAreaTriggersForSourceMove,
+  advanceDnd5ePluginAreasAtTurnBoundary,
   dnd5ePersistentAreaAffectsTokenVerticallyAt,
   dnd5ePersistentAreaDifficultTerrainMultiplierAt,
   expireDnd5ePluginAreasAtTurnBoundary,
@@ -197,6 +198,51 @@ describe('D&D 5e plugin persistent areas', () => {
     expect(expireDnd5ePluginAreasAtTurnBoundary({
       map, timing: 'turn-end', round: 2, tokenId: 'caster-token',
     }).dnd5ePluginAreas).toEqual([])
+  })
+
+  it('advances a moving area once per source turn and scales its height and damage dice', () => {
+    const movingWave = area({
+      cells: [{ col: 4, row: 3 }, { col: 4, row: 4 }],
+      anchorCell: { col: 4, row: 3 },
+      vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 300 },
+      lifecycle: {
+        timing: 'source-turn-start',
+        translateAwayFromSourceFeet: 50,
+        heightReductionFeet: 50,
+        damageDiceCountDelta: -1,
+        damageTriggerIds: ['wave-impact'],
+        minimumDamageDiceCount: 1,
+      },
+      triggers: [{
+        id: 'wave-impact', label: '浪潮冲击', timing: 'on-area-move-impact', oncePerTurn: true,
+        savingThrow: { ability: 'str', dc: 16, onSuccess: 'half', magical: true },
+        damage: { count: 6, sides: 10, modifier: 0, type: 'bludgeoning' },
+      }],
+    })
+    const map = {
+      id: 'moving-area-map', name: 'map', width: 1_000, height: 1_000, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [{
+        id: 'caster-token', label: 'caster', x: 75, y: 175, color: '#fff', emoji: 'C', size: 1,
+        type: 'player' as const, characterId: 'caster',
+      }],
+      dnd5ePluginAreas: [movingWave],
+    }
+    const first = advanceDnd5ePluginAreasAtTurnBoundary({
+      map, timing: 'turn-start', round: 2, tokenId: 'caster-token', turnKey: '2:caster-token',
+    })
+    expect(first.movedAreaIds).toEqual(['area-1'])
+    expect(first.map.dnd5ePluginAreas?.[0]).toMatchObject({
+      cells: [{ col: 14, row: 3 }, { col: 14, row: 4 }],
+      anchorCell: { col: 14, row: 3 },
+      vertical: { mode: 'volume', heightFeet: 250 },
+      lifecycleAdvances: 1,
+      lifecycleLastTurnKey: '2:caster-token',
+      triggers: [{ damage: { count: 5, sides: 10 } }],
+    })
+    expect(advanceDnd5ePluginAreasAtTurnBoundary({
+      map: first.map, timing: 'turn-start', round: 2, tokenId: 'caster-token', turnKey: '2:caster-token',
+    })).toEqual({ map: first.map, movedAreaIds: [] })
   })
 
   it('removes concentration areas as soon as the source concentration no longer matches', () => {
@@ -565,7 +611,10 @@ describe('D&D 5e plugin persistent areas', () => {
       includeSelf: false,
       triggers: [{
         id: 'moonlight', label: '月华区域', timing: 'turn-start', oncePerRound: true,
-        savingThrow: { ability: 'con', dc: 12, onSuccess: 'half' },
+        savingThrow: {
+          ability: 'con', dc: 12, onSuccess: 'half',
+          advantageIfTargetHasSwimSpeed: true,
+        },
         damage: { count: 2, sides: 6, modifier: 0, type: 'radiant' },
         condition: {
           condition: 'blinded',
@@ -582,7 +631,10 @@ describe('D&D 5e plugin persistent areas', () => {
       ],
       dnd5ePluginAreas: [triggerArea],
     }
-    const characters = [character({ id: 'caster', name: 'caster' }), character({ id: 'target', name: 'target', currentHp: 20, maxHp: 20 })]
+    const characters = [character({ id: 'caster', name: 'caster' }), character({
+      id: 'target', name: 'target', currentHp: 20, maxHp: 20,
+      dnd5eMovementSpeeds: { swim: 30 },
+    })]
     const candidate = collectDnd5ePersistentAreaTriggers({
       map, timing: 'turn-start', round: 2, targetTokenId: 'target-token',
     })[0]
@@ -596,9 +648,11 @@ describe('D&D 5e plugin persistent areas', () => {
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
+    expect(prepared.prepared.save?.mode).toBe('advantage')
     const resolved = resolvePreparedDnd5ePersistentAreaTrigger({
       prepared: prepared.prepared,
       d20: 20,
+      d20Second: 1,
       damageRolls: [6, 6],
     })
     expect(resolved.result.ok).toBe(true)

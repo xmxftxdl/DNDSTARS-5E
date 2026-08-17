@@ -39,6 +39,7 @@ type Dnd5eResolvedItemChargeConsumption = Dnd5eResolvedActivityConsumption & {
   kind: 'item-charge'
   resourceId: string
   amount: number
+  itemTemplateIds?: readonly string[]
 }
 
 function isResolvedItemChargeConsumption(
@@ -62,6 +63,8 @@ function itemActivityCost(
   amount: number,
   templateId: string,
 ): Dnd5eInventoryActivityCost | undefined {
+  if (resourceId === 'selected-item:quantity') return { kind: 'quantity', amount }
+  if (resourceId === 'selected-item:charges') return { kind: 'resource', resourceId: 'uses', amount }
   const prefix = `item:${templateId}:`
   if (!resourceId.startsWith(prefix)) return undefined
   const resource = resourceId.slice(prefix.length)
@@ -129,7 +132,10 @@ export function resolveAndCommitDnd5eActivityCommand(
     }
     const inventory = normalizeDnd5eInventory(authority.inventoryOwner)
     const entry = inventory.entries.find((candidate) => candidate.instanceId === inventoryInstanceId)
-    if (!entry || activity?.legacySource?.kind !== 'item' || activity.legacySource.id !== entry.templateId) {
+    const allowedTemplates = new Set(applicableItemConsumptions.flatMap((consumption) => consumption.itemTemplateIds ?? []))
+    const sourceItemMatches = activity?.legacySource?.kind === 'item' && activity.legacySource.id === entry?.templateId
+    const selectedItemMatches = !!entry && allowedTemplates.size > 0 && allowedTemplates.has(entry.templateId)
+    if (!entry || (!sourceItemMatches && !selectedItemMatches)) {
       return { phase: 'inventory', result: { ok: false, reason: 'inventory-item-mismatch' } }
     }
     const costs = applicableItemConsumptions.map((consumption) =>

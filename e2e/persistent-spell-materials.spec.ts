@@ -161,7 +161,11 @@ test('persistent spells use material atlases without duplicate effect tokens', a
     }),
   )), materialAssets)).resolves.toEqual(materialAssets.map((asset) => ({ asset, loaded: true })))
   await expect.poll(() => dm.evaluate(async () => {
-    const Konva = (await import('/node_modules/.vite/deps/konva.js')).default
+    type KonvaNode = { name(): string }
+    const Konva = (window as typeof window & {
+      Konva?: { stages: Array<{ find(selector: string): KonvaNode[] }> }
+    }).Konva
+    if (!Konva) throw new Error('The application Konva instance is unavailable')
     return Konva.stages.flatMap((stage) =>
       stage.find('.persistent-area-sprite-atlas').map((node) => node.name()),
     ).sort()
@@ -174,7 +178,10 @@ test('persistent spells use material atlases without duplicate effect tokens', a
     'persistent-area-sprite-atlas persistent-area-spiritual-weapon',
   ].sort())
   await expect.poll(() => dm.evaluate(async () => {
-    const Konva = (await import('/node_modules/.vite/deps/konva.js')).default
+    const Konva = (window as typeof window & {
+      Konva?: { stages: Array<{ find(selector: string): unknown[] }> }
+    }).Konva
+    if (!Konva) throw new Error('The application Konva instance is unavailable')
     return Konva.stages.flatMap((stage) => stage.find('.wall-of-fire-ring-visual')).length
   })).toBe(1)
   await dm.waitForTimeout(5_500)

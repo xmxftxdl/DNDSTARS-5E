@@ -213,6 +213,7 @@ export function prepareDnd5eDragonbornBreathAction(input: {
     }) &&
     !mapGeometryLineOfEffectBlocked({
       geometry,
+      map: input.map,
       from: actorToken,
       to: candidate,
       fromElevationFeet: sourceElevationFeet,

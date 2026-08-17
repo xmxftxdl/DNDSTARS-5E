@@ -80,11 +80,13 @@ export function buildSpellTargetingSubmission(
   const targetTokenIds = [...new Set(input.selectedTargetIds)]
   return {
     spellId: targeting.spellId,
+    spellOriginAreaId: targeting.spellOriginAreaId,
     focusItemInstanceId: targeting.focusItemInstanceId,
     itemInstanceId: targeting.itemInstanceId,
     itemUseActionId: targeting.itemUseActionId,
     castingClassId: targeting.castingClassId,
     racialInnate: targeting.racialInnate,
+    alternateResourceSpell: targeting.alternateResourceSpell,
     slotLevel: targeting.slotLevel,
     targetTokenId: targetTokenIds[0] ?? input.currentTokenId ?? '',
     targetTokenIds,
@@ -109,6 +111,7 @@ export function buildSpellTargetingSubmission(
       ? [...targeting.targetTokenIds]
       : undefined,
     overchannel: targeting.overchannel || undefined,
+    damageMaximizationFeatureId: targeting.damageMaximizationFeatureId,
     empowered: targeting.empowered || undefined,
     draconicResistance: targeting.draconicResistance || undefined,
     repellingBlast: targeting.repellingBlast || undefined,

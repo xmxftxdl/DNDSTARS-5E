@@ -26,6 +26,7 @@ import {
   dnd5eDruidWildShapeLimits,
   dnd5eWizardArcaneRecoveryLevels,
   dnd5eAvailableWildShapeForms,
+  dnd5ePluginCreatureFormEligibleForCharacter,
   dnd5eMonsterSpeedText,
   dnd5eWarlockMysticArcanumOptions,
   getDnd5eSrdCombatSpell,
@@ -41,8 +42,6 @@ import {
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
-import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
-import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import ClassResourceSummary from './ClassResourceSummary'
 import Dnd5eSpellSlotRecoverySummary from './Dnd5eSpellSlotRecoverySummary'
 
@@ -138,7 +137,11 @@ export default function Dnd5eClassProgressionPanel({
     ? (definition.subclass.spellLists ?? []).filter((list) => !list.choiceOptionId || (stored.selections?.['land-terrain'] ?? []).includes(list.choiceOptionId))
     : []
   const availableCombatSpells = dnd5eAvailableCombatSpells(character)
-  const availableWildShapeForms = dnd5eAvailableWildShapeForms(character)
+  const availableWildShapeForms = dnd5eAvailableWildShapeForms(
+    character,
+    undefined,
+    (form) => dnd5ePluginCreatureFormEligibleForCharacter(character, form),
+  )
 
   const setClassChoices = (next: typeof stored, skills?: string[]) => {
     onChange({
@@ -595,16 +598,7 @@ export default function Dnd5eClassProgressionPanel({
                 </div>
                 <div className="mt-2 space-y-2">
                   {features.map((feature) => (
-                    <div key={feature.id} className="flex items-start gap-3">
-                      <Dnd5eActionIcon
-                        spec={dnd5eClassFeatureActionIcon({
-                          id: feature.id,
-                          name: feature.name,
-                          classId: definition.id,
-                        })}
-                        className="h-12 w-12 shrink-0"
-                        level={entry.level}
-                      />
+                    <div key={feature.id} className="border-l border-white/[0.08] pl-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
                           {feature.name}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { DND5E_CLUB, DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
+import { DND5E_CLUB, DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_HAND_CROSSBOW, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
 import {
   dnd5ePreparedEquipmentAttackMagicWeaponBonus,
   dnd5eEquipmentClassDamageDefinitions,
@@ -17,6 +17,7 @@ import {
   createDnd5eMechanicalEffect,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
 } from './activeEffects'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function fighter(): Character {
   const base: Character = {
@@ -274,6 +275,120 @@ describe('D&D 5e equipment attack authority', () => {
     expect(actionSurgeShot.ok).toBe(true)
     if (!actionSurgeShot.ok) return
     expect(actionSurgeShot.prepared).toMatchObject({ attacksAllowed: 2, spendsAction: true })
+  })
+
+  it('derives Loading-property bypass from an equipped character feat snapshot', () => {
+    const pluginId = 'local.test.crossbow-expert-loading'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId,
+        name: 'Crossbow Expert loading test',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Tests',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'crossbow-expert',
+          name: 'Crossbow Expert',
+          summary: 'Synthetic loading-property test feat.',
+          description: 'Synthetic loading-property test feat.',
+          automation: 'full',
+          staticModifiers: { ignoreLoadingWeaponProperty: true },
+        })
+      },
+    })
+    try {
+      const input = fixture(125)
+      input.actor.equipment = { mainWeapon: DND5E_LIGHT_CROSSBOW }
+      input.actor.dnd5eFeatIds = [`${pluginId}:crossbow-expert`]
+      input.actor = applyDnd5eInventoryMutation([input.actor], {
+        type: 'grant',
+        characterId: input.actor.id,
+        templateId: 'srd-5.1:item:crossbow-bolts',
+        quantity: 20,
+      }).characters[0]
+
+      const secondShot = prepareDnd5eEquipmentAttack({
+        ...input,
+        characters: [input.actor],
+        attacksUsed: 1,
+        attackActionsAvailable: 1,
+      })
+      expect(secondShot.ok).toBe(true)
+      if (!secondShot.ok) return
+      expect(secondShot.prepared).toMatchObject({
+        attacksAllowed: 2,
+        attackNumber: 2,
+        spendsAction: false,
+      })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('rebuilds and consumes an Activity-granted off-hand hand-crossbow attack without two-weapon penalties', () => {
+    const input = fixture(125)
+    const offHandCrossbow = {
+      ...structuredClone(DND5E_HAND_CROSSBOW),
+      slot: 'offHand' as const,
+      allowedSlots: ['mainWeapon', 'offHand'] as const,
+    }
+    input.actor.equipment = { mainWeapon: DND5E_SHORTSWORD, offHand: offHandCrossbow }
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activityWeaponAttackGrants: {
+        'crossbow-expert-follow-up': {
+          schemaVersion: 1,
+          grantId: 'crossbow-expert-follow-up',
+          label: '弩术专家 · 手弩攻击',
+          sourceActivityId: 'crossbow-expert-follow-up-activity',
+          appliedTurnKey: 'combat:1:fighter-token',
+          economy: 'bonus-action',
+          weaponModes: ['ranged'],
+          weaponIds: ['dnd5e-hand-crossbow'],
+          weaponSlots: ['off-hand'],
+        },
+      },
+    }
+    input.actor = applyDnd5eInventoryMutation([input.actor], {
+      type: 'grant', characterId: input.actor.id,
+      templateId: 'srd-5.1:item:crossbow-bolts', quantity: 20,
+    }).characters[0]
+    input.action.dnd5eWeaponAttackOptions = {
+      activityWeaponAttackGrantId: 'crossbow-expert-follow-up',
+      activityWeaponAttackWeaponSlot: 'off-hand',
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 1,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn'),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      spendsAction: false,
+      spendsBonusAction: true,
+      countsTowardAttackAction: false,
+      profile: {
+        weaponId: 'dnd5e-hand-crossbow',
+        baseWeaponId: 'dnd5e-hand-crossbow',
+        handsUsed: 1,
+        damage: { sides: 6, bonus: 1 },
+      },
+    })
+    const resolved = resolvePreparedDnd5eEquipmentAttack({
+      prepared: prepared.prepared,
+      d20: 15,
+      damageRolls: [4],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants['fighter-token'].turn.bonusActionAvailable).toBe(false)
+    expect(resolved.result.state.combatants['fighter-token'].classState.activityWeaponAttackGrants).toBeUndefined()
   })
 
   it('grants half cover from an intervening creature and accepts a DM-only one-attack override', () => {

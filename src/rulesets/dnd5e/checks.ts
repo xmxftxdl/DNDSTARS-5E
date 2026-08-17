@@ -6,6 +6,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eActiveStrengthRollFlags, type Dnd5eActiveEffectInstance } from './activeEffects'
+import { dnd5eCharacterBuildTagsV1 } from './buildChoices'
 
 export type Dnd5eCheckProficiencyRank = 0 | 1 | 2
 
@@ -18,7 +19,7 @@ function abilityScore(character: Pick<Character, 'abilities'>, ability: AbilityK
 }
 
 export function dnd5eSkillCheckProficiencyRank(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'skills' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'skills' | 'dnd5eClassChoices' | 'dnd5eContentChoices'>,
   skillKey: string,
 ): Dnd5eCheckProficiencyRank {
   const bardChoices = character.dnd5eClassChoices?.classes?.bard?.selections ?? {}
@@ -31,7 +32,11 @@ export function dnd5eSkillCheckProficiencyRank(
     (dnd5eCharacterClassLevel(character, 'bard') >= 3 && (bardChoices['lore-bonus-skills'] ?? []).includes(skillKey)) ||
     beguilingInfluence
   if (!proficient) return 0
-  return [...(bardChoices.expertise ?? []), ...(rogueChoices.expertise ?? [])].includes(skillKey) ? 2 : 1
+  return [
+    ...(bardChoices.expertise ?? []),
+    ...(rogueChoices.expertise ?? []),
+    ...dnd5eCharacterBuildTagsV1(character, 'skill-expertise'),
+  ].includes(skillKey) ? 2 : 1
 }
 
 export function dnd5eAbilityCheckModifier(
@@ -47,7 +52,7 @@ export function dnd5eAbilityCheckModifier(
 }
 
 export function dnd5eSkillCheckModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'skills' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'skills' | 'dnd5eClassChoices' | 'dnd5eContentChoices'>,
   skillKey: string,
 ): number {
   const skill = SKILLS.find((candidate) => candidate.key === skillKey)

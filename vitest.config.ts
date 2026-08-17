@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 // no DiceBox engine are pulled in.
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'local-content/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 })

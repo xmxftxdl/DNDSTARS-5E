@@ -137,6 +137,7 @@ export interface PreparedDnd5ePlayerEndTurn {
     fallingDamageDice: number
   }
   nextTurnSlotId?: string
+  nextActorIsMonster: boolean
   nextMonsterRechargeRolls: readonly {
     actorId: string
     actorName: string
@@ -486,6 +487,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
       turnStartGazeRequirements,
       rageFlightFall,
       nextTurnSlotId,
+      nextActorIsMonster: nextMonster != null,
       nextMonsterRechargeRolls,
       currentMonsterMechanicRolls,
       nextMonsterMechanicRolls,
@@ -511,6 +513,8 @@ export function resolveDnd5ePlayerEndTurn(input: {
   rageFlightFallingDamageRolls?: readonly number[]
   optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+  /** Advance initiative now; resolve the new actor's start boundary separately. */
+  deferNextTurnStart?: boolean
 }): {
   ok: true
   actor?: Character
@@ -547,6 +551,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
         prepared.prepared.rageFlightFall?.landingElevationFeet,
       rageFlightFallingDamageRolls: input.rageFlightFallingDamageRolls,
       optionalBonusDice: input.optionalBonusDice,
+      deferNextTurnStart: input.deferNextTurnStart,
     },
     input.airborneFallDamageRollsByCombatantId,
   )

@@ -93,6 +93,7 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'monk-stillness-of-mind'; condition: 'charmed' | 'frightened' }
   | { feature: 'monk-empty-body' }
   | { feature: 'druid-wild-shape'; formId: string }
+  | { feature: 'druid-creature-form-heal'; slotLevel: number }
   | { feature: 'druid-end-wild-shape' }
   | { feature: 'warlock-hurl-through-hell-ready'; active: boolean }
   | { feature: 'linked-equipment-recall'; weaponId: string }
@@ -112,6 +113,12 @@ export interface Dnd5eAbilityCheckPayload {
 export interface Dnd5ePluginActionPayload {
   /** 完整的插件命名空间特性 ID，例如 com.example.rules:guardian-spark。 */
   featureId: string
+  /**
+   * Player-selected data-only modifiers for this Activity. The Host resolves
+   * ownership, delivery, damage type and costs from its registered package;
+   * clients can only name a feature that is already installed and owned.
+   */
+  modifierFeatureIds?: string[]
   /** 插件自定义的纯 JSON 参数；DM 仍会重建目标、距离与行动经济。 */
   payload?: SharedJsonValue
 }
@@ -152,6 +159,12 @@ export interface Dnd5eWeaponAttackOptions {
   offHandAttack?: boolean
   /** Bonus-action weapon attack entitlement opened by an imported feature. */
   featureBonusWeaponAttack?: boolean
+  /** Stable imported feature id for a generic post-Attack bonus weapon attack. */
+  featureBonusWeaponAttackId?: string
+  /** One-shot Host credential created by a unified Activity trigger. */
+  activityWeaponAttackGrantId?: string
+  /** Equipped hand selected for that Activity credential; Host rebuilds the weapon profile. */
+  activityWeaponAttackWeaponSlot?: 'main-hand' | 'off-hand'
   /** 猎人“灭群者”在同回合对原目标 5 尺内另一生物进行的免费攻击。 */
   hordeBreakerAttack?: boolean
   /** 猎人 11 级多重攻击；点击的 Token 作为万箭齐发中心或旋风攻击的目标确认点。 */
@@ -196,6 +209,12 @@ export type Dnd5eSustainedSpellControlId =
 export interface Dnd5eSpellCastPayload {
   spellId: string
   /**
+   * Optional Host-owned persistent projection used only as this cast's
+   * geometric origin. Ownership and the projection mechanic's spellOrigin
+   * permission are revalidated by the authority Host.
+   */
+  spellOriginAreaId?: string
+  /**
    * Held component focus used by a character/class cast. This is not an item
    * spell source: the Host revalidates the held focus while retaining the
    * caster's class features, spell slots and spellcasting ability.
@@ -213,6 +232,13 @@ export interface Dnd5eSpellCastPayload {
   castingClassId?: Dnd5eClassId
   /** The character's racial spell grant authorizes this cast instead of a class spellcasting feature. */
   racialInnate?: boolean
+  /** A Host-registered feature grant authorizes this cast and replaces spell-slot consumption. */
+  alternateResourceSpell?: { featureId: string; grantId: string }
+  /**
+   * Host-owned War Caster reaction credential. A client flag alone never grants
+   * an out-of-turn cast; the DM runtime binds it to a live opportunity trigger.
+   */
+  opportunityAttackSpell?: boolean
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
@@ -251,6 +277,8 @@ export interface Dnd5eSpellCastPayload {
   projectileTargetIds?: string[]
   /** 塑能学派14级“超限导能”：由DM端重新验证资格并掷后续反噬伤害。 */
   overchannel?: boolean
+  /** 通用声明式伤害骰最大化；Host 会重建特性、伤害类型与资源消耗。 */
+  damageMaximizationFeatureId?: string
   /** 塑能学派2级“法术塑形”：必须是本次区域法术所影响、且不含施法者的生物。 */
   sculptedTargetIds?: string[]
   /** Creatures explicitly designated as unaffected by a persistent area such as Spirit Guardians. */
@@ -285,6 +313,8 @@ export interface Dnd5eSpellCastPayload {
   healingAllocations?: Array<{ targetTokenId: string; amount: number }>
   /** 焰击术等法术升环时，由施法者选择额外伤害加入哪一种法术伤害类型。 */
   higherSlotDamageType?: 'acid' | 'bludgeoning' | 'cold' | 'fire' | 'force' | 'lightning' | 'necrotic' | 'piercing' | 'poison' | 'psychic' | 'radiant' | 'slashing' | 'thunder'
+  /** Closed choices declared by a unified spell Activity; the Host validates every id and option. */
+  activityChoices?: Record<string, string>
 }
 
 /**
@@ -344,8 +374,8 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string }
   | { kind: 'ready'; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetTokenId?: string }
   | { kind: 'use-object'; interactionId: string }
-  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
-  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
+  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; activityBasicActionGrantId?: string }
+  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; activityBasicActionGrantId?: string }
   | { kind: 'release-grapple'; targetTokenId: string }
   | { kind: 'escape-grapple'; targetTokenId: string }
   | { kind: 'escape-effect' }

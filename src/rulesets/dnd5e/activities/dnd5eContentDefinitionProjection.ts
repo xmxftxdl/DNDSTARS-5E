@@ -13,6 +13,7 @@ import { dnd5eContentPackageActivityProjectionV1 } from './dnd5eContentPackageAc
 import type { Dnd5eEffectDefinitionV1, Dnd5eEffectModifierV1 } from './dnd5eEffectContracts'
 import type { Dnd5eFormulaV1 } from './dnd5eFormula'
 import { dnd5eWorkshopDamageFormulaAsFormulaV1, type Dnd5eWorkshopDamageFormulaV1 } from '../workshopDamageFormula'
+import { dnd5eCombinedAutomationCapabilityV1 } from '../plugins/pluginMechanicsRegistry'
 
 const CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 
@@ -175,13 +176,7 @@ function itemEffectDefinitions(
 }
 
 function combinedCapability(activities: readonly Dnd5eActivityDefinitionV1[]): AutomationCapability {
-  if (!activities.length) return automationCapabilityFromLegacyStatus('reference-only')
-  if (activities.every((activity) => activity.automation.level === 'full')) return automationCapabilityFromLegacyStatus('full')
-  const limitations = activities.flatMap((activity) => activity.automation.limitations)
-  if (activities.every((activity) => activity.automation.level === 'display-only')) {
-    return automationCapabilityFromLegacyStatus('reference-only', limitations)
-  }
-  return automationCapabilityFromLegacyStatus('partial', limitations.length ? limitations : ['部分 Activity 仍使用兼容执行器或 DM 裁定。'])
+  return dnd5eCombinedAutomationCapabilityV1({ activities })
 }
 
 function definition(
@@ -273,7 +268,10 @@ export function dnd5eContentDefinitionsFromPackageV2(
     const passiveEffects = featurePassiveEffects(id, feat.name, feat)
     definitions.push(definition(value, 'feat', feat.id, feat.name, feat,
       activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(feat.automation), {
-        description: feat.description, activities, effects: [...(effect ? [effect] : []), ...passiveEffects],
+        description: feat.description,
+        activities,
+        effects: [...(effect ? [effect] : []), ...passiveEffects],
+        advancements: feat.advancements,
       }))
   }
   for (const spell of value.content.spells) {
@@ -402,7 +400,14 @@ export function dnd5eContentDefinitionsFromPackageV2(
     const directMonsterActivities = activitiesBySource.get(`monster:${monster.id}`) ?? []
     definitions.push(definition(value, 'monster', monster.slug, monster.name, monster,
       combinedCapability([...monsterActivities, ...directMonsterActivities]), {
-        description: monster.description, activities: [...monsterActivities, ...directMonsterActivities],
+        // An action Activity is owned by the dedicated monster-action
+        // definition below. Repeating it on the parent monster definition
+        // gives one package two executable contributions with the same stable
+        // Activity id, which correctly fails the unified registry's global-id
+        // integrity check. The parent keeps only Activities explicitly bound
+        // to the monster itself; its aggregate automation capability can still
+        // describe all child actions without registering them twice.
+        description: monster.description, activities: directMonsterActivities,
       }))
     for (const activity of monsterActivities) {
       const sourceId = activity.legacySource?.id?.split(':').at(-1) ?? activity.id

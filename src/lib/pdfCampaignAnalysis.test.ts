@@ -111,6 +111,7 @@ function outputForSchema(page: number, schema: unknown): PdfCampaignChunkAnalysi
       timelineKind: 'history',
       tags: ['主线'],
       causedBy: [],
+      causalBranches: [],
       causalExplanation: '',
       branchCondition: '',
       branchPerson: '',
@@ -177,14 +178,18 @@ describe('PDF 战役分析', () => {
     expect(synthesisProperties.people.maxItems).toBe(0)
     expect(synthesisProperties.relationships.maxItems).toBeGreaterThan(0)
     expect(synthesisProperties.scenes.maxItems).toBe(0)
-    expect(synthesisProperties.timelineEvents.maxItems).toBeUndefined()
+    expect(synthesisProperties.timelineEvents.maxItems).toBe(36)
     expect(synthesisProperties.timelineEvents.items?.required).toEqual(expect.arrayContaining([
       'time', 'timelineOrder', 'timelineKind', 'tags',
-      'causedBy', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState',
+      'causedBy', 'causalBranches', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState',
     ]))
     expect(estimatePdfAnalysisWorkload(8, 'deep').recommendation).toBe('local-ready')
     expect(estimatePdfAnalysisWorkload(20, 'deep').recommendation).toBe('prefer-quick')
     expect(estimatePdfAnalysisWorkload(40, 'quick').recommendation).toBe('prefer-cloud')
+    const billed = estimatePdfAnalysisWorkload(20, 'deep')
+    expect(billed.estimatedCredits).toBeGreaterThan(0)
+    expect(billed.reservedCredits).toBeGreaterThanOrEqual(billed.estimatedCredits)
+    expect(billed.reservedCredits % 500).toBe(0)
   })
 
   it('本地按参数量路由，外部 API 按显式角色路由', () => {
@@ -883,6 +888,14 @@ describe('PDF 战役分析', () => {
           timelineKind: 'current',
           tags: ['主线'],
           causedBy: index === 0 ? [] : [`关键事件 ${index}`],
+          causalBranches: index === 0 ? [] : [{
+            sourceEvent: `关键事件 ${index}`,
+            label: '进入下一阶段',
+            condition: '',
+            explanation: '前一关键事件直接开启当前阶段。',
+            branchPerson: '',
+            branchPersonState: 'unspecified',
+          }],
           causalExplanation: index === 0 ? '' : '前一关键事件直接开启当前阶段。',
           branchCondition: '',
           branchPerson: '',
@@ -915,7 +928,7 @@ describe('PDF 战役分析', () => {
       1_400, 1_200, 1_600,
       1_400, 1_200, 1_600,
     ])
-    expect(generate.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(3_200)
+    expect(generate.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(12_000)
     expect(generate.mock.calls.at(-1)?.[0].task).toBe('campaign-analysis')
     expect(progress).toHaveBeenLastCalledWith({ stage: 'complete', current: 7, total: 7, message: 'PDF 分析完成' })
     expect(result.people).toHaveLength(1)

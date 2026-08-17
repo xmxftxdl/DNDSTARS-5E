@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import { X, Shield, Footprints, HeartPulse, Sparkles, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { X, Shield, Footprints, HeartPulse, Sparkles, Trash2, Eye, Dices, PackageOpen } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import { getAc } from '../../lib/combatStats'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
@@ -13,6 +12,19 @@ import {
   shouldCloseCharacterDetailForKey,
 } from './characterDetailClose'
 import { showAppConfirm } from '../../lib/appDialog'
+import {
+  QUICK_CHARACTER_EQUIPMENT_SLOTS,
+  quickCharacterAbilityRows,
+  quickCharacterSkillRows,
+  quickFormatModifier,
+  quickProficiencyBonus,
+} from '../../lib/quickCharacterView'
+import {
+  classResourceDefinitions,
+  classResourceDisplayLabel,
+  getClassResource,
+} from '../../lib/classResources'
+import { dnd5eEffectiveWalkingSpeed, normalizeDnd5eInventory } from '../../rulesets/dnd5e'
 
 interface CharacterDetailPanelProps {
   token: Token
@@ -50,6 +62,44 @@ export default function CharacterDetailPanel({
   const [editingMaxHp, setEditingMaxHp] = useState(false)
   const [removingFromMap, setRemovingFromMap] = useState(false)
   const [removeFromMapError, setRemoveFromMapError] = useState<string>()
+  const quickCharacterSource = useMemo(() => ({
+    ...character,
+    savingThrows: character.savingThrows ?? [],
+    skills: character.skills ?? [],
+  }), [character])
+  const abilityRows = useMemo(() => quickCharacterAbilityRows(quickCharacterSource), [quickCharacterSource])
+  const skillRows = useMemo(() => quickCharacterSkillRows(quickCharacterSource), [quickCharacterSource])
+  const inventory = useMemo(() => normalizeDnd5eInventory(character), [character])
+  const resourceRows = useMemo(() => {
+    const definitions = classResourceDefinitions(character)
+    const knownKeys = new Set(definitions.map((definition) => definition.key))
+    const defined = definitions.flatMap((definition) => {
+      const state = getClassResource(character, definition.key)
+      return state ? [{
+        key: definition.key,
+        label: definition.label,
+        current: state.current,
+        max: state.max,
+        resetOn: definition.resetOn,
+      }] : []
+    })
+    const legacy = Object.entries(character.classResources ?? {}).flatMap(([key, state]) =>
+      knownKeys.has(key) ? [] : [{
+        key,
+        label: classResourceDisplayLabel(character, key),
+        ...state,
+        resetOn: undefined,
+      }])
+    return [...defined, ...legacy]
+  }, [character])
+  const spellSlotRows = resourceRows.filter((resource) =>
+    resource.key.startsWith('dnd5e-spell-slot-') || resource.key === 'dnd5e-pact-slot')
+  const classResourceRows = resourceRows.filter((resource) =>
+    !resource.key.startsWith('dnd5e-spell-slot-') && resource.key !== 'dnd5e-pact-slot')
+  const equippedEntries = inventory.entries.filter((entry) => entry.equippedSlot)
+  const carriedEntries = inventory.entries.filter((entry) => !entry.equippedSlot)
+  const initiative = abilityRows.find((ability) => ability.key === 'dex')!.modifier + (character.initiativeBonus ?? 0)
+  const speed = dnd5eEffectiveWalkingSpeed(character)
   const [pendingHitPoints, setPendingHitPoints] = useState<{
     currentHp: number
     maxHp: number
@@ -176,7 +226,7 @@ export default function CharacterDetailPanel({
     <div
       data-testid="character-detail-panel"
       data-defeated={defeated || undefined}
-      className="glass absolute bottom-3 left-3 z-[90] flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl"
+      className="glass absolute bottom-3 left-3 z-[90] flex max-h-[min(820px,calc(100%-3rem))] w-[min(520px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl"
     >
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
@@ -203,6 +253,11 @@ export default function CharacterDetailPanel({
             <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
               {character.race}
             </span>
+            {character.background ? (
+              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
+                {character.background}
+              </span>
+            ) : null}
           </div>
         </div>
         <button
@@ -286,7 +341,7 @@ export default function CharacterDetailPanel({
           </div>
         </section>
 
-        <div className="mb-4 grid grid-cols-2 gap-2">
+        <div data-testid="character-detail-combat-summary" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
             <Shield className="h-4 w-4 text-sky-400" />
             <div>
@@ -298,28 +353,99 @@ export default function CharacterDetailPanel({
             <Footprints className="h-4 w-4 text-emerald-400" />
             <div>
               <p className="text-[10px] text-slate-500">速度</p>
-              <p className="text-sm font-semibold text-slate-100">{character.speed} 尺</p>
+              <p className="text-sm font-semibold text-slate-100">{speed} 尺</p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
             <Sparkles className="h-4 w-4 text-violet-300" />
             <div>
               <p className="text-[10px] text-slate-500">熟练</p>
-              <p className="text-sm font-semibold text-slate-100">+{Math.max(2, Math.ceil(character.level / 4) + 1)}</p>
+              <p className="text-sm font-semibold text-slate-100">+{quickProficiencyBonus(character.level)}</p>
             </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
+            <Dices className="h-4 w-4 text-amber-300" />
+            <div><p className="text-[10px] text-slate-500">先攻</p><p className="text-sm font-semibold text-slate-100">{quickFormatModifier(initiative)}</p></div>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
+            <Eye className="h-4 w-4 text-cyan-300" />
+            <div><p className="text-[10px] text-slate-500">被动察觉</p><p className="text-sm font-semibold text-slate-100">{character.passivePerception}</p></div>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
+            <Sparkles className="h-4 w-4 text-violet-300" />
+            <div><p className="text-[10px] text-slate-500">法术豁免 DC</p><p className="text-sm font-semibold text-slate-100">{character.saveDC || '—'}</p></div>
           </div>
         </div>
 
-        <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">属性</h3>
+        <section data-testid="character-detail-abilities">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">属性与豁免</h3>
           <div className="grid grid-cols-3 gap-2">
-            {ABILITIES.map(({ key, label }) => (
-              <div key={key} className="flex flex-col items-center rounded-xl border border-white/5 bg-void-900/40 px-2 py-2">
-                <span className="text-[10px] font-medium text-slate-500">{label}</span>
-                <span className="text-lg font-bold text-arcane-200">{formatMod(abilityMod(character.abilities[key]))}</span>
-                <span className="text-[10px] tabular-nums text-slate-500">{character.abilities[key]}</span>
+            {abilityRows.map((ability) => (
+              <div key={ability.key} className="flex flex-col items-center rounded-xl border border-white/5 bg-void-900/40 px-2 py-2">
+                <span className="text-[10px] font-medium text-slate-500">{ability.label}</span>
+                <span className="text-lg font-bold text-arcane-200">{quickFormatModifier(ability.modifier)}</span>
+                <span className="text-[10px] tabular-nums text-slate-500">属性 {ability.score}</span>
+                <span className={ability.saveProficient ? 'mt-1 text-[9px] font-semibold text-emerald-300' : 'mt-1 text-[9px] text-slate-600'}>
+                  豁免 {quickFormatModifier(ability.savingThrowModifier)}{ability.saveProficient ? ' · 熟练' : ''}
+                </span>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section data-testid="character-detail-skills" className="mt-4">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">技能</h3>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {skillRows.map((skill) => (
+              <div key={skill.key} className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.025] px-2.5 py-1.5">
+                <span className={[
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  skill.expertise ? 'bg-amber-300' : skill.proficient ? 'bg-sky-300' : 'border border-slate-700',
+                ].join(' ')} />
+                <span className="min-w-0 flex-1 truncate text-[10px] text-slate-300">{skill.label}</span>
+                <strong className="text-[11px] tabular-nums text-slate-100">{quickFormatModifier(skill.modifier)}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {(spellSlotRows.length > 0 || classResourceRows.length > 0) ? (
+          <section data-testid="character-detail-resources" className="mt-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">法术位与职业资源</h3>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {[...spellSlotRows, ...classResourceRows].map((resource) => (
+                <div key={resource.key} className="rounded-xl border border-violet-300/10 bg-violet-400/[0.05] px-3 py-2">
+                  <div className="truncate text-[10px] font-semibold text-violet-100">{resource.label}</div>
+                  <div className="mt-0.5 text-sm font-black tabular-nums text-white">{resource.current}/{resource.max}</div>
+                  <div className="text-[9px] text-slate-500">{resourceResetLabel(resource.resetOn)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section data-testid="character-detail-equipment" className="mt-4">
+          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500"><PackageOpen className="h-3.5 w-3.5" />装备与背包</h3>
+          {equippedEntries.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {equippedEntries.map((entry) => (
+                <div key={entry.instanceId} className="rounded-lg border border-amber-300/10 bg-amber-400/[0.04] px-2.5 py-2">
+                  <div className="text-[9px] text-amber-200/55">{equipmentSlotLabel(entry.equippedSlot)}</div>
+                  <div className="truncate text-[11px] font-semibold text-amber-50">{entry.item.name}</div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-xs text-slate-600">没有已装备物品</p>}
+          <div className="mt-2 rounded-xl border border-white/[0.06] bg-black/15 p-2.5">
+            <div className="mb-1.5 text-[10px] font-semibold text-slate-400">背包 · {carriedEntries.length} 类物品</div>
+            {carriedEntries.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {carriedEntries.slice(0, 12).map((entry) => (
+                  <span key={entry.instanceId} className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-slate-300">{entry.item.name}{entry.quantity > 1 ? ` ×${entry.quantity}` : ''}</span>
+                ))}
+                {carriedEntries.length > 12 ? <span className="px-1 py-1 text-[10px] text-slate-500">另有 {carriedEntries.length - 12} 类</span> : null}
+              </div>
+            ) : <span className="text-[10px] text-slate-600">背包为空</span>}
           </div>
         </section>
 
@@ -361,4 +487,15 @@ export default function CharacterDetailPanel({
       </div>
     </div>
   )
+}
+
+function resourceResetLabel(resetOn: string | undefined): string {
+  if (resetOn === 'short-rest') return '短休或长休恢复'
+  if (resetOn === 'long-rest') return '长休恢复'
+  if (resetOn === 'combat') return '战斗重置'
+  return '按规则恢复'
+}
+
+function equipmentSlotLabel(slot: string | undefined): string {
+  return QUICK_CHARACTER_EQUIPMENT_SLOTS.find((entry) => entry.key === slot)?.label ?? '已装备'
 }

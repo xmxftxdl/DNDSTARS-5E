@@ -95,7 +95,7 @@ export function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile 
   )
 }
 
-export function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
+export function AcidSplashEffect({ projectile, assetUrl }: { projectile: MapProjectile; assetUrl?: string }) {
   const effectRef = useRef<Konva.Group>(null)
   const trailRef = useRef<Konva.Group>(null)
   const spriteRef = useRef<Konva.Image>(null)
@@ -103,7 +103,7 @@ export function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) 
   const impactRef = useRef<Konva.Group>(null)
   const impactRingRef = useRef<Konva.Circle>(null)
   const dropletRefs = useRef<Array<Konva.Circle | null>>([])
-  const fluidImage = useTokenBadgeImage('/assets/vfx/acid-splash-sprite-v2.png')
+  const fluidImage = useTokenBadgeImage(assetUrl ?? '/assets/vfx/acid-splash-sprite-v2.png')
   const glow = projectile.glowColor ?? '#bef264'
   const accent = projectile.accentColor ?? '#84cc16'
   const distance = Math.max(
@@ -290,11 +290,11 @@ export function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) 
   )
 }
 
-export function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
+export function PoisonSprayEffect({ projectile, assetUrl }: { projectile: MapProjectile; assetUrl?: string }) {
   const effectRef = useRef<Konva.Group>(null)
   const fluidRef = useRef<Konva.Group>(null)
   const spriteRef = useRef<Konva.Image>(null)
-  const fluidImage = useTokenBadgeImage('/assets/vfx/poison-spray-sprite-v2.png')
+  const fluidImage = useTokenBadgeImage(assetUrl ?? '/assets/vfx/poison-spray-sprite-v2.png')
   const glow = projectile.glowColor ?? '#86efac'
   const distance = Math.max(
     1,
@@ -470,14 +470,14 @@ export function ViciousMockeryEffect({ projectile }: { projectile: MapProjectile
   )
 }
 
-export function SacredFlameEffect({ projectile }: { projectile: MapProjectile }) {
+export function SacredFlameEffect({ projectile, assetUrl }: { projectile: MapProjectile; assetUrl?: string }) {
   const effectRef = useRef<Konva.Group>(null)
   const columnRef = useRef<Konva.Group>(null)
   const descendingRef = useRef<Konva.Group>(null)
   const impactRef = useRef<Konva.Group>(null)
   const ringRef = useRef<Konva.Circle>(null)
   const flameRefs = useRef<Array<Konva.Line | null>>([])
-  const sacredFlameImage = useTokenBadgeImage('/assets/vfx/sacred-flame-sprite-v2.png')
+  const sacredFlameImage = useTokenBadgeImage(assetUrl ?? '/assets/vfx/sacred-flame-sprite-v2.png')
   const radius = Math.max(20, projectile.radiusPx ?? 32)
 
   useEffect(() => {
@@ -1575,14 +1575,14 @@ export function ProduceFlameProjectile({ projectile }: { projectile: MapProjecti
   )
 }
 
-export function EldritchBlastProjectile({ projectile }: { projectile: MapProjectile }) {
+export function EldritchBlastProjectile({ projectile, assetUrl }: { projectile: MapProjectile; assetUrl?: string }) {
   const effectRef = useRef<Konva.Group>(null)
   const auraRef = useRef<Konva.Line>(null)
   const beamRef = useRef<Konva.Line>(null)
   const coreRef = useRef<Konva.Line>(null)
   const impactRef = useRef<Konva.Group>(null)
   const impactCoreRef = useRef<Konva.Circle>(null)
-  const fluidImage = useTokenBadgeImage('/assets/vfx/eldritch-blast-sprite-v2.png')
+  const fluidImage = useTokenBadgeImage(assetUrl ?? '/assets/vfx/eldritch-blast-sprite-v2.png')
 
   useEffect(() => {
     const effect = effectRef.current
@@ -1740,14 +1740,14 @@ export function EldritchBlastProjectile({ projectile }: { projectile: MapProject
   )
 }
 
-export function RayOfFrostProjectile({ projectile }: { projectile: MapProjectile }) {
+export function RayOfFrostProjectile({ projectile, assetUrl }: { projectile: MapProjectile; assetUrl?: string }) {
   const effectRef = useRef<Konva.Group>(null)
   const glowRef = useRef<Konva.Line>(null)
   const coreRef = useRef<Konva.Line>(null)
   const filamentRef = useRef<Konva.Line>(null)
   const impactRef = useRef<Konva.Group>(null)
   const impactRingRef = useRef<Konva.Circle>(null)
-  const fluidImage = useTokenBadgeImage('/assets/vfx/ray-of-frost-sprite-v2.png')
+  const fluidImage = useTokenBadgeImage(assetUrl ?? '/assets/vfx/ray-of-frost-sprite-v2.png')
 
   useEffect(() => {
     const effect = effectRef.current

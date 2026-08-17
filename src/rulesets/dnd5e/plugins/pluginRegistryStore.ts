@@ -23,8 +23,17 @@ import type { Dnd5ePluginHeadlessActionDefinition } from './pluginHeadlessContra
 export interface RegisteredDnd5ePluginRuntime {
   plugin: Dnd5eRulesPlugin
   integrity?: string
+  /** All non-native formats are normalized at the loader boundary and remain observable as Legacy adapters. */
+  adapterKind: Dnd5eRulesPluginRuntimeAdapterKind
   dispose(): void
 }
+
+export type Dnd5eRulesPluginRuntimeAdapterKind =
+  | 'unified-native'
+  | 'content-v2-adapter'
+  | 'declarative-v1-adapter'
+  | 'worker-module-adapter'
+  | 'legacy-api-adapter'
 
 export interface OwnedDnd5eHeadlessAction {
   pluginId: string

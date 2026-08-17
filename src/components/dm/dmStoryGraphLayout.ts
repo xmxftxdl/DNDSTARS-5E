@@ -1,9 +1,9 @@
 import type { AccountStoryEventLinkV1, AccountStoryEventV1 } from '../../lib/accountApi'
 
 export const STORY_GRAPH_NODE_WIDTH = 304
-export const STORY_GRAPH_NODE_HEIGHT = 210
+export const STORY_GRAPH_NODE_HEIGHT = 154
 export const STORY_GRAPH_NODE_GAP_X = 124
-export const STORY_GRAPH_NODE_GAP_Y = 176
+export const STORY_GRAPH_NODE_GAP_Y = 112
 export const STORY_GRAPH_MIN_CANVAS_WIDTH = 1_280
 
 const EDGE_LABEL_HEIGHT = 30
@@ -16,6 +16,24 @@ export interface StoryGraphEdgeLabelLayout {
   y: number
   width: number
   height: number
+}
+
+interface StoryGraphMetrics {
+  nodeWidth: number
+  nodeHeight: number
+  nodeGapX: number
+  nodeGapY: number
+  minCanvasWidth: number
+  top: number
+}
+
+const EDIT_METRICS: StoryGraphMetrics = {
+  nodeWidth: STORY_GRAPH_NODE_WIDTH,
+  nodeHeight: STORY_GRAPH_NODE_HEIGHT,
+  nodeGapX: STORY_GRAPH_NODE_GAP_X,
+  nodeGapY: STORY_GRAPH_NODE_GAP_Y,
+  minCanvasWidth: STORY_GRAPH_MIN_CANVAS_WIDTH,
+  top: 64,
 }
 
 interface Rect {
@@ -50,12 +68,13 @@ export function layoutStoryGraphEdgeLabels(
   links: readonly AccountStoryEventLinkV1[],
   positions: Readonly<Record<string, { x: number; y: number }>>,
   labelForLink: (link: AccountStoryEventLinkV1) => string,
+  metrics: Pick<StoryGraphMetrics, 'nodeWidth' | 'nodeHeight'> = EDIT_METRICS,
 ): StoryGraphEdgeLabelLayout[] {
   const nodeRects = Object.values(positions).map((position) => ({
     x: position.x,
     y: position.y,
-    width: STORY_GRAPH_NODE_WIDTH,
-    height: STORY_GRAPH_NODE_HEIGHT,
+    width: metrics.nodeWidth,
+    height: metrics.nodeHeight,
   }))
   const placed: StoryGraphEdgeLabelLayout[] = []
 
@@ -66,9 +85,9 @@ export function layoutStoryGraphEdgeLabels(
     if (!label || !from || !to) continue
 
     const width = Math.min(EDGE_LABEL_MAX_WIDTH, Math.max(EDGE_LABEL_MIN_WIDTH, label.length * 13 + 28))
-    const startX = from.x + STORY_GRAPH_NODE_WIDTH / 2
-    const startY = from.y + STORY_GRAPH_NODE_HEIGHT
-    const endX = to.x + STORY_GRAPH_NODE_WIDTH / 2
+    const startX = from.x + metrics.nodeWidth / 2
+    const startY = from.y + metrics.nodeHeight
+    const endX = to.x + metrics.nodeWidth / 2
     const endY = to.y
     const bend = Math.max(64, Math.abs(endY - startY) * 0.46)
     const tOrder = [0.5, 0.38, 0.62, 0.28, 0.72]
@@ -113,14 +132,30 @@ export function layoutStoryGraphEdgeLabels(
   return placed
 }
 
-export function layoutStoryGraphEvents(events: readonly AccountStoryEventV1[], links: readonly AccountStoryEventLinkV1[]): AccountStoryEventV1[] {
+function layoutStoryGraphPositions(
+  events: readonly AccountStoryEventV1[],
+  links: readonly AccountStoryEventLinkV1[],
+  metrics: StoryGraphMetrics,
+): Record<string, { x: number; y: number }> {
   const ids = new Set(events.map((event) => event.id))
   const incoming = new Map(events.map((event) => [event.id, 0]))
   const outgoing = new Map(events.map((event) => [event.id, [] as string[]]))
+  let validLinkCount = 0
   for (const link of links) {
     if (!ids.has(link.fromEventId) || !ids.has(link.toEventId) || link.fromEventId === link.toEventId) continue
+    validLinkCount += 1
     incoming.set(link.toEventId, (incoming.get(link.toEventId) ?? 0) + 1)
     outgoing.get(link.fromEventId)?.push(link.toEventId)
+  }
+
+  // An empty graph is still useful as a chronological event list. Putting every root on level
+  // zero creates an extremely wide, mostly clipped strip, so keep the analysis order vertically.
+  if (validLinkCount === 0) {
+    const centeredX = (metrics.minCanvasWidth - metrics.nodeWidth) / 2
+    return Object.fromEntries(events.map((event, index) => [event.id, {
+      x: centeredX,
+      y: metrics.top + index * (metrics.nodeHeight + metrics.nodeGapY),
+    }]))
   }
 
   const levels = new Map<string, number>()
@@ -148,18 +183,23 @@ export function layoutStoryGraphEvents(events: readonly AccountStoryEventV1[], l
     byLevel.set(level, [...(byLevel.get(level) ?? []), event])
   }
   const maxColumns = Math.max(1, ...[...byLevel.values()].map((entries) => entries.length))
-  const fullRowWidth = maxColumns * STORY_GRAPH_NODE_WIDTH + (maxColumns - 1) * STORY_GRAPH_NODE_GAP_X
-  const layoutWidth = Math.max(STORY_GRAPH_MIN_CANVAS_WIDTH, fullRowWidth + 160)
+  const fullRowWidth = maxColumns * metrics.nodeWidth + (maxColumns - 1) * metrics.nodeGapX
+  const layoutWidth = Math.max(metrics.minCanvasWidth, fullRowWidth + 120)
   const positionById = new Map<string, { x: number; y: number }>()
   for (const [level, entries] of byLevel) {
-    const rowWidth = entries.length * STORY_GRAPH_NODE_WIDTH + (entries.length - 1) * STORY_GRAPH_NODE_GAP_X
+    const rowWidth = entries.length * metrics.nodeWidth + (entries.length - 1) * metrics.nodeGapX
     const startX = (layoutWidth - rowWidth) / 2
     entries.forEach((event, column) => positionById.set(event.id, {
-      x: startX + column * (STORY_GRAPH_NODE_WIDTH + STORY_GRAPH_NODE_GAP_X),
-      y: 64 + level * (STORY_GRAPH_NODE_HEIGHT + STORY_GRAPH_NODE_GAP_Y),
+      x: startX + column * (metrics.nodeWidth + metrics.nodeGapX),
+      y: metrics.top + level * (metrics.nodeHeight + metrics.nodeGapY),
     }))
   }
-  return events.map((event) => ({ ...event, graphPosition: positionById.get(event.id) ?? event.graphPosition }))
+  return Object.fromEntries(events.map((event) => [event.id, positionById.get(event.id) ?? event.graphPosition ?? { x: 0, y: 0 }]))
+}
+
+export function layoutStoryGraphEvents(events: readonly AccountStoryEventV1[], links: readonly AccountStoryEventLinkV1[]): AccountStoryEventV1[] {
+  const positions = layoutStoryGraphPositions(events, links, EDIT_METRICS)
+  return events.map((event) => ({ ...event, graphPosition: positions[event.id] }))
 }
 
 export function prioritizeSelectedStoryEntries<T extends { id: string }>(entries: readonly T[], selectedIds: readonly string[]): T[] {

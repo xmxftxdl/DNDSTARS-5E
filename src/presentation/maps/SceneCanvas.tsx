@@ -33,7 +33,7 @@ const SceneCanvas = memo(function SceneCanvas(props: SceneCanvasProps) {
   const onAoePreviewCell = useOptionalLatestCallback(props.onAoePreviewCell)
   const onAoeConfirm = useOptionalLatestCallback(props.onAoeConfirm)
   const onAoeCancel = useOptionalLatestCallback(props.onAoeCancel)
-  const onDnd5eConditionClick = useOptionalLatestCallback(props.onDnd5eConditionClick)
+  const onDnd5eStatusTokenClick = useOptionalLatestCallback(props.onDnd5eStatusTokenClick)
   const onDnd5ePluginAreaVisibilityToggle = useOptionalLatestCallback(
     props.onDnd5ePluginAreaVisibilityToggle,
   )
@@ -82,7 +82,7 @@ const SceneCanvas = memo(function SceneCanvas(props: SceneCanvasProps) {
       onAoePreviewCell={onAoePreviewCell}
       onAoeConfirm={onAoeConfirm}
       onAoeCancel={onAoeCancel}
-      onDnd5eConditionClick={onDnd5eConditionClick}
+      onDnd5eStatusTokenClick={onDnd5eStatusTokenClick}
       onDnd5ePluginAreaVisibilityToggle={onDnd5ePluginAreaVisibilityToggle}
       onDnd5ePluginAreaClick={onDnd5ePluginAreaClick}
       onGridOffsetChange={onGridOffsetChange}

@@ -15,6 +15,7 @@ import {
 import { ServerObservability } from './server-observability.mjs'
 import { loadArtAssetPack, serveArtAsset } from './art-asset-server.mjs'
 import { createSharedServerContext } from './shared-server-context.mjs'
+import { createPlayerAiServiceFromPersistedConfig } from './player-ai-service.mjs'
 import { staticCacheControl } from './static-cache-policy.mjs'
 
 const args = new Map()
@@ -137,11 +138,13 @@ const securityConfig = validateProductionSecurityConfig()
 if (!securityConfig.ok) {
   throw new Error(`Unsafe production configuration:\n- ${securityConfig.errors.join('\n- ')}`)
 }
+const playerAi = await createPlayerAiServiceFromPersistedConfig()
 // /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只保留静态回退。
 const apiCtx = createSharedServerContext({
   sharedRoot,
   legacyRoot: path.resolve(process.cwd(), '.stars-shared'),
   serverBuildId: process.env.STARS_BUILD_ID ?? 'static-development',
+  playerAiService: playerAi.service,
 })
 const accountStorage = await initializeAccountStorage(apiCtx)
 const observability = new ServerObservability({
@@ -152,6 +155,11 @@ const observability = new ServerObservability({
 observability.log('info', 'account_storage_ready', {
   backend: accountStorage.backend,
   ...(accountStorage.databasePath ? { databasePath: accountStorage.databasePath } : {}),
+})
+observability.log(playerAi.service ? 'info' : 'warn', 'player_ai_status', {
+  status: playerAi.service ? 'ready' : 'disabled',
+  config: playerAi.files.config,
+  usageAudit: playerAi.files.playerUsage,
 })
 observability.log(
   artAssetPack || !configuredArtAssetRoot ? 'info' : 'warn',

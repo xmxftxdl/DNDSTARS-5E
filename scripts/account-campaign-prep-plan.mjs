@@ -46,6 +46,7 @@ function normalizedEnum(value, allowed) {
 function normalizedStoryEvent(value) {
   if (!plainObject(value)) return null
   const id = normalizedString(value.id, 120, false)
+  const nodeKind = value.nodeKind == null ? undefined : normalizedEnum(value.nodeKind, ['event', 'decision'])
   const title = normalizedString(value.title, 160, false)
   const summary = normalizedString(value.summary, 2_000)
   const details = normalizedString(value.details, 12_000)
@@ -57,16 +58,29 @@ function normalizedStoryEvent(value) {
   const personIds = normalizedIds(value.personIds)
   const clueIds = normalizedIds(value.clueIds)
   const tags = normalizedIds(value.tags)
+  const timelineOrder = value.timelineOrder == null ? undefined : Number(value.timelineOrder)
+  const timelineKind = value.timelineKind == null
+    ? undefined
+    : normalizedEnum(value.timelineKind, ['history', 'current', 'deadline', 'conditional'])
+  const allowedDmEditedFields = ['title', 'summary', 'details', 'timeLabel', 'personIds', 'clueIds', 'tags']
+  const dmEditedFields = value.dmEditedFields == null
+    ? undefined
+    : Array.isArray(value.dmEditedFields) && value.dmEditedFields.length <= allowedDmEditedFields.length
+      ? [...new Set(value.dmEditedFields)]
+      : null
   const gameTimeWorldMinute = value.gameTimeWorldMinute == null ? undefined : Number(value.gameTimeWorldMinute)
   const graphPosition = value.graphPosition == null
     ? undefined
     : plainObject(value.graphPosition)
       ? { x: Number(value.graphPosition.x), y: Number(value.graphPosition.y) }
       : null
-  if (!id || !title || !status || !source || [summary, details, timeLabel, sourceEventIds, sceneIds, personIds, clueIds, tags].some((entry) => entry == null)) return null
+  if (!id || !title || !status || !source || (value.nodeKind != null && !nodeKind) || [summary, details, timeLabel, sourceEventIds, sceneIds, personIds, clueIds, tags].some((entry) => entry == null)) return null
+  if (timelineOrder !== undefined && (!Number.isSafeInteger(timelineOrder) || timelineOrder < 0 || timelineOrder > 10_000)) return null
+  if (value.timelineKind != null && !timelineKind) return null
+  if (dmEditedFields === null || dmEditedFields?.some((field) => !allowedDmEditedFields.includes(field))) return null
   if (gameTimeWorldMinute !== undefined && (!Number.isSafeInteger(gameTimeWorldMinute) || gameTimeWorldMinute < 0)) return null
   if (graphPosition === null || (graphPosition && (!Number.isFinite(graphPosition.x) || !Number.isFinite(graphPosition.y) || graphPosition.x < 0 || graphPosition.y < 0 || graphPosition.x > 50_000 || graphPosition.y > 50_000))) return null
-  return { id, title, summary, details, timeLabel, status, source, sourceEventIds, sceneIds, personIds, clueIds, tags, ...(gameTimeWorldMinute === undefined ? {} : { gameTimeWorldMinute }), ...(graphPosition ? { graphPosition } : {}) }
+  return { id, ...(nodeKind === undefined ? {} : { nodeKind }), title, summary, details, timeLabel, status, source, sourceEventIds, sceneIds, personIds, clueIds, tags, ...(timelineOrder === undefined ? {} : { timelineOrder }), ...(timelineKind === undefined ? {} : { timelineKind }), ...(dmEditedFields === undefined ? {} : { dmEditedFields }), ...(gameTimeWorldMinute === undefined ? {} : { gameTimeWorldMinute }), ...(graphPosition ? { graphPosition } : {}) }
 }
 
 function normalizedStoryGraphLinks(value, eventIds) {
@@ -81,14 +95,17 @@ function normalizedStoryGraphLinks(value, eventIds) {
     const toEventId = normalizedString(candidate.toEventId, 120, false)
     const label = normalizedString(candidate.label, 80)
     const condition = normalizedStoryGraphCondition(candidate.condition, eventIds)
+    const resolution = candidate.resolution == null
+      ? undefined
+      : normalizedEnum(candidate.resolution, ['pending', 'triggered', 'not-triggered'])
     const labelPosition = candidate.labelPosition == null
       ? undefined
       : plainObject(candidate.labelPosition)
         ? { x: Number(candidate.labelPosition.x), y: Number(candidate.labelPosition.y) }
         : null
-    if (!id || !fromEventId || !toEventId || label == null || condition === null || labelPosition === null || (labelPosition && (!Number.isFinite(labelPosition.x) || !Number.isFinite(labelPosition.y) || labelPosition.x < 0 || labelPosition.y < 0 || labelPosition.x > 50_000 || labelPosition.y > 50_000)) || ids.has(id) || fromEventId === toEventId || !eventIds.has(fromEventId) || !eventIds.has(toEventId)) return null
+    if (!id || !fromEventId || !toEventId || label == null || condition === null || (candidate.resolution != null && !resolution) || labelPosition === null || (labelPosition && (!Number.isFinite(labelPosition.x) || !Number.isFinite(labelPosition.y) || labelPosition.x < 0 || labelPosition.y < 0 || labelPosition.x > 50_000 || labelPosition.y > 50_000)) || ids.has(id) || fromEventId === toEventId || !eventIds.has(fromEventId) || !eventIds.has(toEventId)) return null
     ids.add(id)
-    links.push({ id, fromEventId, toEventId, label, ...(condition ? { condition } : {}), ...(labelPosition ? { labelPosition } : {}) })
+    links.push({ id, fromEventId, toEventId, label, ...(condition ? { condition } : {}), ...(resolution ? { resolution } : {}), ...(labelPosition ? { labelPosition } : {}) })
   }
   return links
 }
@@ -229,9 +246,9 @@ function normalizedStoryWorkspace(value) {
   if (new Set(events.map((entry) => entry.id)).size !== events.length || new Set(personStates.map((entry) => entry.personId)).size !== personStates.length || new Set(clueStates.map((entry) => entry.clueId)).size !== clueStates.length || new Set(recaps.map((entry) => entry.id)).size !== recaps.length) return null
   const graphLinks = normalizedStoryGraphLinks(value.graphLinks, new Set(events.map((entry) => entry.id)))
   const timelineMarkers = normalizedStoryTimelineMarkers(value.timelineMarkers)
-  if (graphLinks === null || timelineMarkers === null || (value.graphInitialized != null && typeof value.graphInitialized !== 'boolean') || (value.graphLayoutVersion != null && value.graphLayoutVersion !== 2 && value.graphLayoutVersion !== 3 && value.graphLayoutVersion !== 4)) return null
+  if (graphLinks === null || timelineMarkers === null || (value.graphInitialized != null && typeof value.graphInitialized !== 'boolean') || (value.graphEditedByDm != null && typeof value.graphEditedByDm !== 'boolean') || (value.graphLinksClearedByDm != null && typeof value.graphLinksClearedByDm !== 'boolean') || (value.graphLayoutVersion != null && value.graphLayoutVersion !== 2 && value.graphLayoutVersion !== 3 && value.graphLayoutVersion !== 4)) return null
   if (mode !== 'prep' && !activeSession) return null
-  return { schemaVersion: 1, mode, events, personStates, clueStates, ...(activeSession ? { activeSession } : {}), recaps, ...(graphLinks ? { graphLinks } : {}), ...(timelineMarkers ? { timelineMarkers } : {}), ...(value.graphInitialized == null ? {} : { graphInitialized: value.graphInitialized }), ...([2, 3, 4].includes(value.graphLayoutVersion) ? { graphLayoutVersion: value.graphLayoutVersion } : {}) }
+  return { schemaVersion: 1, mode, events, personStates, clueStates, ...(activeSession ? { activeSession } : {}), recaps, ...(graphLinks ? { graphLinks } : {}), ...(timelineMarkers ? { timelineMarkers } : {}), ...(value.graphInitialized == null ? {} : { graphInitialized: value.graphInitialized }), ...(value.graphEditedByDm == null ? {} : { graphEditedByDm: value.graphEditedByDm }), ...(value.graphLinksClearedByDm == null ? {} : { graphLinksClearedByDm: value.graphLinksClearedByDm }), ...([2, 3, 4].includes(value.graphLayoutVersion) ? { graphLayoutVersion: value.graphLayoutVersion } : {}) }
 }
 
 export function normalizeCampaignPrepPlan(value, { persisted = false } = {}) {

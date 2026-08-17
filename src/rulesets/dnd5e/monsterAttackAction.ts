@@ -19,6 +19,7 @@ import {
   dnd5eHelpAttackApplies,
   dnd5eRageAllyProtectionDisadvantage,
   dnd5eRageAllyMeleeAdvantage,
+  dnd5eSummonedCreatureWeaponAttack,
   dnd5eMonsterTargetEligibilityAllows,
   dnd5eMonsterAttackTraitMovementContext,
   dnd5eTranquilityWardCheck,
@@ -406,6 +407,9 @@ export function prepareDnd5eMonsterAttack(input: {
         actorCombatant.classState.monsterActionUsesByActionId,
     })
   ) return { ok: false, reason: 'invalid-action' }
+  const summonedRepeatedAttackCount = action.kind === 'weapon-attack'
+    ? Math.max(1, Math.min(10, Math.floor(actorCombatant.summonedAttacksPerAction ?? 1)))
+    : 1
   const attackIds = action.kind === 'multiattack'
     ? dnd5eMonsterMultiattackRuntimeActionIds({
         monster,
@@ -414,7 +418,7 @@ export function prepareDnd5eMonsterAttack(input: {
         randomRepeatCount: input.randomRepeatRoll,
         unresolvedRandomRepeat: 'minimum',
       }) ?? []
-    : [action.id]
+    : Array.from({ length: summonedRepeatedAttackCount }, () => action.id)
   const compositeRuntime = dnd5eMonsterActionNeedsCompositeRuntime(monster, action)
     ? prepareDnd5eMonsterCompositeRuntimePlan(monster, action)
     : undefined
@@ -531,7 +535,11 @@ export function prepareDnd5eMonsterAttack(input: {
           targetToken.id,
           resourceAction,
         )
-      ? [{ sequenceIndex: 0, actionId: action.id, targetId: targetToken.id }]
+      ? attackIds.map((actionId, sequenceIndex) => ({
+          sequenceIndex,
+          actionId,
+          targetId: targetToken.id,
+        }))
       : undefined
   if (!targetOccurrences) return { ok: false, reason: 'invalid-target' }
   let attacks = attackIds.flatMap((actionId, sequenceIndex) => {
@@ -556,10 +564,14 @@ export function prepareDnd5eMonsterAttack(input: {
           targetToken: occurrenceTarget,
           distanceFeet: occurrenceDistanceFeet,
           attack: dnd5eMonsterWeaponAttackAtDistance(
-            dnd5eMonsterEffectiveWeaponAttack(
-              definition.attack,
-              Math.max(0, actorToken.hp ?? monster.hitPoints.average),
-              Math.max(1, actorToken.maxHp ?? monster.hitPoints.average),
+            dnd5eSummonedCreatureWeaponAttack(
+              dnd5eMonsterEffectiveWeaponAttack(
+                definition.attack,
+                Math.max(0, actorToken.hp ?? monster.hitPoints.average),
+                Math.max(1, actorToken.maxHp ?? monster.hitPoints.average),
+              ),
+              actorCombatant.summonedWeaponDamageBonus,
+              actorCombatant.summonedWeaponAttackBonus,
             ),
             occurrenceDistanceFeet,
             action.kind === 'multiattack'
@@ -1095,7 +1107,7 @@ export function prepareDnd5eMonsterAfterHitMechanics(
 
 export function resolvePreparedDnd5eMonsterAttack(input: {
   prepared: PreparedDnd5eMonsterAttack
-  rolls: readonly Omit<Dnd5eMonsterActionRoll, 'targetId'>[]
+  rolls: readonly (Omit<Dnd5eMonsterActionRoll, 'targetId'> & { targetId?: string })[]
   mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   compositeSteps?: readonly Dnd5eMonsterMultiattackStepResolutionV1[]
   settleAttackCount?: number
@@ -1106,6 +1118,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
   }
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
   optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
+  damageMitigationInterrupts?: readonly import('./headlessCombatEngine').Dnd5eDamageMitigationInterruptUse[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -1114,8 +1127,9 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
   const { prepared } = input
   const weaponRolls = input.rolls.map((roll, attackIndex) => ({
     ...roll,
-    mode: dnd5ePreparedMonsterAttackMode(prepared, attackIndex),
+    mode: roll.mode ?? dnd5ePreparedMonsterAttackMode(prepared, attackIndex),
     targetId:
+      roll.targetId ??
       prepared.attacks[attackIndex]?.targetToken.id ??
       prepared.targetToken.id,
   }))
@@ -1142,6 +1156,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
         }),
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
     optionalBonusDice: input.optionalBonusDice,
+    damageMitigationInterrupts: input.damageMitigationInterrupts,
   }
   const fallPreview = input.airborneFallDamageRollsByCombatantId == null
     ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)

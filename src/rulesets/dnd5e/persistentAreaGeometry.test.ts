@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
-import { dnd5ePersistentAreaAffectsTokenVerticallyAt } from './persistentAreaGeometry'
+import {
+  dnd5ePersistentAreaAffectsTokenVerticallyAt,
+  dnd5ePersistentAreaOccupantModifiersAt,
+} from './persistentAreaGeometry'
 
 const map: BattleMap = {
   id: 'legacy-core-area-z',
@@ -79,5 +82,31 @@ describe('legacy persistent-area vertical migration', () => {
       token: token(10),
       position: { x: 5, y: 5 },
     })).toBe(false)
+  })
+
+  it('projects silence occupant rules only while the whole token is contained in the volume', () => {
+    const silence: Dnd5ePluginArea = {
+      ...legacyArea('silence'),
+      cells: [{ col: 0, row: 0 }],
+      vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 20 },
+      occupantModifiers: {
+        containment: 'fully-contained',
+        preventsVerbalComponents: true,
+        damageImmunities: ['thunder'],
+      },
+    }
+    const inside = token(0)
+    expect(dnd5ePersistentAreaOccupantModifiersAt({
+      map: { ...map, tokens: [inside], dnd5ePluginAreas: [silence] },
+      token: inside,
+      position: inside,
+    })).toMatchObject({ preventsVerbalComponents: true, damageImmunities: ['thunder'] })
+
+    const tooLarge = { ...inside, id: 'large', size: 2 }
+    expect(dnd5ePersistentAreaOccupantModifiersAt({
+      map: { ...map, tokens: [tooLarge], dnd5ePluginAreas: [silence] },
+      token: tooLarge,
+      position: tooLarge,
+    })).toMatchObject({ preventsVerbalComponents: false, damageImmunities: [] })
   })
 })

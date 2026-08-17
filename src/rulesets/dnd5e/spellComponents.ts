@@ -2,6 +2,7 @@ import type { Character } from '../../types/character'
 import type { EquipmentItem } from '../../types/equipment'
 import type { Dnd5eClassId } from './classes'
 import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
+import { dnd5ePluginBooleanStaticModifierForCharacter } from './pluginApi'
 
 export interface Dnd5eSpellComponentRequirements {
   verbal: boolean
@@ -156,9 +157,11 @@ export function dnd5eSpellComponentCheck(
     entryTemplateKey(entry.templateId) === 'holy-symbol',
   )
   const hasMaterialSubstitute = hasHeldFocus || hasHolySymbol || (hasComponentPouch && hasFreeHand)
-  const somaticHandAvailable = hasFreeHand || (
-    requirements.material && hasHeldFocus
-  )
+  const somaticHandAvailable =
+    dnd5ePluginBooleanStaticModifierForCharacter(
+      actor as Character,
+      'ignoreOccupiedHandsForSomaticComponents',
+    ) || hasFreeHand || (requirements.material && hasHeldFocus)
   return {
     verbal: !requirements.verbal
       ? 'not-required'

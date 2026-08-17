@@ -187,6 +187,180 @@ describe('legacy content Activity adapters', () => {
     }])
   })
 
+  it('preserves explicit damage types for after-damage subclass Activities', () => {
+    const ability: DeclarativeSubclassAbilityV1 = {
+      schemaVersion: 1,
+      id: 'storm-rebuke',
+      name: 'Storm Rebuke',
+      description: 'Synthetic after-damage reaction.',
+      level: 1,
+      trigger: { kind: 'after-damage-taken' },
+      cost: { economy: 'reaction' },
+      targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 5 },
+      rolls: [
+        { id: 'storm-damage', kind: 'damage', label: 'Storm damage', dice: { count: 2, sides: 8 }, damageType: 'lightning' },
+        { id: 'storm-save', kind: 'saving-throw', label: 'Dexterity save', ability: 'dex', dc: { kind: 'ability-modifier', ability: 'wis' }, onSuccess: 'half' },
+      ],
+      effects: [{ kind: 'damage', target: 'target', rollId: 'storm-damage' }],
+      automation: 'partial',
+    }
+    const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability, {
+      subclassId: 'storm-domain',
+      compatibility: { effective: 'partial', reasons: [] },
+    })
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    expect(activity.invocation).toMatchObject({ kind: 'triggered', event: 'after-damage', confirmation: 'dm-approval' })
+    expect(activity.outcomes.flatMap((outcome) => outcome.operations)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'damage', damageType: 'lightning' }),
+    ]))
+  })
+
+  it('projects conditional saving-throw modes and distinct success/failure effects', () => {
+    const ability: DeclarativeSubclassAbilityV1 = {
+      schemaVersion: 1,
+      id: 'abjure-fiend',
+      name: 'Abjure Fiend',
+      description: 'Synthetic branched save fixture.',
+      level: 3,
+      trigger: { kind: 'active-use' },
+      targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 60 },
+      rolls: [{
+        id: 'save', kind: 'saving-throw', label: 'Wisdom save', ability: 'wis',
+        dc: { kind: 'ability-modifier', ability: 'cha' },
+        rollModeByCreatureType: { creatureTypes: ['fiend', 'undead'], mode: 'disadvantage' },
+      }],
+      effects: [
+        { kind: 'activity-effect', target: 'target', effectId: 'failed', when: 'save-failure' },
+        { kind: 'activity-effect', target: 'target', effectId: 'succeeded', when: 'save-success' },
+      ],
+      activityEffects: [{
+        schemaVersion: 1, id: 'failed', name: 'Failed save',
+        duration: { kind: 'rounds', rounds: 10, expiresAt: 'target-turn-end' },
+        conditions: ['frightened'],
+        modifiers: [{ kind: 'speed', mode: 'multiply', value: { kind: 'constant', value: 0 } }],
+        breakOn: ['takes-damage'], stacking: 'refresh-duration',
+      }, {
+        schemaVersion: 1, id: 'succeeded', name: 'Successful save',
+        duration: { kind: 'rounds', rounds: 10, expiresAt: 'target-turn-end' },
+        modifiers: [{ kind: 'speed', mode: 'multiply', value: { kind: 'constant', value: 0.5 } }],
+        breakOn: ['takes-damage'], stacking: 'refresh-duration',
+      }],
+      automation: 'full',
+    }
+    const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability, { subclassId: 'test-oath' })
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    expect(activity.checks?.[0]).toMatchObject({
+      kind: 'saving-throw',
+      rollModeByCreatureType: { creatureTypes: ['fiend', 'undead'], mode: 'disadvantage' },
+    })
+    const actor: Dnd5eActivityActorSnapshot = {
+      id: 'actor', controller: 'players', level: 5, proficiencyBonus: 3,
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 16 },
+      armorClass: 16, currentHp: 30, maxHp: 30, conditions: [],
+    }
+    const undead: Dnd5eActivityActorSnapshot = {
+      ...actor, id: 'undead', controller: 'dm', creatureType: 'undead', savingThrowModifiers: { wis: 0 },
+    }
+    const undeadResult = resolveDnd5eActivity({
+      activity, actor, targets: [undead], distanceFeetByTargetId: { undead: 30 },
+      rolls: { 'save-d20:undead': { values: [18, 2] } },
+    })
+    expect(undeadResult.ok, JSON.stringify(undeadResult)).toBe(true)
+    expect(undeadResult).toMatchObject({ ok: true, proposals: [{ kind: 'apply-effect', targetId: 'undead', effectId: 'failed' }] })
+
+    const humanoid: Dnd5eActivityActorSnapshot = {
+      ...undead, id: 'humanoid', creatureType: 'humanoid',
+    }
+    expect(resolveDnd5eActivity({
+      activity, actor, targets: [humanoid], distanceFeetByTargetId: { humanoid: 30 },
+      rolls: { 'save-d20:humanoid': { values: [18] } },
+    })).toMatchObject({ ok: true, proposals: [{ kind: 'apply-effect', targetId: 'humanoid', effectId: 'succeeded' }] })
+  })
+
+  it('combines a Host-validated runtime choice with a failed-save outcome', () => {
+    const ability: DeclarativeSubclassAbilityV1 = {
+      schemaVersion: 1, id: 'fey-choice', name: 'Fey Choice', description: 'Synthetic choice fixture.', level: 1,
+      trigger: { kind: 'active-use' },
+      targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 30 },
+      choices: [{
+        id: 'condition', label: 'Condition',
+        options: [{ id: 'charm', label: 'Charm' }, { id: 'fear', label: 'Fear' }],
+      }],
+      rolls: [{ id: 'save', kind: 'saving-throw', label: 'Wisdom save', ability: 'wis', dc: { kind: 'fixed', value: 15 } }],
+      effects: [{
+        kind: 'standard-condition', target: 'target', condition: 'charmed',
+        duration: { kind: 'fixed-rounds', rounds: 1 },
+        whenChoice: { choiceId: 'condition', optionId: 'charm' },
+      }, {
+        kind: 'standard-condition', target: 'target', condition: 'frightened',
+        duration: { kind: 'fixed-rounds', rounds: 1 },
+        whenChoice: { choiceId: 'condition', optionId: 'fear' },
+      }],
+      automation: 'full',
+    }
+    const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability, { subclassId: 'test-fey' })
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    const actor: Dnd5eActivityActorSnapshot = {
+      id: 'actor', controller: 'players', level: 3, proficiencyBonus: 2,
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 16 },
+      armorClass: 14, currentHp: 20, maxHp: 20, conditions: [],
+    }
+    const target: Dnd5eActivityActorSnapshot = {
+      ...actor, id: 'target', controller: 'dm', savingThrowModifiers: { wis: 0 },
+    }
+    expect(resolveDnd5eActivity({
+      activity, actor, targets: [target], distanceFeetByTargetId: { target: 10 },
+      choices: { condition: 'fear' }, rolls: { 'save-d20:target': { values: [4] } },
+    })).toMatchObject({
+      ok: true,
+      proposals: [{ kind: 'apply-standard-condition', targetId: 'target', condition: 'frightened' }],
+    })
+    expect(resolveDnd5eActivity({
+      activity, actor, targets: [target], distanceFeetByTargetId: { target: 10 },
+      rolls: { 'save-d20:target': { values: [4] } },
+    })).toMatchObject({ ok: false, reason: 'requirement-failed' })
+  })
+
+  it('uses the target-favorable ability for both an initial and repeating save', () => {
+    const ability: DeclarativeSubclassAbilityV1 = {
+      schemaVersion: 1, id: 'flexible-save', name: 'Flexible Save', description: 'Synthetic fixture.', level: 1,
+      trigger: { kind: 'active-use' }, targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 10 },
+      rolls: [{
+        id: 'save', kind: 'saving-throw', label: 'Strength or Dexterity', ability: 'str',
+        abilityOptions: ['str', 'dex'], dc: { kind: 'fixed', value: 15 },
+      }],
+      effects: [{
+        kind: 'standard-condition', target: 'target', condition: 'restrained',
+        duration: {
+          kind: 'fixed-rounds', rounds: 10,
+          repeatSave: { ability: 'str', abilityOptions: ['str', 'dex'], dc: { kind: 'fixed', value: 15 } },
+        },
+      }],
+      automation: 'full',
+    }
+    const activity = dnd5eActivityFromDeclarativeSubclassAbility(ability, { subclassId: 'flexible-save-test' })
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    const actor: Dnd5eActivityActorSnapshot = {
+      id: 'actor', controller: 'players', level: 5, proficiencyBonus: 3,
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 16 },
+      armorClass: 16, currentHp: 30, maxHp: 30, conditions: [],
+    }
+    const target: Dnd5eActivityActorSnapshot = {
+      ...actor, id: 'target', controller: 'dm', savingThrowModifiers: { str: -1, dex: 5 },
+    }
+    expect(resolveDnd5eActivity({
+      activity, actor, targets: [target], distanceFeetByTargetId: { target: 5 },
+      rolls: { 'save-d20:target': { values: [9] } },
+    })).toMatchObject({
+      ok: true,
+      checks: [{ ability: 'dex', modifier: 5, total: 14, success: false }],
+      proposals: [{
+        kind: 'apply-standard-condition', condition: 'restrained',
+        duration: { kind: 'save-ends', ability: 'dex', dc: 15 },
+      }],
+    })
+  })
+
   it('binds audited subclass mechanics to their native authority without a fake DM operation', () => {
     const ability: DeclarativeSubclassAbilityV1 = {
       schemaVersion: 1,

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as sharedServerCore from '../../scripts/shared-server-core.mjs'
 import { parseCombatPresentationEvent } from './combatPresentation'
+import { SCENE_WEATHER_KINDS } from './sceneWeather'
 import {
   buildDnd5eCustomMonster,
   createDnd5eCustomMonsterDraft,
@@ -39,6 +40,7 @@ import {
   extractSecret,
   migrateLegacyApCombatLogText,
   mergePlayerCharactersStateForAuthority,
+  mutateRoomPlayerCharacterAssignment,
   normalizeDedicatedDnd5eSharedState,
   normalizeLobbyRoomCode,
   normalizeAccountRecoveryCode,
@@ -453,6 +455,10 @@ describe('member-specific shared state projections', () => {
         name: 'Library',
         description: '',
         environmentLabel: '',
+        weather: {
+          kind: 'none', intensity: 0.6, windAngleDegrees: 10, speed: 1,
+          soundEnabled: true, soundVolume: 0.55,
+        },
         backgroundCue: 'none',
         backgroundAudioLoop: false,
         backgroundAudioVolume: 0,
@@ -624,6 +630,9 @@ describe('authoritative campaign time', () => {
       operation: 'long-rest',
       beneficiaryCharacterIds: ['hero-b'],
       ignoreLongRestCooldown: true,
+      restFeatureD20Rolls: [{
+        characterId: 'hero-b', featureId: 'local.test:diviner.portent', values: [4, 17],
+      }],
     }, 20, host, context)
     expect(longRest).toMatchObject({
       ok: true,
@@ -633,9 +642,52 @@ describe('authoritative campaign time', () => {
           kind: 'long-rest',
           beneficiaryCharacterIds: ['hero-b'],
           ignoreLongRestCooldown: true,
+          restFeatureD20Rolls: [{
+            characterId: 'hero-b', featureId: 'local.test:diviner.portent', values: [4, 17],
+          }],
         }],
       },
     })
+    expect(mutateCampaignTimeState(shortRest.next, {
+      operation: 'long-rest', beneficiaryCharacterIds: ['hero-b'],
+      restFeatureD20Rolls: [{
+        characterId: 'hero-b', featureId: 'local.test:diviner.portent', values: [0, 21],
+      }],
+    }, 21, host, context)).toMatchObject({
+      ok: false, error: 'invalid-rest-feature-d20-rolls',
+    })
+  })
+
+  it('projects active cave ambience without exposing DM-only scene automation', () => {
+    const projected = projectSceneOrchestrationForPlayer({
+      schemaVersion: 1,
+      scenes: [{
+        id: 'cave-scene',
+        mapId: 'cave-map',
+        name: 'Cave',
+        weather: { kind: 'cave', intensity: 0.85, windAngleDegrees: -20, speed: 1.4 },
+        interactionPoints: [],
+        triggers: [{ id: 'secret-trigger', actions: [{ kind: 'encounter', entries: [{ monsterId: 'dragon' }] }] }],
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+      runtime: { paused: true, pendingRuns: [{ id: 'secret-run' }], receipts: ['secret'], history: [] },
+      updatedAt: 9,
+    })
+    expect(projected.scenes).toHaveLength(1)
+    expect(projected.scenes[0]).toMatchObject({
+      id: 'cave-scene',
+      mapId: 'cave-map',
+      weather: {
+        kind: 'cave', intensity: 0.85, windAngleDegrees: -20, speed: 1.4,
+        soundEnabled: true, soundVolume: 0.55,
+      },
+      interactionPoints: [],
+      triggers: [],
+    })
+    expect(JSON.stringify(projected)).not.toContain('secret-trigger')
+    expect(JSON.stringify(projected)).not.toContain('secret-run')
+    expect(JSON.stringify(projected)).not.toContain('dragon')
   })
 
   it('sets either a campaign day or Gregorian date while keeping the rules clock monotonic', () => {
@@ -916,6 +968,39 @@ describe('room lobby allocation', () => {
     expect(roomPlayerPresence(player, now + 30_000)).toBe('temporarily-offline')
     expect(roomPlayerPresence({ ...player, leftAt: now + 1 }, now + 2)).toBe('left')
     expect(roomPlayerPresence({ ...player, removedAt: now + 1 }, now + 2)).toBe('removed')
+  })
+
+  it('stores a revisioned DM character assignment and preserves it across player resume', () => {
+    const allocated = assignRoomPlayer(baseRoom(), {
+      memberId: 'assigned-member', clientId: 'assigned-client', displayName: '玩家甲',
+    }, now)
+    if (!allocated.ok) throw new Error('expected player allocation')
+    const assigned = mutateRoomPlayerCharacterAssignment(allocated.next, {
+      targetMemberId: 'assigned-member', characterId: 'hero-1', characterName: '霍霍菲尔',
+    }, now + 1)
+    expect(assigned).toMatchObject({
+      ok: true,
+      assignment: { revision: 1, enforced: true, characterId: 'hero-1', characterName: '霍霍菲尔' },
+    })
+    if (!assigned.ok || !assigned.next) throw new Error('expected character assignment')
+    const resumed = assignRoomPlayer(assigned.next, {
+      memberId: 'assigned-member', clientId: 'assigned-client', displayName: '玩家甲',
+    }, now + 2)
+    expect(resumed).toMatchObject({
+      ok: true,
+      member: {
+        dmCharacterAssignmentEnforced: true,
+        dmAssignedCharacterId: 'hero-1',
+        characterAssignmentRevision: 1,
+      },
+    })
+    if (!resumed.ok) throw new Error('expected resumed assignment')
+    expect(mutateRoomPlayerCharacterAssignment(resumed.next, {
+      targetMemberId: 'assigned-member', characterId: null,
+    }, now + 3)).toMatchObject({
+      ok: true,
+      assignment: { revision: 2, enforced: false, characterId: null },
+    })
   })
 
   it('normalizes readable account recovery codes without exposing ambiguity characters', () => {
@@ -2525,9 +2610,16 @@ describe('P0 shared state boundary', () => {
   it('validates scene declarations at the server boundary', () => {
     const state = {
       schemaVersion: 1,
+      globalAudio: { assetId: 'global-track', loop: true, volume: 0.6, autoPlay: true },
       scenes: [{
         id: 'scene', mapId: 'map', name: 'Gate', description: '', environmentLabel: 'ruins',
-        backgroundCue: 'mystery', boundHandoutIds: [], boundJournalEntryIds: [], createdAt: 1, updatedAt: 1,
+        weather: {
+          kind: 'rain', intensity: 0.6, windAngleDegrees: 10, speed: 1,
+          soundEnabled: true, soundVolume: 0.55,
+        },
+        backgroundCue: 'mystery', backgroundAudioMode: 'override', backgroundAudioId: 'map-track',
+        backgroundAudioLoop: true, backgroundAudioVolume: 0.7, backgroundAudioAutoPlay: true,
+        boundHandoutIds: [], boundJournalEntryIds: [], createdAt: 1, updatedAt: 1,
         triggers: [{
           id: 'zone', name: 'Entry', enabled: true,
           region: { kind: 'circle', x: 10, y: 10, radius: 20 },
@@ -2539,6 +2631,20 @@ describe('P0 shared state boundary', () => {
       updatedAt: 1,
     }
     expect(validateSharedStateShape('scene-orchestration', state)).toEqual({ ok: true })
+    for (const kind of SCENE_WEATHER_KINDS) {
+      expect(validateSharedStateShape('scene-orchestration', {
+        ...state,
+        scenes: [{ ...state.scenes[0], weather: { ...state.scenes[0].weather, kind } }],
+      }), `server weather allowlist should include ${kind}`).toEqual({ ok: true })
+    }
+    expect(validateSharedStateShape('scene-orchestration', {
+      ...state,
+      globalAudio: { ...state.globalAudio, volume: 2 },
+    })).toMatchObject({ ok: false, reason: 'invalid-scene-global-audio' })
+    expect(validateSharedStateShape('scene-orchestration', {
+      ...state,
+      scenes: [{ ...state.scenes[0], weather: { ...state.scenes[0].weather, intensity: 2 } }],
+    })).toMatchObject({ ok: false, reason: 'invalid-scene' })
     expect(validateSharedStateShape('scene-orchestration', {
       ...state,
       scenes: [{ ...state.scenes[0], triggers: [{ ...state.scenes[0].triggers[0], actions: [{ id: 'action', kind: 'network-request', enabled: true }] }] }],
@@ -2924,7 +3030,9 @@ describe('combat interrupt atomic mutation', () => {
         id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
         status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: {
           originalValue: 7,
-          eligibleModifiers: [{ characterId: 'wizard', featureId: 'portent', featureLabel: '预兆' }],
+          eligibleModifiers: [{
+            characterId: 'wizard', featureId: 'portent', featureLabel: '预兆', replacementValues: [17],
+          }],
         }, createdAt: 1, updatedAt: 1,
       }],
     }
@@ -2938,6 +3046,14 @@ describe('combat interrupt atomic mutation', () => {
     expect((result.next.interrupts[0] as { contributions?: unknown[] }).contributions).toEqual([
       expect.objectContaining({ characterId: 'wizard', replacementValue: 17 }),
     ])
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+        featureId: 'portent', featureLabel: '预兆', dieIndex: 0, replacementValue: 18, createdAt: 151,
+      },
+    }, 201, 'player', ['wizard'])).toMatchObject({
+      ok: false, status: 403, error: 'ineligible-roll-replacement',
+    })
     expect(mutateCombatInterruptQueue({
       ...result.next,
       interrupts: result.next.interrupts.map((entry) => ({ ...entry, status: 'done' })),
@@ -3035,7 +3151,10 @@ describe('combat interrupt atomic mutation', () => {
 
   it('validates scoped custom-monster Token marker grants at the server boundary', () => {
     const draft = createDnd5eCustomMonsterDraft()
-    draft.tokenStatusMarkerGrants = [{ statusId: 'fire-averse', target: 'self' }]
+    draft.tokenStatusMarkerGrants = [
+      { statusId: 'fire-averse', target: 'self', application: 'marker' },
+      { statusId: 'marked', target: 'other', application: 'active-effect' },
+    ]
     const monster = buildDnd5eCustomMonster(draft)
     expect(validateSharedStateShape('custom-monsters', {
       schemaVersion: 1,
@@ -3046,6 +3165,13 @@ describe('combat interrupt atomic mutation', () => {
       monsters: [{
         ...monster,
         tokenStatusMarkerGrants: [{ statusId: 'fire-averse', target: 'everyone' }],
+      }],
+    })).toMatchObject({ ok: false, reason: 'invalid-custom-monster' })
+    expect(validateSharedStateShape('custom-monsters', {
+      schemaVersion: 1,
+      monsters: [{
+        ...monster,
+        tokenStatusMarkerGrants: [{ statusId: 'marked', target: 'other', application: 'script' }],
       }],
     })).toMatchObject({ ok: false, reason: 'invalid-custom-monster' })
   })
@@ -4057,5 +4183,189 @@ describe('enforceImageQuota — AC4 配额', () => {
     await writeFile(path.join(dir, 'only'), Buffer.from('x'))
     await writeFile(path.join(dir, 'only.json'), '{}')
     expect(await enforceImageQuota(dir)).toEqual([])
+  })
+})
+
+describe('server-authoritative mobile character commands', () => {
+  const member = { memberId: 'member-mobile', accountId: 'account-mobile', role: 'player' }
+  const levelOne = () => ({
+    id: 'mobile-hero', rulesetId: 'dnd5e-2014-srd-5.1', roomId: 'ROOM01',
+    roomMemberId: member.memberId, ownerAccountId: member.accountId,
+    name: '移动端战士', charClass: '战士', level: 1, dnd5eClassLevels: { fighter: 1 },
+    abilities: { str: 15, dex: 14, con: 13, int: 12, wis: 10, cha: 8 },
+    dnd5eAbilityGeneration: {
+      method: 'standard-array',
+      baseScores: { str: 15, dex: 14, con: 13, int: 12, wis: 10, cha: 8 },
+      racialBonuses: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+    },
+    skills: ['athletics'], savingThrows: ['str', 'con'],
+    dnd5eClassChoices: { classes: { fighter: { selections: {} } } },
+    hitPointMaximumMode: 'fixed', maxHp: 11, currentHp: 11, tempHp: 0,
+    hitPointDice: [{ sides: 10, current: 1, max: 1 }],
+    conditions: [], concentrating: false, deathSaveSuccesses: 0, deathSaveFailures: 0,
+  })
+  const command = (type: string, extra: Record<string, unknown> = {}) => ({
+    commandId: `command-${type}`, type, ...extra,
+  })
+
+  it('creates once and rejects forged final ability values', () => {
+    const created = sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [] }, command('create', { character: levelOne() }), member,
+      { roomId: 'ROOM01', now: 100 },
+    )
+    expect(created).toMatchObject({ ok: true, changed: true })
+    expect(created.next.characters[0]).toMatchObject({ id: 'mobile-hero', maxHp: 11, ownerAccountId: member.accountId })
+    expect(sharedServerCore.applyPlayerCharacterCommand(created.next, command('create', { character: levelOne() }), member))
+      .toMatchObject({ ok: true, changed: false })
+
+    const forged = levelOne()
+    forged.abilities.str = 22
+    expect(sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [] }, { ...command('create'), commandId: 'forged-create', character: forged }, member,
+    )).toMatchObject({ ok: false, status: 422, error: 'invalid-ability-generation' })
+  })
+
+  it('issues 4d6 rolls on the Host and consumes the receipt only once', () => {
+    const issued = sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [] }, command('roll-abilities'), member,
+      { now: 90, rollDie: () => 4 },
+    )
+    expect(issued).toMatchObject({ ok: true, result: { commandId: 'command-roll-abilities' } })
+    expect(issued.result.rolls).toHaveLength(6)
+    expect(issued.result.rolls[0]).toMatchObject({ dice: [4, 4, 4, 4], discardedIndex: 0, total: 12 })
+    const rolled = {
+      ...levelOne(),
+      id: 'mobile-rolled-hero',
+      abilities: { str: 12, dex: 12, con: 12, int: 12, wis: 12, cha: 12 },
+      dnd5eAbilityGeneration: {
+        method: 'roll-4d6',
+        baseScores: { str: 12, dex: 12, con: 12, int: 12, wis: 12, cha: 12 },
+        racialBonuses: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+        rolls: ['str', 'dex', 'con', 'int', 'wis', 'cha'].map((ability, index) => ({
+          ...issued.result.rolls[index], ability,
+        })),
+      },
+    }
+    const created = sharedServerCore.applyPlayerCharacterCommand(
+      issued.next,
+      { ...command('create', { character: rolled, abilityRollCommandId: issued.result.commandId }), commandId: 'create-rolled' },
+      member,
+      { roomId: 'ROOM01', now: 100 },
+    )
+    expect(created).toMatchObject({ ok: true, changed: true })
+    expect(sharedServerCore.applyPlayerCharacterCommand(
+      created.next,
+      { ...command('create', { character: { ...rolled, id: 'mobile-rolled-hero-2' }, abilityRollCommandId: issued.result.commandId }), commandId: 'reuse-rolls' },
+      member,
+    )).toMatchObject({ ok: false, status: 422, error: 'host-ability-roll-required' })
+  })
+
+  it('rolls hit dice on the Host and applies exactly one level advancement', () => {
+    const base = { ...levelOne(), currentHp: 2 }
+    const healed = sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [base], selectedId: base.id },
+      command('spend-hit-die', { characterId: base.id, poolIndex: 0 }), member,
+      { now: 200, rollDie: () => 7 },
+    )
+    expect(healed).toMatchObject({ ok: true, result: { roll: 7, healing: 8, currentHp: 10 } })
+    expect(healed.next.characters[0].hitPointDice[0].current).toBe(0)
+
+    const snapshot = (character: ReturnType<typeof levelOne> & Record<string, unknown>) => ({
+      level: character.level, dnd5eClassLevels: character.dnd5eClassLevels,
+      abilities: character.abilities, skills: character.skills,
+      dnd5eClassChoices: character.dnd5eClassChoices,
+      hitPointMaximumMode: character.hitPointMaximumMode, maxHp: character.maxHp,
+    })
+    const upgraded = { ...levelOne(), level: 2, dnd5eClassLevels: { fighter: 2 }, maxHp: 18, currentHp: 18 }
+    const receipt = {
+      schemaVersion: 1, id: 'mobile-advancement-1', fromLevel: 1, toLevel: 2,
+      classId: 'fighter', fromClassLevel: 1, toClassLevel: 2, completedAt: 300,
+      completedBy: 'player',
+      decision: { schemaVersion: 1, classId: 'fighter', levelsGained: 1, hitPointMethod: 'fixed', hitPointRolls: [], asiChoices: [] },
+      grantedFeatureIds: ['action-surge-1'], before: snapshot(levelOne()), after: snapshot(upgraded),
+    }
+    const advanced = sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [levelOne()], selectedId: base.id },
+      command('level-up', { characterId: base.id, character: { ...upgraded, dnd5eLevelAdvancements: [receipt] } }),
+      member, { now: 300 },
+    )
+    expect(advanced).toMatchObject({ ok: true, changed: true })
+    expect(advanced.next.characters[0]).toMatchObject({ level: 2, dnd5eClassLevels: { fighter: 2 }, maxHp: 18 })
+
+    const forgedHitPoints = {
+      ...upgraded,
+      maxHp: 21,
+      currentHp: 21,
+      dnd5eLevelAdvancements: [{
+        ...receipt,
+        id: 'mobile-advancement-forged-hp',
+        after: snapshot({ ...upgraded, maxHp: 21, currentHp: 21 }),
+      }],
+    }
+    expect(sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [levelOne()], selectedId: base.id },
+      { ...command('level-up', { characterId: base.id, character: forgedHitPoints }), commandId: 'forged-level-hit-points' },
+      member, { now: 301 },
+    )).toMatchObject({ ok: false, status: 422, error: 'invalid-hit-point-advancement' })
+  })
+
+  it('requires a Host-issued roll for rolled level hit points', () => {
+    const base = levelOne()
+    const issued = sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [base], selectedId: base.id },
+      { ...command('roll-level-hit-points', { characterId: base.id, classId: 'fighter' }), commandId: 'host-level-roll' },
+      member,
+      { now: 250, rollDie: () => 6 },
+    )
+    expect(issued).toMatchObject({ ok: true, result: { commandId: 'host-level-roll', roll: 6, hitDie: 10 } })
+    const upgraded = { ...base, level: 2, dnd5eClassLevels: { fighter: 2 }, maxHp: 18, currentHp: 18 }
+    const snapshot = (character: Record<string, any>) => ({
+      level: character.level, dnd5eClassLevels: character.dnd5eClassLevels,
+      abilities: character.abilities, skills: character.skills,
+      dnd5eClassChoices: character.dnd5eClassChoices,
+      hitPointMaximumMode: character.hitPointMaximumMode, maxHp: character.maxHp,
+    })
+    const receipt = {
+      schemaVersion: 1, id: 'mobile-rolled-advancement', fromLevel: 1, toLevel: 2,
+      classId: 'fighter', fromClassLevel: 1, toClassLevel: 2, completedAt: 300, completedBy: 'player',
+      decision: { schemaVersion: 1, classId: 'fighter', levelsGained: 1, hitPointMethod: 'rolled', hitPointRolls: [6], asiChoices: [] },
+      grantedFeatureIds: ['action-surge-1'], before: snapshot(base), after: snapshot(upgraded),
+    }
+    const proposed = { ...upgraded, dnd5eLevelAdvancements: [receipt] }
+    expect(sharedServerCore.applyPlayerCharacterCommand(
+      issued.next,
+      { ...command('level-up', { characterId: base.id, character: proposed, hitPointRollCommandId: 'host-level-roll' }), commandId: 'rolled-level-up' },
+      member,
+      { now: 300 },
+    )).toMatchObject({ ok: true, changed: true })
+    expect(sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [base], selectedId: base.id },
+      { ...command('level-up', { characterId: base.id, character: proposed }), commandId: 'missing-level-roll' },
+      member,
+    )).toMatchObject({ ok: false, status: 422, error: 'host-hit-point-roll-required' })
+  })
+})
+
+describe('mobile Expo push transport', () => {
+  it('filters invalid tokens and never exposes credentials in the request', async () => {
+    let request: { url: string; init?: RequestInit } | null = null
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      request = { url: String(url), init }
+      return new Response(JSON.stringify({ data: [{ status: 'ok', id: 'ticket-1' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const result = await sharedServerCore.sendExpoPushMessages([
+      { to: 'not-a-push-token', title: 'ignored' },
+      { to: 'ExpoPushToken[abcdefghijklmnop]', title: '战斗决断', body: '请返回房间' },
+    ], fetchImpl)
+    const capturedRequest = request as unknown as { url: string; init?: RequestInit }
+    expect(result).toMatchObject({ sent: 1, tickets: [{ status: 'ok', id: 'ticket-1' }] })
+    expect(capturedRequest.url).toBe('https://exp.host/--/api/v2/push/send')
+    expect(capturedRequest.init?.headers).not.toHaveProperty('Authorization')
+    expect(JSON.parse(String(capturedRequest.init?.body))).toEqual([
+      { to: 'ExpoPushToken[abcdefghijklmnop]', title: '战斗决断', body: '请返回房间' },
+    ])
   })
 })

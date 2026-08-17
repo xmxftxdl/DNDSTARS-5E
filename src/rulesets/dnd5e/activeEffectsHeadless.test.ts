@@ -152,6 +152,24 @@ describe('ActiveEffectInstance Headless 生命周期', () => {
       .toEqual(expect.arrayContaining(['makes-attack', 'targeted-by-attack', 'hit-by-attack', 'takes-damage']))
   })
 
+  it('removes pre-existing effects when their actor spends an action', () => {
+    const untilAction = createDnd5eConditionEffect({
+      condition: 'invisible', targetId: 'actor', source: { kind: 'feature' },
+      duration: { type: 'permanent' }, breakOn: ['spends-action'],
+    })
+    const state = startDnd5eHeadlessCombat('action-economy-break', [
+      combatant('actor', 20, { classState: { activeEffects: [untilAction] } }),
+      combatant('target', 10),
+    ])
+    const dashed = resolveDnd5eHeadlessAction(state, { type: 'dash', actorId: 'actor' })
+    expect(dashed.ok).toBe(true)
+    if (!dashed.ok) return
+    expect(dashed.state.combatants.actor.classState.activeEffects).toBeUndefined()
+    expect(dashed.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'actor', reason: 'spends-action',
+    }))
+  })
+
   it('removes a casting-sensitive invisibility effect while preserving advantage for the first spell attack', () => {
     const invisibility = createDnd5eConditionEffect({
       condition: 'invisible', targetId: 'caster', source: { kind: 'spell', rulesId: 'invisibility' },

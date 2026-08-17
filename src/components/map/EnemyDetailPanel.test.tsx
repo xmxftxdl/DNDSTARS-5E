@@ -88,6 +88,48 @@ describe('EnemyDetailPanel monster thumbnail', () => {
     expect(markup).not.toContain('DM 裁定')
   })
 
+  it('separates declared monster runtime states from presentation-only Token markers', () => {
+    const fleshGolemMarkup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken({
+          id: 'flesh-golem-token',
+          label: '血肉魔像',
+          poolId: 'srd-5.1:flesh-golem',
+          hp: 93,
+          maxHp: 93,
+        })}
+        tokens={[
+          monsterToken({ id: 'flesh-golem-token', poolId: 'srd-5.1:flesh-golem' }),
+        ]}
+        onClose={() => {}}
+        isDM
+        mapId="map-1"
+        updateToken={() => {}}
+        canManageConditions
+        onConditionsChange={() => {}}
+        onMonsterRuntimeStatusChange={() => {}}
+      />,
+    )
+    const dragonMarkup = renderToStaticMarkup(
+      <EnemyDetailPanel
+        token={monsterToken({ id: 'dragon', poolId: 'srd-5.1:red-dragon-wyrmling' })}
+        tokens={[monsterToken({ id: 'dragon', poolId: 'srd-5.1:red-dragon-wyrmling' })]}
+        onClose={() => {}}
+        isDM
+        mapId="map-1"
+        updateToken={() => {}}
+        canManageConditions
+        onConditionsChange={() => {}}
+      />,
+    )
+
+    expect(fleshGolemMarkup).toContain('怪物专属状态')
+    expect(fleshGolemMarkup).toContain('dnd5e-runtime-status-toggle-monster-berserk')
+    expect(fleshGolemMarkup).toContain('dnd5e-runtime-status-toggle-monster-damage-aversion')
+    expect(fleshGolemMarkup).toContain('仅用于地图显示')
+    expect(dragonMarkup).not.toContain('怪物专属状态')
+  })
+
   it('uses the bundled monster Token portrait instead of the legacy emoji', () => {
     const markup = renderToStaticMarkup(
       <EnemyDetailPanel token={monsterToken()} onClose={() => {}} />,

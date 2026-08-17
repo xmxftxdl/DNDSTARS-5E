@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Crown, FileUp, Map as MapIcon, Upload, User } from 'lucide-react'
+import { Crown, Map as MapIcon, Upload, User } from 'lucide-react'
 import EmptyState from '../../components/EmptyState'
 import type { Mode } from '../../lib/sharedCombatTypes'
 
@@ -79,7 +79,6 @@ export function MapsEmptyMapPanel(props: {
   modeToggle?: ReactNode
   isDm: boolean
   onUpload: () => void
-  onImportUvtt: () => void
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -89,8 +88,8 @@ export function MapsEmptyMapPanel(props: {
           <EmptyState
             icon={MapIcon}
             title="还没有地图"
-            description="上传一张图片作为战斗地图，之后可以叠加网格、放置 token、开始战斗。"
-            hint="支持 PNG / JPG · 图片本地存储，刷新不丢失"
+            description="上传地图图片或 UVTT 地图包；UVTT 会自动恢复底图、网格、墙体、门和光源。"
+            hint="支持 PNG / JPG / WebP / UVTT / DD2VTT · 文件本地存储，刷新不丢失"
             action={props.isDm ? (
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
@@ -99,15 +98,7 @@ export function MapsEmptyMapPanel(props: {
                   className="flex items-center gap-2 rounded-xl bg-arcane-500/20 px-4 py-2 text-sm font-semibold text-arcane-200 transition-colors hover:bg-arcane-500/30"
                 >
                   <Upload className="h-4 w-4" />
-                  上传地图图片
-                </button>
-                <button
-                  type="button"
-                  onClick={props.onImportUvtt}
-                  className="flex items-center gap-2 rounded-xl bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/30"
-                >
-                  <FileUp className="h-4 w-4" />
-                  导入 UVTT
+                  选择地图 / UVTT
                 </button>
               </div>
             ) : undefined}

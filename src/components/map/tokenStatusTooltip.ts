@@ -39,6 +39,7 @@ export const MAP_SPELL_STATUS_IDS = [
   'blindness-deafness',
   'monster-damage-aversion',
   'monster-berserk',
+  'monster-regeneration-suppressed',
 ] as const
 
 export type MapSpellStatusId = typeof MAP_SPELL_STATUS_IDS[number]
@@ -78,6 +79,10 @@ const CUSTOM_SPELL_STATUS_TOOLTIPS: Partial<Record<MapSpellStatusId, TokenStatus
   'monster-berserk': {
     title: '狂暴',
     description: '该怪物已进入狂暴状态。其回合中会按狂暴规则选择并攻击最近的可见生物；DM 可以在怪物状态面板中手动解除。',
+  },
+  'monster-regeneration-suppressed': {
+    title: '再生受抑',
+    description: '该怪物受到其再生特质指定的克制伤害；下个回合开始时不会恢复生命值，随后此状态结束。',
   },
 }
 

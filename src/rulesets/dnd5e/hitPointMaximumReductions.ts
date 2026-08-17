@@ -8,6 +8,12 @@ export interface Dnd5eHitPointMaximumReductionEntry {
   id: string
   amount: number
   recovery: Dnd5eHitPointMaximumReductionRecovery
+  /**
+   * Optional duration for reductions that end naturally. One combat round is
+   * six seconds, so one minute of campaign time advances this value by ten.
+   * Recovery magic may still remove the entry before the duration expires.
+   */
+  remainingRounds?: number
   sourceActorId?: string
   sourceActionId?: string
   damageType?: string
@@ -47,10 +53,17 @@ function normalizeEntry(
       raw.recovery !== 'greater-restoration-or-other-magic'
     )
   ) return undefined
+  const remainingRounds = raw.remainingRounds == null
+    ? undefined
+    : nonNegativeInteger(raw.remainingRounds)
+  if (raw.remainingRounds != null && (remainingRounds == null || remainingRounds < 1)) {
+    return undefined
+  }
   return {
     id: raw.id,
     amount,
     recovery: raw.recovery,
+    ...(remainingRounds == null ? {} : { remainingRounds }),
     sourceActorId:
       typeof raw.sourceActorId === 'string' && raw.sourceActorId.length <= 256
         ? raw.sourceActorId
@@ -171,6 +184,48 @@ export function recoverDnd5eHitPointMaximumReductions(
     .reduce((total, entry) => total + entry.amount, 0)
   const nextLedger = retained.length > 0
     ? { ...ledger, entries: retained.map((entry) => ({ ...entry })) }
+    : undefined
+  return {
+    ledger: nextLedger,
+    maximum: dnd5eEffectiveHitPointMaximum(ledger.baseMaximum, nextLedger),
+    recoveredAmount,
+  }
+}
+
+/**
+ * Advances only naturally timed reductions. The returned effective maximum is
+ * present whenever a valid ledger was supplied, including when every timed
+ * entry expired during this step.
+ */
+export function advanceDnd5eHitPointMaximumReductionDurations(
+  ledger: Dnd5eHitPointMaximumReductionLedger | undefined,
+  elapsedRounds: number,
+): {
+  ledger: Dnd5eHitPointMaximumReductionLedger | undefined
+  maximum: number | undefined
+  recoveredAmount: number
+} {
+  if (!ledger) return { ledger: undefined, maximum: undefined, recoveredAmount: 0 }
+  const rounds = nonNegativeInteger(elapsedRounds)
+  if (rounds == null || rounds < 1) {
+    return {
+      ledger: { ...ledger, entries: ledger.entries.map((entry) => ({ ...entry })) },
+      maximum: dnd5eEffectiveHitPointMaximum(ledger.baseMaximum, ledger),
+      recoveredAmount: 0,
+    }
+  }
+  let recoveredAmount = 0
+  const retained = ledger.entries.flatMap((entry) => {
+    if (entry.remainingRounds == null) return [{ ...entry }]
+    const remainingRounds = Math.max(0, entry.remainingRounds - rounds)
+    if (remainingRounds < 1) {
+      recoveredAmount += entry.amount
+      return []
+    }
+    return [{ ...entry, remainingRounds }]
+  })
+  const nextLedger = retained.length > 0
+    ? { ...ledger, entries: retained }
     : undefined
   return {
     ledger: nextLedger,

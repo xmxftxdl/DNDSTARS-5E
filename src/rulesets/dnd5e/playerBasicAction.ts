@@ -15,7 +15,7 @@ import {
   type Dnd5eUnsupportedAirborneFallPreview,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eAttacksPerAttackAction } from './classes'
+import { dnd5eEffectiveAttacksPerAttackAction } from './pluginApi'
 import { dnd5eEscapableGrapples } from './activeEffects'
 import {
   cellKey,
@@ -29,6 +29,7 @@ import {
   mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
 } from '../../lib/mapGeometry'
+import { dnd5eActivityBasicActionGrantMatchesV1 } from './activities/dnd5eActivityBasicActionGrant'
 
 export type Dnd5eBasicActionRejectReason =
   | 'invalid-action'
@@ -57,9 +58,16 @@ export interface PreparedDnd5eBasicAction {
   escapeEffectId?: string
   targetDefense?: 'athletics' | 'acrobatics'
   pushTo?: { x: number; y: number }
+  pushDistanceFeet?: number
+  activityBasicActionGrantId?: string
 }
 
-function planDnd5eShovePushDestination(map: BattleMap, actorTokenId: string, targetTokenId: string) {
+function planDnd5eShovePushDestination(
+  map: BattleMap,
+  actorTokenId: string,
+  targetTokenId: string,
+  distanceFeet = 5,
+) {
   const actor = map.tokens.find((token) => token.id === actorTokenId)
   const target = map.tokens.find((token) => token.id === targetTokenId)
   if (!actor || !target) return undefined
@@ -68,7 +76,8 @@ function planDnd5eShovePushDestination(map: BattleMap, actorTokenId: string, tar
   const dc = Math.sign(targetCell.col - actorCell.col)
   const dr = Math.sign(targetCell.row - actorCell.row)
   if (dc === 0 && dr === 0) return undefined
-  const destinationCell = { col: targetCell.col + dc, row: targetCell.row + dr }
+  const cellCount = Math.max(1, Math.floor(distanceFeet / 5))
+  const destinationCell = { col: targetCell.col + dc * cellCount, row: targetCell.row + dr * cellCount }
   const { cols, rows } = mapCellExtent(map)
   const to = tokenCenterForAnchorCell(destinationCell, target, map)
   const footprint = tokenOccupiedCellsAt(target, map, to)
@@ -77,11 +86,21 @@ function planDnd5eShovePushDestination(map: BattleMap, actorTokenId: string, tar
     .flatMap((token) => tokenOccupiedCellsAt(token, map, token))
     .map(cellKey))
   const geometry = mapGeometryRuntimeForMap(map.id)
+  const pathBlocked = Array.from({ length: cellCount }, (_, index) => ({
+    col: targetCell.col + dc * (index + 1),
+    row: targetCell.row + dr * (index + 1),
+  })).some((cell) => {
+    const step = tokenCenterForAnchorCell(cell, target, map)
+    return tokenOccupiedCellsAt(target, map, step).some((occupiedCell) => occupied.has(cellKey(occupiedCell))) ||
+      mapGeometryMovementBlocked({ geometry, map, token: target, to: step }).blocked ||
+      mapGeometryPlacementBlocked({ geometry, map, token: target, at: step }).blocked
+  })
   if (
     footprint.some((cell) => cell.col < 0 || cell.row < 0 || cell.col >= cols || cell.row >= rows) ||
     footprint.some((cell) => occupied.has(cellKey(cell))) ||
     mapGeometryMovementBlocked({ geometry, map, token: target, to }).blocked ||
-    mapGeometryPlacementBlocked({ geometry, map, token: target, at: to }).blocked
+    mapGeometryPlacementBlocked({ geometry, map, token: target, at: to }).blocked ||
+    pathBlocked
   ) return undefined
   return to
 }
@@ -163,11 +182,27 @@ export function prepareDnd5ePlayerBasicAction(input: {
   ) {
     return { ok: false, reason: 'invalid-action' }
   }
-  const replacesAttack = payload.kind === 'grapple' || payload.kind === 'shove'
+  const requestedBasicActionGrantId =
+    (payload.kind === 'grapple' || payload.kind === 'shove')
+      ? payload.activityBasicActionGrantId
+      : undefined
+  const basicActionGrant = requestedBasicActionGrantId
+    ? actor.dnd5eCombatState?.activityBasicActionGrants?.[requestedBasicActionGrantId]
+    : undefined
+  const basicActionGranted = requestedBasicActionGrantId != null &&
+    dnd5eActivityBasicActionGrantMatchesV1(
+      basicActionGrant,
+      input.turnEconomy.turnKey ?? '',
+      payload.kind as 'grapple' | 'shove',
+    )
+  if (requestedBasicActionGrantId != null && !basicActionGranted) {
+    return { ok: false, reason: 'action-unavailable' }
+  }
+  const replacesAttack = (payload.kind === 'grapple' || payload.kind === 'shove') && !basicActionGranted
   const freeAction = payload.kind === 'release-grapple'
-  const spendsBonusAction = payload.kind === 'other-bonus-action' ||
+  const spendsBonusAction = basicActionGranted || payload.kind === 'other-bonus-action' ||
     (payload.kind === 'dash' && payload.sourceSpellId === 'expeditious-retreat')
-  const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
+  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(actor)
   const attacksAllowed = attacksPerAction * Math.max(1, input.turnEconomy.action.max)
   const attackNumber = replacesAttack ? input.turnEconomy.attacksUsed + 1 : undefined
   const spendsAction = !freeAction && !spendsBonusAction &&
@@ -247,8 +282,11 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const targetDefense = escapingGrapple
     ? 'athletics'
     : targetCombatant && replacesAttack ? dnd5eBestGrappleDefense(targetCombatant).skill : undefined
+  const pushDistanceFeet = payload.kind === 'shove'
+    ? 5 + (basicActionGrant?.shovePushDistanceBonusFeet ?? 0)
+    : undefined
   const pushTo = payload.kind === 'shove' && payload.outcome === 'push' && targetTokenId
-    ? planDnd5eShovePushDestination(input.map, token.id, targetTokenId)
+    ? planDnd5eShovePushDestination(input.map, token.id, targetTokenId, pushDistanceFeet)
     : undefined
   if (payload.kind === 'shove' && payload.outcome === 'push' && !pushTo) return { ok: false, reason: 'invalid-target' }
   const actorCheck = escapeOption
@@ -294,6 +332,8 @@ export function prepareDnd5ePlayerBasicAction(input: {
       escapeEffectId: escapeEffect?.id,
       targetDefense,
       pushTo,
+      pushDistanceFeet,
+      activityBasicActionGrantId: requestedBasicActionGrantId,
     },
   }
 }
@@ -344,6 +384,8 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense,
       spendAction: prepared.spendsAction,
+      spendBonusAction: prepared.spendsBonusAction,
+      activityBasicActionGrantId: prepared.activityBasicActionGrantId,
     }; break
     case 'shove': action = {
       type: 'shove', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
@@ -354,10 +396,13 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense, outcome: payload.outcome,
       pushTo: prepared.pushTo,
+      pushDistanceFeet: prepared.pushDistanceFeet,
       pushToElevationFeet: input.pushToElevationFeet,
       pushToGroundElevationFeet: input.pushToGroundElevationFeet,
       fallingDamageRolls: input.fallingDamageRolls,
       spendAction: prepared.spendsAction,
+      spendBonusAction: prepared.spendsBonusAction,
+      activityBasicActionGrantId: prepared.activityBasicActionGrantId,
     }; break
     case 'release-grapple': action = {
       type: 'release-grapple',

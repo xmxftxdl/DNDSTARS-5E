@@ -48,6 +48,11 @@ function alreadyTriggered(
   turnKey?: string,
 ): boolean {
   const frequencyId = trigger.frequencyGroupId ?? trigger.id
+  if (
+    trigger.maximumTotalUses != null &&
+    (area.triggerReceipts ?? []).filter((receipt) => receipt.triggerId === frequencyId).length >=
+      trigger.maximumTotalUses
+  ) return true
   if (trigger.oncePerTurn === true) {
     if (!turnKey) return true
     return (area.triggerReceipts ?? []).some((receipt) =>
@@ -425,7 +430,11 @@ export function reconcileDnd5ePluginAreas(
     return sourceToken?.dnd5eCombatState?.concentrationSpellId === area.concentrationId
   }).map((area) => {
     if (!area.triggerReceipts) return area
-    const triggerReceipts = area.triggerReceipts.filter((receipt) => receipt.round >= round - 2)
+    const persistentReceiptIds = new Set((area.triggers ?? [])
+      .filter((trigger) => trigger.maximumTotalUses != null)
+      .map((trigger) => trigger.frequencyGroupId ?? trigger.id))
+    const triggerReceipts = area.triggerReceipts.filter((receipt) =>
+      receipt.round >= round - 2 || persistentReceiptIds.has(receipt.triggerId))
     return triggerReceipts.length === area.triggerReceipts.length
       ? area
       : { ...area, triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined }
@@ -456,6 +465,112 @@ export function reconcileDnd5ePluginAreasOnMap(
     tokens.length === anchoredMap.tokens.length
   ) return anchoredMap
   return { ...anchoredMap, dnd5ePluginAreas: next, tokens }
+}
+
+export interface Dnd5ePersistentAreaLifecycleAdvanceResult {
+  map: BattleMap
+  movedAreaIds: readonly string[]
+}
+
+/**
+ * Advances data-only moving areas at the source turn boundary. Translation,
+ * vertical shrink and trigger-die scaling are committed to the map snapshot so
+ * retries and reconnects cannot apply a step twice.
+ */
+export function advanceDnd5ePluginAreasAtTurnBoundary(input: {
+  map: BattleMap
+  timing: 'turn-start' | 'turn-end'
+  round: number
+  tokenId: string
+  turnKey: string
+}): Dnd5ePersistentAreaLifecycleAdvanceResult {
+  if (input.timing !== 'turn-start') return { map: input.map, movedAreaIds: [] }
+  const source = input.map.tokens.find((token) => token.id === input.tokenId)
+  if (!source) return { map: input.map, movedAreaIds: [] }
+  const sourceCell = tokenAnchorCellFromPixel(source.x, source.y, source, input.map)
+  const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
+  const maximumCol = Math.max(0, Math.ceil(input.map.width / Math.max(1, input.map.gridSize)) - 1)
+  const maximumRow = Math.max(0, Math.ceil(input.map.height / Math.max(1, input.map.gridSize)) - 1)
+  const movedAreaIds: string[] = []
+  let changed = false
+  const next = (input.map.dnd5ePluginAreas ?? []).flatMap((area) => {
+    const lifecycle = area.lifecycle
+    if (
+      !lifecycle || lifecycle.timing !== 'source-turn-start' ||
+      area.sourceTokenId !== input.tokenId || area.createdRound >= input.round ||
+      area.lifecycleLastTurnKey === input.turnKey
+    ) return [area]
+
+    let colOffset = 0
+    let rowOffset = 0
+    if (lifecycle.translateAwayFromSourceFeet) {
+      const anchor = area.anchorCell ?? area.cells[0]
+      const deltaCol = anchor.col - sourceCell.col
+      const deltaRow = anchor.row - sourceCell.row
+      const length = Math.hypot(deltaCol, deltaRow)
+      if (length > 0) {
+        const distanceCells = lifecycle.translateAwayFromSourceFeet / feetPerCell
+        colOffset = Math.round(deltaCol / length * distanceCells)
+        rowOffset = Math.round(deltaRow / length * distanceCells)
+        if (colOffset === 0 && rowOffset === 0) {
+          if (Math.abs(deltaCol) >= Math.abs(deltaRow)) colOffset = Math.sign(deltaCol)
+          else rowOffset = Math.sign(deltaRow)
+        }
+      }
+    }
+    const translate = (cell: { col: number; row: number }) => ({
+      col: cell.col + colOffset,
+      row: cell.row + rowOffset,
+    })
+    const cells = area.cells.map(translate).filter((cell) =>
+      cell.col >= 0 && cell.row >= 0 && cell.col <= maximumCol && cell.row <= maximumRow)
+    if (cells.length === 0) {
+      changed = true
+      return []
+    }
+    const damageIds = new Set(lifecycle.damageTriggerIds ?? [])
+    const triggers = area.triggers?.map((trigger) => {
+      const damage = trigger.damage && damageIds.has(trigger.id) && lifecycle.damageDiceCountDelta != null
+        ? {
+            ...trigger.damage,
+            count: Math.max(
+              lifecycle.minimumDamageDiceCount ?? 0,
+              trigger.damage.count + lifecycle.damageDiceCountDelta,
+            ),
+          }
+        : trigger.damage
+      return {
+        ...trigger,
+        damage: damage && damage.count > 0 ? damage : undefined,
+        cells: trigger.cells?.map(translate).filter((cell) =>
+          cell.col >= 0 && cell.row >= 0 && cell.col <= maximumCol && cell.row <= maximumRow),
+      }
+    })
+    const vertical = area.vertical?.mode === 'volume' && lifecycle.heightReductionFeet
+      ? {
+          ...area.vertical,
+          heightFeet: Math.max(0, area.vertical.heightFeet - lifecycle.heightReductionFeet),
+        }
+      : area.vertical
+    changed = true
+    // A shrinking volume that reaches the ground no longer has a legal area
+    // snapshot. Removing it here keeps the persisted map schema valid and
+    // prevents a zero-height hazard from continuing to trigger.
+    if (vertical?.mode === 'volume' && vertical.heightFeet <= 0) return []
+    if (colOffset !== 0 || rowOffset !== 0) movedAreaIds.push(area.id)
+    return [{
+      ...area,
+      cells,
+      anchorCell: area.anchorCell ? translate(area.anchorCell) : { ...cells[0] },
+      vertical,
+      triggers,
+      lifecycleAdvances: (area.lifecycleAdvances ?? 0) + 1,
+      lifecycleLastTurnKey: input.turnKey,
+    }]
+  })
+  return changed
+    ? { map: { ...input.map, dnd5ePluginAreas: next }, movedAreaIds }
+    : { map: input.map, movedAreaIds: [] }
 }
 
 /**

@@ -8,6 +8,7 @@
 export interface Dnd5eTransientCombatStartTokenMarkState {
   monsterDamageAversionActive?: boolean
   monsterDamageAversionSourceActorId?: string
+  monsterRegenerationSuppressedDamageTypes?: string[]
 }
 
 interface Dnd5eStatusTokenMarkState extends Dnd5eTransientCombatStartTokenMarkState {
@@ -27,7 +28,8 @@ export function clearDnd5eTransientTokenMarksAtCombatStart<
   if (!state) return state
   if (
     !Object.prototype.hasOwnProperty.call(state, 'monsterDamageAversionActive') &&
-    !Object.prototype.hasOwnProperty.call(state, 'monsterDamageAversionSourceActorId')
+    !Object.prototype.hasOwnProperty.call(state, 'monsterDamageAversionSourceActorId') &&
+    !Object.prototype.hasOwnProperty.call(state, 'monsterRegenerationSuppressedDamageTypes')
   ) {
     return state
   }
@@ -35,6 +37,7 @@ export function clearDnd5eTransientTokenMarksAtCombatStart<
   const persistentState = { ...state } as T & Dnd5eTransientCombatStartTokenMarkState
   delete persistentState.monsterDamageAversionActive
   delete persistentState.monsterDamageAversionSourceActorId
+  delete persistentState.monsterRegenerationSuppressedDamageTypes
   return persistentState
 }
 

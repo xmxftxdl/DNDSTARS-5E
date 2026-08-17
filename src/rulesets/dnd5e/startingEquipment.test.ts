@@ -19,6 +19,13 @@ describe('SRD 5.1 starting equipment', () => {
         for (const option of group.options) {
           for (const entry of option.grants) expect(dnd5eInventoryItemTemplate(entry.templateId)).toBeDefined()
           for (const picker of option.pickers ?? []) {
+            if (!('equipmentIds' in picker)) {
+              expect(picker.templateIds).toContain(picker.defaultTemplateId)
+              for (const templateId of picker.templateIds) {
+                expect(dnd5eInventoryItemTemplate(templateId)).toBeDefined()
+              }
+              continue
+            }
             expect(picker.equipmentIds).toContain(picker.defaultEquipmentId)
             for (const equipmentId of picker.equipmentIds) {
               expect(dnd5eInventoryItemTemplate(`srd-5.1:equipment:${equipmentId}`)).toBeDefined()

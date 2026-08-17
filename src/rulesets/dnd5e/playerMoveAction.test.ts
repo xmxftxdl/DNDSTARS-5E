@@ -16,6 +16,7 @@ import {
 } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function character(): Character {
   return {
@@ -599,6 +600,55 @@ describe('D&D 5e player map movement', () => {
     })
   })
 
+  it('ignores difficult terrain only after a generic Dash capability is committed this turn', () => {
+    const pluginId = 'local.test.dash-terrain'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Dash terrain test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'dash-terrain', name: 'Dash terrain', summary: 'Synthetic feat.',
+          description: 'Synthetic feat.', automation: 'full',
+          staticModifiers: { ignoreDifficultTerrainWhileDashing: true },
+        })
+      },
+    })
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      obstacles: [{
+        id: 'mud', kind: 'obstacle', label: 'Mud',
+        points: [{ x: 10, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 100 }, { x: 10, y: 100 }],
+        blocksVision: false, blocksMovement: false, blocksLineOfEffect: false,
+        cover: 'none', baseHeightFeet: 0, heightFeet: 0, terrainCostMultiplier: 2, createdAt: 1,
+      }],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' },
+      updatedAt: 1,
+    }])
+    try {
+      const hero = character()
+      hero.dnd5eFeatIds = [`${pluginId}:dash-terrain`]
+      hero.dnd5eCombatState = { schemaVersion: 2, dashedTurnKey: 'combat:1:hero-token' }
+      const prepared = prepareDnd5ePlayerMove({
+        action: { ...action, targetPosition: { x: 25, y: 5 } },
+        map,
+        characters: [hero],
+        initiativeOrder: [
+          { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+          { tokenId: 'enemy-token', label: 'Enemy', emoji: '', color: '', roll: 10 },
+        ],
+        turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+      })
+      expect(prepared.ok).toBe(true)
+      if (prepared.ok) expect(prepared.prepared).toMatchObject({ distanceFeet: 10, movementCostFeet: 10 })
+    } finally {
+      dispose()
+    }
+  })
+
   it('doubles vertical traversal cost while flying with a grappled target', () => {
     const hero = character()
     hero.speed = 60
@@ -953,6 +1003,64 @@ describe('D&D 5e player map movement', () => {
     expect(resolved.result.state.combatants['hero-token'].turn.movementRemaining).toBe(10)
     expect(resolved.application?.characters[0].conditions).toEqual([])
     expect(resolved.result.events).toContainEqual({ type: 'condition-ended', targetId: 'hero-token', condition: 'prone' })
+  })
+
+  it('projects generic feat movement modifiers into climbing and standing authority', () => {
+    const pluginId = 'local.test.athletic-movement'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Athletic movement test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'athletic-movement', name: 'Athletic movement', summary: 'Synthetic feat.',
+          description: 'Synthetic feat.', automation: 'partial',
+          staticModifiers: {
+            climbWithoutSpeedCostMultiplier: 1,
+            standFromProneMovementCostFeet: 5,
+          },
+        })
+      },
+    })
+    try {
+      const hero = character()
+      hero.dnd5eFeatIds = [`${pluginId}:athletic-movement`]
+      const climbed = prepareDnd5ePlayerMove({
+        action: {
+          ...action,
+          targetPosition: { x: 25, y: 5 },
+          dnd5eTraversalMode: 'climb',
+        },
+        map,
+        characters: [hero],
+        initiativeOrder: [
+          { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+          { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+        ],
+        turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+      })
+      expect(climbed.ok).toBe(true)
+      if (climbed.ok) expect(climbed.prepared).toMatchObject({ distanceFeet: 10, movementCostFeet: 10 })
+
+      const activeEffects = migrateLegacyDnd5eConditions({ targetId: hero.id, conditions: ['prone'] })
+      hero.conditions = dnd5eConditionsFromActiveEffects(activeEffects)
+      hero.dnd5eCombatState = { schemaVersion: 2, activeEffects }
+      const stood = prepareDnd5ePlayerMove({
+        action: { ...action, targetPosition: { x: 15, y: 5 } },
+        map,
+        characters: [hero],
+        initiativeOrder: [
+          { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+          { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+        ],
+        turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+      })
+      expect(stood.ok).toBe(true)
+      if (stood.ok) expect(stood.prepared).toMatchObject({ distanceFeet: 5, movementCostFeet: 10, standFromProne: true })
+    } finally {
+      dispose()
+    }
   })
 
   it('lets a prone player crawl without automatically standing', () => {

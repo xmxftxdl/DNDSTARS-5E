@@ -337,6 +337,15 @@ describe('SpellSettlementCoordinator', () => {
     })
     expect(areaSpellPresentationForSettlement({
       ...common,
+      spellId: 'web',
+    })).toMatchObject({
+      spellId: 'web',
+      shape: 'rect',
+      widthFeet: 20,
+      heightFeet: 20,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
       spellId: 'grease',
     })).toMatchObject({
       spellId: 'grease',
@@ -406,6 +415,47 @@ describe('SpellSettlementCoordinator', () => {
       ...common,
       spellId: 'insect-plague',
     })).toMatchObject({ spellId: 'insect-plague', shape: 'circle', radiusFeet: 20 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'stinking-cloud',
+    })).toMatchObject({ spellId: 'stinking-cloud', shape: 'circle', radiusFeet: 20 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'fog-cloud',
+    })).toMatchObject({ spellId: 'fog-cloud', shape: 'circle', radiusFeet: 20 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'silence',
+    })).toMatchObject({ spellId: 'silence', shape: 'circle', radiusFeet: 20 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'sleet-storm',
+    })).toMatchObject({ spellId: 'sleet-storm', shape: 'circle', radiusFeet: 40 })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'wind-wall',
+      areaTargetOrientation: 3,
+    })).toMatchObject({
+      spellId: 'wind-wall', shape: 'rect', widthFeet: 50, heightFeet: 5,
+      areaAngleDegrees: 270,
+    })
+    for (const spellId of ['wall-of-force', 'wall-of-stone', 'wall-of-ice'] as const) {
+      expect(areaSpellPresentationForSettlement({
+        ...common,
+        spellId,
+        areaTargetOrientation: 1,
+      })).toMatchObject({
+        spellId, shape: 'rect', widthFeet: 100, heightFeet: 5, areaAngleDegrees: 90,
+      })
+    }
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'wall-of-thorns',
+      areaTargetOrientation: 2,
+    })).toMatchObject({
+      spellId: 'wall-of-thorns', shape: 'rect', widthFeet: 60, heightFeet: 5,
+      areaAngleDegrees: 180,
+    })
     expect(areaSpellPresentationForSettlement({
       ...common,
       spellId: 'wall-of-fire',

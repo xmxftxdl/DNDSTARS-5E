@@ -1,6 +1,7 @@
 import type {
   PdfAnalysisDepthV1,
   PdfAnalysisModelRoutingV1,
+  PdfCausalBranchV1,
   PdfCampaignAnalysisV1,
   PdfImportCandidateKindV1,
   PdfTimelineKindV1,
@@ -149,6 +150,7 @@ export interface PdfSceneRecordV2 extends PdfNamedRecordV2 {
   timelineKind?: PdfTimelineKindV1
   tags?: string[]
   causedBy?: string[]
+  causalBranches?: PdfCausalBranchV1[]
   causalExplanation?: string
   branchCondition?: string
   branchPerson?: string

@@ -73,7 +73,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
   const contextKind = sharedDmAdjudicationPrompt?.payload.contextKind
   const isBasicActionAdjudication = contextKind === 'basic-action'
   const isRandomTableAdjudication = contextKind === 'post-spell-random-table'
-  const supportsDirectEffects = contextKind !== 'map-interaction' && !isBasicActionAdjudication
+  const isActivityBoundary = contextKind === 'activity-boundary'
+  const supportsDirectEffects = contextKind !== 'map-interaction' && !isBasicActionAdjudication && !isActivityBoundary
 
   return (
     <>
@@ -96,6 +97,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                         ? '地图交互中断'
                         : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
                           ? '其他行动裁定'
+                          : isActivityBoundary
+                            ? 'Activity 边界确认'
                           : isRandomTableAdjudication
                             ? '随机表结果裁定'
                         : 'DM 裁定'} · {sharedDmAdjudicationPrompt.payload.spellName}
@@ -141,6 +144,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                         ? '该行动的动作或附赠动作已由 Host 权威扣除。请根据玩家声明确认是否允许，并在备注中记录检定、DC、结果或后续效果；无论批准或驳回，都不会返还行动资源。'
                         : isRandomTableAdjudication
                           ? '该随机表结果没有已审计的 Headless 自动化映射。原始施法与资源消耗已经完成；请填写完成命中、豁免、抗性等裁定后的最终效果，提交后才会恢复战斗。也可以跳过该结果。'
+                        : isActivityBoundary
+                          ? 'Host 已准备目标、骰据和可验证的安全效果。批准后会原子提交这部分结算；边界外的叙事、幻象、地图或临场效果请在备注中记录，不要在此重复填写伤害或状态。取消则不消费任何资源。'
                         : '数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。'}
                   </div>
                   {sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction' && (

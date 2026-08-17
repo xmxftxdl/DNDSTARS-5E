@@ -26,7 +26,7 @@ export const PLAYER_ACTION_COMBAT_BANNER_ROUTES = {
   'dnd5e-basic-action': 'action',
 } as const satisfies Record<SharedPlayerActionState['type'], CombatBannerRoute>
 
-const BASIC_ACTION_LABELS: Readonly<Record<NonNullable<SharedPlayerActionState['dnd5eBasicAction']>['kind'], string>> = {
+const BASIC_ACTION_LABELS: Readonly<Record<NonNullable<SharedPlayerActionState['dnd5eBasicAction']>['kind'], string | null>> = {
   dash: '疾走',
   hide: '躲藏',
   help: '协助',
@@ -34,12 +34,12 @@ const BASIC_ACTION_LABELS: Readonly<Record<NonNullable<SharedPlayerActionState['
   'use-object': '使用物件',
   grapple: '擒抱',
   shove: '推撞',
-  'release-grapple': '释放擒抱',
-  'escape-grapple': '挣脱擒抱',
-  'escape-effect': '挣脱效果',
-  wake: '唤醒',
-  'other-action': '自定义动作',
-  'other-bonus-action': '自定义附赠动作',
+  'release-grapple': null,
+  'escape-grapple': null,
+  'escape-effect': null,
+  wake: null,
+  'other-action': null,
+  'other-bonus-action': null,
 }
 
 function readableContentId(value: string | undefined, fallback: string): string {

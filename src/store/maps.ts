@@ -32,6 +32,7 @@ import {
 } from '../../shared/dnd5e-vision-profile.mjs'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../application/combat/dnd5eCombatRules'
 import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
+import type { Dnd5eActivityWeaponAttackGrantV1 } from '../rulesets/dnd5e/activities/dnd5eActivityWeaponAttackGrant'
 import type {
   Dnd5eDamageType,
   Dnd5eMonsterBehaviorPreferenceV1,
@@ -48,18 +49,28 @@ import {
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
   normalizeDnd5ePersistentAreaLighting,
+  normalizeDnd5ePersistentAreaBlocking,
+  normalizeDnd5ePersistentAreaGrantedActivity,
+  normalizeDnd5ePersistentAreaOccupantModifiers,
+  normalizeDnd5ePersistentAreaTurnLifecycle,
   normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
+  normalizeDnd5ePersistentAreaWeaponHitBonusDamage,
   type Dnd5ePersistentAreaAnchorMode,
   type Dnd5ePersistentAreaMovementDeclaration,
+  type Dnd5ePersistentAreaTurnLifecycle,
+  type Dnd5ePersistentAreaGrantedActivity,
   type Dnd5ePersistentAreaLighting,
+  type Dnd5ePersistentAreaBlocking,
   type Dnd5ePersistentAreaObscuration,
+  type Dnd5ePersistentAreaOccupantModifiers,
   type Dnd5ePersistentAreaSourceKind,
   type Dnd5ePersistentAreaVisual,
   type Dnd5ePersistentAreaTriggerReceipt,
   type Dnd5ePersistentAreaTriggerSnapshot,
   type Dnd5ePersistentAreaVerticalSnapshot,
+  type Dnd5ePersistentAreaWeaponHitBonusDamage,
 } from '../rulesets/dnd5e/persistentAreaTypes'
 import {
   getDnd5eCoreSpellAreaDeclaration,
@@ -80,6 +91,7 @@ import {
 import { campaignLightIsActive, type CampaignLightSourceKind } from '../lib/campaignTime'
 import type { EnemyPlayerVisibleDetail } from '../lib/enemyPlayerVisibleDetail'
 import {
+  normalizeDnd5eSuppressedTokenStatusMarkerIds,
   normalizeDnd5eTokenStatusMarkers,
   type Dnd5eTokenStatusMarker,
 } from '../rulesets/dnd5e/tokenStatusMarkers'
@@ -773,6 +785,8 @@ export interface Token {
    * action, or other Headless rule by themselves.
    */
   dnd5eTokenStatusMarkers?: Dnd5eTokenStatusMarker[]
+  /** Derived badge instances hidden by the DM; underlying Headless rules remain active. */
+  dnd5eSuppressedStatusMarkerIds?: string[]
   /** DM 明确公开的房间怪物详情快照；不包含工坊目录或内联美术。 */
   playerVisibleEnemyDetail?: EnemyPlayerVisibleDetail
   /** 来自怪物池的模板 id */
@@ -794,6 +808,17 @@ export interface Token {
     expiresAfterRound: number
     concentrationId?: string
     side: 'player' | 'enemy'
+    persistent?: true
+    minimumMaximumHitPoints?: number
+    maximumHitPointBonus?: number
+    armorClassBonus?: number
+    weaponAttackBonus?: number
+    weaponDamageBonus?: number
+    savingThrowBonus?: number
+    proficientSkillCheckBonus?: number
+    weaponAttacksMagical?: true
+    attacksPerAction?: number
+    shareSelfSpellsRangeFeet?: number
   }
   /** 无战斗属性的核心法术实体；位置与生命周期只由 DM Headless 区域事务控制。 */
   dnd5eSpellEffect?: {
@@ -819,6 +844,8 @@ export interface Token {
     /** Stable per-turn attack count used by effects such as Slowing Breath. */
     attacksMadeTurnKey?: string
     attacksMadeThisTurn?: number
+    /** Consecutive on-foot movement immediately preceding a possible running jump. */
+    runningJumpApproachFeet?: number
     temporaryHp?: number
     undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
     monsterOnHitSavePending?: {
@@ -879,6 +906,10 @@ export interface Token {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    /** One-shot weapon attack credentials granted by unified Activities. */
+    activityWeaponAttackGrants?: Record<string, Dnd5eActivityWeaponAttackGrantV1>
+    declarativeAttackRetargetImmunityFeatureIds?: string[]
+    declarativeWardPools?: Record<string, { current: number; max: number }>
     /** Imported save-pressure markers keyed by source combatant. */
     spellSavePressureBySource?: Record<string, {
       appliedTurnKey: string
@@ -1080,6 +1111,8 @@ export interface Dnd5ePluginArea {
   /** 旧存档缺省为 plugin-feature；核心 SRD 法术使用 core-spell。 */
   sourceKind?: Dnd5ePersistentAreaSourceKind
   coreSpellId?: string
+  /** Content-neutral projection identity used by feature spell origins and attack predicates. */
+  utilityProjectionId?: string
   /** Core spellcasting source captured when the area was created. */
   castingClassId?: Dnd5eClassId
   slotLevel?: number
@@ -1100,6 +1133,10 @@ export interface Dnd5ePluginArea {
   /** Authoritative vertical extent; absent preserves legacy unbounded-column behavior. */
   vertical?: Dnd5ePersistentAreaVerticalSnapshot
   movement?: Dnd5ePersistentAreaMovementDeclaration
+  /** Host-owned source-turn evolution; progress fields make retries idempotent. */
+  lifecycle?: Dnd5ePersistentAreaTurnLifecycle
+  lifecycleAdvances?: number
+  lifecycleLastTurnKey?: string
   /** 区域内移动成本倍数；例如灵体卫士为 2。 */
   movementCostMultiplier?: number
   relation?: 'any' | 'ally' | 'enemy'
@@ -1111,6 +1148,16 @@ export interface Dnd5ePluginArea {
   lighting?: Dnd5ePersistentAreaLighting
   /** Non-light visibility volume, such as smoke, gas or underwater ink. */
   obscuration?: Dnd5ePersistentAreaObscuration
+  /** Rules projected only while a creature occupies this area. */
+  occupantModifiers?: Dnd5ePersistentAreaOccupantModifiers
+  /** Physical blocking supplied by a wall-like area. */
+  blocking?: Dnd5ePersistentAreaBlocking
+  /** Host-projected weapon-hit rider for eligible creatures currently in this area. */
+  weaponHitBonusDamage?: Dnd5ePersistentAreaWeaponHitBonusDamage
+  /** Host-validated active controls available only while this area exists. */
+  grantedActivities?: Dnd5ePersistentAreaGrantedActivity[]
+  /** Activity ids whose one-time activate-on-create use has been consumed. */
+  grantedActivityUseReceipts?: string[]
   /** Optional independent light origins for one multi-point spell area. */
   lightingAnchorCells?: Array<{ col: number; row: number }>
   visual?: Dnd5ePersistentAreaVisual
@@ -1168,6 +1215,9 @@ function normalizeToken(raw: unknown): Token {
     Number.isInteger(rawSummon.expiresAfterRound) && Number(rawSummon.expiresAfterRound) >= Number(rawSummon.createdRound) &&
     Number(rawSummon.expiresAfterRound) - Number(rawSummon.createdRound) + 1 <= 14_400 &&
     (rawSummon.concentrationId == null || (typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId)) &&
+    (rawSummon.persistent == null || rawSummon.persistent === true) &&
+    (rawSummon.maximumHitPointBonus == null || (Number.isInteger(rawSummon.maximumHitPointBonus) && Number(rawSummon.maximumHitPointBonus) >= 0 && Number(rawSummon.maximumHitPointBonus) <= 1_000_000)) &&
+    (rawSummon.weaponDamageBonus == null || (Number.isInteger(rawSummon.weaponDamageBonus) && Number(rawSummon.weaponDamageBonus) >= 0 && Number(rawSummon.weaponDamageBonus) <= 1_000_000)) &&
     (rawSummon.side === 'player' || rawSummon.side === 'enemy')
     ? {
         schemaVersion: 1 as const,
@@ -1179,6 +1229,9 @@ function normalizeToken(raw: unknown): Token {
         expiresAfterRound: rawSummon.expiresAfterRound,
         concentrationId: rawSummon.concentrationId,
         side: rawSummon.side,
+        persistent: rawSummon.persistent === true ? true as const : undefined,
+        maximumHitPointBonus: rawSummon.maximumHitPointBonus,
+        weaponDamageBonus: rawSummon.weaponDamageBonus,
       }
     : undefined
   const rawSpellEffect = t.dnd5eSpellEffect
@@ -1261,6 +1314,9 @@ function normalizeToken(raw: unknown): Token {
       ? t.visualVariantId
       : undefined,
     dnd5eTokenStatusMarkers: normalizeDnd5eTokenStatusMarkers(t.dnd5eTokenStatusMarkers),
+    dnd5eSuppressedStatusMarkerIds: normalizeDnd5eSuppressedTokenStatusMarkerIds(
+      t.dnd5eSuppressedStatusMarkerIds,
+    ),
     size: creatureSize ? creatureSizeToTokenSize(creatureSize) : rawSize,
     type,
     dnd5eSide: t.dnd5eSide === 'player' || t.dnd5eSide === 'enemy'
@@ -1431,10 +1487,41 @@ function normalizeMap(raw: unknown): BattleMap {
           ? {
               economy: area.movement.economy,
               maximumFeet: Math.floor(area.movement.maximumFeet),
+              ...(Number.isFinite(area.movement.maximumDistanceFromSourceFeet) &&
+                Number(area.movement.maximumDistanceFromSourceFeet) > 0 &&
+                Number(area.movement.maximumDistanceFromSourceFeet) <= 10_000
+                ? { maximumDistanceFromSourceFeet: Math.floor(Number(area.movement.maximumDistanceFromSourceFeet)) }
+                : {}),
             }
           : undefined
         const lighting = area.lighting ? normalizeDnd5ePersistentAreaLighting(area.lighting) : undefined
         if (area.lighting != null && !lighting) return []
+        const occupantModifiers = area.occupantModifiers
+          ? normalizeDnd5ePersistentAreaOccupantModifiers(area.occupantModifiers)
+          : undefined
+        const lifecycle = area.lifecycle
+          ? normalizeDnd5ePersistentAreaTurnLifecycle(area.lifecycle)
+          : undefined
+        if (area.lifecycle != null && !lifecycle) return []
+        if (area.occupantModifiers != null && !occupantModifiers) return []
+        const blocking = area.blocking
+          ? normalizeDnd5ePersistentAreaBlocking(area.blocking)
+          : undefined
+        if (area.blocking != null && !blocking) return []
+        const weaponHitBonusDamage = area.weaponHitBonusDamage
+          ? normalizeDnd5ePersistentAreaWeaponHitBonusDamage(area.weaponHitBonusDamage)
+          : undefined
+        if (area.weaponHitBonusDamage != null && !weaponHitBonusDamage) return []
+        const grantedActivities = Array.isArray(area.grantedActivities)
+          ? area.grantedActivities.flatMap((grant) => {
+              const normalized = normalizeDnd5ePersistentAreaGrantedActivity(grant)
+              return normalized ? [normalized] : []
+            }).slice(0, 8)
+          : []
+        if (
+          area.grantedActivities != null &&
+          (!Array.isArray(area.grantedActivities) || grantedActivities.length !== area.grantedActivities.length)
+        ) return []
         const vertical = area.vertical != null
           ? normalizeDnd5ePersistentAreaVerticalSnapshot(area.vertical)
           : undefined
@@ -1471,6 +1558,10 @@ function normalizeMap(raw: unknown): BattleMap {
           featureId: area.featureId,
           sourceKind,
           coreSpellId,
+          utilityProjectionId: typeof area.utilityProjectionId === 'string' &&
+            /^[a-z0-9][a-z0-9-]{0,99}$/.test(area.utilityProjectionId)
+            ? area.utilityProjectionId
+            : undefined,
           castingClassId,
           slotLevel: Number.isInteger(area.slotLevel) && Number(area.slotLevel) >= 0 && Number(area.slotLevel) <= 9
             ? Number(area.slotLevel)
@@ -1496,6 +1587,13 @@ function normalizeMap(raw: unknown): BattleMap {
           anchorCell,
           vertical,
           movement,
+          lifecycle,
+          lifecycleAdvances: Number.isInteger(area.lifecycleAdvances) && Number(area.lifecycleAdvances) >= 0 && Number(area.lifecycleAdvances) <= 14_400
+            ? Number(area.lifecycleAdvances)
+            : undefined,
+          lifecycleLastTurnKey: typeof area.lifecycleLastTurnKey === 'string' && area.lifecycleLastTurnKey.length <= 160
+            ? area.lifecycleLastTurnKey
+            : undefined,
           movementCostMultiplier: Number.isFinite(area.movementCostMultiplier) &&
             Number(area.movementCostMultiplier) >= 1 && Number(area.movementCostMultiplier) <= 10
             ? Number(area.movementCostMultiplier)
@@ -1515,6 +1613,15 @@ function normalizeMap(raw: unknown): BattleMap {
                 kind: area.obscuration.kind,
                 sourceCanSeeThrough: area.obscuration.sourceCanSeeThrough === true,
               }
+            : undefined,
+          occupantModifiers,
+          blocking,
+          weaponHitBonusDamage,
+          grantedActivities: grantedActivities.length > 0 ? grantedActivities : undefined,
+          grantedActivityUseReceipts: Array.isArray(area.grantedActivityUseReceipts)
+            ? [...new Set(area.grantedActivityUseReceipts.filter((id): id is string =>
+                typeof id === 'string' && grantedActivities.some((grant) => grant.activityId === id),
+              ))]
             : undefined,
           lightingAnchorCells: Array.isArray(area.lightingAnchorCells)
             ? area.lightingAnchorCells.flatMap((cell) => Number.isInteger(cell?.col) && Number.isInteger(cell?.row)
@@ -1825,7 +1932,15 @@ export const useMapStore = create<MapState>()(
         // preview cannot expose an older visible anchor.
         get().applyAuthorityMapUpdate(mapId, committedProjection)
       },
-      select: (id) => set({ selectedId: id }),
+      select: (id) => {
+        const selectedId = id && get().maps.some((map) => map.id === id) ? id : null
+        if (get().selectedId === selectedId) return
+        set({ selectedId })
+        // selectedId is the room's authoritative active scene. DM map changes must travel through
+        // the same revisioned maps resource as token/map edits so player invalidation subscribers
+        // can follow immediately. Player clients remain read-only and only apply remote selection.
+        if (canWriteSharedState()) publishMapsState(get())
+      },
 
       addMap: async ({ name, width, height, blob, gridDetect }) => {
         const id = uid()

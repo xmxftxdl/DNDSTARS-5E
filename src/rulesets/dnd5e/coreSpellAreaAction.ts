@@ -49,7 +49,7 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     : undefined
   const movement = area?.movement ?? declaredMovement
   if (
-    !actor || !actorToken || !area || area.sourceKind !== 'core-spell' ||
+    !actor || !actorToken || !area ||
     area.sourceCharacterId !== actor.id || area.sourceTokenId !== actorToken.id || !movement ||
     !Number.isInteger(payload.targetCell.col) || !Number.isInteger(payload.targetCell.row) ||
     (payload.targetCells?.some((cell) => !Number.isInteger(cell.col) || !Number.isInteger(cell.row)) ?? false)

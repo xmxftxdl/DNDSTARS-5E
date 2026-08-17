@@ -831,6 +831,56 @@ describe('combat presentation events', () => {
     ])
   })
 
+  it('projects Web and Stinking Cloud entrances with persistent-area handoff ids', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 2 },
+      createdAt: 1_000,
+      expiresAt: 1_000 + WALL_OF_FIRE_HANDOFF_TIMEOUT_MS,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'web-entrance:area',
+        transactionId: 'web-entrance',
+        spellId: 'web' as const,
+        shape: 'rect' as const,
+        widthFeet: 20,
+        heightFeet: 20,
+      },
+      {
+        ...base,
+        id: 'stinking-cloud-entrance:area',
+        transactionId: 'stinking-cloud-entrance',
+        spellId: 'stinking-cloud' as const,
+        shape: 'circle' as const,
+        radiusFeet: 20,
+      },
+    ]
+    for (const event of events) expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    const state = events.reduce(
+      (current, event) => reduceCombatPresentationState(current, event, event.createdAt),
+      EMPTY_COMBAT_PRESENTATION_STATE,
+    )
+
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({
+        kind: 'web',
+        areaWidthPx: 200,
+        areaHeightPx: 200,
+        handoffAreaId: 'core-spell-area:web-entrance',
+      }),
+      expect.objectContaining({
+        kind: 'stinking-cloud',
+        radiusPx: 200,
+        handoffAreaId: 'core-spell-area:stinking-cloud-entrance',
+      }),
+    ])
+  })
+
   it('projects persistent area spell cast atlases before their headless effects begin', () => {
     const base = {
       schemaVersion: 1 as const,

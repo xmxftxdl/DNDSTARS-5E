@@ -1,4 +1,11 @@
 import type { AiModelDescriptorV1, AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
+import {
+  AI_MODEL_POLICY,
+  creditCny,
+  fixedBridgeModelIdForTask,
+  reserveCredits,
+  textCredits,
+} from '../../shared/ai-model-policy.mjs'
 import type { AiDocumentChunkV1, AiProviderExecutionResult, JsonSchemaV1 } from './aiProvider'
 import { AiProviderRegistryV1, executeStructuredAiTask } from './aiProvider'
 import { createPdfDocumentChunks, type PdfDocumentChunkV2 } from './pdfDocumentChunker'
@@ -62,6 +69,20 @@ export interface PdfClueRecordV1 extends PdfNamedRecordV1 {
 
 export type PdfTimelineKindV1 = 'history' | 'current' | 'deadline' | 'conditional'
 
+export interface PdfCausalBranchV1 {
+  /** Exact name of the immediate source event in this synthesized timeline. */
+  sourceEvent: string
+  /** Short text displayed beside the branch arrow. */
+  label: string
+  /** Explicit predicate for this one edge; empty only when unconditional. */
+  condition: string
+  /** Why this source event and predicate lead to the target event. */
+  explanation: string
+  /** Canonical person name when this edge depends on whether that person lives. */
+  branchPerson: string
+  branchPersonState: 'dead' | 'alive' | 'unspecified'
+}
+
 export interface PdfSceneRecordV1 extends PdfNamedRecordV1 {
   location: string
   npcs: string[]
@@ -76,6 +97,8 @@ export interface PdfSceneRecordV1 extends PdfNamedRecordV1 {
   tags?: string[]
   /** Exact names of the immediate prerequisite/cause events in the synthesized timeline. */
   causedBy?: string[]
+  /** Per-edge causal metadata. Prefer this over the legacy shared branch fields. */
+  causalBranches?: PdfCausalBranchV1[]
   /** Short explanation of why the prerequisite leads to this event. */
   causalExplanation?: string
   /** Empty for an unconditional edge; otherwise the explicit branch predicate. */
@@ -183,6 +206,9 @@ export interface PdfAnalysisWorkloadEstimateV1 {
   estimatedPasses: number
   estimatedMinutesLow: number
   estimatedMinutesHigh: number
+  estimatedCredits: number
+  reservedCredits: number
+  estimatedCny: number
   recommendation: PdfAnalysisRecommendationV1
 }
 
@@ -227,8 +253,12 @@ export function selectPdfAnalysisModelRouting(
   if (extractionModels.length === 0 || synthesisModels.length === 0) return null
 
   if (selection.providerId === 'external-account') {
-    const configuredExtraction = extractionModels.find((model) => model.id.startsWith('external:extraction:'))
-    const configuredSynthesis = synthesisModels.find((model) => model.id.startsWith('external:synthesis:'))
+    const configuredExtraction = extractionModels.find((model) =>
+      model.id === fixedBridgeModelIdForTask('pdf-extraction', 'pdf-extraction')) ??
+      extractionModels.find((model) => model.id.startsWith('external:extraction:'))
+    const configuredSynthesis = synthesisModels.find((model) =>
+      model.id === fixedBridgeModelIdForTask('campaign-analysis', 'pdf-synthesis')) ??
+      synthesisModels.find((model) => model.id.startsWith('external:synthesis:'))
     const extraction = configuredExtraction ?? selectedExtraction ?? extractionModels[0]
     const synthesis = configuredSynthesis ?? selectedSynthesis ?? synthesisModels[0]
     return {
@@ -301,6 +331,27 @@ export function estimatePdfAnalysisWorkload(
       PDF_PASS_OUTPUT_TOKENS.adventure
     ) + PDF_PASS_OUTPUT_TOKENS.synthesis
     : estimatedChunks * PDF_PASS_OUTPUT_TOKENS.quick
+  const extractionOutputTokens = depth === 'deep'
+    ? estimatedChunks * (
+      PDF_PASS_OUTPUT_TOKENS.entities +
+      PDF_PASS_OUTPUT_TOKENS.relationships +
+      PDF_PASS_OUTPUT_TOKENS.adventure
+    )
+    : outputTokens
+  // 在真正读取文字层之前按每页 1,500 tokens 高估；深度分析会对同一页运行三种提取 pass。
+  const extractionInputTokens = safePages * 1_500 * (depth === 'deep' ? 3 : 1)
+  const synthesisInputTokens = depth === 'deep' ? extractionOutputTokens : 0
+  const synthesisOutputTokens = depth === 'deep' ? PDF_PASS_OUTPUT_TOKENS.synthesis : 0
+  const estimatedCredits = textCredits({
+    modelId: AI_MODEL_POLICY.pdfExtractionModelId,
+    inputTokens: extractionInputTokens,
+    outputTokens: extractionOutputTokens,
+  }) + (depth === 'deep' ? textCredits({
+    modelId: AI_MODEL_POLICY.pdfSynthesisModelId,
+    inputTokens: synthesisInputTokens,
+    outputTokens: synthesisOutputTokens,
+  }) : 0)
+  const reservedCredits = reserveCredits(estimatedCredits)
   // 本地 35B 模型常见约 6-14 输出 token/s；额外预留 15% 给提示词预填充、校验与阶段切换。
   const estimatedMinutesLow = Math.max(1, Math.ceil((outputTokens / 14 / 60) * 1.15))
   const estimatedMinutesHigh = Math.max(estimatedMinutesLow, Math.ceil((outputTokens / 6 / 60) * 1.15))
@@ -310,6 +361,9 @@ export function estimatePdfAnalysisWorkload(
     estimatedPasses,
     estimatedMinutesLow,
     estimatedMinutesHigh,
+    estimatedCredits,
+    reservedCredits,
+    estimatedCny: creditCny(estimatedCredits),
     recommendation: safePages > 30 ? 'prefer-cloud' : safePages > 10 ? 'prefer-quick' : 'local-ready',
   }
 }
@@ -428,6 +482,19 @@ function sceneRecordIsValid(entry: unknown): entry is PdfSceneRecordV1 {
     (field(entry, 'timelineKind') === undefined || ['history', 'current', 'deadline', 'conditional'].includes(String(field(entry, 'timelineKind')))) &&
     (field(entry, 'tags') === undefined || stringsAreValid(field(entry, 'tags'), 8)) &&
     (field(entry, 'causedBy') === undefined || stringsAreValid(field(entry, 'causedBy'), 8)) &&
+    (field(entry, 'causalBranches') === undefined || (
+      Array.isArray(field(entry, 'causalBranches')) &&
+      (field(entry, 'causalBranches') as unknown[]).length <= 8 &&
+      (field(entry, 'causalBranches') as unknown[]).every((branch) => (
+        isPlainObject(branch) &&
+        boundedText(branch.sourceEvent, 120).length > 0 &&
+        typeof branch.label === 'string' && branch.label.length <= 180 &&
+        typeof branch.condition === 'string' && branch.condition.length <= 300 &&
+        typeof branch.explanation === 'string' && branch.explanation.length <= 300 &&
+        typeof branch.branchPerson === 'string' && branch.branchPerson.length <= 120 &&
+        ['dead', 'alive', 'unspecified'].includes(String(branch.branchPersonState))
+      ))
+    )) &&
     (field(entry, 'causalExplanation') === undefined || (typeof field(entry, 'causalExplanation') === 'string' && String(field(entry, 'causalExplanation')).length <= 600)) &&
     (field(entry, 'branchCondition') === undefined || (typeof field(entry, 'branchCondition') === 'string' && String(field(entry, 'branchCondition')).length <= 600)) &&
     (field(entry, 'branchPerson') === undefined || (typeof field(entry, 'branchPerson') === 'string' && String(field(entry, 'branchPerson')).length <= 300)) &&
@@ -591,11 +658,11 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
     },
     timelineEvents: {
       type: 'array',
-      maxItems: 12,
+      maxItems: 36,
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'description', 'aliases', 'location', 'npcs', 'monsters', 'time', 'timelineOrder', 'timelineKind', 'tags', 'causedBy', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState', 'citations'],
+        required: ['name', 'description', 'aliases', 'location', 'npcs', 'monsters', 'time', 'timelineOrder', 'timelineKind', 'tags', 'causedBy', 'causalBranches', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState', 'citations'],
         properties: {
           ...NAMED_RECORD_PROPERTIES,
           location: { type: 'string', maxLength: 120 },
@@ -606,6 +673,23 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
           timelineKind: { type: 'string', enum: ['history', 'current', 'deadline', 'conditional'] },
           tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 40 } },
           causedBy: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 120 } },
+          causalBranches: {
+            type: 'array',
+            maxItems: 8,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['sourceEvent', 'label', 'condition', 'explanation', 'branchPerson', 'branchPersonState'],
+              properties: {
+                sourceEvent: { type: 'string', maxLength: 120 },
+                label: { type: 'string', maxLength: 180 },
+                condition: { type: 'string', maxLength: 300 },
+                explanation: { type: 'string', maxLength: 300 },
+                branchPerson: { type: 'string', maxLength: 120 },
+                branchPersonState: { type: 'string', enum: ['dead', 'alive', 'unspecified'] },
+              },
+            },
+          },
           causalExplanation: { type: 'string', maxLength: 300 },
           branchCondition: { type: 'string', maxLength: 300 },
           branchPerson: { type: 'string', maxLength: 120 },
@@ -708,7 +792,7 @@ const PDF_PASS_ARRAY_LIMITS: Record<PdfAnalysisSchemaModeV1, Record<string, numb
   },
   synthesis: {
     people: 0, relationships: 28, locations: 0, factions: 0, clues: 0,
-    timelineEvents: null, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 10, warnings: 6,
+    timelineEvents: 36, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 10, warnings: 6,
   },
 }
 
@@ -717,7 +801,7 @@ const PDF_PASS_OUTPUT_TOKENS: Record<PdfAnalysisSchemaModeV1, number> = {
   entities: 1_400,
   relationships: 1_200,
   adventure: 1_600,
-  synthesis: 3_200,
+  synthesis: 12_000,
 }
 
 export function pdfAnalysisSchemaForPass(input: {
@@ -1180,8 +1264,8 @@ const PDF_ANALYSIS_SYSTEM_PROMPT = [
   '人物 description 应概括背景、当前身份、经历和剧情作用；role 只写简洁身份，motivation 写其主动追求，personality 写可观察性格，避免把同一句泛化描述复制到多个字段。',
   'scenes 是可运行场景，不是最终时间线。只有全书综合阶段可以填写 timelineEvents；其他阶段必须返回空数组。',
   'timelineEvents 的 time 使用原文明确时间或相对锚点；timelineKind 区分 history、current、deadline、conditional；timelineOrder 表达全书剧情先后。不得把 PDF 页码当作剧情时间。',
-  '全书综合阶段必须直接推理剧情因果图：timelineEvents.causedBy 只列出会直接导致或允许当前事件发生的前置事件正式名称，不得因为时间上相邻就建立因果；causalExplanation 说明原因如何产生结果。',
-  '分支事件使用 branchCondition 写明可判定条件；若条件明确是人物死亡或存活，同时填写 branchPerson 的完整正式姓名和 branchPersonState。无分支条件时使用空字符串与 unspecified。',
+  '全书综合阶段必须直接推理完整剧情因果图：timelineEvents.causedBy 只列出会直接导致或允许当前事件发生的前置事件正式名称；causalBranches 为每个前因分别保存 sourceEvent、短标签、条件、解释及人物生死条件。',
+  '所有会改变后续事件、人物状态、证据链或结局的选择与成功/失败结果都必须成为可见分支；不得仅为了减少节点而把这些分支折叠进 description。',
   '原文没有时间依据时 time 填“时间未注明”，不得自行发明日期；条件分支必须标记 conditional，不能当作已经发生的事实。',
   '严格区分 NPC 与怪物导入候选：社交、剧情或服务型非玩家角色归为 npc；出现体型＋生物类型＋阵营式数据、属性块、战斗动作、法术战斗能力或召唤战斗单位的生物归为 monster，即使它拥有专名。',
   '只有原文提供的结构化数据足以直接完成 Host 校验与权威结算时，automation 才能标记 full；缺少属性块、动作数值或规则细节时必须标记 partial 或 manual。',
@@ -1259,7 +1343,7 @@ function compactCampaignDraft(value: PdfCampaignAnalysisV1): string {
   const result: string[] = []
   let characters = 0
   for (const line of lines) {
-    if (characters + line.length > 10_000) break
+    if (characters + line.length > 28_000) break
     result.push(line)
     characters += line.length + 1
   }
@@ -1281,6 +1365,17 @@ function synthesisTimelineMetadataIsComplete(
     Array.isArray(scene.tags) &&
     Array.isArray(scene.causedBy) &&
     scene.causedBy.every((name) => timelineName(name) !== timelineName(scene.name) && eventNames.has(timelineName(name))) &&
+    Array.isArray(scene.causalBranches) &&
+    scene.causalBranches.every((branch) => (
+      timelineName(branch.sourceEvent) !== timelineName(scene.name) &&
+      eventNames.has(timelineName(branch.sourceEvent)) &&
+      typeof branch.label === 'string' &&
+      typeof branch.condition === 'string' &&
+      typeof branch.explanation === 'string' &&
+      typeof branch.branchPerson === 'string' &&
+      ['dead', 'alive', 'unspecified'].includes(branch.branchPersonState)
+    )) &&
+    scene.causedBy.every((name) => scene.causalBranches!.some((branch) => timelineName(branch.sourceEvent) === timelineName(name))) &&
     typeof scene.causalExplanation === 'string' &&
     typeof scene.branchCondition === 'string' &&
     typeof scene.branchPerson === 'string' &&
@@ -1309,7 +1404,11 @@ async function executePdfAnalysisPass(input: {
     // bounded repair/compaction attempt; never loop unboundedly on a paid provider.
     ? [16_384, 16_384]
     : provider?.transport === 'local-bridge'
-      ? [...new Set([baseOutputTokens, Math.min(baseOutputTokens * 2, 6_144), 6_144])]
+      ? [...new Set([
+        baseOutputTokens,
+        Math.min(baseOutputTokens * 2, input.pass === 'synthesis' ? 16_384 : 6_144),
+        input.pass === 'synthesis' ? 16_384 : 6_144,
+      ])]
       : [baseOutputTokens]
   const baseOutputSchema = pdfAnalysisSchemaForPass({
     pass: input.pass,
@@ -1580,11 +1679,13 @@ export async function analyzeExtractedPdfDocuments(input: {
               '这是已经通过第一阶段引用校验的全书提取草稿。',
               '请进行跨章节综合：说明核心冲突、反派计划、证据因果链、玩家选择如何改变结局，以及下一场真正需要准备的事项。',
               'relationships 应补齐跨章节关系网：人物之间，以及人物与势力、人物与地点、势力与地点之间，分别保留亲属、雇佣、同盟、敌对、控制、调查、知情、隶属和关键活动联系，不要只保留少数主线关系。',
-              'timelineEvents 应重建为去重后的全书关键事件表；数量必须由原文中可辨认的独立重大事件自然决定，不设固定目标或上限。scenes 必须为空，原始可运行场景由 Host 另行保留。',
+              'timelineEvents 应重建为完整但简明的全书剧情流程：短篇通常 12 至 20 个，复杂长篇可以达到 36 个。必须覆盖所有会改变后续事件、人物状态、证据链或结局的互斥结果；scenes 必须为空，原始可运行场景由 Host 作为节点附件另行保留。',
               '不要把 timelineEvents 做成单一路径。请直接输出因果图数据：每个事件的 causedBy 只能引用本次 timelineEvents 中另一个事件的完整 name，而且只写直接原因、必要前提或真正开启该事件的选择；单纯先后相邻不算因果。没有前置原因的根事件使用空数组。',
-              'causalExplanation 要简洁说明“为什么前置事件会导致当前事件”。互斥结果、可选路线和失败后果必须成为从共同原因分出的不同事件，并在 branchCondition 中写明条件。',
+              'causalBranches 必须为 causedBy 中的每一个直接前因提供独立边数据：sourceEvent 精确等于前因 name；label 是流程图上的短标签；condition 是这条边独有的可判定条件；explanation 说明为什么会产生目标事件。causedBy 与 causalBranches.sourceEvent 必须一一对应。',
+              '玩家是否同行、追击或留下、一次救治是否成功、信件是否被伪造、是否取得关键证据、护送是否成功等，只要会造成不同的后续事件、人物状态或结局，都必须保留为分支。判断本身写在 causalBranches.condition，判断产生的持久结果分别建立 timelineEvents，不能压缩进同一个事件 description。',
+              'legacy 字段 causalExplanation、branchCondition、branchPerson、branchPersonState 只在目标事件恰好有一个前因时镜像该 causalBranches 项；多个前因时这些 legacy 字段使用空字符串与 unspecified。',
               '如果条件是某个人物死亡或存活，branchPerson 使用人物目录中的完整正式姓名，branchPersonState 使用 dead 或 alive；其他条件使用 unspecified。无条件边的 branchCondition 和 branchPerson 使用空字符串。',
-              '不要为了凑数量拆分事件，也不要为了压缩数量合并具有不同时间锚点、因果结果或互斥分支的事件。通常每个明确幕／阶段保留一至两个真正改变剧情状态的事件即可，但原文明确列出的历史起因、期限和结局分支必须保留。',
+              '普通战斗轮次、无持久后果的检定和纯气氛片段不必拆分；但不要为了节点少而合并具有不同后续连线的选择、成功/失败结果、证据取得路线或结局。',
               '优先使用原文中的“真正发生了什么”“事件顺序”“时间表”“幕／章流程”等明确顺序；再使用直接因果关系补齐顺序。PDF 页码只能作为证据，绝不是剧情时间。',
               'timelineOrder 从 10 开始按 10 递增；time 必须保留原文中最准确的时间或相对锚点，例如“数年前”“故事开始前”“当日”“伏击后”“三日后（若玩家选择）”。',
               '只保留会改变剧情状态、触发下一阶段或形成明确期限的关键事件。人物档案、地点介绍、设施说明、线索条目、单次检定、规则建议、附录说明和可选日常片段不得成为事件。',

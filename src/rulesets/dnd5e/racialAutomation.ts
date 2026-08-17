@@ -3,6 +3,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { Dnd5eDamageType } from './damageTypes'
 import { dnd5ePluginRaceDefinition } from './pluginApi'
+import { dnd5eCharacterBuildSpellGrantsV1 } from './buildChoices'
 
 export const DND5E_RACIAL_RESOURCE_KEYS = {
   dragonbornBreath: 'dnd5e-racial-dragonborn-breath',
@@ -53,6 +54,8 @@ export interface Dnd5eRacialInnateSpellGrant {
   ability: AbilityKey
   castAtLevel: number
   resetOn: 'at-will' | 'long-rest'
+  /** Ordinary learned spells still require V/S/M; racial innate spells omit this flag. */
+  requiresComponents?: boolean
 }
 
 export interface Dnd5eRacialRulesSnapshot {
@@ -125,6 +128,36 @@ export function dnd5eRacialRulesForCharacter(
   }
 }
 
+/**
+ * Projects independent spells granted by race and data-driven build choices
+ * through one Host-owned resource/casting path. The legacy `racialInnate`
+ * payload name remains a wire adapter only; content does not need a new
+ * execution mode.
+ */
+export function dnd5eIndependentSpellRulesForCharacter(
+  character: RacialCharacterIdentity & Pick<Character, 'dnd5eContentChoices'>,
+): Dnd5eRacialRulesSnapshot {
+  const racial = dnd5eRacialRulesForCharacter(character)
+  const known = new Set(racial.innateSpells.map((grant) => grant.spellId))
+  const buildSpells = dnd5eCharacterBuildSpellGrantsV1(character).flatMap((grant) => {
+    if (known.has(grant.spellId) || !grant.ability) return []
+    if (grant.mode !== 'cantrip' && grant.mode !== 'once-per-long-rest') return []
+    known.add(grant.spellId)
+    return [{
+      spellId: grant.spellId,
+      minimumLevel: 1,
+      ability: grant.ability,
+      castAtLevel: grant.mode === 'cantrip' ? 0 : grant.castAtLevel ?? 1,
+      resetOn: grant.mode === 'cantrip' ? 'at-will' as const : 'long-rest' as const,
+      requiresComponents: true,
+    }]
+  })
+  return {
+    ...racial,
+    innateSpells: [...racial.innateSpells, ...buildSpells],
+  }
+}
+
 export function dnd5eRacialInnateSpellGrant(
   rules: Pick<Dnd5eRacialRulesSnapshot, 'innateSpells'> | undefined,
   spellId: string,
@@ -136,7 +169,7 @@ export function dnd5eRacialResourceDefinitions(
   character: Character,
 ): readonly ClassResourceDefinition[] {
   if (character.rulesetId !== 'dnd5e-2014-srd-5.1') return []
-  const rules = dnd5eRacialRulesForCharacter(character)
+  const rules = dnd5eIndependentSpellRulesForCharacter(character)
   const definitions: ClassResourceDefinition[] = []
   if (rules.dragonbornAncestry) {
     definitions.push({

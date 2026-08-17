@@ -5,6 +5,7 @@ import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { migrateLegacyApCombatLogText } from '../mapsPageHelpers'
 import {
+  combatLogEntryIsInitiativeResult,
   combatLogEntryIsRoundBoundary,
   resolveCombatLogSubject,
   type CombatLogSubjectPresentation,
@@ -79,6 +80,7 @@ export default function CombatLogEntryCard({
     currentTurnTokenId,
   })
   const isRoundBoundary = combatLogEntryIsRoundBoundary(entry)
+  const isInitiativeResult = combatLogEntryIsInitiativeResult(entry)
   const tone =
     entry.kind === 'damage'
       ? 'bg-rose-500/10 text-rose-100'
@@ -110,7 +112,9 @@ export default function CombatLogEntryCard({
                   ? '攻击'
                   : entry.kind === 'turn'
                     ? '回合'
-                    : '规则'}
+                    : isInitiativeResult
+                      ? '先攻'
+                      : '规则'}
             </span>
           </div>
           <p className="text-xs font-semibold leading-snug">
@@ -119,7 +123,9 @@ export default function CombatLogEntryCard({
           {entry.details && entry.details.length > 0 && (
             <details className="group mt-2 border-t border-white/10 pt-1.5 text-[11px] leading-relaxed text-slate-300">
               <summary className="cursor-pointer select-none font-semibold text-slate-400 marker:text-slate-500 hover:text-slate-200">
-                查看 Headless 结算依据（{entry.details.length}）
+                {isInitiativeResult
+                  ? `查看先攻顺序（${entry.details.length}）`
+                  : `查看 Headless 结算依据（${entry.details.length}）`}
               </summary>
               <div className="mt-1.5 space-y-1.5 border-l border-white/10 pl-2">
                 {entry.details.map((detail, index) => (
@@ -135,7 +141,7 @@ export default function CombatLogEntryCard({
             </details>
           )}
         </div>
-        {!isRoundBoundary && <CombatLogSubjectToken subject={subject} />}
+        {!isRoundBoundary && !isInitiativeResult && <CombatLogSubjectToken subject={subject} />}
       </div>
     </article>
   )

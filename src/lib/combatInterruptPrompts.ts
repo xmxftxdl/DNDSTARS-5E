@@ -82,6 +82,7 @@ export interface SharedOpportunityAttackPromptView {
   attackerChar: Character
   targetName: string
   trigger?: CombatInterruptByKind<'opportunity-attack'>['payload']['trigger']
+  featureName?: string
   expiresAt?: number
 }
 
@@ -106,6 +107,7 @@ export interface SharedDeflectMissilesPromptView {
 export interface SharedProtectionPromptView {
   id: string
   protectorChar: Character
+  featureName?: string
   attackerName: string
   targetName: string
   attackName: string
@@ -482,6 +484,7 @@ export function buildCombatInterruptPromptViews(
           attackerChar: opportunityAttack.character,
           targetName: opportunityAttack.interrupt.payload.targetName,
           trigger: opportunityAttack.interrupt.payload.trigger,
+          featureName: opportunityAttack.interrupt.payload.featureName,
           expiresAt: opportunityAttack.interrupt.expiresAt,
         }
       : undefined,
@@ -489,6 +492,7 @@ export function buildCombatInterruptPromptViews(
       ? {
           id: protection.interrupt.id,
           protectorChar: protection.character,
+          featureName: protection.interrupt.payload.featureName,
           attackerName: protection.interrupt.payload.attackerName,
           targetName: protection.interrupt.payload.targetName,
           attackName: protection.interrupt.payload.attackName,

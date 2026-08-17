@@ -20,6 +20,11 @@ import type { Character } from '../types/character'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
 import { useCharacterStore } from './characters'
 import { useMapStore, type BattleMap, type Token } from './maps'
+import { getDnd5eSrdMonster } from '../rulesets/dnd5e/monsters'
+import {
+  dnd5eMonsterRuntimeStatusCapabilities,
+  type Dnd5eMonsterRuntimeStatusId,
+} from '../rulesets/dnd5e/tokenStatusMarkers'
 
 type SpellChoicePatch = Pick<Character, 'dnd5eClassChoices'>
 
@@ -113,6 +118,14 @@ export type AppRoomCommand =
       mapId: string
       tokenId: string
       active: boolean
+    })
+  | (RoomCommandEnvelope & {
+      type: 'combat.monster-runtime-status.set'
+      mapId: string
+      tokenId: string
+      statusId: Dnd5eMonsterRuntimeStatusId
+      active: boolean
+      sourceActorId?: string
     })
   | (RoomCommandEnvelope & {
       type: 'character.spell-selections.replace'
@@ -536,7 +549,7 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
     }
   }
 
-  if (command.type === 'combat.monster-berserk.set') {
+  if (command.type === 'combat.monster-berserk.set' || command.type === 'combat.monster-runtime-status.set') {
     if (!directDmMutationAllowed()) {
       return { status: 'rejected', message: '只有 DM 可以直接调整怪物专属状态。' }
     }
@@ -553,6 +566,19 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
     if (token.characterId && !character) {
       return { status: 'rejected', message: '怪物关联角色数据已经失效。' }
     }
+    const statusId: Dnd5eMonsterRuntimeStatusId = command.type === 'combat.monster-berserk.set'
+      ? 'monster-berserk'
+      : command.statusId
+    const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
+    if (!dnd5eMonsterRuntimeStatusCapabilities(monster).some((status) => status.id === statusId)) {
+      return { status: 'rejected', message: '该怪物没有声明这个专属状态，不能写入其 Headless 数据。' }
+    }
+    const requestedSourceActorId = command.type === 'combat.monster-runtime-status.set'
+      ? command.sourceActorId
+      : undefined
+    if (requestedSourceActorId && !map.tokens.some((candidate) => candidate.id === requestedSourceActorId)) {
+      return { status: 'rejected', message: '专属状态的来源生物不在当前地图。' }
+    }
 
     const previousCharacter = character ? structuredClone(character) : undefined
     const previousToken = structuredClone(token)
@@ -560,7 +586,20 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
     const nextState = {
       ...(previousState ?? {}),
       schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
-      monsterBerserk: command.active ? true : undefined,
+      ...(statusId === 'monster-berserk'
+        ? { monsterBerserk: command.active ? true : undefined }
+        : statusId === 'monster-damage-aversion'
+          ? {
+            monsterDamageAversionActive: command.active ? true : undefined,
+            monsterDamageAversionSourceActorId: command.active ? requestedSourceActorId : undefined,
+          }
+          : {
+              monsterRegenerationSuppressedDamageTypes: command.active
+                ? monster?.traits.flatMap((trait) => trait.rule?.kind === 'regeneration'
+                  ? trait.rule.suppressedByDamageTypes
+                  : [])
+                : undefined,
+            }),
     }
     if (character) {
       characterState.applyAuthorityUpdate(character.id, { dnd5eCombatState: nextState })
@@ -858,6 +897,28 @@ export function setRoomMonsterBerserk(input: {
     ...input,
     id: commandId('monster-berserk'),
     type: 'combat.monster-berserk.set',
+    ...aggregateTarget,
+    issuedAt: Date.now(),
+  })
+}
+
+export function setRoomMonsterRuntimeStatus(input: {
+  mapId: string
+  tokenId: string
+  statusId: Dnd5eMonsterRuntimeStatusId
+  active: boolean
+  sourceActorId?: string
+}): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [linkedCharacterIdForToken(input.mapId, input.tokenId)],
+    mapId: input.mapId,
+    tokenIds: [input.tokenId, input.sourceActorId],
+    fallback: 'room:invalid:monster-runtime-status',
+  })
+  return appRoomCommandBus.dispatch({
+    ...input,
+    id: commandId('monster-runtime-status'),
+    type: 'combat.monster-runtime-status.set',
     ...aggregateTarget,
     issuedAt: Date.now(),
   })

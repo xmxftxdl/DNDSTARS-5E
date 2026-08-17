@@ -12,17 +12,20 @@ import type {
 /** Browser targeting draft. It contains no authoritative combat result. */
 export interface Dnd5eSpellTargetingSession {
   characterId: string
+  spellOriginAreaId?: string
   focusItemInstanceId?: string
   itemInstanceId?: string
   itemUseActionId?: string
   castingClassId?: Dnd5eClassId
   racialInnate?: boolean
+  alternateResourceSpell?: Dnd5eSpellCastPayload['alternateResourceSpell']
   spellId: string
   slotLevel: number
   maximumTargets: number
   allowDuplicateTargets: boolean
   targetTokenIds: string[]
   overchannel: boolean
+  damageMaximizationFeatureId?: string
   empowered: boolean
   draconicResistance: boolean
   repellingBlast: boolean

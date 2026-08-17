@@ -51,6 +51,7 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'bonus-action-unavailable': { title: '附赠动作已用尽', message: '本回合已没有可用附赠动作，本次行动未结算。' },
   'reaction-unavailable': { title: '反应已用尽', message: '当前已没有可用反应，本次行动未结算。' },
   'insufficient-movement': { title: '移动力不足', message: '剩余移动力不足以完成该移动。' },
+  'movement-boundary-save-failed': { title: '移动被法术限制', message: '角色未通过离开来源范围所需的豁免，本次移动没有发生，也不会消耗移动力。' },
   'invalid-target': { title: '目标无效', message: '目标不符合该行动的规则或已不可用，本次行动未结算。' },
   'slot-unavailable': { title: '法术位不足', message: '没有可用的对应环阶法术位，本次施法未结算。' },
   'spell-unavailable': { title: '法术不可用', message: '当前角色不能施放该法术，本次施法未结算。' },

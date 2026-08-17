@@ -1,12 +1,14 @@
-import { Radio, UserRoundCog, Volume2, X } from 'lucide-react'
+import { Radio, Sparkles, UserRoundCog, Volume2, X } from 'lucide-react'
 import { useMemo } from 'react'
 import { useMapStore } from '../store/maps'
 import {
   VOICE_BASE_PROFILES,
   VOICE_EFFECT_PRESETS,
+  VOICE_PERSONA_PRESETS,
   type VoiceBaseProfileId,
   type VoiceEffectPresetId,
   type VoiceNpcQuickSlot,
+  type VoicePersonaPresetId,
 } from '../voice/voiceChanger'
 import { useVoiceRoom } from '../voice/useVoiceRoom'
 
@@ -57,7 +59,32 @@ export default function NpcVoiceChangerPanel() {
       npcName,
       ...(npcTokenId ? { npcTokenId } : {}),
       ...(npcTokenId && mapId ? { mapId } : {}),
+      ...(patch.personaPresetId ?? current?.personaPresetId
+        ? { personaPresetId: patch.personaPresetId ?? current?.personaPresetId }
+        : {}),
+      ...(patch.performanceCue ?? current?.performanceCue
+        ? { performanceCue: patch.performanceCue ?? current?.performanceCue }
+        : {}),
       selection: patch.selection ?? current?.selection ?? config.selection,
+    })
+  }
+
+  const applyPersonaPreset = (shortcut: number, presetId: VoicePersonaPresetId) => {
+    const current = config.slots.find((slot) => slot.shortcut === shortcut)
+    if (presetId === 'custom') {
+      updateSlot(shortcut, {
+        npcName: current?.npcName || `角色 ${shortcut}`,
+        personaPresetId: 'custom',
+      })
+      return
+    }
+    const preset = VOICE_PERSONA_PRESETS.find((entry) => entry.id === presetId)
+    if (!preset) return
+    updateSlot(shortcut, {
+      npcName: current?.npcName || `角色 ${shortcut}`,
+      personaPresetId: preset.id,
+      performanceCue: preset.performanceCue,
+      selection: preset.selection,
     })
   }
 
@@ -70,7 +97,7 @@ export default function NpcVoiceChangerPanel() {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold text-slate-100">DM 角色变声台</h3>
           <p className="mt-1 text-xs leading-5 text-slate-400">
-            声线可以自定义命名，也可以选择性关联地图 NPC。数字 1–9 切换完整角色声线；再次按下当前数字键恢复原声。
+            为本场常用 NPC 预设身份声线。数字 1–9 切换完整角色声线；再次按下当前数字键恢复原声。
           </p>
         </div>
         <div className="rounded-xl border border-violet-300/15 bg-black/20 px-3 py-2 text-right">
@@ -133,9 +160,15 @@ export default function NpcVoiceChangerPanel() {
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-bold text-slate-300">角色声线快捷槽</p>
-            <span className="text-[11px] text-slate-500">地图角色关联为可选；同键再次按下即取消</span>
+            <p className="flex items-center gap-2 text-xs font-bold text-slate-300">
+              <Sparkles className="h-3.5 w-3.5 text-violet-300" />
+              本场 NPC 声线预设
+            </p>
+            <span className="text-[11px] text-slate-500">优先按身份与说话习惯区分，不必按种族套音色</span>
           </div>
+          <p className="mt-1 text-[11px] leading-5 text-slate-500">
+            一键模板只做细微音色变化；语速、停顿和口头习惯会保存为 DM 表演提示。所有快捷槽跟随当前战役保存。
+          </p>
           <div className="mt-2 grid gap-2">
             {Array.from({ length: 9 }, (_, index) => index + 1).map((shortcut) => {
               const slot = config.slots.find((candidate) => candidate.shortcut === shortcut)
@@ -143,7 +176,7 @@ export default function NpcVoiceChangerPanel() {
               return (
                 <div
                   key={shortcut}
-                  className={`grid items-center gap-2 rounded-xl border p-2 sm:grid-cols-[36px_minmax(110px,0.8fr)_minmax(140px,1fr)_110px_130px_34px] ${config.activeShortcut === shortcut ? 'border-violet-300/45 bg-violet-500/10' : 'border-white/8 bg-black/10'}`}
+                  className={`grid items-center gap-2 rounded-xl border p-2 sm:grid-cols-[36px_minmax(110px,0.8fr)_minmax(140px,1fr)_140px_34px] ${config.activeShortcut === shortcut ? 'border-violet-300/45 bg-violet-500/10' : 'border-white/8 bg-black/10'}`}
                 >
                   <button
                     type="button"
@@ -171,6 +204,8 @@ export default function NpcVoiceChangerPanel() {
                           shortcut,
                           npcName: slot.npcName,
                           selection: slot.selection,
+                          ...(slot.personaPresetId ? { personaPresetId: slot.personaPresetId } : {}),
+                          ...(slot.performanceCue ? { performanceCue: slot.performanceCue } : {}),
                         })
                         return
                       }
@@ -191,32 +226,13 @@ export default function NpcVoiceChangerPanel() {
                     ))}
                   </select>
                   <select
-                    aria-label={`快捷键 ${shortcut} 的基础声线`}
-                    value={slot?.selection.baseProfileId ?? config.selection.baseProfileId}
-                    disabled={!slot}
-                    onChange={(event) => updateSlot(shortcut, {
-                      selection: {
-                        ...(slot?.selection ?? config.selection),
-                        baseProfileId: event.target.value as VoiceBaseProfileId,
-                      },
-                    })}
-                    className="rounded-lg border border-white/8 bg-slate-950 px-2 py-2 text-xs text-slate-200 disabled:opacity-35"
+                    aria-label={`快捷键 ${shortcut} 的人物模板`}
+                    value={slot?.personaPresetId ?? 'custom'}
+                    onChange={(event) => applyPersonaPreset(shortcut, event.target.value as VoicePersonaPresetId)}
+                    className="rounded-lg border border-violet-300/15 bg-slate-950 px-2 py-2 text-xs text-violet-100"
                   >
-                    {VOICE_BASE_PROFILES.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
-                  </select>
-                  <select
-                    aria-label={`快捷键 ${shortcut} 的角色效果`}
-                    value={slot?.selection.effectPresetId ?? config.selection.effectPresetId}
-                    disabled={!slot}
-                    onChange={(event) => updateSlot(shortcut, {
-                      selection: {
-                        ...(slot?.selection ?? config.selection),
-                        effectPresetId: event.target.value as VoiceEffectPresetId,
-                      },
-                    })}
-                    className="rounded-lg border border-white/8 bg-slate-950 px-2 py-2 text-xs text-slate-200 disabled:opacity-35"
-                  >
-                    {VOICE_EFFECT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                    <option value="custom">自定义声线</option>
+                    {VOICE_PERSONA_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
                   </select>
                   <button
                     type="button"
@@ -227,6 +243,49 @@ export default function NpcVoiceChangerPanel() {
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
+                  {slot && (
+                    <div className="grid gap-2 sm:col-start-2 sm:col-span-4 sm:grid-cols-[minmax(220px,1fr)_110px_130px]">
+                      <input
+                        aria-label={`快捷键 ${shortcut} 的表演提示`}
+                        value={slot.performanceCue ?? ''}
+                        maxLength={240}
+                        placeholder="表演提示：语速、停顿、口头习惯……"
+                        onChange={(event) => updateSlot(shortcut, {
+                          personaPresetId: 'custom',
+                          performanceCue: event.target.value,
+                        })}
+                        className="min-w-0 rounded-lg border border-white/8 bg-black/20 px-2 py-2 text-[11px] text-slate-300 placeholder:text-slate-600"
+                      />
+                      <select
+                        aria-label={`快捷键 ${shortcut} 的基础声线`}
+                        value={slot.selection.baseProfileId}
+                        onChange={(event) => updateSlot(shortcut, {
+                          personaPresetId: 'custom',
+                          selection: {
+                            ...slot.selection,
+                            baseProfileId: event.target.value as VoiceBaseProfileId,
+                          },
+                        })}
+                        className="rounded-lg border border-white/8 bg-slate-950 px-2 py-2 text-xs text-slate-200"
+                      >
+                        {VOICE_BASE_PROFILES.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+                      </select>
+                      <select
+                        aria-label={`快捷键 ${shortcut} 的角色效果`}
+                        value={slot.selection.effectPresetId}
+                        onChange={(event) => updateSlot(shortcut, {
+                          personaPresetId: 'custom',
+                          selection: {
+                            ...slot.selection,
+                            effectPresetId: event.target.value as VoiceEffectPresetId,
+                          },
+                        })}
+                        className="rounded-lg border border-white/8 bg-slate-950 px-2 py-2 text-xs text-slate-200"
+                      >
+                        {VOICE_EFFECT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )
             })}

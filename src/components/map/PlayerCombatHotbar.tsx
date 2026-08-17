@@ -12,6 +12,7 @@ import {
   dnd5eClassDefinitionForCharacter,
   dnd5eMartialSpellSynergyForCharacter,
   dnd5eMartialSpellBonusAttackAvailable,
+  dnd5ePluginBonusWeaponAttackForCharacter,
   dnd5eRageFeatureForCharacter,
   dnd5eEffectiveSpellcastingSources,
   dnd5eEffectiveSpellSelections,
@@ -30,6 +31,8 @@ import {
   resolveDnd5eSpellModifierIntents,
   toggleDnd5eSpellModifierIntent,
   dnd5eWeaponAttackProfile,
+  dnd5eWeaponPropertyIds,
+  dnd5eActivityWeaponAttackGrantMatchesV1,
   fighterResourceState,
 } from '../../rulesets/dnd5e'
 import { dnd5eClassFeatureActionIcon, dnd5eItemActionIcon, dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
@@ -59,6 +62,8 @@ import {
   type CombatItemQuickbarPreferenceV1,
 } from './combatItemQuickbar'
 import { dnd5eCombatSpellDamagePreview } from './combatSpellDamagePresentation'
+import PlayerQuickCharacterSheet from './PlayerQuickCharacterSheet'
+import { resolveDnd5eHotbarSpellCommand } from './playerCombatHotbarSpellCommand'
 
 const STORAGE_PREFIX = 'dndstars5e:combat-hotbar:v1:'
 const ITEM_QUICKBAR_STORAGE_PREFIX = 'dndstars5e:combat-item-quickbar:v1:'
@@ -119,7 +124,22 @@ interface PlayerCombatHotbarProps {
     economy: 'action' | 'bonus-action'
     targeting: 'area' | 'creature'
   }[]
+  persistentAreaActivityControls?: readonly {
+    areaId: string
+    featureId: string
+    activityId: string
+    label: string
+    economy: 'action' | 'bonus-action' | 'reaction' | 'none'
+    targeting: 'self' | 'creature' | 'area'
+  }[]
   hunterMarkTransferAvailable?: boolean
+  /**
+   * Pending "next spell" modifiers are owned by the map casting session when
+   * supplied. Keeping them above this hotbar prevents opening another dock or
+   * remounting the hotbar from silently dropping Overchannel/Sculpt Spell.
+   */
+  armedSpellModifiers?: readonly Dnd5eCombatSpellModifier[]
+  onArmedSpellModifiersChange?: (modifiers: readonly Dnd5eCombatSpellModifier[]) => void
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
   onCommand: (command: Dnd5eCombatActionCommand, descriptor: Dnd5eCombatActionDescriptorV1) => void
@@ -208,7 +228,10 @@ export default function PlayerCombatHotbar({
   grappleEscapes = [],
   movablePersistentAreas = [],
   sustainedAreaControls = [],
+  persistentAreaActivityControls = [],
   hunterMarkTransferAvailable = false,
+  armedSpellModifiers: controlledArmedSpellModifiers,
+  onArmedSpellModifiersChange,
   selectedSpellSlotLevels,
   onSelectedSpellSlotLevelChange,
   onCommand,
@@ -231,9 +254,19 @@ export default function PlayerCombatHotbar({
     characterId: string
     ids: Set<Dnd5eCombatSpellModifier>
   }>(() => ({ characterId: character.id, ids: new Set() }))
-  const armedSpellModifiers = armedSpellModifierState.characterId === character.id
-    ? armedSpellModifierState.ids
-    : EMPTY_ARMED_SPELL_MODIFIERS
+  const armedSpellModifiers = useMemo(() => controlledArmedSpellModifiers != null
+    ? new Set(controlledArmedSpellModifiers)
+    : armedSpellModifierState.characterId === character.id
+      ? armedSpellModifierState.ids
+      : EMPTY_ARMED_SPELL_MODIFIERS,
+  [armedSpellModifierState, character.id, controlledArmedSpellModifiers])
+  const commitArmedSpellModifiers = useCallback((next: Set<Dnd5eCombatSpellModifier>) => {
+    if (onArmedSpellModifiersChange) {
+      onArmedSpellModifiersChange([...next])
+      return
+    }
+    setArmedSpellModifierState({ characterId: character.id, ids: next })
+  }, [character.id, onArmedSpellModifiersChange])
   const descriptors = useMemo(() => {
     const spellbookById = new Map(dnd5eSpellbookEntriesWithPlugins(importedSpells, registeredDnd5ePluginSpells()).map((spell) => [spell.id, spell]))
     const spellSources: Dnd5eCombatActionSpellSource[] = []
@@ -369,7 +402,7 @@ export default function PlayerCombatHotbar({
       icon: dnd5eClassFeatureActionIcon({
         id: definition.id,
         name: definition.label,
-        classId: definition.source.classId,
+        classId: definition.source.classId ?? primaryClassId,
       }),
       modifier: definition.id,
       resource,
@@ -454,6 +487,19 @@ export default function PlayerCombatHotbar({
         sustainedEffectAreaId: control.areaId,
       },
     })))
+    featureSources.unshift(...persistentAreaActivityControls.map((control) => ({
+      id: `persistent-area-activity:${control.areaId}:${control.activityId}`,
+      label: control.label,
+      description: `由地图上的持续区域授予；${control.economy === 'bonus-action' ? '附赠动作' : control.economy === 'action' ? '动作' : control.economy === 'reaction' ? '反应' : '不消耗行动'}，区域消失后按钮自动移除。`,
+      icon: dnd5eSpellActionIcon({ id: control.activityId, name: control.label }),
+      economy: control.economy,
+      targeting: control.targeting,
+      command: {
+        kind: 'use-persistent-area-activity' as const,
+        areaId: control.areaId,
+        featureId: control.featureId,
+      },
+    })))
     featureSources.unshift(...movablePersistentAreas.map((area) => ({
       id: `persistent-area-move:${area.id}`,
       label: `移动${area.label}`,
@@ -469,6 +515,62 @@ export default function PlayerCombatHotbar({
     })))
     const turnKey = turnEconomy.turnKey ?? ''
     const mainWeaponId = character.equipment?.mainWeapon?.id
+    const mainWeaponProfile = dnd5eWeaponAttackProfile(character)
+    const activityWeaponProfiles = [
+      ...(mainWeaponProfile ? [{ slot: 'main-hand' as const, profile: mainWeaponProfile }] : []),
+      ...(() => {
+        const profile = dnd5eWeaponAttackProfile(character, { weaponSlot: 'offHand' })
+        return profile ? [{ slot: 'off-hand' as const, profile }] : []
+      })(),
+    ]
+    const activityWeaponAttackGrants = Object.values(
+      character.dnd5eCombatState?.activityWeaponAttackGrants ?? {},
+    ).flatMap((grant) => activityWeaponProfiles.flatMap(({ slot, profile }) =>
+      dnd5eActivityWeaponAttackGrantMatchesV1(grant, turnKey, {
+        weaponId: profile.weaponId,
+        baseWeaponId: profile.baseWeaponId,
+        mode: profile.mode,
+        weaponProperties: dnd5eWeaponPropertyIds(profile.properties),
+        proficient: profile.proficient,
+      }, slot) ? [{ grant, slot, profile }] : []))
+    const genericBonusWeaponAttack = dnd5ePluginBonusWeaponAttackForCharacter(character, turnKey)
+    if (mainWeaponProfile && genericBonusWeaponAttack) {
+      featureSources.push({
+        id: `generic-bonus-weapon-attack:${genericBonusWeaponAttack.id}`,
+        label: genericBonusWeaponAttack.name,
+        description: '完成攻击动作后，以附赠动作进行一次武器攻击；次数、装备、目标、距离与命中均由 Host 校验。',
+        icon: dnd5eClassFeatureActionIcon({
+          id: genericBonusWeaponAttack.id,
+          name: genericBonusWeaponAttack.name,
+          classId: genericBonusWeaponAttack.sourceClassId ?? primaryClassId,
+        }),
+        economy: 'bonus-action',
+        targeting: 'creature',
+        command: {
+          kind: 'select-weapon-target',
+          options: { featureBonusWeaponAttackId: genericBonusWeaponAttack.id },
+        },
+      })
+    }
+    featureSources.push(...activityWeaponAttackGrants.map(({ grant, slot, profile }) => ({
+      id: `activity-weapon-attack:${grant.grantId}:${slot}`,
+      label: `${grant.label} · ${profile.weaponName}`,
+      description: '由统一 Activity 触发；点击后选择目标，Host 会重新校验当前主手武器、距离、命中与附赠动作。',
+      icon: dnd5eClassFeatureActionIcon({
+        id: grant.sourceActivityId,
+        name: grant.label,
+        classId: primaryClassId,
+      }),
+      economy: 'bonus-action' as const,
+      targeting: 'creature' as const,
+      command: {
+        kind: 'select-weapon-target' as const,
+        options: {
+          activityWeaponAttackGrantId: grant.grantId,
+          activityWeaponAttackWeaponSlot: slot,
+        },
+      },
+    })))
     if (
       dnd5eWeaponAttackProfile(character) &&
       dnd5eMartialSpellBonusAttackAvailable(character, turnKey)
@@ -593,6 +695,10 @@ export default function PlayerCombatHotbar({
       if (entry.item.useActions?.length) {
         const active = dnd5eInventoryEntryIsActive(entry)
         return entry.item.useActions.map((use) => {
+          const spell = use.effect.kind === 'spell-cast'
+            ? getDnd5eSrdCombatSpell(use.effect.spellId)
+            : undefined
+          const reactionOnly = spell?.castingTime === 'reaction'
           const resource = use.resourceCost
             ? entry.resources?.[use.resourceCost.resourceId]
             : Object.values(entry.resources ?? {})[0]
@@ -612,18 +718,24 @@ export default function PlayerCombatHotbar({
             targeting,
             quantity: entry.quantity,
             resource: resource ? { label: resource.label, current: resource.current, maximum: resource.maximum } : undefined,
-            usable: active && entry.quantity > 0 && enoughResource,
+            usable: active && entry.quantity > 0 && enoughResource && !reactionOnly,
             unavailableReason: entry.identified === false
               ? '魔法物品尚未鉴定。'
               : !active
                 ? '需要先完成同调。'
-                : !enoughResource ? `${resource?.label ?? '资源'}不足。` : undefined,
+                : reactionOnly
+                  ? '满足触发条件时由战斗反应窗口使用。'
+                  : !enoughResource ? `${resource?.label ?? '资源'}不足。` : undefined,
           }
         })
       }
       if (!entry.item.use) return []
       const resource = Object.values(entry.resources ?? {})[0]
       const active = dnd5eInventoryEntryIsActive(entry)
+      const spell = entry.item.use.effect.kind === 'spell-cast'
+        ? getDnd5eSrdCombatSpell(entry.item.use.effect.spellId)
+        : undefined
+      const reactionOnly = spell?.castingTime === 'reaction'
       const targeting: Dnd5eCombatActionTargeting = entry.item.use.targeting?.kind === 'map-area'
         ? 'area'
         : entry.item.use.targeting?.kind === 'creature'
@@ -638,12 +750,14 @@ export default function PlayerCombatHotbar({
         targeting,
         quantity: entry.quantity,
         resource: resource ? { label: resource.label, current: resource.current, maximum: resource.maximum } : undefined,
-        usable: active && entry.quantity > 0 && (!resource || resource.current > 0),
+        usable: active && entry.quantity > 0 && (!resource || resource.current > 0) && !reactionOnly,
         unavailableReason: entry.identified === false
           ? '魔法物品尚未鉴定。'
           : !active
             ? '需要先完成同调。'
-            : resource?.current === 0 ? `${resource.label}已经耗尽。` : undefined,
+            : reactionOnly
+              ? '满足触发条件时由战斗反应窗口使用。'
+              : resource?.current === 0 ? `${resource.label}已经耗尽。` : undefined,
       }]
     })
     const built = buildDnd5eCombatActionDescriptors({
@@ -671,6 +785,8 @@ export default function PlayerCombatHotbar({
       if (
         entry.sourceKind === 'feature' &&
         !entry.id.startsWith('feature:sustained-spell:') &&
+        !entry.id.startsWith('feature:persistent-area-move:') &&
+        !entry.id.startsWith('feature:persistent-area-activity:') &&
         entry.command.kind !== 'open-panel' &&
         entry.command.kind !== 'toggle-spell-modifier'
       ) return {
@@ -703,6 +819,7 @@ export default function PlayerCombatHotbar({
     primaryClassId,
     spellModifierIntents,
     sustainedAreaControls,
+    persistentAreaActivityControls,
     turnEconomy.action.max,
     turnEconomy.turnKey,
   ])
@@ -728,6 +845,7 @@ export default function PlayerCombatHotbar({
   const [draggedActionId, setDraggedActionId] = useState<string | null>(null)
   const [draggedItemInstanceId, setDraggedItemInstanceId] = useState<string | null>(null)
   const [backpackOpen, setBackpackOpen] = useState(() => readBackpackOpen(character.id))
+  const [quickCharacterOpen, setQuickCharacterOpen] = useState(false)
   const setBackpackVisible = useCallback((open: boolean) => {
     setBackpackOpen(open)
     if (typeof window === 'undefined') return
@@ -817,13 +935,7 @@ export default function PlayerCombatHotbar({
     }
     if (entry.command.kind === 'toggle-spell-modifier') {
       const modifier = entry.command.modifier
-      setArmedSpellModifierState((current) => ({
-        characterId: character.id,
-        ids: toggleDnd5eSpellModifierIntent(
-          current.characterId === character.id ? current.ids : new Set(),
-          modifier,
-        ),
-      }))
+      commitArmedSpellModifiers(toggleDnd5eSpellModifierIntent(armedSpellModifiers, modifier))
       return
     }
     if (entry.command.kind === 'cast-spell') {
@@ -837,35 +949,27 @@ export default function PlayerCombatHotbar({
         return
       }
       const slotLevel = slotSelection.slotLevel
-      const resolution = resolveDnd5eSpellModifierIntents({
+      const resolvedCommand = resolveDnd5eHotbarSpellCommand(
         character,
-        castingClassId: entry.command.castingClassId as Parameters<typeof resolveDnd5eSpellModifierIntents>[0]['castingClassId'],
-        spellId: entry.command.spellId,
+        entry.command,
         slotLevel,
-        modifierIds: [...armedSpellModifiers],
-      })
-      if (!resolution.ok) {
+        [...armedSpellModifiers],
+      )
+      if (!resolvedCommand.ok) {
         onUnavailable?.({
           ...entry,
           enabled: false,
-          disabledReason: resolution.reasons.join('；'),
+          disabledReason: resolvedCommand.reasons.join('；'),
         })
         return
       }
-      onCommand({
-        ...entry.command,
-        slotLevel,
-        options: {
-          ...resolution.options,
-          autoSubmitOnTargetSelection: !resolution.requiresTargetConfiguration,
-        },
-      }, entry)
-      setArmedSpellModifierState({ characterId: character.id, ids: new Set() })
+      onCommand(resolvedCommand.command, entry)
+      commitArmedSpellModifiers(new Set())
       setSpellConfiguration(null)
       return
     }
     onCommand(entry.command, entry)
-  }, [armedSpellModifiers, character, onCommand, onUnavailable, setArmedSpellModifierState])
+  }, [armedSpellModifiers, character, commitArmedSpellModifiers, onCommand, onUnavailable])
 
   const pinSpellSlotLevel = useCallback((actionId: string, slotLevel: number) => {
     if (onSelectedSpellSlotLevelChange) {
@@ -877,14 +981,15 @@ export default function PlayerCombatHotbar({
   }, [onSelectedSpellSlotLevelChange])
 
   useEffect(() => {
-    if (!spellConfiguration && !backpackOpen) return
+    if (!spellConfiguration && !backpackOpen && !quickCharacterOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setSpellConfiguration(null)
       if (event.key === 'Escape') setBackpackVisible(false)
+      if (event.key === 'Escape') setQuickCharacterOpen(false)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [backpackOpen, setBackpackVisible, spellConfiguration])
+  }, [backpackOpen, quickCharacterOpen, setBackpackVisible, spellConfiguration])
 
   const spellConfigurationResolution = useMemo(() => {
     if (!spellConfiguration || spellConfiguration.entry.command.kind !== 'cast-spell') return undefined
@@ -947,6 +1052,7 @@ export default function PlayerCombatHotbar({
       key={entry.id}
       type="button"
       data-action-id={entry.id}
+      data-command-kind={entry.command.kind}
       draggable
       onDragStart={() => {
         suppressClickAfterDragRef.current = true
@@ -1169,11 +1275,18 @@ export default function PlayerCombatHotbar({
     >
       <div className="grid min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px] gap-1.5">
         <aside className="flex flex-col items-center justify-between rounded-lg border border-amber-100/10 bg-black/25 p-1.5">
-          <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)]">
+          <button
+            type="button"
+            data-testid="combat-hotbar-character-portrait"
+            aria-label={`快速查看${character.name}的人物卡`}
+            title="快速查看人物卡"
+            onClick={() => setQuickCharacterOpen(true)}
+            className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)] transition hover:scale-105 hover:border-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+          >
             {portrait
               ? <img src={portrait} alt={`${character.name}的战斗头像`} className="h-full w-full object-cover" />
               : <span className={`flex h-full w-full items-center justify-center bg-gradient-to-br text-2xl ${character.accent}`}>{character.avatar}</span>}
-          </div>
+          </button>
           <div className="mt-1 w-full">
             <div className="h-1.5 overflow-hidden rounded-full bg-black/70"><div className="h-full rounded-full bg-gradient-to-r from-rose-700 to-emerald-400" style={{ width: `${hpPercentage}%` }} /></div>
             <div className="mt-0.5 text-center text-[9px] font-semibold tabular-nums text-slate-300">{character.currentHp}/{character.maxHp}</div>
@@ -1283,6 +1396,10 @@ export default function PlayerCombatHotbar({
         </div>
       </div>
     </section>
+    {quickCharacterOpen && typeof document !== 'undefined' ? createPortal(
+      <PlayerQuickCharacterSheet character={character} onClose={() => setQuickCharacterOpen(false)} />,
+      document.body,
+    ) : null}
     {backpackOpen && typeof document !== 'undefined' ? createPortal(
       <div
         className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"

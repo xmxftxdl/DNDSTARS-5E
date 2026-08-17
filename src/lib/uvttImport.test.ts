@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { importUvttGeometry, uvttEmbeddedImageBlob } from './uvttImport'
+import { importUvttGeometry, isUvttMapFile, uvttEmbeddedImageBlob } from './uvttImport'
 import { mapGeometrySegments } from './mapGeometry'
 
 describe('UVTT/DD2VTT geometry import', () => {
+  it.each([
+    ['dungeon.uvtt', ''],
+    ['dungeon.dd2vtt', ''],
+    ['dungeon.df2vtt', ''],
+    ['dungeon.json', 'application/json'],
+  ])('recognizes %s as a UVTT map file', (name, type) => {
+    expect(isUvttMapFile({ name, type })).toBe(true)
+  })
+
+  it('does not route ordinary images through the UVTT importer', () => {
+    expect(isUvttMapFile({ name: 'dungeon.webp', type: 'image/webp' })).toBe(false)
+  })
+
   it('imports walls, attached portals and lights at the target map scale', () => {
     const result = importUvttGeometry({
       format: 0.3,

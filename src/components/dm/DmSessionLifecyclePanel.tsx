@@ -39,6 +39,14 @@ export default function DmSessionLifecyclePanel({
     updateWorkspace({ ...workspace, activeSession: { ...session, review: nextReview } })
   }
 
+  if (view === 'session' && workspace.mode === 'prep') {
+    return <section className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/8 bg-black/15 px-4 py-3" data-testid="dm-session-runtime">
+      <span className="h-2.5 w-2.5 rounded-full bg-slate-600" />
+      <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">团务模式 · 备团</p><p className="mt-1 truncate text-xs text-slate-300">{plan.sessionTitle} · 统一剧情事件 {workspace.events.length} 个 · 已选本场节点 {plan.selectedStoryEventIds.length} 个</p></div>
+      <button type="button" onClick={() => updateWorkspace(startCampaignSession(workspace, plan.sessionTitle, journalEntries))} className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-400"><Play className="h-4 w-4" />开始本场团务</button>
+    </section>
+  }
+
   if (view === 'session') {
     return (
       <section className={`mb-4 rounded-3xl border p-5 ${workspace.mode === 'running' ? 'border-cyan-400/25 bg-cyan-500/[0.055]' : workspace.mode === 'review' ? 'border-amber-400/25 bg-amber-500/[0.045]' : 'border-white/8 bg-black/15'}`} data-testid="dm-session-runtime">

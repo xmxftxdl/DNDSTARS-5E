@@ -9,6 +9,7 @@ import {
   mapCanvasStageCanPan,
   mapCanvasTokenUsesInstantPosition,
   mapCanvasTokenClickAction,
+  syncMapCanvasViewportDataset,
 } from './mapCanvasInteraction'
 
 const base = {
@@ -27,6 +28,18 @@ const base = {
 }
 
 describe('map canvas viewport panning', () => {
+  it('publishes the live Konva transform before React commits the drag', () => {
+    const target = { dataset: {} }
+
+    syncMapCanvasViewportDataset(target, { x: -142.5, y: 83.25, scale: 0.72 })
+
+    expect(target.dataset).toEqual({
+      viewportX: '-142.5',
+      viewportY: '83.25',
+      viewportScale: '0.72',
+    })
+  })
+
   it('keeps panning available in fog pan mode and while placing doors or windows', () => {
     expect(mapCanvasStageCanPan({ ...base, fogEditMode: true, fogTool: 'pan' })).toBe(true)
     expect(mapCanvasStageCanPan({ ...base, geometryEditMode: true, geometryTool: 'select' })).toBe(true)

@@ -468,6 +468,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
   if (
     variant.area.origin === 'point' && mapGeometryLineOfEffectBlocked({
       geometry,
+      map: input.map,
       from: actorToken,
       to: effectOrigin,
       fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
@@ -499,6 +500,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
           }) &&
           !mapGeometryLineOfEffectBlocked({
             geometry,
+            map: input.map,
             from: effectOrigin,
             to: candidate,
             fromElevationFeet: effectOriginElevation,

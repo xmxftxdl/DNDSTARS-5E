@@ -9,7 +9,7 @@ import { dnd5eCombatSpellActionId } from '../../lib/dnd5eCombatActionDescriptors
 import { dnd5eCombatSpellDamagePreview } from './combatSpellDamagePresentation'
 
 import { getClassResource } from '../../lib/classResources'
-import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_RACIAL_RESOURCE_KEYS, dnd5eActiveSustainedSpellControl, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eEffectiveSpellcastingSources, dnd5eEffectiveSpellSelections, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eRacialRulesForCharacter, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
+import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_RACIAL_RESOURCE_KEYS, dnd5eActiveSustainedSpellControl, dnd5eAlternateResourceSpellsForCharacter, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eEffectiveSpellcastingSources, dnd5eEffectiveSpellSelections, dnd5eFreeSpellCastSource, dnd5eIndependentSpellRulesForCharacter, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginFeatureDefinition, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
 
 const DAMAGE_TYPE_LABELS: Record<string, string> = {
   acid: '强酸', cold: '冷冻', fire: '火焰', lightning: '闪电', poison: '毒素',
@@ -95,11 +95,16 @@ interface MapSpellsPanelProps {
     coreSpellId: 'call-lightning'
     slotLevel: number
   }[]
+  spellOriginAreas?: readonly { id: string; label: string }[]
   movingPersistentAreaId?: string
   requestedFocusedSpellId?: string
+  armedSpellModifiers?: readonly import('../../lib/dnd5eCombatActionDescriptors').Dnd5eCombatSpellModifier[]
+  onArmedSpellModifiersChange?: (
+    modifiers: readonly import('../../lib/dnd5eCombatActionDescriptors').Dnd5eCombatSpellModifier[],
+  ) => void
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
-  onCastSpell?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId | undefined, options?: { racialInnate?: boolean; overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
+  onCastSpell?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId | undefined, options?: { racialInnate?: boolean; alternateResourceSpell?: { featureId: string; grantId: string }; spellOriginAreaId?: string; overchannel?: boolean; damageMaximizationFeatureId?: string; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
   onRequestAdjudication?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId) => void
   onConfirmSpellTargets?: () => void
   onUndoSpellTarget?: () => void
@@ -129,8 +134,10 @@ export default function MapSpellsPanel({
   targetingCarefulSelecting = false,
   targetingCanHeightened = false, targetingHeightenedSelected = false, targetingHeightenedSelecting = false,
   targetingSustainedEffectAttack,
-  movablePersistentAreas = [], activatablePersistentAreas = [], movingPersistentAreaId,
+  movablePersistentAreas = [], activatablePersistentAreas = [], spellOriginAreas = [], movingPersistentAreaId,
   requestedFocusedSpellId,
+  armedSpellModifiers,
+  onArmedSpellModifiersChange,
   selectedSpellSlotLevels,
   onSelectedSpellSlotLevelChange,
   onCastSpell, onRequestAdjudication, onConfirmSpellTargets, onUndoSpellTarget, onToggleSculptSpellTargets,
@@ -148,7 +155,9 @@ export default function MapSpellsPanel({
   const [empoweredBySpell, setEmpoweredBySpell] = useState<Record<string, boolean>>({})
   const [draconicResistanceBySpell, setDraconicResistanceBySpell] = useState<Record<string, boolean>>({})
   const [repellingBlastBySpell, setRepellingBlastBySpell] = useState<Record<string, boolean>>({})
+  const [alternateSlotByGrant, setAlternateSlotByGrant] = useState<Record<string, number>>({})
   const [selectedCastingClassId, setSelectedCastingClassId] = useState<Dnd5eClassId | undefined>()
+  const [selectedSpellOriginAreaId, setSelectedSpellOriginAreaId] = useState('')
   const [localFocusedSpellId, setLocalFocusedSpellId] = useState<string | undefined>()
   const effectiveSelectedSpellSlotLevels = selectedSpellSlotLevels ?? slotBySpell
 
@@ -171,6 +180,22 @@ export default function MapSpellsPanel({
     return <p className="py-6 text-center text-sm text-slate-500">该角色不是当前 SRD 5.1 角色，请先完成存档迁移。</p>
   }
 
+    const effectiveSpellOriginAreaId = spellOriginAreas.some((area) => area.id === selectedSpellOriginAreaId)
+      ? selectedSpellOriginAreaId
+      : ''
+    const spellOriginPanel = spellOriginAreas.length > 0 ? <label className="block rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/[0.05] p-3 text-xs text-slate-300">
+      <span className="font-semibold text-fuchsia-100">本次施法起点</span>
+      <select
+        value={effectiveSpellOriginAreaId}
+        onChange={(event) => setSelectedSpellOriginAreaId(event.target.value)}
+        className="mt-2 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-xs text-slate-100"
+      >
+        <option value="">角色 Token</option>
+        {spellOriginAreas.map((area) => <option key={area.id} value={area.id}>{area.label}</option>)}
+      </select>
+      <span className="mt-1 block text-[10px] text-slate-500">仅改变射程、范围与效果线的几何起点；Host 会再次验证投影归属和特性许可。</span>
+    </label> : null
+
     const castingSources = dnd5eEffectiveSpellcastingSources(c)
     const source = castingSources.find((candidate) => candidate.classId === selectedCastingClassId) ?? castingSources[0]
     const castingDefinitions = castingSources.map((candidate) => candidate.definition)
@@ -179,14 +204,14 @@ export default function MapSpellsPanel({
       candidate.classLevel,
     ])) as Partial<Record<Dnd5eClassId, number>>
     const definition = source?.definition
-    const racialInnateSpells = dnd5eRacialRulesForCharacter(c).innateSpells.flatMap((grant) => {
+    const racialInnateSpells = dnd5eIndependentSpellRulesForCharacter(c).innateSpells.flatMap((grant) => {
       const spell = getDnd5eSrdCombatSpell(grant.spellId)
       return spell ? [{ grant, spell }] : []
     })
     const racialInnatePanel = racialInnateSpells.length > 0 ? <section className="rounded-2xl border border-amber-300/20 bg-amber-500/[0.05] p-3">
       <div>
-        <h4 className="text-sm font-semibold text-amber-100">种族先天法术</h4>
-        <p className="mt-1 text-[11px] text-slate-500">使用种族施法属性与独立次数；不会消耗职业法术位。</p>
+        <h4 className="text-sm font-semibold text-amber-100">先天与专长法术</h4>
+        <p className="mt-1 text-[11px] text-slate-500">使用规则授予的施法属性与独立次数；专长法术仍校验普通法术成分。</p>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {racialInnateSpells.map(({ grant, spell }) => {
@@ -199,7 +224,10 @@ export default function MapSpellsPanel({
             key={`racial:${spell.id}`}
             type="button"
             disabled={!canAct || pending || reaction || unavailable}
-            onClick={() => onCastSpell?.(spell.id, grant.castAtLevel, undefined, { racialInnate: true })}
+            onClick={() => onCastSpell?.(spell.id, grant.castAtLevel, undefined, {
+              racialInnate: true,
+              spellOriginAreaId: effectiveSpellOriginAreaId || undefined,
+            })}
             className="rounded-xl border border-amber-300/20 bg-black/20 px-3 py-2 text-left transition hover:border-amber-300/40 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <span className="block text-xs font-semibold text-amber-100">{spell.name}</span>
@@ -211,8 +239,120 @@ export default function MapSpellsPanel({
         })}
       </div>
     </section> : null
+    const alternateResourceSpells = dnd5eAlternateResourceSpellsForCharacter(c).flatMap((grant) => {
+      const spell = getDnd5eSrdCombatSpell(grant.spellId)
+      return spell ? [{ grant, spell }] : []
+    })
+    const alternateResourcePanel = alternateResourceSpells.length > 0 ? <section className="rounded-2xl border border-cyan-300/20 bg-cyan-500/[0.05] p-3">
+      <div>
+        <h4 className="text-sm font-semibold text-cyan-100">特性资源施法</h4>
+        <p className="mt-1 text-[11px] text-slate-500">法术规则由 Host 目录提供；施法属性、选择门槛、升环与资源成本由已激活扩展声明并再次校验。</p>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {alternateResourceSpells.map(({ grant, spell }) => {
+          const key = `${grant.featureId}:${grant.grantId}`
+          const selectedSlot = alternateSlotByGrant[key] ?? grant.castAtLevel
+          const selectedOption = grant.castLevelOptions.find((option) => option.slotLevel === selectedSlot) ??
+            grant.castLevelOptions[0]
+          const resource = getClassResource(c, grant.resourceId)
+          const unavailable = !selectedOption || (resource?.current ?? 0) < selectedOption.resourceCost
+          return <div key={key} className="rounded-xl border border-cyan-300/20 bg-black/20 p-3">
+            <button
+              type="button"
+              disabled={!canAct || pending || spell.castingTime === 'reaction' || unavailable}
+              onClick={() => selectedOption && onCastSpell?.(
+                spell.id,
+                selectedOption.slotLevel,
+                undefined,
+                {
+                  alternateResourceSpell: { featureId: grant.featureId, grantId: grant.grantId },
+                  spellOriginAreaId: effectiveSpellOriginAreaId || undefined,
+                },
+              )}
+              className="w-full text-left disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <span className="block text-xs font-semibold text-cyan-100">{spell.name}</span>
+              <span className="mt-1 block text-[10px] text-slate-400">
+                {grant.featureName} · {selectedOption?.resourceCost ?? grant.resourceCost} 点资源 · {resource?.current ?? 0}/{resource?.max ?? 0} · Headless
+              </span>
+            </button>
+            {grant.castLevelOptions.length > 1 ? <select
+              value={selectedOption?.slotLevel ?? grant.castAtLevel}
+              onChange={(event) => setAlternateSlotByGrant((current) => ({
+                ...current,
+                [key]: Number(event.target.value),
+              }))}
+              className="mt-2 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-[11px] text-slate-200"
+            >
+              {grant.castLevelOptions.map((option) => <option key={option.slotLevel} value={option.slotLevel}>
+                {option.slotLevel} 环 · {option.resourceCost} 点资源
+              </option>)}
+            </select> : null}
+          </div>
+        })}
+      </div>
+    </section> : null
+    const interceptedSpells = Object.entries(
+      c.dnd5eCombatState?.declarativeSpellInterceptionGrants ?? {},
+    ).flatMap(([featureId, grant]) => {
+      const spell = grant.roundsRemaining > 0 ? getDnd5eSrdCombatSpell(grant.spellId) : undefined
+      const feature = dnd5ePluginFeatureDefinition(featureId)
+      return spell && feature?.automation === 'full' &&
+        feature.declarativeAbility?.mechanic?.kind === 'spell-interception'
+        ? [{ featureId, feature, grant, spell }]
+        : []
+    })
+    const interceptedSpellPanel = interceptedSpells.length > 0 ? <section className="rounded-2xl border border-violet-300/20 bg-violet-500/[0.05] p-3">
+      <div>
+        <h4 className="text-sm font-semibold text-violet-100">临时掌握的法术</h4>
+        <p className="mt-1 text-[11px] text-slate-500">来自已结算的法术拦截；仍消耗正常法术位、动作和成分，并由 Host 复验临时授权。</p>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {interceptedSpells.map(({ featureId, feature, grant, spell }) => {
+          const key = `intercepted:${featureId}:${spell.id}`
+          const availableLevels = Array.from(
+            { length: Math.max(0, 10 - spell.level) },
+            (_, index) => spell.level + index,
+          ).filter((level) => (getClassResource(c, `dnd5e-spell-slot-${level}`)?.current ?? 0) > 0)
+          const selectedLevel = availableLevels.includes(alternateSlotByGrant[key])
+            ? alternateSlotByGrant[key]
+            : availableLevels[0]
+          const reaction = spell.castingTime === 'reaction'
+          return <div key={key} className="rounded-xl border border-violet-300/20 bg-black/20 p-3">
+            <button
+              type="button"
+              disabled={!canAct || pending || reaction || selectedLevel == null}
+              onClick={() => selectedLevel != null && onCastSpell?.(
+                spell.id,
+                selectedLevel,
+                grant.castingClassId,
+                { spellOriginAreaId: effectiveSpellOriginAreaId || undefined },
+              )}
+              className="w-full text-left disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <span className="block text-xs font-semibold text-violet-100">{spell.name}</span>
+              <span className="mt-1 block text-[10px] text-slate-400">
+                {feature.name} · 剩余 {grant.roundsRemaining} 轮 · {reaction ? '反应法术等待对应窗口' : 'Headless'}
+              </span>
+            </button>
+            {spell.level > 0 ? <select
+              value={selectedLevel ?? ''}
+              onChange={(event) => setAlternateSlotByGrant((current) => ({
+                ...current,
+                [key]: Number(event.target.value),
+              }))}
+              className="mt-2 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-[11px] text-slate-200"
+            >
+              {availableLevels.length === 0 ? <option value="">无法术位</option> : availableLevels.map((level) => <option key={level} value={level}>{level} 环法术位</option>)}
+            </select> : null}
+          </div>
+        })}
+      </div>
+    </section> : null
     if (!definition?.spellcasting) {
-      return racialInnatePanel ?? <p className="py-6 text-center text-sm text-slate-500">该职业在 SRD 5.1 中没有施法或契约魔法。</p>
+      return racialInnatePanel || alternateResourcePanel || interceptedSpellPanel || spellOriginPanel
+        ? <div className="space-y-3 py-2">{spellOriginPanel}{racialInnatePanel}{alternateResourcePanel}{interceptedSpellPanel}</div>
+        : <p className="py-6 text-center text-sm text-slate-500">该职业在 SRD 5.1 中没有施法或契约魔法。</p>
     }
     const classLevel = source?.classLevel ?? 0
     const effectiveSelections = source ? dnd5eEffectiveSpellSelections(c, source) : {}
@@ -289,7 +429,10 @@ export default function MapSpellsPanel({
       (definition.id !== 'druid' || classLevel < 18)
     return (
       <div className="space-y-3 py-2">
+        {spellOriginPanel}
         {racialInnatePanel}
+        {alternateResourcePanel}
+        {interceptedSpellPanel}
         {castingDefinitions.length > 1 ? <label className="flex items-center justify-between gap-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 text-xs text-slate-400">
           <span>施法职业</span>
           <select
@@ -441,7 +584,10 @@ export default function MapSpellsPanel({
               subclassId: effectiveSubclassId,
               level: classLevel,
             }, spell, selectedSlot)
-            const overchannel = canOverchannel && overchannelBySpell[spell.id] === true
+            const controlledOverchannel = armedSpellModifiers != null
+            const overchannel = canOverchannel && (controlledOverchannel
+              ? armedSpellModifiers.includes('evocation-overchannel')
+              : overchannelBySpell[spell.id] === true)
             const priorOverchannelUses = Math.max(0, Math.floor(c.dnd5eCombatState?.overchannelUsesSinceLongRest ?? 0))
             const backlashDice = overchannel && priorOverchannelUses > 0 && selectedSlot != null
               ? (priorOverchannelUses + 1) * selectedSlot
@@ -508,7 +654,16 @@ export default function MapSpellsPanel({
                 <input
                   type="checkbox"
                   checked={overchannel}
-                  onChange={(event) => setOverchannelBySpell((current) => ({ ...current, [spell.id]: event.target.checked }))}
+                  onChange={(event) => {
+                    if (onArmedSpellModifiersChange) {
+                      const next = new Set(armedSpellModifiers ?? [])
+                      if (event.target.checked) next.add('evocation-overchannel')
+                      else next.delete('evocation-overchannel')
+                      onArmedSpellModifiersChange([...next])
+                      return
+                    }
+                    setOverchannelBySpell((current) => ({ ...current, [spell.id]: event.target.checked }))
+                  }}
                   className="mt-0.5"
                 />
                 <span>
@@ -596,6 +751,7 @@ export default function MapSpellsPanel({
                   }
                   if (selectedSlot == null) return
                   onCastSpell?.(spell.id, selectedSlot, definition.id, {
+                    spellOriginAreaId: effectiveSpellOriginAreaId || undefined,
                     overchannel,
                     metamagic: selectedMetamagic ? { kind: selectedMetamagic } : undefined,
                     empowered,
@@ -751,7 +907,7 @@ export default function MapSpellsPanel({
                 {slotSelection.unavailableMessage}
               </p> : null}
               <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-500">{spell.description}</p>
-              <button type="button" disabled={!canAct || pending || !selectedSlotAvailable || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => onCastSpell?.(entry.id, selectedSlot, definition.id)} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
+              <button type="button" disabled={!canAct || pending || !selectedSlotAvailable || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => onCastSpell?.(entry.id, selectedSlot, definition.id, { spellOriginAreaId: effectiveSpellOriginAreaId || undefined })} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
                 {targetingSpellId === entry.id ? '请点击地图目标' : spell.castingTime.unit === 'reaction' ? '反应法术暂不支持主动施放' : '选择目标并施放'}
               </button>
             </div>

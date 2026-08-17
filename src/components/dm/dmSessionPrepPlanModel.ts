@@ -18,16 +18,15 @@ export function createDefaultCampaignPrepPlan(analysis: PdfCampaignAnalysisV2 | 
     .filter((event) => event.status === 'planned' || event.status === 'active')
     .slice(0, 3)
     .map((event) => event.id)
+  const selectedStoryEvents = storyWorkspace.events.filter((event) => selectedStoryEventIds.includes(event.id))
   return {
     schemaVersion: 1,
     sessionTitle: '下一次团务',
     objective: analysis?.overview?.trim().slice(0, 1200) ?? '',
     selectedStoryEventIds,
-    selectedSceneIds: [...new Set(storyWorkspace.events
-      .filter((event) => selectedStoryEventIds.includes(event.id))
-      .flatMap((event) => event.sceneIds))],
-    selectedPersonIds: analysis?.people.slice(0, 4).map((entry) => entry.id) ?? [],
-    selectedClueIds: analysis?.clues.slice(0, 4).map((entry) => entry.id) ?? [],
+    selectedSceneIds: [...new Set(selectedStoryEvents.flatMap((event) => event.sceneIds))],
+    selectedPersonIds: [...new Set(selectedStoryEvents.flatMap((event) => event.personIds))],
+    selectedClueIds: [...new Set(selectedStoryEvents.flatMap((event) => event.clueIds))],
     checklist: DEFAULT_CHECKLIST.map((text, index) => ({ id: `default-${index + 1}`, text, completed: false })),
     privateNotes: '',
     storyWorkspace,

@@ -68,9 +68,12 @@ export function useMapsPageStoreProjection() {
   const activeMapScenes = useSceneOrchestrationStore(useShallow((state) =>
     state.shared.scenes.filter((entry) => entry.mapId === activeMapId),
   ))
+  const orchestratedScenes = useSceneOrchestrationStore((state) => state.shared.scenes)
+  const scenePendingRunCount = useSceneOrchestrationStore((state) => state.shared.runtime.pendingRuns.length)
   const sceneActions = useSceneOrchestrationStore(useShallow((state) => ({
     setSceneTriggerRegion: state.setTriggerRegion,
     setSceneInteractionPointPosition: state.setInteractionPointPosition,
+    updateSceneAction: state.updateAction,
   })))
 
   return {
@@ -80,6 +83,8 @@ export function useMapsPageStoreProjection() {
     ...exploration,
     ...combatStatistics,
     activeMapScenes,
+    orchestratedScenes,
+    scenePendingRunCount,
     ...sceneActions,
   }
 }

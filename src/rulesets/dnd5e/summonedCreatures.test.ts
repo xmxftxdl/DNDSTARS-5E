@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
@@ -7,6 +7,9 @@ import {
   rebaseDnd5eSummonedCreatureTokens,
   reconcileDnd5eSummonedCreatures,
 } from './summonedCreatures'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
+import { dnd5eSummonedCreatureWeaponAttack } from './headlessCombatEngine'
 
 function map(tokens: Token[]): BattleMap {
   return {
@@ -33,21 +36,49 @@ function source(concentrationSpellId?: string): Character {
 }
 
 describe('D&D 5e summoned creature lifecycle', () => {
+  afterEach(() => setDnd5eRoomMonsterCatalog([]))
+
+  it('adds a persisted summon bonus once to each weapon hit, not to every damage component', () => {
+    const attack = dnd5eSummonedCreatureWeaponAttack({
+      mode: 'melee', toHit: 4, target: 'one creature',
+      damage: [
+        { average: 5, count: 1, sides: 6, bonus: 2, type: 'piercing' },
+        { average: 3, count: 1, sides: 6, bonus: 0, type: 'necrotic' },
+      ],
+    }, 3, 2)
+    expect(attack.toHit).toBe(6)
+    expect(attack.damage).toEqual([
+      expect.objectContaining({ bonus: 5, type: 'piercing' }),
+      expect.objectContaining({ bonus: 0, type: 'necrotic' }),
+    ])
+  })
+
   it('creates an allied SRD creature at an unoccupied cell with authoritative initiative', () => {
     const result = planDnd5eSummonedCreature({
       map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
       featureId: 'com.example:wolf', pluginId: 'com.example', actionId: 'action-1', round: 2,
       targetCell: { col: 2, row: 1 }, initiativeD20: 12,
-      summon: { monsterId: 'srd-5.1:wolf', durationRounds: 10, concentration: true, side: 'ally' },
+      summon: {
+        monsterId: 'srd-5.1:wolf', durationRounds: 10, concentration: true, side: 'ally',
+        temporaryHitPoints: 8, minimumMaximumHitPoints: 40, maximumHitPointBonus: 6,
+        armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
+        savingThrowBonus: 3, proficientSkillCheckBonus: 3,
+        weaponAttacksMagical: true, attacksPerAction: 2, shareSelfSpellsRangeFeet: 30,
+      },
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.plan.token).toMatchObject({
       id: 'plugin-summon:action-1', poolId: 'srd-5.1:wolf', visualVariantId: 'rain-stalker',
-      type: 'enemy', hp: 11, maxHp: 11,
+      type: 'enemy', hp: 40, maxHp: 40,
+      dnd5eCombatState: { temporaryHp: 8 },
       dnd5eSummon: {
         sourceCharacterId: 'actor', createdRound: 2, expiresAfterRound: 11,
         concentrationId: 'plugin-summon:action-1', side: 'player',
+        minimumMaximumHitPoints: 40, maximumHitPointBonus: 6,
+        armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
+        savingThrowBonus: 3, proficientSkillCheckBonus: 3,
+        weaponAttacksMagical: true, attacksPerAction: 2, shareSelfSpellsRangeFeet: 30,
       },
     })
     expect(result.plan.initiativeEntry).toMatchObject({ tokenId: 'plugin-summon:action-1', roll: 14 })
@@ -74,6 +105,29 @@ describe('D&D 5e summoned creature lifecycle', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.plan.token.visualVariantId).toBe('snow-howler')
+  })
+
+  it('places a room-local workshop monster through the same summon boundary', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '房间援军'
+    const roomMonster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([roomMonster])
+
+    const result = planDnd5eSummonedCreature({
+      map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'local.activity:reinforcement', pluginId: 'local.activity',
+      actionId: 'room-monster-action', round: 2,
+      targetCell: { col: 2, row: 1 }, initiativeD20: 11,
+      summon: { monsterId: roomMonster.id, durationRounds: 3, side: 'ally' },
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.plan.token).toMatchObject({
+      poolId: roomMonster.id,
+      label: '房间援军',
+      dnd5eSummon: { side: 'player', expiresAfterRound: 4 },
+    })
   })
 
   it('rejects occupied placement before the action can spend resources', () => {

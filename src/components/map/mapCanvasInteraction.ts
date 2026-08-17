@@ -3,6 +3,29 @@ import { clampGridSize, type GridCell } from '../../lib/gridCombat'
 import type { MapGeometryTool } from '../../lib/mapGeometry'
 import type { MapTabletopTool } from '../../lib/mapTabletop'
 
+export interface MapCanvasViewportDatasetTarget {
+  dataset: {
+    viewportX?: string
+    viewportY?: string
+    viewportScale?: string
+  }
+}
+
+/**
+ * Publishes Konva's live viewport transform without forcing a React render.
+ * DOM overlays can read this during a drag instead of waiting for the final
+ * state commit on pointer release.
+ */
+export function syncMapCanvasViewportDataset(
+  target: MapCanvasViewportDatasetTarget | null,
+  viewport: { x: number; y: number; scale: number },
+): void {
+  if (!target) return
+  target.dataset.viewportX = String(viewport.x)
+  target.dataset.viewportY = String(viewport.y)
+  target.dataset.viewportScale = String(viewport.scale)
+}
+
 export function mapCanvasAoeGridCell(
   point: { x: number; y: number },
   grid: { gridSize: number; gridOffsetX: number; gridOffsetY: number },

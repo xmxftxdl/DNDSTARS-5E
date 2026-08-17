@@ -46,7 +46,7 @@ import {
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eAttacksPerAttackAction } from './classes'
+import { dnd5eEffectiveAttacksPerAttackAction } from './pluginApi'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import { dnd5eAvailableMonsterSpellSlotLevels } from './monsterCoreSpellAction'
 import {
@@ -1136,7 +1136,7 @@ function offensiveMonsterSpellExpectedValue(input: {
   const cover = mapGeometryCoverBetween(geometry, attacker, target, map)
   if (cover.blocksLineOfEffect || cover.cover === 'total') return undefined
   if (mapGeometryLineOfSightBlocked({
-    geometry,
+    geometry, map,
     from: attacker,
     to: target,
     fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -1552,7 +1552,7 @@ function allocateMonsterActionTargets(input: {
         cover.blocksLineOfEffect ||
         cover.cover === 'total' ||
         mapGeometryLineOfSightBlocked({
-          geometry,
+          geometry, map: input.map,
           from: input.attacker,
           to: target,
           fromElevationFeet: mapGeometryTokenElevation(
@@ -1751,7 +1751,7 @@ function actionExpectedValue(input: {
     const cover = mapGeometryCoverBetween(geometry, attacker, target, map)
     if (cover.blocksLineOfEffect || cover.cover === 'total') return undefined
     if (mapGeometryLineOfSightBlocked({
-      geometry,
+      geometry, map,
       from: attacker,
       to: target,
       fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -2482,7 +2482,7 @@ function plannerTargetAttackCount(
   characters: readonly Character[],
 ): number {
   const character = plannerTargetCharacter(target, characters)
-  if (character) return dnd5eAttacksPerAttackAction(character)
+  if (character) return dnd5eEffectiveAttacksPerAttackAction(character)
   const monster = plannerTargetMonster(target)
   if (!monster) return 1
   return Math.max(1, ...monster.actions.map((action) =>
@@ -2523,7 +2523,7 @@ function plannerTargetStrengthDependency(
   const character = plannerTargetCharacter(target, characters)
   if (character) {
     let value = character.abilities.str >= character.abilities.dex
-      ? Math.min(2, dnd5eAttacksPerAttackAction(character) * 0.6)
+      ? Math.min(2, dnd5eEffectiveAttacksPerAttackAction(character) * 0.6)
       : 0
     if (character.savingThrows.includes('str')) value += 0.3
     if (character.skills.includes('athletics')) value += 0.3
@@ -2730,7 +2730,7 @@ function bestMonsterAreaPlacement(input: {
     if (
       area.origin === 'point' &&
       mapGeometryLineOfEffectBlocked({
-        geometry,
+        geometry, map,
         from: attacker,
         to: effectOrigin,
         fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -2754,7 +2754,7 @@ function bestMonsterAreaPlacement(input: {
         effectAimElevationFeet: anchor.elevationFeet,
       }) &&
       !mapGeometryLineOfEffectBlocked({
-        geometry,
+        geometry, map,
         from: effectOrigin,
         to: token,
         fromElevationFeet: effectOriginElevation,

@@ -9,6 +9,7 @@ describe('combat-start Token mark cleanup', () => {
     const state = {
       monsterDamageAversionActive: true,
       monsterDamageAversionSourceActorId: 'fire-source',
+      monsterRegenerationSuppressedDamageTypes: ['acid', 'fire'],
       surprisedCombatId: 'old-combat',
     }
 
@@ -32,6 +33,7 @@ describe('combat-start Token mark cleanup', () => {
     const state = {
       monsterDamageAversionActive: true,
       monsterDamageAversionSourceActorId: 'fire-source',
+      monsterRegenerationSuppressedDamageTypes: ['fire'],
       conditions: ['blessed'],
       activeEffects: [activeEffect],
       concentrationSpellId: 'flaming-sphere',
@@ -60,6 +62,7 @@ describe('combat-start Token mark cleanup', () => {
     expect(clearDnd5eStatusTokenMarksAtCombatStart({
       monsterDamageAversionActive: true,
       monsterDamageAversionSourceActorId: 'fire-source',
+      monsterRegenerationSuppressedDamageTypes: ['acid'],
       activeEffects: [{ id: 'bless' }],
       conditions: ['blinded'],
       concentrationSpellId: 'flaming-sphere',

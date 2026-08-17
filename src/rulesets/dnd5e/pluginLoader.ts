@@ -18,6 +18,7 @@ import {
   type Dnd5eDeclarativeRulesPackageV1,
 } from './declarativeSubclassAbility'
 import {
+  buildDnd5eCustomRulesContentPackageV2,
   dnd5eContentPackageAutomationCoverageV2,
   dnd5eContentPackageSummaryV2,
   dnd5eRulesPluginFromContentPackageV2,
@@ -27,6 +28,9 @@ import {
   type Dnd5eContentPackageSummaryV2,
   type Dnd5eContentPackageV2,
 } from './contentPackageV2'
+import { unregisterContentDefinitionPackage } from '../../domain/content/contentDefinitionRegistry'
+import type { Dnd5eCustomRulesPluginDraft } from './customRulesPlugin'
+import { normalizeLegacyDnd5eSpellClassIds } from './declarativePluginPackage'
 import {
   dnd5eRulesPluginFromUnifiedContentBundleV1,
   dnd5eUnifiedContentSummaryV1,
@@ -114,6 +118,15 @@ export interface Dnd5eRulesPluginHost {
   clearEphemeral(): Promise<void>
   listInstalled(): readonly InstalledDnd5eRulesPlugin[]
   listActive(): ReturnType<typeof registeredDnd5eRulesPlugins>
+}
+
+// A module-local Symbol distinguishes the Host created by this exact module
+// generation. Vite HMR preserves window globals while it replaces module
+// state; returning an older frozen Host would then make installs write into
+// the old registries while readiness reads from the new ones.
+const PLUGIN_HOST_MODULE_MARKER = Symbol('dnd5e-rules-plugin-host-module')
+type ModuleOwnedDnd5eRulesPluginHost = Dnd5eRulesPluginHost & {
+  readonly [PLUGIN_HOST_MODULE_MARKER]: true
 }
 
 const ephemeralModuleBytes = new Map<string, ArrayBuffer>()
@@ -327,19 +340,23 @@ async function descriptorBytes(descriptor: InstalledDnd5eRulesPlugin): Promise<A
 type LoadedDnd5ePluginArtifact =
   | {
       kind: 'worker'
+      adapterKind: 'worker-module-adapter'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
       session: Dnd5ePluginSandboxSession
     }
   | {
       kind: 'declarative-v1'
+      adapterKind: 'declarative-v1-adapter'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
       package: Dnd5eDeclarativeRulesPackageV1
+      normalizedPackage: Dnd5eContentPackageV2
       plugin: Dnd5eRulesPlugin
     }
   | {
       kind: 'content-v2'
+      adapterKind: 'content-v2-adapter'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
       package: Dnd5eContentPackageV2
@@ -347,36 +364,70 @@ type LoadedDnd5ePluginArtifact =
     }
   | {
       kind: 'unified-v1'
+      adapterKind: 'unified-native'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
       package: Dnd5eUnifiedContentBundleV1
       plugin: Dnd5eRulesPlugin
     }
 
+function legacyArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? structuredClone(value as T[]) : []
+}
+
+export function normalizeDnd5eDeclarativePackageAtLoadBoundary(
+  declaration: Dnd5eDeclarativeRulesPackageV1,
+): Dnd5eContentPackageV2 {
+  const legacy = declaration.legacy && typeof declaration.legacy === 'object' && !Array.isArray(declaration.legacy)
+    ? declaration.legacy as Partial<Dnd5eCustomRulesPluginDraft>
+    : {}
+  const draft = normalizeLegacyDnd5eSpellClassIds({
+    manifest: structuredClone(declaration.manifest),
+    races: legacyArray(legacy.races),
+    backgrounds: legacyArray(legacy.backgrounds),
+    features: legacyArray(legacy.features),
+    feats: legacyArray(legacy.feats),
+    spells: legacyArray(legacy.spells),
+    items: legacyArray(legacy.items),
+    abilityGenerationMethods: legacyArray(legacy.abilityGenerationMethods),
+    headlessActions: legacyArray(legacy.headlessActions),
+    activities: legacyArray(legacy.activities),
+    monsters: legacyArray(legacy.monsters),
+    classes: [...structuredClone(declaration.classes ?? legacy.classes ?? [])],
+    subclasses: [...structuredClone(declaration.subclasses)],
+  })
+  const encoded = new TextEncoder().encode(buildDnd5eCustomRulesContentPackageV2(draft))
+  const normalized = parseDnd5eContentPackageV2(encoded.buffer)
+  if (!normalized) throw new Error('Legacy Declarative 内容包无法转换到 Unified Content Registry。')
+  return normalized
+}
+
 async function loadPluginArtifact(bytes: ArrayBuffer): Promise<LoadedDnd5ePluginArtifact> {
-  const content = parseDnd5eContentPackageV2(bytes)
-  if (content) {
-    const plugin = dnd5eRulesPluginFromContentPackageV2(content)
-    const trust = dnd5ePluginTrustProfile(content.manifest.pluginKind, 'content-v2')
-    return { kind: 'content-v2', manifest: { ...content.manifest }, trust, package: content, plugin }
-  }
   const unified = parseDnd5eUnifiedContentBundleV1(bytes)
   if (unified) {
     const plugin = dnd5eRulesPluginFromUnifiedContentBundleV1(unified)
     const trust = dnd5ePluginTrustProfile(unified.manifest.pluginKind, 'unified-v1')
-    return { kind: 'unified-v1', manifest: { ...unified.manifest }, trust, package: unified, plugin }
+    return { kind: 'unified-v1', adapterKind: 'unified-native', manifest: { ...unified.manifest }, trust, package: unified, plugin }
+  }
+  const content = parseDnd5eContentPackageV2(bytes)
+  if (content) {
+    const plugin = dnd5eRulesPluginFromContentPackageV2(content)
+    const trust = dnd5ePluginTrustProfile(content.manifest.pluginKind, 'content-v2')
+    return { kind: 'content-v2', adapterKind: 'content-v2-adapter', manifest: { ...content.manifest }, trust, package: content, plugin }
   }
   const declaration = parseDnd5eDeclarativeRulesPackageV1(bytes)
   if (declaration) {
-    // Constructing the Host plugin performs the existing v2 contribution validation too.
-    const { dnd5eRulesPluginFromDeclarativePackageV1 } = await import('./declarativePluginPackage')
-    const plugin = dnd5eRulesPluginFromDeclarativePackageV1(declaration)
+    const normalizedPackage = normalizeDnd5eDeclarativePackageAtLoadBoundary(declaration)
+    const plugin = dnd5eRulesPluginFromContentPackageV2(normalizedPackage)
     const trust = dnd5ePluginTrustProfile(declaration.manifest.pluginKind, 'declarative-v1')
-    return { kind: 'declarative-v1', manifest: { ...declaration.manifest }, trust, package: declaration, plugin }
+    return {
+      kind: 'declarative-v1', adapterKind: 'declarative-v1-adapter',
+      manifest: { ...declaration.manifest }, trust, package: declaration, normalizedPackage, plugin,
+    }
   }
   const session = await createDnd5ePluginSandbox(bytes)
   const trust = dnd5ePluginTrustProfile(session.manifest.pluginKind, 'worker-module')
-  return { kind: 'worker', manifest: { ...session.manifest }, trust, session }
+  return { kind: 'worker', adapterKind: 'worker-module-adapter', manifest: { ...session.manifest }, trust, session }
 }
 
 function terminatePluginArtifact(artifact: LoadedDnd5ePluginArtifact): void {
@@ -405,11 +456,15 @@ function activatePlugin(artifact: LoadedDnd5ePluginArtifact, integrity: string):
     throw new Error('local-only 内容包只能在未连接联网房间时运行；离开房间并重新加载后可恢复本地使用')
   }
   unregisterDnd5eRulesPlugin(artifact.manifest.id)
+  // A failed/HMR-interrupted activation can leave the Unified Content package
+  // behind after the runtime index has already disappeared. Remove only the
+  // package owned by the plugin being replaced before registering it again.
+  unregisterContentDefinitionPackage(artifact.manifest.id)
   const plugin = artifact.kind === 'worker'
     ? activateDnd5ePluginSandbox(artifact.session)
     : artifact.plugin
   try {
-    registerDnd5eRulesPlugin(plugin, { integrity })
+    registerDnd5eRulesPlugin(plugin, { integrity, adapterKind: artifact.adapterKind })
   } catch (error) {
     if (artifact.kind === 'worker') terminateDnd5ePluginSandbox(artifact.manifest.id)
     throw error
@@ -558,9 +613,10 @@ export async function loadInstalledDnd5eRulesPlugins(): Promise<Dnd5eRulesPlugin
 }
 
 export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
-  const existing = window.DNDSTARS_5E_RULES_PLUGINS
-  if (existing) return existing
-  const host: Dnd5eRulesPluginHost = {
+  const existing = window.DNDSTARS_5E_RULES_PLUGINS as ModuleOwnedDnd5eRulesPluginHost | undefined
+  if (existing?.[PLUGIN_HOST_MODULE_MARKER]) return existing
+  const host: ModuleOwnedDnd5eRulesPluginHost = {
+    [PLUGIN_HOST_MODULE_MARKER]: true,
     apiVersion: DND5E_RULES_PLUGIN_API_VERSION,
     async install(descriptor) {
       if (descriptor.source === 'ephemeral') {

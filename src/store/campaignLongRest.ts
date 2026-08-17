@@ -1,11 +1,13 @@
 import type {
   CampaignRestRecoveryReport,
+  CampaignRestFeatureD20Roll,
   CampaignTimeMutation,
   SharedCampaignTimeState,
 } from '../lib/campaignTime'
 import { useCampaignTimeStore } from './campaignTime'
 import { useCharacterStore } from './characters'
 import { buildDnd5eRestRecoveryReports } from '../rulesets/dnd5e/campaignRestRecovery'
+import { dnd5eStoredD20ReplacementFeaturesForCharacter } from '../rulesets/dnd5e/pluginApi'
 
 interface CampaignLongRestTransaction {
   currentClock: SharedCampaignTimeState
@@ -14,6 +16,7 @@ interface CampaignLongRestTransaction {
   beneficiaryCharacterIds?: readonly string[]
   ignoreLongRestCooldown?: boolean
   createRecoveryReports?: () => CampaignRestRecoveryReport[]
+  createRestFeatureD20Rolls?: () => CampaignRestFeatureD20Roll[]
   mutate: (mutation: CampaignTimeMutation) => Promise<SharedCampaignTimeState>
   reconcileCharacters: (clock: SharedCampaignTimeState) => Promise<unknown>
 }
@@ -29,6 +32,9 @@ export async function runDnd5eCampaignLongRestTransaction(
 ): Promise<SharedCampaignTimeState> {
   await transaction.reconcileCharacters(transaction.currentClock)
   const restRecoveryReports = transaction.createRecoveryReports?.()
+  const restFeatureD20Rolls = transaction.restKind === 'long-rest'
+    ? transaction.createRestFeatureD20Rolls?.()
+    : undefined
   const nextClock = await transaction.mutate({
     operation: transaction.restKind ?? 'long-rest',
     reason: transaction.reason,
@@ -39,9 +45,34 @@ export async function runDnd5eCampaignLongRestTransaction(
       ? { ignoreLongRestCooldown: true }
       : {}),
     ...(restRecoveryReports ? { restRecoveryReports } : {}),
+    ...(restFeatureD20Rolls?.length ? { restFeatureD20Rolls } : {}),
   })
   await transaction.reconcileCharacters(nextClock)
   return nextClock
+}
+
+function secureD20(): number {
+  const crypto = globalThis.crypto
+  if (!crypto?.getRandomValues) throw new Error('secure-random-unavailable')
+  const sample = new Uint32Array(1)
+  const maximumAccepted = Math.floor(0x1_0000_0000 / 20) * 20
+  do crypto.getRandomValues(sample)
+  while (sample[0] >= maximumAccepted)
+  return sample[0] % 20 + 1
+}
+
+function createLongRestFeatureD20Rolls(
+  beneficiaryCharacterIds?: readonly string[],
+): CampaignRestFeatureD20Roll[] {
+  const beneficiaries = beneficiaryCharacterIds ? new Set(beneficiaryCharacterIds) : undefined
+  return useCharacterStore.getState().characters.flatMap((character) => {
+    if (beneficiaries && !beneficiaries.has(character.id)) return []
+    return dnd5eStoredD20ReplacementFeaturesForCharacter(character).map(({ feature, count }) => ({
+      characterId: character.id,
+      featureId: feature.id,
+      values: Array.from({ length: count }, secureD20),
+    }))
+  })
 }
 
 function completeDnd5eCampaignRest(
@@ -65,6 +96,7 @@ function completeDnd5eCampaignRest(
       completionWorldMinute: campaignTime.state.worldMinute + (restKind === 'long-rest' ? 8 * 60 : 60),
       ignoreLongRestCooldown,
     }),
+    createRestFeatureD20Rolls: () => createLongRestFeatureD20Rolls(beneficiaryCharacterIds),
     mutate: campaignTime.mutate,
     reconcileCharacters: (clock) =>
       useCharacterStore.getState().reconcileCampaignTimeAndSave(clock),

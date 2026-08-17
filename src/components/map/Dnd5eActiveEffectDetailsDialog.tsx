@@ -1,9 +1,10 @@
-import { Clock3, Link2, ShieldAlert, X } from 'lucide-react'
+import { Clock3, Link2, ShieldAlert, Trash2, X } from 'lucide-react'
 import {
   dnd5eActiveEffectRemainingLabel,
   type Dnd5eActiveEffectInstance,
 } from '../../rulesets/dnd5e/activeEffects'
 import { dnd5eConditionLabel } from '../../rulesets/dnd5e/conditions'
+import type { MapTokenStatusInstance } from './mapTokenStatusInstance'
 
 const BREAK_LABELS = {
   'takes-damage': '受到伤害后解除',
@@ -12,8 +13,13 @@ const BREAK_LABELS = {
   'makes-attack': '发动攻击后解除',
   'casts-spell': '施放法术后解除',
   moves: '移动后解除',
+  'spends-action': '消耗动作后解除',
+  'spends-bonus-action': '消耗附赠动作后解除',
+  'spends-reaction': '消耗反应后解除',
   awakened: '被唤醒后解除',
   'magical-healing': '接受魔法治疗后解除',
+  'short-rest-complete': '完成短休后解除',
+  'long-rest-complete': '完成长休后解除',
 } as const
 
 const ABILITY_LABELS = { str: '力量', dex: '敏捷', con: '体质', int: '智力', wis: '感知', cha: '魅力' } as const
@@ -33,13 +39,34 @@ const DAMAGE_LABELS: Readonly<Record<string, string>> = {
   thunder: '雷鸣',
 }
 
+const INSTANCE_KIND_LABELS: Readonly<Record<MapTokenStatusInstance['kind'], string>> = {
+  'active-effect': '状态实例',
+  'spell-effect': '法术效果',
+  concentration: '专注实例',
+  flight: '地图高度',
+  shillelagh: '武器强化',
+  'token-marker': 'DM 标注',
+  'monster-trait': '怪物特性',
+  'monster-state': '怪物状态',
+}
+
+const INSTANCE_AUTHORITY_LABELS: Readonly<Record<MapTokenStatusInstance['authority'], string>> = {
+  headless: 'Headless 权威规则',
+  geometry: '地图几何状态',
+  'dm-annotation': 'DM 地图标注',
+}
+
 export default function Dnd5eActiveEffectDetailsDialog({
   targetName,
   effects,
+  instance,
+  onRemove,
   onClose,
 }: {
   targetName: string
   effects: readonly Dnd5eActiveEffectInstance[]
+  instance?: MapTokenStatusInstance
+  onRemove?: () => void
   onClose: () => void
 }) {
   return (
@@ -48,19 +75,50 @@ export default function Dnd5eActiveEffectDetailsDialog({
         <header className="flex items-center gap-3 border-b border-white/10 px-5 py-4">
           <ShieldAlert className="h-5 w-5 text-violet-300" />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-base font-bold text-slate-100">{targetName} · 状态详情</h2>
-            <p className="text-xs text-slate-500">来源、剩余时间与自动解除条件均来自房间权威快照。</p>
+            <h2 className="truncate text-base font-bold text-slate-100">{targetName} · {instance?.title ?? '状态详情'}</h2>
+            <p className="text-xs text-slate-500">每个地图状态 Token 对应一个独立实例；权威效果会显示来源、剩余时间与解除条件。</p>
           </div>
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              data-testid="dnd5e-token-status-instance-remove"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/20 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition-colors hover:bg-rose-500/20"
+              title="移除当前状态实例"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              移除状态
+            </button>
+          ) : null}
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white" title="关闭"><X className="h-4 w-4" /></button>
         </header>
         <div className="max-h-[calc(min(720px,90vh)-76px)] space-y-3 overflow-y-auto p-5">
-          {effects.length === 0 ? <p className="rounded-xl border border-dashed border-white/10 p-5 text-center text-sm text-slate-500">当前没有可显示的状态实例。</p> : effects.map((effect) => (
+          {effects.length === 0 && instance ? (
+            <article className="rounded-xl border border-violet-300/15 bg-void-950/45 p-4" data-testid="dnd5e-token-status-instance-details">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-semibold text-violet-100">{instance.title}</h3>
+                <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">{INSTANCE_KIND_LABELS[instance.kind]}</span>
+                <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">{INSTANCE_AUTHORITY_LABELS[instance.authority]}</span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-200">{instance.description}</p>
+              <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
+                <div><dt className="text-slate-500">来源</dt><dd className="mt-0.5 text-slate-200">{instance.sourceLabel ?? '未注明'}</dd></div>
+                <div><dt className="text-slate-500">实例 ID</dt><dd className="mt-0.5 break-all font-mono text-[11px] text-slate-300">{instance.id}</dd></div>
+                {instance.statusId ? <div><dt className="text-slate-500">规则 ID</dt><dd className="mt-0.5 break-all font-mono text-[11px] text-slate-300">{instance.statusId}</dd></div> : null}
+              </dl>
+              {instance.authority === 'dm-annotation' ? <p className="mt-3 rounded bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-100">此实例仅用于地图标注，不会自行改变 Headless 规则。</p> : null}
+              {instance.kind === 'monster-trait' ? <p className="mt-3 rounded bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-100">移除只隐藏这枚地图状态标记，不会删除怪物图鉴中的固有特性，也不会停用 Headless 规则。</p> : null}
+              {instance.kind === 'monster-state' ? <p className="mt-3 rounded bg-rose-500/10 px-2 py-1.5 text-[11px] text-rose-100">移除会结束当前触发的怪物运行状态；怪物图鉴中的固有特性仍会保留，并可在满足条件后再次触发。</p> : null}
+            </article>
+          ) : effects.length === 0 ? <p className="rounded-xl border border-dashed border-white/10 p-5 text-center text-sm text-slate-500">当前没有可显示的状态实例。</p> : effects.map((effect) => (
             <article key={effect.id} className="rounded-xl border border-white/10 bg-void-950/45 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-semibold text-violet-100">{effect.label}</h3>
                 <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">{effect.definitionId}</span>
                 {effect.visibility === 'dm-only' ? <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] text-rose-200">仅 DM</span> : null}
+                <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">独立实例</span>
               </div>
+              {instance?.description ? <p className="mt-3 text-sm leading-6 text-slate-200">{instance.description}</p> : null}
               <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div><dt className="text-slate-500">来源</dt><dd className="mt-0.5 text-slate-200">{effect.source.actorName ?? effect.source.label ?? effect.source.rulesId ?? '旧数据 / 未注明'}</dd></div>
                 <div><dt className="text-slate-500">持续</dt><dd className="mt-0.5 inline-flex items-center gap-1 text-slate-200"><Clock3 className="h-3.5 w-3.5 text-violet-300" />{dnd5eActiveEffectRemainingLabel(effect)}</dd></div>

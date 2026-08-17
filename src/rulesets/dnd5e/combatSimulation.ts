@@ -21,11 +21,11 @@ import {
 import { getClassResource, syncCharacterClassResources } from '../../lib/classResources'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import {
-  dnd5eAttacksPerAttackAction,
   dnd5eClassDefinition,
   dnd5ePactSlotLevel,
   type Dnd5eClassId,
 } from './classes'
+import { dnd5eEffectiveAttacksPerAttackAction } from './pluginApi'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import {
@@ -1001,7 +1001,7 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
 
 function simulationPlayerWeaponAction(character: Character): SimulationAction {
   const profile = dnd5eWeaponAttackProfile(character)
-  const attacks = dnd5eAttacksPerAttackAction(character)
+  const attacks = dnd5eEffectiveAttacksPerAttackAction(character)
   if (!profile) {
     const strengthModifier = rules.abilityModifier(character.abilities.str)
     return {
@@ -3116,6 +3116,7 @@ function synchronizeHeadlessActors(
           }
           if (mapGeometryLineOfSightBlocked({
             geometry: battlefield.geometry,
+            map: battlefield.map,
             from: { ...attackerToken, x: attacker.position, y: attacker.positionY },
             to: { ...targetToken, x: target.position, y: target.positionY },
             fromElevationFeet: attackerToken.elevationFeet ?? 0,

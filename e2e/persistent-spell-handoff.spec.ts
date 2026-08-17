@@ -108,7 +108,16 @@ test('persistent spell entrances remain formed while Headless waits', async ({ b
   await expect(canvas).toHaveAttribute('data-combat-projectile-kinds', /flaming-sphere/)
   await expect(canvas).toHaveAttribute('data-combat-projectile-kinds', /cloudkill/)
   await expect.poll(() => dm.evaluate(async () => {
-    const Konva = (await import('/node_modules/.vite/deps/konva.js')).default
+    type KonvaNode = {
+      opacity(): number
+      cropY(): number
+      cropHeight(): number
+      findOne(selector: string): KonvaNode | undefined
+    }
+    const Konva = (window as typeof window & {
+      Konva?: { stages: Array<{ find(selector: string): KonvaNode[] }> }
+    }).Konva
+    if (!Konva) throw new Error('The application Konva instance is unavailable')
     return ['wall-of-fire', 'flaming-sphere', 'cloudkill'].map((kind) => {
       const group = Konva.stages.flatMap((stage) =>
         stage.find(`.target-sprite-atlas-${kind}`),

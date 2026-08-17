@@ -13,7 +13,10 @@ import type {
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
-import type { Dnd5eTokenStatusMarkerGrantDeclaration } from './tokenStatusMarkers'
+import type {
+  Dnd5eTacticalTokenStatusMarkerId,
+  Dnd5eTokenStatusMarkerGrantDeclaration,
+} from './tokenStatusMarkers'
 import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
 import type {
   Dnd5eActiveEffectEscapeCheck,
@@ -200,6 +203,17 @@ export type Dnd5eMonsterMechanicEffectV2 =
       bonus: number
       /** Stable equipment id for self-authored weapon effects; targets otherwise use their main weapon. */
       equipmentId?: string
+      duration: Dnd5eMonsterMechanicDurationV2
+    }
+  | {
+      /**
+       * A non-standard, source-tracked status instance. It owns display and
+       * lifecycle; any numerical modifier remains a separate structured effect.
+       */
+      id: string
+      kind: 'tactical-status'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      statusId: Dnd5eTacticalTokenStatusMarkerId
       duration: Dnd5eMonsterMechanicDurationV2
     }
 
@@ -3271,6 +3285,7 @@ const CATALOG_EXACT_WEAPON_ATTACKS = {
         conditions: [],
         rootLegacyCondition: 'attached',
         conditionsWhenAttackHasAdvantage: [{ condition: 'blinded' }],
+        dependentLegacyConditionsWhenAttackHasAdvantage: [{ condition: 'unable-to-breathe' }],
       }],
     },
   }],

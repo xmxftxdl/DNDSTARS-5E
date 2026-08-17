@@ -131,4 +131,30 @@ describe('DM campaign long-rest transaction', () => {
       beneficiaryCharacterIds: ['wizard'],
     })
   })
+
+  it('writes Host-pre-rolled feature d20 values into the long-rest event', async () => {
+    const current = clock(480)
+    const after = clock(960)
+    const mutate = vi.fn(async () => after)
+    const rolls = [{
+      characterId: 'wizard', featureId: 'local.test:diviner.portent', values: [3, 18],
+    }]
+
+    await runDnd5eCampaignLongRestTransaction({
+      currentClock: current,
+      restKind: 'long-rest',
+      reason: 'DM 长休',
+      beneficiaryCharacterIds: ['wizard'],
+      createRestFeatureD20Rolls: () => rolls,
+      mutate,
+      reconcileCharacters: async () => undefined,
+    })
+
+    expect(mutate).toHaveBeenCalledWith({
+      operation: 'long-rest',
+      reason: 'DM 长休',
+      beneficiaryCharacterIds: ['wizard'],
+      restFeatureD20Rolls: rolls,
+    })
+  })
 })

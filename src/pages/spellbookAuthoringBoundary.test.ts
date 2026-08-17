@@ -23,9 +23,9 @@ describe('spell content authoring boundary', () => {
     expect(workshopSource).toContain("displayedSection !== 'spells' && <Dnd5eBuilderResourceInventory")
   })
 
-  it('keeps Activity as an internal protocol instead of a normal workshop content category', () => {
+  it('keeps Activity internal while embedding its schema editor in typed content forms', () => {
     expect(workshopSource).not.toContain("label: 'Activity 模板'")
-    expect(workshopSource).not.toContain('<Dnd5eActivityTemplateEditor')
+    expect(workshopSource).toContain('<Dnd5eActivityTemplateEditor')
     expect(workshopSource).toContain('内部 Activity 诊断')
     expect(workshopSource).toContain('activities: importedActivities')
   })

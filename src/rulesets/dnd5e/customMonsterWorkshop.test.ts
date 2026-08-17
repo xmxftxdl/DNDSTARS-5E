@@ -98,15 +98,61 @@ describe('D&D 5e custom monster workshop', () => {
       { statusId: 'fire-averse', target: 'self' },
       { statusId: 'marked', target: 'other' },
     ]
+    const normalizedMarkerGrants = [
+      { statusId: 'fire-averse', target: 'self', application: 'marker' },
+      { statusId: 'marked', target: 'other', application: 'marker' },
+    ]
     const monster = buildDnd5eCustomMonster(draft)
-    expect(monster.tokenStatusMarkerGrants).toEqual(draft.tokenStatusMarkerGrants)
+    expect(monster.tokenStatusMarkerGrants).toEqual(normalizedMarkerGrants)
     expect(parseDnd5eMonsterStatBlock(monster)).toMatchObject({ ok: true })
     expect(dnd5eCustomMonsterDraftFromStatBlock(monster).tokenStatusMarkerGrants)
-      .toEqual(draft.tokenStatusMarkerGrants)
+      .toEqual(normalizedMarkerGrants)
     expect(parseDnd5eMonsterStatBlock({
       ...monster,
       tokenStatusMarkerGrants: [{ statusId: 'fire-averse', target: 'everyone' }],
     })).toMatchObject({ ok: false })
+  })
+
+  it('round-trips a triggerable tactical status separately from a presentation-only marker', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.tokenStatusMarkerGrants = [
+      { statusId: 'fire-averse', target: 'self', application: 'marker' },
+      { statusId: 'marked', target: 'other', application: 'active-effect' },
+    ]
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'blood-mark',
+      name: '血猎标记',
+      trigger: 'after-move-hit',
+      effectKind: 'tactical-status',
+      effectTarget: 'trigger-target',
+      statusMarkerId: 'marked',
+      durationKind: 'rounds',
+      durationRounds: 2,
+      hpPercentageAtOrBelow: undefined,
+    }]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster)).toMatchObject({ ok: true })
+    expect(monster.tokenStatusMarkerGrants).toEqual(draft.tokenStatusMarkerGrants)
+    expect(monster.headlessMechanics?.[0]).toMatchObject({
+      trigger: { event: 'after-move-hit' },
+      effects: [{
+        kind: 'tactical-status',
+        target: 'trigger-target',
+        statusId: 'marked',
+        duration: { kind: 'rounds', rounds: 2 },
+      }],
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster)).toMatchObject({
+      tokenStatusMarkerGrants: draft.tokenStatusMarkerGrants,
+      headlessMechanics: [{
+        effectKind: 'tactical-status',
+        statusMarkerId: 'marked',
+        durationKind: 'rounds',
+        durationRounds: 2,
+      }],
+    })
   })
 
   it('compiles monster proficiency and ability modifiers without losing the editable formula', () => {

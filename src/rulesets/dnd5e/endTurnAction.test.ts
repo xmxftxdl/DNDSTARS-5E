@@ -5,6 +5,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
+import { resolveDnd5eBeginTurn } from './beginTurnAction'
 import { prepareDnd5ePlayerEndTurn, resolveDnd5ePlayerEndTurn } from './endTurnAction'
 import { DND5E_AVERTED_GAZE_DEFINITION_ID } from './headlessCombatEngine'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
@@ -128,6 +129,51 @@ describe('D&D 5e map end-turn authority bridge', () => {
     })
   })
 
+  it('can advance to a monster before resolving and presenting its recharge boundary', () => {
+    const input = fixture(barbarian(false))
+    const dragon = input.map.tokens[1]
+    dragon.poolId = 'srd-5.1:adult-black-dragon'
+    dragon.hp = 195
+    dragon.maxHp = 195
+    dragon.dnd5eCombatState = {
+      monsterRechargeReadyByActionId: { 'acid-breath': false },
+    }
+
+    const advanced = resolveDnd5ePlayerEndTurn({
+      ...input,
+      deferNextTurnStart: true,
+    })
+    expect(advanced.ok).toBe(true)
+    if (!advanced.ok) return
+    expect(advanced.result.state.initiativeIndex).toBe(1)
+    expect(advanced.result.events).not.toContainEqual(expect.objectContaining({
+      type: 'monster-recharge-resolved',
+    }))
+    expect(advanced.application.map.tokens.find((token) => token.id === dragon.id)
+      ?.dnd5eCombatState?.turnStartResolvedTurnKey).toBeUndefined()
+
+    const began = resolveDnd5eBeginTurn({
+      combatId: input.action.combatId!,
+      round: advanced.result.state.round,
+      initiativeIndex: advanced.result.state.initiativeIndex,
+      map: advanced.application.map,
+      characters: advanced.application.characters,
+      initiativeOrder: input.initiativeOrder,
+      monsterRechargeRolls: [{ actorId: dragon.id, actionId: 'acid-breath', roll: 5 }],
+    })
+    expect(began.ok).toBe(true)
+    if (!began.ok) return
+    expect(began.result.events).toContainEqual({
+      type: 'monster-recharge-resolved', actorId: dragon.id,
+      actionId: 'acid-breath', roll: 5, ready: true,
+    })
+    expect(began.application.map.tokens.find((token) => token.id === dragon.id)?.dnd5eCombatState)
+      .toMatchObject({
+        monsterRechargeReadyByActionId: { 'acid-breath': true },
+        turnStartResolvedTurnKey: expect.any(String),
+      })
+  })
+
   it('rolls and applies an eligible custom monster healing mechanism exactly once per combat', () => {
     const draft = createDnd5eCustomMonsterDraft()
     draft.name = '浴血守卫'
@@ -203,10 +249,11 @@ describe('D&D 5e map end-turn authority bridge', () => {
       healingDice: '1d8+2',
       hpPercentageAtOrBelow: 100,
       limit: 'once-per-turn',
-      preservedEffects: [
-        { id: 'effect-0', kind: 'temporary-hit-points', target: 'self', dice: { count: 1, sides: 8, bonus: 2 } },
-        { id: 'warded', kind: 'standard-condition', target: 'self', condition: 'invisible', duration: { kind: 'until-source-turn-start' } },
-      ],
+        preservedEffects: [
+          { id: 'effect-0', kind: 'temporary-hit-points', target: 'self', dice: { count: 1, sides: 8, bonus: 2 } },
+          { id: 'warded', kind: 'standard-condition', target: 'self', condition: 'invisible', duration: { kind: 'until-source-turn-start' } },
+          { id: 'ward-mark', kind: 'tactical-status', target: 'self', statusId: 'protected', duration: { kind: 'until-source-turn-start' } },
+        ],
     }]
     const monster = buildDnd5eCustomMonster(draft)
     setDnd5eRoomMonsterCatalog([monster])
@@ -247,9 +294,13 @@ describe('D&D 5e map end-turn authority bridge', () => {
     expect(settledMonster?.dnd5eCombatState?.temporaryHp).toBe(8)
     expect(settledMonster?.dnd5eCombatState?.activeEffects).toEqual(expect.arrayContaining([
       expect.objectContaining({ standardCondition: 'invisible' }),
+      expect.objectContaining({ legacyCondition: 'protected' }),
     ]))
     expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'monster-mechanic-v2-triggered', mechanicId: 'shadow-ward', trigger: 'turn-end',
+      outcomes: expect.arrayContaining([
+        expect.objectContaining({ effectId: 'ward-mark', kind: 'tactical-status', targetId: monsterToken.id, statusId: 'protected' }),
+      ]),
     }))
   })
 

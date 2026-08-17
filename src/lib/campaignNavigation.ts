@@ -20,6 +20,11 @@ export function nextCampaignRoomPath(campaignId: string): string | null {
   return `/app/rooms?mode=create&campaign=${encodeURIComponent(normalized)}`
 }
 
+/** Scene-bound presentation and audio must only run inside the map workspace. */
+export function isMapWorkspacePath(pathname: string): boolean {
+  return pathname === '/maps' || /^\/campaign\/[^/]+\/maps(?:\/|$)/.test(pathname)
+}
+
 /**
  * A newly allocated room must not bootstrap itself from the previous room's
  * persisted Zustand snapshots. Account identity and recovery information are

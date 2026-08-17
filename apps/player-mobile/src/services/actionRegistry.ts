@@ -5,7 +5,10 @@ import type {
   MobilePlayerWorkspace,
   MobileRoomRules,
 } from '../../../../packages/mobile-protocol/src'
-import { downloadMobileRoomPlugin, type MobileCredentials } from './mobileApi'
+import type { MobileCredentials } from './mobileApi'
+import { mobileRoomPluginPackage } from './mobileRoomPluginRuntime'
+
+export { prepareMobileRoomPlugins } from './mobileRoomPluginRuntime'
 
 export const MOBILE_ACTION_REGISTRY_SCHEMA_VERSION = 1 as const
 
@@ -52,7 +55,6 @@ function pluginDescriptor(pluginId: string, featureId: string, feature: Record<s
   if (action.trigger && record(action.trigger)?.kind !== 'active-use') return null
   let automation = ['full', 'partial', 'manual'].includes(String(feature.automation))
     ? feature.automation as MobileActionDescriptorV1['automation'] : 'full'
-  if (automation === 'manual') return null
   const targeting = record(action.targeting) ?? { kind: 'self' }
   const kind = ['self', 'single-creature', 'multiple-creatures', 'area'].includes(String(targeting.kind))
     ? targeting.kind as 'self' | 'single-creature' | 'multiple-creatures' | 'area' : 'self'
@@ -61,6 +63,7 @@ function pluginDescriptor(pluginId: string, featureId: string, feature: Record<s
   if (kind === 'multiple-creatures' && automation === 'full') automation = 'partial'
   const economy = ['action', 'bonusAction', 'reaction', 'none'].includes(String(action.economy))
     ? action.economy as MobileActionDescriptorV1['economy'] : 'none'
+  const manual = automation === 'manual'
   return {
     schemaVersion: 1,
     id: `plugin-action:${featureId}`,
@@ -85,7 +88,15 @@ function pluginDescriptor(pluginId: string, featureId: string, feature: Record<s
         ...(Number.isFinite(Number(targeting.heightFeet)) ? { heightFeet: Number(targeting.heightFeet) } : {}),
       } } : {}),
     },
-    execution: { kind: 'host-command', command: { type: 'dnd5e-plugin-action', dnd5ePluginAction: { featureId } } },
+    execution: manual
+      ? { kind: 'host-command', command: {
+          type: 'dnd5e-basic-action',
+          dnd5eBasicAction: {
+            kind: economy === 'bonusAction' ? 'other-bonus-action' : 'other-action',
+            description: `${text(action.label) || text(feature.name) || featureId}：${text(action.description) || text(feature.description) || '由 DM 裁定具体效果。'}`,
+          },
+        } }
+      : { kind: 'host-command', command: { type: 'dnd5e-plugin-action', dnd5ePluginAction: { featureId } } },
     ownerPluginId: pluginId,
   }
 }
@@ -166,10 +177,21 @@ function candidateOwned(
 function packageFeatureCandidates(pluginId: string, value: unknown): PackageFeatureCandidate[] {
   const pkg = record(value)
   const manifest = record(pkg?.manifest)
-  const content = record(pkg?.content)
-  if (pkg?.format !== 'dndstars5e-content' || pkg.schemaVersion !== 2 || manifest?.id !== pluginId || !content) {
+  const current = pkg?.format === 'dndstars5e-content' && pkg.schemaVersion === 2
+  const legacy = pkg?.format === 'dndstars5e-declarative' && pkg.schemaVersion === 1
+  if ((!current && !legacy) || manifest?.id !== pluginId) {
     throw new Error('unsupported-plugin-package')
   }
+  const currentContent = current ? record(pkg?.content) : undefined
+  if (current && !currentContent) throw new Error('unsupported-plugin-package')
+  const legacyContent = record(pkg?.legacy) ?? {}
+  const content = currentContent
+    ? currentContent
+    : {
+        ...legacyContent,
+        classes: array(pkg?.classes),
+        subclasses: array(pkg?.subclasses),
+      }
   const result: PackageFeatureCandidate[] = []
   const byId = new Map<string, PackageFeatureCandidate>()
   const classNames = new Map(array(content.classes).flatMap((rawClass) => {
@@ -238,31 +260,6 @@ function packageFeatureCandidates(pluginId: string, value: unknown): PackageFeat
   return result
 }
 
-const packageCache = new Map<string, Promise<unknown>>()
-
-function cachedRoomPlugin(
-  credentials: MobileCredentials,
-  requirement: MobileRoomRules['requiredPlugins'][number],
-): Promise<unknown> {
-  const key = `${credentials.room.roomId}:${requirement.id}:${requirement.integrity}`
-  const cached = packageCache.get(key)
-  if (cached) return cached
-  const pending = downloadMobileRoomPlugin(credentials, requirement)
-  packageCache.set(key, pending)
-  pending.catch(() => {
-    if (packageCache.get(key) === pending) packageCache.delete(key)
-  })
-  return pending
-}
-
-/** Download and validate every required package before claiming room readiness. */
-export async function prepareMobileRoomPlugins(
-  credentials: MobileCredentials,
-  rules: MobileRoomRules,
-): Promise<void> {
-  await Promise.all(rules.requiredPlugins.map((requirement) => cachedRoomPlugin(credentials, requirement)))
-}
-
 export async function buildMobileActionRegistry(input: {
   workspace: Omit<MobilePlayerWorkspace, 'actionRegistry'> | MobilePlayerWorkspace
   credentials: MobileCredentials
@@ -278,7 +275,42 @@ export async function buildMobileActionRegistry(input: {
     }),
   ])
   const rejectedPluginEntries: MobileActionRegistryV1['rejectedPluginEntries'] = []
-  const actions = [...coreActions]
+  const actions = coreActions.map((entry) => ({ ...entry, targeting: { ...entry.targeting }, execution: cloneJson(entry.execution) }))
+  const mainWeapon = character?.dnd5eInventory?.entries.find((entry) => entry.equippedSlot === 'mainWeapon')
+  const offHandWeapon = character?.dnd5eInventory?.entries.find((entry) => entry.equippedSlot === 'offHand' && entry.item.equipment?.dnd5e && (entry.item.equipment.dnd5e as Record<string, unknown>).kind === 'weapon')
+  const ammunition = (character?.dnd5eInventory?.entries ?? []).filter((entry) => /ammunition|弹药|箭|弩矢/i.test(`${entry.item.category} ${entry.item.name}`)).reduce((sum, entry) => sum + entry.quantity, 0)
+  const weaponAttack = actions.find((entry) => entry.id === 'core.weapon-attack')
+  if (weaponAttack && mainWeapon) {
+    weaponAttack.label = mainWeapon.item.name
+    weaponAttack.description = `以已装备主手武器攻击。${ammunition > 0 ? `携带弹药 ${ammunition}。` : ''}`
+  }
+  if (offHandWeapon) actions.push(core(
+    'core.off-hand-attack',
+    `${offHandWeapon.item.name}（副手）`,
+    '⚔',
+    'bonusAction',
+    'single-creature',
+    { type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { offHandAttack: true } },
+  ))
+  for (const area of input.workspace.scene?.persistentAreas ?? []) {
+    if (area.sourceCharacterId !== character?.id || !area.movement) continue
+    actions.push({
+      schemaVersion: 1,
+      id: `persistent-area-move:${area.id}`,
+      group: 'features',
+      source: 'class-feature',
+      label: `移动${area.label}`,
+      description: `消耗${area.movement.economy === 'bonus-action' ? '附赠动作' : '动作'}，在地图上选择新落点（最多 ${area.movement.maximumFeet} 尺）。距离、碰撞、墙门与行动经济由 Host 重新验证。`,
+      icon: '◎',
+      economy: area.movement.economy === 'bonus-action' ? 'bonusAction' : 'action',
+      automation: 'full',
+      targeting: { kind: 'area', rangeFeet: area.movement.maximumFeet },
+      execution: {
+        kind: 'host-command',
+        command: { type: 'dnd5e-persistent-area-move', dnd5ePersistentAreaMove: { areaId: area.id } },
+      },
+    })
+  }
   const resolvedOwnedFeatureIds = new Set<string>()
   for (const spell of input.workspace.spells) actions.push({
     schemaVersion: 1, id: `spell:${spell.id}`, group: 'spells', source: 'spell', label: spell.name,
@@ -293,12 +325,36 @@ export async function buildMobileActionRegistry(input: {
   })
   for (const requirement of input.rules?.member.ready === true ? input.rules.requiredPlugins : []) {
     try {
-      const packageValue = await (input.loadPlugin?.(requirement) ?? cachedRoomPlugin(input.credentials, requirement))
+      const packageValue = input.loadPlugin
+        ? await input.loadPlugin(requirement)
+        : mobileRoomPluginPackage(requirement)
+      if (!packageValue) throw new Error('plugin-runtime-not-active')
       for (const candidate of packageFeatureCandidates(requirement.id, packageValue)) {
-        if (!candidateOwned(character, owned, candidate)) continue
-        resolvedOwnedFeatureIds.add(candidate.id)
+        const featureAction = record(candidate.feature.action)
+        const areaGrants = (input.workspace.scene?.persistentAreas ?? []).filter((area) =>
+          area.sourceCharacterId === character?.id &&
+          area.ownerPluginId === requirement.id &&
+          area.grantedActivities?.some((grant) => grant.activityId === text(featureAction?.id)),
+        )
+        const directlyOwned = candidateOwned(character, owned, candidate)
+        if (!directlyOwned && areaGrants.length === 0) continue
+        if (directlyOwned) resolvedOwnedFeatureIds.add(candidate.id)
         const descriptor = pluginDescriptor(requirement.id, candidate.id, candidate.feature)
-        if (descriptor) actions.push(descriptor)
+        if (descriptor && directlyOwned) actions.push(descriptor)
+        if (descriptor?.execution.kind === 'host-command') for (const area of areaGrants) {
+          const command = cloneJson(descriptor.execution.command)
+          const pluginAction = record(command.dnd5ePluginAction) ?? {}
+          command.dnd5ePluginAction = {
+            ...pluginAction,
+            payload: { persistentAreaId: area.id },
+          }
+          actions.push({
+            ...descriptor,
+            id: `${descriptor.id}:area:${area.id}`,
+            label: `${area.label} · ${descriptor.label}`,
+            execution: { kind: 'host-command', command },
+          })
+        }
       }
     } catch (cause) {
       rejectedPluginEntries.push({ pluginId: requirement.id, reason: cause instanceof Error ? cause.message : 'plugin-registry-failed' })
