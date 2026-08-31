@@ -122,6 +122,26 @@ const ephemeralDescriptors = new Map<string, Extract<InstalledDnd5eRulesPlugin, 
 declare global {
   interface Window {
     DNDSTARS_5E_RULES_PLUGINS?: Dnd5eRulesPluginHost
+    astralTraceDesktop?: {
+      pluginPackages?: {
+        put(input: {
+          pluginId: string
+          version: string
+          fileName: string
+          integrity: string
+          bytes: ArrayBuffer
+        }): Promise<unknown>
+        get(pluginId: string, integrity?: string): Promise<{
+          pluginId: string
+          version: string
+          fileName: string
+          integrity: string
+          bytes: ArrayBuffer | null
+        } | null>
+        remove(pluginId: string): Promise<void>
+        list(): Promise<readonly unknown[]>
+      }
+    }
   }
 }
 
@@ -227,7 +247,16 @@ async function openPluginDatabase(): Promise<IDBDatabase> {
   })
 }
 
-async function storeModuleBytes(pluginId: string, bytes: ArrayBuffer): Promise<void> {
+async function storeModuleBytes(
+  pluginId: string,
+  bytes: ArrayBuffer,
+  metadata?: { version: string; fileName: string; integrity: string },
+): Promise<void> {
+  const desktopPackages = window.astralTraceDesktop?.pluginPackages
+  if (desktopPackages && metadata) {
+    await desktopPackages.put({ pluginId, bytes, ...metadata })
+    return
+  }
   const database = await openPluginDatabase()
   try {
     await new Promise<void>((resolve, reject) => {
@@ -242,7 +271,12 @@ async function storeModuleBytes(pluginId: string, bytes: ArrayBuffer): Promise<v
   }
 }
 
-async function loadModuleBytes(pluginId: string): Promise<ArrayBuffer | undefined> {
+async function loadModuleBytes(pluginId: string, integrity?: string): Promise<ArrayBuffer | undefined> {
+  const desktopPackages = window.astralTraceDesktop?.pluginPackages
+  if (desktopPackages) {
+    const stored = await desktopPackages.get(pluginId, integrity)
+    if (stored?.bytes instanceof ArrayBuffer) return stored.bytes
+  }
   const database = await openPluginDatabase()
   try {
     return await new Promise<ArrayBuffer | undefined>((resolve, reject) => {
@@ -262,6 +296,11 @@ async function loadModuleBytes(pluginId: string): Promise<ArrayBuffer | undefine
 }
 
 async function deleteModuleBytes(pluginId: string): Promise<void> {
+  const desktopPackages = window.astralTraceDesktop?.pluginPackages
+  if (desktopPackages) {
+    await desktopPackages.remove(pluginId)
+    return
+  }
   const database = await openPluginDatabase()
   try {
     await new Promise<void>((resolve, reject) => {
@@ -314,7 +353,7 @@ async function descriptorBytes(descriptor: InstalledDnd5eRulesPlugin): Promise<A
     return bytes.slice(0)
   }
   if (descriptor.source === 'file') {
-    const bytes = await loadModuleBytes(descriptor.id)
+    const bytes = await loadModuleBytes(descriptor.id, descriptor.integrity)
     if (!bytes) throw new Error(`本机插件文件不存在：${descriptor.fileName}`)
     return bytes
   }
@@ -460,7 +499,11 @@ async function installFileBytes(input: {
   const next = installedDnd5eRulesPlugins().filter((item) => item.id !== descriptor.id)
   try {
     activatePlugin(artifact, integrity)
-    await storeModuleBytes(artifact.manifest.id, input.bytes)
+    await storeModuleBytes(artifact.manifest.id, input.bytes, {
+      version: artifact.manifest.version,
+      fileName: input.fileName,
+      integrity,
+    })
     persistInstalled([...next, descriptor])
   } catch (error) {
     unregisterDnd5eRulesPlugin(artifact.manifest.id)
@@ -470,7 +513,13 @@ async function installFileBytes(input: {
       if (previousDescriptor && previousBytes) {
         const previousArtifact = await loadPluginArtifact(previousBytes)
         activatePlugin(previousArtifact, previousDescriptor.integrity)
-        if (previousDescriptor.source === 'file') await storeModuleBytes(previousDescriptor.id, previousBytes)
+        if (previousDescriptor.source === 'file') {
+          await storeModuleBytes(previousDescriptor.id, previousBytes, {
+            version: previousArtifact.manifest.version,
+            fileName: previousDescriptor.fileName,
+            integrity: previousDescriptor.integrity,
+          })
+        }
       } else {
         await deleteModuleBytes(artifact.manifest.id)
       }

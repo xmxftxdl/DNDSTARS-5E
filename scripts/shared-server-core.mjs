@@ -91,6 +91,7 @@ import {
   updateMarketplaceInstallation,
 } from '../shared/marketplace-analytics.mjs'
 import { sharedAuthenticatedSystemRoute, sharedPublicSystemRoute } from './shared-server-system-routes.mjs'
+import { desktopReleaseManifestFromEnvironment } from './desktop-release-manifest.mjs'
 import { createInMemorySseEventPublisher } from './adapters/in-memory-sse-event-publisher.mjs'
 import { listCampaignSnapshotSummaries, readCampaignSnapshot } from './application/campaign-snapshot-catalog.mjs'
 import { handleRoomVoiceApi } from './application/room-voice-api.mjs'
@@ -11419,6 +11420,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
     startedAt: ctx.serverStartedAt ?? PROCESS_STARTED_AT,
     now: Date.now(),
+    desktopRelease: desktopReleaseManifestFromEnvironment(process.env, SHARED_PROTOCOL_VERSION),
   })
   if (publicSystemRoute) {
     writeJson(res, publicSystemRoute.status, publicSystemRoute.body)

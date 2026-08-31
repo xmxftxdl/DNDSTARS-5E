@@ -2,13 +2,16 @@ import {
   ArrowRight,
   Boxes,
   Dices,
+  Download,
   DoorOpen,
+  Monitor,
   ShieldCheck,
   Sparkles,
   Swords,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import PublicWebsiteShell from '../components/PublicWebsiteShell'
+import { WINDOWS_DESKTOP_DOWNLOAD_URL } from '../lib/desktopRelease'
 
 export default function PublicLandingPage() {
   return (
@@ -40,12 +43,20 @@ export default function PublicLandingPage() {
               Chronicle Every Adventure. Legends Never Die.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
-              <Link
-                to="/app"
+              <a
+                href={WINDOWS_DESKTOP_DOWNLOAD_URL}
+                data-desktop-download="windows-x64"
                 className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-5 py-3.5 text-sm font-bold text-white shadow-xl shadow-violet-950/60 transition hover:-translate-y-0.5 hover:bg-violet-400"
               >
+                <Download className="h-4 w-4" />
+                下载 Windows 客户端
+              </a>
+              <Link
+                to="/app"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-5 py-3.5 text-sm font-bold text-slate-200 transition hover:border-violet-300/30 hover:bg-white/[0.07]"
+              >
                 <DoorOpen className="h-4 w-4" />
-                开始冒险
+                使用网页版
               </Link>
               <Link
                 to="/combat"
@@ -54,6 +65,10 @@ export default function PublicLandingPage() {
                 查看战斗系统
                 <ArrowRight className="h-4 w-4" />
               </Link>
+            </div>
+            <div className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-500">
+              <Monitor className="h-3.5 w-3.5" />
+              Windows 10/11 x64 · DM 与玩家通用 · 需要联网 · Beta
             </div>
           </div>
 

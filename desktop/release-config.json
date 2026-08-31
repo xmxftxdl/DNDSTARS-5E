@@ -1,0 +1,11 @@
+{
+  "productName": "Astral Trace",
+  "channel": "beta",
+  "shellVersion": "0.0.0",
+  "clientVersion": "0.0.0",
+  "protocolVersion": 5,
+  "serverOrigin": "https://astraltracevtt.com",
+  "clientManifestUrl": "https://github.com/xmxftxdl/DNDSTARS-5E/releases/latest/download/desktop-client-manifest.json",
+  "installerUrl": "https://github.com/xmxftxdl/DNDSTARS-5E/releases/latest/download/AstralTrace-Setup-x64.exe",
+  "releasePublicKeyPem": ""
+}

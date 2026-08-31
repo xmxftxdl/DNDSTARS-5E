@@ -6,6 +6,12 @@ function normalizedNow(now) {
 
 export function sharedPublicSystemRoute(input) {
   if (input.method !== 'GET') return undefined
+  if (input.pathname === '/api/desktop/releases/latest') {
+    return {
+      status: 200,
+      body: input.desktopRelease,
+    }
+  }
   if (input.pathname === '/api/meta') {
     return {
       status: 200,
