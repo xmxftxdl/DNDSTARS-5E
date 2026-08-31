@@ -20,6 +20,10 @@ describe('产品网站独立页面', () => {
 
     expect(html).toContain('data-public-page="product"')
     expect(html).toContain('记录每一场冒险')
+    expect(html).toContain('data-desktop-download="windows-x64"')
+    expect(html).toContain('AstralTrace-Setup-x64.exe')
+    expect(html).toContain('下载 Windows 客户端')
+    expect(html).toContain('DM 与玩家通用')
     expect(html).toContain('href="/app?auth=login"')
     expect(html).toContain('href="/app?auth=register"')
     expect(html).toContain('扩展市场')

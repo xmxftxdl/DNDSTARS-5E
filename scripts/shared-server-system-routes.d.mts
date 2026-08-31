@@ -1,3 +1,5 @@
+import type { DesktopReleaseManifest } from './desktop-release-manifest.mjs'
+
 export interface SharedSystemRouteResponse {
   status: number
   body: Record<string, unknown>
@@ -12,6 +14,7 @@ export interface SharedPublicSystemRouteInput {
   buildId: string
   startedAt: number
   now?: number
+  desktopRelease?: DesktopReleaseManifest
 }
 
 export interface SharedAuthenticatedSystemRouteInput {
