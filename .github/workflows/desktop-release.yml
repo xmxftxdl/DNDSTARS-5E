@@ -26,6 +26,9 @@ jobs:
       - name: Verify desktop updater
         run: npm run test:desktop
 
+      - name: Audit production dependencies
+        run: npm run audit:production
+
       - name: Build local game client
         run: npm run build
 

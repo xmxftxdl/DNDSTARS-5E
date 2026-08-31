@@ -32,8 +32,8 @@ function fail(message) {
 }
 
 const packageJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-if (packageJson.dependencies?.['react-router-dom'] !== '7.18.1') {
-  fail('React Router 安全例外只允许精确版本 react-router-dom@7.18.1。')
+if (packageJson.dependencies?.['react-router-dom'] !== '7.18.3') {
+  fail('React Router 只允许已审计的精确版本 react-router-dom@7.18.3。')
 }
 
 for (const file of sourceFiles(path.join(ROOT, 'src'))) {
